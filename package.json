@@ -2,13 +2,32 @@
   "name": "geoscratch",
   "version": "0.0.22",
   "description": "Tiny 3D library for geovisualization, powered by WebGPU",
-  "main": "src/scratch.js",
-  "types": "src/scratch.d.ts",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./scratch": {
+      "types": "./src/scratch.d.ts",
+      "import": "./src/scratch.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "public/shaders",
+    "public/icon",
+    "public/images"
+  ],
   "directories": {
-    "example": "example"
+    "example": "examples",
+    "test": "tests"
   },
   "scripts": {
-    "test": "mocha",
+    "test": "mocha \"tests/**/*.test.js\"",
     "dev": "vite",
     "build": "vite build",
     "serve": "vite preview"

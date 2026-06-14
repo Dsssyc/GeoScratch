@@ -1,4 +1,4 @@
-import { UUID } from "../utils/uuid"
+import { UUID } from "../utils/uuid.js"
 
 export class ScratchObject {
 

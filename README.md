@@ -10,12 +10,27 @@ Specific rendering structures will be implemented in the **geo-application** lay
 
 ![Image text](https://github.com/YcSoku/GeoScratch/blob/main/DayDream.png)
 
+## Project Structure
+
+- `src/index.js`: public package entrypoint.
+- `src/scratch.js`: compatibility re-export for older local imports.
+- `src/core/`: math, geometry, data, object, and geospatial primitives.
+- `src/gpu/`: WebGPU device, resources, bindings, passes, pipelines, and frame orchestration.
+- `src/loaders/`: image and shader loading helpers.
+- `src/effects/`: reusable rendering effects such as postprocessing passes.
+- `src/applications/`: higher-level geo application modules.
+- `examples/`: Vite examples and demos.
+- `public/`: static shaders, images, icons, and example data.
+- `tests/`: Mocha smoke and unit tests.
+
 ## Build Examples
-Examples of `GeoScratch` is built by [Vite](https://vitejs.dev/). Trying examples provided in this project
+Examples of `GeoScratch` are built by [Vite](https://vitejs.dev/). Trying examples provided in this project
 requires an installation of [Node.js](https://nodejs.org/en/).
 
 - Install dependencies: `npm install`.
 - Run examples: `npm run dev`.
+- Run tests: `npm test`.
+- Build: `npm run build`.
 
 ## Usage
 The code below shows the way using GeoScratch to render a hard-coded triangle.

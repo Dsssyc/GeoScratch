@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-GeoScratch is an ES module WebGPU library. The public entrypoint is `src/scratch.js`, with TypeScript declaration files (`*.d.ts`) kept beside the matching JavaScript modules. Core math, geometry, data, and geospatial helpers live in `src/core/`; WebGPU resources, passes, pipelines, bindings, textures, and context code live in `src/platform/`; loaders are in `src/resource/`; postprocessing helpers are in `src/function/`; and higher-level terrain code is in `src/application/`. Vite examples are under `example/`, with shared static assets and WGSL shaders in `public/`. Tests belong in `test/`.
+GeoScratch is an ES module WebGPU library. The public entrypoint is `src/index.js`, with `src/scratch.js` kept as a compatibility shim. TypeScript declaration files (`*.d.ts`) live beside matching JavaScript modules. Core math, geometry, data, and geospatial helpers live in `src/core/`; WebGPU resources, passes, pipelines, bindings, textures, and context code live in `src/gpu/`; loaders are in `src/loaders/`; postprocessing helpers are in `src/effects/`; and higher-level terrain code is in `src/applications/`. Vite examples are under `examples/`, with shared static assets and WGSL shaders in `public/`. Tests belong in `tests/`.
 
 ## Build, Test, and Development Commands
 
@@ -10,15 +10,15 @@ GeoScratch is an ES module WebGPU library. The public entrypoint is `src/scratch
 - `npm run dev`: start the Vite development server for `index.html` and the examples.
 - `npm run build`: run the Vite production build.
 - `npm run serve`: preview the built Vite output locally.
-- `npm test`: run Mocha tests from `test/`.
+- `npm test`: run Mocha tests from `tests/`.
 
 ## Coding Style & Naming Conventions
 
-Use ES module imports/exports and keep exports routed through `src/scratch.js` when adding public API. Follow the surrounding style: no semicolons, compact object literals, and 4-space indentation inside functions/classes. Prefer descriptive lower camelCase for factory functions and upper PascalCase for classes, matching pairs such as `screen`/`Screen` and `vertexBuffer`/`VertexBuffer`. Keep declaration files synchronized with public JavaScript modules. Store feature shaders under `public/shaders/<feature>/` or `public/shaders/examples/<example>/`.
+Use ES module imports/exports and keep exports routed through `src/index.js` when adding public API. Preserve `src/scratch.js` as a compatibility re-export only. Follow the surrounding style: no semicolons, compact object literals, and 4-space indentation inside functions/classes. Prefer descriptive lower camelCase for factory functions and upper PascalCase for classes, matching pairs such as `screen`/`Screen` and `vertexBuffer`/`VertexBuffer`. Keep declaration files synchronized with public JavaScript modules. Store feature shaders under `public/shaders/<feature>/` or `public/shaders/examples/<example>/`.
 
 ## Testing Guidelines
 
-Mocha and Chai are available for tests. Add tests as `test/*.js`, import from `../src/scratch.js` or the target module, and keep browser/WebGPU-only behavior separated from Node-compatible unit checks. Run `npm test` before submitting. For rendering or shader changes, also run `npm run dev` and manually verify the affected example in a WebGPU-capable browser.
+Mocha and Chai are available for tests. Add tests as `tests/*.test.js`, import from `../src/index.js` or the target module, and keep browser/WebGPU-only behavior separated from Node-compatible unit checks. Run `npm test` before submitting. For rendering or shader changes, also run `npm run dev` and manually verify the affected example in a WebGPU-capable browser.
 
 ## Commit & Pull Request Guidelines
 
