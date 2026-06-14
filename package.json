@@ -17,6 +17,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "README_zh.md",
     "src",
     "public/shaders",
     "public/icon",
