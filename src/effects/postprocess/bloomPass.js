@@ -3,14 +3,26 @@ import { aRef } from "../../core/data/arrayRef.js"
 import { Binding } from "../../gpu/binding/binding.js"
 import { Texture } from "../../gpu/texture/texture.js"
 import { ComputePass } from "../../gpu/pass/computePass.js"
-import shaderLoader from "../../loaders/shader/shaderLoader.js"
+import { shader } from "../../gpu/shader/shader.js"
 import { StorageBuffer } from "../../gpu/buffer/storageBuffer.js"
 import { ComputePipeline } from "../../gpu/pipeline/computePipeline.js"
+import {
+    bloomOutputComputeShader,
+    downsampleComputeShader,
+    gaussianBlurXComputeShader,
+    gaussianBlurYComputeShader,
+    highlightComputeShader,
+} from "./shaders/bloom/index.js"
 
 function gaussian(x, sigma = 1.0) {
 
     let a = 1.0 / (sigma * Math.sqrt(2.0 * Math.PI));
     return a * Math.exp(-((x * x) / (2.0 * sigma * sigma)));
+}
+
+function inlineShader(name, code) {
+
+    return shader({ name, codeFunc: () => code })
 }
 
 /**
@@ -243,7 +255,7 @@ export class BloomPass {
          */
         this.highlight = ComputePipeline.create({
             name: 'Computable builder (Highlight extraction)',
-            shader: { module: shaderLoader.load('Shader (Hightlight)', '/shaders/postprocess/bloom/highlight.compute.wgsl') },
+            shader: { module: inlineShader('Shader (Hightlight)', highlightComputeShader) },
             constants: { blockSize: 16 },
         })
 
@@ -252,7 +264,7 @@ export class BloomPass {
          */
         this.downSample = ComputePipeline.create({
             name: 'Computable builder (Highlight downsample)',
-            shader: { module: shaderLoader.load('Shader (Down Sampling)', '/shaders/postprocess/bloom/downsample.compute.wgsl') },
+            shader: { module: inlineShader('Shader (Down Sampling)', downsampleComputeShader) },
             constants: { blockSize: 16 },
         })
 
@@ -261,7 +273,7 @@ export class BloomPass {
          */
         this.blurUpX = ComputePipeline.create({
             name: 'Computable builder (Blur up X)',
-            shader: { module: shaderLoader.load('Shader (Blur Up X)', '/shaders/postprocess/bloom/gaussianBlurX.compute.wgsl') },
+            shader: { module: inlineShader('Shader (Blur Up X)', gaussianBlurXComputeShader) },
             constants: { blockSize: 16 },
         })
 
@@ -270,7 +282,7 @@ export class BloomPass {
          */
         this.blurUpY = ComputePipeline.create({
             name: 'Computable builder (Blur up Y)',
-            shader: { module: shaderLoader.load('Shader (Blur Up Y)', '/shaders/postprocess/bloom/gaussianBlurY.compute.wgsl') },
+            shader: { module: inlineShader('Shader (Blur Up Y)', gaussianBlurYComputeShader) },
             constants: { blockSize: 16 },
         })
 
@@ -279,7 +291,7 @@ export class BloomPass {
          */
         this.output = ComputePipeline.create({
             name: 'Computable builder (Output)',
-            shader: { module: shaderLoader.load('Shader (Texture Add)', '/shaders/postprocess/bloom/bloomOutput.compute.wgsl') },
+            shader: { module: inlineShader('Shader (Texture Add)', bloomOutputComputeShader) },
             constants: { blockSize: 16 },
         })
 

@@ -2,8 +2,9 @@ import { f32, i32 } from '../../core/numericType/numericType.js'
 import { Binding } from "../../gpu/binding/binding.js"
 import { Texture } from "../../gpu/texture/texture.js"
 import { ComputePass } from "../../gpu/pass/computePass.js"
-import shaderLoader from "../../loaders/shader/shaderLoader.js"
+import { shader } from "../../gpu/shader/shader.js"
 import { ComputePipeline } from "../../gpu/pipeline/computePipeline.js"
+import { fxaaComputeShader } from "./shaders/fxaa/index.js"
 
 /**
  * @typedef {Object} FXAAPassDescription
@@ -56,7 +57,7 @@ export class FXAAPass {
          */
         this.fxaaPipeline = ComputePipeline.create({
             name: 'Compute Pipeline (FXAA)',
-            shader: { module: shaderLoader.load('Shader (FXAA)', '/shaders/postprocess/fxaa/fxaa.compute.wgsl') },
+            shader: { module: shader({ name: 'Shader (FXAA)', codeFunc: () => fxaaComputeShader }) },
             constants: { blockSize: 16 },
         })
 

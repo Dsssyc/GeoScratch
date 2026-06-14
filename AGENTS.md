@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-GeoScratch is an ES module WebGPU library. The public entrypoint is `src/index.js`, with `src/scratch.js` kept as a compatibility shim. TypeScript declaration files (`*.d.ts`) live beside matching JavaScript modules. Core math, geometry, data, and geospatial helpers live in `src/core/`; WebGPU resources, passes, pipelines, bindings, textures, and context code live in `src/gpu/`; loaders are in `src/loaders/`; postprocessing helpers are in `src/effects/`; and higher-level terrain code is in `src/applications/`. Vite examples are under `examples/`, with shared static assets and WGSL shaders in `public/`. Tests belong in `tests/`.
+GeoScratch is an ES module WebGPU library. The public entrypoint is `src/index.js`, with `src/scratch.js` kept as a compatibility shim. TypeScript declaration files (`*.d.ts`) live beside matching JavaScript modules. Shared primitives live in `src/core/`; geospatial helpers and tiling structures are in `src/geo/`; reusable mesh generators are in `src/geometry/`; WebGPU resources are in `src/gpu/`; loaders are in `src/loaders/`; postprocessing helpers are in `src/effects/`; and higher-level terrain code is in `src/applications/`. Vite examples are under `examples/`, with static example assets in `examples/public/`. Tests belong in `tests/`.
 
 ## Build, Test, and Development Commands
 
@@ -14,7 +14,7 @@ GeoScratch is an ES module WebGPU library. The public entrypoint is `src/index.j
 
 ## Coding Style & Naming Conventions
 
-Use ES module imports/exports and keep exports routed through `src/index.js` when adding public API. Preserve `src/scratch.js` as a compatibility re-export only. Follow the surrounding style: no semicolons, compact object literals, and 4-space indentation inside functions/classes. Prefer descriptive lower camelCase for factory functions and upper PascalCase for classes, matching pairs such as `screen`/`Screen` and `vertexBuffer`/`VertexBuffer`. Keep declaration files synchronized with public JavaScript modules. Keep runnable demos under `examples/<name>/index.html` plus `main.js`; do not add a root `index.html`. Store feature shaders under `public/shaders/<feature>/` or `public/shaders/examples/<example>/`.
+Use ES module imports/exports and keep exports routed through `src/index.js` when adding public API. Preserve `src/scratch.js` as a compatibility re-export only. Follow the surrounding style: no semicolons, compact object literals, and 4-space indentation inside functions/classes. Prefer descriptive lower camelCase for factory functions and upper PascalCase for classes, matching pairs such as `screen`/`Screen` and `vertexBuffer`/`VertexBuffer`. Keep declaration files synchronized with public JavaScript modules. Keep runnable demos under `examples/<name>/index.html` plus `main.js`; do not add a root `index.html`. Store example-only shaders and images under `examples/public/`.
 
 ## Testing Guidelines
 
@@ -26,4 +26,4 @@ Existing history uses short imperative subjects, often one line, with occasional
 
 ## Security & Configuration Tips
 
-Do not commit `node_modules/`, generated build output, local data under `public/json/examples/`, or machine-specific files. Keep large demo data out of git unless it is required for reproducible examples.
+Do not commit `node_modules/`, generated build output, local data under `examples/public/json/examples/`, or machine-specific files. Keep large demo data out of git unless it is required for reproducible examples.

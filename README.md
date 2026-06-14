@@ -35,13 +35,15 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 | --- | --- |
 | `src/index.js` | Main public package entrypoint. |
 | `src/scratch.js` | Compatibility re-export for older imports. |
-| `src/core/` | Math, geometry, data references, object, box, quad tree, and geo primitives. |
+| `src/core/` | Shared data references, math, object, and bounding box primitives. |
+| `src/geo/` | Geospatial helpers and geographic tiling structures. |
+| `src/geometry/` | Reusable geometry generators such as sphere and plane meshes. |
 | `src/gpu/` | WebGPU device, buffers, bindings, passes, pipelines, shaders, textures, samplers, and director. |
 | `src/loaders/` | Image and shader loading helpers. |
 | `src/effects/` | Reusable postprocessing effects. |
 | `src/applications/` | Higher-level geospatial application modules, including terrain. |
 | `examples/` | Examples browser plus standalone demo pages. |
-| `public/` | Static shaders, textures, icons, and example data served by Vite. |
+| `examples/public/` | Static shaders, textures, icons, and local demo data served by Vite. |
 | `tests/` | Node-compatible Mocha tests. |
 
 ## Package Entrypoints
@@ -54,6 +56,13 @@ The package also keeps a compatibility entrypoint:
 
 ```js
 import * as scr from 'geoscratch/scratch'
+```
+
+Focused subpaths are available for geospatial and geometry helpers:
+
+```js
+import { MercatorCoordinate } from 'geoscratch/geo'
+import { sphere } from 'geoscratch/geometry'
 ```
 
 ## Minimal Usage
@@ -130,7 +139,7 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 
 - Keep public exports routed through `src/index.js`.
 - Add browser/WebGPU demos under `examples/<name>/index.html` and `examples/<name>/main.js`.
-- Keep shared static resources in `public/` so examples can load them with absolute paths such as `/shaders/...` and `/images/...`.
+- Keep example runtime resources in `examples/public/` so examples can load them with absolute paths such as `/shaders/...` and `/images/...`.
 - Use `npm test` for Node-compatible checks, and verify rendering changes in a WebGPU-capable browser.
 
 [npm]: https://img.shields.io/npm/v/geoscratch

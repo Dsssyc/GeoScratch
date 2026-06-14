@@ -41,4 +41,5 @@ Thumbs.db
 ######################
 node_modules/
 dist/
-public/json/examples/*
+.playwright-cli/
+examples/public/json/examples/*

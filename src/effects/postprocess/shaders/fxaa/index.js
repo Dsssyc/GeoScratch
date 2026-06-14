@@ -1,3 +1,4 @@
+export const fxaaComputeShader = `
 struct StaticUniformBlock {
     threshold: f32,
     searchStep: i32,
@@ -273,3 +274,4 @@ fn cMain(@builtin(global_invocation_id) id: vec3<u32>) {
     // let output = IDW(uv + offsetStep * finalBlend, dim, 5, 3);
     textureStore(dstTexture, vec2i(id.xy), output);
 }
+`

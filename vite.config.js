@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 const examplesRoot = path.resolve(projectRoot, 'examples')
+const examplesPublic = path.resolve(examplesRoot, 'public')
 
 const examplePages = {
   index: path.resolve(examplesRoot, 'index.html'),
@@ -17,7 +18,7 @@ const examplePages = {
 // https://vitejs.dev/config/
 export default defineConfig({
   root: examplesRoot,
-  publicDir: path.resolve(projectRoot, 'public'),
+  publicDir: examplesPublic,
   plugins: [
   ],
   build: {

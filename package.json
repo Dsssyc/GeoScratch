@@ -26,10 +26,7 @@
   },
   "files": [
     "README_zh.md",
-    "src",
-    "public/shaders",
-    "public/icon",
-    "public/images"
+    "src"
   ],
   "directories": {
     "example": "examples",

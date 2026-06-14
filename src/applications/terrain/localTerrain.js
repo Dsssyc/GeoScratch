@@ -8,7 +8,7 @@ import { sampler } from '../../gpu/sampler/sampler.js'
 import imageLoader from '../../loaders/image/imageLoader.js'
 import { renderPass } from '../../gpu/pass/renderPass.js'
 import { boundingBox2D } from '../../core/box/boundingBox2D.js'
-import shaderLoader from '../../loaders/shader/shaderLoader.js'
+import { shader } from '../../gpu/shader/shader.js'
 import { NoBlending } from '../../gpu/blending/blending.js'
 import { indexBuffer } from '../../gpu/buffer/indexBuffer.js'
 import { vertexBuffer } from '../../gpu/buffer/vertexBuffer.js'
@@ -16,6 +16,16 @@ import { storageBuffer } from '../../gpu/buffer/storageBuffer.js'
 import { uniformBuffer } from '../../gpu/buffer/uniformBuffer.js'
 import { renderPipeline } from '../../gpu/pipeline/renderPipeline.js'
 import { asF32, f32, asVec2f, vec2f } from '../../core/numericType/numericType.js'
+import {
+    lodMapShader,
+    terrainMeshShader,
+    terrainMeshLineShader,
+} from './shaders/index.js'
+
+function inlineShader(name, code) {
+
+    return shader({ name, codeFunc: () => code })
+}
 
 export class LocalTerrain {
 
@@ -187,18 +197,18 @@ export class LocalTerrain {
         // Pipeline
         this.lodMapPipeline = renderPipeline({
             name: 'Render Pipeline (LOD Map)',
-            shader: { module: shaderLoader.load('Shader (Terrain Mesh)', '/shaders/examples/terrain/lodMap.wgsl') },
+            shader: { module: inlineShader('Shader (Terrain Mesh)', lodMapShader) },
             primitive: { topology: 'triangle-strip' },
         })
         this.meshRenderPipeline = renderPipeline({
             name: 'Render Pipeline (Terrain Mesh)',
-            shader: { module: shaderLoader.load('Shader (Terrain Mesh)', '/shaders/examples/terrain/terrainMesh.wgsl') },
+            shader: { module: inlineShader('Shader (Terrain Mesh)', terrainMeshShader) },
             colorTargetStates: [ { blend: NoBlending } ],
             // depthTest: true,
         })
         this.meshLineRenderPipeline = renderPipeline({
             name: 'Render Pipeline (Terrain Mesh)',
-            shader: { module: shaderLoader.load('Shader (Terrain Mesh Line)', '/shaders/examples/terrain/terrainMeshLine.wgsl') },
+            shader: { module: inlineShader('Shader (Terrain Mesh Line)', terrainMeshLineShader) },
             // depthTest: true,
             primitive: { topology: 'line-list' },
         })

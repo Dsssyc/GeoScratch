@@ -35,13 +35,15 @@ npm run dev
 | --- | --- |
 | `src/index.js` | 包的主要公开入口。 |
 | `src/scratch.js` | 为旧导入方式保留的兼容入口。 |
-| `src/core/` | 数学、几何、数据引用、对象、包围盒、四叉树和地理基础类型。 |
+| `src/core/` | 共享数据引用、数学、对象和包围盒基础类型。 |
+| `src/geo/` | 地理坐标辅助工具和地理瓦片结构。 |
+| `src/geometry/` | sphere、plane 等可复用几何生成器。 |
 | `src/gpu/` | WebGPU device、buffer、binding、pass、pipeline、shader、texture、sampler 和 director。 |
 | `src/loaders/` | 图片和 shader 加载工具。 |
 | `src/effects/` | 可复用的后处理效果。 |
 | `src/applications/` | 更高层的地理应用模块，包括地形。 |
 | `examples/` | 示例浏览器和各示例的独立页面。 |
-| `public/` | Vite 服务的静态 shader、纹理、图标和示例数据。 |
+| `examples/public/` | Vite 服务的静态 shader、纹理、图标和本地示例数据。 |
 | `tests/` | 可在 Node 环境中运行的 Mocha 测试。 |
 
 ## 包入口
@@ -54,6 +56,13 @@ import * as scr from 'geoscratch'
 
 ```js
 import * as scr from 'geoscratch/scratch'
+```
+
+地理和几何辅助模块也提供独立子入口：
+
+```js
+import { MercatorCoordinate } from 'geoscratch/geo'
+import { sphere } from 'geoscratch/geometry'
 ```
 
 ## 最小示例
@@ -130,7 +139,7 @@ function main(canvas) {
 
 - 公开 API 统一从 `src/index.js` 导出。
 - 浏览器或 WebGPU 示例放在 `examples/<name>/index.html` 和 `examples/<name>/main.js`。
-- 共享静态资源放在 `public/`，示例可通过 `/shaders/...`、`/images/...` 等绝对路径加载。
+- 示例运行资源放在 `examples/public/`，示例可通过 `/shaders/...`、`/images/...` 等绝对路径加载。
 - Node 兼容的检查使用 `npm test`；涉及渲染的改动还需要在支持 WebGPU 的浏览器中验证。
 
 [npm]: https://img.shields.io/npm/v/geoscratch
