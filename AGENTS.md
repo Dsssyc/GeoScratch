@@ -7,14 +7,14 @@ GeoScratch is an ES module WebGPU library. The public entrypoint is `src/index.j
 ## Build, Test, and Development Commands
 
 - `npm install`: install dependencies from `package-lock.json`.
-- `npm run dev`: start the Vite development server for `index.html` and the examples.
-- `npm run build`: run the Vite production build.
+- `npm run dev`: start the Vite development server rooted at `examples/`.
+- `npm run build`: build the examples browser and standalone example pages into `dist/examples/`.
 - `npm run serve`: preview the built Vite output locally.
 - `npm test`: run Mocha tests from `tests/`.
 
 ## Coding Style & Naming Conventions
 
-Use ES module imports/exports and keep exports routed through `src/index.js` when adding public API. Preserve `src/scratch.js` as a compatibility re-export only. Follow the surrounding style: no semicolons, compact object literals, and 4-space indentation inside functions/classes. Prefer descriptive lower camelCase for factory functions and upper PascalCase for classes, matching pairs such as `screen`/`Screen` and `vertexBuffer`/`VertexBuffer`. Keep declaration files synchronized with public JavaScript modules. Store feature shaders under `public/shaders/<feature>/` or `public/shaders/examples/<example>/`.
+Use ES module imports/exports and keep exports routed through `src/index.js` when adding public API. Preserve `src/scratch.js` as a compatibility re-export only. Follow the surrounding style: no semicolons, compact object literals, and 4-space indentation inside functions/classes. Prefer descriptive lower camelCase for factory functions and upper PascalCase for classes, matching pairs such as `screen`/`Screen` and `vertexBuffer`/`VertexBuffer`. Keep declaration files synchronized with public JavaScript modules. Keep runnable demos under `examples/<name>/index.html` plus `main.js`; do not add a root `index.html`. Store feature shaders under `public/shaders/<feature>/` or `public/shaders/examples/<example>/`.
 
 ## Testing Guidelines
 

@@ -19,18 +19,17 @@ Specific rendering structures will be implemented in the **geo-application** lay
 - `src/loaders/`: image and shader loading helpers.
 - `src/effects/`: reusable rendering effects such as postprocessing passes.
 - `src/applications/`: higher-level geo application modules.
-- `examples/`: Vite examples and demos.
+- `examples/`: Vite examples browser and standalone demo pages.
 - `public/`: static shaders, images, icons, and example data.
 - `tests/`: Mocha smoke and unit tests.
 
 ## Build Examples
-Examples of `GeoScratch` are built by [Vite](https://vitejs.dev/). Trying examples provided in this project
-requires an installation of [Node.js](https://nodejs.org/en/).
+Examples of `GeoScratch` are built by [Vite](https://vitejs.dev/) from the `examples/` directory. The repository root is kept free of demo HTML; `examples/index.html` is the examples browser, and each demo also has its own standalone `examples/<name>/index.html` page.
 
 - Install dependencies: `npm install`.
-- Run examples: `npm run dev`.
+- Run examples browser: `npm run dev`.
 - Run tests: `npm test`.
-- Build: `npm run build`.
+- Build examples: `npm run build`.
 
 ## Usage
 The code below shows the way using GeoScratch to render a hard-coded triangle.
