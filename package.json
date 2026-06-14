@@ -13,6 +13,14 @@
       "types": "./src/scratch.d.ts",
       "import": "./src/scratch.js"
     },
+    "./geo": {
+      "types": "./src/geo/index.d.ts",
+      "import": "./src/geo/index.js"
+    },
+    "./geometry": {
+      "types": "./src/geometry/index.d.ts",
+      "import": "./src/geometry/index.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },

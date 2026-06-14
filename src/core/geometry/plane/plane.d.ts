@@ -1,1 +1,1 @@
-export function plane(time = 5): { positions: number[], indices: number[] }
+export { plane } from '../../../geometry/plane/plane'

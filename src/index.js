@@ -16,7 +16,7 @@ export { mapBuffer, MapBuffer } from './gpu/buffer/mapBuffer.js'
 export { ArrayRef, aRef } from './core/data/arrayRef.js'
 export { BlockRef, bRef } from './core/data/blockRef.js'
 export { boundingBox2D, BoundingBox2D } from './core/box/boundingBox2D.js'
-export { Node2D } from './core/quadTree/node2D.js'
+export { GeoQuadNode2D, Node2D } from './geo/tiling/geoQuadNode2D.js'
 
 export { sampler, Sampler } from './gpu/sampler/sampler.js'
 export { texture, Texture } from './gpu/texture/texture.js'
@@ -49,8 +49,8 @@ export { imageLoader }
 import shaderLoader from './loaders/shader/shaderLoader.js'
 export { shaderLoader }
 
-export { sphere } from './core/geometry/sphere/sphere.js'
-export { plane } from './core/geometry/plane/plane.js'
+export { sphere } from './geometry/sphere/sphere.js'
+export { plane } from './geometry/plane/plane.js'
 export { randomNonZeroBetweenMinusOneAndOne } from './core/math/random.js'
 export {
 	vec2, vec3, vec4, mat3, mat4, utils, quat,
@@ -70,7 +70,7 @@ export {
 	mat4f, Mat4f
 } from './core/numericType/numericType.js'
 
-export { MercatorCoordinate } from './core/geo/mercatorCoordinate.js'
+export { MercatorCoordinate } from './geo/mercatorCoordinate.js'
 
 
 export { UUID } from './core/utils/uuid.js'

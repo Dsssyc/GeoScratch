@@ -1,4 +1,4 @@
-import { MapOptions } from '../../core/quadTree/node2D'
+import { MapOptions } from '../../geo/tiling/geoQuadNode2D'
 import { Binding } from '../../gpu/binding/binding'
 import { Buffer } from '../../gpu/buffer/buffer'
 import { RenderPass } from '../../gpu/pass/renderPass'
