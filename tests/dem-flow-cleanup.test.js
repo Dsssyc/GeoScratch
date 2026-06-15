@@ -4,6 +4,7 @@ import path from 'node:path'
 
 const root = process.cwd()
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
+const stripLineComments = (source) => source.replace(/\/\/.*$/gm, '')
 const methodBody = (source, name) => {
 
     const start = source.indexOf(`${name}() {`)
@@ -97,6 +98,28 @@ describe('DEM flow layer cleanup', () => {
 
         expect(simulation).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
         expect(simulation).to.not.include('length(velocity) / frameUniform.maxSpeed')
+    })
+
+    it('guards flow visualization speed scaling against a zero max speed', () => {
+
+        const shaderNames = [
+            'flowVoronoi.wgsl',
+            'simulation.compute.wgsl',
+            'particles.wgsl',
+            'flowShow.wgsl',
+            'arrow.wgsl',
+        ]
+
+        for (const shaderName of shaderNames) {
+
+            const shader = stripLineComments(read('examples', 'm_demLayer', 'shaders', 'flow', shaderName))
+
+            expect(shader, shaderName).to.not.match(/\/\s*frameUniform\.maxSpeed/)
+        }
+
+        expect(read('examples', 'm_demLayer', 'shaders', 'flow', 'particles.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
+        expect(read('examples', 'm_demLayer', 'shaders', 'flow', 'flowShow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
+        expect(read('examples', 'm_demLayer', 'shaders', 'flow', 'arrow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
     })
 
     it('derives the flow-domain mask from supported Voronoi geometry, not speed alone', () => {

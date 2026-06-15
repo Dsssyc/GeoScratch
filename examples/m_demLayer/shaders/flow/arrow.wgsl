@@ -178,7 +178,7 @@ fn fMain(input: VertexOutput) -> @location(0) vec4f {
         discard;
     }
 
-    if (length(velocity) / frameUniform.maxSpeed < 0.1) {
+    if (length(velocity) / max(frameUniform.maxSpeed, 0.000001) < 0.1) {
 
         if(length(input.coords) > 0.5) {
             discard;
