@@ -50,7 +50,7 @@ describe('DEM flow layer cleanup', () => {
         expect(layer).to.include('textures: [ { texture: this.layerTexture2 }, { texture: this.flowMaskTexture } ]')
 
         expect(voronoi).to.include('flowMaskCutoff: f32')
-        expect(voronoi).to.include('@location(1) mask: vec4f')
+        expect(voronoi).to.include('@location(1) mask: f32')
         expect(voronoi).to.include('length(input.velocity) / max(frameUniform.maxSpeed')
         expect(voronoi).to.include('output.velocity = input.velocity * maskValue')
 
@@ -61,6 +61,18 @@ describe('DEM flow layer cleanup', () => {
         expect(swap).to.include('useFlowMask: f32')
         expect(swap).to.include('var maskTexture: texture_2d<f32>')
         expect(swap).to.include('textureLoad(maskTexture, pixel, 0).r')
+    })
+
+    it('stores the flow-domain mask as a single-channel render target', () => {
+
+        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const voronoi = read('examples', 'm_demLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+
+        expect(layer).to.include("this.flowMaskTexture = this.map.screen.createScreenDependentTexture('Texture (Flow Mask)', 'r8unorm')")
+        expect(voronoi).to.include('@location(1) mask: f32')
+        expect(voronoi).to.include('output.mask = maskValue')
+        expect(voronoi).to.not.include('@location(1) mask: vec4f')
+        expect(voronoi).to.not.include('output.mask = vec4f(maskValue')
     })
 
     it('derives the flow-domain mask from supported Voronoi geometry, not speed alone', () => {

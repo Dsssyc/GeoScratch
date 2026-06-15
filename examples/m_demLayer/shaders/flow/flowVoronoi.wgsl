@@ -25,7 +25,7 @@ struct FrameUniformBlock {
 
 struct FragmentOutput {
     @location(0) velocity: vec2f,
-    @location(1) mask: vec4f,
+    @location(1) mask: f32,
 };
 
 struct StaticUniformBlock {
@@ -89,6 +89,6 @@ fn fMain(input: VertexOutput) -> FragmentOutput {
 
     var output: FragmentOutput;
     output.velocity = input.velocity * maskValue;
-    output.mask = vec4f(maskValue, maskValue, maskValue, 1.0);
+    output.mask = maskValue;
     return output;
 }

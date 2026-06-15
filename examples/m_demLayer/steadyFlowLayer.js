@@ -189,7 +189,7 @@ export default class SteadyFlowLayer {
         this.layerTexture1 = this.map.screen.createScreenDependentTexture('Texture (Background 1)')
         this.layerTexture2 = this.map.screen.createScreenDependentTexture('Texture (Background 2)')
         this.flowTexture = this.map.screen.createScreenDependentTexture('Texture (Velocity)', 'rg32float')
-        this.flowMaskTexture = this.map.screen.createScreenDependentTexture('Texture (Flow Mask)')
+        this.flowMaskTexture = this.map.screen.createScreenDependentTexture('Texture (Flow Mask)', 'r8unorm')
 
         // PASS - 1: flow textures (mix(from -> to)) generation ////////////////////////////////////////////////
         await this.getVoronoi('/json/examples/flow/station.bin')
