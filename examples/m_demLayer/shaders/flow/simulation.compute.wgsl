@@ -25,6 +25,7 @@ struct ControllerUniformBlock {
     dropRate: f32,
     dropRateBump: f32,
     speedFactor: f32,
+    useFlowMask: f32,
 }
 
 // Uniform bindings
@@ -38,7 +39,7 @@ struct ControllerUniformBlock {
 
 // Texture bindings
 @group(2) @binding(0) var fromTexture: texture_2d<f32>;
-// @group(2) @binding(1) var toTexture: texture_2d<f32>;
+@group(2) @binding(1) var maskTexture: texture_2d<f32>;
 
 // Constants
 override blockSize: u32;
@@ -161,6 +162,12 @@ fn getVelocity(texture: texture_2d<f32>, uv: vec2f) -> vec2f {
     return linearSampling(texture, uv * dim, dim).rg;
 }
 
+fn getMask(texture: texture_2d<f32>, uv: vec2f) -> f32 {
+
+    let dim = vec2f(textureDimensions(texture, 0).xy);
+    return linearSampling(texture, uv * dim, dim).r;
+}
+
 @compute @workgroup_size(blockSize, blockSize, 1)
 fn cMain(@builtin(global_invocation_id) id: vec3<u32>) {
 
@@ -192,6 +199,7 @@ fn cMain(@builtin(global_invocation_id) id: vec3<u32>) {
     // let vNext = getVelocity(toTexture, uv);
     // let vCurrent = mix(vLast, vNext, frameUniform.progressRate);
     let vCurrent = getVelocity(fromTexture, uv);
+    let maskValid = getMask(maskTexture, uv);
     var velocity = mix(vCurrent, vPast, FACTOR);
     let offset = velocity * 50.0 * controllerUniform.speedFactor;
     // let nextCoords = clamp(calculateDisplacedLonLat(x, y, offset.x, offset.y), cExtent.xy, cExtent.zw);
@@ -204,7 +212,7 @@ fn cMain(@builtin(global_invocation_id) id: vec3<u32>) {
     let nextPos = nextCoords;
 
     let seed = frameUniform.randomSeed * (nextPos - uv + vec2f(f32(id.x), f32(id.y)));
-    if (drop(velocity, seed) == 1.0 || all(velocity == vec2f(0.0)) || uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
+    if (drop(velocity, seed) == 1.0 || (controllerUniform.useFlowMask > 0.5 && maskValid < 0.5) || all(velocity == vec2f(0.0)) || uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
     // if (drop(velocity, seed) == 1.0 || all(velocity == vec2f(0.0)) || lastPos.x * lastPos.y * uv.x * uv.y * nextPos.x * nextPos.y == 0.0 || any(nextPos <= vec2f(0.0)) || any(nextPos >= vec2f(1.0))) {
 
         let rebirth_x = mix(cExtent.x, cExtent.z, rand(seed + f32(id.x)));

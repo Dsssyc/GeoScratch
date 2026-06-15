@@ -18,6 +18,12 @@ struct FrameUniformBlock {
     zoomLevel: f32,
     progressRate: f32,
     maxSpeed: f32,
+    flowMaskCutoff: f32,
+};
+
+struct FragmentOutput {
+    @location(0) velocity: vec2f,
+    @location(1) mask: vec4f,
 };
 
 struct StaticUniformBlock {
@@ -68,10 +74,17 @@ fn vMain(input: VertexInput) -> VertexOutput {
 }
 
 @fragment
-fn fMain(input: VertexOutput) -> @location(0) vec2f {
+fn fMain(input: VertexOutput) -> FragmentOutput {
 
     // if (input.velocity.x == 0.0 &&  input.velocity.y == 0.0) {
     //     discard;
     // }
-    return input.velocity;
+
+    let speedRate = length(input.velocity) / max(frameUniform.maxSpeed, 0.000001);
+    let maskValue = step(frameUniform.flowMaskCutoff, speedRate);
+
+    var output: FragmentOutput;
+    output.velocity = input.velocity;
+    output.mask = vec4f(maskValue, maskValue, maskValue, 1.0);
+    return output;
 }

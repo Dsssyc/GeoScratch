@@ -34,4 +34,31 @@ describe('DEM flow layer cleanup', () => {
         expect(layer).to.include('clearOnMove')
         expect(layer).to.include('this.showVoronoi = options.showVoronoi ?? true')
     })
+
+    it('wires a flow-domain mask through velocity, simulation, and history cleanup', () => {
+
+        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const voronoi = read('examples', 'm_demLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+        const simulation = read('examples', 'm_demLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
+        const swap = read('examples', 'm_demLayer', 'shaders', 'flow', 'swap.wgsl')
+
+        expect(layer).to.include('this.useFlowMask = options.useFlowMask ?? true')
+        expect(layer).to.include('this.flowMaskCutoff = scr.f32(')
+        expect(layer).to.include("this.flowMaskTexture = this.map.screen.createScreenDependentTexture('Texture (Flow Mask)'")
+        expect(layer).to.include('colorAttachments: [ { colorResource: this.flowTexture }, { colorResource: this.flowMaskTexture } ]')
+        expect(layer).to.include('textures: [ { texture: this.flowTexture, sampleType: \'unfilterable-float\' }, { texture: this.flowMaskTexture } ]')
+        expect(layer).to.include('textures: [ { texture: this.layerTexture2 }, { texture: this.flowMaskTexture } ]')
+
+        expect(voronoi).to.include('flowMaskCutoff: f32')
+        expect(voronoi).to.include('@location(1) mask: vec4f')
+        expect(voronoi).to.include('length(input.velocity) / max(frameUniform.maxSpeed')
+
+        expect(simulation).to.include('var maskTexture: texture_2d<f32>')
+        expect(simulation).to.include('getMask(maskTexture, uv)')
+        expect(simulation).to.include('controllerUniform.useFlowMask > 0.5 && maskValid < 0.5')
+
+        expect(swap).to.include('useFlowMask: f32')
+        expect(swap).to.include('var maskTexture: texture_2d<f32>')
+        expect(swap).to.include('textureLoad(maskTexture, pixel, 0).r')
+    })
 })

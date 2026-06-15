@@ -72,6 +72,9 @@ export default class SteadyFlowLayer {
         this.particleNum = scr.u32(262144)
         this.trailDecay = scr.f32(options.trailDecay ?? 0.996)
         this.trailCutoff = scr.f32(options.trailCutoff ?? 1 / 255)
+        this.useFlowMask = options.useFlowMask ?? true
+        this.useFlowMaskValue = scr.f32(this.useFlowMask ? 1 : 0)
+        this.flowMaskCutoff = scr.f32(options.flowMaskCutoff ?? 0.02)
         this.clearOnMove = options.clearOnMove ?? true
 
         // Compute
@@ -97,6 +100,7 @@ export default class SteadyFlowLayer {
 
         // Texture-related resource
         this.flowTexture = undefined
+        this.flowMaskTexture = undefined
         this.layerTexture1 = undefined
         this.layerTexture2 = undefined
 
@@ -172,6 +176,7 @@ export default class SteadyFlowLayer {
                         zoomLevel: this.map.zoom,
                         progressRate: this.progressRate,
                         maxSpeed: this.maxSpeed,
+                        flowMaskCutoff: this.flowMaskCutoff,
                     }
                 })
             ]
@@ -181,6 +186,7 @@ export default class SteadyFlowLayer {
         this.layerTexture1 = this.map.screen.createScreenDependentTexture('Texture (Background 1)')
         this.layerTexture2 = this.map.screen.createScreenDependentTexture('Texture (Background 2)')
         this.flowTexture = this.map.screen.createScreenDependentTexture('Texture (Velocity)', 'rg32float')
+        this.flowMaskTexture = this.map.screen.createScreenDependentTexture('Texture (Flow Mask)')
 
         // PASS - 1: flow textures (mix(from -> to)) generation ////////////////////////////////////////////////
         await this.getVoronoi('/json/examples/flow/station.bin')
@@ -195,7 +201,7 @@ export default class SteadyFlowLayer {
         })
         this.voronoiPass = scr.renderPass({
             name: 'Render Pass (Voronoi Flow From)',
-            colorAttachments: [ { colorResource: this.flowTexture } ],
+            colorAttachments: [ { colorResource: this.flowTexture }, { colorResource: this.flowMaskTexture } ],
             depthStencilAttachment: { depthStencilResource: this.map.depthTexture }
         }).add(this.voronoiPipeline, this.voronoiBinding)
 
@@ -203,7 +209,7 @@ export default class SteadyFlowLayer {
         this.simulationBinding = scr.binding({
             name: 'Binding (Particle Simulation)',
             range: () => [ this.groupSizeX, this.groupSizeY ],
-            textures: [ { texture: this.flowTexture, sampleType: 'unfilterable-float' } ],
+            textures: [ { texture: this.flowTexture, sampleType: 'unfilterable-float' }, { texture: this.flowMaskTexture } ],
             storages: [ { buffer: this.storageBuffer_particle, writable: true } ],
             uniforms: [
                 {
@@ -213,6 +219,7 @@ export default class SteadyFlowLayer {
                         dropRate: scr.asF32(0.003),
                         dropRateBump: scr.asF32(0.001),
                         speedFactor: scr.asF32(1.0),
+                        useFlowMask: this.useFlowMaskValue,
                     }
                 }
             ],
@@ -244,10 +251,11 @@ export default class SteadyFlowLayer {
                         map: {
                             trailDecay: this.trailDecay,
                             trailCutoff: this.trailCutoff,
+                            useFlowMask: this.useFlowMaskValue,
                         }
                     }
                 ],
-                textures: [ { texture: this.layerTexture2 } ]
+                textures: [ { texture: this.layerTexture2 }, { texture: this.flowMaskTexture } ]
             }),
             scr.binding({
                 name: 'Binding (Background Swap 2)',
@@ -259,10 +267,11 @@ export default class SteadyFlowLayer {
                         map: {
                             trailDecay: this.trailDecay,
                             trailCutoff: this.trailCutoff,
+                            useFlowMask: this.useFlowMaskValue,
                         }
                     }
                 ],
-                textures: [ { texture: this.layerTexture1 } ]
+                textures: [ { texture: this.layerTexture1 }, { texture: this.flowMaskTexture } ]
             }),
         ]
         this.trajectoryPipeline = scr.renderPipeline({

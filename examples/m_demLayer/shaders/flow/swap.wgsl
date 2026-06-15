@@ -10,6 +10,7 @@ struct VertexOutput {
 struct CleanupUniformBlock {
     trailDecay: f32,
     trailCutoff: f32,
+    useFlowMask: f32,
 };
 
 // Uniform bindings
@@ -17,6 +18,7 @@ struct CleanupUniformBlock {
 
 // Texture bindings
 @group(1) @binding(0) var bgTexture: texture_2d<f32>;
+@group(1) @binding(1) var maskTexture: texture_2d<f32>;
 
 fn toneMapACES(color: vec3f) -> vec3f {
     let a = 2.51;
@@ -82,6 +84,11 @@ fn fMain(fsInput: VertexOutput) -> @location(0) vec4f {
 
     let dim = vec2f(textureDimensions(bgTexture, 0).xy);
     let pixel = vec2i(clamp(dim * fsInput.texcoords.xy, vec2f(0.0), dim - vec2f(1.0)));
+    let mask = textureLoad(maskTexture, pixel, 0).r;
+    if (cleanupUniform.useFlowMask > 0.5 && mask < 0.5) {
+        return vec4f(0.0);
+    }
+
     let color = textureLoad(bgTexture, pixel, 0);
     let faded = vec4f(floor(255.0 * color * cleanupUniform.trailDecay) / 255.0);
     let residual = max(max(faded.r, faded.g), faded.b);
