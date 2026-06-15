@@ -83,4 +83,18 @@ describe('DEM flow layer cleanup', () => {
         expect(voronoi).to.include('let speedMask = step(frameUniform.flowMaskCutoff, speedRate)')
         expect(voronoi).to.include('let maskValue = speedMask * input.domainSupport')
     })
+
+    it('cleans up flow camera listeners and worker resources when removed', () => {
+
+        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+
+        expect(layer).to.include('this.cameraInvalidationHandlers = []')
+        expect(layer).to.include('onRemove()')
+        expect(layer).to.include('this.unregisterCameraInvalidation()')
+        expect(layer).to.match(/onRemove\(\) \{[\s\S]*this\.makeVisibility\(false\)/)
+        expect(layer).to.include('this.loadWorker.terminate()')
+        expect(layer).to.include('this.cameraInvalidationHandlers.push({ eventName, handler: clearHistory })')
+        expect(layer).to.include('this.map.off(eventName, handler)')
+        expect(layer).to.match(/onRemove\(\) \{[\s\S]*this\.map = undefined/)
+    })
 })

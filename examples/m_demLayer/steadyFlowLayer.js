@@ -61,6 +61,7 @@ export default class SteadyFlowLayer {
 
         // Resource worker
         this.loadWorker = undefined
+        this.cameraInvalidationHandlers = []
 
         // Control
         this.progress = 0.0
@@ -413,6 +414,22 @@ export default class SteadyFlowLayer {
         this.swapPointer = (this.swapPointer + 1) % 2
     }
 
+    onRemove() {
+
+        this.unregisterCameraInvalidation()
+
+        if (this.isInitialized) this.makeVisibility(false)
+
+        if (this.loadWorker) {
+
+            this.loadWorker.terminate()
+            this.loadWorker = undefined
+        }
+
+        this.isInitialized = false
+        this.map = undefined
+    }
+
     idle() {
 
         if (!this.swapPasses) return
@@ -444,15 +461,33 @@ export default class SteadyFlowLayer {
 
     registerCameraInvalidation() {
 
-        if (!this.clearOnMove) return
+        if (!this.clearOnMove || !this.map) return
+
+        this.unregisterCameraInvalidation()
 
         const clearHistory = () => this.idle()
         const restartHistory = () => this.restart()
         const movingEvents = [ 'movestart', 'move', 'dragstart', 'drag', 'zoomstart', 'zoom', 'rotatestart', 'rotate', 'pitchstart', 'pitch' ]
         const settledEvents = [ 'moveend', 'dragend', 'zoomend', 'rotateend', 'pitchend' ]
 
-        movingEvents.forEach(eventName => this.map.on(eventName, clearHistory))
-        settledEvents.forEach(eventName => this.map.on(eventName, restartHistory))
+        movingEvents.forEach(eventName => {
+
+            this.map.on(eventName, clearHistory)
+            this.cameraInvalidationHandlers.push({ eventName, handler: clearHistory })
+        })
+        settledEvents.forEach(eventName => {
+
+            this.map.on(eventName, restartHistory)
+            this.cameraInvalidationHandlers.push({ eventName, handler: restartHistory })
+        })
+    }
+
+    unregisterCameraInvalidation() {
+
+        if (!this.map || this.cameraInvalidationHandlers.length === 0) return
+
+        this.cameraInvalidationHandlers.forEach(({ eventName, handler }) => this.map.off(eventName, handler))
+        this.cameraInvalidationHandlers = []
     }
 
     show() {
