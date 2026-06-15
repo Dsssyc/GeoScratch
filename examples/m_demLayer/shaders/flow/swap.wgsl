@@ -158,6 +158,7 @@ fn fMain(fsInput: VertexOutput) -> @location(0) vec4f {
         return vec4f(0.0);
     }
 
+    var color = textureLoad(bgTexture, pixel, 0);
     var historyUv = fsInput.texcoords.xy;
     if (cleanupUniform.historyMode > 1.5 && cleanupUniform.historyReprojecting > 0.5) {
         if (cleanupUniform.historyValid < 0.5) {
@@ -169,10 +170,10 @@ fn fMain(fsInput: VertexOutput) -> @location(0) vec4f {
             return vec4f(0.0);
         }
         historyUv = projection.uv;
-    }
 
-    let historyPixel = clamp(historyUv * dim, vec2f(0.0), dim - vec2f(1.0));
-    let color = linearSampling(bgTexture, historyPixel, dim);
+        let historyPixel = clamp(historyUv * dim, vec2f(0.0), dim - vec2f(1.0));
+        color = linearSampling(bgTexture, historyPixel, dim);
+    }
     let faded = vec4f(floor(255.0 * color * cleanupUniform.trailDecay) / 255.0);
     let residual = max(max(faded.r, faded.g), faded.b);
     if (residual <= cleanupUniform.trailCutoff) {

@@ -118,4 +118,13 @@ describe('DEM flow history reprojection', () => {
         expect(swap).to.include('linearSampling(bgTexture, historyPixel, dim)')
         expect(swap).to.include('textureLoad(maskTexture, pixel, 0).r')
     })
+
+    it('keeps static trail feedback pixel-exact and filters only during reprojection', () => {
+
+        const swap = read('examples', 'm_demLayer', 'shaders', 'flow', 'swap.wgsl')
+
+        expect(swap).to.include('var color = textureLoad(bgTexture, pixel, 0)')
+        expect(swap).to.match(/if \(cleanupUniform\.historyMode > 1\.5 && cleanupUniform\.historyReprojecting > 0\.5\)[\s\S]*color = linearSampling\(bgTexture, historyPixel, dim\)/)
+        expect(swap).to.not.include('let color = linearSampling(bgTexture, historyPixel, dim)')
+    })
 })
