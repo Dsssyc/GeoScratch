@@ -1,14 +1,16 @@
 struct VertexInput {
     @builtin(vertex_index) vertexIndex: u32,
     @location(0) position: vec4f,
-    @location(1) vFrom: vec2f,
-    @location(2) vTo: vec2f,
+    @location(1) domainSupport: f32,
+    @location(2) vFrom: vec2f,
+    @location(3) vTo: vec2f,
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) velocity: vec2f,
     @location(1) uv: vec2f,
+    @location(2) domainSupport: f32,
 };
 
 struct FrameUniformBlock {
@@ -70,6 +72,7 @@ fn vMain(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     output.position = dynamicUniform.uMatrix * vec4f(translateRelativeToEye(vec3f(input.position.xy, 0.0), vec3f(input.position.zw, 0.0)), 1.0);
     output.velocity = mix(input.vFrom, input.vTo, frameUniform.progressRate);
+    output.domainSupport = input.domainSupport;
     return output;
 }
 
@@ -81,7 +84,8 @@ fn fMain(input: VertexOutput) -> FragmentOutput {
     // }
 
     let speedRate = length(input.velocity) / max(frameUniform.maxSpeed, 0.000001);
-    let maskValue = step(frameUniform.flowMaskCutoff, speedRate);
+    let speedMask = step(frameUniform.flowMaskCutoff, speedRate);
+    let maskValue = speedMask * input.domainSupport;
 
     var output: FragmentOutput;
     output.velocity = input.velocity * maskValue;

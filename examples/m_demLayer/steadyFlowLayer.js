@@ -75,6 +75,7 @@ export default class SteadyFlowLayer {
         this.useFlowMask = options.useFlowMask ?? true
         this.useFlowMaskValue = scr.f32(this.useFlowMask ? 1 : 0)
         this.flowMaskCutoff = scr.f32(options.flowMaskCutoff ?? 0.02)
+        this.flowDomainMaxEdge = options.flowDomainMaxEdge ?? 0.04
         this.clearOnMove = options.clearOnMove ?? true
 
         // Compute
@@ -91,8 +92,9 @@ export default class SteadyFlowLayer {
         this.toRef = undefined
         this.fromRef = undefined
         this.nextRef = undefined
+        this.triangleVertexIndices = undefined
+        this.voronoiVertexCount = 0
         this.uniformBuffer_frame = undefined
-        this.indexBuffer_voronoi = undefined
         this.vertexBuffer_voronoi = undefined
         this.uniformBuffer_static = undefined
         this.storageBuffer_particle = undefined
@@ -519,29 +521,40 @@ export default class SteadyFlowLayer {
     async getVoronoi(url) {
         
         const res = await axios.get(url, { responseType: 'arraybuffer' })
-        const meshes = new Delaunay(new Float32Array(res.data))
+        const stationCoords = new Float32Array(res.data)
+        const meshes = new Delaunay(stationCoords)
         
         const vertices = []
-        const indices = meshes.triangles
-        for (let i = 0; i < meshes.points.length; i += 2) {
-    
-            const x = encodeFloatToDouble(scr.MercatorCoordinate.mercatorXfromLon(meshes.points[i + 0]))
-            const y = encodeFloatToDouble(scr.MercatorCoordinate.mercatorYfromLat(meshes.points[i + 1]))
-    
-            vertices.push(x[0])
-            vertices.push(y[0])
-            vertices.push(x[1])
-            vertices.push(y[1])
+        const domainSupport = []
+        const triangleVertexIndices = []
+        const triangles = meshes.triangles
+        for (let i = 0; i < triangles.length; i += 3) {
+
+            const ids = [ triangles[i + 0], triangles[i + 1], triangles[i + 2] ]
+            const support = calculateTriangleDomainSupport(meshes.points, ids, this.flowDomainMaxEdge)
+
+            ids.forEach(id => {
+
+                const x = encodeFloatToDouble(scr.MercatorCoordinate.mercatorXfromLon(meshes.points[id * 2 + 0]))
+                const y = encodeFloatToDouble(scr.MercatorCoordinate.mercatorYfromLat(meshes.points[id * 2 + 1]))
+
+                vertices.push(x[0])
+                vertices.push(y[0])
+                vertices.push(x[1])
+                vertices.push(y[1])
+
+                domainSupport.push(support)
+                triangleVertexIndices.push(id)
+            })
         }
 
-        this.toRef = scr.aRef(new Float32Array(meshes.points.length).fill(0.))
-        this.fromRef = scr.aRef(new Float32Array(meshes.points.length).fill(0.))
-        this.nextRef = scr.aRef(new Float32Array(meshes.points.length).fill(0.))
+        this.triangleVertexIndices = new Uint32Array(triangleVertexIndices)
+        this.voronoiVertexCount = this.triangleVertexIndices.length
 
-        this.indexBuffer_voronoi = scr.indexBuffer({
-            name: `IndexBuffer (Voronoi Index (${url}))`,
-            resource: { arrayRef: scr.aRef(new Uint32Array(indices)) }
-        })
+        this.toRef = scr.aRef(new Float32Array(this.voronoiVertexCount * 2).fill(0.))
+        this.fromRef = scr.aRef(new Float32Array(this.voronoiVertexCount * 2).fill(0.))
+        this.nextRef = scr.aRef(new Float32Array(this.voronoiVertexCount * 2).fill(0.))
+
         this.vertexBuffer_voronoi = scr.vertexBuffer({
             name: `VertexBuffer (Station Position (${url}))`,
             resource: { arrayRef: scr.aRef(new Float32Array(vertices)), structure: [ { components: 4 } ] }
@@ -549,10 +562,15 @@ export default class SteadyFlowLayer {
 
         this.voronoiBinding = scr.binding({
             name: `Binding (Flow-Field Voronoi)`,
-            range: () => [ this.indexBuffer_voronoi.length ],
-            index: { buffer: this.indexBuffer_voronoi },
+            range: () => [ this.voronoiVertexCount ],
             vertices: [
                 { buffer: this.vertexBuffer_voronoi },
+                {
+                    buffer: scr.vertexBuffer({
+                        name: `VertexBuffer (Flow Domain Support (${url}))`,
+                        resource: { arrayRef: scr.aRef(new Float32Array(domainSupport)), structure: [ { components: 1 } ] }
+                    })
+                },
                 {
                     buffer: scr.vertexBuffer({
                         name: `VertexBuffer (Station Velocity (From)`,
@@ -590,7 +608,7 @@ export default class SteadyFlowLayer {
             maxSpeed = speed > maxSpeed ? speed : maxSpeed
         }
 
-        this.nextRef.value = uvs
+        this.nextRef.value = this.expandStationVelocities(uvs)
         this.updateMaxSpeed(maxSpeed)
 
         this.nextPreparing = false
@@ -620,7 +638,7 @@ export default class SteadyFlowLayer {
             const { url, maxSpeed, uvs } = event.data
             const name = url
             that.updateMaxSpeed(maxSpeed)
-            that.nextRef.value = uvs
+            that.nextRef.value = that.expandStationVelocities(uvs)
 
             that.nextPrepared = true
             that.nextPreparing = false
@@ -633,9 +651,39 @@ export default class SteadyFlowLayer {
 
         this.loadWorker.postMessage({ url })
     }
+
+    expandStationVelocities(uvs) {
+
+        const expandedUvs = new Float32Array(this.voronoiVertexCount * 2)
+        for (let i = 0; i < this.triangleVertexIndices.length; i++) {
+
+            const stationIndex = this.triangleVertexIndices[i]
+            expandedUvs[i * 2 + 0] = uvs[stationIndex * 2 + 0]
+            expandedUvs[i * 2 + 1] = uvs[stationIndex * 2 + 1]
+        }
+
+        return expandedUvs
+    }
 }
 
 // Helpers //////////////////////////////////////////////////////////////////////////////////////////////////////
+function calculateTriangleDomainSupport(points, ids, maxEdge) {
+
+    const edge01 = calculateStationEdgeLength(points, ids[0], ids[1])
+    const edge12 = calculateStationEdgeLength(points, ids[1], ids[2])
+    const edge20 = calculateStationEdgeLength(points, ids[2], ids[0])
+
+    return Math.max(edge01, edge12, edge20) <= maxEdge ? 1 : 0
+}
+
+function calculateStationEdgeLength(points, a, b) {
+
+    const dx = points[a * 2 + 0] - points[b * 2 + 0]
+    const dy = points[a * 2 + 1] - points[b * 2 + 1]
+
+    return Math.sqrt(dx * dx + dy * dy)
+}
+
 function encodeFloatToDouble(value) {
 
     const result = new Float32Array(2);

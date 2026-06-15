@@ -38,6 +38,8 @@ The cleanup layer should cover three concerns:
 5. Re-enable camera lifecycle handling in `steadyFlowLayer.js`: movement should invalidate screen-space history, and `restart()` should reset particle state after movement ends.
 6. Expose cleanup tuning as layer options, including `trailDecay`, `trailCutoff`, `clearOnMove`, and `useFlowMask`.
 
+Implementation note: the current example data does not include an independent physical water or flow-domain mask. Until such data exists, the example derives a conservative geometry support signal from the Delaunay triangles using a configurable maximum station-edge length (`flowDomainMaxEdge`). This is a domain-support heuristic, not a replacement for a true hydrological mask.
+
 ## Non-Goals
 
 - Do not replace the current particle advection algorithm.

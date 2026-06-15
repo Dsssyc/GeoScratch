@@ -62,4 +62,25 @@ describe('DEM flow layer cleanup', () => {
         expect(swap).to.include('var maskTexture: texture_2d<f32>')
         expect(swap).to.include('textureLoad(maskTexture, pixel, 0).r')
     })
+
+    it('derives the flow-domain mask from supported Voronoi geometry, not speed alone', () => {
+
+        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const voronoi = read('examples', 'm_demLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+
+        expect(layer).to.include('this.flowDomainMaxEdge = options.flowDomainMaxEdge ??')
+        expect(layer).to.include('this.triangleVertexIndices = undefined')
+        expect(layer).to.include('this.voronoiVertexCount = 0')
+        expect(layer).to.include('calculateTriangleDomainSupport(')
+        expect(layer).to.include('expandStationVelocities(uvs)')
+        expect(layer).to.include('range: () => [ this.voronoiVertexCount ]')
+        expect(layer).to.not.include('index: { buffer: this.indexBuffer_voronoi }')
+        expect(layer).to.include('structure: [ { components: 1 } ]')
+
+        expect(voronoi).to.include('@location(1) domainSupport: f32')
+        expect(voronoi).to.include('@location(3) vTo: vec2f')
+        expect(voronoi).to.include('output.domainSupport = input.domainSupport')
+        expect(voronoi).to.include('let speedMask = step(frameUniform.flowMaskCutoff, speedRate)')
+        expect(voronoi).to.include('let maskValue = speedMask * input.domainSupport')
+    })
 })
