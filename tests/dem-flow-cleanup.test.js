@@ -44,6 +44,8 @@ describe('DEM flow layer cleanup', () => {
         expect(layer).to.include('constructor(options = {})')
         expect(layer).to.include('this.trailDecay = scr.f32(')
         expect(layer).to.include('this.trailCutoff = scr.f32(')
+        expect(layer).to.include('this.flowMaskCutoff = scr.f32(options.flowMaskCutoff ?? 0.0)')
+        expect(layer).to.not.include('this.flowMaskCutoff = scr.f32(options.flowMaskCutoff ?? 0.02)')
         expect(layer).to.include('name: \'cleanupUniform\'')
         expect(layer).to.include('trailDecay: this.trailDecay')
         expect(layer).to.include('trailCutoff: this.trailCutoff')
@@ -69,7 +71,7 @@ describe('DEM flow layer cleanup', () => {
         expect(voronoi).to.include('flowMaskCutoff: f32')
         expect(voronoi).to.include('@location(1) mask: f32')
         expect(voronoi).to.include('length(input.velocity) / max(frameUniform.maxSpeed')
-        expect(voronoi).to.include('output.velocity = input.velocity * maskValue')
+        expect(voronoi).to.include('output.velocity = input.velocity * velocityMask')
 
         expect(simulation).to.include('var maskTexture: texture_2d<f32>')
         expect(simulation).to.include('getMask(maskTexture, uv)')
@@ -161,7 +163,10 @@ describe('DEM flow layer cleanup', () => {
         expect(voronoi).to.include('@location(3) vTo: vec2f')
         expect(voronoi).to.include('output.domainSupport = input.domainSupport')
         expect(voronoi).to.include('let speedMask = step(frameUniform.flowMaskCutoff, speedRate)')
-        expect(voronoi).to.include('let maskValue = speedMask * input.domainSupport')
+        expect(voronoi).to.include('let velocityMask = speedMask * input.domainSupport')
+        expect(voronoi).to.include('let maskValue = input.domainSupport')
+        expect(voronoi).to.include('output.velocity = input.velocity * velocityMask')
+        expect(voronoi).to.not.include('let maskValue = speedMask * input.domainSupport')
     })
 
     it('cleans up flow camera listeners and worker resources when removed', () => {
@@ -178,19 +183,20 @@ describe('DEM flow layer cleanup', () => {
         expect(layer).to.match(/onRemove\(\) \{[\s\S]*this\.map = undefined/)
     })
 
-    it('pauses simulation and trail accumulation while camera movement clears history', () => {
+    it('keeps current flow rendering active while camera movement clears history', () => {
 
         const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
         const idle = methodBody(layer, 'idle')
         const restart = methodBody(layer, 'restart')
 
-        expect(idle).to.include('this.isIdling = true')
         expect(idle).to.include('this.swapPasses[0].executable = true')
-        expect(idle).to.include('this.swapPasses[1].executable = false')
-        expect(idle).to.include('this.swapPasses[2].executable = false')
-        expect(idle).to.include('this.layerBindings[0].executable = false')
-        expect(idle).to.include('this.layerBindings[1].executable = false')
-        expect(idle).to.include('this.simulationPass.executable = false')
+        expect(idle).to.include('this.simulationPass.executable = true')
+        expect(idle).to.not.include('this.isIdling = true')
+        expect(idle).to.not.include('this.swapPasses[1].executable = false')
+        expect(idle).to.not.include('this.swapPasses[2].executable = false')
+        expect(idle).to.not.include('this.layerBindings[0].executable = false')
+        expect(idle).to.not.include('this.layerBindings[1].executable = false')
+        expect(idle).to.not.include('this.simulationPass.executable = false')
 
         expect(restart).to.include('this.isIdling = false')
         expect(restart).to.include('this.swapPasses[0].executable = false')

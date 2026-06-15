@@ -27,7 +27,7 @@ The cleanup layer should cover three concerns:
 
 1. **Validity masking**: introduce a flow-domain mask and use it consistently when generating velocity, advancing particles, and preserving history.
 2. **History cleanup**: extend the trail swap pass with configurable decay, cutoff, and mask-based clearing.
-3. **Camera invalidation**: clear or pause history accumulation during map movement, then restart particles when the camera settles.
+3. **Camera invalidation**: clear screen-space history during map movement without disabling current flow rendering, then restart particles when the camera settles.
 
 ## Implementation Plan
 
@@ -35,7 +35,7 @@ The cleanup layer should cover three concerns:
 2. Use the mask in the velocity pass. `flowVoronoi.wgsl` should avoid writing usable velocity for invalid samples.
 3. Use the mask in the simulation pass. `simulation.compute.wgsl` should rebirth particles when their sampled velocity pixel is invalid, even if the sampled velocity is non-zero.
 4. Convert `swap.wgsl` from pure decay into a cleanup pass. It should keep the current long-tail behavior for valid pixels, clear invalid pixels, and drop very low residual values below a tunable cutoff.
-5. Re-enable camera lifecycle handling in `steadyFlowLayer.js`: movement should invalidate screen-space history, and `restart()` should reset particle state after movement ends.
+5. Re-enable camera lifecycle handling in `steadyFlowLayer.js`: movement should invalidate screen-space history while keeping current-frame flow rendering active, and `restart()` should reset particle state after movement ends.
 6. Expose cleanup tuning as layer options, including `trailDecay`, `trailCutoff`, `clearOnMove`, and `useFlowMask`.
 
 Implementation note: the current example data does not include an independent physical water or flow-domain mask. Until such data exists, the example derives a conservative geometry support signal from the Delaunay triangles using a configurable maximum station-edge length (`flowDomainMaxEdge`). This is a domain-support heuristic, not a replacement for a true hydrological mask.
@@ -45,11 +45,11 @@ Implementation note: the current example data does not include an independent ph
 Implemented for `examples/m_demLayer` on 2026-06-15.
 
 - The flow-domain mask is stored in a separate `r8unorm` screen-dependent texture.
-- `flowVoronoi.wgsl` writes masked velocity and mask outputs from speed cutoff plus geometry support.
+- `flowVoronoi.wgsl` writes velocity gated by optional speed cutoff plus geometry support, while the cleanup mask itself represents geometry support so low-speed in-domain pixels are not erased as holes.
 - `simulation.compute.wgsl` samples the mask and rebirths particles outside valid pixels.
 - `swap.wgsl` applies configurable decay, low-value cutoff, and mask-based trail clearing.
 - `steadyFlowLayer.js` exposes `trailDecay`, `trailCutoff`, `clearOnMove`, `useFlowMask`, `flowMaskCutoff`, and `flowDomainMaxEdge`.
-- Camera movement pauses simulation and trail accumulation, clears history, and restarts particles after movement settles.
+- Camera movement clears screen-space history while keeping simulation and current flow rendering active, then restarts particles after movement settles.
 - Follow-up hardening guards zero `maxSpeed` normalization and clamps velocity color-ramp indices, without changing the retained-history rendering model.
 
 Verification is covered by `tests/dem-flow-cleanup.test.js`, `npm test`, `npm run build`, and WebGPU browser screenshots of `examples/m_demLayer`.

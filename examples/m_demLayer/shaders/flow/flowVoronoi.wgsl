@@ -85,10 +85,11 @@ fn fMain(input: VertexOutput) -> FragmentOutput {
 
     let speedRate = length(input.velocity) / max(frameUniform.maxSpeed, 0.000001);
     let speedMask = step(frameUniform.flowMaskCutoff, speedRate);
-    let maskValue = speedMask * input.domainSupport;
+    let velocityMask = speedMask * input.domainSupport;
+    let maskValue = input.domainSupport;
 
     var output: FragmentOutput;
-    output.velocity = input.velocity * maskValue;
+    output.velocity = input.velocity * velocityMask;
     output.mask = maskValue;
     return output;
 }

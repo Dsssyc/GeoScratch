@@ -75,7 +75,7 @@ export default class SteadyFlowLayer {
         this.trailCutoff = scr.f32(options.trailCutoff ?? 1 / 255)
         this.useFlowMask = options.useFlowMask ?? true
         this.useFlowMaskValue = scr.f32(this.useFlowMask ? 1 : 0)
-        this.flowMaskCutoff = scr.f32(options.flowMaskCutoff ?? 0.02)
+        this.flowMaskCutoff = scr.f32(options.flowMaskCutoff ?? 0.0)
         this.flowDomainMaxEdge = options.flowDomainMaxEdge ?? 0.04
         this.clearOnMove = options.clearOnMove ?? true
 
@@ -434,14 +434,8 @@ export default class SteadyFlowLayer {
 
         if (!this.swapPasses) return
 
-        this.isIdling = true
-
         this.swapPasses[0].executable = true
-        this.swapPasses[1].executable = false
-        this.swapPasses[2].executable = false
-        this.layerBindings[0].executable = false
-        this.layerBindings[1].executable = false
-        this.simulationPass.executable = false
+        this.simulationPass.executable = true
         
         // this.showBinding.executable = true
         // this.swapPasses[2].executable = true
