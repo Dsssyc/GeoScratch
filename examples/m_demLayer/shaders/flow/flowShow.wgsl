@@ -70,12 +70,13 @@ fn velocityColor(speed: f32, rampColors: array<u32, 8>) -> vec3f {
     // let bottomIndex = floor(speed * 10.0);
     // let topIndex = mix(bottomIndex + 1.0, 7.0, step(6.0, bottomIndex));
     // let interval = mix(1.0, 4.0, step(6.0, bottomIndex));
-    let bottomIndex = floor(speed * 8.0);
-    let topIndex = ceil(speed * 8.0);
-    let interval = speed * 8.0 - bottomIndex;
+    let palettePosition = clamp(speed * 8.0, 0.0, 7.0);
+    let bottomIndex = u32(floor(palettePosition));
+    let topIndex = min(bottomIndex + 1u, 7u);
+    let interval = palettePosition - f32(bottomIndex);
 
-    let slowColor = colorFromInt(rampColors[u32(bottomIndex)]);
-    let fastColor = colorFromInt(rampColors[u32(topIndex)]);
+    let slowColor = colorFromInt(rampColors[bottomIndex]);
+    let fastColor = colorFromInt(rampColors[topIndex]);
 
     // return mix(slowColor, fastColor, (speed * 10.0 - f32(bottomIndex)) / interval);
     return mix(slowColor, fastColor, interval);

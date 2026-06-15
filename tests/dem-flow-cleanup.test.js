@@ -122,6 +122,27 @@ describe('DEM flow layer cleanup', () => {
         expect(read('examples', 'm_demLayer', 'shaders', 'flow', 'arrow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
     })
 
+    it('clamps flow velocity palette indices to the ramp bounds', () => {
+
+        const shaderNames = [
+            'particles.wgsl',
+            'flowShow.wgsl',
+            'arrow.wgsl',
+        ]
+
+        for (const shaderName of shaderNames) {
+
+            const shader = stripLineComments(read('examples', 'm_demLayer', 'shaders', 'flow', shaderName))
+
+            expect(shader, shaderName).to.include('let palettePosition = clamp(speed * 8.0, 0.0, 7.0)')
+            expect(shader, shaderName).to.include('let bottomIndex = u32(floor(palettePosition))')
+            expect(shader, shaderName).to.include('let topIndex = min(bottomIndex + 1u, 7u)')
+            expect(shader, shaderName).to.include('rampColors[bottomIndex]')
+            expect(shader, shaderName).to.include('rampColors[topIndex]')
+            expect(shader, shaderName).to.not.include('ceil(speed * 8.0)')
+        }
+    })
+
     it('derives the flow-domain mask from supported Voronoi geometry, not speed alone', () => {
 
         const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
