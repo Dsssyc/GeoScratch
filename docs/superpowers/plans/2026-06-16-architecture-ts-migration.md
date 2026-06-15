@@ -553,16 +553,16 @@ git commit -m "refactor: start source-compatible typescript migration"
 
 Before marking the thread goal complete:
 
-- [ ] Re-read `docs/decisions/ADR-003-architecture-before-typescript-migration.md`.
-- [ ] Re-read this plan.
-- [ ] Verify every Phase 1, Phase 2, Phase 3, and Phase 4 checkbox is complete.
-- [ ] Verify every ADR-003 completion signal has current evidence:
+- [x] Re-read `docs/decisions/ADR-003-architecture-before-typescript-migration.md`.
+- [x] Re-read this plan.
+- [x] Verify every Phase 1, Phase 2, Phase 3, and Phase 4 checkbox is complete.
+- [x] Verify every ADR-003 completion signal has current evidence:
   - Public package entrypoints are explicit and intentional.
   - Internal modules can change without requiring examples to import through `packages/geoscratch/src/*`.
   - Device, director, resource, pass, pipeline, and binding ownership rules are documented and reflected in code.
   - Per-frame CPU update paths are identifiable and avoid work when no resource changed.
   - Public API type coverage exists and passes `npm run typecheck`.
-- [ ] Run final verification:
+- [x] Run final verification:
 
 ```bash
 npm run typecheck
@@ -571,5 +571,5 @@ npm run build
 git status --short
 ```
 
-- [ ] Perform final review. Fix every Critical or Important issue and repeat verification after fixes.
-- [ ] Only after the audit is proven, mark the goal complete.
+- [x] Perform final review. Fix every Critical or Important issue and repeat verification after fixes.
+- [x] Only after the audit is proven, mark the goal complete.
