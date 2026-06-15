@@ -91,6 +91,14 @@ describe('DEM flow layer cleanup', () => {
         expect(voronoi).to.not.include('output.mask = vec4f(maskValue')
     })
 
+    it('guards simulation drop-rate scaling against a zero max speed', () => {
+
+        const simulation = read('examples', 'm_demLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
+
+        expect(simulation).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
+        expect(simulation).to.not.include('length(velocity) / frameUniform.maxSpeed')
+    })
+
     it('derives the flow-domain mask from supported Voronoi geometry, not speed alone', () => {
 
         const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')

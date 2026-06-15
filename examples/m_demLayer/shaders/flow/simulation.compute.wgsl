@@ -109,7 +109,7 @@ fn rand(co: vec2f) -> f32 {
 
 fn drop(velocity: vec2f, seed: vec2f) -> f32 {
     
-    let speedRate = length(velocity) / frameUniform.maxSpeed;
+    let speedRate = length(velocity) / max(frameUniform.maxSpeed, 0.000001);
     let drop_rate = controllerUniform.dropRate + speedRate * controllerUniform.dropRateBump;
 
     return step(1.0 - drop_rate, rand(seed));
