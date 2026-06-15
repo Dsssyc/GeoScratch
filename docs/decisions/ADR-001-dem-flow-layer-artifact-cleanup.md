@@ -4,6 +4,8 @@
 
 Accepted
 
+Mask cleanup remains accepted. Camera movement handling is superseded by ADR-002.
+
 ## Date
 
 2026-06-15
