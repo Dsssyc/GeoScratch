@@ -78,6 +78,20 @@ export default class SteadyFlowLayer {
         this.flowMaskCutoff = scr.f32(options.flowMaskCutoff ?? 0.0)
         this.flowDomainMaxEdge = options.flowDomainMaxEdge ?? 0.04
         this.clearOnMove = options.clearOnMove ?? true
+        this.historyMode = options.historyMode ?? (options.clearOnMove === false ? 'off' : 'reproject')
+        this.historyModeValue = scr.f32(historyModeToValue(this.historyMode))
+        this.historyValid = scr.f32(0)
+        this.hasHistoryCameraState = false
+        this.maxHistoryReprojectCenterDelta = options.maxHistoryReprojectCenterDelta ?? 0.25
+        this.previousHistoryMatrix = scr.mat4f()
+        this.currentHistoryMatrix = scr.mat4f()
+        this.currentHistoryInverseMatrix = scr.mat4f()
+        this.previousHistoryCenterHigh = scr.vec3f()
+        this.previousHistoryCenterLow = scr.vec3f()
+        this.currentHistoryCenterHigh = scr.vec3f()
+        this.currentHistoryCenterLow = scr.vec3f()
+        this.previousHistoryViewport = scr.vec2f()
+        this.currentHistoryViewport = scr.vec2f()
 
         // Compute
         this.blockSizeX = 16
@@ -255,6 +269,17 @@ export default class SteadyFlowLayer {
                             trailDecay: this.trailDecay,
                             trailCutoff: this.trailCutoff,
                             useFlowMask: this.useFlowMaskValue,
+                            historyMode: this.historyModeValue,
+                            historyValid: this.historyValid,
+                            previousMatrix: this.previousHistoryMatrix,
+                            currentMatrix: this.currentHistoryMatrix,
+                            currentInverseMatrix: this.currentHistoryInverseMatrix,
+                            previousCenterHigh: this.previousHistoryCenterHigh,
+                            previousCenterLow: this.previousHistoryCenterLow,
+                            currentCenterHigh: this.currentHistoryCenterHigh,
+                            currentCenterLow: this.currentHistoryCenterLow,
+                            previousViewport: this.previousHistoryViewport,
+                            currentViewport: this.currentHistoryViewport,
                         }
                     }
                 ],
@@ -271,6 +296,17 @@ export default class SteadyFlowLayer {
                             trailDecay: this.trailDecay,
                             trailCutoff: this.trailCutoff,
                             useFlowMask: this.useFlowMaskValue,
+                            historyMode: this.historyModeValue,
+                            historyValid: this.historyValid,
+                            previousMatrix: this.previousHistoryMatrix,
+                            currentMatrix: this.currentHistoryMatrix,
+                            currentInverseMatrix: this.currentHistoryInverseMatrix,
+                            previousCenterHigh: this.previousHistoryCenterHigh,
+                            previousCenterLow: this.previousHistoryCenterLow,
+                            currentCenterHigh: this.currentHistoryCenterHigh,
+                            currentCenterLow: this.currentHistoryCenterLow,
+                            previousViewport: this.previousHistoryViewport,
+                            currentViewport: this.currentHistoryViewport,
                         }
                     }
                 ],
@@ -398,6 +434,8 @@ export default class SteadyFlowLayer {
         if (!this.isInitialized || this.isIdling || this.preheat-- > 0) return
         if (this.isHided) { this.makeVisibility(false); return } else { this.makeVisibility(true) }
 
+        this.updateHistoryCameraState()
+
         // Swap
         this.showBinding.executable = false
 
@@ -430,9 +468,61 @@ export default class SteadyFlowLayer {
         this.map = undefined
     }
 
+    updateHistoryCameraState() {
+
+        if (!this.map) return
+
+        const hadHistory = this.hasHistoryCameraState
+        const previousViewport = [ this.currentHistoryViewport.x, this.currentHistoryViewport.y ]
+        const previousCenter = [
+            this.currentHistoryCenterHigh.x + this.currentHistoryCenterLow.x,
+            this.currentHistoryCenterHigh.y + this.currentHistoryCenterLow.y,
+        ]
+
+        this.previousHistoryMatrix.data = new Float32Array(this.currentHistoryMatrix.data)
+        copyVec3(this.currentHistoryCenterHigh, this.previousHistoryCenterHigh)
+        copyVec3(this.currentHistoryCenterLow, this.previousHistoryCenterLow)
+        copyVec2(this.currentHistoryViewport, this.previousHistoryViewport)
+
+        const matrix = new Float32Array(this.map.uMatrix.data)
+        const inverseMatrix = scr.mat4.inverse(matrix)
+        const matrixValid = isFiniteArray(matrix) && isFiniteArray(inverseMatrix)
+
+        this.currentHistoryMatrix.data = matrix
+        this.currentHistoryInverseMatrix.data = new Float32Array(inverseMatrix)
+        copyVec3(this.map.centerHigh, this.currentHistoryCenterHigh)
+        copyVec3(this.map.centerLow, this.currentHistoryCenterLow)
+        copyVec2(this.map.screen.sizeF, this.currentHistoryViewport)
+
+        const currentViewport = [ this.currentHistoryViewport.x, this.currentHistoryViewport.y ]
+        const currentCenter = [
+            this.currentHistoryCenterHigh.x + this.currentHistoryCenterLow.x,
+            this.currentHistoryCenterHigh.y + this.currentHistoryCenterLow.y,
+        ]
+        const viewportChanged = hadHistory && (
+            previousViewport[0] !== currentViewport[0] ||
+            previousViewport[1] !== currentViewport[1]
+        )
+        const centerDelta = Math.hypot(
+            currentCenter[0] - previousCenter[0],
+            currentCenter[1] - previousCenter[1],
+        )
+        const largeJump = hadHistory && centerDelta > this.maxHistoryReprojectCenterDelta
+
+        this.historyValid.n = this.historyMode === 'reproject' && hadHistory && matrixValid && !viewportChanged && !largeJump ? 1 : 0
+        this.hasHistoryCameraState = matrixValid
+    }
+
     idle() {
 
         if (!this.swapPasses) return
+
+        if (this.historyMode !== 'clear') {
+
+            this.historyValid.n = 0
+            this.simulationPass.executable = true
+            return
+        }
 
         this.swapPasses[0].executable = true
         this.simulationPass.executable = true
@@ -450,6 +540,7 @@ export default class SteadyFlowLayer {
     restart() {
 
         if (!this.swapPasses) return
+        if (this.historyMode !== 'clear') return
 
         this.preheat = 10
         this.isIdling = false
@@ -461,7 +552,7 @@ export default class SteadyFlowLayer {
 
     registerCameraInvalidation() {
 
-        if (!this.clearOnMove || !this.map) return
+        if (this.historyMode === 'off' || !this.map) return
 
         this.unregisterCameraInvalidation()
 
@@ -727,4 +818,30 @@ function encodeFloatToDouble(value) {
     const delta = value - result[0];
     result[1] = delta;
     return result;
+}
+
+function historyModeToValue(mode) {
+
+    if (mode === 'off') return 0
+    if (mode === 'clear') return 1
+    if (mode === 'reproject') return 2
+    throw new Error(`Unsupported DEM flow history mode: ${mode}`)
+}
+
+function copyVec2(source, target) {
+
+    target.x = source.x
+    target.y = source.y
+}
+
+function copyVec3(source, target) {
+
+    target.x = source.x
+    target.y = source.y
+    target.z = source.z
+}
+
+function isFiniteArray(values) {
+
+    return values.every(value => Number.isFinite(value))
 }
