@@ -33,17 +33,16 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 
 | Path | Purpose |
 | --- | --- |
-| `packages/geoscratch/` | Publishable library package. |
-| `packages/geoscratch/src/index.js` | Main public package entrypoint. |
-| `packages/geoscratch/src/scratch.js` | Compatibility re-export for older imports. |
-| `packages/geoscratch/src/core/` | Shared data references, math, object, and bounding box primitives. |
-| `packages/geoscratch/src/geo/` | Geospatial helpers and geographic tiling structures. |
-| `packages/geoscratch/src/geometry/` | Reusable geometry generators such as sphere and plane meshes. |
-| `packages/geoscratch/src/gpu/` | WebGPU device, buffers, bindings, passes, pipelines, shaders, textures, samplers, and director. |
-| `packages/geoscratch/src/loaders/` | Image and shader loading helpers. |
-| `packages/geoscratch/src/effects/` | Reusable postprocessing effects. |
-| `packages/geoscratch/src/applications/` | Higher-level geospatial application modules, including terrain. |
-| `examples/` | Examples workspace, examples browser, and standalone demo pages. |
+| `src/index.js` | Main public package entrypoint. |
+| `src/scratch.js` | Compatibility re-export for older imports. |
+| `src/core/` | Shared data references, math, object, and bounding box primitives. |
+| `src/geo/` | Geospatial helpers and geographic tiling structures. |
+| `src/geometry/` | Reusable geometry generators such as sphere and plane meshes. |
+| `src/gpu/` | WebGPU device, buffers, bindings, passes, pipelines, shaders, textures, samplers, and director. |
+| `src/loaders/` | Image and shader loading helpers. |
+| `src/effects/` | Reusable postprocessing effects. |
+| `src/applications/` | Higher-level geospatial application modules, including terrain. |
+| `examples/` | Examples browser plus standalone demo pages. |
 | `docs/assets/` | Documentation and project branding assets. |
 | `examples/public/` | Large local demo data that must be fetched by stable absolute URL. |
 | `tests/` | Node-compatible Mocha tests. |
@@ -139,11 +138,10 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 
 ## Development Notes
 
-- Keep public exports routed through `packages/geoscratch/src/index.js`.
+- Keep public exports routed through `src/index.js`.
 - Add browser/WebGPU demos under `examples/<name>/index.html` and `examples/<name>/main.js`.
-- Examples must import the package as `geoscratch`, not reach into library source by relative path.
 - Keep ordinary example images and shaders beside their owning example, using relative asset URLs or raw shader imports.
-- Keep library-owned runtime assets beside the source module that owns them, under `packages/geoscratch/src/`.
+- Keep library-owned runtime assets beside the source module that owns them, under `src/`.
 - Use `examples/public/` only for large local data that must be loaded by stable absolute URLs such as `/json/...`.
 - Use `npm test` for Node-compatible checks, and verify rendering changes in a WebGPU-capable browser.
 

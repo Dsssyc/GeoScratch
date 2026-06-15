@@ -2,8 +2,8 @@ import { defineConfig } from 'vite'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const projectRoot = path.dirname(fileURLToPath(import.meta.url))
-const examplesRoot = path.resolve(projectRoot, 'examples')
+const examplesRoot = path.dirname(fileURLToPath(import.meta.url))
+const projectRoot = path.resolve(examplesRoot, '..')
 const examplesPublic = path.resolve(examplesRoot, 'public')
 
 const examplePages = {

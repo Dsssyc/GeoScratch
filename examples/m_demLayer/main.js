@@ -1,4 +1,4 @@
-import * as scr from '../../src/index.js'
+import * as scr from 'geoscratch'
 import TerrainLayer from './terrainLayer.js'
 import SteadyFlowLayer from './steadyFlowLayer.js'
 

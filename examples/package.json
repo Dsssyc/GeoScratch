@@ -1,0 +1,20 @@
+{
+  "name": "geoscratch-examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "serve": "vite preview"
+  },
+  "dependencies": {
+    "@mapbox/tilebelt": "^1.0.2",
+    "d3-delaunay": "^6.0.4",
+    "earcut": "^2.2.4",
+    "geoscratch": "file:../packages/geoscratch",
+    "hammerjs": "^2.0.8"
+  },
+  "devDependencies": {
+    "vite": "^5.1.5"
+  }
+}

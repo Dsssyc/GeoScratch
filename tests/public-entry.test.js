@@ -1,6 +1,6 @@
 import { expect } from 'chai'
-import * as scr from '../src/index.js'
-import * as scratchCompat from '../src/scratch.js'
+import * as scr from '../packages/geoscratch/src/index.js'
+import * as scratchCompat from '../packages/geoscratch/src/scratch.js'
 import * as pkg from 'geoscratch'
 import * as pkgScratchCompat from 'geoscratch/scratch'
 

@@ -1,9 +1,7 @@
-import * as scr from '../../src/index.js'
+import * as scr from 'geoscratch'
 import Hammer from 'hammerjs'
 import earcut from 'earcut'
 import tilebelt from '@mapbox/tilebelt'
-import Protobuf from 'pbf'
-import { VectorTile } from '@mapbox/vector-tile'
 import mapTestShader from './shaders/test.wgsl?raw'
 
 const MIN_ZOOM = 0
@@ -279,13 +277,6 @@ function main(canvas) {
       }
 
     async function init() {
-
-        // const [ x, y, z ] = tilesInView[0]
-        // const response = await fetch(`https://maps.ckochis.com/data/v3/${z}/${x}/${y}.pbf?apiKey=${config('mapsApiKey')}`)
-        // const buffer = await response.arrayBuffer()
-        // const pbf = new Protobuf(buffer)
-        // const vectorTile = new VectorTile(pbf)
-        // console.log(vectorTile)
 
         // Buffer-related resource
         const geoJsonResource = await fetch('/json/examples/map/washington.geojson').then(async response => { return await response.text() })

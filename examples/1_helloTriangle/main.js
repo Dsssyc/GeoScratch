@@ -1,4 +1,4 @@
-import * as scr from '../../src/index.js'
+import * as scr from 'geoscratch'
 
 scr.StartDash().then(() => main(document.getElementById('GPUFrame')))
 

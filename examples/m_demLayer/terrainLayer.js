@@ -1,4 +1,4 @@
-import * as scr from '../../src/index.js'
+import * as scr from 'geoscratch'
 
 export default class TerrainLayer extends scr.LocalTerrain {
 

@@ -9,16 +9,16 @@ describe('module layout', () => {
 
     it('exposes geo and geometry as top-level library modules', async () => {
 
-        expect(exists('src', 'geo', 'index.js')).to.equal(true)
-        expect(exists('src', 'geo', 'mercatorCoordinate.js')).to.equal(true)
-        expect(exists('src', 'geo', 'tiling', 'geoQuadNode2D.js')).to.equal(true)
-        expect(exists('src', 'geometry', 'index.js')).to.equal(true)
-        expect(exists('src', 'geometry', 'sphere', 'sphere.js')).to.equal(true)
-        expect(exists('src', 'geometry', 'plane', 'plane.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'geo', 'index.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'geo', 'mercatorCoordinate.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'geo', 'tiling', 'geoQuadNode2D.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'geometry', 'index.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'geometry', 'sphere', 'sphere.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'geometry', 'plane', 'plane.js')).to.equal(true)
 
-        const entry = await import('../src/index.js')
-        const geo = await import('../src/geo/index.js')
-        const geometry = await import('../src/geometry/index.js')
+        const entry = await import('../packages/geoscratch/src/index.js')
+        const geo = await import('../packages/geoscratch/src/geo/index.js')
+        const geometry = await import('../packages/geoscratch/src/geometry/index.js')
 
         expect(geo.MercatorCoordinate).to.equal(entry.MercatorCoordinate)
         expect(geo.Node2D).to.equal(entry.Node2D)
@@ -29,12 +29,12 @@ describe('module layout', () => {
 
     it('keeps compatibility re-exports for legacy core paths', async () => {
 
-        const geo = await import('../src/geo/index.js')
-        const geometry = await import('../src/geometry/index.js')
-        const legacyMercator = await import('../src/core/geo/mercatorCoordinate.js')
-        const legacyNode = await import('../src/core/quadTree/node2D.js')
-        const legacySphere = await import('../src/core/geometry/sphere/sphere.js')
-        const legacyPlane = await import('../src/core/geometry/plane/plane.js')
+        const geo = await import('../packages/geoscratch/src/geo/index.js')
+        const geometry = await import('../packages/geoscratch/src/geometry/index.js')
+        const legacyMercator = await import('../packages/geoscratch/src/core/geo/mercatorCoordinate.js')
+        const legacyNode = await import('../packages/geoscratch/src/core/quadTree/node2D.js')
+        const legacySphere = await import('../packages/geoscratch/src/core/geometry/sphere/sphere.js')
+        const legacyPlane = await import('../packages/geoscratch/src/core/geometry/plane/plane.js')
 
         expect(legacyMercator.MercatorCoordinate).to.equal(geo.MercatorCoordinate)
         expect(legacyNode.Node2D).to.equal(geo.Node2D)

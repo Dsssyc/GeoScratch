@@ -47,7 +47,7 @@ describe('asset layout', () => {
 
     it('configures Vite to use examples/public as its public directory', () => {
 
-        const config = read('vite.config.js')
+        const config = read('examples', 'vite.config.js')
 
         expect(config).to.include("const examplesPublic = path.resolve(examplesRoot, 'public')")
         expect(config).to.include('publicDir: examplesPublic')
@@ -56,9 +56,10 @@ describe('asset layout', () => {
 
     it('keeps npm package files focused on library source', () => {
 
-        const pkg = JSON.parse(read('package.json'))
+        const pkg = JSON.parse(read('packages', 'geoscratch', 'package.json'))
 
         expect(pkg.files).to.deep.equal([
+            'README.md',
             'README_zh.md',
             'src',
         ])
@@ -75,17 +76,17 @@ describe('asset layout', () => {
 
     it('keeps library-owned terrain assets next to terrain source', async () => {
 
-        expect(exists('src', 'applications', 'terrain', 'assets', 'index.js')).to.equal(true)
-        expect(exists('src', 'applications', 'terrain', 'assets', 'dem.png')).to.equal(false)
-        expect(exists('src', 'applications', 'terrain', 'assets', 'border.png')).to.equal(false)
-        expect(exists('src', 'applications', 'terrain', 'assets', 'demPalette10.png')).to.equal(false)
+        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'assets', 'index.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'assets', 'dem.png')).to.equal(false)
+        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'assets', 'border.png')).to.equal(false)
+        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'assets', 'demPalette10.png')).to.equal(false)
 
-        const localTerrain = read('src', 'applications', 'terrain', 'localTerrain.js')
+        const localTerrain = read('packages', 'geoscratch', 'src', 'applications', 'terrain', 'localTerrain.js')
 
         expect(localTerrain).to.not.include('/images/examples/terrain/')
         expect(localTerrain).to.include('./assets/index.js')
 
-        const terrainAssets = await import('../src/applications/terrain/assets/index.js')
+        const terrainAssets = await import('../packages/geoscratch/src/applications/terrain/assets/index.js')
 
         expect(terrainAssets.demImageDataUrl).to.match(/^data:image\/png;base64,/)
         expect(terrainAssets.borderImageDataUrl).to.match(/^data:image\/png;base64,/)
@@ -94,18 +95,18 @@ describe('asset layout', () => {
 
     it('keeps library-owned postprocess shaders next to postprocess source', async () => {
 
-        expect(exists('src', 'effects', 'postprocess', 'shaders', 'bloom', 'index.js')).to.equal(true)
-        expect(exists('src', 'effects', 'postprocess', 'shaders', 'fxaa', 'index.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'effects', 'postprocess', 'shaders', 'bloom', 'index.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'effects', 'postprocess', 'shaders', 'fxaa', 'index.js')).to.equal(true)
         expect(exists('examples', 'public', 'shaders', 'postprocess')).to.equal(false)
 
-        const bloomPass = read('src', 'effects', 'postprocess', 'bloomPass.js')
-        const fxaaPass = read('src', 'effects', 'postprocess', 'fxaaPass.js')
+        const bloomPass = read('packages', 'geoscratch', 'src', 'effects', 'postprocess', 'bloomPass.js')
+        const fxaaPass = read('packages', 'geoscratch', 'src', 'effects', 'postprocess', 'fxaaPass.js')
 
         expect(bloomPass).to.not.include('/shaders/postprocess/')
         expect(fxaaPass).to.not.include('/shaders/postprocess/')
 
-        const bloomShaders = await import('../src/effects/postprocess/shaders/bloom/index.js')
-        const fxaaShaders = await import('../src/effects/postprocess/shaders/fxaa/index.js')
+        const bloomShaders = await import('../packages/geoscratch/src/effects/postprocess/shaders/bloom/index.js')
+        const fxaaShaders = await import('../packages/geoscratch/src/effects/postprocess/shaders/fxaa/index.js')
 
         expect(bloomShaders.highlightComputeShader).to.include('@compute')
         expect(bloomShaders.bloomOutputComputeShader).to.include('@compute')
@@ -114,14 +115,14 @@ describe('asset layout', () => {
 
     it('keeps library-owned terrain shaders next to terrain source', async () => {
 
-        expect(exists('src', 'applications', 'terrain', 'shaders', 'index.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'shaders', 'index.js')).to.equal(true)
         expect(exists('examples', 'public', 'shaders', 'examples', 'terrain')).to.equal(false)
 
-        const localTerrain = read('src', 'applications', 'terrain', 'localTerrain.js')
+        const localTerrain = read('packages', 'geoscratch', 'src', 'applications', 'terrain', 'localTerrain.js')
 
         expect(localTerrain).to.not.include('/shaders/examples/terrain/')
 
-        const terrainShaders = await import('../src/applications/terrain/shaders/index.js')
+        const terrainShaders = await import('../packages/geoscratch/src/applications/terrain/shaders/index.js')
 
         expect(terrainShaders.lodMapShader).to.include('@vertex')
         expect(terrainShaders.terrainMeshShader).to.include('@vertex')

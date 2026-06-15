@@ -1,4 +1,4 @@
-import * as scr from '../../src/index.js'
+import * as scr from 'geoscratch'
 import { Delaunay } from 'd3-delaunay'
 import arrowShader from './shaders/flow/arrow.wgsl?raw'
 import flowLayerShader from './shaders/flow/flowLayer.wgsl?raw'

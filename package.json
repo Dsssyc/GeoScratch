@@ -1,73 +1,20 @@
 {
-  "name": "geoscratch",
-  "version": "0.0.22",
-  "description": "Tiny 3D library for geovisualization, powered by WebGPU",
-  "main": "src/index.js",
-  "types": "src/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./src/index.d.ts",
-      "import": "./src/index.js"
-    },
-    "./scratch": {
-      "types": "./src/scratch.d.ts",
-      "import": "./src/scratch.js"
-    },
-    "./geo": {
-      "types": "./src/geo/index.d.ts",
-      "import": "./src/geo/index.js"
-    },
-    "./geometry": {
-      "types": "./src/geometry/index.d.ts",
-      "import": "./src/geometry/index.js"
-    },
-    "./src/*": "./src/*",
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "README_zh.md",
-    "src"
-  ],
-  "directories": {
-    "example": "examples",
-    "test": "tests"
-  },
-  "scripts": {
-    "test": "mocha \"tests/**/*.test.js\"",
-    "dev": "vite",
-    "build": "vite build",
-    "serve": "vite preview"
-  },
+  "name": "geoscratch-repo",
+  "private": true,
   "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/YcSoku/GeoScratch.git"
-  },
-  "keywords": [
-    "WebGPU",
-    "3D Library",
-    "Geovisualization"
+  "workspaces": [
+    "packages/geoscratch",
+    "examples"
   ],
-  "author": "YcSoku",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/YcSoku/GeoScratch/issues"
-  },
-  "homepage": "https://github.com/YcSoku/GeoScratch#readme",
-  "dependencies": {
-    "@mapbox/tilebelt": "^1.0.2",
-    "@mapbox/vector-tile": "^1.3.1",
-    "@webgpu/types": "^0.1.40",
-    "d3-delaunay": "^6.0.4",
-    "d3-voronoi": "^1.1.4",
-    "earcut": "^2.2.4",
-    "hammerjs": "^2.0.8",
-    "pbf": "^3.2.1"
+  "scripts": {
+    "dev": "npm --workspace examples run dev",
+    "build": "npm --workspace examples run build",
+    "serve": "npm --workspace examples run serve",
+    "test": "mocha \"tests/**/*.test.js\""
   },
   "devDependencies": {
     "chai": "^5.1.0",
     "mocha": "^10.3.0",
-    "playwright": "^1.60.0",
-    "vite": "^5.1.5"
+    "playwright": "^1.60.0"
   }
 }

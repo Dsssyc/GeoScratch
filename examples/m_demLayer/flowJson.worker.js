@@ -1,5 +1,5 @@
 import { Delaunay } from 'd3-delaunay'
-import * as scr from '../../src/index.js'
+import * as scr from 'geoscratch'
 
 self.addEventListener('message', (event) => {
 

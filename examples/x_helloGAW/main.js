@@ -1,4 +1,4 @@
-import * as scr from '../../src/index.js'
+import * as scr from 'geoscratch'
 import cloudShader from './shaders/cloud.wgsl?raw'
 import landShader from './shaders/land.wgsl?raw'
 import lastShader from './shaders/last.wgsl?raw'
