@@ -81,6 +81,7 @@ export default class SteadyFlowLayer {
         this.historyMode = options.historyMode ?? (options.clearOnMove === false ? 'off' : 'reproject')
         this.historyModeValue = scr.f32(historyModeToValue(this.historyMode))
         this.historyValid = scr.f32(0)
+        this.historyReprojecting = scr.f32(0)
         this.hasHistoryCameraState = false
         this.maxHistoryReprojectCenterDelta = options.maxHistoryReprojectCenterDelta ?? 0.25
         this.previousHistoryMatrix = scr.mat4f()
@@ -271,6 +272,7 @@ export default class SteadyFlowLayer {
                             useFlowMask: this.useFlowMaskValue,
                             historyMode: this.historyModeValue,
                             historyValid: this.historyValid,
+                            historyReprojecting: this.historyReprojecting,
                             previousMatrix: this.previousHistoryMatrix,
                             currentMatrix: this.currentHistoryMatrix,
                             currentInverseMatrix: this.currentHistoryInverseMatrix,
@@ -298,6 +300,7 @@ export default class SteadyFlowLayer {
                             useFlowMask: this.useFlowMaskValue,
                             historyMode: this.historyModeValue,
                             historyValid: this.historyValid,
+                            historyReprojecting: this.historyReprojecting,
                             previousMatrix: this.previousHistoryMatrix,
                             currentMatrix: this.currentHistoryMatrix,
                             currentInverseMatrix: this.currentHistoryInverseMatrix,
@@ -519,7 +522,7 @@ export default class SteadyFlowLayer {
 
         if (this.historyMode !== 'clear') {
 
-            this.historyValid.n = 0
+            if (this.historyMode === 'reproject') this.historyReprojecting.n = 1
             this.simulationPass.executable = true
             return
         }
@@ -540,7 +543,11 @@ export default class SteadyFlowLayer {
     restart() {
 
         if (!this.swapPasses) return
-        if (this.historyMode !== 'clear') return
+        if (this.historyMode !== 'clear') {
+
+            this.historyReprojecting.n = 0
+            return
+        }
 
         this.preheat = 10
         this.isIdling = false

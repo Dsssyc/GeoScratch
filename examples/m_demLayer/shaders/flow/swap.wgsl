@@ -13,6 +13,7 @@ struct CleanupUniformBlock {
     useFlowMask: f32,
     historyMode: f32,
     historyValid: f32,
+    historyReprojecting: f32,
     previousMatrix: mat4x4f,
     currentMatrix: mat4x4f,
     currentInverseMatrix: mat4x4f,
@@ -158,7 +159,7 @@ fn fMain(fsInput: VertexOutput) -> @location(0) vec4f {
     }
 
     var historyUv = fsInput.texcoords.xy;
-    if (cleanupUniform.historyMode > 1.5) {
+    if (cleanupUniform.historyMode > 1.5 && cleanupUniform.historyReprojecting > 0.5) {
         if (cleanupUniform.historyValid < 0.5) {
             return vec4f(0.0);
         }

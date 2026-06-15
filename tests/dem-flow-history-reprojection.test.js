@@ -53,6 +53,7 @@ describe('DEM flow history reprojection', () => {
         expect(layer).to.include("this.historyMode = options.historyMode ?? (options.clearOnMove === false ? 'off' : 'reproject')")
         expect(layer).to.include("this.historyModeValue = scr.f32(historyModeToValue(this.historyMode))")
         expect(layer).to.include('this.historyValid = scr.f32(0)')
+        expect(layer).to.include('this.historyReprojecting = scr.f32(0)')
         expect(layer).to.include('this.previousHistoryMatrix = scr.mat4f()')
         expect(layer).to.include('this.currentHistoryInverseMatrix = scr.mat4f()')
         expect(layer).to.include('this.previousHistoryCenterHigh = scr.vec3f()')
@@ -70,10 +71,11 @@ describe('DEM flow history reprojection', () => {
         const restart = methodBody(layer, 'restart')
 
         expect(idle).to.include("if (this.historyMode !== 'clear')")
-        expect(idle).to.include('this.historyValid.n = 0')
+        expect(idle).to.include("if (this.historyMode === 'reproject') this.historyReprojecting.n = 1")
         expect(idle).to.match(/if \(this\.historyMode !== 'clear'\)[\s\S]*return[\s\S]*this\.swapPasses\[0\]\.executable = true/)
 
         expect(restart).to.include("if (this.historyMode !== 'clear')")
+        expect(restart).to.include('this.historyReprojecting.n = 0')
         expect(restart).to.match(/if \(this\.historyMode !== 'clear'\)[\s\S]*return[\s\S]*this\.particleRef\.value = this\.randomFillData/)
     })
 
@@ -83,6 +85,7 @@ describe('DEM flow history reprojection', () => {
 
         expect(layer).to.include('historyMode: this.historyModeValue')
         expect(layer).to.include('historyValid: this.historyValid')
+        expect(layer).to.include('historyReprojecting: this.historyReprojecting')
         expect(layer).to.include('previousMatrix: this.previousHistoryMatrix')
         expect(layer).to.include('currentInverseMatrix: this.currentHistoryInverseMatrix')
         expect(layer).to.include('previousCenterHigh: this.previousHistoryCenterHigh')
@@ -97,6 +100,7 @@ describe('DEM flow history reprojection', () => {
 
         expect(swap).to.include('historyMode: f32')
         expect(swap).to.include('historyValid: f32')
+        expect(swap).to.include('historyReprojecting: f32')
         expect(swap).to.include('previousMatrix: mat4x4f')
         expect(swap).to.include('currentInverseMatrix: mat4x4f')
         expect(swap).to.include('previousCenterHigh: vec3f')
@@ -108,7 +112,7 @@ describe('DEM flow history reprojection', () => {
         expect(swap).to.include('let previousClip = cleanupUniform.previousMatrix * previousRelative')
         expect(swap).to.include('abs(previousClip.x) > previousClip.w')
         expect(swap).to.include('previousClip.z < 0.0 || previousClip.z > previousClip.w')
-        expect(swap).to.include('cleanupUniform.historyMode > 1.5')
+        expect(swap).to.include('cleanupUniform.historyMode > 1.5 && cleanupUniform.historyReprojecting > 0.5')
         expect(swap).to.include('cleanupUniform.historyValid < 0.5')
         expect(swap).to.include('let historyPixel = clamp(historyUv * dim, vec2f(0.0), dim - vec2f(1.0))')
         expect(swap).to.include('linearSampling(bgTexture, historyPixel, dim)')
