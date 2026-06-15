@@ -15,32 +15,32 @@ export interface UniformBindingDescription {
     dynamic?: boolean,
     visibility?: number,
     map: { [varName: string]: Numeric | { type: string, data: any } },
-};
+}
 
 export interface SharedUniformBindingDescription {
     buffer: UniformBuffer,
     visibility?: number,
-};
+}
 
 export interface StorageBindingDescription {
     buffer: StorageBuffer | VertexBuffer | IndexBuffer | IndirectBuffer,
     writable?: boolean
-};
+}
 
 export interface IndexBindingDescription {
     buffer: IndexBuffer
-};
+}
 
 export interface IndirectBindingDescription {
     buffer: IndirectBuffer
     byteOffset?: number
-};
+}
 
 export interface SamplerDescription {
     sampler: Sampler
     visibility?: number,
     bindingType?: GPUSamplerBindingType,
-};
+}
 
 export interface VertexBindingDescription {
     buffer: VertexBuffer,
@@ -55,7 +55,7 @@ export interface TextureBindingDescription {
     viewDimension?: GPUTextureViewDimension,
     multisampled? : boolean,
     asStorage?: boolean,
-};
+}
 
 export interface BindingsDescription {
     name?: string,
@@ -68,7 +68,7 @@ export interface BindingsDescription {
     storages?: Array<StorageBindingDescription>,
     textures?: Array<TextureBindingDescription>,
     sharedUniforms?: Array<SharedUniformBindingDescription>,
-};
+}
 
 export class Binding extends ScratchObject {
 

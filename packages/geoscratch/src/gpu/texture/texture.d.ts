@@ -1,8 +1,8 @@
 export interface TextureResourceDescription {
-    imageBitmap?: Function,
-    resource?: Function,
-    size?: Function,
-    canvasTexture?: GPUTexture,
+    imageBitmap?: () => { imageBitmap: ImageBitmap | null | undefined, index?: number, id?: unknown },
+    resource?: () => unknown,
+    size?: () => [number, number] | [number, number, number],
+    canvasTexture?: () => GPUTexture | undefined,
     dataType?: 'imageBitmap' | 'buffer' | 'data' | 'size' | 'canvasTexture'
 }
 
@@ -13,7 +13,7 @@ export interface TextureDescription {
     mipMapped?: boolean,
     computable?: boolean,
     format?: GPUTextureFormat,
-    resource?: TextureResourceDescription,
+    resource: TextureResourceDescription,
 }
 
 export class Texture {
@@ -32,7 +32,10 @@ export class Texture {
     /**
      * @param {TextureDescription} description 
      */
-    static create(description: TextureDescription): Texture;
+    static create<D, T extends Texture>(
+        this: new (description: D) => T,
+        description: D
+    ): T;
 
     get width(): number;
 
@@ -41,11 +44,11 @@ export class Texture {
     update(): void;
     needUpdate(): void;
 
-    use(): Texture;
+    use(): this;
 
     release(): null;
 
-    registerCallback(callback: Function): number;
+    registerCallback(callback: () => void): number;
 
     removeCallback(index: number): null;
 
@@ -54,9 +57,4 @@ export class Texture {
     destroy(): void;
 }
 
-function texture(description: TextureDescription): Texture;
-
-export {
-    texture,
-    Texture
-}
+export function texture(description: TextureDescription): Texture;

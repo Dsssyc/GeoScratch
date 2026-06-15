@@ -49,7 +49,7 @@ export class RenderPass {
 
     makeColorFormats(): Array<GPUTextureFormat>;
 
-    makeDepthStencilFormat(): GPUTextureFormat | null;
+    makeDepthStencilFormat(): GPUTextureFormat | undefined;
 
     /**
      * Executes the render pass using the provided GPUCommandEncoder.
@@ -64,7 +64,7 @@ export class RenderPass {
      * @deprecated
      * @param canvasTextureIndex 
      */
-    updateSwapChain(canvasTextureIndex = 0)
+    updateSwapChain(canvasTextureIndex?: number): void;
 }
 
 export function renderPass(description: RenderPassDescription): RenderPass;

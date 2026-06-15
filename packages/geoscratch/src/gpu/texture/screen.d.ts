@@ -9,12 +9,12 @@ export interface ScreenDescription {
     sampleCount?: number,
     depthTest?: boolean,
     alphaMode?: GPUCanvasAlphaMode,
-};
+}
 
 /**
  * Represents information about the canvas and its GPU context.
  */
-export class Screen {
+export class Screen extends Texture {
     canvas: HTMLCanvasElement;
     context: GPUCanvasContext;
     presentationFormat: GPUTextureFormat;
@@ -26,14 +26,12 @@ export class Screen {
      */
     constructor(description: ScreenDescription);
 
-    static create(description: ScreenDescription): Screen;
-
     /**
      * Resizes the canvas to the display size.
      */
     onWindowResize(): void;
 
-    createScreenDependentTexture(name?: string, format?: GPUTextureFormat, computable?: boolean, mipMapped?: boolean, usage?: number, multiplier = [1, 1], multiplier?: number[]): Texture;
+    createScreenDependentTexture(name?: string, format?: GPUTextureFormat, computable?: boolean, mipMapped?: boolean, usage?: number, multiplier?: number[]): Texture;
 
     getCurrentCanvasTexture(): Texture;
 

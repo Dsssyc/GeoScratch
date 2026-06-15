@@ -10,11 +10,13 @@
     "dev": "npm --workspace examples run dev",
     "build": "npm --workspace examples run build",
     "serve": "npm --workspace examples run serve",
-    "test": "mocha \"tests/**/*.test.js\""
+    "test": "mocha \"tests/**/*.test.js\"",
+    "typecheck": "tsc -p tsconfig.types.json"
   },
   "devDependencies": {
     "chai": "^5.1.0",
     "mocha": "^10.3.0",
-    "playwright": "^1.60.0"
+    "playwright": "^1.60.0",
+    "typescript": "^6.0.3"
   }
 }

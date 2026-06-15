@@ -3,7 +3,7 @@ import { Vec3f } from "./vec3f";
 
 export class Mat4f extends Numeric{
 
-    constructor(): Mat4f;
+    constructor();
 
     static create(): Mat4f;
 

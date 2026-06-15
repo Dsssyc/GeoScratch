@@ -3,7 +3,7 @@ import { Numeric } from "./numeric"
 
 export class Vec2u extends Numeric {
      
-    constructor(x?: number, y?: number): Vec2u;
+    constructor(x?: number, y?: number);
 
     static create(x: number, y: number): Vec2u;
 

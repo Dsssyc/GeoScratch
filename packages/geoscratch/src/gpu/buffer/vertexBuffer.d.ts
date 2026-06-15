@@ -8,6 +8,11 @@ export interface VertexResourceDescription {
     structure: Array<{components: number}>,
 }
 
+export interface VertexAttributeDescription {
+    format: GPUVertexFormat,
+    offset: number,
+}
+
 export interface VertexBufferDescription {
     name: string,
     usage?: number,
@@ -15,7 +20,7 @@ export interface VertexBufferDescription {
     resource: VertexResourceDescription
 }
 
-class VertexBuffer extends Buffer {
+export class VertexBuffer extends Buffer {
 
     stepMode: GPUVertexStepMode;
     attributes: Array<{format: GPUVertexFormat, offset: number}>;
@@ -30,6 +35,4 @@ class VertexBuffer extends Buffer {
     getComponentsPerElement(): number;
 }
 
-function vertexBuffer(description: VertexBufferDescription): VertexBuffer;
-
-export { vertexBuffer, VertexBuffer };
+export function vertexBuffer(description: VertexBufferDescription): VertexBuffer;

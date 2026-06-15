@@ -2,11 +2,11 @@ export class Monitor {
 
     constructor();
 
-    set memorySizeInBytes(value): void;
+    set memorySizeInBytes(value: number);
     get memorySizeInBytes(): number;
 
     getMemoryInMB(): number;
 }
 
-const monitor: Monitor;
+declare const monitor: Monitor;
 export default monitor;

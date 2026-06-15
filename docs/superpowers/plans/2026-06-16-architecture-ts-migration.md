@@ -236,7 +236,7 @@ git commit -m "refactor: clarify default runtime boundary"
 - Public imports from `geoscratch`, `geoscratch/geo`, and `geoscratch/geometry` type-check.
 - Runtime descriptor objects for device, binding, pass, and pipeline have declaration coverage good enough for consumers to use the public API without `any` for the main happy path.
 
-- [ ] Add the RED typecheck entrypoint.
+- [x] Add the RED typecheck entrypoint.
 
 Run:
 ```bash
@@ -257,7 +257,6 @@ Create `tsconfig.types.json`:
     "moduleResolution": "Bundler",
     "strict": true,
     "noEmit": true,
-    "types": [ "@webgpu/types" ],
     "skipLibCheck": false
   },
   "include": [
@@ -276,6 +275,9 @@ const startResult: Promise<GPUDevice | undefined> = scr.StartDash()
 const device: GPUDevice = scr.getDevice()
 
 const screen = scr.screen({
+    canvas: document.createElement('canvas'),
+})
+const createdScreen: scr.Screen = scr.Screen.create({
     canvas: document.createElement('canvas'),
 })
 
@@ -301,12 +303,14 @@ const binding = scr.binding({
 
 pass.add(pipeline, binding)
 
-const mercator = MercatorCoordinate.fromLngLat({ lng: 0, lat: 0 }, 0)
-const planeGeometry = plane({ width: 1, height: 1 })
-const sphereGeometry = sphere({ radius: 1, widthSegments: 8, heightSegments: 4 })
+const mercator = MercatorCoordinate.fromLonLat([ 0, 0 ])
+const planeGeometry = plane(2)
+const sphereGeometry = sphere(1, 8, 4)
 
 void startResult
 void device
+void screen
+void createdScreen
 void mercator
 void planeGeometry
 void sphereGeometry
@@ -319,11 +323,11 @@ npm run typecheck
 
 Expected before declaration fixes: fail with declaration mismatch errors.
 
-- [ ] Fix declarations until `npm run typecheck` passes.
+- [x] Fix declarations until `npm run typecheck` passes.
 
 Keep fixes focused on public contracts. Do not rename JavaScript source files in this phase.
 
-- [ ] Add a Mocha guard for the typecheck script.
+- [x] Add a Mocha guard for the typecheck script.
 
 In an existing package/workspace test or a new `tests/type-contracts.test.js`, assert:
 ```js
@@ -331,7 +335,7 @@ expect(readJson('package.json').scripts.typecheck).to.equal('tsc -p tsconfig.typ
 expect(exists('tests', 'types', 'public-api.ts')).to.equal(true)
 ```
 
-- [ ] Run Phase 2 verification.
+- [x] Run Phase 2 verification.
 
 Run:
 ```bash
@@ -340,11 +344,11 @@ npm test
 npm run build
 ```
 
-- [ ] Review Phase 2.
+- [x] Review Phase 2.
 
 Review declaration accuracy against the JavaScript implementations. Fix every Critical or Important issue. Repeat until the review verdict is "Approve".
 
-- [ ] Commit Phase 2.
+- [x] Commit Phase 2.
 
 Run:
 ```bash
@@ -360,11 +364,13 @@ git commit -m "test: add public type contract checks"
 - Modify: `packages/geoscratch/src/gpu/director/director.d.ts`
 - Modify: `packages/geoscratch/src/gpu/pass/renderPass.js`
 - Modify: `packages/geoscratch/src/gpu/pass/renderPass.d.ts`
+- Modify: `packages/geoscratch/src/gpu/pipeline/computePipeline.js`
 - Modify only if needed: `packages/geoscratch/src/gpu/pass/computePass.js`
 
 **Contract to establish:**
 - A frame with no visible stages must not submit an empty command buffer list.
 - `RenderPass.update()` must be idempotent so a pass can refresh attachment views without corrupting its own method table.
+- `ComputePipeline.isComplete()` must not reference an undefined render pass variable while creating its pipeline.
 - Update-list behavior must remain deduplicated and should not require a resource to update more than once per frame unless `updatePerFrame` is true.
 
 - [ ] Write RED tests for runtime hot-path behavior.
@@ -374,6 +380,7 @@ Add behavior in `tests/runtime-performance-contracts.test.js`:
 import { expect } from 'chai'
 import { Director } from '../packages/geoscratch/src/gpu/director/director.js'
 import { RenderPass } from '../packages/geoscratch/src/gpu/pass/renderPass.js'
+import { ComputePipeline } from '../packages/geoscratch/src/gpu/pipeline/computePipeline.js'
 
 describe('runtime performance contracts', () => {
     it('does not submit an empty queue when no visible stages produce work', () => {
@@ -413,6 +420,21 @@ describe('runtime performance contracts', () => {
         expect(pass.initialized).to.equal(true)
         expect(pass.initialize).to.be.a('function')
     })
+
+    it('creates compute pipelines from isComplete without an undefined renderPass reference', () => {
+        const pipeline = Object.create(ComputePipeline.prototype)
+        const binding = {}
+        let receivedBinding
+
+        pipeline.pipeline = undefined
+        pipeline.pipelineCreating = false
+        pipeline.createPipeline = (nextBinding) => {
+            receivedBinding = nextBinding
+        }
+
+        expect(() => pipeline.isComplete({}, binding)).not.to.throw()
+        expect(receivedBinding).to.equal(binding)
+    })
 })
 ```
 
@@ -432,6 +454,10 @@ In `director.tickRender()`:
 In `RenderPass.initialize()`:
 - Set `this.initialized = true`.
 - Do not assign to `this.initialize`.
+
+In `ComputePipeline.isComplete()`:
+- Pass `binding` to `createPipeline()`.
+- Do not reference `renderPass`.
 
 In update-list code:
 - Preserve dedupe semantics.

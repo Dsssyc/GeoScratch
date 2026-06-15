@@ -2,7 +2,7 @@ import { Numeric } from "./numeric";
 
 export class Mat3f extends Numeric{
 
-    constructor(): Mat3f;
+    constructor();
 
     static create(): Mat3f;
 

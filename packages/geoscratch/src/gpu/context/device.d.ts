@@ -1,5 +1,3 @@
-/// <reference types="@webgpu/types" />
-
 export interface DefaultDeviceSlot {
     device: GPUDevice | undefined;
     setDevice(device: GPUDevice): void;

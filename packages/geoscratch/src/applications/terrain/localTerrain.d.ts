@@ -6,17 +6,17 @@ import { RenderPipeline } from '../../gpu/pipeline/renderPipeline'
 
 export class LocalTerrain {
 
-    constructor(maxLevel: number): LocalTerrain;
+    constructor(maxLevel: number);
 
     setResource(gDynamicBuffer: Buffer): LocalTerrain;
 
     registerRenderableNode(options: MapOptions): void;
 
-    set minVisibleNodeLevel (min: number): void;
+    set minVisibleNodeLevel (min: number);
 
-    set maxVisibleNodeLevel (max: number): void;
+    set maxVisibleNodeLevel (max: number);
 
-    get minVisibleNodeLevel (): number
+    get minVisibleNodeLevel (): number;
 
     get maxVisibleNodeLevel (): number;
 

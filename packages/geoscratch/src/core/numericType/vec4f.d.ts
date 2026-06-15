@@ -1,29 +1,28 @@
 import { Mat4 } from "../math/mat4";
-import { Vec3 } from "../math/vec3";
 import { Numeric } from "./numeric"
 export class Vec4f extends Numeric {
 
      
-    constructor(x?: number, y?: number, z?: number, w?: number): Vec4f;
+    constructor(x?: number, y?: number, z?: number, w?: number);
 
     get x(): number;
     get y(): number;
     get z(): number;
     get w(): number;
-    set x(x: number): void;
-    set y(y: number): void;
-    set z(z: number): void;
-    set w(w: number): void;
+    set x(x: number);
+    set y(y: number);
+    set z(z: number);
+    set w(w: number);
     get xy(): number[]
     get yz(): number[]
     get zw(): number[]
     get xyz(): number[]
     get yzw(): number[]
-    set xy(xy: number[]): void
-    set yz(yz: number[]): void
-    set zw(zw: number[]): void
-    set xyz(xyz: number[]): void
-    set yzw(yzw: number[]): void
+    set xy(xy: number[])
+    set yz(yz: number[])
+    set zw(zw: number[])
+    set xyz(xyz: number[])
+    set yzw(yzw: number[])
 
     static create(x?: number, y?: number, z?: number, w?: number): Vec4f;
 
@@ -34,4 +33,4 @@ export class Vec4f extends Numeric {
 
 export function vec4f(x?: number, y?: number, z?: number, w?: number): Vec4f;
 
-export function asVec4f(x?: number, y?: number, z?: number, z?: number): { type: string, data: Vec4 }
+export function asVec4f(x?: number, y?: number, z?: number, w?: number): { type: string, data: Vec4f }

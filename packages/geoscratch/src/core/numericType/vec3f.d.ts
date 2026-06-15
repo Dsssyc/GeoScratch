@@ -4,14 +4,14 @@ import { Numeric } from "./numeric"
 
 export class Vec3f extends Numeric {
      
-    constructor(x?: number, y?: number, z?: number): Vec3f;
+    constructor(x?: number, y?: number, z?: number);
 
     get x(): number;
     get y(): number;
     get z(): number;
-    set x(x: number): void;
-    set y(y: number): void;
-    set z(z: number): void;
+    set x(x: number);
+    set y(y: number);
+    set z(z: number);
 
     static create(x?: number, y?: number, z?: number): Vec3f;
 

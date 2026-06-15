@@ -11,18 +11,18 @@ export interface SamplerDescription {
     name: string,
     mipmap?: number,
     maxAnisotropy?: number,
-    filterMinMag: [GPUFilterMode],
-    addressModeUVW: [GPUAddressMode],
-};
+    filterMinMag: GPUFilterMode[],
+    addressModeUVW: GPUAddressMode[],
+}
 
 export class Sampler {
 
     static create(description: SamplerDescription): Sampler;
     update(): void;
-    use(): Sampler;
+    use(): this;
     release(): null;
     get sampler(): GPUSampler;
-    set sampler(sampler: GPUSampler): void;
+    set sampler(sampler: GPUSampler);
     exportDescriptor(): GPUSamplerDescriptor;
 }
 

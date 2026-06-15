@@ -1,12 +1,12 @@
 export class Numeric {
 
-    constructor(type: string, data: any): Numeric;
+    constructor(type: string, data: any);
 
-    set data(value: any): void;
+    set data(value: any);
 
     get data(): any;
 
-    get type(): string
+    get type(): string;
 
     get state(): { type: string, value: Function };
 }

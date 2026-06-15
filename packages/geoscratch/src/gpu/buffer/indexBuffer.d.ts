@@ -1,4 +1,5 @@
 import { ArrayRef } from "../../core/data/arrayRef";
+import { Buffer } from "./buffer";
 
 export interface IndexResourceDescription {
     arrayRef: ArrayRef,
@@ -14,7 +15,7 @@ export interface IndexBufferDescription {
 }
 
 export class IndexBuffer extends Buffer {
-    type: string;
+    type: GPUIndexFormat;
     length: number;
     constructor(description: IndexBufferDescription);
     static create(description: IndexBufferDescription): IndexBuffer;

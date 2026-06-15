@@ -9,11 +9,11 @@ export interface MapOptions {
 
 export class GeoQuadNode2D {
 
-    constructor(level: number = 0, id: number = 0, parent: GeoQuadNode2D = undefined): GeoQuadNode2D;
+    constructor(level?: number, id?: number, parent?: GeoQuadNode2D);
 
     release(): null;
 
-    isSubdividable(options: MapOptions): Boolean;
+    isSubdividable(options: MapOptions): boolean;
 }
 
 export { GeoQuadNode2D as Node2D }

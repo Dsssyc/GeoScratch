@@ -1,16 +1,14 @@
 export class ScratchObject {
 
     uuid: string;
-    
     name: string;
-
     refCount: number;
 
-    constructor(): ScratchObject
-    
-    use(): void
+    constructor();
 
-    release(): null
+    use(): this;
 
-    destroy(): void
+    release(): null;
+
+    destroy(): void;
 }

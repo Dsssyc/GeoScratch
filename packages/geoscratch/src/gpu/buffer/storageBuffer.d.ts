@@ -1,10 +1,11 @@
 import { Buffer, BufferDescription } from "./buffer";
-import { IndexBuffer } from "./indexBuffer";
+import { ArrayRef } from "../../core/data/arrayRef";
 
 export interface StorageResourceDescription {
     size?: number, // element lenght of the TypedArray
-    arrayRef: DataRef, // must return TypedArray
+    arrayRef: ArrayRef, // must return TypedArray
     dataOffset?: number, // in bytes
+    components?: number,
 }
 
 export interface StorageBufferDescription {
@@ -13,7 +14,7 @@ export interface StorageBufferDescription {
     resource: StorageResourceDescription,
 }
 
-class StorageBuffer extends Buffer {
+export class StorageBuffer extends Buffer {
 
     name: string;
     componetsPerElement: number;
@@ -23,6 +24,4 @@ class StorageBuffer extends Buffer {
     static create(description: StorageBufferDescription): StorageBuffer;
 }
 
-function storageBuffer(description: StorageBufferDescription): StorageBuffer;
-
-export { storageBuffer, StorageBuffer };
+export function storageBuffer(description: StorageBufferDescription): StorageBuffer;

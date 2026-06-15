@@ -7,7 +7,7 @@ export interface UniformBufferDescription {
     blocks: Array<BlockRef>,
 }
 
-class UniformBuffer extends Buffer {
+export class UniformBuffer extends Buffer {
 
     name: string;
 
@@ -16,9 +16,4 @@ class UniformBuffer extends Buffer {
     static create(description: UniformBufferDescription): UniformBuffer;
 }
 
-function uniformBuffer(description: UniformBufferDescription): UniformBuffer;
-
-export { 
-    uniformBuffer,
-    UniformBuffer,
-};
+export function uniformBuffer(description: UniformBufferDescription): UniformBuffer;

@@ -2,13 +2,13 @@ import { Numeric } from "./numeric";
 
 export class F32 extends Numeric {
 
-    constructor(a?: number): F32;
+    constructor(a?: number);
 
     static create(a?: number): F32;
 
     add(a: number): F32;
     
-    set n(a: number): void;
+    set n(a: number);
     get n(): number;
 }
 

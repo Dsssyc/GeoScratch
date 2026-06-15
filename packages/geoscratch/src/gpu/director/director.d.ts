@@ -19,9 +19,8 @@ export class Director extends EventDispatcher{
     addItem(stageName: string, item: any): Director;
     tick(): void;
 
-    async init(): void;
+    init(): Promise<void>;
 }
 
-const director: Director;
+declare const director: Director;
 export default director;
-export { Director };
