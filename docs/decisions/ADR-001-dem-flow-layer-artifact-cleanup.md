@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -39,6 +39,20 @@ The cleanup layer should cover three concerns:
 6. Expose cleanup tuning as layer options, including `trailDecay`, `trailCutoff`, `clearOnMove`, and `useFlowMask`.
 
 Implementation note: the current example data does not include an independent physical water or flow-domain mask. Until such data exists, the example derives a conservative geometry support signal from the Delaunay triangles using a configurable maximum station-edge length (`flowDomainMaxEdge`). This is a domain-support heuristic, not a replacement for a true hydrological mask.
+
+## Implementation Status
+
+Implemented for `examples/m_demLayer` on 2026-06-15.
+
+- The flow-domain mask is stored in a separate `r8unorm` screen-dependent texture.
+- `flowVoronoi.wgsl` writes masked velocity and mask outputs from speed cutoff plus geometry support.
+- `simulation.compute.wgsl` samples the mask and rebirths particles outside valid pixels.
+- `swap.wgsl` applies configurable decay, low-value cutoff, and mask-based trail clearing.
+- `steadyFlowLayer.js` exposes `trailDecay`, `trailCutoff`, `clearOnMove`, `useFlowMask`, `flowMaskCutoff`, and `flowDomainMaxEdge`.
+- Camera movement pauses simulation and trail accumulation, clears history, and restarts particles after movement settles.
+- Follow-up hardening guards zero `maxSpeed` normalization and clamps velocity color-ramp indices, without changing the retained-history rendering model.
+
+Verification is covered by `tests/dem-flow-cleanup.test.js`, `npm test`, `npm run build`, and WebGPU browser screenshots of `examples/m_demLayer`.
 
 ## Non-Goals
 
