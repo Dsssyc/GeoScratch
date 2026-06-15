@@ -4,4 +4,4 @@ Run `npm run dev` from the repository root and open the Vite URL to browse examp
 
 Keep example runtime code in `main.js` and place only page shell concerns, such as the shared canvas and external scripts, in the matching HTML file.
 
-Static assets served by Vite live in `examples/public/`. Example code may load those assets with absolute paths such as `/shaders/examples/GAW/land.wgsl` or `/images/Earth/earth.jpg`.
+Keep ordinary example assets beside the example that owns them. Use relative asset URLs for images and raw shader imports for WGSL files. Reserve `examples/public/` for large local data that must be loaded by stable absolute URL, such as `/json/examples/flow/station.bin`.

@@ -1,6 +1,28 @@
 import * as scr from '../../src/index.js'
+import cloudShader from './shaders/cloud.wgsl?raw'
+import landShader from './shaders/land.wgsl?raw'
+import lastShader from './shaders/last.wgsl?raw'
+import linkComputeShader from './shaders/link.compute.wgsl?raw'
+import linkShader from './shaders/link.wgsl?raw'
+import particleComputeShader from './shaders/particle.compute.wgsl?raw'
+import pointShader from './shaders/point.wgsl?raw'
+import waterShader from './shaders/water.wgsl?raw'
 
 scr.StartDash().then(() => main(document.getElementById('GPUFrame')))
+
+const earthImage = new URL('./assets/images/earth.jpg', import.meta.url).href
+const cloudImage = new URL('./assets/images/cloud.jpg', import.meta.url).href
+const landMaskImage = new URL('./assets/images/mask-land.jpg', import.meta.url).href
+const cloudAlphaImage = new URL('./assets/images/cloud-alpha.jpg', import.meta.url).href
+const earthNightImage = new URL('./assets/images/earth-night.jpg', import.meta.url).href
+const cloudNightImage = new URL('./assets/images/cloud-night.jpg', import.meta.url).href
+const earthSpecularImage = new URL('./assets/images/earth-specular.jpg', import.meta.url).href
+const earthEmissionImage = new URL('./assets/images/earth-selfillumination.jpg', import.meta.url).href
+
+function inlineShader(name, code) {
+
+    return scr.shader({ name, codeFunc: () => code })
+}
 
 const main = function (canvas) {
 
@@ -64,14 +86,14 @@ const main = function (canvas) {
         })
 
         // Texture-related resource
-        const ldTexture = scr.imageLoader.load('Land day', '/images/Earth/earth.jpg' )
-        const cdTexture = scr.imageLoader.load('Cloud day', '/images/Earth/cloud.jpg')
-        const lmTexture = scr.imageLoader.load('Land mask', '/images/Earth/mask-land.jpg')
-        const cmTexture = scr.imageLoader.load('Cloud mask', '/images/Earth/cloud-alpha.jpg')
-        const lnTexture = scr.imageLoader.load('Land night', '/images/Earth/earth-night.jpg')
-        const cnTexture = scr.imageLoader.load('Cloud night', '/images/Earth/cloud-night.jpg')
-        const lsTexture = scr.imageLoader.load('Land specular', '/images/Earth/earth-specular.jpg')
-        const leTexture = scr.imageLoader.load('Land emission', '/images/Earth/earth-selfillumination.jpg')
+        const ldTexture = scr.imageLoader.load('Land day', earthImage)
+        const cdTexture = scr.imageLoader.load('Cloud day', cloudImage)
+        const lmTexture = scr.imageLoader.load('Land mask', landMaskImage)
+        const cmTexture = scr.imageLoader.load('Cloud mask', cloudAlphaImage)
+        const lnTexture = scr.imageLoader.load('Land night', earthNightImage)
+        const cnTexture = scr.imageLoader.load('Cloud night', cloudNightImage)
+        const lsTexture = scr.imageLoader.load('Land specular', earthSpecularImage)
+        const leTexture = scr.imageLoader.load('Land emission', earthEmissionImage)
 
         // Binding: Land and water
         const landWater = scr.binding({
@@ -193,19 +215,19 @@ const main = function (canvas) {
         // Pipeline: Land
         const landPipeline = scr.renderPipeline({
             name: 'Render Pipeline (Land)',
-            shader: { module: scr.shaderLoader.load('Shader (GawEarth land)', '/shaders/examples/GAW/land.wgsl') },
+            shader: { module: inlineShader('Shader (GawEarth land)', landShader) },
             colorTargetStates: [ { blend: scr.NormalBlending } ],
         })
         // Pipeline: Water
         const waterPipeline = scr.renderPipeline({
             name: 'Render Pipeline (Water)',
-            shader: { module: scr.shaderLoader.load('Shader (GawEarth water)', '/shaders/examples/GAW/water.wgsl') },
+            shader: { module: inlineShader('Shader (GawEarth water)', waterShader) },
             colorTargetStates: [ { blend: scr.NormalBlending } ],
         })
         // Pipeline: Cloud
         const cloudPipeline = scr.renderPipeline({
             name: 'Render Pipeline (Cloud)',
-            shader: { module: scr.shaderLoader.load('Shader (GawEarth cloud)', '/shaders/examples/GAW/cloud.wgsl') },
+            shader: { module: inlineShader('Shader (GawEarth cloud)', cloudShader) },
             colorTargetStates: [ { blend: scr.AdditiveBlending } ],
         })
 
@@ -372,7 +394,7 @@ const main = function (canvas) {
         // Pipeline: Particle
         const particlePipeline = scr.renderPipeline({
             name: 'Render Pipeline (Earth core particel)',
-            shader: { module: scr.shaderLoader.load('Shader (Earth core particel)', '/shaders/examples/GAW/point.wgsl') },
+            shader: { module: inlineShader('Shader (Earth core particel)', pointShader) },
             colorTargetStates: [ { blend: scr.NormalBlending } ],
             primitive: { topology: 'triangle-strip' },
             depthTest: false,
@@ -380,20 +402,20 @@ const main = function (canvas) {
         // Pipeline: Link
         const linkPipeline = scr.renderPipeline({
             name: 'Render Pipeline (Earth core link)',
-            shader: { module: scr.shaderLoader.load('Shader (Earth core link)', '/shaders/examples/GAW/link.wgsl') },
+            shader: { module: inlineShader('Shader (Earth core link)', linkShader) },
             primitive: { topology: 'line-strip' },
             depthTest: false,
         })
         // Pipeline: Simulation
         const simulationPipeline = scr.computePipeline({
             name: 'Compute Pipeline (Particle simulation)',
-            shader: { module: scr.shaderLoader.load('Shader (Particle simulation)', '/shaders/examples/GAW/particle.compute.wgsl') },
+            shader: { module: inlineShader('Shader (Particle simulation)', particleComputeShader) },
             constants: { blockSize: 10 },
         })
         // Pipeline: Indexing
         const indexingPipeline = scr.computePipeline({
             name: 'Compute Pipeline (Link indexing)',
-            shader: { module: scr.shaderLoader.load('Shader (Link indexing)', '/shaders/examples/GAW/link.compute.wgsl') },
+            shader: { module: inlineShader('Shader (Link indexing)', linkComputeShader) },
             constants: { blockSize: 10 },
         })
 
@@ -462,7 +484,7 @@ const main = function (canvas) {
         // Pipeline: Output
         const outputPipeline = scr.renderPipeline({
             name: 'Render Pipeline (Output)',
-            shader: { module: scr.shaderLoader.load('Shader (Output)', '/shaders/examples/GAW/last.wgsl') },
+            shader: { module: inlineShader('Shader (Output)', lastShader) },
             primitive: { topology: 'triangle-strip' },
         })
 

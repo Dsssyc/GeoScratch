@@ -8,18 +8,41 @@ const exists = (...parts) => fs.existsSync(path.join(root, ...parts))
 
 describe('asset layout', () => {
 
-    it('serves example runtime assets from examples/public', () => {
+    it('keeps documentation and branding assets under docs/assets', () => {
 
-        expect(exists('examples', 'public', 'icon', 'icon_light.png')).to.equal(true)
-        expect(exists('examples', 'public', 'images', 'Earth', 'earth.jpg')).to.equal(true)
-        expect(exists('examples', 'public', 'images', 'examples', 'terrain', 'dem.png')).to.equal(true)
-        expect(exists('examples', 'public', 'shaders', 'examples', 'GAW', 'land.wgsl')).to.equal(true)
-        expect(exists('examples', 'public', 'shaders', 'examples', 'flow', 'particles.wgsl')).to.equal(true)
+        expect(exists('docs', 'assets', 'icons', 'icon_light.png')).to.equal(true)
+        expect(exists('docs', 'assets', 'icons', 'icon_dark.png')).to.equal(true)
+        expect(read('examples', 'index.html')).to.include('../docs/assets/icons/icon_light.png')
+        expect(read('examples', '1_helloTriangle', 'index.html')).to.include('../../docs/assets/icons/icon_light.png')
     })
 
-    it('keeps the repository root free of public runtime asset buckets', () => {
+    it('keeps ordinary example assets colocated with their examples', () => {
+
+        expect(exists('examples', 'x_helloGAW', 'assets', 'images', 'earth.jpg')).to.equal(true)
+        expect(exists('examples', 'x_helloGAW', 'shaders', 'land.wgsl')).to.equal(true)
+        expect(exists('examples', 'm_demLayer', 'shaders', 'flow', 'particles.wgsl')).to.equal(true)
+        expect(exists('examples', 'm_helloMap', 'shaders', 'test.wgsl')).to.equal(true)
+
+        const helloGAW = read('examples', 'x_helloGAW', 'main.js')
+        const steadyFlowLayer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const helloMap = read('examples', 'm_helloMap', 'main.js')
+
+        expect(helloGAW).to.not.include('/images/Earth/')
+        expect(helloGAW).to.not.include('/shaders/examples/GAW/')
+        expect(helloGAW).to.include('./assets/images/earth.jpg')
+        expect(helloGAW).to.include('./shaders/land.wgsl?raw')
+        expect(steadyFlowLayer).to.not.include('/shaders/examples/flow/')
+        expect(steadyFlowLayer).to.include('./shaders/flow/particles.wgsl?raw')
+        expect(helloMap).to.not.include('/shaders/examples/map/')
+        expect(helloMap).to.include('./shaders/test.wgsl?raw')
+    })
+
+    it('keeps public directories only for large URL-addressed local data', () => {
 
         expect(exists('public')).to.equal(false)
+        expect(exists('examples', 'public', 'icon')).to.equal(false)
+        expect(exists('examples', 'public', 'images')).to.equal(false)
+        expect(exists('examples', 'public', 'shaders')).to.equal(false)
     })
 
     it('configures Vite to use examples/public as its public directory', () => {
@@ -48,6 +71,25 @@ describe('asset layout', () => {
 
         expect(lines).to.include('examples/public/json/examples/*')
         expect(lines).to.not.include('public/json/examples/*')
+    })
+
+    it('keeps library-owned terrain assets next to terrain source', async () => {
+
+        expect(exists('src', 'applications', 'terrain', 'assets', 'index.js')).to.equal(true)
+        expect(exists('src', 'applications', 'terrain', 'assets', 'dem.png')).to.equal(false)
+        expect(exists('src', 'applications', 'terrain', 'assets', 'border.png')).to.equal(false)
+        expect(exists('src', 'applications', 'terrain', 'assets', 'demPalette10.png')).to.equal(false)
+
+        const localTerrain = read('src', 'applications', 'terrain', 'localTerrain.js')
+
+        expect(localTerrain).to.not.include('/images/examples/terrain/')
+        expect(localTerrain).to.include('./assets/index.js')
+
+        const terrainAssets = await import('../src/applications/terrain/assets/index.js')
+
+        expect(terrainAssets.demImageDataUrl).to.match(/^data:image\/png;base64,/)
+        expect(terrainAssets.borderImageDataUrl).to.match(/^data:image\/png;base64,/)
+        expect(terrainAssets.demPaletteImageDataUrl).to.match(/^data:image\/png;base64,/)
     })
 
     it('keeps library-owned postprocess shaders next to postprocess source', async () => {

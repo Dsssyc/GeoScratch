@@ -43,7 +43,8 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 | `src/effects/` | Reusable postprocessing effects. |
 | `src/applications/` | Higher-level geospatial application modules, including terrain. |
 | `examples/` | Examples browser plus standalone demo pages. |
-| `examples/public/` | Static shaders, textures, icons, and local demo data served by Vite. |
+| `docs/assets/` | Documentation and project branding assets. |
+| `examples/public/` | Large local demo data that must be fetched by stable absolute URL. |
 | `tests/` | Node-compatible Mocha tests. |
 
 ## Package Entrypoints
@@ -139,7 +140,9 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 
 - Keep public exports routed through `src/index.js`.
 - Add browser/WebGPU demos under `examples/<name>/index.html` and `examples/<name>/main.js`.
-- Keep example runtime resources in `examples/public/` so examples can load them with absolute paths such as `/shaders/...` and `/images/...`.
+- Keep ordinary example images and shaders beside their owning example, using relative asset URLs or raw shader imports.
+- Keep library-owned runtime assets beside the source module that owns them, under `src/`.
+- Use `examples/public/` only for large local data that must be loaded by stable absolute URLs such as `/json/...`.
 - Use `npm test` for Node-compatible checks, and verify rendering changes in a WebGPU-capable browser.
 
 [npm]: https://img.shields.io/npm/v/geoscratch

@@ -43,7 +43,8 @@ npm run dev
 | `src/effects/` | 可复用的后处理效果。 |
 | `src/applications/` | 更高层的地理应用模块，包括地形。 |
 | `examples/` | 示例浏览器和各示例的独立页面。 |
-| `examples/public/` | Vite 服务的静态 shader、纹理、图标和本地示例数据。 |
+| `docs/assets/` | 文档和项目品牌资源。 |
+| `examples/public/` | 需要稳定绝对 URL fetch 的大型本地示例数据。 |
 | `tests/` | 可在 Node 环境中运行的 Mocha 测试。 |
 
 ## 包入口
@@ -139,7 +140,9 @@ function main(canvas) {
 
 - 公开 API 统一从 `src/index.js` 导出。
 - 浏览器或 WebGPU 示例放在 `examples/<name>/index.html` 和 `examples/<name>/main.js`。
-- 示例运行资源放在 `examples/public/`，示例可通过 `/shaders/...`、`/images/...` 等绝对路径加载。
+- 普通示例图片和 shader 放在所属 example 目录旁边，通过相对资源 URL 或 raw shader import 使用。
+- 库自带运行资源放在拥有它的 `src/` 模块旁边。
+- `examples/public/` 只用于需要 `/json/...` 这类稳定绝对 URL 加载的大型本地数据。
 - Node 兼容的检查使用 `npm test`；涉及渲染的改动还需要在支持 WebGPU 的浏览器中验证。
 
 [npm]: https://img.shields.io/npm/v/geoscratch

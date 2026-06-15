@@ -1,6 +1,18 @@
 import * as scr from '../../src/index.js'
 import { Delaunay } from 'd3-delaunay'
 import axios from 'axios'
+import arrowShader from './shaders/flow/arrow.wgsl?raw'
+import flowLayerShader from './shaders/flow/flowLayer.wgsl?raw'
+import flowShowShader from './shaders/flow/flowShow.wgsl?raw'
+import flowVoronoiShader from './shaders/flow/flowVoronoi.wgsl?raw'
+import particlesShader from './shaders/flow/particles.wgsl?raw'
+import simulationShader from './shaders/flow/simulation.compute.wgsl?raw'
+import swapShader from './shaders/flow/swap.wgsl?raw'
+
+function inlineShader(name, code) {
+
+    return scr.shader({ name, codeFunc: () => code })
+}
 
 const resourceUrl = [
     '/json/examples/flow/uv_0.bin',
@@ -176,7 +188,7 @@ export default class SteadyFlowLayer {
 
         this.voronoiPipeline = scr.renderPipeline({
             name: 'Render Pipeline (Voronoi Flow)',
-            shader: { module: scr.shaderLoader.load('Shader (Flow Voronoi)', '/shaders/examples/flow/flowVoronoi.wgsl') },
+            shader: { module: inlineShader('Shader (Flow Voronoi)', flowVoronoiShader) },
         })
         this.voronoiPass = scr.renderPass({
             name: 'Render Pass (Voronoi Flow From)',
@@ -209,7 +221,7 @@ export default class SteadyFlowLayer {
         })
         this.simulationPipeline = scr.computePipeline({
             name: 'Compute Pipeline (Flow Simulation)',
-            shader: { module: scr.shaderLoader.load('Shader (Particle Simulation)', '/shaders/examples/flow/simulation.compute.wgsl') },
+            shader: { module: inlineShader('Shader (Particle Simulation)', simulationShader) },
             constants: { blockSize: 16 },
         })
         this.simulationPass = scr.computePass({
@@ -232,7 +244,7 @@ export default class SteadyFlowLayer {
         ]
         this.trajectoryPipeline = scr.renderPipeline({
             name: 'Rendej pipeline (Background Swap)', 
-            shader: { module: scr.shaderLoader.load('Shader (Background Swap)', '/shaders/examples/flow/swap.wgsl') },
+            shader: { module: inlineShader('Shader (Background Swap)', swapShader) },
             primitive: { topology: 'triangle-strip' },
             depthTest: false
         })
@@ -249,7 +261,7 @@ export default class SteadyFlowLayer {
         })
         this.particlePipeline = scr.renderPipeline({
             name: 'Render Pipeline (Particles)',
-            shader: { module: scr.shaderLoader.load('Shader (Particles)', '/shaders/examples/flow/particles.wgsl') },
+            shader: { module: inlineShader('Shader (Particles)', particlesShader) },
             primitive: { topology: 'line-list' },
         })
         this.swapPasses = [
@@ -294,7 +306,7 @@ export default class SteadyFlowLayer {
         ]
         this.layerPipeline = scr.renderPipeline({
             name: 'Render Pipeline (Layer Rendering)',
-            shader: { module: scr.shaderLoader.load('Shader (Flow Layer Rendering)', '/shaders/examples/flow/flowLayer.wgsl') },
+            shader: { module: inlineShader('Shader (Flow Layer Rendering)', flowLayerShader) },
             primitive: { topology: 'triangle-strip' },
             colorTargetStates: [ { blend: scr.NormalBlending } ],
         })
@@ -308,13 +320,13 @@ export default class SteadyFlowLayer {
         })
         this.showPipeline = scr.renderPipeline({
             name: 'Render Pipeline (Flow Show)',
-            shader: { module: scr.shaderLoader.load('Shader (Flow Show)', '/shaders/examples/flow/flowShow.wgsl') },
+            shader: { module: inlineShader('Shader (Flow Show)', flowShowShader) },
             primitive: { topology: 'triangle-strip' },
             colorTargetStates: [ { blend: scr.NormalBlending } ],
         })
         this.arrowPipeline = scr.renderPipeline({
             name: 'Render Pipeline (Flow Arrow)',
-            shader: { module: scr.shaderLoader.load('Shader (Flow Show)', '/shaders/examples/flow/arrow.wgsl') },
+            shader: { module: inlineShader('Shader (Flow Show)', arrowShader) },
             primitive: { topology: 'triangle-strip' },
             colorTargetStates: [ { blend: scr.NormalBlending } ],
         })

@@ -5,6 +5,7 @@ import tilebelt from '@mapbox/tilebelt'
 import Protobuf from 'pbf'
 import { VectorTile } from '@mapbox/vector-tile'
 import axios from 'axios'
+import mapTestShader from './shaders/test.wgsl?raw'
 
 const MIN_ZOOM = 0
 const MAX_ZOOM = 16
@@ -17,6 +18,11 @@ const GPUFrame = document.getElementById('GPUFrame')
 scr.StartDash().then(() => main(GPUFrame)) 
 
 let uMatrix = scr.mat4f()
+function inlineShader(name, code) {
+
+    return scr.shader({ name, codeFunc: () => code })
+}
+
 function main(canvas) {
     const camera = {
         x: 0.,
@@ -310,7 +316,7 @@ function main(canvas) {
         })
     
         const tPipeline = scr.renderPipeline({
-            shader: { module: scr.shaderLoader.load('Shader (Map test)', '/shaders/examples/map/test.wgsl') },
+            shader: { module: inlineShader('Shader (Map test)', mapTestShader) },
         })
     
         const mapPass = scr.renderPass({

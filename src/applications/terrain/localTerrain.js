@@ -21,6 +21,11 @@ import {
     terrainMeshShader,
     terrainMeshLineShader,
 } from './shaders/index.js'
+import {
+    borderImageDataUrl,
+    demImageDataUrl,
+    demPaletteImageDataUrl,
+} from './assets/index.js'
 
 function inlineShader(name, code) {
 
@@ -143,9 +148,9 @@ export class LocalTerrain {
             filterMinMag: ['linear', 'linear'],
             addressModeUVW: ['clamp-to-edge', 'clamp-to-edge'],
         })
-        this.demTexture = imageLoader.load('Texture (DEM)', '/images/examples/terrain/dem.png')
-        this.borderTexture = imageLoader.load('Texture (DEM Border)', '/images/examples/terrain/border.png')
-        this.paletteTexture = imageLoader.load('Texture (DEM Palette)', '/images/examples/terrain/demPalette10.png')
+        this.demTexture = imageLoader.load('Texture (DEM)', demImageDataUrl)
+        this.borderTexture = imageLoader.load('Texture (DEM Border)', borderImageDataUrl)
+        this.paletteTexture = imageLoader.load('Texture (DEM Palette)', demPaletteImageDataUrl)
         this.lodMapTexture = texture({
             name: 'Texture (LOD Map)',
             resource: { size: () => this.lodMapSize.array }
