@@ -53,6 +53,7 @@ export class Director extends EventDispatcher {
 
         if (this.device === undefined) {
 
+            // StartDash owns default device initialization; Director only resolves it.
             this.device = getDevice()
             this._limits = this.device.limits
         }

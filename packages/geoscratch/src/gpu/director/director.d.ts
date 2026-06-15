@@ -5,6 +5,8 @@ import { EventDispatcher } from '../../core/event/dispatcher';
 
 export class Director extends EventDispatcher{
 
+    readonly limits: GPUSupportedLimits;
+    tryGetDevice(): GPUDevice;
     addStage(stage: {name: string, items: Array<any>, visibility?: boolean}): void;
     showStage(name: string): void;
     hideStage(name: string): void;

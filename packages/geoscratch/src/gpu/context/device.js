@@ -32,7 +32,7 @@ export class Device {
 
         deviceInstance.device = await adapter.requestDevice();
         deviceInstance.device.lost.then((info) => {
-            console.error("ERROR:: WebGPU device was lost: ${info.message}");
+            console.error(`ERROR:: WebGPU device was lost: ${info.message}`);
 
             // "reason" will be "destroyed" if we intentionally destroy the device
             if (info.reason !== "destroyed") {
@@ -49,7 +49,8 @@ export class Device {
 }
 
 function fail(msg) {
-    alert(msg);
+    if (typeof alert === 'function') alert(msg)
+    else console.error(msg)
 }
 
 let device = {
@@ -95,7 +96,7 @@ async function StartDash() {
     
     const instance = await adapter.requestDevice()
     instance.lost.then(async(info) => {
-        console.error("ERROR:: WebGPU device was lost: ${info.message}")
+        console.error(`ERROR:: WebGPU device was lost: ${info.message}`)
 
         // "reason" will be "destroyed" if we intentionally destroy the device
         if (info.reason !== "destroyed") {
@@ -111,9 +112,8 @@ async function StartDash() {
 
 export default function getDevice() {
 
-    while(true) {
-
-        if (device.device) break
+    if (!device.device) {
+        throw new Error('GeoScratch default GPUDevice is not initialized. Call StartDash() before requesting getDevice().')
     }
 
     return device.device

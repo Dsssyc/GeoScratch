@@ -60,7 +60,7 @@ Expected output includes:
 42 passing
 ```
 
-- [ ] Commit the plan.
+- [x] Commit the plan.
 
 Run:
 ```bash
@@ -88,7 +88,7 @@ git commit -m "docs: plan architecture and typescript migration"
 - `director` may remain the default global frame orchestrator, but its device ownership must be explicit: it lazily resolves the default device and caches limits only after a device exists.
 - The package keeps `./src/*` only as a deprecated compatibility aperture. New examples and docs must rely on public entrypoints.
 
-- [ ] Write the RED runtime-boundary test.
+- [x] Write the RED runtime-boundary test.
 
 Add this test behavior in `tests/runtime-boundary.test.js`:
 ```js
@@ -116,7 +116,7 @@ npx mocha tests/runtime-boundary.test.js
 
 Expected before implementation: fail because the child process times out or exits incorrectly under the current busy-wait behavior.
 
-- [ ] Implement the minimal runtime-boundary fix.
+- [x] Implement the minimal runtime-boundary fix.
 
 In `packages/geoscratch/src/gpu/context/device.js`:
 - Replace the infinite loop in `getDevice()` with an immediate error when the default device is missing.
@@ -125,7 +125,7 @@ In `packages/geoscratch/src/gpu/context/device.js`:
 - Correct interpolated error logs to use template literals.
 - Avoid adding a new runtime abstraction in this phase.
 
-- [ ] Update declaration files for the runtime boundary.
+- [x] Update declaration files for the runtime boundary.
 
 In `packages/geoscratch/src/gpu/context/device.d.ts`:
 ```ts
@@ -147,7 +147,7 @@ export function StartDash(): Promise<GPUDevice | undefined>;
 export const device: DefaultDeviceSlot;
 ```
 
-- [ ] Write the RED architecture-boundary test.
+- [x] Write the RED architecture-boundary test.
 
 Add this behavior in `tests/architecture-boundary.test.js`:
 ```js
@@ -184,7 +184,7 @@ npx mocha tests/architecture-boundary.test.js
 
 Expected before ADR-004 exists: fail because the ADR file is missing.
 
-- [ ] Add ADR-004.
+- [x] Add ADR-004.
 
 Create `docs/decisions/ADR-004-default-runtime-and-package-boundaries.md` with these decisions:
 - Keep the default global runtime for compatibility in this branch.
@@ -193,7 +193,7 @@ Create `docs/decisions/ADR-004-default-runtime-and-package-boundaries.md` with t
 - `director` remains the default frame orchestrator for existing examples.
 - `./src/*` remains only as a deprecated compatibility aperture until a separate deprecation/removal ADR.
 
-- [ ] Run Phase 1 verification.
+- [x] Run Phase 1 verification.
 
 Run:
 ```bash
@@ -202,11 +202,11 @@ npm test
 npm run build
 ```
 
-- [ ] Review Phase 1.
+- [x] Review Phase 1.
 
 Review against the Phase 1 contract and the five review axes. Fix every Critical or Important issue. Repeat the review until the verdict is "Approve".
 
-- [ ] Commit Phase 1.
+- [x] Commit Phase 1.
 
 Run:
 ```bash
