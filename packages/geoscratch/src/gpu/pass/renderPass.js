@@ -138,7 +138,7 @@ export class RenderPass {
 
         this.addColorAttachments()
         this.addDepthStencilAttachment()
-        this.initialize = true
+        this.initialized = true
     }
 
     isComplete() {

@@ -143,7 +143,7 @@ export class Director extends EventDispatcher {
             })
             encoders.push(encoder.finish())
         }
-        this.device.queue.submit(encoders)
+        if (encoders.length) this.device.queue.submit(encoders)
     }
 
     swap() {

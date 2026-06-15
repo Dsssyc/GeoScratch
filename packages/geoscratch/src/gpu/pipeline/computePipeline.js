@@ -98,7 +98,7 @@ class ComputePipeline {
 
         if (this.pipeline) return true
 
-        !this.pipelineCreating && this.createPipeline(renderPass, binding)
+        !this.pipelineCreating && this.createPipeline(binding)
         return false
     }
 

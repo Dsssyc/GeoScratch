@@ -29,11 +29,16 @@ export interface RenderPassDescription {
 export class RenderPass {
     
     pass: GPURenderPassEncoder;
+    dirty: boolean;
+    initialized: boolean;
+    completed: boolean;
     executable: boolean;
 
     constructor(description: RenderPassDescription);
     static create(description: RenderPassDescription): RenderPass;
 
+    initialize(): void;
+    isComplete(): boolean;
     updateColorAttachments(): void;
     updateDepthStencilAttachment(): void;
     update(): void;

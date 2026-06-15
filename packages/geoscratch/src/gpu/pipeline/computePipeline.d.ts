@@ -47,6 +47,8 @@ export class ComputePipeline {
      */
     static create(description: ComputePipelineDescription): ComputePipeline;
 
+    isComplete(computePass: ComputePass, binding: Binding): boolean;
+
     tryMakeComplete(computePass: ComputePass, binding: Binding): boolean;
 
     /**

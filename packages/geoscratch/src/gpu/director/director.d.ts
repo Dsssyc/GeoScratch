@@ -17,6 +17,8 @@ export class Director extends EventDispatcher{
     removeTexture(uuid: string): void;
     makeNewStage(name: string): Director;
     addItem(stageName: string, item: any): Director;
+    tickMemory(): void;
+    tickRender(): void;
     tick(): void;
 
     init(): Promise<void>;

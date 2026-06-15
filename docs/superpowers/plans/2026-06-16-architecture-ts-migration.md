@@ -373,7 +373,7 @@ git commit -m "test: add public type contract checks"
 - `ComputePipeline.isComplete()` must not reference an undefined render pass variable while creating its pipeline.
 - Update-list behavior must remain deduplicated and should not require a resource to update more than once per frame unless `updatePerFrame` is true.
 
-- [ ] Write RED tests for runtime hot-path behavior.
+- [x] Write RED tests for runtime hot-path behavior.
 
 Add behavior in `tests/runtime-performance-contracts.test.js`:
 ```js
@@ -445,7 +445,7 @@ npx mocha tests/runtime-performance-contracts.test.js
 
 Expected before implementation: fail because empty submit happens and repeated `RenderPass.update()` breaks `initialize`.
 
-- [ ] Implement the minimal hot-path fixes.
+- [x] Implement the minimal hot-path fixes.
 
 In `director.tickRender()`:
 - Skip `queue.submit()` when no command buffers were produced.
@@ -463,7 +463,7 @@ In update-list code:
 - Preserve dedupe semantics.
 - Convert object-backed sets to `Map` only if it simplifies code without changing public behavior.
 
-- [ ] Run Phase 3 verification.
+- [x] Run Phase 3 verification.
 
 Run:
 ```bash
@@ -472,11 +472,11 @@ npm test
 npm run build
 ```
 
-- [ ] Review Phase 3.
+- [x] Review Phase 3.
 
 Review specifically for behavior drift in render ordering, command submission, and attachment refresh. Fix every Critical or Important issue. Repeat until the review verdict is "Approve".
 
-- [ ] Commit Phase 3.
+- [x] Commit Phase 3.
 
 Run:
 ```bash
