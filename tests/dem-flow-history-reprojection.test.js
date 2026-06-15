@@ -90,4 +90,28 @@ describe('DEM flow history reprojection', () => {
         expect(layer).to.include('previousViewport: this.previousHistoryViewport')
         expect(layer).to.include('currentViewport: this.currentHistoryViewport')
     })
+
+    it('reprojects retained trail history by reverse gathering in the swap shader', () => {
+
+        const swap = read('examples', 'm_demLayer', 'shaders', 'flow', 'swap.wgsl')
+
+        expect(swap).to.include('historyMode: f32')
+        expect(swap).to.include('historyValid: f32')
+        expect(swap).to.include('previousMatrix: mat4x4f')
+        expect(swap).to.include('currentInverseMatrix: mat4x4f')
+        expect(swap).to.include('previousCenterHigh: vec3f')
+        expect(swap).to.include('currentCenterLow: vec3f')
+        expect(swap).to.include('fn reprojectHistoryUv')
+        expect(swap).to.include('let nearClip = vec4f(ndc, 0.0, 1.0)')
+        expect(swap).to.include('let farClip = vec4f(ndc, 1.0, 1.0)')
+        expect(swap).to.include('let planeT = -nearWorld.z / ray.z')
+        expect(swap).to.include('let previousClip = cleanupUniform.previousMatrix * previousRelative')
+        expect(swap).to.include('abs(previousClip.x) > previousClip.w')
+        expect(swap).to.include('previousClip.z < 0.0 || previousClip.z > previousClip.w')
+        expect(swap).to.include('cleanupUniform.historyMode > 1.5')
+        expect(swap).to.include('cleanupUniform.historyValid < 0.5')
+        expect(swap).to.include('let historyPixel = clamp(historyUv * dim, vec2f(0.0), dim - vec2f(1.0))')
+        expect(swap).to.include('linearSampling(bgTexture, historyPixel, dim)')
+        expect(swap).to.include('textureLoad(maskTexture, pixel, 0).r')
+    })
 })

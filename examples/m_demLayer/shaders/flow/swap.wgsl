@@ -11,6 +11,22 @@ struct CleanupUniformBlock {
     trailDecay: f32,
     trailCutoff: f32,
     useFlowMask: f32,
+    historyMode: f32,
+    historyValid: f32,
+    previousMatrix: mat4x4f,
+    currentMatrix: mat4x4f,
+    currentInverseMatrix: mat4x4f,
+    previousCenterHigh: vec3f,
+    previousCenterLow: vec3f,
+    currentCenterHigh: vec3f,
+    currentCenterLow: vec3f,
+    previousViewport: vec2f,
+    currentViewport: vec2f,
+};
+
+struct HistoryProjection {
+    uv: vec2f,
+    valid: f32,
 };
 
 // Uniform bindings
@@ -53,6 +69,58 @@ fn linearSampling(texture: texture_2d<f32>, uv: vec2f, dim: vec2f) -> vec4f {
     return mix(top, bottom, mix_y);
 }
 
+fn invalidHistoryProjection() -> HistoryProjection {
+
+    var output: HistoryProjection;
+    output.uv = vec2f(0.0);
+    output.valid = 0.0;
+    return output;
+}
+
+fn reprojectHistoryUv(texcoords: vec2f) -> HistoryProjection {
+
+    let ndc = vec2f(texcoords.x * 2.0 - 1.0, (1.0 - texcoords.y) * 2.0 - 1.0);
+    let nearClip = vec4f(ndc, 0.0, 1.0);
+    let farClip = vec4f(ndc, 1.0, 1.0);
+
+    let nearRelativeH = cleanupUniform.currentInverseMatrix * nearClip;
+    let farRelativeH = cleanupUniform.currentInverseMatrix * farClip;
+    if (abs(nearRelativeH.w) < 0.000001 || abs(farRelativeH.w) < 0.000001) {
+        return invalidHistoryProjection();
+    }
+
+    let nearWorld = nearRelativeH.xyz / nearRelativeH.w + cleanupUniform.currentCenterHigh + cleanupUniform.currentCenterLow;
+    let farWorld = farRelativeH.xyz / farRelativeH.w + cleanupUniform.currentCenterHigh + cleanupUniform.currentCenterLow;
+    let ray = farWorld - nearWorld;
+    if (abs(ray.z) < 0.000001) {
+        return invalidHistoryProjection();
+    }
+
+    let planeT = -nearWorld.z / ray.z;
+    if (planeT < 0.0 || planeT > 1.0) {
+        return invalidHistoryProjection();
+    }
+
+    let world = nearWorld + ray * planeT;
+    let previousRelative = vec4f(world - cleanupUniform.previousCenterHigh - cleanupUniform.previousCenterLow, 1.0);
+    let previousClip = cleanupUniform.previousMatrix * previousRelative;
+    if (
+        previousClip.w <= 0.0 ||
+        abs(previousClip.x) > previousClip.w ||
+        abs(previousClip.y) > previousClip.w ||
+        previousClip.z < 0.0 || previousClip.z > previousClip.w
+    ) {
+        return invalidHistoryProjection();
+    }
+
+    let previousNdc = previousClip.xy / previousClip.w;
+
+    var output: HistoryProjection;
+    output.uv = vec2f(previousNdc.x * 0.5 + 0.5, 1.0 - (previousNdc.y * 0.5 + 0.5));
+    output.valid = 1.0;
+    return output;
+}
+
 @vertex
 fn vMain(vsInput: VertexInput) -> VertexOutput {
 
@@ -89,7 +157,21 @@ fn fMain(fsInput: VertexOutput) -> @location(0) vec4f {
         return vec4f(0.0);
     }
 
-    let color = textureLoad(bgTexture, pixel, 0);
+    var historyUv = fsInput.texcoords.xy;
+    if (cleanupUniform.historyMode > 1.5) {
+        if (cleanupUniform.historyValid < 0.5) {
+            return vec4f(0.0);
+        }
+
+        let projection = reprojectHistoryUv(historyUv);
+        if (projection.valid < 0.5) {
+            return vec4f(0.0);
+        }
+        historyUv = projection.uv;
+    }
+
+    let historyPixel = clamp(historyUv * dim, vec2f(0.0), dim - vec2f(1.0));
+    let color = linearSampling(bgTexture, historyPixel, dim);
     let faded = vec4f(floor(255.0 * color * cleanupUniform.trailDecay) / 255.0);
     let residual = max(max(faded.r, faded.g), faded.b);
     if (residual <= cleanupUniform.trailCutoff) {
