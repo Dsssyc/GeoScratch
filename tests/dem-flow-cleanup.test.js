@@ -52,6 +52,7 @@ describe('DEM flow layer cleanup', () => {
         expect(voronoi).to.include('flowMaskCutoff: f32')
         expect(voronoi).to.include('@location(1) mask: vec4f')
         expect(voronoi).to.include('length(input.velocity) / max(frameUniform.maxSpeed')
+        expect(voronoi).to.include('output.velocity = input.velocity * maskValue')
 
         expect(simulation).to.include('var maskTexture: texture_2d<f32>')
         expect(simulation).to.include('getMask(maskTexture, uv)')
