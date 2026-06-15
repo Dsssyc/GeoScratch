@@ -4,6 +4,22 @@ import path from 'node:path'
 
 const root = process.cwd()
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
+const methodBody = (source, name) => {
+
+    const start = source.indexOf(`${name}() {`)
+    if (start === -1) return ''
+
+    const bodyStart = source.indexOf('{', start)
+    let depth = 0
+    for (let i = bodyStart; i < source.length; i++) {
+
+        if (source[i] === '{') depth++
+        if (source[i] === '}') depth--
+        if (depth === 0) return source.slice(bodyStart + 1, i).replace(/\/\/.*$/gm, '')
+    }
+
+    return ''
+}
 
 describe('DEM flow layer cleanup', () => {
 
@@ -108,5 +124,25 @@ describe('DEM flow layer cleanup', () => {
         expect(layer).to.include('this.cameraInvalidationHandlers.push({ eventName, handler: clearHistory })')
         expect(layer).to.include('this.map.off(eventName, handler)')
         expect(layer).to.match(/onRemove\(\) \{[\s\S]*this\.map = undefined/)
+    })
+
+    it('pauses simulation and trail accumulation while camera movement clears history', () => {
+
+        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const idle = methodBody(layer, 'idle')
+        const restart = methodBody(layer, 'restart')
+
+        expect(idle).to.include('this.isIdling = true')
+        expect(idle).to.include('this.swapPasses[0].executable = true')
+        expect(idle).to.include('this.swapPasses[1].executable = false')
+        expect(idle).to.include('this.swapPasses[2].executable = false')
+        expect(idle).to.include('this.layerBindings[0].executable = false')
+        expect(idle).to.include('this.layerBindings[1].executable = false')
+        expect(idle).to.include('this.simulationPass.executable = false')
+
+        expect(restart).to.include('this.isIdling = false')
+        expect(restart).to.include('this.swapPasses[0].executable = false')
+        expect(restart).to.include('this.simulationPass.executable = true')
+        expect(restart).to.include('this.particleRef.value = this.randomFillData')
     })
 })

@@ -437,6 +437,11 @@ export default class SteadyFlowLayer {
         this.isIdling = true
 
         this.swapPasses[0].executable = true
+        this.swapPasses[1].executable = false
+        this.swapPasses[2].executable = false
+        this.layerBindings[0].executable = false
+        this.layerBindings[1].executable = false
+        this.simulationPass.executable = false
         
         // this.showBinding.executable = true
         // this.swapPasses[2].executable = true
@@ -456,6 +461,7 @@ export default class SteadyFlowLayer {
         this.isIdling = false
         // this.arrowPipeline.executable = true
         this.swapPasses[0].executable = false
+        this.simulationPass.executable = true
         this.particleRef.value = this.randomFillData
     }
 
