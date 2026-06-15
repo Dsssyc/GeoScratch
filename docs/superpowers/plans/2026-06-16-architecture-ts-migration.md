@@ -498,7 +498,7 @@ git commit -m "perf: avoid empty runtime work"
   - introduce a compiler output boundary that lets `.ts` source emit `.js` and `.d.ts` without breaking package exports.
 - The chosen approach must be documented before any source conversion.
 
-- [ ] Write ADR-005 before converting source files.
+- [x] Write ADR-005 before converting source files.
 
 ADR-005 must decide one of these paths:
 - Path A: Source-compatible migration first: keep runtime `.js`, add `// @ts-check` and JSDoc to stable leaf modules, and rely on `tsc` for contract checks.
@@ -506,7 +506,7 @@ ADR-005 must decide one of these paths:
 
 This branch should choose Path A unless there is a concrete reason to move package output during the same branch.
 
-- [ ] Write the RED type migration test.
+- [x] Write the RED type migration test.
 
 Extend `tsconfig.types.json` so it includes the first stable checked leaf module, starting with:
 ```json
@@ -520,7 +520,7 @@ npm run typecheck
 
 Expected before JSDoc/check fixes: fail if the selected file has implicit or incompatible types.
 
-- [ ] Implement the first source-compatible TypeScript migration slice.
+- [x] Implement the first source-compatible TypeScript migration slice.
 
 For `packages/geoscratch/src/core/utils/uuid.js`:
 - Add `// @ts-check`.
@@ -528,7 +528,7 @@ For `packages/geoscratch/src/core/utils/uuid.js`:
 - Keep the `.js` filename and public import paths unchanged.
 - Keep `packages/geoscratch/src/core/utils/uuid.d.ts` synchronized if it exists or create it if absent.
 
-- [ ] Run Phase 4 verification.
+- [x] Run Phase 4 verification.
 
 Run:
 ```bash
@@ -537,11 +537,11 @@ npm test
 npm run build
 ```
 
-- [ ] Review Phase 4.
+- [x] Review Phase 4.
 
 Review for type drift, package export drift, and accidental build-boundary changes. Fix every Critical or Important issue. Repeat until the review verdict is "Approve".
 
-- [ ] Commit Phase 4.
+- [x] Commit Phase 4.
 
 Run:
 ```bash
