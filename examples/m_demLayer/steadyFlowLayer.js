@@ -45,7 +45,7 @@ const resourceUrl = [
 
 export default class SteadyFlowLayer {
 
-    constructor() {
+    constructor(options = {}) {
 
         // Layer
         this.type = 'custom'
@@ -70,6 +70,9 @@ export default class SteadyFlowLayer {
         this.maxParticleNum = 262144
         this.progressRate = scr.f32()
         this.particleNum = scr.u32(262144)
+        this.trailDecay = scr.f32(options.trailDecay ?? 0.996)
+        this.trailCutoff = scr.f32(options.trailCutoff ?? 1 / 255)
+        this.clearOnMove = options.clearOnMove ?? true
 
         // Compute
         this.blockSizeX = 16
@@ -123,7 +126,7 @@ export default class SteadyFlowLayer {
         this.isHided = false
         this.isIdling = false
         this.showArrow = false
-        this.showVoronoi = true
+        this.showVoronoi = options.showVoronoi ?? true
         this.nextPrepared = false
         this.isInitialized = false
         this.nextPreparing = false
@@ -234,11 +237,31 @@ export default class SteadyFlowLayer {
             scr.binding({
                 name: 'Binding (Background Swap 1)',
                 range: () => [ 4 ],
+                uniforms: [
+                    {
+                        name: 'cleanupUniform',
+                        dynamic: true,
+                        map: {
+                            trailDecay: this.trailDecay,
+                            trailCutoff: this.trailCutoff,
+                        }
+                    }
+                ],
                 textures: [ { texture: this.layerTexture2 } ]
             }),
             scr.binding({
                 name: 'Binding (Background Swap 2)',
                 range: () => [ 4 ],
+                uniforms: [
+                    {
+                        name: 'cleanupUniform',
+                        dynamic: true,
+                        map: {
+                            trailDecay: this.trailDecay,
+                            trailCutoff: this.trailCutoff,
+                        }
+                    }
+                ],
                 textures: [ { texture: this.layerTexture1 } ]
             }),
         ]
@@ -349,21 +372,7 @@ export default class SteadyFlowLayer {
         .add2PreProcess(this.swapPasses[1])
         .add2PreProcess(this.swapPasses[2])
 
-        // this.map.on('movestart', () => this.idle())
-        // this.map.on('move', () => this.idle())
-        // this.map.on('moveend', () => this.restart())
-        // this.map.on('dragstart', () => this.idle())
-        // this.map.on('drag', () => this.idle())
-        // this.map.on('dragend', () => this.restart())
-        // this.map.on('zoomstart', () => this.idle())
-        // this.map.on('zoom', () => this.idle())
-        // this.map.on('zoomend', () => this.restart())
-        // this.map.on('rotatestart', () => this.idle())
-        // this.map.on('rotate', () => this.idle())
-        // this.map.on('rotateend', () => this.restart())
-        // this.map.on('pitchstart', () => this.idle())
-        // this.map.on('pitch', () => this.idle())
-        // this.map.on('pitchend', () => this.restart())
+        this.registerCameraInvalidation()
 
         this.isInitialized = true
     }
@@ -395,6 +404,8 @@ export default class SteadyFlowLayer {
 
     idle() {
 
+        if (!this.swapPasses) return
+
         this.isIdling = true
 
         this.swapPasses[0].executable = true
@@ -411,11 +422,26 @@ export default class SteadyFlowLayer {
 
     restart() {
 
+        if (!this.swapPasses) return
+
         this.preheat = 10
         this.isIdling = false
         // this.arrowPipeline.executable = true
         this.swapPasses[0].executable = false
         this.particleRef.value = this.randomFillData
+    }
+
+    registerCameraInvalidation() {
+
+        if (!this.clearOnMove) return
+
+        const clearHistory = () => this.idle()
+        const restartHistory = () => this.restart()
+        const movingEvents = [ 'movestart', 'move', 'dragstart', 'drag', 'zoomstart', 'zoom', 'rotatestart', 'rotate', 'pitchstart', 'pitch' ]
+        const settledEvents = [ 'moveend', 'dragend', 'zoomend', 'rotateend', 'pitchend' ]
+
+        movingEvents.forEach(eventName => this.map.on(eventName, clearHistory))
+        settledEvents.forEach(eventName => this.map.on(eventName, restartHistory))
     }
 
     show() {
