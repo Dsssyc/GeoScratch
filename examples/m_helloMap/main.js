@@ -4,7 +4,6 @@ import earcut from 'earcut'
 import tilebelt from '@mapbox/tilebelt'
 import Protobuf from 'pbf'
 import { VectorTile } from '@mapbox/vector-tile'
-import axios from 'axios'
 import mapTestShader from './shaders/test.wgsl?raw'
 
 const MIN_ZOOM = 0
@@ -282,10 +281,9 @@ function main(canvas) {
     async function init() {
 
         // const [ x, y, z ] = tilesInView[0]
-        // const res = await axios.get(`https://maps.ckochis.com/data/v3/${z}/${x}/${y}.pbf?apiKey=${config('mapsApiKey')}`, {
-        //   responseType: 'arraybuffer',
-        // })
-        // const pbf = new Protobuf(res.data)
+        // const response = await fetch(`https://maps.ckochis.com/data/v3/${z}/${x}/${y}.pbf?apiKey=${config('mapsApiKey')}`)
+        // const buffer = await response.arrayBuffer()
+        // const pbf = new Protobuf(buffer)
         // const vectorTile = new VectorTile(pbf)
         // console.log(vectorTile)
 

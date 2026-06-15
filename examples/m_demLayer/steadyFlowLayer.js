@@ -1,6 +1,5 @@
 import * as scr from '../../src/index.js'
 import { Delaunay } from 'd3-delaunay'
-import axios from 'axios'
 import arrowShader from './shaders/flow/arrow.wgsl?raw'
 import flowLayerShader from './shaders/flow/flowLayer.wgsl?raw'
 import flowShowShader from './shaders/flow/flowShow.wgsl?raw'
@@ -12,6 +11,15 @@ import swapShader from './shaders/flow/swap.wgsl?raw'
 function inlineShader(name, code) {
 
     return scr.shader({ name, codeFunc: () => code })
+}
+
+async function fetchArrayBuffer(url) {
+
+    const response = await fetch(url)
+    if (!response.ok) {
+        throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`)
+    }
+    return response.arrayBuffer()
 }
 
 const resourceUrl = [
@@ -653,8 +661,7 @@ export default class SteadyFlowLayer {
     }
     async getVoronoi(url) {
         
-        const res = await axios.get(url, { responseType: 'arraybuffer' })
-        const stationCoords = new Float32Array(res.data)
+        const stationCoords = new Float32Array(await fetchArrayBuffer(url))
         const meshes = new Delaunay(stationCoords)
         
         const vertices = []
@@ -728,8 +735,7 @@ export default class SteadyFlowLayer {
     async addVoronoiBindingSync(url) {
         
         this.nextPreparing = true
-        const res = await axios.get(url, { responseType: 'arraybuffer' })
-        const uvs = new Float32Array(res.data)
+        const uvs = new Float32Array(await fetchArrayBuffer(url))
 
         let maxSpeed = -Infinity
         for (let i = 0; i < uvs.length; i += 2) {

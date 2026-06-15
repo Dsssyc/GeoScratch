@@ -1,4 +1,3 @@
-import axios from 'axios'
 import { Delaunay } from 'd3-delaunay'
 import * as scr from '../../src/index.js'
 
@@ -11,8 +10,7 @@ self.addEventListener('message', (event) => {
 
 async function parseBin(url) {
 
-  const res = await axios.get(url, { responseType: 'arraybuffer' })
-  const uvs = new Float32Array(res.data)
+  const uvs = new Float32Array(await fetchArrayBuffer(url))
 
   let maxSpeed = -Infinity
   for (let i = 0; i < uvs.length / 2; i++) {
@@ -29,14 +27,32 @@ async function parseBin(url) {
 
 async function parseStations(url) {
 
-  const res = await axios.get(url)
-  const { maxSpeed, indices, attributes } = triangulate(res.data.stations)
+  const data = await fetchJson(url)
+  const { maxSpeed, indices, attributes } = triangulate(data.stations)
   self.postMessage({
     url,
     maxSpeed,
     indices,
     attributes
   })
+}
+
+async function fetchArrayBuffer(url) {
+
+    const response = await fetch(url)
+    if (!response.ok) {
+        throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`)
+    }
+    return response.arrayBuffer()
+}
+
+async function fetchJson(url) {
+
+    const response = await fetch(url)
+    if (!response.ok) {
+        throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`)
+    }
+    return response.json()
 }
 
 function encodeFloatToDouble(value) {
@@ -80,4 +96,3 @@ function triangulate(data) {
     
     return { maxSpeed, indices: meshes.triangles, attributes }
 }
-  
