@@ -30,7 +30,7 @@ scr.StartDash().then(() => {
         zoom: 9,
     }).on('load', () => {
         
-        // map.addLayer(new TerrainLayer(14))
+        map.addLayer(new TerrainLayer(14))
         map.addLayer(new SteadyFlowLayer())
     })
 })

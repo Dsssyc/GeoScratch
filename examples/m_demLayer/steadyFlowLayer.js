@@ -49,6 +49,7 @@ const resourceUrl = [
     '/json/examples/flow/uv_23.bin',
     '/json/examples/flow/uv_24.bin',
     '/json/examples/flow/uv_25.bin',
+    '/json/examples/flow/uv_26.bin',
 ]
 
 export default class SteadyFlowLayer {
