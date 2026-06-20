@@ -1,0 +1,161 @@
+# 设计评审
+
+状态: Review (vision draft)
+日期: 2026-06-20
+
+## 范围
+
+本模块从两个角度对 `00`–`05` 进行评审，并记录经得起推敲后幸存下来的修订:
+
+1. **AI 辅助编写**("vibe coding"): 当使用 `scratch` 的大部分代码都由 AI 辅助写成时，这套设计是否仍然合适？
+2. **通用 compute 对等性**: `scratch` 的目标和 WebGPU 一样，是 GPU 能力的 CPU 端映射——因此 compute 必须是与图形 *平起平坐* 的一等用途，而不是图形的附属。这套设计能否支撑严肃的高性能并行计算？
+
+结论: 不需要重写。`00`–`05` 的实质(显式、声明式、可校验、fail-fast)本就高度契合。需要改的是 *首要目标的措辞*、三个定向的编写期修订(第一部分)、以及 **把 compute 从附属升为一等用途**(第二部分)。
+
+这些都是叠加在 `00`–`05` 之上的提案，尚未并入。本模块先用于 review。
+
+## 第一部分 — AI 时代编写视角
+
+### 评判轴(更正)
+
+早先的一种框定用"AI 读起来顺不顺"和"聪明 vs 无聊"来评判 API。两者都是错的轴。
+
+- "聪明 vs 无聊"是个陷阱。"无聊"的极限是裸 WebGPU，而它是 *最不* 可验证的接口面，不是最可验证的: 它的有效性规则是隐式的，许多逻辑错误(资源版本错、写前读、resize 后 bind group 失效)不会报错，而是直接给出一张错的画面。
+- 正确的轴是 **"加约束 + 加检查的抽象" vs "加隐藏行为的抽象"**。前者可以比裸 WebGPU *更* 抽象，同时 *更* 可验证。后者让同一段代码因调用点看不见的状态而行为不同。
+
+下面每条修订都按两个问题评判，顺序如下:
+
+1. 功能性: 它是否仍能表达真实工作负载，包括真正的运行时动态性？
+2. 可验证性: 正确性能否通过局部阅读确认，系统能否抓住错误？
+
+这条评判轴——务实功能优先，其次是可验证性即约束——取代"AI 可读性"和"聪明 vs 无聊"，作为本次修订的标准。
+
+### 修订 A — 首要目标
+
+替换"减少样板"这一目标。
+
+现状(`00-overview`):
+
+> 新的 `scratch` API 应减少 WebGPU 样板工作，同时保留直接 GPU 控制能力。
+
+问题: 在 AI 时代，生成样板的边际成本接近于零，所以"更少的代码"是抽象层能提供的最不值钱的东西。冗长不是敌人; 歧义和隐藏/非局部状态才是。
+
+建议目标:
+
+> 新的 `scratch` API 应在保留直接 GPU 控制能力的同时，最大化"可局部验证的正确性"。它应补上裸 WebGPU 缺失的约束与检查，而不引入隐藏行为。由作者写出、再由 validator 校验的样板是可接受的; 歧义和不可见状态则不可接受。
+
+推论:
+
+- 保留那些"啰嗦"的特性——显式 `resources.read/write`、显式 `BindLayout`、显式 frame 顺序。它们是这套设计中最具未来韧性的部分。不要仅仅为了简洁就自动推断它们。
+- 每个"聪明"的特性(资源版本化、readiness、device-loss rehydration)都必须暴露可 inspect、可 assert 的状态，例如可读的 `version` / `state`(`02-resources` 已定义 `ResourceState`)。一个藏起"为什么发生了重建"的聪明特性是净负值。
+- 这不削弱已有的 escape hatch 要求。直接的低层控制保留。
+
+### 修订 B — 闭包策略
+
+把现有的"不让 command count 默认就是闭包"(`04-pipelines-commands`)推广成一条按 *闭包编码了什么* 来分流的规则，而不是一刀切地回避。闭包有时是真实动态性的正当代价——一个只有在运行时剔除之后才知道的 draw count——而不是作者图省事。
+
+分流:
+
+1. **静态值，构造时即可得** → 不要闭包。应移除的例子: `range: () => [3]`，以及当 shader code 为常量时的 `codeFunc: () => shaderCode`。
+   - 例外: 如果这层 thunk 是为了延迟到 device-ready，或为了让值之后可变，那它编码的是 *生命周期/时机*，这是正当的——但应通过 resource/ref 模型来表达，而不是临时闭包。
+2. **CPU 动态值**(count 只有在 CPU 侧工作如剔除之后才知道) → 闭包正当。作为显式 escape hatch 保留。
+3. **GPU 动态值**(count 由 GPU 产生，例如 GPU 剔除写出 draw arguments) → 优先 `indirect`，它在 `04-pipelines-commands` 中已是推荐的 GPU-driven 路径。严格优于 CPU 闭包: 无回读、全声明式、对 validation 可见。
+
+动态 count 的可验证性阶梯(优先靠上):
+
+```text
+indirect buffer  >  ref / handle  >  closure
+```
+
+接入既有惯用法: 项目本就有一个非闭包的动态原语——`aRef` / `ArrayRef`(身份稳定、内容可变、可追 dirty)。在值不是 GPU 产生时，把这套句柄模型延伸到 count(一个从 ref 或 buffer 读取的 count)。它比闭包更可验证，且与既有设计语言一致。
+
+净规则: 静态 → 不要 thunk; CPU 动态 → 闭包可以; GPU 动态 → indirect。
+
+### 修订 C — Shader 反射作为可选的、warn 级的交叉校验
+
+保留显式 `BindLayout` 作为 source of truth(`03-bindings`，"explicit is the contract")。把反射从"脚手架 helper"提升为一道 *守卫*，针对 AI 最高频的那一类错误: bind layout 与 shader 不匹配(binding index、type、visibility)。
+
+约束它，使它绝不造成功能倒退:
+
+- **仅 dev。** 生产路径不硬依赖某个具体 WGSL parser。
+- **默认 warn，而非 throw。** 一个滞后于 WGSL spec 的 parser 会对合法但少见的 layout 报假错——而那正是 kernel 承诺要支持的 exotic 用法。warn 让它保持建议性。
+- **可按 entry 关闭。** 作者在有意构造 superset layout 时，可以静默某一项检查。
+- **只做交叉校验。** 反射把显式 layout 与 shader 比对; 它绝不成为 layout 的 source of truth。
+
+净效果: 在"改→跑→修"闭环的早期抓住常见错配，同时不让反射变成权威、也不挡住 exotic layout。
+
+### 第一部分不改变什么
+
+- **保留 `BindSet` 命名**(不改名为 `BindGroup`)。`BindSet` 比 `GPUBindGroup` 做得更多——version 比对、惰性重建、暴露 readiness(`03-bindings`)。语义不同正是它必须命名不同的理由: 与 WebGPU 同名会诱导错误的心智模型并产出微妙 bug。规则: 行为与 WebGPU 一致处才照 WebGPU 命名，不一致处精确改名。
+- 保留显式的 `ScratchRuntime` / `Surface` 拆分、显式 `resources.read/write` 声明、使用点上的 `whenMissing`、以及 `FrameValidationMode`(`off` / `warn` / `throw`)。它们本就与 AI 契合: 无隐藏全局状态、可局部推理、且提供了 agentic 闭环可以迭代对抗的错误面。
+
+## 第二部分 — 通用 compute 对等性
+
+这部分是在以"`scratch` 是 GPU 能力的 CPU 端接口(类同 WebGPU)、而不仅是图形内核"这一要求复查 `00`–`05` 之后补充的。严肃的高性能并行计算(仿真、scan/sort/reduce、迭代求解、ML 式 kernel)必须是一等用途。
+
+### 已经能用的部分
+
+- `01-runtime-surface` 已要求 runtime 支持 **compute-only / offscreen / worker**(不绑 canvas)。这是 GPGPU 的地基。
+- `04-pipelines-commands` 的 **indirect dispatch**(`DispatchCount` 的 `{ indirect }`)就是 GPU-driven compute 路径: 上一趟 pass 产出的数量决定下一趟 dispatch 规模。
+- storage buffer/texture 读写、override `constants`(参数化 workgroup size)、`requiredFeatures` / `requiredLimits` 钩子都在。
+- `04` / `05` 的 `resources.read/write` 声明 + 依赖校验，对 compute *链*(scan 的 up/down-sweep、迭代求解、simulate→sort→render)的价值 *比对图形还大*——这正是 GPGPU 正确性最容易错的地方。这套设计最"啰嗦"的特性，是它最强的 compute 资产。
+
+### 缺口(按严重度排)
+
+#### 缺口 1 — 定位: "图形内核"低估了 compute(必须修)
+
+`scratch-graphics-kernel.md` 把 scratch 称为 "the **graphics** kernel"; `00-overview` 是 "graphics execution kernel"; compute 出现为 "GPU compute-heavy **visualization**" 和 "visualization and compute tasks"——都是"服务于可视化的 compute"。
+
+但 WebGPU 这个类比恰是要点: WebGPU 是 **GPU** API，graphics 与 compute 同级。若 compute 是一等用途，顶层心智模型应重定为 **"GPU 执行内核"**(compute + graphics)。否则 compute 会在后续每个决策里被默默当成二等。
+
+#### 缺口 2 — 异步回读(readback)完全没有建模(必须修; 功能性 + 可验证性)
+
+通查 `00`–`05`，只有 `map` 作为一种 buffer usage 出现(`02-resources`)。**没有任何 readback / `mapAsync` / 可 await 的结果获取机制**: command 家族是 Draw / Dispatch / Copy / Upload(没有 Readback)，唯一的提交单元是 `frame…submit()`——纯 fire-and-forget，也没有 `queue.onSubmittedWorkDone`。
+
+GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CPU 读结果 → 可能再喂下一趟 pass。这条路现在表达不出来。
+
+它还戳穿了修订 A 的可验证性目标: 没有 readback，你 *根本写不出* 一个从 CPU 侧断言 compute kernel 输出是否正确的测试。所以这个缺口在功能性和可验证性上 *双失*。
+
+设计空间(留到 brainstorming 再定，不在此拍板): 一个 `ReadbackCommand` 加一个可 await 的 result handle，或一个提交级的 `onComplete` / readback promise。语义要求是"可 await 的 GPU→CPU 结果"; 具体形状待定。
+
+#### 缺口 3 — 提交单元是"presentation 味"的 `Frame`(应该修)
+
+`05` 唯一的提交单元是 `Frame`，带显示倾向的语义(skip empty passes、current frame、surface 集成)。compute 往往不是"一帧": one-shot 任务、按自己的节奏跑、或在 present 之前先迭代 N 步。
+
+该模型对"多 dispatch 录进一帧、提交一次"支持得很好——适合 GPU-bound 迭代。它没覆盖的是"迭代中周期性 CPU 回读/反馈"，而这又和缺口 2 缠在一起。
+
+解决方向: 要么提供一个不带显示语义的提交概念，要么明确把 `Frame` 定义为"提交批次"并给出一个不携带显示语义的 compute 入口。
+
+#### 缺口 4 — 没有 GPU 计时 / 查询(应该修)
+
+`00`–`05` 全文未提 `timestamp-query` 或 `GPUQuerySet`(唯一的 "profiling" 指的是 validation mode，不是 GPU 计时)。"高性能"意味着要能测; 没有 timestamp / pipeline-statistics 查询就调不动 kernel。它是 feature-gated 的可选项，但设计得给它一个落脚点: 一种 query resource kind 加一个 pass/command 触点。
+
+#### 缺口 5 — compute 专属校验 + binding 完整性(可后补)
+
+- `05` 的 validator 校验顺序 / 归属 / readiness，但不校验 compute 限制: workgroup 数 vs `maxComputeWorkgroupsPerDimension`、storage binding 大小 vs limits。这些现在是静默失败; 应纳入 validator。
+- `03-bindings` 没提 dynamic buffer offset(`hasDynamicOffset`); "绑一个大 buffer、每次 dispatch 用 offset 取一段"是常用的 compute 批处理手法。
+
+### 用评判轴小结
+
+- **必须修**: 缺口 1(定位决定所有下游决策)、缺口 2(功能性 + 可验证性双失)。
+- **应该修**: 缺口 3(功能性，且与缺口 2 耦合)、缺口 4(高性能的前提)。
+- **可后补**: 缺口 5。
+
+净判断: 不是推倒，而是"把 compute 从附属升为一等"——重定位 + 补回读/提交语义 + 给计时和 compute 校验留位置。补对了，这套 read/write 依赖模型反而会成为 GPGPU 的强项。
+
+## 待定决策点
+
+第一部分(编写):
+
+1. 在 `00-overview` 采用修订后的首要目标措辞？(修订 A)
+2. 采用闭包分流规则并并入 `02-resources` 与 `04-pipelines-commands`？(修订 B)
+3. 在 `03-bindings` 采用"默认 warn、可关闭"的 dev 交叉校验？(修订 C)
+4. 确认 `BindSet` 命名保留。
+
+第二部分(compute):
+
+5. 把愿景重定为"GPU 执行内核"、让 compute 与图形同级？(缺口 1)
+6. 给 command + 提交模型加一条可 await 的 readback/result 路径？(缺口 2)
+7. 把"提交批次"概念与 presentation 的 `Frame` 分开？(缺口 3)
+8. 为 timestamp / query 支持预留位置？(缺口 4)
+9. 把 compute 限制校验与 dynamic offset 并入 validation / bindings？(缺口 5)

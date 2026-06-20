@@ -106,6 +106,15 @@ type ResourceState =
 
 `dirty` 表示资源逻辑上可用，但在记录依赖新数据的 command 前需要 prepare。`empty`、`lost`、`disposed` 不可用。
 
+## 动态值: 句柄优于闭包
+
+喂给资源的值(size、初始或更新数据)有时静态、有时随运行时变化。按它编码的内容来表达:
+
+- 静态值、构造时即可得 → 直接传值; 不要包 thunk。
+- 运行时变化的值 → 优先用"身份稳定、内容可变"的句柄(array ref，或 runtime 能追 dirty 的 buffer)，而不是不透明闭包。句柄可 inspect、可追 dirty; 闭包对 validation 是黑箱。
+
+`size: () => surface.size` 这种 provider 是正当的: surface 尺寸在构造时未知、会随 resize 变化——这个闭包编码的是生命周期/时机，不是偷懒。只为延迟一个常量而用的闭包则是开销。该规则可推广到 command count(`04-pipelines-commands`)。
+
 ## Missing Resource Policy
 
 缺失或 readiness 策略不属于 resource 自己。它属于使用该资源的 command 或 pass，因为同一个资源在不同上下文中语义不同。

@@ -40,6 +40,8 @@ Supported entry families should include:
 - sampler
 - external texture, when supported
 
+Buffer entries (uniform and storage) should support an optional dynamic-offset flag, so one large buffer can be bound once and a per-dispatch or per-draw slice selected by offset — a common compute batching pattern.
+
 ## BindSet
 
 `BindSet` binds resources by layout entry name:
@@ -62,11 +64,11 @@ Responsibilities:
 - lazily rebuild bind groups when bound resource versions change
 - expose readiness of bound resources to command validation
 
-## Shader Inspection
+## Shader Inspection And Cross-Check
 
-Shader reflection should not be required in the core runtime path.
+Shader reflection is not the source of truth and is not on the core runtime path. Explicit `BindLayout` stays authoritative. But reflection should be promoted from "scaffolding only" to a *guard* against the most common binding error: a `BindLayout` that disagrees with the shader on binding index, type, or visibility.
 
-Allowed helper direction:
+Helper and guard directions:
 
 ```ts
 const report = scratch.inspectShader(shader).compareBindLayouts([terrainLayout])
@@ -74,7 +76,14 @@ const report = scratch.inspectShader(shader).compareBindLayouts([terrainLayout])
 const draft = scratch.inspectShader(shader).suggestBindLayout({ group: 0 })
 ```
 
-Reflection is a development helper for validation or scaffolding. It must not become the source of truth for production layout creation.
+The cross-check is constrained so it never blocks legitimate work:
+
+- dev-only — no hard dependency on a specific WGSL parser in the production path
+- default `warn`, not `throw` — a parser lagging the WGSL spec would otherwise emit false errors on legitimate-but-unusual layouts
+- per-entry suppressible — an intentional superset layout can silence a specific check
+- cross-check only — it compares explicit layout against the shader; it never generates the authoritative layout
+
+Reflection must not become the source of truth for production layout creation.
 
 ## Explicit Is The Contract
 

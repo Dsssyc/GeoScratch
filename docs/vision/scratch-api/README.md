@@ -15,6 +15,7 @@ The documents here are design references, not implementation status. They should
 - `03-bindings/`: explicit bind layouts, bind sets, bind group cache, and shader inspection helpers
 - `04-pipelines-commands/`: stable pipelines and executable GPU commands
 - `05-passes-frames-scheduler/`: persistent pass specs, per-frame command lists, and scheduler validation
+- `06-design-review/`: review of `00`–`05` against AI-assisted authoring and general-purpose compute parity
 
 Each module has an English `README.md` and a Chinese `README_zh.md`.
 

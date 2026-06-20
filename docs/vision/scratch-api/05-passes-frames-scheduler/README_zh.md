@@ -89,6 +89,8 @@ Frame 职责:
 - surface current texture view 在所属 frame 外使用
 - render command 被插入 compute pass
 - dispatch command 被插入 render pass
+- dispatch 的 workgroup 数超过 `maxComputeWorkgroupsPerDimension`
+- 绑定的 storage buffer 范围超过 device storage-binding 限制
 
 Validation modes:
 

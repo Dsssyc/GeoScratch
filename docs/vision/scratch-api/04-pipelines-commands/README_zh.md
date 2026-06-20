@@ -136,6 +136,16 @@ const simulate = scratch.command.dispatch({
 })
 ```
 
+## Count 分流
+
+draw 与 dispatch count 分三种情况; 按 count 实际依赖什么来选:
+
+- 静态、record 时即可得 → 用字面量形式(`{ vertexCount: 3 }`、`{ workgroups: [64, 64, 1] }`)。不要把常量包进闭包。
+- CPU 动态——只有在 CPU 侧工作(如剔除)之后才知道 → resolver 闭包正当，或从一个被追踪的句柄读取 count(见 `02-resources` 动态值)。值若已在某个句柄里，优先用句柄。
+- GPU 动态——由 GPU 产生(例如 compute 写出 draw 或 dispatch arguments)→ 优先 `indirect`。它无需回读、全声明式、对 validation 可见。
+
+可验证性阶梯，优先靠上: indirect buffer > 被追踪的句柄 > 闭包。
+
 ## Readiness Policy
 
 每个 command 必须显式声明所需资源未 ready 时的行为:

@@ -40,6 +40,8 @@ const terrainLayout = scratch.bindLayout({
 - sampler
 - external texture, when supported
 
+buffer entry(uniform 与 storage)应支持可选的 dynamic-offset 标志，这样可以只绑定一次大 buffer、按 offset 选取每次 dispatch 或 draw 的一段——这是常用的 compute 批处理手法。
+
 ## BindSet
 
 `BindSet` 按 layout entry name 绑定资源:
@@ -62,11 +64,11 @@ const terrainSet = scratch.bindSet(terrainLayout, {
 - 当绑定资源版本变化时惰性重建 bind group
 - 向 command validation 暴露已绑定资源的 readiness
 
-## Shader Inspection
+## Shader Inspection 与交叉校验
 
-Shader reflection 不应进入核心 runtime 路径。
+Shader reflection 不是 source of truth，也不在核心 runtime 路径上。显式 `BindLayout` 仍然权威。但 reflection 应从"仅脚手架"提升为一道 *守卫*，针对最常见的绑定错误: `BindLayout` 与 shader 在 binding index、type 或 visibility 上不一致。
 
-允许的 helper 方向:
+helper 与守卫方向:
 
 ```ts
 const report = scratch.inspectShader(shader).compareBindLayouts([terrainLayout])
@@ -74,7 +76,14 @@ const report = scratch.inspectShader(shader).compareBindLayouts([terrainLayout])
 const draft = scratch.inspectShader(shader).suggestBindLayout({ group: 0 })
 ```
 
-Reflection 是开发期校验或脚手架辅助。它不能成为生产 layout 创建的真相来源。
+约束该交叉校验，使它绝不挡住正当工作:
+
+- 仅 dev——生产路径不硬依赖某个具体 WGSL parser
+- 默认 `warn` 而非 `throw`——否则一个滞后于 WGSL spec 的 parser 会对合法但少见的 layout 报假错
+- 可按 entry 关闭——有意构造的 superset layout 可静默某项检查
+- 只做交叉校验——它把显式 layout 与 shader 比对; 绝不生成权威 layout
+
+Reflection 不能成为生产 layout 创建的真相来源。
 
 ## 显式声明是核心契约
 

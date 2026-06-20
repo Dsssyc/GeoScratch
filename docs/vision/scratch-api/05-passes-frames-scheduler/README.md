@@ -89,6 +89,8 @@ Examples of checks:
 - surface current texture view used outside its frame
 - render command inserted into compute pass
 - dispatch command inserted into render pass
+- dispatch workgroup count exceeds `maxComputeWorkgroupsPerDimension`
+- bound storage buffer range exceeds device storage-binding limits
 
 Validation modes:
 

@@ -136,6 +136,16 @@ const simulate = scratch.command.dispatch({
 })
 ```
 
+## Count Triage
+
+Draw and dispatch counts span three cases; choose by what the count actually depends on:
+
+- Static, known at record time → use the literal form (`{ vertexCount: 3 }`, `{ workgroups: [64, 64, 1] }`). Do not wrap a constant in a closure.
+- CPU-dynamic — known only after CPU-side work such as culling → a resolver closure is legitimate, or a count read from a tracked handle (see `02-resources`, dynamic values). Prefer the handle when the value already lives in one.
+- GPU-dynamic — produced on the GPU (e.g. compute writes draw or dispatch arguments) → prefer `indirect`. It needs no readback, is fully declarative, and is visible to validation.
+
+Verifiability ladder, prefer the top: indirect buffer > tracked handle > closure.
+
 ## Readiness Policy
 
 Every command must explicitly declare what happens when required resources are not ready:

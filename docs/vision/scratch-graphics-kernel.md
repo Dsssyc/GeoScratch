@@ -1,4 +1,4 @@
-# Scratch Graphics Kernel Vision
+# Scratch GPU Kernel Vision
 
 ## Status
 
@@ -12,7 +12,7 @@ Vision draft
 
 This document records the target design philosophy for the `scratch` layer so later ADRs and implementation plans can be checked against the same architectural north star.
 
-`scratch` is the graphics kernel of GeoScratch. `geo` is the scene, space, layer, and geospatial resource-policy layer built on top of that kernel.
+`scratch` is the GPU execution kernel of GeoScratch — compute and graphics are co-equal uses. `geo` is the scene, space, layer, and geospatial resource-policy layer built on top of that kernel.
 
 This distinction matters because geographic visualization workloads vary widely:
 
@@ -27,11 +27,11 @@ This distinction matters because geographic visualization workloads vary widely:
 - GPU compute-heavy visualization
 - specialized one-off WebGPU tasks
 
-The kernel must reduce low-level WebGPU burden without assuming one geospatial scene model.
+The kernel must reduce low-level WebGPU burden without assuming one geospatial scene model — and without assuming graphics at all, since general-purpose parallel compute is a co-equal use.
 
 ## Core Philosophy
 
-`scratch` should abstract stable graphics-kernel responsibilities:
+`scratch` should abstract stable GPU-kernel responsibilities:
 
 - GPU resource identity, lifetime, and invalidation
 - CPU-to-GPU data synchronization

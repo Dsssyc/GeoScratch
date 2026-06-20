@@ -5,7 +5,7 @@ Date: 2026-06-20
 
 ## Purpose
 
-The new `scratch` API should reduce WebGPU boilerplate while preserving direct GPU control. It should be a graphics execution kernel, not a geospatial scene graph and not a configuration DSL for every rendering technique.
+The new `scratch` API should maximize locally-verifiable correctness while preserving direct GPU control. It should add the constraints and checks that raw WebGPU lacks, without adding hidden behavior. It is a GPU execution kernel — compute and graphics are co-equal uses — not a geospatial scene graph and not a configuration DSL for every rendering technique.
 
 `scratch` should make repeated low-level work easier:
 
@@ -24,6 +24,15 @@ The new `scratch` API should reduce WebGPU boilerplate while preserving direct G
 - layer history, reprojection, or camera-to-resource decisions
 
 Those belong in `geo` or higher application layers.
+
+## Design Axis
+
+The objective above implies one axis for judging any abstraction: it should **add constraints and checks**, not **hidden behavior**. An abstraction may be more abstract than raw WebGPU and still be more verifiable, as long as behavior stays explicit and local. Raw WebGPU is the limit of minimal abstraction yet is the least verifiable surface: its validity rules are implicit and many logic errors fail silently with a wrong result instead of an error.
+
+Two consequences:
+
+- Keep the explicit, "verbose" surface — `resources.read/write`, explicit `BindLayout`, explicit frame order. Do not auto-infer it merely for brevity. Boilerplate an author writes and a validator checks is acceptable; ambiguity and hidden state are not.
+- Every stateful "smart" feature (resource versioning, readiness, device-loss rehydration) must expose inspectable and assertable state. A feature that hides why a rebuild happened is net-negative.
 
 ## 0.x Breaking-Change Policy
 

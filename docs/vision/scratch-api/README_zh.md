@@ -15,6 +15,7 @@
 - `03-bindings/`: 显式 bind layout、bind set、bind group 缓存、shader 检查辅助
 - `04-pipelines-commands/`: 稳定 pipeline 与可执行 GPU command
 - `05-passes-frames-scheduler/`: 持久 pass spec、逐帧 command 列表、scheduler 校验
+- `06-design-review/`: 从 AI 辅助编写与通用 compute 对等性两个角度，对 `00`–`05` 的评审
 
 每个模块都包含英文 `README.md` 和中文 `README_zh.md`。
 

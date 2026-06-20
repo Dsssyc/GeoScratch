@@ -106,6 +106,15 @@ type ResourceState =
 
 `dirty` means the resource is logically usable but needs preparation before recording commands that depend on the new data. `empty`, `lost`, and `disposed` are not usable.
 
+## Dynamic Values: Prefer Handles Over Closures
+
+Values that feed a resource (size, initial or updated data) are sometimes static and sometimes runtime-varying. Express them by what they encode:
+
+- Static value, known at construction time → pass it directly; do not wrap it in a thunk.
+- Runtime-varying value → prefer a stable handle whose contents change (an array ref, or a buffer the runtime tracks for dirty state) over an opaque closure. A handle is inspectable and dirty-trackable; a closure is a black box to validation.
+
+A `size: () => surface.size` provider is legitimate, because the surface size is unknown at construction and changes on resize — that closure encodes lifecycle/timing, not laziness. A closure used only to defer a constant is overhead. This rule generalizes to command counts (`04-pipelines-commands`).
+
 ## Missing Resource Policy
 
 The missing/readiness policy does not belong to the resource. It belongs to the command or pass using the resource because the same resource can have different semantics in different contexts.
