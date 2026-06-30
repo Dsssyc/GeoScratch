@@ -112,6 +112,77 @@ Properties:
 - **Auto staging.** The runtime owns `MAP_READ` staging resources. User buffers do not need map usage for common readback, but the source needs the appropriate copy usage or an explicit resolve path.
 - **Layout-derived views.** Buffer layout from `02-resources` decides whether the result is a `TypedArray`, bytes, or a layout-derived structured view. AoS fields are strided and should not be promised as one contiguous typed array unless explicitly deinterleaved.
 
+## Readback Operation Lifecycle
+
+The runtime should track `ReadbackOperation` objects, not whether a JavaScript `Promise` was awaited. Promise consumption is not a reliable contract in JavaScript: a promise can be passed elsewhere, wrapped, observed through `.then()`, or retained without being awaited. A runtime-owned operation is observable and diagnosable.
+
+Target operation state:
+
+```ts
+type ReadbackState =
+    | 'requested'
+    | 'scheduled'
+    | 'submitted'
+    | 'mapping'
+    | 'ready'
+    | 'consumed'
+    | 'cancelled'
+    | 'failed'
+    | 'disposed'
+```
+
+State semantics:
+
+- `requested` -> source, range or region, layout view, and content epoch are captured.
+- `scheduled` -> a copy, resolve, or map path has been assigned.
+- `submitted` -> GPU work is in flight. It may not be possible to retract, but the result can still be marked unwanted.
+- `mapping` -> staging copy exists and `mapAsync` or equivalent host availability is pending.
+- `ready` -> a CPU-readable result exists but has not been consumed or explicitly retained.
+- `consumed` -> `toArray()` or `toBytes()` returned an owned copy and runtime staging can be released.
+- `cancelled` -> the caller declared that the result is no longer needed. Already submitted GPU work may still finish, but the runtime should discard the result and release staging.
+- `failed` -> device loss, source disposal before copy, map failure, validation error, or budget failure prevented a usable result.
+- `disposed` -> the user-facing operation is closed. The runtime may keep an internal cleanup record until in-flight GPU work and staging release finish. Later read attempts fail with a diagnostic error.
+
+Default host-copy reads are **consume-on-read**:
+
+```ts
+const result = await readback.toArray()  // returns an owned copy
+// operation transitions to consumed; staging can be freed
+```
+
+If repeated reads are required, the caller should opt into retention explicitly:
+
+```ts
+const readback = scratch.readback({
+    source: particles.segment('positions'),
+    after: submitted,
+    retain: 'until-dispose',
+})
+```
+
+Zero-copy or mapped views must be leased, because a mapped range is invalid after unmap:
+
+```ts
+const lease = await readback.map()
+try {
+    const view = lease.view
+    // inspect the mapped data
+} finally {
+    lease.dispose()
+}
+```
+
+Only the lease exposes the mapped view. The operation tracks active leases, and development validation should warn if a lease is not released before the operation or runtime is disposed.
+
+`cancel()` and `dispose()` are explicit:
+
+```ts
+readback.cancel('no longer visible')
+readback.dispose()
+```
+
+`cancel()` means the result is no longer needed. `dispose()` releases local operation ownership; if the operation is still in flight, it behaves like cancel plus user-facing detachment while the runtime keeps enough internal state to release staging later. After disposal, `toArray()`, `toBytes()`, and `map()` reject with a structured diagnostic.
+
 For uncommon cases where the copy or resolve point must be placed inside the command graph, use `ReadbackCommand`:
 
 ```ts
@@ -166,11 +237,65 @@ GPU timing uses the same transfer model:
 
 Pipeline statistics are not part of the current WebGPU core contract and should stay outside the core design unless a future target explicitly supports them.
 
-## Lifetime And Diagnostics
+## Retention, Budgets, And Diagnostics
 
-- Runtime-owned staging resources are released when the `ReadbackOperation` resolves, is cancelled, or is disposed.
-- A requested but unresolved readback is a runtime-owned pending operation, not an unobservable Promise leak. Development validation can warn on stale pending readbacks.
-- Diagnostics should include resource id, allocation version, content epoch, range or region, producer submission, and the operation that created the pending transfer.
+Readback retention is a runtime policy, not hidden garbage collection. The default policy should be conservative:
+
+- keep an operation until it is consumed, cancelled, disposed, or failed
+- warn in development when a pending operation becomes stale
+- warn in development when a ready operation remains unconsumed
+- fail fast or emit a high-severity diagnostic when staging budgets are exceeded
+- never silently evict a readback result unless the operation was explicitly declared evictable
+
+Example configuration shape:
+
+```ts
+const runtime = await ScratchRuntime.create({
+    readback: {
+        staleAfterFrames: 3,
+        staleAfterMs: 250,
+        maxPendingOperations: 16,
+        maxStagingBytes: 64 * 1024 * 1024,
+        onBudgetExceeded: 'throw',
+    },
+})
+```
+
+Potential diagnostic codes:
+
+```ts
+type ReadbackDiagnosticCode =
+    | 'SCRATCH_READBACK_STALE_PENDING'
+    | 'SCRATCH_READBACK_READY_UNCONSUMED'
+    | 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED'
+    | 'SCRATCH_READBACK_CANCELLED'
+    | 'SCRATCH_READBACK_SOURCE_DISPOSED_BEFORE_COPY'
+    | 'SCRATCH_READBACK_RUNTIME_DISPOSED'
+    | 'SCRATCH_READBACK_LEASE_NOT_RELEASED'
+```
+
+Every readback diagnostic should carry enough context for an agent or human to repair the issue without parsing prose:
+
+```ts
+type ReadbackDiagnostic = {
+    code: ReadbackDiagnosticCode
+    severity: 'info' | 'warn' | 'error'
+    operationId: string
+    label?: string
+    state: ReadbackState
+    sourceResourceId: string
+    allocationVersion: number
+    contentEpoch: number
+    rangeOrRegion?: unknown
+    producerSubmissionId?: string
+    ageInFrames?: number
+    ageInMs?: number
+    stagingBytes?: number
+    hint?: string
+}
+```
+
+General validation diagnostics are a broader design topic, but readback-specific diagnostics should follow this machine-readable pattern from the start.
 
 ## Non-Goals
 

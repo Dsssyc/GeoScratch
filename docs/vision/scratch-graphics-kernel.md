@@ -211,8 +211,7 @@ This preserves GeoScratch's design philosophy:
 
 ## Open Questions For Future ADRs And Living Reviews
 
-- What retention and cancellation policy should `ReadbackOperation` use for long-lived or forgotten readbacks?
-- What diagnostic schema should validation expose so humans and agents can repair mistakes without parsing prose?
+- What general diagnostic schema should validation expose so humans and agents can repair mistakes without parsing prose? Readback-specific lifecycle diagnostics are defined in `docs/vision/scratch-api/07-transfers-epochs/`.
 - How strict should buffer layout typing be across CPU views, vertex attributes, WGSL storage, and readback?
 - Should future graph orchestration remain a helper over explicit `Frame` order, or become a separate upper-layer API?
 - How should allocation replacement notify bindings, pass attachments, commands, and pending transfer operations without broad event coupling?

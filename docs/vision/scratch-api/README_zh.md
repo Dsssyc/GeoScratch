@@ -16,7 +16,7 @@
 - `04-pipelines-commands/`: 稳定 pipeline 与可执行 GPU command
 - `05-passes-frames-scheduler/`: 持久 pass spec、逐 submission command 列表、scheduler 校验
 - `06-design-review/`: 从 AI 辅助编写与通用 compute 对等性两个角度，对 `00`–`05` 的评审
-- `07-transfers-epochs/`: presentation 可选的 `Frame` 提交、显式 transfer、allocation version 与 content epoch(解决缺口 2–4)
+- `07-transfers-epochs/`: presentation 可选的 `Frame` 提交、显式 transfer、allocation version、content epoch 与 readback operation 生命周期(解决缺口 2–4)
 
 每个模块都包含英文 `README.md` 和中文 `README_zh.md`。
 
@@ -30,6 +30,7 @@
 - 资源是逻辑句柄，并持有 physical GPU allocation version 与 content epoch。
 - 资源缺失或未 ready 时的策略必须由 command 或 pass 使用点显式声明。
 - CPU/GPU transfer 必须显式表达: upload、readback、copy 是 command 或 operation，不是隐藏的 `Resource` 方法。
+- `ReadbackOperation` 有显式生命周期、retention、cancellation、disposal、budget 与 diagnostic 语义。
 - 核心 API 中 bind layout 必须显式声明。Shader reflection 只作为开发辅助或校验工具。
 - `Command` 是 draw、dispatch、copy、upload 等可执行 GPU 动作的统一名称。
 - `PassSpec` 表达持久 pass 形状。`Frame` 把 pass spec 与当前 submission 的 command 列表绑定，并且可以带或不带 surface presentation。

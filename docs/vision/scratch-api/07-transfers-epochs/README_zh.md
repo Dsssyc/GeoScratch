@@ -112,6 +112,77 @@ const values = await readback.toArray()
 - **自动 staging。** runtime 持有 `MAP_READ` staging resources。常见 readback 下用户 buffer 不需要 map usage，但 source 需要合适的 copy usage 或显式 resolve 路径。
 - **由 layout 派生视图。** `02-resources` 的 buffer layout 决定结果是 `TypedArray`、bytes，还是 layout-derived structured view。AoS 字段是 strided 的，除非显式 deinterleave，否则不承诺为一个连续 typed array。
 
+## Readback Operation 生命周期
+
+runtime 应追踪 `ReadbackOperation` 对象，而不是追踪某个 JavaScript `Promise` 是否被 await。Promise 消费在 JavaScript 中不是可靠契约: promise 可以被传到别处、被包装、通过 `.then()` 观察，或被保留但不 await。runtime-owned operation 才是可观察、可诊断的对象。
+
+目标 operation 状态:
+
+```ts
+type ReadbackState =
+    | 'requested'
+    | 'scheduled'
+    | 'submitted'
+    | 'mapping'
+    | 'ready'
+    | 'consumed'
+    | 'cancelled'
+    | 'failed'
+    | 'disposed'
+```
+
+状态语义:
+
+- `requested` -> 已捕获 source、range 或 region、layout view 与 content epoch。
+- `scheduled` -> 已选择 copy、resolve 或 map 路径。
+- `submitted` -> GPU work 已在飞行中。它可能无法撤回，但结果仍可标记为不再需要。
+- `mapping` -> staging copy 已存在，正在等待 `mapAsync` 或等价 host 可用性。
+- `ready` -> CPU 可读结果已存在，但尚未消费或显式 retain。
+- `consumed` -> `toArray()` 或 `toBytes()` 已返回 owned copy，runtime staging 可释放。
+- `cancelled` -> 调用方声明不再需要结果。已提交的 GPU work 仍可能完成，但 runtime 应丢弃结果并释放 staging。
+- `failed` -> device loss、copy 前 source disposal、map failure、validation error 或 budget failure 导致无法得到可用结果。
+- `disposed` -> user-facing operation 已关闭。runtime 可以保留内部 cleanup record，直到 in-flight GPU work 和 staging release 结束。之后再读取会以 diagnostic error 失败。
+
+默认 host-copy 读取采用 **consume-on-read**:
+
+```ts
+const result = await readback.toArray()  // returns an owned copy
+// operation transitions to consumed; staging can be freed
+```
+
+如果需要重复读取，调用方应显式选择 retention:
+
+```ts
+const readback = scratch.readback({
+    source: particles.segment('positions'),
+    after: submitted,
+    retain: 'until-dispose',
+})
+```
+
+Zero-copy 或 mapped view 必须以 lease 表达，因为 mapped range 在 unmap 后失效:
+
+```ts
+const lease = await readback.map()
+try {
+    const view = lease.view
+    // inspect the mapped data
+} finally {
+    lease.dispose()
+}
+```
+
+只有 lease 暴露 mapped view。operation 追踪 active leases; 如果 lease 在 operation 或 runtime dispose 前没有释放，开发期 validation 应告警。
+
+`cancel()` 与 `dispose()` 是显式操作:
+
+```ts
+readback.cancel('no longer visible')
+readback.dispose()
+```
+
+`cancel()` 表示结果不再需要。`dispose()` 释放本地 operation 所有权; 若 operation 仍在飞行中，它等价于 cancel 加 user-facing detachment，同时 runtime 保留足够内部状态以便稍后释放 staging。dispose 后，`toArray()`、`toBytes()` 与 `map()` 都应以结构化 diagnostic reject。
+
 少数情况下，如果 copy 或 resolve 点必须放进 command graph 的特定位置，使用 `ReadbackCommand`:
 
 ```ts
@@ -166,11 +237,65 @@ GPU timing 复用同一套 transfer 模型:
 
 Pipeline statistics 不是当前 WebGPU core contract 的一部分，除非未来目标明确支持，否则不进入核心设计。
 
-## 生命周期与诊断
+## Retention、预算与诊断
 
-- runtime-owned staging resources 在 `ReadbackOperation` resolve、cancel 或 dispose 时释放。
-- 被请求但未 resolve 的 readback 是 runtime-owned pending operation，不是不可观察的 Promise leak。开发期 validation 可以对 stale pending readbacks 告警。
-- 诊断应包含 resource id、allocation version、content epoch、range 或 region、producer submission，以及创建 pending transfer 的 operation。
+Readback retention 是 runtime policy，不是隐藏 garbage collection。默认策略应保守:
+
+- operation 保留到 consumed、cancelled、disposed 或 failed
+- pending operation 过旧时在开发期告警
+- ready operation 长时间未消费时在开发期告警
+- staging budget 超限时 fail fast 或发出高严重度诊断
+- 除非 operation 显式声明 evictable，否则绝不静默淘汰 readback result
+
+配置形状示例:
+
+```ts
+const runtime = await ScratchRuntime.create({
+    readback: {
+        staleAfterFrames: 3,
+        staleAfterMs: 250,
+        maxPendingOperations: 16,
+        maxStagingBytes: 64 * 1024 * 1024,
+        onBudgetExceeded: 'throw',
+    },
+})
+```
+
+候选 diagnostic codes:
+
+```ts
+type ReadbackDiagnosticCode =
+    | 'SCRATCH_READBACK_STALE_PENDING'
+    | 'SCRATCH_READBACK_READY_UNCONSUMED'
+    | 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED'
+    | 'SCRATCH_READBACK_CANCELLED'
+    | 'SCRATCH_READBACK_SOURCE_DISPOSED_BEFORE_COPY'
+    | 'SCRATCH_READBACK_RUNTIME_DISPOSED'
+    | 'SCRATCH_READBACK_LEASE_NOT_RELEASED'
+```
+
+每条 readback diagnostic 都应携带足够上下文，使 agent 或人无需解析 prose 也能修复问题:
+
+```ts
+type ReadbackDiagnostic = {
+    code: ReadbackDiagnosticCode
+    severity: 'info' | 'warn' | 'error'
+    operationId: string
+    label?: string
+    state: ReadbackState
+    sourceResourceId: string
+    allocationVersion: number
+    contentEpoch: number
+    rangeOrRegion?: unknown
+    producerSubmissionId?: string
+    ageInFrames?: number
+    ageInMs?: number
+    stagingBytes?: number
+    hint?: string
+}
+```
+
+通用 validation diagnostics 是更大的设计议题，但 readback-specific diagnostics 应从一开始就遵循这种 machine-readable pattern。
 
 ## 非目标
 

@@ -24,35 +24,43 @@ Coverage check for this pass:
 - No core `resource.toArray()` / `resource.toBytes()` / `resource.write()` sugar: covered by `02-resources` and `07-transfers-epochs`.
 - Future-agent routing: covered by `AGENTS.md` and the `scratch-api` module index.
 
+### Pending Readback Lifecycle
+
+Resolved in `docs/vision/scratch-api/07-transfers-epochs/`: stale readback detection is defined over runtime-owned `ReadbackOperation` objects, not over whether a JavaScript `Promise` was awaited. The vision now defines the target operation state machine, consume-on-read default behavior, explicit retention, mapped-view leases, `cancel()` / `dispose()` semantics, staging budgets, and readback-specific diagnostic codes.
+
+Coverage check for this pass:
+
+- Promise await detection is explicitly rejected as the core contract: covered by `07-transfers-epochs`.
+- Runtime-owned operation states from `requested` through `disposed`: covered by `07-transfers-epochs`.
+- Default consume-on-read and explicit `retain: 'until-dispose'`: covered by `07-transfers-epochs`.
+- Zero-copy mapped views use an explicit lease with disposal: covered by `07-transfers-epochs`.
+- `cancel()` and `dispose()` semantics: covered by `07-transfers-epochs`.
+- Readback retention budgets and no hidden eviction by default: covered by `07-transfers-epochs`.
+- Machine-readable readback diagnostics with operation/source/epoch/age/byte context: covered by `07-transfers-epochs`.
+
 ## Current Review Items
 
-### 1. Pending Readback Leak Detection
-
-The docs now phrase stale readbacks as runtime-owned pending `ReadbackOperation` objects, not unobservable "never awaited" Promises. The next design pass still needs concrete retention, cancellation, and diagnostic policies for long-lived pending operations.
-
-Risk if unresolved: staging resources may leak or diagnostics may be too vague to repair in an agentic loop.
-
-### 2. `Frame` Naming And Submission Mental Model
+### 1. `Frame` Naming And Submission Mental Model
 
 The accepted direction keeps `Frame` as the single submission builder, with presentation optional. That is workable, but the name can still bias readers toward display frames. All docs should consistently define `Frame` as a presentation-optional submission unit, and examples should avoid implying a surface is required.
 
 Risk if unresolved: compute-only jobs may be misdesigned as render-loop-only workloads.
 
-### 3. QuerySet Scope
+### 2. QuerySet Scope
 
 Core WebGPU query types are timestamp and occlusion. Pipeline statistics should remain outside the core design unless a future target explicitly supports it.
 
 Risk if unresolved: TypeScript declarations or runtime validators may expose unsupported WebGPU query types.
 
-### 4. Buffer Layout Type Grammar
+### 3. Buffer Layout Type Grammar
 
 The compositional buffer layout model is valuable, but it needs a sharper typed contract. A field `format` may mean different things for CPU views, vertex attributes, WGSL storage structs, and readback. The design should define usage-specific lowering, alignment mode, and failure diagnostics.
 
 Risk if unresolved: the API may look type-safe while still allowing invalid or misleading storage-buffer layouts.
 
-### 5. Validation Diagnostic Schema
+### 4. Validation Diagnostic Schema
 
-The intelligent-friendly loop needs machine-readable diagnostics, not only `warn` / `throw` and prose messages. A future design should define something like `ScratchDiagnostic { code, severity, path, expected, actual, hint }` for validation, shader cross-checks, resource readiness, and submission ordering.
+The intelligent-friendly loop needs machine-readable diagnostics, not only `warn` / `throw` and prose messages. Readback-specific diagnostics are now covered in `07-transfers-epochs`, but a future design should still define the general schema for validation, shader cross-checks, resource readiness, and submission ordering.
 
 Risk if unresolved: agents must parse natural-language errors, making iterative repair fragile.
 
