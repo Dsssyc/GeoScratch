@@ -1,7 +1,7 @@
 # Runtime And Surface
 
 Status: Vision draft
-Date: 2026-06-20
+Date: 2026-06-30
 
 ## Decision
 
@@ -38,7 +38,7 @@ const surface = scratch.surface(canvas, {
 - device limits and features
 - resource registry
 - pipeline and bind group caches
-- frame scheduler defaults
+- submission scheduler defaults
 - device-loss state
 
 `Surface` owns:
@@ -77,6 +77,8 @@ frame.render(outputPass, [compositeTo(surface.currentView(frame))])
 ```
 
 The exact syntax may change, but the semantic boundary should not.
+
+`Frame` here means the presentation-optional submission builder defined in `05` / `07`. A compute-only `Frame` has no current surface texture; only a presentation frame can borrow a surface current texture view.
 
 ## Device Loss
 

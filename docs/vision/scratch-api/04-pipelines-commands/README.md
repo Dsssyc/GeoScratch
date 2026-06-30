@@ -1,7 +1,7 @@
 # Pipelines And Commands
 
 Status: Vision draft
-Date: 2026-06-20
+Date: 2026-06-30
 
 ## Decision
 
@@ -31,7 +31,7 @@ Compute pipelines own:
 
 Pipelines do not own:
 
-- per-frame command counts
+- per-submission command counts
 - resource readiness policy
 - pass membership
 - concrete bind set resource versions
@@ -46,6 +46,7 @@ Target command families:
 - `DispatchCommand`
 - `CopyCommand`
 - `UploadCommand`
+- `ReadbackCommand` as an explicit staging escape hatch, not the default readback path
 - future explicit clear or resolve commands, if needed
 
 Every command should declare:
@@ -67,7 +68,7 @@ type DrawCount =
     | { vertexCount: number, instanceCount?: number, firstVertex?: number, firstInstance?: number }
     | { indexCount: number, instanceCount?: number, firstIndex?: number, baseVertex?: number, firstInstance?: number }
     | { indirect: BufferResource, offset?: number }
-    | ((frame: FrameContext) => DrawCount)
+    | ((context: FrameContext) => DrawCount)
 ```
 
 Static values are the default path:
@@ -117,7 +118,7 @@ Dispatch count follows the same model:
 type DispatchCount =
     | { workgroups: [number, number?, number?] }
     | { indirect: BufferResource, offset?: number }
-    | ((frame: FrameContext) => DispatchCount)
+    | ((context: FrameContext) => DispatchCount)
 ```
 
 Example:
@@ -145,6 +146,8 @@ Draw and dispatch counts span three cases; choose by what the count actually dep
 - GPU-dynamic — produced on the GPU (e.g. compute writes draw or dispatch arguments) → prefer `indirect`. It needs no readback, is fully declarative, and is visible to validation.
 
 Verifiability ladder, prefer the top: indirect buffer > tracked handle > closure.
+
+`FrameContext` is the context of the current submission. The name follows the `Frame` builder, but it does not imply a presentation surface exists.
 
 ## Readiness Policy
 

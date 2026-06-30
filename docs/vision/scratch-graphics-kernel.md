@@ -6,11 +6,11 @@ Vision draft
 
 ## Date
 
-2026-06-17
+2026-06-30
 
 ## Purpose
 
-This document records the target design philosophy for the `scratch` layer so later ADRs and implementation plans can be checked against the same architectural north star.
+This document records the target design philosophy for the `scratch` layer so later ADRs, implementation plans, and living review notes can be checked against the same architectural north star.
 
 `scratch` is the GPU execution kernel of GeoScratch — compute and graphics are co-equal uses. `geo` is the scene, space, layer, and geospatial resource-policy layer built on top of that kernel.
 
@@ -38,7 +38,7 @@ The kernel must reduce low-level WebGPU burden without assuming one geospatial s
 - buffer, texture, sampler, shader, binding, pipeline, pass, and command construction
 - bind group layout and bind group lifecycle
 - pipeline creation and reuse
-- frame scheduling and command submission
+- submission scheduling and command completion
 - dependency-aware invalidation and skip logic
 - escape hatches for direct WebGPU-like control
 
@@ -67,11 +67,11 @@ Descriptor-style APIs are still useful, but their job is to describe stable shap
 
 Descriptor-style APIs become weak when they are asked to model time-varying behavior:
 
-- whether a command runs in the current frame
+- whether a command runs in the current submission
 - which resource version is read or written
 - when async resource availability changes execution
 - when a resize invalidates attachments and bind groups
-- when frame history is preserved, cleared, or reprojected
+- when presentation history is preserved, cleared, or reprojected
 - when a pipeline, layout, or bind group must be rebuilt
 - when a pass should be skipped because its inputs are not ready
 
@@ -123,14 +123,14 @@ A command should be able to declare:
 - which resources it reads
 - which resources it writes
 - how its draw or dispatch count is computed
-- whether it is ready for the current frame
+- whether it is ready for the current submission
 - whether it can be skipped without side effects
 
 This keeps low-level freedom while giving the scheduler enough information to reduce CPU work and avoid rebuilding WebGPU objects unnecessarily.
 
-### Frame Scheduler
+### Frame / Submission Scheduler
 
-The scheduler should organize commands and passes for a frame.
+The scheduler should organize commands and passes for a `Frame`, where `Frame` means a presentation-optional submission builder. A presentation frame is one mode; compute-only and offscreen submissions use the same core model.
 
 It should be responsible for:
 
@@ -142,7 +142,7 @@ It should be responsible for:
 - skipping empty work
 - invalidating dependent bindings or attachments when resources are replaced
 
-The scheduler may eventually be implemented as a render graph or frame graph, but the important abstraction is dependency-aware frame execution, not a particular graph API shape.
+The scheduler may eventually be implemented as a render graph or frame graph, but the important abstraction is dependency-aware submission execution, not a particular graph API shape.
 
 ### Escape Hatches
 
@@ -194,7 +194,7 @@ If the answer is no, the abstraction likely belongs in `geo`, an application lay
 The preferred long-term direction is:
 
 ```text
-scratch = GPU resource model + binding model + command model + frame scheduler
+scratch = GPU resource model + binding model + command model + submission scheduler
 geo     = spatial models + layer policies + geospatial resource loading
 ```
 
@@ -203,14 +203,14 @@ This preserves GeoScratch's design philosophy:
 - keep WebGPU explicit enough for specialized visualization and compute
 - remove repetitive low-level mistakes from scene-layer code
 - avoid forcing one scene graph or one geospatial world model
-- make dynamic rendering behavior explicit through resource and command state
+- make dynamic GPU behavior explicit through resource and command state
 - improve CPU-side performance by letting the kernel understand dependencies and invalidation
 
-## Open Questions For Future ADRs
+## Open Questions For Future ADRs And Living Reviews
 
-- What is the minimal command object that can replace draw/dispatch range stored on `Binding`?
-- Should pipeline layout be derived from binding shape, shader reflection, explicit user layout, or a combination?
-- How much dependency information should commands declare explicitly?
-- Should the scheduler expose a graph API, or remain an internal implementation behind stages and passes?
-- How should resource replacement notify bindings, pass attachments, and commands without broad event coupling?
+- What version-pinned readback or pending-readback handle is needed beyond `await buffer.toArray()`?
+- What diagnostic schema should validation expose so humans and agents can repair mistakes without parsing prose?
+- How strict should buffer layout typing be across CPU views, vertex attributes, WGSL storage, and readback?
+- Should future graph orchestration remain a helper over explicit `Frame` order, or become a separate upper-layer API?
+- How should resource replacement notify bindings, pass attachments, commands, and readback requests without broad event coupling?
 - What compatibility guarantees should the raw primitive API keep once a recommended command/scheduler API exists?

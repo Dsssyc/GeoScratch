@@ -1,9 +1,9 @@
 # Scratch API Redesign
 
 Status: Vision draft
-Date: 2026-06-20
+Date: 2026-06-30
 
-This directory records the modular target design for the next `scratch` API. It expands the graphics-kernel direction described in `docs/vision/scratch-graphics-kernel.md` into smaller interface layers.
+This directory records the modular target design for the next `scratch` API. It expands the GPU-kernel direction described in `docs/vision/scratch-graphics-kernel.md` into smaller interface layers.
 
 The documents here are design references, not implementation status. They should be read before changing `packages/geoscratch/src/gpu/`, `packages/geoscratch/src/scratch.js`, or the public `scratch` API shape.
 
@@ -14,14 +14,15 @@ The documents here are design references, not implementation status. They should
 - `02-resources/`: logical resources, physical GPU objects, versions, readiness, and replacement
 - `03-bindings/`: explicit bind layouts, bind sets, bind group cache, and shader inspection helpers
 - `04-pipelines-commands/`: stable pipelines and executable GPU commands
-- `05-passes-frames-scheduler/`: persistent pass specs, per-frame command lists, and scheduler validation
+- `05-passes-frames-scheduler/`: persistent pass specs, per-submission command lists, and scheduler validation
 - `06-design-review/`: review of `00`–`05` against AI-assisted authoring and general-purpose compute parity
+- `07-submission-readback/`: presentation-optional `Frame` submission and resource-as-handle readback (resolves Gaps 2–4)
 
 Each module has an English `README.md` and a Chinese `README_zh.md`.
 
 ## Confirmed Top-Level Decisions
 
-- `scratch` is the graphics kernel. `geo` owns scene, spatial, layer, tiling, loading, and geospatial policy.
+- `scratch` is the GPU execution kernel (compute and graphics co-equal). `geo` owns scene, spatial, layer, tiling, loading, and geospatial policy.
 - During `0.x.x`, breaking API redesign is allowed and expected when it removes obsolete concepts.
 - Existing APIs are reference material, not compatibility constraints.
 - The core API uses an explicit async `ScratchRuntime`. There is no implicit global device in the kernel contract.
@@ -30,5 +31,5 @@ Each module has an English `README.md` and a Chinese `README_zh.md`.
 - Resource missing/readiness policy must be declared by command or pass usage.
 - Bind layouts are explicit in the core API. Shader reflection is only a development helper or validator.
 - `Command` is the canonical name for draw, dispatch, copy, upload, and related executable GPU actions.
-- `PassSpec` is persistent pass shape. `Frame` binds pass specs to the current frame's command list.
-- The first scheduler model is explicit frame order plus dependency validation. Automatic sorting belongs in an optional upper orchestration layer.
+- `PassSpec` is persistent pass shape. `Frame` binds pass specs to the current submission's command list and may or may not present to a surface.
+- The first scheduler model is explicit submission order plus dependency validation. Automatic sorting belongs in an optional upper orchestration layer.

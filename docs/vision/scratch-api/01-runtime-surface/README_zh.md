@@ -1,7 +1,7 @@
 # Runtime 与 Surface
 
 状态: Vision draft
-日期: 2026-06-20
+日期: 2026-06-30
 
 ## 决策
 
@@ -38,7 +38,7 @@ const surface = scratch.surface(canvas, {
 - device limits 和 features
 - resource registry
 - pipeline 与 bind group caches
-- frame scheduler 默认配置
+- submission scheduler 默认配置
 - device-loss 状态
 
 `Surface` 拥有:
@@ -77,6 +77,8 @@ frame.render(outputPass, [compositeTo(surface.currentView(frame))])
 ```
 
 最终语法可以变化，但语义边界不应变化。
+
+这里的 `Frame` 指 `05` / `07` 定义的 presentation 可选提交 builder。compute-only 的 `Frame` 没有 surface current texture; 只有 presentation frame 能借用 surface current texture view。
 
 ## Device Loss
 

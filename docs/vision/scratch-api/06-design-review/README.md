@@ -1,18 +1,18 @@
 # Design Review
 
 Status: Review (vision draft)
-Date: 2026-06-20
+Date: 2026-06-30
 
 ## Scope
 
-This module reviews `00`–`05` against two lenses and records the revisions that survived scrutiny:
+This module records the review that originally tested `00`–`05` against two lenses and motivated the later `07` addition:
 
 1. **AI-assisted authoring** ("vibe coding"): does the design still fit when most code that uses it is written with AI help?
 2. **General-purpose compute parity**: `scratch`'s goal, like WebGPU's, is a CPU-side mapping of GPU capability — so compute must be a co-equal first-class use, not a graphics adjunct. Does the design support serious high-performance parallel compute?
 
 Conclusion: not a rewrite. The substance of `00`–`05` (explicit, declarative, validated, fail-fast) is already well-aligned. What needs change is the *primary objective's wording*, three targeted authoring points (Part 1), and **raising compute from an adjunct to a first-class use** (Part 2).
 
-These are proposals layered on top of `00`–`05`, not yet folded in. This module exists for review first.
+Status: Part 1 (Revisions A/B/C), Gap 1 (positioning), and Gap 5 (compute validation + dynamic offsets) are **applied** to `00`–`05` and `scratch-graphics-kernel.md`. Gaps 2–4 (async readback, submission unit, GPU timing/queries) are now **designed** in `07-submission-readback`. This module is the review record; `00`–`05` and `07` are the source of truth for what is applied. Ongoing open review items live under `docs/review/`.
 
 ## Part 1 — AI-Era Authoring Lens
 
@@ -34,7 +34,7 @@ This lens — pragmatic function first, then verifiability-as-constraint — rep
 
 Replace the boilerplate-reduction objective.
 
-Current (`00-overview`):
+Earlier (`00-overview`, before Revision A):
 
 > The new `scratch` API should reduce WebGPU boilerplate while preserving direct GPU control.
 
@@ -46,7 +46,7 @@ Proposed objective:
 
 Consequences:
 
-- Keep the "verbose" features — explicit `resources.read/write`, explicit `BindLayout`, explicit frame order. They are the most future-proof part of the design. Do not auto-infer them merely for brevity.
+- Keep the "verbose" features — explicit `resources.read/write`, explicit `BindLayout`, explicit submission order. They are the most future-proof part of the design. Do not auto-infer them merely for brevity.
 - Every "smart" feature (resource versioning, readiness, device-loss rehydration) must expose inspectable and assertable state, such as a readable `version` / `state` (`02-resources` already defines `ResourceState`). A smart feature that hides *why* a rebuild happened is net-negative.
 - This does not weaken the existing escape-hatch requirement. Direct low-level control stays.
 
@@ -102,13 +102,13 @@ Added after reviewing `00`–`05` against the requirement that `scratch` be a CP
 
 ### Gaps (ordered by severity)
 
-#### Gap 1 — Positioning: "graphics kernel" undersells compute (must fix)
+#### Gap 1 — Positioning: "graphics kernel" undersold compute (fixed)
 
-`scratch-graphics-kernel.md` calls scratch "the **graphics** kernel"; `00-overview` says "graphics execution kernel"; compute appears as "GPU compute-heavy **visualization**" and "visualization and compute tasks" — compute framed as serving visualization.
+Earlier drafts called scratch "the **graphics** kernel"; `00-overview` said "graphics execution kernel"; compute appeared as "GPU compute-heavy **visualization**" and "visualization and compute tasks" — compute framed as serving visualization.
 
 But the WebGPU analogy is the point: WebGPU is a **GPU** API, with graphics and compute co-equal. If compute is a first-class use, the top-level mental model should be re-centered as a **GPU execution kernel** (compute + graphics). Otherwise compute is silently treated as second-class in every downstream decision.
 
-#### Gap 2 — Async readback is unmodeled (must fix; functional + verifiability)
+#### Gap 2 — Async readback was unmodeled (fixed at the vision level)
 
 Across `00`–`05`, only `map` appears as a buffer usage (`02-resources`). There is no readback / `mapAsync` / awaitable-result mechanism: command families are Draw / Dispatch / Copy / Upload (no Readback), and the only submission unit is `frame…submit()` — fire-and-forget, with no `queue.onSubmittedWorkDone`.
 
@@ -116,19 +116,19 @@ GPGPU routinely needs: dispatch → copy to a readback buffer → `await map` �
 
 This also breaks Revision A's verifiability objective: without readback you cannot write a CPU-side test that asserts a compute kernel's output is correct. So this gap fails both the functional and the verifiability test.
 
-Design space (to settle in brainstorming, not here): a `ReadbackCommand` plus an awaitable result handle, or a submission-level `onComplete` / readback promise. The semantic requirement is an awaitable GPU→CPU result; the exact shape is open.
+Resolved (`07-submission-readback`): the resource is its own readback handle — `await buffer.toArray()` — with an explicit `await` and provenance from the version model. `ReadbackCommand` is kept only as an ordered-staging escape hatch.
 
-#### Gap 3 — Submission unit is presentation-flavored (should fix)
+#### Gap 3 — Submission unit was presentation-flavored (fixed at the vision level)
 
 `05`'s only submission unit is `Frame`, with presentation-leaning semantics (skip empty passes, current frame, surface integration). Compute is often not a frame: one-shot jobs, its own cadence, or N iterations before any present.
 
 The model already handles "many dispatches recorded into one frame, submitted once" well — good for GPU-bound iteration. What it does not handle is iteration with periodic CPU readback/feedback, which couples back to Gap 2.
 
-Resolution direction: either a non-presentation submission concept, or explicitly define `Frame` as a "submission batch" with a compute entry that carries no display semantics.
+Resolved (`07-submission-readback`): `Frame` is generalized to a presentation-optional submission unit — no surface means a compute or offscreen submission — rather than adding a separate submission type.
 
-#### Gap 4 — No GPU timing / queries (should fix)
+#### Gap 4 — No GPU timing / queries (fixed at the vision level)
 
-Nothing in `00`–`05` mentions `timestamp-query` or `GPUQuerySet` (the only "profiling" reference is about validation mode, not GPU timing). "High-performance" implies measurement; without timestamp / pipeline-statistics queries you cannot profile kernels. It is a feature-gated optional, but the design needs a home for it: a query resource kind plus a pass/command touchpoint.
+Earlier `00`–`05` did not mention `timestamp-query` or `GPUQuerySet` (the only "profiling" reference was about validation mode, not GPU timing). "High-performance" implies measurement; without timestamp queries you cannot profile kernels. It is feature-gated, but the design needs a home for it: a query resource kind plus a pass/command touchpoint.
 
 #### Gap 5 — Compute-specific validation + binding completeness (later)
 
@@ -143,19 +143,18 @@ Nothing in `00`–`05` mentions `timestamp-query` or `GPUQuerySet` (the only "pr
 
 Net: not a rewrite — raise compute from adjunct to first-class (reposition + add readback/submission semantics + leave room for timing and compute validation). Done right, the read/write dependency model becomes GPGPU's strength.
 
-## Open decision points
+## Decision status
 
-Part 1 (authoring):
+Applied to `00`–`05`, `07`, and `scratch-graphics-kernel.md`:
 
-1. Adopt the revised primary objective wording in `00-overview`? (Revision A)
-2. Adopt the closure triage and fold it into `02-resources` and `04-pipelines-commands`? (Revision B)
-3. Adopt reflection as a default-warn, suppressible dev cross-check in `03-bindings`? (Revision C)
-4. Confirm `BindSet` name stays.
+1. Revised primary objective wording in `00-overview` (Revision A).
+2. Closure triage in `02-resources` and `04-pipelines-commands` (Revision B).
+3. Reflection as a default-warn, suppressible dev cross-check in `03-bindings` (Revision C).
+4. `BindSet` name stays (confirmed).
+5. Re-centered as a "GPU execution kernel", compute co-equal (Gap 1).
+6. Awaitable readback via the resource handle, `await buffer.toArray()` (Gap 2) — see `07-submission-readback`.
+7. `Frame` generalized to a presentation-optional submission unit (Gap 3) — see `07`.
+8. `QuerySet` resource + `timestampWrites`, resolved through the readback path (Gap 4) — see `07`.
+9. Compute-limit checks and dynamic offsets in validation / bindings (Gap 5).
 
-Part 2 (compute):
-
-5. Re-center the vision as a "GPU execution kernel" with compute co-equal to graphics? (Gap 1)
-6. Add an awaitable readback/result path to the command + submission model? (Gap 2)
-7. Separate a "submission batch" concept from the presentation `Frame`? (Gap 3)
-8. Reserve a place for timestamp / query support? (Gap 4)
-9. Fold compute-limit checks and dynamic offsets into validation / bindings? (Gap 5)
+Resolution notes: Gaps 2–4 became one design (`07-submission-readback`). The submission fork (Gap 3) was resolved by generalizing `Frame` (presentation optional) rather than adding a neutral `Submission` type; readback (Gap 2) is the resource-as-handle model with an explicit `await`; timing (Gap 4) reuses the readback path.

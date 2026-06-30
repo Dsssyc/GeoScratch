@@ -1,9 +1,9 @@
 # Scratch API 重设计
 
 状态: Vision draft
-日期: 2026-06-20
+日期: 2026-06-30
 
-本目录记录下一版 `scratch` API 的模块化目标设计。它把 `docs/vision/scratch-graphics-kernel.md` 中的图形内核方向拆成更小的接口层级。
+本目录记录下一版 `scratch` API 的模块化目标设计。它把 `docs/vision/scratch-graphics-kernel.md` 中的 GPU 内核方向拆成更小的接口层级。
 
 这里的文档是设计参考，不代表实现已完成。修改 `packages/geoscratch/src/gpu/`、`packages/geoscratch/src/scratch.js` 或公开 `scratch` API 形状前，应先阅读这些文档。
 
@@ -14,14 +14,15 @@
 - `02-resources/`: 逻辑资源、物理 GPU 对象、版本、readiness、资源替换
 - `03-bindings/`: 显式 bind layout、bind set、bind group 缓存、shader 检查辅助
 - `04-pipelines-commands/`: 稳定 pipeline 与可执行 GPU command
-- `05-passes-frames-scheduler/`: 持久 pass spec、逐帧 command 列表、scheduler 校验
+- `05-passes-frames-scheduler/`: 持久 pass spec、逐 submission command 列表、scheduler 校验
 - `06-design-review/`: 从 AI 辅助编写与通用 compute 对等性两个角度，对 `00`–`05` 的评审
+- `07-submission-readback/`: presentation 可选的 `Frame` 提交，以及"资源即句柄"的 readback(解决缺口 2–4)
 
 每个模块都包含英文 `README.md` 和中文 `README_zh.md`。
 
 ## 已确认的顶层决策
 
-- `scratch` 是图形内核。`geo` 负责场景、空间、图层、瓦片、加载和地理可视化策略。
+- `scratch` 是 GPU 执行内核(compute 与图形同级)。`geo` 负责场景、空间、图层、瓦片、加载和地理可视化策略。
 - 在 `0.x.x` 阶段，允许并鼓励为了清理过时概念而进行破坏性 API 重设计。
 - 现有 API 只是需求样本和反例材料，不是兼容性约束。
 - 核心 API 使用显式异步 `ScratchRuntime`。内核契约中不保留隐式全局 device。
@@ -30,5 +31,5 @@
 - 资源缺失或未 ready 时的策略必须由 command 或 pass 使用点显式声明。
 - 核心 API 中 bind layout 必须显式声明。Shader reflection 只作为开发辅助或校验工具。
 - `Command` 是 draw、dispatch、copy、upload 等可执行 GPU 动作的统一名称。
-- `PassSpec` 表达持久 pass 形状。`Frame` 把 pass spec 与当前帧 command 列表绑定。
-- 第一版 scheduler 采用显式 frame 顺序加依赖校验。自动排序属于可选上层编排能力。
+- `PassSpec` 表达持久 pass 形状。`Frame` 把 pass spec 与当前 submission 的 command 列表绑定，并且可以带或不带 surface presentation。
+- 第一版 scheduler 采用显式 submission 顺序加依赖校验。自动排序属于可选上层编排能力。

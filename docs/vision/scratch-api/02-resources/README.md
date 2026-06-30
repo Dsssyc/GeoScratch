@@ -1,7 +1,7 @@
 # Resources
 
 Status: Vision draft
-Date: 2026-06-20
+Date: 2026-06-30
 
 ## Decision
 
@@ -33,6 +33,7 @@ Target resource families:
 - `TextureResource`
 - `SamplerResource`
 - `ShaderModuleResource`
+- `QuerySetResource` (timestamp / occlusion, feature-gated)
 - frame-scoped borrowed surface texture views
 
 Surface texture views are not persistent `TextureResource` objects.
@@ -48,7 +49,7 @@ Buffers should support:
 - copy source and copy destination usage
 - storage, vertex, index, uniform, indirect, and map usage where applicable
 
-Static data should not require a per-frame callback. Dynamic data should mark dirty ranges and let the frame prepare step batch uploads.
+Static data should not require a per-submission callback. Dynamic data should mark dirty ranges and let the `Frame` / submission prepare step batch uploads.
 
 Example shape:
 
@@ -57,13 +58,50 @@ const positions = scratch.buffer({
     label: 'positions',
     usage: ['vertex', 'storage', 'copyDst'],
     data: new Float32Array(...),
-    layout: [
+    struct: [
         { name: 'position', format: 'float32x3' },
     ],
 })
 
 positions.write(nextPositions, { offset: 0 })
 ```
+
+## Buffer Layout
+
+A buffer is raw bytes; its layout declares how those bytes are typed and is the single source of truth for byte interpretation on both the GPU side (vertex layout / WGSL struct) and the CPU side (readback views).
+
+Layout is **compositional**, not a fixed set of modes. A buffer is a sequence of **segments**; each segment is an array (`count`) of an **element**; an element is either a scalar/vector `format` or a nested `struct` of named fields — and struct fields are elements too, so structs nest.
+
+```ts
+const sim = scratch.buffer({
+    usage: ['storage', 'copySrc'],
+    segments: [
+        // a segment of structs (AoS region)
+        { name: 'particles', count: 1000, struct: [
+            { name: 'pos', format: 'float32x3' },
+            { name: 'vel', format: 'float32x3' },
+        ] },
+        // a segment of scalars (SoA region)
+        { name: 'flags', count: 1000, format: 'sint8' },
+    ],
+})
+```
+
+The familiar shapes are just points in this one grammar:
+
+- **Homogeneous** — one segment, scalar element.
+- **AoS** — one segment, struct element.
+- **SoA** — many segments, scalar elements.
+- **SoA of AoS** — many segments, some with struct elements (above).
+
+A single-segment buffer may inline the element as sugar — top-level `format` + `count`, or `struct` + `count` — which is exactly a one-segment layout.
+
+The runtime computes offsets, stride, and padding from the declared layout for the target usage and exposes them, so the CPU views and the GPU interpretation stay in sync without hand-computed padding. Two constraints:
+
+- **Alignment / padding.** WGSL storage structs follow alignment rules (`vec3<f32>` aligns to 16, struct size rounds up to its largest member) that differ from the looser vertex-attribute rules. A segment bound separately as a storage binding with a dynamic offset must start on `minStorageBufferOffsetAlignment` (commonly 256); the runtime pads and reports the real byte offsets.
+- **Sub-32-bit types.** WGSL has no `i8`/`u8` storage scalar. An 8-bit field is fine as a vertex attribute (`sint8x4`, `unorm8x4`) and for readback, but a compute shader reads it as `u32` and unpacks. Choose the field type by who consumes it.
+
+Readback follows the same composition (see `07-submission-readback`). A segment is addressed by name: a scalar segment yields a `TypedArray` (`await buf.segment('flags').toArray()`); a struct segment yields an `ArrayBuffer` plus layout-derived `ArrayBufferView`s (`buf.segment('particles').at(i)`, `.field('pos')`) — AoS fields are strided, so a `DataView` rather than one fixed typed array. A single-segment buffer can be read directly (`buf.toArray()` / `buf.toBytes()`). Either path waits on the last-writer submission and needs `copySrc`.
 
 ## TextureResource
 
@@ -82,7 +120,7 @@ Example shape:
 ```ts
 const sceneColor = scratch.texture({
     label: 'scene color',
-    size: () => surface.size,
+    size: derived(() => surface.size, [surface]),
     format: 'rgba16float',
     usage: ['render', 'sample', 'copySrc'],
 })
@@ -106,14 +144,16 @@ type ResourceState =
 
 `dirty` means the resource is logically usable but needs preparation before recording commands that depend on the new data. `empty`, `lost`, and `disposed` are not usable.
 
-## Dynamic Values: Prefer Handles Over Closures
+## Dynamic Values: Prefer Tracked Values Over Closures
 
 Values that feed a resource (size, initial or updated data) are sometimes static and sometimes runtime-varying. Express them by what they encode:
 
 - Static value, known at construction time → pass it directly; do not wrap it in a thunk.
-- Runtime-varying value → prefer a stable handle whose contents change (an array ref, or a buffer the runtime tracks for dirty state) over an opaque closure. A handle is inspectable and dirty-trackable; a closure is a black box to validation.
+- Runtime-varying data → a stable handle whose contents change (an array ref, or a buffer the runtime tracks for dirty state).
+- Runtime-varying value computed from other tracked sources (e.g. texture size from the surface) → a **derived value**: the runtime can inspect its dependency, subscribe to it for invalidation, and check it during validation.
+- Last resort → a raw closure, only when no handle or derived value can express the case.
 
-A `size: () => surface.size` provider is legitimate, because the surface size is unknown at construction and changes on resize — that closure encodes lifecycle/timing, not laziness. A closure used only to defer a constant is overhead. This rule generalizes to command counts (`04-pipelines-commands`).
+A tracked handle or derived value is inspectable and invalidation-aware; a bare `size: () => surface.size` closure is a black box — the runtime must poll it every frame and cannot know when or why it changed. This rule generalizes to command counts (`04-pipelines-commands`).
 
 ## Missing Resource Policy
 

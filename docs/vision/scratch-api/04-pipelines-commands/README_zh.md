@@ -1,7 +1,7 @@
 # Pipelines 与 Commands
 
 状态: Vision draft
-日期: 2026-06-20
+日期: 2026-06-30
 
 ## 决策
 
@@ -31,7 +31,7 @@ Compute pipeline 拥有:
 
 Pipeline 不拥有:
 
-- per-frame command counts
+- per-submission command counts
 - resource readiness policy
 - pass membership
 - 具体 bind set resource versions
@@ -46,6 +46,7 @@ Pipeline 不拥有:
 - `DispatchCommand`
 - `CopyCommand`
 - `UploadCommand`
+- `ReadbackCommand` 作为显式 staging 逃生口，而不是默认 readback 路径
 - 未来必要时加入显式 clear 或 resolve command
 
 每个 command 应声明:
@@ -67,7 +68,7 @@ type DrawCount =
     | { vertexCount: number, instanceCount?: number, firstVertex?: number, firstInstance?: number }
     | { indexCount: number, instanceCount?: number, firstIndex?: number, baseVertex?: number, firstInstance?: number }
     | { indirect: BufferResource, offset?: number }
-    | ((frame: FrameContext) => DrawCount)
+    | ((context: FrameContext) => DrawCount)
 ```
 
 静态值是默认路径:
@@ -117,7 +118,7 @@ Dispatch count 采用相同模型:
 type DispatchCount =
     | { workgroups: [number, number?, number?] }
     | { indirect: BufferResource, offset?: number }
-    | ((frame: FrameContext) => DispatchCount)
+    | ((context: FrameContext) => DispatchCount)
 ```
 
 示例:
@@ -145,6 +146,8 @@ draw 与 dispatch count 分三种情况; 按 count 实际依赖什么来选:
 - GPU 动态——由 GPU 产生(例如 compute 写出 draw 或 dispatch arguments)→ 优先 `indirect`。它无需回读、全声明式、对 validation 可见。
 
 可验证性阶梯，优先靠上: indirect buffer > 被追踪的句柄 > 闭包。
+
+`FrameContext` 是当前 submission 的上下文。命名跟随 `Frame` builder，但不表示一定存在 presentation surface。
 
 ## Readiness Policy
 

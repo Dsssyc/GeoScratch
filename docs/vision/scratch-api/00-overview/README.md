@@ -1,7 +1,7 @@
 # Overview
 
 Status: Vision draft
-Date: 2026-06-20
+Date: 2026-06-30
 
 ## Purpose
 
@@ -14,7 +14,7 @@ The new `scratch` API should maximize locally-verifiable correctness while prese
 - bind layout and bind group construction
 - pipeline cache and compatibility
 - command readiness and resource dependency validation
-- frame submission and empty-work skipping
+- submission recording, completion, and empty-work skipping
 
 `scratch` should not own domain policy:
 
@@ -31,7 +31,7 @@ The objective above implies one axis for judging any abstraction: it should **ad
 
 Two consequences:
 
-- Keep the explicit, "verbose" surface — `resources.read/write`, explicit `BindLayout`, explicit frame order. Do not auto-infer it merely for brevity. Boilerplate an author writes and a validator checks is acceptable; ambiguity and hidden state are not.
+- Keep the explicit, "verbose" surface — `resources.read/write`, explicit `BindLayout`, explicit submission order. Do not auto-infer it merely for brevity. Boilerplate an author writes and a validator checks is acceptable; ambiguity and hidden state are not.
 - Every stateful "smart" feature (resource versioning, readiness, device-loss rehydration) must expose inspectable and assertable state. A feature that hides why a rebuild happened is net-negative.
 
 ## 0.x Breaking-Change Policy
@@ -52,7 +52,7 @@ Existing APIs should not be treated as compatibility requirements until the proj
 The target model is:
 
 ```text
-scratch = explicit GPU runtime + resources + bindings + pipelines + commands + frame scheduler
+scratch = explicit GPU runtime + resources + bindings + pipelines + commands + submission scheduler
 geo     = spatial models + layer policy + geospatial resource loading and orchestration
 ```
 
@@ -70,14 +70,14 @@ Descriptors are useful for stable shape:
 
 Descriptors are weak for time-varying behavior:
 
-- which commands run this frame
+- which commands run in the current submission
 - which resources are ready
 - which resource version is read or written
 - whether a pass is skipped
 - whether a dirty resource is prepared
 - whether command counts are static, dynamic, or indirect
 
-Dynamic behavior should live in resource state, command state, and frame scheduling.
+Dynamic behavior should live in resource state, command state, and submission scheduling.
 
 ## Required Mental Model
 
@@ -91,4 +91,4 @@ The new API should make these boundaries hard to miss:
 - `Pipeline` describes stable GPU program state.
 - `Command` describes one executable GPU action.
 - `PassSpec` describes stable pass shape.
-- `Frame` records commands into pass specs in explicit order and submits them.
+- `Frame` is the presentation-optional submission builder. It records commands into pass specs in explicit order and submits them.

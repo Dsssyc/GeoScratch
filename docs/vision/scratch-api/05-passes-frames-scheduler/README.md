@@ -1,13 +1,13 @@
 # Passes, Frames, And Scheduler
 
 Status: Vision draft
-Date: 2026-06-20
+Date: 2026-06-30
 
 ## Decision
 
-Use persistent `PassSpec` objects for stable pass shape. Use `Frame` to bind pass specs to the current frame's command lists.
+Use persistent `PassSpec` objects for stable pass shape. Use `Frame` to bind pass specs to the current submission's command lists.
 
-The first scheduler model is explicit frame order plus dependency validation. Automatic sorting or render-graph scheduling can be built later as an upper orchestration mode.
+The first scheduler model is explicit submission order plus dependency validation. Automatic sorting or render-graph scheduling can be built later as an upper orchestration mode.
 
 ## PassSpec
 
@@ -43,11 +43,11 @@ const simulationPass = scratch.pass.compute({
 })
 ```
 
-Pass specs do not store commands. This prevents stale command lists from surviving across frames.
+Pass specs do not store commands. This prevents stale command lists from surviving across submissions.
 
 ## Frame
 
-`Frame` is the current frame builder and submission unit:
+`Frame` is the recording and submission unit; presentation is optional (with a surface output it is a presentation frame, with none a compute or offscreen submission), and `await frame.submit()` resolves on GPU completion:
 
 ```ts
 scratch.frame({ validation: 'throw' })
@@ -76,6 +76,10 @@ Frame responsibilities:
 - record GPU commands
 - submit command buffers
 
+## Compute Submission And Readback
+
+`Frame` is presentation-optional: with no surface it is a compute or offscreen submission. Results return to the CPU through the resource itself — `await buffer.toArray()` waits on the buffer's last-writer submission, stages, and maps. See `07-submission-readback` for the full model.
+
 ## Dependency Validation
 
 The core scheduler does not automatically sort commands. It validates explicit order.
@@ -84,7 +88,7 @@ Examples of checks:
 
 - resource from wrong runtime
 - disposed or lost resource used by a command
-- command reads a resource before the frame prepares or writes it
+- command reads a resource before the submission prepares or writes it
 - same pass reads and writes the same resource without an explicitly allowed pattern
 - surface current texture view used outside its frame
 - render command inserted into compute pass
@@ -104,7 +108,7 @@ Development should prefer `throw`. Production or profiling runs may choose `warn
 
 Dependency validation and resource readiness policy are separate.
 
-- Validation checks whether the frame order and ownership are coherent.
+- Validation checks whether the submission order and ownership are coherent.
 - `whenMissing` checks what to do if a required resource is not ready.
 
 Commands still need explicit readiness policy even when validation is enabled.
@@ -119,11 +123,11 @@ scratch.schedule(commands, {
 }).into(frame)
 ```
 
-That layer can build on command read/write declarations without changing the core frame model.
+That layer can build on command read/write declarations without changing the core `Frame` submission model.
 
 ## Non-Goals
 
-- Do not make pass specs mutable containers for current-frame commands.
+- Do not make pass specs mutable containers for current-submission commands.
 - Do not make automatic render graph sorting the default core behavior.
-- Do not hide frame order from users who need WebGPU-level control.
+- Do not hide submission order from users who need WebGPU-level control.
 - Do not encode geospatial layer order in the scratch scheduler.

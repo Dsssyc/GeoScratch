@@ -1,18 +1,18 @@
 # 设计评审
 
 状态: Review (vision draft)
-日期: 2026-06-20
+日期: 2026-06-30
 
 ## 范围
 
-本模块从两个角度对 `00`–`05` 进行评审，并记录经得起推敲后幸存下来的修订:
+本模块记录最初从两个角度评审 `00`–`05` 并推动后续 `07` 补充的那次 review:
 
 1. **AI 辅助编写**("vibe coding"): 当使用 `scratch` 的大部分代码都由 AI 辅助写成时，这套设计是否仍然合适？
 2. **通用 compute 对等性**: `scratch` 的目标和 WebGPU 一样，是 GPU 能力的 CPU 端映射——因此 compute 必须是与图形 *平起平坐* 的一等用途，而不是图形的附属。这套设计能否支撑严肃的高性能并行计算？
 
 结论: 不需要重写。`00`–`05` 的实质(显式、声明式、可校验、fail-fast)本就高度契合。需要改的是 *首要目标的措辞*、三个定向的编写期修订(第一部分)、以及 **把 compute 从附属升为一等用途**(第二部分)。
 
-这些都是叠加在 `00`–`05` 之上的提案，尚未并入。本模块先用于 review。
+状态: 第一部分(修订 A/B/C)、缺口 1(定位)、缺口 5(compute 校验 + dynamic offset)已 **并入** `00`–`05` 与 `scratch-graphics-kernel.md`。缺口 2–4(异步 readback、提交单元、GPU 计时/查询)现已在 `07-submission-readback` 中 **设计**。本模块是评审记录; 已并入内容以 `00`–`05` 与 `07` 为 source of truth。持续更新的开放 review 项放在 `docs/review/`。
 
 ## 第一部分 — AI 时代编写视角
 
@@ -34,7 +34,7 @@
 
 替换"减少样板"这一目标。
 
-现状(`00-overview`):
+早期写法(`00-overview`，修订 A 之前):
 
 > 新的 `scratch` API 应减少 WebGPU 样板工作，同时保留直接 GPU 控制能力。
 
@@ -46,7 +46,7 @@
 
 推论:
 
-- 保留那些"啰嗦"的特性——显式 `resources.read/write`、显式 `BindLayout`、显式 frame 顺序。它们是这套设计中最具未来韧性的部分。不要仅仅为了简洁就自动推断它们。
+- 保留那些"啰嗦"的特性——显式 `resources.read/write`、显式 `BindLayout`、显式 submission 顺序。它们是这套设计中最具未来韧性的部分。不要仅仅为了简洁就自动推断它们。
 - 每个"聪明"的特性(资源版本化、readiness、device-loss rehydration)都必须暴露可 inspect、可 assert 的状态，例如可读的 `version` / `state`(`02-resources` 已定义 `ResourceState`)。一个藏起"为什么发生了重建"的聪明特性是净负值。
 - 这不削弱已有的 escape hatch 要求。直接的低层控制保留。
 
@@ -102,13 +102,13 @@ indirect buffer  >  ref / handle  >  closure
 
 ### 缺口(按严重度排)
 
-#### 缺口 1 — 定位: "图形内核"低估了 compute(必须修)
+#### 缺口 1 — 定位: "图形内核"低估了 compute(已修)
 
-`scratch-graphics-kernel.md` 把 scratch 称为 "the **graphics** kernel"; `00-overview` 是 "graphics execution kernel"; compute 出现为 "GPU compute-heavy **visualization**" 和 "visualization and compute tasks"——都是"服务于可视化的 compute"。
+早期文档把 scratch 称为 "the **graphics** kernel"; `00-overview` 是 "graphics execution kernel"; compute 出现为 "GPU compute-heavy **visualization**" 和 "visualization and compute tasks"——都是"服务于可视化的 compute"。
 
 但 WebGPU 这个类比恰是要点: WebGPU 是 **GPU** API，graphics 与 compute 同级。若 compute 是一等用途，顶层心智模型应重定为 **"GPU 执行内核"**(compute + graphics)。否则 compute 会在后续每个决策里被默默当成二等。
 
-#### 缺口 2 — 异步回读(readback)完全没有建模(必须修; 功能性 + 可验证性)
+#### 缺口 2 — 异步回读(readback)曾未建模(vision 层已修)
 
 通查 `00`–`05`，只有 `map` 作为一种 buffer usage 出现(`02-resources`)。**没有任何 readback / `mapAsync` / 可 await 的结果获取机制**: command 家族是 Draw / Dispatch / Copy / Upload(没有 Readback)，唯一的提交单元是 `frame…submit()`——纯 fire-and-forget，也没有 `queue.onSubmittedWorkDone`。
 
@@ -116,19 +116,19 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 
 它还戳穿了修订 A 的可验证性目标: 没有 readback，你 *根本写不出* 一个从 CPU 侧断言 compute kernel 输出是否正确的测试。所以这个缺口在功能性和可验证性上 *双失*。
 
-设计空间(留到 brainstorming 再定，不在此拍板): 一个 `ReadbackCommand` 加一个可 await 的 result handle，或一个提交级的 `onComplete` / readback promise。语义要求是"可 await 的 GPU→CPU 结果"; 具体形状待定。
+已解决(`07-submission-readback`): 资源就是它自己的 readback 句柄——`await buffer.toArray()`——显式 `await`，provenance 来自 version 模型。`ReadbackCommand` 仅作为 ordered-staging 逃生口保留。
 
-#### 缺口 3 — 提交单元是"presentation 味"的 `Frame`(应该修)
+#### 缺口 3 — 提交单元曾是"presentation 味"的 `Frame`(vision 层已修)
 
 `05` 唯一的提交单元是 `Frame`，带显示倾向的语义(skip empty passes、current frame、surface 集成)。compute 往往不是"一帧": one-shot 任务、按自己的节奏跑、或在 present 之前先迭代 N 步。
 
 该模型对"多 dispatch 录进一帧、提交一次"支持得很好——适合 GPU-bound 迭代。它没覆盖的是"迭代中周期性 CPU 回读/反馈"，而这又和缺口 2 缠在一起。
 
-解决方向: 要么提供一个不带显示语义的提交概念，要么明确把 `Frame` 定义为"提交批次"并给出一个不携带显示语义的 compute 入口。
+已解决(`07-submission-readback`): `Frame` 泛化为 presentation 可选的提交单元——不带 surface 即 compute 或 offscreen 提交——而不是新增单独的提交类型。
 
-#### 缺口 4 — 没有 GPU 计时 / 查询(应该修)
+#### 缺口 4 — 没有 GPU 计时 / 查询(vision 层已修)
 
-`00`–`05` 全文未提 `timestamp-query` 或 `GPUQuerySet`(唯一的 "profiling" 指的是 validation mode，不是 GPU 计时)。"高性能"意味着要能测; 没有 timestamp / pipeline-statistics 查询就调不动 kernel。它是 feature-gated 的可选项，但设计得给它一个落脚点: 一种 query resource kind 加一个 pass/command 触点。
+早期 `00`–`05` 全文未提 `timestamp-query` 或 `GPUQuerySet`(唯一的 "profiling" 指的是 validation mode，不是 GPU 计时)。"高性能"意味着要能测; 没有 timestamp query 就调不动 kernel。它是 feature-gated 的可选项，但设计得给它一个落脚点: 一种 query resource kind 加一个 pass/command 触点。
 
 #### 缺口 5 — compute 专属校验 + binding 完整性(可后补)
 
@@ -143,19 +143,18 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 
 净判断: 不是推倒，而是"把 compute 从附属升为一等"——重定位 + 补回读/提交语义 + 给计时和 compute 校验留位置。补对了，这套 read/write 依赖模型反而会成为 GPGPU 的强项。
 
-## 待定决策点
+## 决策状态
 
-第一部分(编写):
+已并入 `00`–`05`、`07` 与 `scratch-graphics-kernel.md`:
 
-1. 在 `00-overview` 采用修订后的首要目标措辞？(修订 A)
-2. 采用闭包分流规则并并入 `02-resources` 与 `04-pipelines-commands`？(修订 B)
-3. 在 `03-bindings` 采用"默认 warn、可关闭"的 dev 交叉校验？(修订 C)
-4. 确认 `BindSet` 命名保留。
+1. `00-overview` 修订后的首要目标措辞(修订 A)。
+2. `02-resources` 与 `04-pipelines-commands` 的闭包分流(修订 B)。
+3. `03-bindings` 的"默认 warn、可关闭"dev 交叉校验(修订 C)。
+4. `BindSet` 命名保留(已确认)。
+5. 重定为"GPU 执行内核"、compute 同级(缺口 1)。
+6. 通过资源句柄的可 await readback，`await buffer.toArray()`(缺口 2)——见 `07-submission-readback`。
+7. `Frame` 泛化为 presentation 可选的提交单元(缺口 3)——见 `07`。
+8. `QuerySet` 资源 + `timestampWrites`，经 readback 路径取回(缺口 4)——见 `07`。
+9. validation / bindings 的 compute 限制校验与 dynamic offset(缺口 5)。
 
-第二部分(compute):
-
-5. 把愿景重定为"GPU 执行内核"、让 compute 与图形同级？(缺口 1)
-6. 给 command + 提交模型加一条可 await 的 readback/result 路径？(缺口 2)
-7. 把"提交批次"概念与 presentation 的 `Frame` 分开？(缺口 3)
-8. 为 timestamp / query 支持预留位置？(缺口 4)
-9. 把 compute 限制校验与 dynamic offset 并入 validation / bindings？(缺口 5)
+解决记录: 缺口 2–4 合为一个设计(`07-submission-readback`)。提交分叉(缺口 3)是通过泛化 `Frame`(presentation 可选)解决的，而非新增中性 `Submission` 类型; readback(缺口 2)是"资源即句柄" + 显式 `await`; 计时(缺口 4)复用 readback 路径。

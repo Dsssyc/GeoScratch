@@ -1,13 +1,13 @@
 # Passes, Frames 与 Scheduler
 
 状态: Vision draft
-日期: 2026-06-20
+日期: 2026-06-30
 
 ## 决策
 
-使用持久 `PassSpec` 表达稳定 pass 形状。使用 `Frame` 把 pass specs 与当前帧 command 列表绑定。
+使用持久 `PassSpec` 表达稳定 pass 形状。使用 `Frame` 把 pass specs 与当前 submission 的 command 列表绑定。
 
-第一版 scheduler 采用显式 frame 顺序加依赖校验。自动排序或 render-graph scheduling 后续可以作为上层编排模式构建。
+第一版 scheduler 采用显式 submission 顺序加依赖校验。自动排序或 render-graph scheduling 后续可以作为上层编排模式构建。
 
 ## PassSpec
 
@@ -43,11 +43,11 @@ const simulationPass = scratch.pass.compute({
 })
 ```
 
-Pass spec 不存储 command。这能避免上一帧残留 command list 存活到下一帧。
+Pass spec 不存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
 
 ## Frame
 
-`Frame` 是当前帧 builder 和提交单位:
+`Frame` 是记录与提交单元; presentation 可选(带 surface 输出是 presentation frame，不带则是 compute 或 offscreen 提交)，且 `await frame.submit()` 在 GPU 完成时 resolve:
 
 ```ts
 scratch.frame({ validation: 'throw' })
@@ -76,6 +76,10 @@ Frame 职责:
 - 记录 GPU commands
 - 提交 command buffers
 
+## Compute 提交与 Readback
+
+`Frame` presentation 可选: 不带 surface 时即 compute 或 offscreen 提交。结果通过资源自身回到 CPU——`await buffer.toArray()` 等待产出该 buffer 的那次提交，staging 后 map。完整模型见 `07-submission-readback`。
+
 ## Dependency Validation
 
 核心 scheduler 不自动排序 commands。它校验显式顺序。
@@ -84,7 +88,7 @@ Frame 职责:
 
 - command 使用了其他 runtime 的 resource
 - command 使用了 disposed 或 lost resource
-- command 在 frame prepare 或写入前读取资源
+- command 在 submission prepare 或写入前读取资源
 - 同一 pass 未显式允许时同时读写同一 resource
 - surface current texture view 在所属 frame 外使用
 - render command 被插入 compute pass
@@ -104,7 +108,7 @@ type FrameValidationMode = 'off' | 'warn' | 'throw'
 
 Dependency validation 与 resource readiness policy 是两件事。
 
-- Validation 检查 frame 顺序与 ownership 是否自洽。
+- Validation 检查 submission 顺序与 ownership 是否自洽。
 - `whenMissing` 检查所需资源未 ready 时如何处理。
 
 即使启用了 validation，command 仍需要显式 readiness policy。
@@ -119,11 +123,11 @@ scratch.schedule(commands, {
 }).into(frame)
 ```
 
-该层可以基于 command read/write 声明构建，不需要改变核心 frame 模型。
+该层可以基于 command read/write 声明构建，不需要改变核心 `Frame` 提交模型。
 
 ## 非目标
 
-- 不把 pass spec 做成当前帧 commands 的可变容器。
+- 不把 pass spec 做成当前 submission commands 的可变容器。
 - 不把自动 render graph 排序作为默认 core 行为。
-- 不向需要 WebGPU 级控制的用户隐藏 frame order。
+- 不向需要 WebGPU 级控制的用户隐藏 submission order。
 - 不在 scratch scheduler 中编码 geospatial layer order。
