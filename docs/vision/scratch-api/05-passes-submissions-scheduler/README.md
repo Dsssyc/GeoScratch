@@ -1,11 +1,13 @@
-# Passes, Frames, And Scheduler
+# Passes, Submissions, And Scheduler
 
 Status: Vision draft
 Date: 2026-06-30
 
 ## Decision
 
-Use persistent `PassSpec` objects for stable pass shape. Use `Frame` to bind pass specs to the current submission's command lists.
+Use persistent `PassSpec` objects for stable pass shape. Use `Submission` as the core GPU-kernel submission model that binds pass specs to the current command lists.
+
+The old `Frame` name is removed from the scratch core model. A frame is an application or presentation cadence; a submission is work sent toward the GPU queue. A submission may present to a surface, or it may be compute-only/offscreen.
 
 The first scheduler model is explicit submission order plus dependency validation. Automatic sorting or render-graph scheduling can be built later as an upper orchestration mode.
 
@@ -45,12 +47,12 @@ const simulationPass = scratch.pass.compute({
 
 Pass specs do not store commands. This prevents stale command lists from surviving across submissions.
 
-## Frame
+## Submission
 
-`Frame` is the recording and submission unit; presentation is optional (with a surface output it is a presentation frame, with none a compute or offscreen submission), and `await frame.submit()` resolves on GPU completion:
+`SubmissionBuilder` records one explicit pass-command sequence. It is not a display frame and does not imply presentation:
 
 ```ts
-scratch.frame({ validation: 'throw' })
+const submitted = scratch.submission({ validation: 'throw' })
     .compute(simulationPass, [
         simulateParticles,
     ])
@@ -62,9 +64,18 @@ scratch.frame({ validation: 'throw' })
         compositeToSurface,
     ])
     .submit()
+
+await submitted.done
 ```
 
-Frame responsibilities:
+Conceptual split:
+
+- `SubmissionBuilder` records and validates the current pass-command sequence.
+- `SubmittedWork` is returned by `.submit()`. It owns the submitted-work id, `done` promise, producer epochs, diagnostics, and links used by readback operations.
+
+`SubmittedWork` should not be thenable. Waiting uses `await submitted.done`, not `await submitted`. This keeps the submitted-work object inspectable and consistent with `ReadbackOperation`, where the object is not itself a promise.
+
+Submission responsibilities:
 
 - collect pass-command pairs in user order
 - validate runtime ownership
@@ -75,10 +86,18 @@ Frame responsibilities:
 - skip empty passes
 - record GPU commands
 - submit command buffers
+- return `SubmittedWork`
 
-## Transfers, Rendering, And Readback
+## Presentation Is A Submission Mode
 
-`Frame` is presentation-optional: with no surface it is a compute or offscreen submission. CPU/GPU data motion is explicit. Uploads, copies, render writes, compute writes, and readback staging all participate in the same command order and epoch validation. Results return to the CPU through a `ReadbackOperation`, for example `await readback.toArray()`, not through `buffer.toArray()`. See `07-transfers-epochs` for the full model.
+A submission may present, but presentation is not the definition of the core submission unit:
+
+- no surface target -> compute-only or offscreen submission
+- surface output -> presentation submission that borrows a surface current texture view
+
+CPU/GPU data motion is explicit. Uploads, copies, render writes, compute writes, and readback staging all participate in the same submission order and epoch validation. Results return to the CPU through a `ReadbackOperation`, for example `await readback.toArray()`, not through `buffer.toArray()`. See `07-transfers-epochs` for the full model.
+
+Application code may still have a `renderFrame()` or animation-frame loop. That application frame can create one or more scratch submissions, but it is not the scratch core type.
 
 ## Dependency Validation
 
@@ -90,7 +109,7 @@ Examples of checks:
 - disposed or lost resource used by a command
 - command reads a content epoch before the submission prepares or writes it
 - same pass reads and writes the same resource without an explicitly allowed pattern
-- surface current texture view used outside its frame
+- surface current texture view used outside its owning presentation submission
 - render command inserted into compute pass
 - dispatch command inserted into render pass
 - dispatch workgroup count exceeds `maxComputeWorkgroupsPerDimension`
@@ -99,7 +118,7 @@ Examples of checks:
 Validation modes:
 
 ```ts
-type FrameValidationMode = 'off' | 'warn' | 'throw'
+type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 ```
 
 Development should prefer `throw`. Production or profiling runs may choose `warn` or `off`.
@@ -120,10 +139,10 @@ Automatic sorting should not be part of the first core scheduler. A future upper
 ```ts
 scratch.schedule(commands, {
     strategy: 'topological',
-}).into(frame)
+}).into(submission)
 ```
 
-That layer can build on command read/write declarations without changing the core `Frame` submission model.
+That layer can build on command read/write declarations without changing the core `Submission` model.
 
 ## Non-Goals
 
@@ -131,3 +150,4 @@ That layer can build on command read/write declarations without changing the cor
 - Do not make automatic render graph sorting the default core behavior.
 - Do not hide submission order from users who need WebGPU-level control.
 - Do not encode geospatial layer order in the scratch scheduler.
+- Do not use `Frame` as the scratch core submission type; frame cadence belongs to geo, app, or presentation layers.

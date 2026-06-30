@@ -37,7 +37,7 @@
 - `SamplerResource`
 - `ShaderModuleResource`
 - `QuerySetResource`(timestamp / occlusion，feature-gated)
-- frame-scoped borrowed surface texture views
+- presentation-submission-scoped borrowed surface texture views
 
 Surface texture view 不是持久 `TextureResource`。
 
@@ -51,7 +51,7 @@ Buffer 应支持:
 - copy source 与 copy destination usage
 - storage、vertex、index、uniform、indirect、map 等适用 usage
 
-静态数据不应需要 per-submission callback。动态数据应通过显式 upload/copy command 表达，或由 tracked handle 在 frame preparation 时产生 upload command。
+静态数据不应需要 per-submission callback。动态数据应通过显式 upload/copy command 表达，或由 tracked handle 在 submission preparation 时产生 upload command。
 
 示例形状:
 
@@ -159,7 +159,7 @@ type ResourceState =
 - 由其他受追踪来源算出的运行时变化值(例如 texture size 来自 surface)→ 用 **derived value**: runtime 能 inspect 它的依赖、订阅其 invalidation、并在 validation 时检查它。
 - 最后手段 → 裸闭包，仅当没有句柄或 derived value 能表达该情况时。
 
-受追踪的句柄或 derived value 可 inspect、能感知 invalidation; 而裸的 `size: () => surface.size` 闭包是黑箱——runtime 必须每帧 poll 它，且无从得知它何时、为何变化。该规则可推广到 command count(`04-pipelines-commands`)。
+受追踪的句柄或 derived value 可 inspect、能感知 invalidation; 而裸的 `size: () => surface.size` 闭包是黑箱——runtime 必须每次 submission poll 它，且无从得知它何时、为何变化。该规则可推广到 command count(`04-pipelines-commands`)。
 
 ## Missing Resource Policy
 

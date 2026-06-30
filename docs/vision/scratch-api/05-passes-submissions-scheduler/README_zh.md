@@ -1,11 +1,13 @@
-# Passes, Frames 与 Scheduler
+# Passes, Submissions 与 Scheduler
 
 状态: Vision draft
 日期: 2026-06-30
 
 ## 决策
 
-使用持久 `PassSpec` 表达稳定 pass 形状。使用 `Frame` 把 pass specs 与当前 submission 的 command 列表绑定。
+使用持久 `PassSpec` 表达稳定 pass 形状。使用 `Submission` 作为 scratch 核心 GPU-kernel 提交模型，把 pass specs 与当前 command 列表绑定。
+
+旧的 `Frame` 名称不再作为 scratch core model。frame 是应用或 presentation cadence; submission 是送往 GPU queue 的工作。一个 submission 可以 present 到 surface，也可以是 compute-only/offscreen。
 
 第一版 scheduler 采用显式 submission 顺序加依赖校验。自动排序或 render-graph scheduling 后续可以作为上层编排模式构建。
 
@@ -45,12 +47,12 @@ const simulationPass = scratch.pass.compute({
 
 Pass spec 不存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
 
-## Frame
+## Submission
 
-`Frame` 是记录与提交单元; presentation 可选(带 surface 输出是 presentation frame，不带则是 compute 或 offscreen 提交)，且 `await frame.submit()` 在 GPU 完成时 resolve:
+`SubmissionBuilder` 记录一条显式 pass-command 序列。它不是 display frame，也不暗示 presentation:
 
 ```ts
-scratch.frame({ validation: 'throw' })
+const submitted = scratch.submission({ validation: 'throw' })
     .compute(simulationPass, [
         simulateParticles,
     ])
@@ -62,9 +64,18 @@ scratch.frame({ validation: 'throw' })
         compositeToSurface,
     ])
     .submit()
+
+await submitted.done
 ```
 
-Frame 职责:
+概念拆分:
+
+- `SubmissionBuilder` 负责记录并校验当前 pass-command 序列。
+- `SubmittedWork` 由 `.submit()` 返回，持有 submitted-work id、`done` promise、producer epochs、diagnostics，以及 readback operations 使用的链接信息。
+
+`SubmittedWork` 不应是 thenable。等待使用 `await submitted.done`，而不是 `await submitted`。这样 submitted-work object 仍然可 inspect，并与 `ReadbackOperation` 保持一致: object 本身不是 promise。
+
+Submission 职责:
 
 - 按用户顺序收集 pass-command pairs
 - 校验 runtime ownership
@@ -75,10 +86,18 @@ Frame 职责:
 - 跳过 empty passes
 - 记录 GPU commands
 - 提交 command buffers
+- 返回 `SubmittedWork`
 
-## Transfer、渲染与 Readback
+## Presentation 是 Submission 的一种模式
 
-`Frame` presentation 可选: 不带 surface 时即 compute 或 offscreen 提交。CPU/GPU 数据移动是显式的。Upload、copy、render 写入、compute 写入与 readback staging 都进入同一套 command order 和 epoch validation。结果通过 `ReadbackOperation` 回到 CPU，例如 `await readback.toArray()`，而不是通过 `buffer.toArray()`。完整模型见 `07-transfers-epochs`。
+Submission 可以 present，但 presentation 不是核心提交单元的定义:
+
+- 没有 surface target -> compute-only 或 offscreen submission
+- 有 surface output -> 借用 surface current texture view 的 presentation submission
+
+CPU/GPU 数据移动是显式的。Upload、copy、render 写入、compute 写入与 readback staging 都进入同一套 submission order 和 epoch validation。结果通过 `ReadbackOperation` 回到 CPU，例如 `await readback.toArray()`，而不是通过 `buffer.toArray()`。完整模型见 `07-transfers-epochs`。
+
+应用代码仍然可以有 `renderFrame()` 或 animation-frame loop。这个应用层 frame 可以创建一个或多个 scratch submissions，但它不是 scratch core type。
 
 ## Dependency Validation
 
@@ -90,7 +109,7 @@ Frame 职责:
 - command 使用了 disposed 或 lost resource
 - command 在 submission prepare 或写入前读取某个 content epoch
 - 同一 pass 未显式允许时同时读写同一 resource
-- surface current texture view 在所属 frame 外使用
+- surface current texture view 在所属 presentation submission 外使用
 - render command 被插入 compute pass
 - dispatch command 被插入 render pass
 - dispatch 的 workgroup 数超过 `maxComputeWorkgroupsPerDimension`
@@ -99,7 +118,7 @@ Frame 职责:
 Validation modes:
 
 ```ts
-type FrameValidationMode = 'off' | 'warn' | 'throw'
+type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 ```
 
 开发期应优先使用 `throw`。生产或性能 profiling 可选择 `warn` 或 `off`。
@@ -120,10 +139,10 @@ Dependency validation 与 resource readiness policy 是两件事。
 ```ts
 scratch.schedule(commands, {
     strategy: 'topological',
-}).into(frame)
+}).into(submission)
 ```
 
-该层可以基于 command read/write 声明构建，不需要改变核心 `Frame` 提交模型。
+该层可以基于 command read/write 声明构建，不需要改变核心 `Submission` 模型。
 
 ## 非目标
 
@@ -131,3 +150,4 @@ scratch.schedule(commands, {
 - 不把自动 render graph 排序作为默认 core 行为。
 - 不向需要 WebGPU 级控制的用户隐藏 submission order。
 - 不在 scratch scheduler 中编码 geospatial layer order。
+- 不把 `Frame` 作为 scratch core submission type; frame cadence 属于 geo、app 或 presentation layers。

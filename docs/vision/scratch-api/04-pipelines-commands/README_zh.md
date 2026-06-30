@@ -71,7 +71,7 @@ type DrawCount =
     | { vertexCount: number, instanceCount?: number, firstVertex?: number, firstInstance?: number }
     | { indexCount: number, instanceCount?: number, firstIndex?: number, baseVertex?: number, firstInstance?: number }
     | { indirect: BufferResource, offset?: number }
-    | ((context: FrameContext) => DrawCount)
+    | ((context: SubmissionContext) => DrawCount)
 ```
 
 静态值是默认路径:
@@ -99,7 +99,7 @@ const drawTerrain = scratch.command.draw({
     bindSets: [terrainSet],
     vertex: terrainVertex,
     index: terrainIndex,
-    count: frame => ({
+    count: context => ({
         indexCount: terrain.visibleIndexCount,
         instanceCount: terrain.visibleTileCount,
     }),
@@ -121,7 +121,7 @@ Dispatch count 采用相同模型:
 type DispatchCount =
     | { workgroups: [number, number?, number?] }
     | { indirect: BufferResource, offset?: number }
-    | ((context: FrameContext) => DispatchCount)
+    | ((context: SubmissionContext) => DispatchCount)
 ```
 
 示例:
@@ -150,7 +150,7 @@ draw 与 dispatch count 分三种情况; 按 count 实际依赖什么来选:
 
 可验证性阶梯，优先靠上: indirect buffer > 被追踪的句柄 > 闭包。
 
-`FrameContext` 是当前 submission 的上下文。命名跟随 `Frame` builder，但不表示一定存在 presentation surface。
+`SubmissionContext` 是当前 submission 的上下文。它暴露 runtime state、submission diagnostics、受追踪动态值和 producer epochs，但不表示一定存在 presentation surface。
 
 ## Readiness Policy
 

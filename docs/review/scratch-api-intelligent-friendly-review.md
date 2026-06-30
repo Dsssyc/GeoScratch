@@ -38,27 +38,33 @@ Coverage check for this pass:
 - Readback retention budgets and no hidden eviction by default: covered by `07-transfers-epochs`.
 - Machine-readable readback diagnostics with operation/source/epoch/age/byte context: covered by `07-transfers-epochs`.
 
+### Submission Naming And Mental Model
+
+Resolved in `docs/vision/scratch-api/05-passes-submissions-scheduler/`: scratch core now uses `Submission` rather than `Frame` as the single submission model. The design separates `SubmissionBuilder` from `SubmittedWork`, uses `submitted.done` for GPU completion, and treats presentation as one submission mode rather than the definition of the core type.
+
+Coverage check for this pass:
+
+- `Frame` is no longer the scratch core submission type: covered by `05-passes-submissions-scheduler`, `00-overview`, and `07-transfers-epochs`.
+- `SubmissionBuilder` / `SubmittedWork` split: covered by `05-passes-submissions-scheduler` and the scratch-api module index.
+- `SubmittedWork` is not thenable; GPU completion uses `submitted.done`: covered by `05-passes-submissions-scheduler` and `07-transfers-epochs`.
+- Presentation is a submission mode, not the core concept: covered by `01-runtime-surface`, `05-passes-submissions-scheduler`, `07-transfers-epochs`, and `scratch-graphics-kernel.md`.
+- `FrameContext` / `FrameValidationMode` are renamed to `SubmissionContext` / `SubmissionValidationMode`: covered by `04-pipelines-commands` and `05-passes-submissions-scheduler`.
+
 ## Current Review Items
 
-### 1. `Frame` Naming And Submission Mental Model
-
-The accepted direction keeps `Frame` as the single submission builder, with presentation optional. That is workable, but the name can still bias readers toward display frames. All docs should consistently define `Frame` as a presentation-optional submission unit, and examples should avoid implying a surface is required.
-
-Risk if unresolved: compute-only jobs may be misdesigned as render-loop-only workloads.
-
-### 2. QuerySet Scope
+### 1. QuerySet Scope
 
 Core WebGPU query types are timestamp and occlusion. Pipeline statistics should remain outside the core design unless a future target explicitly supports it.
 
 Risk if unresolved: TypeScript declarations or runtime validators may expose unsupported WebGPU query types.
 
-### 3. Buffer Layout Type Grammar
+### 2. Buffer Layout Type Grammar
 
 The compositional buffer layout model is valuable, but it needs a sharper typed contract. A field `format` may mean different things for CPU views, vertex attributes, WGSL storage structs, and readback. The design should define usage-specific lowering, alignment mode, and failure diagnostics.
 
 Risk if unresolved: the API may look type-safe while still allowing invalid or misleading storage-buffer layouts.
 
-### 4. Validation Diagnostic Schema
+### 3. Validation Diagnostic Schema
 
 The intelligent-friendly loop needs machine-readable diagnostics, not only `warn` / `throw` and prose messages. Readback-specific diagnostics are now covered in `07-transfers-epochs`, but a future design should still define the general schema for validation, shader cross-checks, resource readiness, and submission ordering.
 

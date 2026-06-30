@@ -12,7 +12,7 @@ This module records the review that originally tested `00`–`05` against two le
 
 Conclusion: not a rewrite. The substance of `00`–`05` (explicit, declarative, validated, fail-fast) is already well-aligned. What needs change is the *primary objective's wording*, three targeted authoring points (Part 1), and **raising compute from an adjunct to a first-class use** (Part 2).
 
-Status: Part 1 (Revisions A/B/C), Gap 1 (positioning), and Gap 5 (compute validation + dynamic offsets) are **applied** to `00`–`05` and `scratch-graphics-kernel.md`. Gaps 2–4 (async readback, submission unit, GPU timing/queries) are now **designed** in `07-transfers-epochs`. This module is the review record; `00`–`05` and `07` are the source of truth for what is applied. Ongoing open review items live under `docs/review/`.
+Status: Part 1 (Revisions A/B/C), Gap 1 (positioning), and Gap 5 (compute validation + dynamic offsets) are **applied** to `00`–`05` and `scratch-graphics-kernel.md`. Gaps 2–4 (async readback, submission unit, GPU timing/queries) are now **designed** across `05-passes-submissions-scheduler` and `07-transfers-epochs`. This module is the review record; `00`–`05` and `07` are the source of truth for what is applied. Ongoing open review items live under `docs/review/`.
 
 ## Part 1 — AI-Era Authoring Lens
 
@@ -87,7 +87,7 @@ Net: catch the common mismatch early in the generate-run-fix loop, without makin
 ### What Part 1 does NOT change
 
 - **`BindSet` name is kept** (not renamed to `BindGroup`). `BindSet` does more than `GPUBindGroup` — allocation-version comparison, lazy rebuild, readiness exposure (`03-bindings`). The semantic difference is exactly why it must be named differently: a WebGPU-identical name would invite the wrong mental model and produce subtle bugs. Rule: name like WebGPU only where behavior matches; rename precisely where it diverges.
-- The explicit `ScratchRuntime` / `Surface` split, explicit resource access and transfer declarations, `whenMissing` at the usage point, and `FrameValidationMode` (`off` / `warn` / `throw`) are kept. They are already AI-aligned: no hidden global state, local reasoning, and an error surface the agentic loop can iterate against.
+- The explicit `ScratchRuntime` / `Surface` split, explicit resource access and transfer declarations, `whenMissing` at the usage point, and `SubmissionValidationMode` (`off` / `warn` / `throw`) are kept. They are already AI-aligned: no hidden global state, local reasoning, and an error surface the agentic loop can iterate against.
 
 ## Part 2 — General-Purpose Compute Parity
 
@@ -110,7 +110,7 @@ But the WebGPU analogy is the point: WebGPU is a **GPU** API, with graphics and 
 
 #### Gap 2 — Async readback was unmodeled (fixed at the vision level)
 
-Across `00`–`05`, only `map` appears as a buffer usage (`02-resources`). There is no readback / `mapAsync` / awaitable-result mechanism: command families are Draw / Dispatch / Copy / Upload (no Readback), and the only submission unit is `frame…submit()` — fire-and-forget, with no `queue.onSubmittedWorkDone`.
+Across `00`–`05`, only `map` appears as a buffer usage (`02-resources`). There was no readback / `mapAsync` / awaitable-result mechanism: command families were Draw / Dispatch / Copy / Upload (no Readback), and the only submission unit was the older `frame…submit()` shape — fire-and-forget, with no `queue.onSubmittedWorkDone`.
 
 GPGPU routinely needs: dispatch → copy to a readback buffer → `await map` → read on CPU → optionally feed the next pass. That path is currently inexpressible.
 
@@ -120,11 +120,11 @@ Resolved (`07-transfers-epochs`): readback creates an explicit `ReadbackOperatio
 
 #### Gap 3 — Submission unit was presentation-flavored (fixed at the vision level)
 
-`05`'s only submission unit is `Frame`, with presentation-leaning semantics (skip empty passes, current frame, surface integration). Compute is often not a frame: one-shot jobs, its own cadence, or N iterations before any present.
+Earlier `05` used `Frame` as the only submission unit, with presentation-leaning semantics (skip empty passes, current frame, surface integration). Compute is often not a frame: one-shot jobs, its own cadence, or N iterations before any present.
 
-The model already handles "many dispatches recorded into one frame, submitted once" well — good for GPU-bound iteration. What it does not handle is iteration with periodic CPU readback/feedback, which couples back to Gap 2.
+The model already handles "many dispatches recorded into one submission" well — good for GPU-bound iteration. What it does not handle is iteration with periodic CPU readback/feedback, which couples back to Gap 2.
 
-Resolved (`07-transfers-epochs`): `Frame` is generalized to a presentation-optional submission unit — no surface means a compute or offscreen submission — rather than adding a separate submission type.
+Resolved (`05-passes-submissions-scheduler` / `07-transfers-epochs`): the scratch core submission unit is now `Submission`, not `Frame`. A submission may present to a surface, or it may be compute-only/offscreen. `Frame` cadence belongs above scratch core.
 
 #### Gap 4 — No GPU timing / queries (fixed at the vision level)
 
@@ -153,8 +153,8 @@ Applied to `00`–`05`, `07`, and `scratch-graphics-kernel.md`:
 4. `BindSet` name stays (confirmed).
 5. Re-centered as a "GPU execution kernel", compute co-equal (Gap 1).
 6. Awaitable readback via explicit `ReadbackOperation`, `await readback.toArray()` (Gap 2) — see `07-transfers-epochs`.
-7. `Frame` generalized to a presentation-optional submission unit (Gap 3) — see `07`.
+7. Core submission unit renamed to `Submission` with `SubmissionBuilder` / `SubmittedWork` split (Gap 3) — see `05` and `07`.
 8. `QuerySet` resource + `timestampWrites`, resolved through explicit copy/readback operations (Gap 4) — see `07`.
 9. Compute-limit checks and dynamic offsets in validation / bindings (Gap 5).
 
-Resolution notes: Gaps 2–4 became one design (`07-transfers-epochs`). The submission fork (Gap 3) was resolved by generalizing `Frame` (presentation optional) rather than adding a neutral `Submission` type; readback (Gap 2) is an explicit transfer operation with an explicit `await`; timing (Gap 4) reuses the same copy/readback path.
+Resolution notes: Gaps 2–4 became one transfer/submission design across `05` and `07`. The submission naming issue (Gap 3) is resolved by using `Submission` as the only scratch core submission model; readback (Gap 2) is an explicit transfer operation with an explicit `await`; timing (Gap 4) reuses the same copy/readback path.

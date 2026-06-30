@@ -12,7 +12,7 @@
 
 结论: 不需要重写。`00`–`05` 的实质(显式、声明式、可校验、fail-fast)本就高度契合。需要改的是 *首要目标的措辞*、三个定向的编写期修订(第一部分)、以及 **把 compute 从附属升为一等用途**(第二部分)。
 
-状态: 第一部分(修订 A/B/C)、缺口 1(定位)、缺口 5(compute 校验 + dynamic offset)已 **并入** `00`–`05` 与 `scratch-graphics-kernel.md`。缺口 2–4(异步 readback、提交单元、GPU 计时/查询)现已在 `07-transfers-epochs` 中 **设计**。本模块是评审记录; 已并入内容以 `00`–`05` 与 `07` 为 source of truth。持续更新的开放 review 项放在 `docs/review/`。
+状态: 第一部分(修订 A/B/C)、缺口 1(定位)、缺口 5(compute 校验 + dynamic offset)已 **并入** `00`–`05` 与 `scratch-graphics-kernel.md`。缺口 2–4(异步 readback、提交单元、GPU 计时/查询)现已跨 `05-passes-submissions-scheduler` 与 `07-transfers-epochs` **设计**。本模块是评审记录; 已并入内容以 `00`–`05` 与 `07` 为 source of truth。持续更新的开放 review 项放在 `docs/review/`。
 
 ## 第一部分 — AI 时代编写视角
 
@@ -87,7 +87,7 @@ indirect buffer  >  ref / handle  >  closure
 ### 第一部分不改变什么
 
 - **保留 `BindSet` 命名**(不改名为 `BindGroup`)。`BindSet` 比 `GPUBindGroup` 做得更多——allocation-version 比对、惰性重建、暴露 readiness(`03-bindings`)。语义不同正是它必须命名不同的理由: 与 WebGPU 同名会诱导错误的心智模型并产出微妙 bug。规则: 行为与 WebGPU 一致处才照 WebGPU 命名，不一致处精确改名。
-- 保留显式的 `ScratchRuntime` / `Surface` 拆分、显式 resource access 与 transfer 声明、使用点上的 `whenMissing`、以及 `FrameValidationMode`(`off` / `warn` / `throw`)。它们本就与 AI 契合: 无隐藏全局状态、可局部推理、且提供了 agentic 闭环可以迭代对抗的错误面。
+- 保留显式的 `ScratchRuntime` / `Surface` 拆分、显式 resource access 与 transfer 声明、使用点上的 `whenMissing`、以及 `SubmissionValidationMode`(`off` / `warn` / `throw`)。它们本就与 AI 契合: 无隐藏全局状态、可局部推理、且提供了 agentic 闭环可以迭代对抗的错误面。
 
 ## 第二部分 — 通用 compute 对等性
 
@@ -110,7 +110,7 @@ indirect buffer  >  ref / handle  >  closure
 
 #### 缺口 2 — 异步回读(readback)曾未建模(vision 层已修)
 
-通查 `00`–`05`，只有 `map` 作为一种 buffer usage 出现(`02-resources`)。**没有任何 readback / `mapAsync` / 可 await 的结果获取机制**: command 家族是 Draw / Dispatch / Copy / Upload(没有 Readback)，唯一的提交单元是 `frame…submit()`——纯 fire-and-forget，也没有 `queue.onSubmittedWorkDone`。
+通查早期 `00`–`05`，只有 `map` 作为一种 buffer usage 出现(`02-resources`)。当时**没有任何 readback / `mapAsync` / 可 await 的结果获取机制**: command 家族是 Draw / Dispatch / Copy / Upload(没有 Readback)，唯一的提交单元是旧 `frame…submit()` 形状——纯 fire-and-forget，也没有 `queue.onSubmittedWorkDone`。
 
 GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CPU 读结果 → 可能再喂下一趟 pass。这条路现在表达不出来。
 
@@ -120,11 +120,11 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 
 #### 缺口 3 — 提交单元曾是"presentation 味"的 `Frame`(vision 层已修)
 
-`05` 唯一的提交单元是 `Frame`，带显示倾向的语义(skip empty passes、current frame、surface 集成)。compute 往往不是"一帧": one-shot 任务、按自己的节奏跑、或在 present 之前先迭代 N 步。
+早期 `05` 唯一的提交单元是 `Frame`，带显示倾向的语义(skip empty passes、current frame、surface 集成)。compute 往往不是"一帧": one-shot 任务、按自己的节奏跑、或在 present 之前先迭代 N 步。
 
-该模型对"多 dispatch 录进一帧、提交一次"支持得很好——适合 GPU-bound 迭代。它没覆盖的是"迭代中周期性 CPU 回读/反馈"，而这又和缺口 2 缠在一起。
+该模型对"多 dispatch 录进一次 submission"支持得很好——适合 GPU-bound 迭代。它没覆盖的是"迭代中周期性 CPU 回读/反馈"，而这又和缺口 2 缠在一起。
 
-已解决(`07-transfers-epochs`): `Frame` 泛化为 presentation 可选的提交单元——不带 surface 即 compute 或 offscreen 提交——而不是新增单独的提交类型。
+已解决(`05-passes-submissions-scheduler` / `07-transfers-epochs`): scratch core submission unit 现在是 `Submission`，不是 `Frame`。一个 submission 可以 present 到 surface，也可以是 compute-only/offscreen。`Frame` cadence 属于 scratch core 之上的层。
 
 #### 缺口 4 — 没有 GPU 计时 / 查询(vision 层已修)
 
@@ -153,8 +153,8 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 4. `BindSet` 命名保留(已确认)。
 5. 重定为"GPU 执行内核"、compute 同级(缺口 1)。
 6. 通过显式 `ReadbackOperation` 的可 await readback，`await readback.toArray()`(缺口 2)——见 `07-transfers-epochs`。
-7. `Frame` 泛化为 presentation 可选的提交单元(缺口 3)——见 `07`。
+7. 核心提交单元改名为 `Submission`，并拆分 `SubmissionBuilder` / `SubmittedWork`(缺口 3)——见 `05` 与 `07`。
 8. `QuerySet` 资源 + `timestampWrites`，经显式 copy/readback operation 取回(缺口 4)——见 `07`。
 9. validation / bindings 的 compute 限制校验与 dynamic offset(缺口 5)。
 
-解决记录: 缺口 2–4 合为一个设计(`07-transfers-epochs`)。提交分叉(缺口 3)是通过泛化 `Frame`(presentation 可选)解决的，而非新增中性 `Submission` 类型; readback(缺口 2)是显式 transfer operation + 显式 `await`; 计时(缺口 4)复用同一套 copy/readback 路径。
+解决记录: 缺口 2–4 形成跨 `05` 与 `07` 的 transfer/submission 设计。提交命名问题(缺口 3)通过把 `Submission` 作为唯一 scratch core submission model 解决; readback(缺口 2)是显式 transfer operation + 显式 `await`; 计时(缺口 4)复用同一套 copy/readback 路径。

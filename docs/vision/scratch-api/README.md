@@ -14,9 +14,9 @@ The documents here are design references, not implementation status. They should
 - `02-resources/`: logical resources, allocation versions, content epochs, readiness, and replacement
 - `03-bindings/`: explicit bind layouts, bind sets, bind group cache, and shader inspection helpers
 - `04-pipelines-commands/`: stable pipelines and executable GPU commands
-- `05-passes-frames-scheduler/`: persistent pass specs, per-submission command lists, and scheduler validation
+- `05-passes-submissions-scheduler/`: persistent pass specs, submission builders, submitted work, and scheduler validation
 - `06-design-review/`: review of `00`–`05` against AI-assisted authoring and general-purpose compute parity
-- `07-transfers-epochs/`: presentation-optional `Frame` submission, explicit transfers, allocation versions, content epochs, and readback operation lifecycle (resolves Gaps 2–4)
+- `07-transfers-epochs/`: submission-scoped transfers, allocation versions, content epochs, and readback operation lifecycle (resolves Gaps 2–4)
 
 Each module has an English `README.md` and a Chinese `README_zh.md`.
 
@@ -33,5 +33,6 @@ Each module has an English `README.md` and a Chinese `README_zh.md`.
 - `ReadbackOperation` has explicit lifecycle, retention, cancellation, disposal, budget, and diagnostic semantics.
 - Bind layouts are explicit in the core API. Shader reflection is only a development helper or validator.
 - `Command` is the canonical name for draw, dispatch, copy, upload, and related executable GPU actions.
-- `PassSpec` is persistent pass shape. `Frame` binds pass specs to the current submission's command list and may or may not present to a surface.
+- `PassSpec` is persistent pass shape. `SubmissionBuilder` binds pass specs to the current command list; `.submit()` returns `SubmittedWork`.
 - The first scheduler model is explicit submission order plus dependency validation. Automatic sorting belongs in an optional upper orchestration layer.
+- `Frame` is not a scratch core submission type. Frame cadence belongs to `geo`, applications, or presentation loops.

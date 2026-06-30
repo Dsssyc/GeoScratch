@@ -93,4 +93,6 @@ The new API should make these boundaries hard to miss:
 - `Pipeline` describes stable GPU program state.
 - `Command` describes one executable GPU action.
 - `PassSpec` describes stable pass shape.
-- `Frame` is the presentation-optional submission builder. It records commands into pass specs in explicit order and submits them.
+- `SubmissionBuilder` records commands into pass specs in explicit order.
+- `SubmittedWork` is the inspectable handle returned by `.submit()`, with a `done` promise for GPU completion.
+- `Frame` is not a scratch core type; frame cadence belongs to `geo`, applications, or presentation loops.

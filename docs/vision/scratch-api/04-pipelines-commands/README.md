@@ -71,7 +71,7 @@ type DrawCount =
     | { vertexCount: number, instanceCount?: number, firstVertex?: number, firstInstance?: number }
     | { indexCount: number, instanceCount?: number, firstIndex?: number, baseVertex?: number, firstInstance?: number }
     | { indirect: BufferResource, offset?: number }
-    | ((context: FrameContext) => DrawCount)
+    | ((context: SubmissionContext) => DrawCount)
 ```
 
 Static values are the default path:
@@ -99,7 +99,7 @@ const drawTerrain = scratch.command.draw({
     bindSets: [terrainSet],
     vertex: terrainVertex,
     index: terrainIndex,
-    count: frame => ({
+    count: context => ({
         indexCount: terrain.visibleIndexCount,
         instanceCount: terrain.visibleTileCount,
     }),
@@ -121,7 +121,7 @@ Dispatch count follows the same model:
 type DispatchCount =
     | { workgroups: [number, number?, number?] }
     | { indirect: BufferResource, offset?: number }
-    | ((context: FrameContext) => DispatchCount)
+    | ((context: SubmissionContext) => DispatchCount)
 ```
 
 Example:
@@ -150,7 +150,7 @@ Draw and dispatch counts span three cases; choose by what the count actually dep
 
 Verifiability ladder, prefer the top: indirect buffer > tracked handle > closure.
 
-`FrameContext` is the context of the current submission. The name follows the `Frame` builder, but it does not imply a presentation surface exists.
+`SubmissionContext` is the context of the current submission. It exposes runtime state, submission diagnostics, tracked dynamic values, and producer epochs without implying a presentation surface exists.
 
 ## Readiness Policy
 

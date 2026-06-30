@@ -96,7 +96,7 @@ Future designs should make room for:
 - resource lifetime and release
 - resource usage declarations such as sample, render target, storage read, storage write, copy source, and copy destination
 
-This is broader than any one rendering technique. For example, alternating between two textures across frames is only one case of content epoch and resource rotation management, not a kernel feature by itself.
+This is broader than any one rendering technique. For example, alternating between two textures across submissions or application frames is only one case of content epoch and resource rotation management, not a kernel feature by itself.
 
 ### Binding Model
 
@@ -131,9 +131,9 @@ A command should be able to declare:
 
 This keeps low-level freedom while giving the scheduler enough information to reduce CPU work and avoid rebuilding WebGPU objects unnecessarily.
 
-### Frame / Submission Scheduler
+### Submission Scheduler
 
-The scheduler should organize commands and passes for a `Frame`, where `Frame` means a presentation-optional submission builder. A presentation frame is one mode; compute-only and offscreen submissions use the same core model.
+The scheduler should organize commands and passes for a `Submission`, where `Submission` means work sent toward the GPU queue. A presentation submission is one mode; compute-only and offscreen submissions use the same core model. `Frame` cadence belongs to `geo`, application, or presentation loops rather than the scratch core.
 
 It should be responsible for:
 
@@ -178,7 +178,7 @@ These policies can use `scratch` resource state and commands, but they should no
 
 Specific rendering patterns should not automatically become kernel APIs.
 
-For example, alternating read/write resources across frames is a useful test case. It proves whether the kernel can express allocation versions, content epochs, read/write usage, and frame transitions. But the kernel should not be designed around a narrow `pingPong` feature as a first-class concept.
+For example, alternating read/write resources across submissions or application frames is a useful test case. It proves whether the kernel can express allocation versions, content epochs, read/write usage, and temporal transitions. But the kernel should not be designed around a narrow `pingPong` feature as a first-class concept.
 
 A pattern is kernel-worthy only if it generalizes to core GPU execution mechanics.
 
@@ -213,6 +213,6 @@ This preserves GeoScratch's design philosophy:
 
 - What general diagnostic schema should validation expose so humans and agents can repair mistakes without parsing prose? Readback-specific lifecycle diagnostics are defined in `docs/vision/scratch-api/07-transfers-epochs/`.
 - How strict should buffer layout typing be across CPU views, vertex attributes, WGSL storage, and readback?
-- Should future graph orchestration remain a helper over explicit `Frame` order, or become a separate upper-layer API?
+- Should future graph orchestration remain a helper over explicit `Submission` order, or become a separate upper-layer API?
 - How should allocation replacement notify bindings, pass attachments, commands, and pending transfer operations without broad event coupling?
 - What compatibility guarantees should the raw primitive API keep once a recommended command/scheduler API exists?

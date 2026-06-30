@@ -5,30 +5,30 @@
 
 ## 决策
 
-`Frame` 仍是 presentation 可选的提交单元。CPU/GPU 数据移动不是 `Resource` 方法; 它应表达为显式 transfer operation 与 command。
+`Submission` 是核心提交单元。CPU/GPU 数据移动不是 `Resource` 方法; 它应表达为显式 transfer operation 与 command。
 
 `Resource` 是逻辑身份加状态，不是 host transfer 句柄。upload、readback、copy、render 写入和 compute 写入都进入同一套 epoch 模型，使 runtime 能校验读取的是哪份内容、绑定的是哪个物理 GPU 对象。
 
 这取代早先的"资源即 readback 句柄"模型。它解决异步 readback、提交单元、GPU 计时/查询缺口，同时不把 `buffer.toArray()` 或 `buffer.write()` 纳入核心资源契约。
 
-## Frame 是提交单元
+## Submission 是提交单元
 
-`Frame` 记录 passes 与 commands 并提交。Presentation 只是其中一种模式，而不是它的定义:
+`SubmissionBuilder` 记录 passes 与 commands 并提交。Presentation 只是其中一种模式，而不是它的定义:
 
-- 带 surface 输出 -> 使用 frame-scoped surface texture view 的 presentation frame
+- 带 surface 输出 -> 使用 presentation-submission-scoped surface texture view 的 presentation submission
 - 不带 surface -> compute 或 offscreen submission
 
-`submit()` 可 await 以等待 GPU 完成，底层是 `queue.onSubmittedWorkDone`。完成等待与数据传输是两件事: await `submit()` 只说明已提交 GPU 工作完成了，不会自动把数据搬到 CPU，也不会自动从 CPU 搬到 GPU。
+`.submit()` 返回 `SubmittedWork`，这是带 `done` promise 的可 inspect 句柄，底层是 `queue.onSubmittedWorkDone`。完成等待与数据传输是两件事: await `submitted.done` 只说明已提交 GPU 工作完成了，不会自动把数据搬到 CPU，也不会自动从 CPU 搬到 GPU。
 
 ```ts
-const submitted = scratch.frame()       // no surface -> compute submission
+const submitted = scratch.submission()  // no surface -> compute submission
     .compute(simulationPass, [simulate])
     .submit()
 
-await submitted                         // GPU completion, not host readback
+await submitted.done                    // GPU completion, not host readback
 ```
 
-因此 `Frame` 是唯一提交概念。核心模型中不额外引入 `Submission` 或 `Batch` 类型。
+因此 `Submission` 是唯一核心提交概念。scratch core model 中不额外引入 `Frame` 或 `Batch` 类型。
 
 ## Epoch 模型
 
@@ -77,7 +77,7 @@ const uploadPositions = scratch.command.upload({
     range: { offset: 0 },
 })
 
-scratch.frame()
+scratch.submission()
     .upload(uploadPositions)
     .submit()
 ```
@@ -91,7 +91,7 @@ Upload 会推进目标写入范围的 `contentEpoch`，并记录 producing submi
 GPU-to-CPU 读取创建显式 `ReadbackOperation`:
 
 ```ts
-const submitted = scratch.frame()
+const submitted = scratch.submission()
     .compute(simulationPass, [simulate])
     .submit()
 
@@ -191,7 +191,7 @@ const readParticles = scratch.command.readback({
     source: particles.segment('positions'),
 })
 
-const submitted = scratch.frame()
+const submitted = scratch.submission()
     .compute(simulationPass, [simulate])
     .readback(readParticles)
     .submit()
@@ -223,7 +223,7 @@ Copy 读取 source `contentEpoch`，并推进 target `contentEpoch`。如果 cop
 - render pass attachment 是声明式写入。它的 store、clear、resolve 行为会推进 attachment resource 的 `contentEpoch`。
 - 后续 pass 采样该 texture 时，声明读取已产生的 `contentEpoch`。
 - depth 与 stencil attachment 使用同一规则。load/store policy 与 read-as-texture 用法必须足够显式，供 dependency validation 判断。
-- surface current texture 是借来的 frame-scoped target，不是持久 `TextureResource`。它不能在获取它的 frame 之外保留。
+- surface current texture 是借来的 presentation-submission-scoped target，不是持久 `TextureResource`。它不能在获取它的 presentation submission 之外保留。
 - render target resize 会推进 `allocationVersion`，并使依赖旧物理对象的 cached views、bind sets、pass attachments 与 commands 失效。
 - TAA history、trails、迭代仿真纹理这类 temporal resources 都是普通资源; 它们的 previous-frame contents 由 content epochs 表达，而不是内核里的特殊一等特性。
 
@@ -252,7 +252,7 @@ Readback retention 是 runtime policy，不是隐藏 garbage collection。默认
 ```ts
 const runtime = await ScratchRuntime.create({
     readback: {
-        staleAfterFrames: 3,
+        staleAfterSubmissions: 3,
         staleAfterMs: 250,
         maxPendingOperations: 16,
         maxStagingBytes: 64 * 1024 * 1024,
@@ -288,7 +288,7 @@ type ReadbackDiagnostic = {
     contentEpoch: number
     rangeOrRegion?: unknown
     producerSubmissionId?: string
-    ageInFrames?: number
+    ageInSubmissions?: number
     ageInMs?: number
     stagingBytes?: number
     hint?: string

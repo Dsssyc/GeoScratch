@@ -47,7 +47,7 @@ const surface = scratch.surface(canvas, {
 - canvas or `OffscreenCanvas`
 - presentation format
 - alpha mode and configure options
-- current frame swapchain texture access
+- current presentation texture access
 - resize policy
 
 ## Ownership Rules
@@ -55,30 +55,30 @@ const surface = scratch.surface(canvas, {
 - A resource belongs to exactly one `ScratchRuntime`.
 - A surface is configured by exactly one `ScratchRuntime` at a time.
 - Resources from one runtime cannot be used by commands recorded on another runtime.
-- A surface current texture is frame-scoped and must not be stored as a persistent resource.
+- A surface current texture is presentation-submission-scoped and must not be stored as a persistent resource.
 - Disposing a surface does not dispose the runtime.
 - Disposing a runtime invalidates its resources, surfaces, pipelines, bind sets, and commands.
 
 ## Surface Is Not A TextureResource
 
-A surface can produce a current-frame texture view, but it should not inherit from or masquerade as `TextureResource`.
+A surface can produce a current presentation texture view, but it should not inherit from or masquerade as `TextureResource`.
 
 Reasoning:
 
-- swapchain textures are borrowed per frame
+- swapchain textures are borrowed per presentation submission
 - they are not long-lived logical resources
 - their lifetime is controlled by the browser presentation system
 - caching them like normal textures would corrupt allocation/content epoch semantics
 
-Use a frame-scoped borrowed handle instead:
+Use a presentation-submission-scoped borrowed handle instead:
 
 ```ts
-frame.render(outputPass, [compositeTo(surface.currentView(frame))])
+submission.render(outputPass, [compositeTo(surface.currentView(submission))])
 ```
 
 The exact syntax may change, but the semantic boundary should not.
 
-`Frame` here means the presentation-optional submission builder defined in `05` / `07`. A compute-only `Frame` has no current surface texture; only a presentation frame can borrow a surface current texture view.
+`Submission` here means the core submission builder defined in `05` / `07`. A compute-only submission has no current surface texture; only a presentation submission can borrow a surface current texture view.
 
 ## Device Loss
 

@@ -47,7 +47,7 @@ const surface = scratch.surface(canvas, {
 - canvas 或 `OffscreenCanvas`
 - presentation format
 - alpha mode 与 configure options
-- 当前帧 swapchain texture 访问
+- 当前 presentation texture 访问
 - resize policy
 
 ## 所有权规则
@@ -55,30 +55,30 @@ const surface = scratch.surface(canvas, {
 - 一个 resource 只属于一个 `ScratchRuntime`。
 - 一个 surface 同一时间只由一个 `ScratchRuntime` 配置。
 - 一个 runtime 的资源不能被另一个 runtime 记录的 command 使用。
-- surface current texture 是 frame-scoped，不允许作为持久 resource 保存。
+- surface current texture 是 presentation-submission-scoped，不允许作为持久 resource 保存。
 - dispose surface 不会 dispose runtime。
 - dispose runtime 会使其 resources、surfaces、pipelines、bind sets、commands 全部失效。
 
 ## Surface 不是 TextureResource
 
-Surface 可以产生当前帧 texture view，但不应继承或伪装成 `TextureResource`。
+Surface 可以产生当前 presentation texture view，但不应继承或伪装成 `TextureResource`。
 
 原因:
 
-- swapchain texture 是逐帧借用的
+- swapchain texture 是逐 presentation submission 借用的
 - 它不是长期逻辑资源
 - 它的生命周期由浏览器呈现系统控制
 - 如果像普通 texture 一样缓存，会污染 allocation/content epoch 语义
 
-应使用 frame-scoped borrowed handle:
+应使用 presentation-submission-scoped borrowed handle:
 
 ```ts
-frame.render(outputPass, [compositeTo(surface.currentView(frame))])
+submission.render(outputPass, [compositeTo(surface.currentView(submission))])
 ```
 
 最终语法可以变化，但语义边界不应变化。
 
-这里的 `Frame` 指 `05` / `07` 定义的 presentation 可选提交 builder。compute-only 的 `Frame` 没有 surface current texture; 只有 presentation frame 能借用 surface current texture view。
+这里的 `Submission` 指 `05` / `07` 定义的核心 submission builder。compute-only submission 没有 surface current texture; 只有 presentation submission 能借用 surface current texture view。
 
 ## Device Loss
 

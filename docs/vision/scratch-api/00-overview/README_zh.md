@@ -93,4 +93,6 @@ Descriptor 不适合承担时间变化行为:
 - `Pipeline` 描述稳定 GPU 程序状态。
 - `Command` 描述一个可执行 GPU 动作。
 - `PassSpec` 描述稳定 pass 形状。
-- `Frame` 是 presentation 可选的提交 builder，按显式顺序把 commands 记录进 pass specs 并提交。
+- `SubmissionBuilder` 按显式顺序把 commands 记录进 pass specs。
+- `SubmittedWork` 是 `.submit()` 返回的可 inspect 句柄，并通过 `done` promise 等待 GPU 完成。
+- `Frame` 不是 scratch core type; frame cadence 属于 `geo`、应用或 presentation loops。

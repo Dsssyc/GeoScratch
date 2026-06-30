@@ -5,30 +5,30 @@ Date: 2026-06-30
 
 ## Decision
 
-`Frame` remains the presentation-optional submission unit. CPU/GPU data motion is not a method on `Resource`; it is expressed as explicit transfer operations and commands.
+`Submission` is the core submission unit. CPU/GPU data motion is not a method on `Resource`; it is expressed as explicit transfer operations and commands.
 
 A `Resource` is a logical identity plus state. It is not a host transfer handle. Upload, readback, copy, render writes, and compute writes all participate in the same epoch model, so the runtime can validate which contents are read and which physical GPU object is bound.
 
 This replaces the earlier resource-as-readback-handle model. It resolves the async readback, submission, and timing/query gaps without making `buffer.toArray()` or `buffer.write()` part of the core resource contract.
 
-## Frame Is The Submission Unit
+## Submission Is The Submission Unit
 
-`Frame` records passes and commands and submits them. Presentation is one mode, not the definition:
+`SubmissionBuilder` records passes and commands and submits them. Presentation is one mode, not the definition:
 
-- with a surface output -> a presentation frame using a frame-scoped surface texture view
+- with a surface output -> a presentation submission using a presentation-submission-scoped surface texture view
 - with no surface -> a compute or offscreen submission
 
-`submit()` is awaitable for GPU completion, backed by `queue.onSubmittedWorkDone`. Completion is separate from data transfer: awaiting `submit()` tells you submitted GPU work finished; it does not automatically move data to or from the CPU.
+`.submit()` returns `SubmittedWork`, an inspectable handle with a `done` promise backed by `queue.onSubmittedWorkDone`. Completion is separate from data transfer: awaiting `submitted.done` tells you submitted GPU work finished; it does not automatically move data to or from the CPU.
 
 ```ts
-const submitted = scratch.frame()       // no surface -> compute submission
+const submitted = scratch.submission()  // no surface -> compute submission
     .compute(simulationPass, [simulate])
     .submit()
 
-await submitted                         // GPU completion, not host readback
+await submitted.done                    // GPU completion, not host readback
 ```
 
-`Frame` is therefore the single submission concept. There is no separate `Submission` or `Batch` type in the core model.
+`Submission` is therefore the single core submission concept. There is no separate `Frame` or `Batch` type in the scratch core model.
 
 ## Epoch Model
 
@@ -77,7 +77,7 @@ const uploadPositions = scratch.command.upload({
     range: { offset: 0 },
 })
 
-scratch.frame()
+scratch.submission()
     .upload(uploadPositions)
     .submit()
 ```
@@ -91,7 +91,7 @@ An upload advances the target's `contentEpoch` for the written range and records
 GPU-to-CPU reads create an explicit `ReadbackOperation`:
 
 ```ts
-const submitted = scratch.frame()
+const submitted = scratch.submission()
     .compute(simulationPass, [simulate])
     .submit()
 
@@ -191,7 +191,7 @@ const readParticles = scratch.command.readback({
     source: particles.segment('positions'),
 })
 
-const submitted = scratch.frame()
+const submitted = scratch.submission()
     .compute(simulationPass, [simulate])
     .readback(readParticles)
     .submit()
@@ -223,7 +223,7 @@ The same model covers graphics resources:
 - A render pass attachment is a declared write. Its store, clear, and resolve behavior advances the attachment resource's `contentEpoch`.
 - A later pass that samples that texture declares a read of the produced `contentEpoch`.
 - Depth and stencil attachments use the same rule. Load/store policy and read-as-texture use must be explicit enough for dependency validation.
-- The surface current texture is a borrowed frame-scoped target, not a persistent `TextureResource`. It cannot be retained beyond the frame that acquired it.
+- The surface current texture is a borrowed presentation-submission-scoped target, not a persistent `TextureResource`. It cannot be retained beyond the presentation submission that acquired it.
 - Resizing a render target advances `allocationVersion` and invalidates cached views, bind sets, pass attachments, and commands that depend on the previous physical object.
 - Temporal resources such as TAA history, trails, or iterative simulation textures are ordinary resources whose previous-frame contents are represented by content epochs, not by a special core feature.
 
@@ -252,7 +252,7 @@ Example configuration shape:
 ```ts
 const runtime = await ScratchRuntime.create({
     readback: {
-        staleAfterFrames: 3,
+        staleAfterSubmissions: 3,
         staleAfterMs: 250,
         maxPendingOperations: 16,
         maxStagingBytes: 64 * 1024 * 1024,
@@ -288,7 +288,7 @@ type ReadbackDiagnostic = {
     contentEpoch: number
     rangeOrRegion?: unknown
     producerSubmissionId?: string
-    ageInFrames?: number
+    ageInSubmissions?: number
     ageInMs?: number
     stagingBytes?: number
     hint?: string

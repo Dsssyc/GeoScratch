@@ -37,7 +37,7 @@ Target resource families:
 - `SamplerResource`
 - `ShaderModuleResource`
 - `QuerySetResource` (timestamp / occlusion, feature-gated)
-- frame-scoped borrowed surface texture views
+- presentation-submission-scoped borrowed surface texture views
 
 Surface texture views are not persistent `TextureResource` objects.
 
@@ -51,7 +51,7 @@ Buffers should support:
 - copy source and copy destination usage
 - storage, vertex, index, uniform, indirect, and map usage where applicable
 
-Static data should not require a per-submission callback. Dynamic data should be represented by explicit upload/copy commands or tracked handles that produce upload commands during frame preparation.
+Static data should not require a per-submission callback. Dynamic data should be represented by explicit upload/copy commands or tracked handles that produce upload commands during submission preparation.
 
 Example shape:
 
@@ -159,7 +159,7 @@ Values that feed a resource (size, initial or updated data) are sometimes static
 - Runtime-varying value computed from other tracked sources (e.g. texture size from the surface) → a **derived value**: the runtime can inspect its dependency, subscribe to it for invalidation, and check it during validation.
 - Last resort → a raw closure, only when no handle or derived value can express the case.
 
-A tracked handle or derived value is inspectable and invalidation-aware; a bare `size: () => surface.size` closure is a black box — the runtime must poll it every frame and cannot know when or why it changed. This rule generalizes to command counts (`04-pipelines-commands`).
+A tracked handle or derived value is inspectable and invalidation-aware; a bare `size: () => surface.size` closure is a black box — the runtime must poll it every submission and cannot know when or why it changed. This rule generalizes to command counts (`04-pipelines-commands`).
 
 ## Missing Resource Policy
 
