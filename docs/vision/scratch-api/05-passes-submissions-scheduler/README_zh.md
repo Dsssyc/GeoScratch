@@ -13,7 +13,7 @@
 
 ## PassSpec
 
-`PassSpec` 描述稳定 encoder 边界和 attachment 形状。
+`PassSpec` 描述稳定 encoder 边界、attachment 形状，以及 timestamp writes 或 occlusion query-set ownership 这类 pass-level instrumentation。
 
 Render pass spec 示例:
 
@@ -34,6 +34,12 @@ const scenePass = scratch.pass.render({
         store: 'store',
         clear: 1,
     },
+    occlusionQuerySet: visibilityQueries,
+    timestampWrites: {
+        querySet: renderTiming,
+        begin: 0,
+        end: 1,
+    },
 })
 ```
 
@@ -42,8 +48,15 @@ Compute pass spec 示例:
 ```ts
 const simulationPass = scratch.pass.compute({
     label: 'simulation',
+    timestampWrites: {
+        querySet: simulationTiming,
+        begin: 0,
+        end: 1,
+    },
 })
 ```
+
+`timestampWrites` 降低为 WebGPU pass descriptor timestamp writes，并要求 `timestamp` query set。`occlusionQuerySet` 仅用于 render pass，并要求 `occlusion` query set。Query result transfer 不隐含在 pass spec 中; resolve 与 readback 仍然是显式 command 或 operation。
 
 Pass spec 不存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
 

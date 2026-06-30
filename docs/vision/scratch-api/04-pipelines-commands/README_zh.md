@@ -46,8 +46,10 @@ Pipeline 不拥有:
 - `DispatchCommand`
 - `CopyCommand`
 - `UploadCommand`
+- `ResolveQuerySetCommand`
 - `ReadbackCommand` 作为显式 ordered-staging 逃生口，并产生 `ReadbackOperation`
-- 未来必要时加入显式 clear 或 resolve command
+- `BeginOcclusionQueryCommand` / `EndOcclusionQueryCommand` 作为 render-pass-only query bracket
+- 未来必要时加入显式 clear 或 attachment-resolve command
 
 每个 command 应声明:
 
@@ -61,6 +63,8 @@ Pipeline 不拥有:
 - 适用时的 static、dynamic 或 indirect count
 
 写入资源内容的 command 推进 `contentEpoch`。替换物理 GPU 对象的 command 推进 `allocationVersion`。两者分离，这样 compute 写入不会被误解为 bind group invalidation。
+
+Query command 会写入 indexed `QuerySetResource` slots。resolve query set 会把字节写入 destination buffer，并推进该 buffer 的 `contentEpoch`; 它不会让数据自动 CPU-visible，CPU 访问仍需创建或消费 `ReadbackOperation`。
 
 ## DrawCommand
 
@@ -140,6 +144,32 @@ const simulate = scratch.command.dispatch({
 })
 ```
 
+## Query Commands
+
+Query command 暴露 WebGPU query 机制，但不发明平台并不提供的 profiling 抽象。
+
+```ts
+const resolveTiming = scratch.command.resolveQuerySet({
+    label: 'resolve timing',
+    querySet: timingQueries,
+    first: 0,
+    count: 2,
+    destination: timingBuffer,
+    destinationOffset: 0,
+})
+```
+
+`ResolveQuerySetCommand` 是 copy/resolve command。它的 source 是 indexed query range，destination 必须是带有 query-resolve usage，以及该 workflow 后续所需 copy/readback usage 的 buffer。后续 CPU 访问仍然使用 `ReadbackOperation`。
+
+Occlusion query bracket 是 render-pass-only 的 command-like encoder action:
+
+```ts
+scratch.command.beginOcclusionQuery({ querySet: visibilityQueries, index: tileIndex })
+scratch.command.endOcclusionQuery()
+```
+
+它们要求 active render pass 拥有同一个 `occlusionQuerySet`，不能嵌套，并写入一个 indexed query slot。
+
 ## Count 分流
 
 draw 与 dispatch count 分三种情况; 按 count 实际依赖什么来选:
@@ -170,5 +200,6 @@ type ResourceReadinessPolicy =
 
 - 不让 command count 默认就是闭包。
 - 不把 indirect draw 或 dispatch 隐藏成特殊高层特性。
+- 当 WebGPU 缺少对应 core query type 时，不把 pipeline statistics 暴露成核心 command family。
 - 不把 command membership 存在 pass spec 中。
 - 不在 command 中编码 terrain、flow、tile 或 layer 概念。

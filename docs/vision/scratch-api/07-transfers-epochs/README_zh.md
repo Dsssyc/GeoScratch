@@ -229,13 +229,122 @@ Copy 读取 source `contentEpoch`，并推进 target `contentEpoch`。如果 cop
 
 ## Timing 与 Query
 
-GPU timing 复用同一套 transfer 模型:
+GPU timing 与 visibility query 复用同一套 transfer 模型。`QuerySetResource` 名称沿用 WebGPU `GPUQuerySet`; 它是 indexed slot resource，不是无序集合。
 
-- `QuerySetResource` 是 timestamp 或 occlusion query 的资源种类，按需 feature-gated。
-- `timestampWrites` 附着在 pass specs 上。
-- Query 结果通过显式 copy/resolve 写入 buffer，再由 `ReadbackOperation` 读取。
+核心 query-set contract:
 
-Pipeline statistics 不是当前 WebGPU core contract 的一部分，除非未来目标明确支持，否则不进入核心设计。
+```ts
+type QuerySetType = 'timestamp' | 'occlusion'
+type QueryUnsupportedPolicy = 'throw' | 'warn-disable' | 'disable'
+
+const timingQueries = scratch.querySet({
+    label: 'simulation timing',
+    type: 'timestamp',
+    count: 2,
+    whenUnsupported: 'throw',
+})
+```
+
+- `count` 是 indexed query slots 的数量。
+- Query slot 通过显式 index 或 index range 访问。
+- `timestamp` 需要 `timestamp-query` feature，可用于 render 或 compute pass 的 `timestampWrites`。
+- `occlusion` 通过 `occlusionQuerySet` 和 begin/end occlusion query brackets 属于 render pass。
+- query write 会推进 query slot 的 content epoch。resolve query results 会推进 destination buffer 的 `contentEpoch`。
+- `whenUnsupported` 控制 feature-gate failure。开发期应优先用 `throw`; profiling overlays 可在 instrumentation 可选时使用 `warn-disable` 或 `disable`。
+
+Timestamp writes 是 pass-level instrumentation:
+
+```ts
+const simulationPass = scratch.pass.compute({
+    label: 'simulate',
+    timestampWrites: {
+        querySet: timingQueries,
+        begin: 0,
+        end: 1,
+    },
+})
+```
+
+Occlusion queries 是 render-pass-scoped:
+
+```ts
+const visibilityQueries = scratch.querySet({
+    label: 'tile visibility',
+    type: 'occlusion',
+    count: tileCapacity,
+})
+
+const scenePass = scratch.pass.render({
+    label: 'scene',
+    color: [
+        {
+            target: sceneColor,
+            load: 'load',
+            store: 'store',
+        },
+    ],
+    depth: {
+        target: depth,
+        load: 'load',
+        store: 'store',
+    },
+    occlusionQuerySet: visibilityQueries,
+})
+
+const drawTileWithVisibility = [
+    scratch.command.beginOcclusionQuery({ querySet: visibilityQueries, index: tileIndex }),
+    drawTile,
+    scratch.command.endOcclusionQuery(),
+]
+```
+
+Query result 只有显式 resolve 并 read back 后才 CPU-visible:
+
+```ts
+const resolveTiming = scratch.command.resolveQuerySet({
+    querySet: timingQueries,
+    first: 0,
+    count: 2,
+    destination: timingBuffer,
+    destinationOffset: 0,
+})
+
+const submitted = scratch.submission()
+    .compute(simulationPass, [simulateParticles])
+    .copy([resolveTiming])
+    .submit()
+
+const timingReadback = scratch.readback({
+    source: {
+        resource: timingBuffer,
+        range: { offset: 0, byteLength: 16 },
+        view: 'u64',
+    },
+    after: submitted,
+    provenance: { querySet: timingQueries, first: 0, count: 2 },
+})
+
+const timingValues = await timingReadback.toBigUint64Array()
+```
+
+Pipeline statistics 不是当前 WebGPU core contract 的一部分; 除非未来 WebGPU target 或显式 extension 支持，否则必须留在 scratch core 之外。
+
+候选 query diagnostic codes:
+
+```ts
+type QueryDiagnosticCode =
+    | 'SCRATCH_QUERY_UNSUPPORTED_TYPE'
+    | 'SCRATCH_QUERY_FEATURE_UNAVAILABLE'
+    | 'SCRATCH_QUERY_INDEX_OUT_OF_RANGE'
+    | 'SCRATCH_QUERY_WRONG_PASS_KIND'
+    | 'SCRATCH_QUERY_WRONG_SET_TYPE'
+    | 'SCRATCH_QUERY_OCCLUSION_NESTED'
+    | 'SCRATCH_QUERY_OCCLUSION_NOT_ACTIVE'
+    | 'SCRATCH_QUERY_RESOLVE_UNWRITTEN_RANGE'
+    | 'SCRATCH_QUERY_RESOLVE_DESTINATION_INVALID'
+```
+
+Query diagnostic 应携带 query-set id、type、requested range、pass 或 command id、相关 feature name、resolve 失败时的 destination buffer id，以及 query slot 被写入时的 producer submission id。
 
 ## Retention、预算与诊断
 
@@ -303,5 +412,6 @@ type ReadbackDiagnostic = {
 - 不暴露核心 `resource.write()` 糖。
 - 不隐藏 upload、readback 或 copy submission。
 - 不让 `ReadbackCommand` 成为默认路径。
+- 当 WebGPU 不提供对应 core query primitive 时，不把 pipeline statistics 暴露成核心 query type。
 - 不把自动 render-graph sorting 放进核心 scheduler。
 - 不把 ping-pong、history buffer、readback ring 等常见模式做成内核一等特性。

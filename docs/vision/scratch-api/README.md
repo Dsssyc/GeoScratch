@@ -16,7 +16,7 @@ The documents here are design references, not implementation status. They should
 - `04-pipelines-commands/`: stable pipelines and executable GPU commands
 - `05-passes-submissions-scheduler/`: persistent pass specs, submission builders, submitted work, and scheduler validation
 - `06-design-review/`: review of `00`–`05` against AI-assisted authoring and general-purpose compute parity
-- `07-transfers-epochs/`: submission-scoped transfers, allocation versions, content epochs, and readback operation lifecycle (resolves Gaps 2–4)
+- `07-transfers-epochs/`: submission-scoped transfers, allocation versions, content epochs, readback operation lifecycle, and indexed query-set transfer (resolves Gaps 2–4)
 
 Each module has an English `README.md` and a Chinese `README_zh.md`.
 
@@ -31,6 +31,7 @@ Each module has an English `README.md` and a Chinese `README_zh.md`.
 - Resource missing/readiness policy must be declared by command or pass usage.
 - CPU/GPU transfer is explicit: uploads, readbacks, and copies are commands or operations, not hidden `Resource` methods.
 - `ReadbackOperation` has explicit lifecycle, retention, cancellation, disposal, budget, and diagnostic semantics.
+- `QuerySetResource` keeps the WebGPU `QuerySet` name but means indexed query slots. Core query types are `timestamp | occlusion`; pipeline statistics are not a core query type.
 - Bind layouts are explicit in the core API. Shader reflection is only a development helper or validator.
 - `Command` is the canonical name for draw, dispatch, copy, upload, and related executable GPU actions.
 - `PassSpec` is persistent pass shape. `SubmissionBuilder` binds pass specs to the current command list; `.submit()` returns `SubmittedWork`.

@@ -50,21 +50,28 @@ Coverage check for this pass:
 - Presentation is a submission mode, not the core concept: covered by `01-runtime-surface`, `05-passes-submissions-scheduler`, `07-transfers-epochs`, and `scratch-graphics-kernel.md`.
 - `FrameContext` / `FrameValidationMode` are renamed to `SubmissionContext` / `SubmissionValidationMode`: covered by `04-pipelines-commands` and `05-passes-submissions-scheduler`.
 
+### QuerySet Scope
+
+Resolved in `docs/vision/scratch-api/07-transfers-epochs/`: scratch core keeps the WebGPU-compatible `QuerySet` name but defines it as indexed query slots, not an unordered collection. Core query types are limited to `timestamp` and `occlusion`. Timestamp queries are feature-gated by `timestamp-query`, occlusion queries are render-pass-scoped, query results are resolved into buffers and then read through `ReadbackOperation`, and pipeline statistics remain outside the core model.
+
+Coverage check for this pass:
+
+- `QuerySetResource` is indexed slots, not an unordered set: covered by `02-resources` and `07-transfers-epochs`.
+- Core query types are `timestamp | occlusion`: covered by `02-resources` and `07-transfers-epochs`.
+- Timestamp feature gating and pass-level `timestampWrites`: covered by `05-passes-submissions-scheduler` and `07-transfers-epochs`.
+- Render-pass-only occlusion query set and begin/end brackets: covered by `04-pipelines-commands`, `05-passes-submissions-scheduler`, and `07-transfers-epochs`.
+- Explicit `resolveQuerySet` into a buffer before readback: covered by `04-pipelines-commands` and `07-transfers-epochs`.
+- Query-specific diagnostics and pipeline statistics non-goal: covered by `07-transfers-epochs`.
+
 ## Current Review Items
 
-### 1. QuerySet Scope
-
-Core WebGPU query types are timestamp and occlusion. Pipeline statistics should remain outside the core design unless a future target explicitly supports it.
-
-Risk if unresolved: TypeScript declarations or runtime validators may expose unsupported WebGPU query types.
-
-### 2. Buffer Layout Type Grammar
+### 1. Buffer Layout Type Grammar
 
 The compositional buffer layout model is valuable, but it needs a sharper typed contract. A field `format` may mean different things for CPU views, vertex attributes, WGSL storage structs, and readback. The design should define usage-specific lowering, alignment mode, and failure diagnostics.
 
 Risk if unresolved: the API may look type-safe while still allowing invalid or misleading storage-buffer layouts.
 
-### 3. Validation Diagnostic Schema
+### 2. Validation Diagnostic Schema
 
 The intelligent-friendly loop needs machine-readable diagnostics, not only `warn` / `throw` and prose messages. Readback-specific diagnostics are now covered in `07-transfers-epochs`, but a future design should still define the general schema for validation, shader cross-checks, resource readiness, and submission ordering.
 

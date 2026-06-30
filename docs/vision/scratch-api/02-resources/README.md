@@ -36,10 +36,20 @@ Target resource families:
 - `TextureResource`
 - `SamplerResource`
 - `ShaderModuleResource`
-- `QuerySetResource` (timestamp / occlusion, feature-gated)
+- `QuerySetResource` (indexed timestamp / occlusion query slots, feature-gated where required)
 - presentation-submission-scoped borrowed surface texture views
 
 Surface texture views are not persistent `TextureResource` objects.
+
+`QuerySetResource` follows WebGPU's `GPUQuerySet` naming. The `Set` suffix does not mean an unordered mathematical set. A query set is an indexed slot resource with a fixed `count`; pass instrumentation and query commands write specific query indices, and resolve commands copy an explicit index range into a buffer.
+
+Core query types are intentionally limited to current WebGPU query primitives:
+
+```ts
+type QuerySetType = 'timestamp' | 'occlusion'
+```
+
+`timestamp` query sets require the `timestamp-query` feature. `occlusion` query sets belong to render passes. Query sets are resources for ownership, lifetime, usage validation, and slot epoch tracking, but they are not bindable shader resources.
 
 ## BufferResource
 

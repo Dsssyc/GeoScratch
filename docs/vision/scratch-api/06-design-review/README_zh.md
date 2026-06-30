@@ -154,7 +154,7 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 5. 重定为"GPU 执行内核"、compute 同级(缺口 1)。
 6. 通过显式 `ReadbackOperation` 的可 await readback，`await readback.toArray()`(缺口 2)——见 `07-transfers-epochs`。
 7. 核心提交单元改名为 `Submission`，并拆分 `SubmissionBuilder` / `SubmittedWork`(缺口 3)——见 `05` 与 `07`。
-8. `QuerySet` 资源 + `timestampWrites`，经显式 copy/readback operation 取回(缺口 4)——见 `07`。
+8. timestamp/occlusion 的 indexed `QuerySet` 资源、`timestampWrites`、occlusion query bracket，以及显式 resolve/readback operations(缺口 4)——见 `07`。
 9. validation / bindings 的 compute 限制校验与 dynamic offset(缺口 5)。
 
 解决记录: 缺口 2–4 形成跨 `05` 与 `07` 的 transfer/submission 设计。提交命名问题(缺口 3)通过把 `Submission` 作为唯一 scratch core submission model 解决; readback(缺口 2)是显式 transfer operation + 显式 `await`; 计时(缺口 4)复用同一套 copy/readback 路径。

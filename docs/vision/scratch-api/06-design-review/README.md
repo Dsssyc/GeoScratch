@@ -154,7 +154,7 @@ Applied to `00`–`05`, `07`, and `scratch-graphics-kernel.md`:
 5. Re-centered as a "GPU execution kernel", compute co-equal (Gap 1).
 6. Awaitable readback via explicit `ReadbackOperation`, `await readback.toArray()` (Gap 2) — see `07-transfers-epochs`.
 7. Core submission unit renamed to `Submission` with `SubmissionBuilder` / `SubmittedWork` split (Gap 3) — see `05` and `07`.
-8. `QuerySet` resource + `timestampWrites`, resolved through explicit copy/readback operations (Gap 4) — see `07`.
+8. Indexed `QuerySet` resource for timestamp/occlusion, `timestampWrites`, occlusion query brackets, and explicit resolve/readback operations (Gap 4) — see `07`.
 9. Compute-limit checks and dynamic offsets in validation / bindings (Gap 5).
 
 Resolution notes: Gaps 2–4 became one transfer/submission design across `05` and `07`. The submission naming issue (Gap 3) is resolved by using `Submission` as the only scratch core submission model; readback (Gap 2) is an explicit transfer operation with an explicit `await`; timing (Gap 4) reuses the same copy/readback path.

@@ -229,13 +229,122 @@ The same model covers graphics resources:
 
 ## Timing And Queries
 
-GPU timing uses the same transfer model:
+GPU timing and visibility queries use the same transfer model. The name `QuerySetResource` follows WebGPU `GPUQuerySet`; it is an indexed slot resource, not an unordered collection.
 
-- `QuerySetResource` is a resource kind for timestamp or occlusion queries, feature-gated where required.
-- `timestampWrites` attach to pass specs.
-- Query results are resolved through an explicit copy/resolve into a buffer and then read through a `ReadbackOperation`.
+Core query-set contract:
 
-Pipeline statistics are not part of the current WebGPU core contract and should stay outside the core design unless a future target explicitly supports them.
+```ts
+type QuerySetType = 'timestamp' | 'occlusion'
+type QueryUnsupportedPolicy = 'throw' | 'warn-disable' | 'disable'
+
+const timingQueries = scratch.querySet({
+    label: 'simulation timing',
+    type: 'timestamp',
+    count: 2,
+    whenUnsupported: 'throw',
+})
+```
+
+- `count` is the number of indexed query slots.
+- Query slots are addressed by explicit indices or index ranges.
+- `timestamp` requires the `timestamp-query` feature and can be used by render or compute pass `timestampWrites`.
+- `occlusion` belongs to render passes through `occlusionQuerySet` and begin/end occlusion query brackets.
+- A query write advances the query slot's content epoch. Resolving query results advances the destination buffer's `contentEpoch`.
+- `whenUnsupported` controls feature-gate failure. Development should prefer `throw`; profiling overlays may choose `warn-disable` or `disable` when instrumentation is optional.
+
+Timestamp writes are pass-level instrumentation:
+
+```ts
+const simulationPass = scratch.pass.compute({
+    label: 'simulate',
+    timestampWrites: {
+        querySet: timingQueries,
+        begin: 0,
+        end: 1,
+    },
+})
+```
+
+Occlusion queries are render-pass-scoped:
+
+```ts
+const visibilityQueries = scratch.querySet({
+    label: 'tile visibility',
+    type: 'occlusion',
+    count: tileCapacity,
+})
+
+const scenePass = scratch.pass.render({
+    label: 'scene',
+    color: [
+        {
+            target: sceneColor,
+            load: 'load',
+            store: 'store',
+        },
+    ],
+    depth: {
+        target: depth,
+        load: 'load',
+        store: 'store',
+    },
+    occlusionQuerySet: visibilityQueries,
+})
+
+const drawTileWithVisibility = [
+    scratch.command.beginOcclusionQuery({ querySet: visibilityQueries, index: tileIndex }),
+    drawTile,
+    scratch.command.endOcclusionQuery(),
+]
+```
+
+Query results are not CPU-visible until explicitly resolved and read back:
+
+```ts
+const resolveTiming = scratch.command.resolveQuerySet({
+    querySet: timingQueries,
+    first: 0,
+    count: 2,
+    destination: timingBuffer,
+    destinationOffset: 0,
+})
+
+const submitted = scratch.submission()
+    .compute(simulationPass, [simulateParticles])
+    .copy([resolveTiming])
+    .submit()
+
+const timingReadback = scratch.readback({
+    source: {
+        resource: timingBuffer,
+        range: { offset: 0, byteLength: 16 },
+        view: 'u64',
+    },
+    after: submitted,
+    provenance: { querySet: timingQueries, first: 0, count: 2 },
+})
+
+const timingValues = await timingReadback.toBigUint64Array()
+```
+
+Pipeline statistics are not part of the current WebGPU core contract and must stay outside the scratch core design unless a future WebGPU target or explicit extension supports them.
+
+Potential query diagnostic codes:
+
+```ts
+type QueryDiagnosticCode =
+    | 'SCRATCH_QUERY_UNSUPPORTED_TYPE'
+    | 'SCRATCH_QUERY_FEATURE_UNAVAILABLE'
+    | 'SCRATCH_QUERY_INDEX_OUT_OF_RANGE'
+    | 'SCRATCH_QUERY_WRONG_PASS_KIND'
+    | 'SCRATCH_QUERY_WRONG_SET_TYPE'
+    | 'SCRATCH_QUERY_OCCLUSION_NESTED'
+    | 'SCRATCH_QUERY_OCCLUSION_NOT_ACTIVE'
+    | 'SCRATCH_QUERY_RESOLVE_UNWRITTEN_RANGE'
+    | 'SCRATCH_QUERY_RESOLVE_DESTINATION_INVALID'
+```
+
+Query diagnostics should include query-set id, type, requested range, pass or command id, feature name where relevant, destination buffer id for resolve failures, and the producer submission id when a query slot was written.
 
 ## Retention, Budgets, And Diagnostics
 
@@ -303,5 +412,6 @@ General validation diagnostics are a broader design topic, but readback-specific
 - Do not expose core `resource.write()` sugar.
 - Do not hide upload, readback, or copy submission.
 - Do not make `ReadbackCommand` the default path.
+- Do not expose pipeline statistics as a core query type while WebGPU does not provide that core query primitive.
 - Do not add automatic render-graph sorting to the core scheduler.
 - Do not turn common patterns such as ping-pong, history buffers, or readback rings into first-class kernel features.

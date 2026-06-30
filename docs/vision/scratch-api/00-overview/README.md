@@ -87,6 +87,7 @@ The new API should make these boundaries hard to miss:
 - `ScratchRuntime` owns GPU device state and caches.
 - `Surface` owns presentation target configuration, not GPU execution.
 - `Resource` is a logical handle with physical GPU allocation versions and content epochs.
+- `QuerySetResource` is an indexed query-slot resource, not an unordered collection or shader binding.
 - Transfer operations move data across CPU/GPU or GPU/GPU boundaries and advance content epochs explicitly.
 - `BindLayout` describes shader binding shape.
 - `BindSet` binds concrete resources to a layout.

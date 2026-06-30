@@ -13,7 +13,7 @@ The first scheduler model is explicit submission order plus dependency validatio
 
 ## PassSpec
 
-`PassSpec` describes stable encoder boundaries and attachment shape.
+`PassSpec` describes stable encoder boundaries, attachment shape, and pass-level instrumentation such as timestamp writes or occlusion query-set ownership.
 
 Render pass spec example:
 
@@ -34,6 +34,12 @@ const scenePass = scratch.pass.render({
         store: 'store',
         clear: 1,
     },
+    occlusionQuerySet: visibilityQueries,
+    timestampWrites: {
+        querySet: renderTiming,
+        begin: 0,
+        end: 1,
+    },
 })
 ```
 
@@ -42,8 +48,15 @@ Compute pass spec example:
 ```ts
 const simulationPass = scratch.pass.compute({
     label: 'simulation',
+    timestampWrites: {
+        querySet: simulationTiming,
+        begin: 0,
+        end: 1,
+    },
 })
 ```
+
+`timestampWrites` lower to WebGPU pass descriptor timestamp writes and require a `timestamp` query set. `occlusionQuerySet` is render-pass-only and requires an `occlusion` query set. Query result transfer is not implicit in pass specs; resolve and readback remain explicit commands or operations.
 
 Pass specs do not store commands. This prevents stale command lists from surviving across submissions.
 

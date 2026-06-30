@@ -46,8 +46,10 @@ Target command families:
 - `DispatchCommand`
 - `CopyCommand`
 - `UploadCommand`
+- `ResolveQuerySetCommand`
 - `ReadbackCommand` as an explicit ordered-staging escape hatch that produces a `ReadbackOperation`
-- future explicit clear or resolve commands, if needed
+- `BeginOcclusionQueryCommand` / `EndOcclusionQueryCommand` as render-pass-only query brackets
+- future explicit clear or attachment-resolve commands, if needed
 
 Every command should declare:
 
@@ -61,6 +63,8 @@ Every command should declare:
 - static, dynamic, or indirect count where relevant
 
 Commands that write resource contents advance `contentEpoch`. Commands that replace physical GPU objects advance `allocationVersion`. The two effects are separate so a compute write does not accidentally imply bind group invalidation.
+
+Query commands write indexed `QuerySetResource` slots. Resolving a query set writes bytes into a destination buffer and advances that buffer's `contentEpoch`; it does not make CPU-visible data until a `ReadbackOperation` is created or consumed.
 
 ## DrawCommand
 
@@ -140,6 +144,32 @@ const simulate = scratch.command.dispatch({
 })
 ```
 
+## Query Commands
+
+Query commands expose WebGPU query mechanics without inventing profiling abstractions that the platform does not provide.
+
+```ts
+const resolveTiming = scratch.command.resolveQuerySet({
+    label: 'resolve timing',
+    querySet: timingQueries,
+    first: 0,
+    count: 2,
+    destination: timingBuffer,
+    destinationOffset: 0,
+})
+```
+
+`ResolveQuerySetCommand` is a copy/resolve command. Its source is an indexed query range, and its destination must be a buffer with query-resolve usage plus any later copy/readback usage the workflow needs. Later CPU access still uses `ReadbackOperation`.
+
+Occlusion query brackets are render-pass-only command-like encoder actions:
+
+```ts
+scratch.command.beginOcclusionQuery({ querySet: visibilityQueries, index: tileIndex })
+scratch.command.endOcclusionQuery()
+```
+
+They require the active render pass to own the same `occlusionQuerySet`, cannot be nested, and write one indexed query slot.
+
 ## Count Triage
 
 Draw and dispatch counts span three cases; choose by what the count actually depends on:
@@ -170,5 +200,6 @@ This avoids conflating streaming data absence with wiring bugs.
 
 - Do not make command counts closures by default.
 - Do not hide indirect draw or dispatch behind a special high-level feature.
+- Do not expose pipeline statistics as a core command family while WebGPU lacks that core query type.
 - Do not store command membership in pass specs.
 - Do not encode terrain, flow, tile, or layer concepts in commands.

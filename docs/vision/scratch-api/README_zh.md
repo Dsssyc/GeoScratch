@@ -16,7 +16,7 @@
 - `04-pipelines-commands/`: 稳定 pipeline 与可执行 GPU command
 - `05-passes-submissions-scheduler/`: 持久 pass spec、submission builder、submitted work、scheduler 校验
 - `06-design-review/`: 从 AI 辅助编写与通用 compute 对等性两个角度，对 `00`–`05` 的评审
-- `07-transfers-epochs/`: submission-scoped transfer、allocation version、content epoch 与 readback operation 生命周期(解决缺口 2–4)
+- `07-transfers-epochs/`: submission-scoped transfer、allocation version、content epoch、readback operation 生命周期与 indexed query-set transfer(解决缺口 2–4)
 
 每个模块都包含英文 `README.md` 和中文 `README_zh.md`。
 
@@ -31,6 +31,7 @@
 - 资源缺失或未 ready 时的策略必须由 command 或 pass 使用点显式声明。
 - CPU/GPU transfer 必须显式表达: upload、readback、copy 是 command 或 operation，不是隐藏的 `Resource` 方法。
 - `ReadbackOperation` 有显式生命周期、retention、cancellation、disposal、budget 与 diagnostic 语义。
+- `QuerySetResource` 保留 WebGPU 的 `QuerySet` 名称，但语义是 indexed query slots。核心 query type 是 `timestamp | occlusion`; pipeline statistics 不是核心 query type。
 - 核心 API 中 bind layout 必须显式声明。Shader reflection 只作为开发辅助或校验工具。
 - `Command` 是 draw、dispatch、copy、upload 等可执行 GPU 动作的统一名称。
 - `PassSpec` 表达持久 pass 形状。`SubmissionBuilder` 把 pass spec 与当前 command 列表绑定; `.submit()` 返回 `SubmittedWork`。

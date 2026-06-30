@@ -36,10 +36,20 @@
 - `TextureResource`
 - `SamplerResource`
 - `ShaderModuleResource`
-- `QuerySetResource`(timestamp / occlusion，feature-gated)
+- `QuerySetResource`(有索引的 timestamp / occlusion query slots，按需 feature-gated)
 - presentation-submission-scoped borrowed surface texture views
 
 Surface texture view 不是持久 `TextureResource`。
+
+`QuerySetResource` 沿用 WebGPU 的 `GPUQuerySet` 命名。这里的 `Set` 不表示数学意义上的无序集合。query set 是固定 `count` 的 indexed slot resource; pass instrumentation 和 query command 会写入具体 query index，resolve command 会把显式 index range 拷贝到 buffer。
+
+核心 query type 刻意限制为当前 WebGPU query 原语:
+
+```ts
+type QuerySetType = 'timestamp' | 'occlusion'
+```
+
+`timestamp` query set 需要 `timestamp-query` feature。`occlusion` query set 属于 render pass。Query set 是用于 ownership、lifetime、usage validation 和 slot epoch tracking 的资源，但不是可被 shader bind 的资源。
 
 ## BufferResource
 

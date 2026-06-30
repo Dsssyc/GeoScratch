@@ -87,6 +87,7 @@ Descriptor 不适合承担时间变化行为:
 - `ScratchRuntime` 拥有 GPU device 状态与缓存。
 - `Surface` 拥有呈现目标配置，不拥有 GPU 执行上下文。
 - `Resource` 是带有 physical GPU allocation version 与 content epoch 的逻辑句柄。
+- `QuerySetResource` 是 indexed query-slot resource，不是无序集合，也不是 shader binding。
 - Transfer operation 显式移动 CPU/GPU 或 GPU/GPU 边界上的数据，并推进 content epoch。
 - `BindLayout` 描述 shader binding 形状。
 - `BindSet` 把具体资源绑定到 layout。
