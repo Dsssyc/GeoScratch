@@ -60,9 +60,11 @@ Responsibilities:
 - validate that all required slots are provided
 - validate runtime ownership
 - cache the `GPUBindGroup`
-- compare resource versions before use
-- lazily rebuild bind groups when bound resource versions change
+- compare bound resource `allocationVersion` values before use
+- lazily rebuild bind groups when bound resource allocation versions change
 - expose readiness of bound resources to command validation
+
+`BindSet` does not rebuild merely because a bound resource's `contentEpoch` changes. Content changes affect dependency validation and readback, not the physical binding target.
 
 ## Shader Inspection And Cross-Check
 

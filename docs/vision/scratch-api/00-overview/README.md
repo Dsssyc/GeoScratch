@@ -10,7 +10,7 @@ The new `scratch` API should maximize locally-verifiable correctness while prese
 `scratch` should make repeated low-level work easier:
 
 - runtime and device lifecycle
-- resource identity, replacement, readiness, and dirty updates
+- resource identity, allocation replacement, readiness, content epochs, and explicit transfers
 - bind layout and bind group construction
 - pipeline cache and compatibility
 - command readiness and resource dependency validation
@@ -31,8 +31,8 @@ The objective above implies one axis for judging any abstraction: it should **ad
 
 Two consequences:
 
-- Keep the explicit, "verbose" surface — `resources.read/write`, explicit `BindLayout`, explicit submission order. Do not auto-infer it merely for brevity. Boilerplate an author writes and a validator checks is acceptable; ambiguity and hidden state are not.
-- Every stateful "smart" feature (resource versioning, readiness, device-loss rehydration) must expose inspectable and assertable state. A feature that hides why a rebuild happened is net-negative.
+- Keep the explicit, "verbose" surface — declared resource access, explicit transfer operations, explicit `BindLayout`, explicit submission order. Do not auto-infer it merely for brevity. Boilerplate an author writes and a validator checks is acceptable; ambiguity and hidden state are not.
+- Every stateful "smart" feature (allocation versioning, content epochs, readiness, device-loss rehydration) must expose inspectable and assertable state. A feature that hides why a rebuild happened is net-negative.
 
 ## 0.x Breaking-Change Policy
 
@@ -52,7 +52,7 @@ Existing APIs should not be treated as compatibility requirements until the proj
 The target model is:
 
 ```text
-scratch = explicit GPU runtime + resources + bindings + pipelines + commands + submission scheduler
+scratch = explicit GPU runtime + resources + transfers + bindings + pipelines + commands + submission scheduler
 geo     = spatial models + layer policy + geospatial resource loading and orchestration
 ```
 
@@ -72,7 +72,8 @@ Descriptors are weak for time-varying behavior:
 
 - which commands run in the current submission
 - which resources are ready
-- which resource version is read or written
+- which allocation version is bound
+- which content epoch is read or written
 - whether a pass is skipped
 - whether a dirty resource is prepared
 - whether command counts are static, dynamic, or indirect
@@ -85,7 +86,8 @@ The new API should make these boundaries hard to miss:
 
 - `ScratchRuntime` owns GPU device state and caches.
 - `Surface` owns presentation target configuration, not GPU execution.
-- `Resource` is a logical handle with physical GPU object versions.
+- `Resource` is a logical handle with physical GPU allocation versions and content epochs.
+- Transfer operations move data across CPU/GPU or GPU/GPU boundaries and advance content epochs explicitly.
 - `BindLayout` describes shader binding shape.
 - `BindSet` binds concrete resources to a layout.
 - `Pipeline` describes stable GPU program state.

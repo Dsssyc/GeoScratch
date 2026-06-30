@@ -12,7 +12,7 @@
 
 结论: 不需要重写。`00`–`05` 的实质(显式、声明式、可校验、fail-fast)本就高度契合。需要改的是 *首要目标的措辞*、三个定向的编写期修订(第一部分)、以及 **把 compute 从附属升为一等用途**(第二部分)。
 
-状态: 第一部分(修订 A/B/C)、缺口 1(定位)、缺口 5(compute 校验 + dynamic offset)已 **并入** `00`–`05` 与 `scratch-graphics-kernel.md`。缺口 2–4(异步 readback、提交单元、GPU 计时/查询)现已在 `07-submission-readback` 中 **设计**。本模块是评审记录; 已并入内容以 `00`–`05` 与 `07` 为 source of truth。持续更新的开放 review 项放在 `docs/review/`。
+状态: 第一部分(修订 A/B/C)、缺口 1(定位)、缺口 5(compute 校验 + dynamic offset)已 **并入** `00`–`05` 与 `scratch-graphics-kernel.md`。缺口 2–4(异步 readback、提交单元、GPU 计时/查询)现已在 `07-transfers-epochs` 中 **设计**。本模块是评审记录; 已并入内容以 `00`–`05` 与 `07` 为 source of truth。持续更新的开放 review 项放在 `docs/review/`。
 
 ## 第一部分 — AI 时代编写视角
 
@@ -20,7 +20,7 @@
 
 早先的一种框定用"AI 读起来顺不顺"和"聪明 vs 无聊"来评判 API。两者都是错的轴。
 
-- "聪明 vs 无聊"是个陷阱。"无聊"的极限是裸 WebGPU，而它是 *最不* 可验证的接口面，不是最可验证的: 它的有效性规则是隐式的，许多逻辑错误(资源版本错、写前读、resize 后 bind group 失效)不会报错，而是直接给出一张错的画面。
+- "聪明 vs 无聊"是个陷阱。"无聊"的极限是裸 WebGPU，而它是 *最不* 可验证的接口面，不是最可验证的: 它的有效性规则是隐式的，许多逻辑错误(allocation version 错、content epoch 错、写前读、resize 后 bind group 失效)不会报错，而是直接给出一张错的画面。
 - 正确的轴是 **"加约束 + 加检查的抽象" vs "加隐藏行为的抽象"**。前者可以比裸 WebGPU *更* 抽象，同时 *更* 可验证。后者让同一段代码因调用点看不见的状态而行为不同。
 
 下面每条修订都按两个问题评判，顺序如下:
@@ -46,8 +46,8 @@
 
 推论:
 
-- 保留那些"啰嗦"的特性——显式 `resources.read/write`、显式 `BindLayout`、显式 submission 顺序。它们是这套设计中最具未来韧性的部分。不要仅仅为了简洁就自动推断它们。
-- 每个"聪明"的特性(资源版本化、readiness、device-loss rehydration)都必须暴露可 inspect、可 assert 的状态，例如可读的 `version` / `state`(`02-resources` 已定义 `ResourceState`)。一个藏起"为什么发生了重建"的聪明特性是净负值。
+- 保留那些"啰嗦"的特性——声明式 resource access、显式 transfer operation、显式 `BindLayout`、显式 submission 顺序。它们是这套设计中最具未来韧性的部分。不要仅仅为了简洁就自动推断它们。
+- 每个"聪明"的特性(allocation version、content epoch、readiness、device-loss rehydration)都必须暴露可 inspect、可 assert 的状态，例如可读的 `allocationVersion` / `contentEpoch` / `state`(`02-resources` 已定义 `ResourceState`)。一个藏起"为什么发生了重建"的聪明特性是净负值。
 - 这不削弱已有的 escape hatch 要求。直接的低层控制保留。
 
 ### 修订 B — 闭包策略
@@ -86,8 +86,8 @@ indirect buffer  >  ref / handle  >  closure
 
 ### 第一部分不改变什么
 
-- **保留 `BindSet` 命名**(不改名为 `BindGroup`)。`BindSet` 比 `GPUBindGroup` 做得更多——version 比对、惰性重建、暴露 readiness(`03-bindings`)。语义不同正是它必须命名不同的理由: 与 WebGPU 同名会诱导错误的心智模型并产出微妙 bug。规则: 行为与 WebGPU 一致处才照 WebGPU 命名，不一致处精确改名。
-- 保留显式的 `ScratchRuntime` / `Surface` 拆分、显式 `resources.read/write` 声明、使用点上的 `whenMissing`、以及 `FrameValidationMode`(`off` / `warn` / `throw`)。它们本就与 AI 契合: 无隐藏全局状态、可局部推理、且提供了 agentic 闭环可以迭代对抗的错误面。
+- **保留 `BindSet` 命名**(不改名为 `BindGroup`)。`BindSet` 比 `GPUBindGroup` 做得更多——allocation-version 比对、惰性重建、暴露 readiness(`03-bindings`)。语义不同正是它必须命名不同的理由: 与 WebGPU 同名会诱导错误的心智模型并产出微妙 bug。规则: 行为与 WebGPU 一致处才照 WebGPU 命名，不一致处精确改名。
+- 保留显式的 `ScratchRuntime` / `Surface` 拆分、显式 resource access 与 transfer 声明、使用点上的 `whenMissing`、以及 `FrameValidationMode`(`off` / `warn` / `throw`)。它们本就与 AI 契合: 无隐藏全局状态、可局部推理、且提供了 agentic 闭环可以迭代对抗的错误面。
 
 ## 第二部分 — 通用 compute 对等性
 
@@ -98,7 +98,7 @@ indirect buffer  >  ref / handle  >  closure
 - `01-runtime-surface` 已要求 runtime 支持 **compute-only / offscreen / worker**(不绑 canvas)。这是 GPGPU 的地基。
 - `04-pipelines-commands` 的 **indirect dispatch**(`DispatchCount` 的 `{ indirect }`)就是 GPU-driven compute 路径: 上一趟 pass 产出的数量决定下一趟 dispatch 规模。
 - storage buffer/texture 读写、override `constants`(参数化 workgroup size)、`requiredFeatures` / `requiredLimits` 钩子都在。
-- `04` / `05` 的 `resources.read/write` 声明 + 依赖校验，对 compute *链*(scan 的 up/down-sweep、迭代求解、simulate→sort→render)的价值 *比对图形还大*——这正是 GPGPU 正确性最容易错的地方。这套设计最"啰嗦"的特性，是它最强的 compute 资产。
+- `04` / `05` / `07` 的声明式 resource access、显式 transfer 与依赖校验，对 compute *链*(scan 的 up/down-sweep、迭代求解、simulate→sort→render)的价值 *比对图形还大*——这正是 GPGPU 正确性最容易错的地方。这套设计最"啰嗦"的特性，是它最强的 compute 资产。
 
 ### 缺口(按严重度排)
 
@@ -116,7 +116,7 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 
 它还戳穿了修订 A 的可验证性目标: 没有 readback，你 *根本写不出* 一个从 CPU 侧断言 compute kernel 输出是否正确的测试。所以这个缺口在功能性和可验证性上 *双失*。
 
-已解决(`07-submission-readback`): 资源就是它自己的 readback 句柄——`await buffer.toArray()`——显式 `await`，provenance 来自 version 模型。`ReadbackCommand` 仅作为 ordered-staging 逃生口保留。
+已解决(`07-transfers-epochs`): readback 创建显式 `ReadbackOperation`——`await readback.toArray()`——显式 `await`，provenance 来自 operation 捕获的 content epoch。`ReadbackCommand` 仅作为 ordered-staging 逃生口保留，并产出同一种 operation 类型。
 
 #### 缺口 3 — 提交单元曾是"presentation 味"的 `Frame`(vision 层已修)
 
@@ -124,7 +124,7 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 
 该模型对"多 dispatch 录进一帧、提交一次"支持得很好——适合 GPU-bound 迭代。它没覆盖的是"迭代中周期性 CPU 回读/反馈"，而这又和缺口 2 缠在一起。
 
-已解决(`07-submission-readback`): `Frame` 泛化为 presentation 可选的提交单元——不带 surface 即 compute 或 offscreen 提交——而不是新增单独的提交类型。
+已解决(`07-transfers-epochs`): `Frame` 泛化为 presentation 可选的提交单元——不带 surface 即 compute 或 offscreen 提交——而不是新增单独的提交类型。
 
 #### 缺口 4 — 没有 GPU 计时 / 查询(vision 层已修)
 
@@ -152,9 +152,9 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 3. `03-bindings` 的"默认 warn、可关闭"dev 交叉校验(修订 C)。
 4. `BindSet` 命名保留(已确认)。
 5. 重定为"GPU 执行内核"、compute 同级(缺口 1)。
-6. 通过资源句柄的可 await readback，`await buffer.toArray()`(缺口 2)——见 `07-submission-readback`。
+6. 通过显式 `ReadbackOperation` 的可 await readback，`await readback.toArray()`(缺口 2)——见 `07-transfers-epochs`。
 7. `Frame` 泛化为 presentation 可选的提交单元(缺口 3)——见 `07`。
-8. `QuerySet` 资源 + `timestampWrites`，经 readback 路径取回(缺口 4)——见 `07`。
+8. `QuerySet` 资源 + `timestampWrites`，经显式 copy/readback operation 取回(缺口 4)——见 `07`。
 9. validation / bindings 的 compute 限制校验与 dynamic offset(缺口 5)。
 
-解决记录: 缺口 2–4 合为一个设计(`07-submission-readback`)。提交分叉(缺口 3)是通过泛化 `Frame`(presentation 可选)解决的，而非新增中性 `Submission` 类型; readback(缺口 2)是"资源即句柄" + 显式 `await`; 计时(缺口 4)复用 readback 路径。
+解决记录: 缺口 2–4 合为一个设计(`07-transfers-epochs`)。提交分叉(缺口 3)是通过泛化 `Frame`(presentation 可选)解决的，而非新增中性 `Submission` 类型; readback(缺口 2)是显式 transfer operation + 显式 `await`; 计时(缺口 4)复用同一套 copy/readback 路径。

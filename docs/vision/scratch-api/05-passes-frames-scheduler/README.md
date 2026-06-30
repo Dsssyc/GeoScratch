@@ -70,15 +70,15 @@ Frame responsibilities:
 - validate runtime ownership
 - validate pass and command compatibility
 - validate resource read/write order
-- prepare dirty resources
+- prepare explicit transfer operations
 - resolve command readiness policies
 - skip empty passes
 - record GPU commands
 - submit command buffers
 
-## Compute Submission And Readback
+## Transfers, Rendering, And Readback
 
-`Frame` is presentation-optional: with no surface it is a compute or offscreen submission. Results return to the CPU through the resource itself — `await buffer.toArray()` waits on the buffer's last-writer submission, stages, and maps. See `07-submission-readback` for the full model.
+`Frame` is presentation-optional: with no surface it is a compute or offscreen submission. CPU/GPU data motion is explicit. Uploads, copies, render writes, compute writes, and readback staging all participate in the same command order and epoch validation. Results return to the CPU through a `ReadbackOperation`, for example `await readback.toArray()`, not through `buffer.toArray()`. See `07-transfers-epochs` for the full model.
 
 ## Dependency Validation
 
@@ -88,7 +88,7 @@ Examples of checks:
 
 - resource from wrong runtime
 - disposed or lost resource used by a command
-- command reads a resource before the submission prepares or writes it
+- command reads a content epoch before the submission prepares or writes it
 - same pass reads and writes the same resource without an explicitly allowed pattern
 - surface current texture view used outside its frame
 - render command inserted into compute pass

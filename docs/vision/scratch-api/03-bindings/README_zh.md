@@ -60,9 +60,11 @@ const terrainSet = scratch.bindSet(terrainLayout, {
 - 校验所有 required slots 都已提供
 - 校验 runtime ownership
 - 缓存 `GPUBindGroup`
-- 使用前比较 resource versions
-- 当绑定资源版本变化时惰性重建 bind group
+- 使用前比较已绑定 resource 的 `allocationVersion`
+- 当绑定资源 allocation version 变化时惰性重建 bind group
 - 向 command validation 暴露已绑定资源的 readiness
+
+`BindSet` 不会仅因已绑定 resource 的 `contentEpoch` 改变而重建。内容变化影响 dependency validation 与 readback，不代表 physical binding target 变化。
 
 ## Shader Inspection 与交叉校验
 

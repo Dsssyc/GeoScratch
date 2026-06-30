@@ -34,7 +34,7 @@ The kernel must reduce low-level WebGPU burden without assuming one geospatial s
 `scratch` should abstract stable GPU-kernel responsibilities:
 
 - GPU resource identity, lifetime, and invalidation
-- CPU-to-GPU data synchronization
+- CPU/GPU transfer operations and content epochs
 - buffer, texture, sampler, shader, binding, pipeline, pass, and command construction
 - bind group layout and bind group lifecycle
 - pipeline creation and reuse
@@ -68,7 +68,8 @@ Descriptor-style APIs are still useful, but their job is to describe stable shap
 Descriptor-style APIs become weak when they are asked to model time-varying behavior:
 
 - whether a command runs in the current submission
-- which resource version is read or written
+- which allocation version is bound
+- which content epoch is read or written
 - when async resource availability changes execution
 - when a resize invalidates attachments and bind groups
 - when presentation history is preserved, cleared, or reprojected
@@ -86,15 +87,16 @@ A `scratch` resource should separate logical identity from physical GPU allocati
 Future designs should make room for:
 
 - logical resource handles
-- physical GPU resource versions
-- dirty CPU refs
+- physical GPU allocation versions
+- content epochs
+- dirty CPU refs that lower into explicit uploads
 - upload ranges
 - resize-driven replacement
 - resource readiness
 - resource lifetime and release
 - resource usage declarations such as sample, render target, storage read, storage write, copy source, and copy destination
 
-This is broader than any one rendering technique. For example, alternating between two textures across frames is only one case of resource versioning, not a kernel feature by itself.
+This is broader than any one rendering technique. For example, alternating between two textures across frames is only one case of content epoch and resource rotation management, not a kernel feature by itself.
 
 ### Binding Model
 
@@ -114,7 +116,7 @@ Draw count, dispatch count, index usage, and execution policy belong closer to c
 
 ### Command Model
 
-Draw, dispatch, copy, and upload should become explicit execution units.
+Draw, dispatch, copy, upload, and ordered readback staging should become explicit execution units.
 
 A command should be able to declare:
 
@@ -122,6 +124,7 @@ A command should be able to declare:
 - which bindings it uses
 - which resources it reads
 - which resources it writes
+- which writes advance content epochs
 - how its draw or dispatch count is computed
 - whether it is ready for the current submission
 - whether it can be skipped without side effects
@@ -135,7 +138,7 @@ The scheduler should organize commands and passes for a `Frame`, where `Frame` m
 It should be responsible for:
 
 - update-list processing
-- resource dirty propagation
+- transfer preparation and content epoch propagation
 - command readiness checks
 - pass execution ordering
 - command submission
@@ -175,7 +178,7 @@ These policies can use `scratch` resource state and commands, but they should no
 
 Specific rendering patterns should not automatically become kernel APIs.
 
-For example, alternating read/write resources across frames is a useful test case. It proves whether the kernel can express resource versions, read/write usage, and frame transitions. But the kernel should not be designed around a narrow `pingPong` feature as a first-class concept.
+For example, alternating read/write resources across frames is a useful test case. It proves whether the kernel can express allocation versions, content epochs, read/write usage, and frame transitions. But the kernel should not be designed around a narrow `pingPong` feature as a first-class concept.
 
 A pattern is kernel-worthy only if it generalizes to core GPU execution mechanics.
 
@@ -194,7 +197,7 @@ If the answer is no, the abstraction likely belongs in `geo`, an application lay
 The preferred long-term direction is:
 
 ```text
-scratch = GPU resource model + binding model + command model + submission scheduler
+scratch = GPU resource model + transfer model + binding model + command model + submission scheduler
 geo     = spatial models + layer policies + geospatial resource loading
 ```
 
@@ -208,9 +211,9 @@ This preserves GeoScratch's design philosophy:
 
 ## Open Questions For Future ADRs And Living Reviews
 
-- What version-pinned readback or pending-readback handle is needed beyond `await buffer.toArray()`?
+- What retention and cancellation policy should `ReadbackOperation` use for long-lived or forgotten readbacks?
 - What diagnostic schema should validation expose so humans and agents can repair mistakes without parsing prose?
 - How strict should buffer layout typing be across CPU views, vertex attributes, WGSL storage, and readback?
 - Should future graph orchestration remain a helper over explicit `Frame` order, or become a separate upper-layer API?
-- How should resource replacement notify bindings, pass attachments, commands, and readback requests without broad event coupling?
+- How should allocation replacement notify bindings, pass attachments, commands, and pending transfer operations without broad event coupling?
 - What compatibility guarantees should the raw primitive API keep once a recommended command/scheduler API exists?

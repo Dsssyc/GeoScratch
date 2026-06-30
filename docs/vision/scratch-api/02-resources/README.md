@@ -7,7 +7,7 @@ Date: 2026-06-30
 
 A `Resource` is a logical handle owned by a `ScratchRuntime`. It is not just a thin wrapper around one `GPUBuffer` or `GPUTexture`.
 
-The logical resource records stable identity and reconstruction information. The physical GPU object can be replaced when data changes, size changes, or the device is lost.
+The logical resource records stable identity and reconstruction information. The physical GPU object can be replaced when descriptor shape changes, size changes, or the device is lost. Ordinary content changes should advance a content epoch without replacing the physical binding target.
 
 ## Core Concepts
 
@@ -18,12 +18,15 @@ Every resource should expose or internally track:
 - label
 - descriptor shape
 - current physical GPU object
-- version number
+- `allocationVersion`
+- `contentEpoch`
 - readiness state
-- pending dirty ranges or replacement
+- pending transfer operations or replacement
 - disposal state
 
-The resource version increments when the physical binding target changes. Bind sets and pipelines can use versions to lazily rebuild only when needed.
+`allocationVersion` increments when the physical binding target changes. Bind sets, view caches, pass attachments, and commands can use it to lazily rebuild only when needed.
+
+`contentEpoch` increments when bytes or texels change. Upload, copy, render attachment writes, storage writes, clears, resolves, and mip generation are content producers. Readback and dependency validation use content epochs; bind-group invalidation uses allocation versions.
 
 ## Resource Kinds
 
@@ -43,13 +46,12 @@ Surface texture views are not persistent `TextureResource` objects.
 Buffers should support:
 
 - explicit usage declarations
-- optional initial data
-- dirty range tracking
-- direct write requests
+- optional initialization source lowered to an explicit upload
+- dirty range tracking for pending transfer preparation
 - copy source and copy destination usage
 - storage, vertex, index, uniform, indirect, and map usage where applicable
 
-Static data should not require a per-submission callback. Dynamic data should mark dirty ranges and let the `Frame` / submission prepare step batch uploads.
+Static data should not require a per-submission callback. Dynamic data should be represented by explicit upload/copy commands or tracked handles that produce upload commands during frame preparation.
 
 Example shape:
 
@@ -57,13 +59,16 @@ Example shape:
 const positions = scratch.buffer({
     label: 'positions',
     usage: ['vertex', 'storage', 'copyDst'],
-    data: new Float32Array(...),
     struct: [
         { name: 'position', format: 'float32x3' },
     ],
 })
 
-positions.write(nextPositions, { offset: 0 })
+const uploadPositions = scratch.command.upload({
+    target: positions,
+    data: nextPositions,
+    range: { offset: 0 },
+})
 ```
 
 ## Buffer Layout
@@ -101,7 +106,7 @@ The runtime computes offsets, stride, and padding from the declared layout for t
 - **Alignment / padding.** WGSL storage structs follow alignment rules (`vec3<f32>` aligns to 16, struct size rounds up to its largest member) that differ from the looser vertex-attribute rules. A segment bound separately as a storage binding with a dynamic offset must start on `minStorageBufferOffsetAlignment` (commonly 256); the runtime pads and reports the real byte offsets.
 - **Sub-32-bit types.** WGSL has no `i8`/`u8` storage scalar. An 8-bit field is fine as a vertex attribute (`sint8x4`, `unorm8x4`) and for readback, but a compute shader reads it as `u32` and unpacks. Choose the field type by who consumes it.
 
-Readback follows the same composition (see `07-submission-readback`). A segment is addressed by name: a scalar segment yields a `TypedArray` (`await buf.segment('flags').toArray()`); a struct segment yields an `ArrayBuffer` plus layout-derived `ArrayBufferView`s (`buf.segment('particles').at(i)`, `.field('pos')`) — AoS fields are strided, so a `DataView` rather than one fixed typed array. A single-segment buffer can be read directly (`buf.toArray()` / `buf.toBytes()`). Either path waits on the last-writer submission and needs `copySrc`.
+Readback follows the same composition through an explicit `ReadbackOperation` (see `07-transfers-epochs`). A segment is addressed by name: a scalar segment can yield a `TypedArray` through `await readback.toArray()` after creating `scratch.readback({ source: buf.segment('flags'), after })`; a struct segment yields an `ArrayBuffer` plus layout-derived `ArrayBufferView`s. AoS fields are strided, so they use a `DataView` or an explicit deinterleaved copy rather than one fixed typed array. Core resources do not expose `buf.toArray()` / `buf.toBytes()` sugar.
 
 ## TextureResource
 
@@ -114,6 +119,7 @@ Textures should support:
 - view cache keyed by view descriptor
 - resize invalidation
 - storage texture read/write declarations
+- attachment write and sampled-read declarations
 
 Example shape:
 
@@ -142,14 +148,14 @@ type ResourceState =
     | 'disposed'
 ```
 
-`dirty` means the resource is logically usable but needs preparation before recording commands that depend on the new data. `empty`, `lost`, and `disposed` are not usable.
+`dirty` means the resource is logically usable but has pending preparation requested by an explicit transfer or replacement operation before recording commands that depend on the new data. `empty`, `lost`, and `disposed` are not usable.
 
 ## Dynamic Values: Prefer Tracked Values Over Closures
 
 Values that feed a resource (size, initial or updated data) are sometimes static and sometimes runtime-varying. Express them by what they encode:
 
 - Static value, known at construction time → pass it directly; do not wrap it in a thunk.
-- Runtime-varying data → a stable handle whose contents change (an array ref, or a buffer the runtime tracks for dirty state).
+- Runtime-varying data → a stable handle whose contents change and can lower into explicit upload commands, or a GPU resource written by prior commands.
 - Runtime-varying value computed from other tracked sources (e.g. texture size from the surface) → a **derived value**: the runtime can inspect its dependency, subscribe to it for invalidation, and check it during validation.
 - Last resort → a raw closure, only when no handle or derived value can express the case.
 
@@ -175,3 +181,5 @@ This policy must be explicitly declared at the usage point.
 - Do not have resources directly rebuild bind groups through callbacks.
 - Do not force all dynamic counts or readiness checks through CPU closures.
 - Do not make surface swapchain textures persistent resources.
+- Do not expose core `resource.write()` methods; upload is an explicit transfer.
+- Do not expose core `resource.toArray()` / `resource.toBytes()` methods; readback creates an explicit operation.

@@ -68,7 +68,7 @@ Reasoning:
 - swapchain textures are borrowed per frame
 - they are not long-lived logical resources
 - their lifetime is controlled by the browser presentation system
-- caching them like normal textures would corrupt resource-version semantics
+- caching them like normal textures would corrupt allocation/content epoch semantics
 
 Use a frame-scoped borrowed handle instead:
 

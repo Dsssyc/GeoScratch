@@ -70,15 +70,15 @@ Frame 职责:
 - 校验 runtime ownership
 - 校验 pass 与 command compatibility
 - 校验 resource read/write order
-- prepare dirty resources
+- prepare 显式 transfer operations
 - 解析 command readiness policies
 - 跳过 empty passes
 - 记录 GPU commands
 - 提交 command buffers
 
-## Compute 提交与 Readback
+## Transfer、渲染与 Readback
 
-`Frame` presentation 可选: 不带 surface 时即 compute 或 offscreen 提交。结果通过资源自身回到 CPU——`await buffer.toArray()` 等待产出该 buffer 的那次提交，staging 后 map。完整模型见 `07-submission-readback`。
+`Frame` presentation 可选: 不带 surface 时即 compute 或 offscreen 提交。CPU/GPU 数据移动是显式的。Upload、copy、render 写入、compute 写入与 readback staging 都进入同一套 command order 和 epoch validation。结果通过 `ReadbackOperation` 回到 CPU，例如 `await readback.toArray()`，而不是通过 `buffer.toArray()`。完整模型见 `07-transfers-epochs`。
 
 ## Dependency Validation
 
@@ -88,7 +88,7 @@ Frame 职责:
 
 - command 使用了其他 runtime 的 resource
 - command 使用了 disposed 或 lost resource
-- command 在 submission prepare 或写入前读取资源
+- command 在 submission prepare 或写入前读取某个 content epoch
 - 同一 pass 未显式允许时同时读写同一 resource
 - surface current texture view 在所属 frame 外使用
 - render command 被插入 compute pass

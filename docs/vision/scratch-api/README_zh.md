@@ -11,12 +11,12 @@
 
 - `00-overview/`: 设计原则、0.x 破坏性重构策略、API 边界
 - `01-runtime-surface/`: 显式异步 runtime 与 canvas surface 分离
-- `02-resources/`: 逻辑资源、物理 GPU 对象、版本、readiness、资源替换
+- `02-resources/`: 逻辑资源、allocation version、content epoch、readiness、资源替换
 - `03-bindings/`: 显式 bind layout、bind set、bind group 缓存、shader 检查辅助
 - `04-pipelines-commands/`: 稳定 pipeline 与可执行 GPU command
 - `05-passes-frames-scheduler/`: 持久 pass spec、逐 submission command 列表、scheduler 校验
 - `06-design-review/`: 从 AI 辅助编写与通用 compute 对等性两个角度，对 `00`–`05` 的评审
-- `07-submission-readback/`: presentation 可选的 `Frame` 提交，以及"资源即句柄"的 readback(解决缺口 2–4)
+- `07-transfers-epochs/`: presentation 可选的 `Frame` 提交、显式 transfer、allocation version 与 content epoch(解决缺口 2–4)
 
 每个模块都包含英文 `README.md` 和中文 `README_zh.md`。
 
@@ -27,8 +27,9 @@
 - 现有 API 只是需求样本和反例材料，不是兼容性约束。
 - 核心 API 使用显式异步 `ScratchRuntime`。内核契约中不保留隐式全局 device。
 - `Surface` 与 `ScratchRuntime` 分离；runtime 必须支持 compute-only 和 offscreen 工作流。
-- 资源是逻辑句柄，并持有物理 GPU 对象版本。
+- 资源是逻辑句柄，并持有 physical GPU allocation version 与 content epoch。
 - 资源缺失或未 ready 时的策略必须由 command 或 pass 使用点显式声明。
+- CPU/GPU transfer 必须显式表达: upload、readback、copy 是 command 或 operation，不是隐藏的 `Resource` 方法。
 - 核心 API 中 bind layout 必须显式声明。Shader reflection 只作为开发辅助或校验工具。
 - `Command` 是 draw、dispatch、copy、upload 等可执行 GPU 动作的统一名称。
 - `PassSpec` 表达持久 pass 形状。`Frame` 把 pass spec 与当前 submission 的 command 列表绑定，并且可以带或不带 surface presentation。

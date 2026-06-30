@@ -34,7 +34,7 @@ Pipelines do not own:
 - per-submission command counts
 - resource readiness policy
 - pass membership
-- concrete bind set resource versions
+- concrete bind set resource allocation versions
 
 ## Command
 
@@ -46,7 +46,7 @@ Target command families:
 - `DispatchCommand`
 - `CopyCommand`
 - `UploadCommand`
-- `ReadbackCommand` as an explicit staging escape hatch, not the default readback path
+- `ReadbackCommand` as an explicit ordered-staging escape hatch that produces a `ReadbackOperation`
 - future explicit clear or resolve commands, if needed
 
 Every command should declare:
@@ -56,8 +56,11 @@ Every command should declare:
 - bind sets
 - resources read
 - resources written
+- content epoch effects for written resources
 - readiness policy
 - static, dynamic, or indirect count where relevant
+
+Commands that write resource contents advance `contentEpoch`. Commands that replace physical GPU objects advance `allocationVersion`. The two effects are separate so a compute write does not accidentally imply bind group invalidation.
 
 ## DrawCommand
 

@@ -34,7 +34,7 @@ Pipeline 不拥有:
 - per-submission command counts
 - resource readiness policy
 - pass membership
-- 具体 bind set resource versions
+- 具体 bind set resource allocation versions
 
 ## Command
 
@@ -46,7 +46,7 @@ Pipeline 不拥有:
 - `DispatchCommand`
 - `CopyCommand`
 - `UploadCommand`
-- `ReadbackCommand` 作为显式 staging 逃生口，而不是默认 readback 路径
+- `ReadbackCommand` 作为显式 ordered-staging 逃生口，并产生 `ReadbackOperation`
 - 未来必要时加入显式 clear 或 resolve command
 
 每个 command 应声明:
@@ -56,8 +56,11 @@ Pipeline 不拥有:
 - bind sets
 - read resources
 - written resources
+- written resources 的 content epoch effects
 - readiness policy
 - 适用时的 static、dynamic 或 indirect count
+
+写入资源内容的 command 推进 `contentEpoch`。替换物理 GPU 对象的 command 推进 `allocationVersion`。两者分离，这样 compute 写入不会被误解为 bind group invalidation。
 
 ## DrawCommand
 

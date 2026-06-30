@@ -68,7 +68,7 @@ Surface 可以产生当前帧 texture view，但不应继承或伪装成 `Textur
 - swapchain texture 是逐帧借用的
 - 它不是长期逻辑资源
 - 它的生命周期由浏览器呈现系统控制
-- 如果像普通 texture 一样缓存，会污染 resource-version 语义
+- 如果像普通 texture 一样缓存，会污染 allocation/content epoch 语义
 
 应使用 frame-scoped borrowed handle:
 

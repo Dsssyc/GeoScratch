@@ -7,7 +7,7 @@
 
 `Resource` 是由 `ScratchRuntime` 拥有的逻辑句柄。它不只是某个 `GPUBuffer` 或 `GPUTexture` 的薄包装。
 
-逻辑资源记录稳定身份和重建信息。物理 GPU 对象可以因为数据变化、尺寸变化或 device loss 被替换。
+逻辑资源记录稳定身份和重建信息。物理 GPU 对象可以因为 descriptor shape 变化、尺寸变化或 device loss 被替换。普通内容变化应推进 content epoch，而不是替换 physical binding target。
 
 ## 核心概念
 
@@ -18,12 +18,15 @@
 - label
 - descriptor shape
 - 当前物理 GPU 对象
-- version number
+- `allocationVersion`
+- `contentEpoch`
 - readiness state
-- pending dirty ranges 或 replacement
+- pending transfer operations 或 replacement
 - disposal state
 
-当物理 binding target 变化时，resource version 递增。Bind set 与 pipeline 可以利用 version 做惰性重建。
+当 physical binding target 变化时，`allocationVersion` 递增。Bind set、view cache、pass attachment 与 command 可以利用它做惰性重建。
+
+当 bytes 或 texels 变化时，`contentEpoch` 递增。Upload、copy、render attachment 写入、storage 写入、clear、resolve、mip generation 都是 content producer。Readback 与 dependency validation 使用 content epoch; bind-group invalidation 使用 allocation version。
 
 ## 资源类型
 
@@ -43,13 +46,12 @@ Surface texture view 不是持久 `TextureResource`。
 Buffer 应支持:
 
 - 显式 usage 声明
-- 可选 initial data
-- dirty range tracking
-- direct write request
+- 可选 initialization source，并降低为显式 upload
+- pending transfer preparation 的 dirty range tracking
 - copy source 与 copy destination usage
 - storage、vertex、index、uniform、indirect、map 等适用 usage
 
-静态数据不应需要 per-submission callback。动态数据应标记 dirty ranges，并由 `Frame` / submission prepare 步骤批量上传。
+静态数据不应需要 per-submission callback。动态数据应通过显式 upload/copy command 表达，或由 tracked handle 在 frame preparation 时产生 upload command。
 
 示例形状:
 
@@ -57,13 +59,16 @@ Buffer 应支持:
 const positions = scratch.buffer({
     label: 'positions',
     usage: ['vertex', 'storage', 'copyDst'],
-    data: new Float32Array(...),
     struct: [
         { name: 'position', format: 'float32x3' },
     ],
 })
 
-positions.write(nextPositions, { offset: 0 })
+const uploadPositions = scratch.command.upload({
+    target: positions,
+    data: nextPositions,
+    range: { offset: 0 },
+})
 ```
 
 ## Buffer Layout
@@ -101,7 +106,7 @@ runtime 按目标 usage 从声明 layout 算出 offset、stride、padding 并暴
 - **对齐 / padding。** WGSL storage struct 遵循对齐规则(`vec3<f32>` 对齐到 16、struct size 向上取整到最大成员的对齐)，与更宽松的 vertex 属性规则不同。若把一个 segment 单独作为 storage binding 用 dynamic offset 绑定，其起点须满足 `minStorageBufferOffsetAlignment`(常见 256); runtime 会 pad 并报告真实字节 offset。
 - **子 32 位类型。** WGSL 没有 `i8`/`u8` storage 标量。8 位字段作为 vertex 属性(`sint8x4`、`unorm8x4`)或用于 readback 都没问题，但 compute 着色器要按 `u32` 读再 unpack。按消费者选字段类型。
 
-Readback 遵循同样的组合(见 `07-submission-readback`)。segment 按名寻址: 标量 segment 给出 `TypedArray`(`await buf.segment('flags').toArray()`); struct segment 给出 `ArrayBuffer` 加上按 layout 派生的 `ArrayBufferView`(`buf.segment('particles').at(i)`、`.field('pos')`)—— AoS 字段是 strided 的，所以用 `DataView` 而非一个定死的 typed array。单 segment 的 buffer 可直接读(`buf.toArray()` / `buf.toBytes()`)。两条路径都等待 last-writer 提交，且需要 `copySrc`。
+Readback 通过显式 `ReadbackOperation` 遵循同样的组合(见 `07-transfers-epochs`)。segment 按名寻址: 创建 `scratch.readback({ source: buf.segment('flags'), after })` 后，标量 segment 可通过 `await readback.toArray()` 给出 `TypedArray`; struct segment 给出 `ArrayBuffer` 加上按 layout 派生的 `ArrayBufferView`。AoS 字段是 strided 的，所以用 `DataView` 或显式 deinterleaved copy，而不是一个定死的 typed array。核心 resource 不暴露 `buf.toArray()` / `buf.toBytes()` 糖。
 
 ## TextureResource
 
@@ -114,6 +119,7 @@ Texture 应支持:
 - 基于 view descriptor 的 view cache
 - resize invalidation
 - storage texture read/write 声明
+- attachment write 与 sampled-read 声明
 
 示例形状:
 
@@ -142,14 +148,14 @@ type ResourceState =
     | 'disposed'
 ```
 
-`dirty` 表示资源逻辑上可用，但在记录依赖新数据的 command 前需要 prepare。`empty`、`lost`、`disposed` 不可用。
+`dirty` 表示资源逻辑上可用，但在记录依赖新数据的 command 前，有显式 transfer 或 replacement operation 请求的 pending preparation。`empty`、`lost`、`disposed` 不可用。
 
 ## 动态值: 受追踪的值优于闭包
 
 喂给资源的值(size、初始或更新数据)有时静态、有时随运行时变化。按它编码的内容来表达:
 
 - 静态值、构造时即可得 → 直接传值; 不要包 thunk。
-- 运行时变化的数据 → 用"身份稳定、内容可变"的句柄(array ref，或 runtime 能追 dirty 的 buffer)。
+- 运行时变化的数据 → 用"身份稳定、内容可变"且可降低成显式 upload command 的句柄，或由前序 command 写入的 GPU resource。
 - 由其他受追踪来源算出的运行时变化值(例如 texture size 来自 surface)→ 用 **derived value**: runtime 能 inspect 它的依赖、订阅其 invalidation、并在 validation 时检查它。
 - 最后手段 → 裸闭包，仅当没有句柄或 derived value 能表达该情况时。
 
@@ -175,3 +181,5 @@ type ResourceReadinessPolicy =
 - 不让 resource 通过 callback 直接重建 bind group。
 - 不强迫所有 dynamic count 或 readiness check 都通过 CPU closure。
 - 不把 surface swapchain texture 做成持久 resource。
+- 不暴露核心 `resource.write()` 方法; upload 是显式 transfer。
+- 不暴露核心 `resource.toArray()` / `resource.toBytes()` 方法; readback 创建显式 operation。
