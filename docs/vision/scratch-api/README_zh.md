@@ -1,7 +1,7 @@
 # Scratch API 重设计
 
 状态: Vision draft
-日期: 2026-06-30
+日期: 2026-07-06
 
 本目录记录下一版 `scratch` API 的模块化目标设计。它把 `docs/vision/scratch-graphics-kernel.md` 中的 GPU 内核方向拆成更小的接口层级。
 
@@ -16,7 +16,9 @@
 - `04-pipelines-commands/`: 稳定 pipeline 与可执行 GPU command
 - `05-passes-submissions-scheduler/`: 持久 pass spec、submission builder、submitted work、scheduler 校验
 - `06-design-review/`: 从 AI 辅助编写与通用 compute 对等性两个角度，对 `00`–`05` 的评审
-- `07-transfers-epochs/`: submission-scoped transfer、allocation version、content epoch、readback operation 生命周期与 indexed query-set transfer(解决缺口 2–4)
+- `07-transfers-epochs/`: submission-scoped transfer、allocation version、content epoch、readback operation 生命周期与 indexed query-set transfer(解决缺口 2-4)
+- `08-programs-codecs/`: shader `Program`、layout codec、生成 WGSL accessor、pipeline 边界，以及明确排除 `Material`
+- `09-diagnostics-validation/`: 统一 machine-readable diagnostic envelope、validation phases、code stability 与 repair suggestions
 
 每个模块都包含英文 `README.md` 和中文 `README_zh.md`。
 
@@ -28,11 +30,15 @@
 - 核心 API 使用显式异步 `ScratchRuntime`。内核契约中不保留隐式全局 device。
 - `Surface` 与 `ScratchRuntime` 分离；runtime 必须支持 compute-only 和 offscreen 工作流。
 - 资源是逻辑句柄，并持有 physical GPU allocation version 与 content epoch。
+- Layout codec 是连接 CPU packing、WGSL accessor、readback view 与 layout diagnostics 的准备期 artifact; submission hot path 只消费显式 artifact。
 - 资源缺失或未 ready 时的策略必须由 command 或 pass 使用点显式声明。
 - CPU/GPU transfer 必须显式表达: upload、readback、copy 是 command 或 operation，不是隐藏的 `Resource` 方法。
 - `ReadbackOperation` 有显式生命周期、retention、cancellation、disposal、budget 与 diagnostic 语义。
 - `QuerySetResource` 保留 WebGPU 的 `QuerySet` 名称，但语义是 indexed query slots。核心 query type 是 `timestamp | occlusion`; pipeline statistics 不是核心 query type。
 - 核心 API 中 bind layout 必须显式声明。Shader reflection 只作为开发辅助或校验工具。
+- `Program` 是由 user WGSL 与 generated modules 组合出的 shader contract; 它不拥有具体资源。
+- `Material` 不是 scratch core concept。material-like style 或 scene package 属于 scratch 之上，并降低到 `Program`、`BindSet`、`Pipeline` 和 `Command`。
+- Diagnostics 是 API contract 的一部分: 稳定 machine-readable code 与 subject，而不是 prose-only log。
 - `Command` 是 draw、dispatch、copy、upload 等可执行 GPU 动作的统一名称。
 - `PassSpec` 表达持久 pass 形状。`SubmissionBuilder` 把 pass spec 与当前 command 列表绑定; `.submit()` 返回 `SubmittedWork`。
 - 第一版 scheduler 采用显式 submission 顺序加依赖校验。自动排序属于可选上层编排能力。

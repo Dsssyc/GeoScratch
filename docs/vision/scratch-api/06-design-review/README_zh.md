@@ -1,18 +1,18 @@
 # 设计评审
 
 状态: Review (vision draft)
-日期: 2026-06-30
+日期: 2026-07-06
 
 ## 范围
 
-本模块记录最初从两个角度评审 `00`–`05` 并推动后续 `07` 补充的那次 review:
+本模块记录最初从两个角度评审 `00`–`05` 并推动后续 `07` 与 `08` 补充的那次 review:
 
 1. **AI 辅助编写**("vibe coding"): 当使用 `scratch` 的大部分代码都由 AI 辅助写成时，这套设计是否仍然合适？
 2. **通用 compute 对等性**: `scratch` 的目标和 WebGPU 一样，是 GPU 能力的 CPU 端映射——因此 compute 必须是与图形 *平起平坐* 的一等用途，而不是图形的附属。这套设计能否支撑严肃的高性能并行计算？
 
 结论: 不需要重写。`00`–`05` 的实质(显式、声明式、可校验、fail-fast)本就高度契合。需要改的是 *首要目标的措辞*、三个定向的编写期修订(第一部分)、以及 **把 compute 从附属升为一等用途**(第二部分)。
 
-状态: 第一部分(修订 A/B/C)、缺口 1(定位)、缺口 5(compute 校验 + dynamic offset)已 **并入** `00`–`05` 与 `scratch-graphics-kernel.md`。缺口 2–4(异步 readback、提交单元、GPU 计时/查询)现已跨 `05-passes-submissions-scheduler` 与 `07-transfers-epochs` **设计**。本模块是评审记录; 已并入内容以 `00`–`05` 与 `07` 为 source of truth。持续更新的开放 review 项放在 `docs/review/`。
+状态: 第一部分(修订 A/B/C/D/E)、缺口 1(定位)、缺口 5(compute 校验 + dynamic offset)已 **并入** `00`-`05`、`08`、`09` 与 `scratch-graphics-kernel.md`。缺口 2-4(异步 readback、提交单元、GPU 计时/查询)现已跨 `05-passes-submissions-scheduler` 与 `07-transfers-epochs` **设计**。shader/codec/material 边界现已在 `08-programs-codecs` **设计**。统一 diagnostic contract 现已在 `09-diagnostics-validation` **设计**。本模块是评审记录; 已并入内容以 `00`-`05`、`07`、`08` 与 `09` 为 source of truth。持续更新的开放 review 项放在 `docs/review/`。
 
 ## 第一部分 — AI 时代编写视角
 
@@ -67,7 +67,7 @@
 indirect buffer  >  ref / handle  >  closure
 ```
 
-接入既有惯用法: 项目本就有一个非闭包的动态原语——`aRef` / `ArrayRef`(身份稳定、内容可变、可追 dirty)。在值不是 GPU 产生时，把这套句柄模型延伸到 count(一个从 ref 或 buffer 读取的 count)。它比闭包更可验证，且与既有设计语言一致。
+接入既有证据: 旧 API 已证明一种非闭包动态原语是可行的，只要它有稳定身份、可变内容和 dirty tracking。在 `0.x.x` 阶段，`aRef` / `ArrayRef` 这类旧名称只作为参考材料; 目标设计应在有价值时保留底层 handle pattern，而不是把这些名称或旧职责当作兼容性约束。
 
 净规则: 静态 → 不要 thunk; CPU 动态 → 闭包可以; GPU 动态 → indirect。
 
@@ -84,9 +84,42 @@ indirect buffer  >  ref / handle  >  closure
 
 净效果: 在"改→跑→修"闭环的早期抓住常见错配，同时不让反射变成权威、也不挡住 exotic layout。
 
+### 修订 D — Program/codecs，但不引入 Material
+
+shader code 天然是混合结果: 一部分是用户写的 WGSL，一部分是生成的 layout/accessor 支撑代码，还有一部分是 WebGPU pipeline state。成熟引擎常用 material 或 node-material 层解决这个问题，但那会把数据、程序、表面语义与场景赋值关系耦合在一起，不适合 scratch。
+
+目标拆分是:
+
+```text
+LayoutSpec -> LayoutArtifact -> LayoutCodec
+user WGSL + generated accessors -> Program
+Program entry point + pipeline state -> Pipeline
+Pipeline + BindSet + counts/policy -> Command
+```
+
+`LayoutCodec` 是准备期 artifact，不是 submission-time magic。它可以在 runtime 前生成，也可以在 runtime 初始化阶段惰性生成，但 hot path 消费的是显式、可缓存 artifact。这样既避免 runtime 无法校验的割裂式外部 codegen，也避免在 `submit()` 里隐藏 shader mutation。
+
+`Material` 被明确排除在 scratch core 概念之外。如果 scene 层需要 layer style、symbolizer、renderable layer 或 material-like package，那属于 `geo` 或应用，并且必须降低为 `Program`、`BindSet`、`Pipeline` 和 `Command`。
+
+### 修订 E - Diagnostics 作为 machine-readable repair contract
+
+intelligent-friendly loop 需要结构化 diagnostics，而不是 prose-only errors。如果 agent 必须解析英文才能理解 bind mismatch 或 read-before-write，这个 API 就没有达成自己的可验证性目标。
+
+目标 diagnostic contract 是:
+
+```text
+ScratchDiagnostic = stable code + phase + subject + related + expected/actual + optional hints
+```
+
+`message` 与 `hint` 给人读。`code`、`phase`、`subject` 与已文档化 payload fields 给 tooling 和 tests 使用。Validation modes(`off` / `warn` / `throw`)控制处置方式，而不是 diagnostic identity。Repair suggestions 可以让修复更局部、更机械，但 scratch 不能静默应用它们。
+
+该修订通过让 `09-diagnostics-validation` 成为 diagnostic envelope、phase sources、code naming、stability rules 与 repair suggestion boundaries 的 source of truth，解决剩余开放 review 项。
+
 ### 第一部分不改变什么
 
 - **保留 `BindSet` 命名**(不改名为 `BindGroup`)。`BindSet` 比 `GPUBindGroup` 做得更多——allocation-version 比对、惰性重建、暴露 readiness(`03-bindings`)。语义不同正是它必须命名不同的理由: 与 WebGPU 同名会诱导错误的心智模型并产出微妙 bug。规则: 行为与 WebGPU 一致处才照 WebGPU 命名，不一致处精确改名。
+- **不引入 `Material`。** kernel 保持 `Program`、`BindSet`、`Pipeline` 与 `Command` 分离。material-like scene concepts 留在 scratch 之上。
+- **Diagnostics 不自动修复。** 结构化 suggestions 可以指导 tooling，但 resource usage、bind layouts、shader code 与 submission order 仍然必须是显式的用户或工具编辑。
 - 保留显式的 `ScratchRuntime` / `Surface` 拆分、显式 resource access 与 transfer 声明、使用点上的 `whenMissing`、以及 `SubmissionValidationMode`(`off` / `warn` / `throw`)。它们本就与 AI 契合: 无隐藏全局状态、可局部推理、且提供了 agentic 闭环可以迭代对抗的错误面。
 
 ## 第二部分 — 通用 compute 对等性
@@ -156,5 +189,7 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 7. 核心提交单元改名为 `Submission`，并拆分 `SubmissionBuilder` / `SubmittedWork`(缺口 3)——见 `05` 与 `07`。
 8. timestamp/occlusion 的 indexed `QuerySet` 资源、`timestampWrites`、occlusion query bracket，以及显式 resolve/readback operations(缺口 4)——见 `07`。
 9. validation / bindings 的 compute 限制校验与 dynamic offset(缺口 5)。
+10. Program/layout-codec/shader-composition 拆分，并把 `Material` 排除出 scratch core(修订 D)——见 `08-programs-codecs`。
+11. 统一 machine-readable diagnostic envelope、code stability、validation phases 与显式 repair suggestions(修订 E)——见 `09-diagnostics-validation`。
 
 解决记录: 缺口 2–4 形成跨 `05` 与 `07` 的 transfer/submission 设计。提交命名问题(缺口 3)通过把 `Submission` 作为唯一 scratch core submission model 解决; readback(缺口 2)是显式 transfer operation + 显式 `await`; 计时(缺口 4)复用同一套 copy/readback 路径。

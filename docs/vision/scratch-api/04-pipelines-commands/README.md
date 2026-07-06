@@ -1,19 +1,21 @@
 # Pipelines And Commands
 
 Status: Vision draft
-Date: 2026-06-30
+Date: 2026-07-06
 
 ## Decision
 
-`Pipeline` describes stable GPU program state. `Command` describes one executable GPU action.
+`Program` describes shader source contracts. `Pipeline` describes stable WebGPU executable state for one `Program` entry point. `Command` describes one executable GPU action.
 
-This replaces the older pattern where binding, range, executable flags, pipeline, and pass membership were coupled.
+This replaces the older pattern where shader code, binding, range, executable flags, pipeline, and pass membership were coupled.
+
+See `08-programs-codecs` for the source-level `Program`, layout codec, and shader-composition model. This module starts at the executable pipeline and command layer.
 
 ## Pipelines
 
 Render pipelines own stable state:
 
-- shader stages and entry points
+- program or shader modules, shader stages, and entry points
 - bind layouts
 - vertex buffer layouts
 - primitive state
@@ -24,7 +26,7 @@ Render pipelines own stable state:
 
 Compute pipelines own:
 
-- shader stage and entry point
+- program or shader module, shader stage, and entry point
 - bind layouts
 - constants
 - pipeline cache key
@@ -35,6 +37,10 @@ Pipelines do not own:
 - resource readiness policy
 - pass membership
 - concrete bind set resource allocation versions
+- material or style parameters
+- scene-object assignment
+
+Pipelines are allowed to cache compiled GPU state. They are not allowed to become the place where concrete resources, visual semantics, and shader code are bundled into a material-like object.
 
 ## Command
 
@@ -63,6 +69,8 @@ Every command should declare:
 - static, dynamic, or indirect count where relevant
 
 Commands that write resource contents advance `contentEpoch`. Commands that replace physical GPU objects advance `allocationVersion`. The two effects are separate so a compute write does not accidentally imply bind group invalidation.
+
+Pipeline and command validation findings should use the shared `ScratchDiagnostic` envelope from `09-diagnostics-validation`. `Command` diagnostics should identify the command as `subject` and put related resources, pass specs, pipelines, or bind sets in `related` instead of prose.
 
 Query commands write indexed `QuerySetResource` slots. Resolving a query set writes bytes into a destination buffer and advances that buffer's `contentEpoch`; it does not make CPU-visible data until a `ReadbackOperation` is created or consumed.
 
@@ -203,3 +211,5 @@ This avoids conflating streaming data absence with wiring bugs.
 - Do not expose pipeline statistics as a core command family while WebGPU lacks that core query type.
 - Do not store command membership in pass specs.
 - Do not encode terrain, flow, tile, or layer concepts in commands.
+- Do not introduce `Material` as a shortcut for `Program` + `BindSet` + render semantics.
+- Do not expose pipeline or command validation as prose-only errors.

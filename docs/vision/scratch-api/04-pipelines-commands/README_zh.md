@@ -1,19 +1,21 @@
 # Pipelines 与 Commands
 
 状态: Vision draft
-日期: 2026-06-30
+日期: 2026-07-06
 
 ## 决策
 
-`Pipeline` 描述稳定 GPU 程序状态。`Command` 描述一个可执行 GPU 动作。
+`Program` 描述 shader source contract。`Pipeline` 描述某个 `Program` entry point 的稳定 WebGPU 可执行状态。`Command` 描述一个可执行 GPU 动作。
 
-这会替代旧模式中 binding、range、executable flags、pipeline、pass membership 混在一起的做法。
+这会替代旧模式中 shader code、binding、range、executable flags、pipeline、pass membership 混在一起的做法。
+
+source-level `Program`、layout codec 与 shader composition 模型见 `08-programs-codecs`。本模块从可执行 pipeline 与 command 层开始。
 
 ## Pipelines
 
 Render pipeline 拥有稳定状态:
 
-- shader stages 与 entry points
+- program 或 shader modules、shader stages 与 entry points
 - bind layouts
 - vertex buffer layouts
 - primitive state
@@ -24,7 +26,7 @@ Render pipeline 拥有稳定状态:
 
 Compute pipeline 拥有:
 
-- shader stage 与 entry point
+- program 或 shader module、shader stage 与 entry point
 - bind layouts
 - constants
 - pipeline cache key
@@ -35,6 +37,10 @@ Pipeline 不拥有:
 - resource readiness policy
 - pass membership
 - 具体 bind set resource allocation versions
+- material 或 style 参数
+- scene-object assignment
+
+Pipeline 可以缓存编译好的 GPU state。它不能变成把具体资源、视觉语义和 shader code 打包在一起的 material-like object。
 
 ## Command
 
@@ -63,6 +69,8 @@ Pipeline 不拥有:
 - 适用时的 static、dynamic 或 indirect count
 
 写入资源内容的 command 推进 `contentEpoch`。替换物理 GPU 对象的 command 推进 `allocationVersion`。两者分离，这样 compute 写入不会被误解为 bind group invalidation。
+
+Pipeline 与 command validation findings 应使用 `09-diagnostics-validation` 中的共享 `ScratchDiagnostic` envelope。`Command` diagnostics 应以 command 自身作为 `subject`，并把相关 resources、pass specs、pipelines 或 bind sets 放进 `related`，而不是只写在 prose 里。
 
 Query command 会写入 indexed `QuerySetResource` slots。resolve query set 会把字节写入 destination buffer，并推进该 buffer 的 `contentEpoch`; 它不会让数据自动 CPU-visible，CPU 访问仍需创建或消费 `ReadbackOperation`。
 
@@ -203,3 +211,5 @@ type ResourceReadinessPolicy =
 - 当 WebGPU 缺少对应 core query type 时，不把 pipeline statistics 暴露成核心 command family。
 - 不把 command membership 存在 pass spec 中。
 - 不在 command 中编码 terrain、flow、tile 或 layer 概念。
+- 不引入 `Material` 作为 `Program` + `BindSet` + render semantics 的快捷组合。
+- 不把 pipeline 或 command validation 暴露成 prose-only errors。

@@ -1,7 +1,7 @@
 # Overview
 
 Status: Vision draft
-Date: 2026-06-30
+Date: 2026-07-06
 
 ## Purpose
 
@@ -11,9 +11,11 @@ The new `scratch` API should maximize locally-verifiable correctness while prese
 
 - runtime and device lifecycle
 - resource identity, allocation replacement, readiness, content epochs, and explicit transfers
+- layout artifacts, layout codecs, and shader accessor generation
 - bind layout and bind group construction
-- pipeline cache and compatibility
+- shader program composition and pipeline cache compatibility
 - command readiness and resource dependency validation
+- machine-readable diagnostics and validation reports
 - submission recording, completion, and empty-work skipping
 
 `scratch` should not own domain policy:
@@ -52,11 +54,13 @@ Existing APIs should not be treated as compatibility requirements until the proj
 The target model is:
 
 ```text
-scratch = explicit GPU runtime + resources + transfers + bindings + pipelines + commands + submission scheduler
+scratch = explicit GPU runtime + resources + layout codecs + transfers + bindings + programs + pipelines + commands + diagnostics + submission scheduler
 geo     = spatial models + layer policy + geospatial resource loading and orchestration
 ```
 
 The API should be explicit enough that unusual WebGPU workloads can still be expressed. Helpers may exist, but they must not hide the underlying resource, pipeline, pass, and command model.
+
+`scratch` must not add a `Material` layer. A material-like abstraction couples shader program, data values, visual surface semantics, and object assignment. That belongs in `geo`, an application, or an optional scene helper. The scratch core keeps the split: `Program` declares shader code contracts, `BindSet` supplies concrete resources, `Pipeline` describes stable WebGPU executable state, and `Command` performs one explicit GPU action.
 
 ## Shape vs Time
 
@@ -89,10 +93,13 @@ The new API should make these boundaries hard to miss:
 - `Resource` is a logical handle with physical GPU allocation versions and content epochs.
 - `QuerySetResource` is an indexed query-slot resource, not an unordered collection or shader binding.
 - Transfer operations move data across CPU/GPU or GPU/GPU boundaries and advance content epochs explicitly.
+- `LayoutCodec` is a preparation artifact that connects CPU packing, WGSL accessors, readback views, and layout diagnostics.
 - `BindLayout` describes shader binding shape.
 - `BindSet` binds concrete resources to a layout.
-- `Pipeline` describes stable GPU program state.
+- `Program` describes shader source, generated modules, entry points, and required layouts without owning concrete resources.
+- `Pipeline` describes stable WebGPU executable state for a `Program` entry point.
 - `Command` describes one executable GPU action.
+- `ScratchDiagnostic` is the unified machine-readable validation contract; prose messages are not the stable API.
 - `PassSpec` describes stable pass shape.
 - `SubmissionBuilder` records commands into pass specs in explicit order.
 - `SubmittedWork` is the inspectable handle returned by `.submit()`, with a `done` promise for GPU completion.

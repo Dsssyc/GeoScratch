@@ -1,18 +1,18 @@
 # Design Review
 
 Status: Review (vision draft)
-Date: 2026-06-30
+Date: 2026-07-06
 
 ## Scope
 
-This module records the review that originally tested `00`–`05` against two lenses and motivated the later `07` addition:
+This module records the review that originally tested `00`–`05` against two lenses and motivated the later `07` and `08` additions:
 
 1. **AI-assisted authoring** ("vibe coding"): does the design still fit when most code that uses it is written with AI help?
 2. **General-purpose compute parity**: `scratch`'s goal, like WebGPU's, is a CPU-side mapping of GPU capability — so compute must be a co-equal first-class use, not a graphics adjunct. Does the design support serious high-performance parallel compute?
 
 Conclusion: not a rewrite. The substance of `00`–`05` (explicit, declarative, validated, fail-fast) is already well-aligned. What needs change is the *primary objective's wording*, three targeted authoring points (Part 1), and **raising compute from an adjunct to a first-class use** (Part 2).
 
-Status: Part 1 (Revisions A/B/C), Gap 1 (positioning), and Gap 5 (compute validation + dynamic offsets) are **applied** to `00`–`05` and `scratch-graphics-kernel.md`. Gaps 2–4 (async readback, submission unit, GPU timing/queries) are now **designed** across `05-passes-submissions-scheduler` and `07-transfers-epochs`. This module is the review record; `00`–`05` and `07` are the source of truth for what is applied. Ongoing open review items live under `docs/review/`.
+Status: Part 1 (Revisions A/B/C/D/E), Gap 1 (positioning), and Gap 5 (compute validation + dynamic offsets) are **applied** to `00`-`05`, `08`, `09`, and `scratch-graphics-kernel.md`. Gaps 2-4 (async readback, submission unit, GPU timing/queries) are now **designed** across `05-passes-submissions-scheduler` and `07-transfers-epochs`. The shader/codec/material boundary is now **designed** in `08-programs-codecs`. The unified diagnostic contract is now **designed** in `09-diagnostics-validation`. This module is the review record; `00`-`05`, `07`, `08`, and `09` are the source of truth for what is applied. Ongoing open review items live under `docs/review/`.
 
 ## Part 1 — AI-Era Authoring Lens
 
@@ -67,7 +67,7 @@ Verifiability ladder for dynamic counts (prefer the top):
 indirect buffer  >  ref / handle  >  closure
 ```
 
-Bridge to the existing idiom: the project already has a non-closure dynamic primitive — `aRef` / `ArrayRef` (stable identity, mutable contents, dirty-trackable). Extend this handle model to counts (a count that reads from a ref or buffer) where the value is not GPU-produced. It is more verifiable than a closure and consistent with the existing design language.
+Bridge to prior evidence: older APIs already proved that a non-closure dynamic primitive can work when it has stable identity, mutable contents, and dirty tracking. During `0.x.x`, old names such as `aRef` / `ArrayRef` remain reference material only; the target design should keep the underlying handle pattern where useful without preserving those names or their old responsibilities as compatibility constraints.
 
 Net rule: static → no thunk; CPU-dynamic → closure ok; GPU-dynamic → indirect.
 
@@ -84,9 +84,42 @@ Constrain it so it never regresses function:
 
 Net: catch the common mismatch early in the generate-run-fix loop, without making reflection authoritative or blocking exotic layouts.
 
+### Revision D — Program/codecs without Material
+
+Shader code is inherently a mixed result: part user-authored WGSL, part generated layout/accessor support, and part WebGPU pipeline state. Mature engines often solve this through material or node-material layers, but that would couple data, program, surface semantics, and scene assignment in a way that does not belong in scratch.
+
+The target split is:
+
+```text
+LayoutSpec -> LayoutArtifact -> LayoutCodec
+user WGSL + generated accessors -> Program
+Program entry point + pipeline state -> Pipeline
+Pipeline + BindSet + counts/policy -> Command
+```
+
+`LayoutCodec` is a preparation artifact, not submission-time magic. It may be generated before runtime or lazily during runtime initialization, but the hot path consumes explicit, cacheable artifacts. This avoids both a disconnected external codegen step the runtime cannot validate and hidden shader mutation inside `submit()`.
+
+`Material` is explicitly rejected as a scratch core concept. If a scene layer wants layer styles, symbolizers, renderable layers, or material-like packages, those belong in `geo` or applications and must lower into `Program`, `BindSet`, `Pipeline`, and `Command`.
+
+### Revision E - Diagnostics as a machine-readable repair contract
+
+The intelligent-friendly loop needs structured diagnostics, not prose-only errors. If an agent must parse English to understand a bind mismatch or read-before-write, the API has failed its own verifiability goal.
+
+The target diagnostic contract is:
+
+```text
+ScratchDiagnostic = stable code + phase + subject + related + expected/actual + optional hints
+```
+
+`message` and `hint` are for humans. `code`, `phase`, `subject`, and documented payload fields are for tooling and tests. Validation modes (`off` / `warn` / `throw`) control disposition, not diagnostic identity. Repair suggestions can make fixes local and mechanical, but scratch must not silently apply them.
+
+This revision resolves the remaining open review item by making `09-diagnostics-validation` the source of truth for diagnostic envelope, phase sources, code naming, stability rules, and repair suggestion boundaries.
+
 ### What Part 1 does NOT change
 
-- **`BindSet` name is kept** (not renamed to `BindGroup`). `BindSet` does more than `GPUBindGroup` — allocation-version comparison, lazy rebuild, readiness exposure (`03-bindings`). The semantic difference is exactly why it must be named differently: a WebGPU-identical name would invite the wrong mental model and produce subtle bugs. Rule: name like WebGPU only where behavior matches; rename precisely where it diverges.
+- **`BindSet` name is kept** (not renamed to `BindGroup`). `BindSet` does more than `GPUBindGroup` - allocation-version comparison, lazy rebuild, readiness exposure (`03-bindings`). The semantic difference is exactly why it must be named differently: a WebGPU-identical name would invite the wrong mental model and produce subtle bugs. Rule: name like WebGPU only where behavior matches; rename precisely where it diverges.
+- **`Material` is not introduced.** The kernel keeps `Program`, `BindSet`, `Pipeline`, and `Command` separate. Material-like scene concepts remain above scratch.
+- **Diagnostics do not auto-repair.** Structured suggestions may guide tooling, but resource usage, bind layouts, shader code, and submission order remain explicit user or tooling edits.
 - The explicit `ScratchRuntime` / `Surface` split, explicit resource access and transfer declarations, `whenMissing` at the usage point, and `SubmissionValidationMode` (`off` / `warn` / `throw`) are kept. They are already AI-aligned: no hidden global state, local reasoning, and an error surface the agentic loop can iterate against.
 
 ## Part 2 — General-Purpose Compute Parity
@@ -154,7 +187,9 @@ Applied to `00`–`05`, `07`, and `scratch-graphics-kernel.md`:
 5. Re-centered as a "GPU execution kernel", compute co-equal (Gap 1).
 6. Awaitable readback via explicit `ReadbackOperation`, `await readback.toArray()` (Gap 2) — see `07-transfers-epochs`.
 7. Core submission unit renamed to `Submission` with `SubmissionBuilder` / `SubmittedWork` split (Gap 3) — see `05` and `07`.
-8. Indexed `QuerySet` resource for timestamp/occlusion, `timestampWrites`, occlusion query brackets, and explicit resolve/readback operations (Gap 4) — see `07`.
+8. Indexed `QuerySet` resource for timestamp/occlusion, `timestampWrites`, occlusion query brackets, and explicit resolve/readback operations (Gap 4) - see `07`.
 9. Compute-limit checks and dynamic offsets in validation / bindings (Gap 5).
+10. Program/layout-codec/shader-composition split, with `Material` excluded from scratch core (Revision D) - see `08-programs-codecs`.
+11. Unified machine-readable diagnostic envelope, code stability, validation phases, and explicit repair suggestions (Revision E) - see `09-diagnostics-validation`.
 
 Resolution notes: Gaps 2–4 became one transfer/submission design across `05` and `07`. The submission naming issue (Gap 3) is resolved by using `Submission` as the only scratch core submission model; readback (Gap 2) is an explicit transfer operation with an explicit `await`; timing (Gap 4) reuses the same copy/readback path.

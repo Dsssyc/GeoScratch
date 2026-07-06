@@ -1,7 +1,7 @@
 # Bindings
 
 Status: Vision draft
-Date: 2026-06-30
+Date: 2026-07-06
 
 ## Decision
 
@@ -66,6 +66,8 @@ Responsibilities:
 
 `BindSet` does not rebuild merely because a bound resource's `contentEpoch` changes. Content changes affect dependency validation and readback, not the physical binding target.
 
+`BindSet` is not a material parameter object. It supplies concrete resources for an explicit `BindLayout`; it does not own shader source, generated accessor modules, pipeline state, render style, object assignment, draw counts, or dispatch counts. A command is the place where a pipeline and bind sets meet for one executable action.
+
 ## Shader Inspection And Cross-Check
 
 Shader reflection is not the source of truth and is not on the core runtime path. Explicit `BindLayout` stays authoritative. But reflection should be promoted from "scaffolding only" to a *guard* against the most common binding error: a `BindLayout` that disagrees with the shader on binding index, type, or visibility.
@@ -80,12 +82,14 @@ const draft = scratch.inspectShader(shader).suggestBindLayout({ group: 0 })
 
 The cross-check is constrained so it never blocks legitimate work:
 
-- dev-only — no hard dependency on a specific WGSL parser in the production path
-- default `warn`, not `throw` — a parser lagging the WGSL spec would otherwise emit false errors on legitimate-but-unusual layouts
-- per-entry suppressible — an intentional superset layout can silence a specific check
-- cross-check only — it compares explicit layout against the shader; it never generates the authoritative layout
+- dev-only - no hard dependency on a specific WGSL parser in the production path
+- default `warn`, not `throw` - a parser lagging the WGSL spec would otherwise emit false errors on legitimate-but-unusual layouts
+- per-entry suppressible - an intentional superset layout can silence a specific check
+- cross-check only - it compares explicit layout against the shader; it never generates the authoritative layout
 
 Reflection must not become the source of truth for production layout creation.
+
+Cross-check findings should use the shared diagnostic envelope from `09-diagnostics-validation`, with the `BindLayoutEntry` as `subject` and the reflected `ShaderBinding` plus `Program` as `related` context.
 
 ## Explicit Is The Contract
 
@@ -96,4 +100,6 @@ The shader and the bind layout should both be intentionally authored. This keeps
 - Do not store vertex or index input state in `BindSet`.
 - Do not store draw or dispatch counts in `BindSet`.
 - Do not store command readiness policy in `BindSet`.
+- Do not use `BindSet` as a material, style, or scene-object parameter bundle.
+- Do not emit bind validation failures as prose-only errors.
 - Do not use shader reflection as the primary runtime layout mechanism.

@@ -1,7 +1,7 @@
 # Transfers And Epochs
 
 Status: Vision draft
-Date: 2026-06-30
+Date: 2026-07-06
 
 ## Decision
 
@@ -329,7 +329,7 @@ const timingValues = await timingReadback.toBigUint64Array()
 
 Pipeline statistics are not part of the current WebGPU core contract and must stay outside the scratch core design unless a future WebGPU target or explicit extension supports them.
 
-Potential query diagnostic codes:
+Potential query diagnostic codes using the shared envelope from `09-diagnostics-validation`:
 
 ```ts
 type QueryDiagnosticCode =
@@ -344,7 +344,7 @@ type QueryDiagnosticCode =
     | 'SCRATCH_QUERY_RESOLVE_DESTINATION_INVALID'
 ```
 
-Query diagnostics should include query-set id, type, requested range, pass or command id, feature name where relevant, destination buffer id for resolve failures, and the producer submission id when a query slot was written.
+Query diagnostics should include query-set id, type, requested range, pass or command id, feature name where relevant, destination buffer id for resolve failures, and the producer submission id when a query slot was written. These details belong in `subject`, `related`, `expected`, `actual`, or compact evidence fields, not only in prose.
 
 ## Retention, Budgets, And Diagnostics
 
@@ -370,7 +370,7 @@ const runtime = await ScratchRuntime.create({
 })
 ```
 
-Potential diagnostic codes:
+Potential readback diagnostic codes using the shared envelope from `09-diagnostics-validation`:
 
 ```ts
 type ReadbackDiagnosticCode =
@@ -386,25 +386,28 @@ type ReadbackDiagnosticCode =
 Every readback diagnostic should carry enough context for an agent or human to repair the issue without parsing prose:
 
 ```ts
-type ReadbackDiagnostic = {
+type ReadbackDiagnostic = ScratchDiagnostic & {
     code: ReadbackDiagnosticCode
-    severity: 'info' | 'warn' | 'error'
-    operationId: string
-    label?: string
-    state: ReadbackState
-    sourceResourceId: string
-    allocationVersion: number
-    contentEpoch: number
-    rangeOrRegion?: unknown
-    producerSubmissionId?: string
-    ageInSubmissions?: number
-    ageInMs?: number
-    stagingBytes?: number
-    hint?: string
+    phase: 'readback'
+    subject: { kind: 'ReadbackOperation', id: string, label?: string }
+    related?: [
+        { kind: 'Resource', id: string, label?: string, resourceKind?: string },
+        ...DiagnosticSubject[],
+    ]
+    actual?: {
+        state: ReadbackState
+        allocationVersion?: number
+        contentEpoch?: number
+        rangeOrRegion?: unknown
+        producerSubmissionId?: string
+        ageInSubmissions?: number
+        ageInMs?: number
+        stagingBytes?: number
+    }
 }
 ```
 
-General validation diagnostics are a broader design topic, but readback-specific diagnostics should follow this machine-readable pattern from the start.
+Readback-specific diagnostics should follow the shared machine-readable pattern from the start. Readback-specific state lives inside the common `ScratchDiagnostic` envelope, usually in `subject`, `related`, `actual`, and `evidence`.
 
 ## Non-Goals
 

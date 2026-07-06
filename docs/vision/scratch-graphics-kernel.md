@@ -6,7 +6,7 @@ Vision draft
 
 ## Date
 
-2026-06-30
+2026-07-06
 
 ## Purpose
 
@@ -35,11 +35,12 @@ The kernel must reduce low-level WebGPU burden without assuming one geospatial s
 
 - GPU resource identity, lifetime, and invalidation
 - CPU/GPU transfer operations and content epochs
-- buffer, texture, sampler, shader, binding, pipeline, pass, and command construction
+- buffer, texture, sampler, layout codec, shader program, binding, pipeline, pass, and command construction
 - bind group layout and bind group lifecycle
 - pipeline creation and reuse
 - submission scheduling and command completion
 - dependency-aware invalidation and skip logic
+- machine-readable validation diagnostics
 - escape hatches for direct WebGPU-like control
 
 `scratch` should not encode scene-layer responsibilities:
@@ -51,8 +52,11 @@ The kernel must reduce low-level WebGPU burden without assuming one geospatial s
 - LoD selection policy
 - resource loading strategy for a specific geospatial data source
 - camera-to-resource policy for a specific layer
+- material, style, or symbolizer semantics
 
 The goal is not to build a high-level scene graph. The goal is to provide a composable GPU execution kernel that `geo` can use to build many incompatible geospatial scene models.
+
+`scratch` also should not adopt a `Material` layer as a substitute for shader/program design. A material-style abstraction couples shader code, data values, visual surface meaning, and object assignment. That coupling belongs in `geo`, applications, or optional scene helpers. The kernel keeps `Program`, `BindSet`, `Pipeline`, `Command`, and `Submission` separate.
 
 ## Configuration Is Shape, Not Time
 
@@ -60,7 +64,9 @@ Descriptor-style APIs are still useful, but their job is to describe stable shap
 
 - texture formats and size providers
 - buffer usage and backing refs
+- layout artifacts and codec output shape
 - shader modules and entry points
+- diagnostic code and subject shape
 - pipeline static state
 - binding layout shape
 - pass attachment shape
@@ -114,6 +120,22 @@ Long term, binding responsibilities should trend toward:
 
 Draw count, dispatch count, index usage, and execution policy belong closer to command objects.
 
+### Program And Codec Model
+
+Shader authoring should separate layout/code generation from executable runtime state.
+
+Future designs should make room for:
+
+- `LayoutSpec` as logical data shape
+- `LayoutArtifact` as resolved offsets, stride, padding, alignment, usage lowering, and structural hash
+- `LayoutCodec` as CPU writer, upload byte view, readback view, and WGSL accessor generation
+- `Program` as user WGSL plus generated modules, entry points, bind-layout contract, required features, and diagnostics
+- `Pipeline` as stable WebGPU executable state for one program entry point
+
+Generated layout and shader artifacts may be produced before runtime or during runtime initialization, but submission-time work should consume explicit artifacts rather than generating or mutating shader code in the hot path.
+
+The kernel should explicitly reject `Material` as a core abstraction. Material-like scene concepts can exist above scratch, but they must lower into the kernel primitives instead of becoming kernel primitives.
+
 ### Command Model
 
 Draw, dispatch, copy, upload, and ordered readback staging should become explicit execution units.
@@ -146,6 +168,21 @@ It should be responsible for:
 - invalidating dependent bindings or attachments when resources are replaced
 
 The scheduler may eventually be implemented as a render graph or frame graph, but the important abstraction is dependency-aware submission execution, not a particular graph API shape.
+
+### Diagnostics And Validation Model
+
+Validation diagnostics should be a public machine-readable contract, not prose-only logs.
+
+Future designs should make room for:
+
+- one `ScratchDiagnostic` envelope across runtime, resource, layout codec, program, binding, pipeline, command, submission, query, and readback validation
+- stable `SCRATCH_<DOMAIN>_<CONDITION>` diagnostic codes
+- structured `subject`, `related`, `expected`, and `actual` payloads
+- deterministic diagnostic reports for inspected state
+- validation modes that control disposition without changing diagnostic identity
+- repair suggestions that help tooling make local edits without letting scratch silently auto-fix state
+
+This is part of the intelligent-friendly goal: agents and tests should assert diagnostic codes and subjects, not parse English messages.
 
 ### Escape Hatches
 
@@ -197,7 +234,7 @@ If the answer is no, the abstraction likely belongs in `geo`, an application lay
 The preferred long-term direction is:
 
 ```text
-scratch = GPU resource model + transfer model + binding model + command model + submission scheduler
+scratch = GPU resource model + layout/codec model + transfer model + binding model + program/pipeline model + command model + diagnostics model + submission scheduler
 geo     = spatial models + layer policies + geospatial resource loading
 ```
 
@@ -208,10 +245,11 @@ This preserves GeoScratch's design philosophy:
 - avoid forcing one scene graph or one geospatial world model
 - make dynamic GPU behavior explicit through resource and command state
 - improve CPU-side performance by letting the kernel understand dependencies and invalidation
+- keep shader/data composition explicit through `Program`, `BindSet`, and `Command`, not `Material`
+- expose validation failures through stable diagnostics, not prose-only exceptions
 
 ## Open Questions For Future ADRs And Living Reviews
 
-- What general diagnostic schema should validation expose so humans and agents can repair mistakes without parsing prose? Readback-specific lifecycle diagnostics are defined in `docs/vision/scratch-api/07-transfers-epochs/`.
 - How strict should buffer layout typing be across CPU views, vertex attributes, WGSL storage, and readback?
 - Should future graph orchestration remain a helper over explicit `Submission` order, or become a separate upper-layer API?
 - How should allocation replacement notify bindings, pass attachments, commands, and pending transfer operations without broad event coupling?

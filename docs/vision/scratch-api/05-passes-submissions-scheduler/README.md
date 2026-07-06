@@ -1,7 +1,7 @@
 # Passes, Submissions, And Scheduler
 
 Status: Vision draft
-Date: 2026-06-30
+Date: 2026-07-06
 
 ## Decision
 
@@ -136,6 +136,8 @@ type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 
 Development should prefer `throw`. Production or profiling runs may choose `warn` or `off`.
 
+Validation findings should use the shared `ScratchDiagnostic` envelope from `09-diagnostics-validation`. Submission validation should attach a deterministic diagnostic report to `SubmittedWork` when work is submitted, and should throw a structured diagnostic error in `throw` mode rather than a prose-only `Error`.
+
 ## Readiness Policy Interaction
 
 Dependency validation and resource readiness policy are separate.
@@ -163,4 +165,5 @@ That layer can build on command read/write declarations without changing the cor
 - Do not make automatic render graph sorting the default core behavior.
 - Do not hide submission order from users who need WebGPU-level control.
 - Do not encode geospatial layer order in the scratch scheduler.
+- Do not expose submission validation as prose-only errors.
 - Do not use `Frame` as the scratch core submission type; frame cadence belongs to geo, app, or presentation layers.

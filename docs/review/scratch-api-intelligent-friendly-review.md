@@ -1,7 +1,7 @@
 # Scratch API Intelligent-Friendly Review
 
 Status: Living temporary review
-Date: 2026-06-30
+Date: 2026-07-06
 
 This file tracks open design issues for the `scratch` API's "intelligent-friendly" goal: maximize locally-verifiable correctness while preserving direct GPU control. It is temporary in the sense that items should be revised, resolved, or replaced as the architecture matures. It is not a legacy archive.
 
@@ -63,19 +63,35 @@ Coverage check for this pass:
 - Explicit `resolveQuerySet` into a buffer before readback: covered by `04-pipelines-commands` and `07-transfers-epochs`.
 - Query-specific diagnostics and pipeline statistics non-goal: covered by `07-transfers-epochs`.
 
+### Program, Layout Codec, And Material Boundary
+
+Resolved in `docs/vision/scratch-api/08-programs-codecs/`: shader authoring is split into `LayoutSpec`, `LayoutArtifact`, `LayoutCodec`, `Program`, `Pipeline`, `BindSet`, `Command`, and `Submission`. Layout codec output connects CPU packing, upload byte views, readback views, and generated WGSL accessors. `Material` is explicitly excluded from scratch core because it couples program, data, render semantics, and scene assignment.
+
+Coverage check for this pass:
+
+- CPU array to GPU-aligned buffer path: covered by `02-resources` and `08-programs-codecs`.
+- Layout artifact and codec split: covered by `02-resources` and `08-programs-codecs`.
+- Generated WGSL accessor modules plus user WGSL compose into `Program`: covered by `08-programs-codecs`.
+- `Program` / `Pipeline` / `BindSet` / `Command` responsibilities stay separate: covered by `04-pipelines-commands` and `08-programs-codecs`.
+- No `Material` / `Style` / material-like scratch core term: covered by `00-overview`, `03-bindings`, `04-pipelines-commands`, `08-programs-codecs`, and `scratch-graphics-kernel.md`.
+- Build-time or runtime-initialization code generation is allowed, but submission hot paths consume explicit artifacts: covered by `08-programs-codecs`.
+
+### Validation Diagnostic Schema
+
+Resolved in `docs/vision/scratch-api/09-diagnostics-validation/`: scratch diagnostics are now a machine-readable API contract, not prose-only logs or ad-hoc exception strings. The vision defines one `ScratchDiagnostic` envelope across runtime, resource, layout-codec, program, binding, pipeline, command, submission, query, and readback phases. It also defines diagnostic report shape, validation mode disposition, code naming and stability rules, structured subject/related/expected/actual payloads, and explicit repair suggestions that tooling may use without scratch silently applying fixes.
+
+Coverage check for this pass:
+
+- Unified `ScratchDiagnostic` envelope and `ScratchDiagnosticReport`: covered by `09-diagnostics-validation`.
+- Validation phases across runtime/resource/layout/program/bind/pipeline/command/submission/query/readback: covered by `09-diagnostics-validation`.
+- Query/readback codes lifted into the shared envelope instead of separate shapes: covered by `07-transfers-epochs` and `09-diagnostics-validation`.
+- Submission validation reports and structured diagnostic errors: covered by `05-passes-submissions-scheduler` and `09-diagnostics-validation`.
+- Program/layout codec diagnostics using structured subjects: covered by `08-programs-codecs` and `09-diagnostics-validation`.
+- Repair suggestions are advisory and must not create hidden auto-repair behavior: covered by `06-design-review` and `09-diagnostics-validation`.
+
 ## Current Review Items
 
-### 1. Buffer Layout Type Grammar
-
-The compositional buffer layout model is valuable, but it needs a sharper typed contract. A field `format` may mean different things for CPU views, vertex attributes, WGSL storage structs, and readback. The design should define usage-specific lowering, alignment mode, and failure diagnostics.
-
-Risk if unresolved: the API may look type-safe while still allowing invalid or misleading storage-buffer layouts.
-
-### 2. Validation Diagnostic Schema
-
-The intelligent-friendly loop needs machine-readable diagnostics, not only `warn` / `throw` and prose messages. Readback-specific diagnostics are now covered in `07-transfers-epochs`, but a future design should still define the general schema for validation, shader cross-checks, resource readiness, and submission ordering.
-
-Risk if unresolved: agents must parse natural-language errors, making iterative repair fragile.
+None. The current intelligent-friendly scratch API review queue is complete. Add new items here when a later pass finds a sharper design risk.
 
 ## Update Rules
 

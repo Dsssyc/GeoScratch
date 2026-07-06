@@ -1,7 +1,7 @@
 # 传输与 Epoch
 
 状态: Vision draft
-日期: 2026-06-30
+日期: 2026-07-06
 
 ## 决策
 
@@ -329,7 +329,7 @@ const timingValues = await timingReadback.toBigUint64Array()
 
 Pipeline statistics 不是当前 WebGPU core contract 的一部分; 除非未来 WebGPU target 或显式 extension 支持，否则必须留在 scratch core 之外。
 
-候选 query diagnostic codes:
+使用 `09-diagnostics-validation` 共享 envelope 的候选 query diagnostic codes:
 
 ```ts
 type QueryDiagnosticCode =
@@ -344,7 +344,7 @@ type QueryDiagnosticCode =
     | 'SCRATCH_QUERY_RESOLVE_DESTINATION_INVALID'
 ```
 
-Query diagnostic 应携带 query-set id、type、requested range、pass 或 command id、相关 feature name、resolve 失败时的 destination buffer id，以及 query slot 被写入时的 producer submission id。
+Query diagnostic 应携带 query-set id、type、requested range、pass 或 command id、相关 feature name、resolve 失败时的 destination buffer id，以及 query slot 被写入时的 producer submission id。这些细节应进入 `subject`、`related`、`expected`、`actual` 或 compact evidence fields，而不是只写在 prose 里。
 
 ## Retention、预算与诊断
 
@@ -370,7 +370,7 @@ const runtime = await ScratchRuntime.create({
 })
 ```
 
-候选 diagnostic codes:
+使用 `09-diagnostics-validation` 共享 envelope 的候选 readback diagnostic codes:
 
 ```ts
 type ReadbackDiagnosticCode =
@@ -386,25 +386,28 @@ type ReadbackDiagnosticCode =
 每条 readback diagnostic 都应携带足够上下文，使 agent 或人无需解析 prose 也能修复问题:
 
 ```ts
-type ReadbackDiagnostic = {
+type ReadbackDiagnostic = ScratchDiagnostic & {
     code: ReadbackDiagnosticCode
-    severity: 'info' | 'warn' | 'error'
-    operationId: string
-    label?: string
-    state: ReadbackState
-    sourceResourceId: string
-    allocationVersion: number
-    contentEpoch: number
-    rangeOrRegion?: unknown
-    producerSubmissionId?: string
-    ageInSubmissions?: number
-    ageInMs?: number
-    stagingBytes?: number
-    hint?: string
+    phase: 'readback'
+    subject: { kind: 'ReadbackOperation', id: string, label?: string }
+    related?: [
+        { kind: 'Resource', id: string, label?: string, resourceKind?: string },
+        ...DiagnosticSubject[],
+    ]
+    actual?: {
+        state: ReadbackState
+        allocationVersion?: number
+        contentEpoch?: number
+        rangeOrRegion?: unknown
+        producerSubmissionId?: string
+        ageInSubmissions?: number
+        ageInMs?: number
+        stagingBytes?: number
+    }
 }
 ```
 
-通用 validation diagnostics 是更大的设计议题，但 readback-specific diagnostics 应从一开始就遵循这种 machine-readable pattern。
+Readback-specific diagnostics 应从一开始就遵循共享 machine-readable pattern。Readback-specific state 应放在 common `ScratchDiagnostic` envelope 内，通常进入 `subject`、`related`、`actual` 与 `evidence`。
 
 ## 非目标
 

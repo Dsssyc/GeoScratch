@@ -1,7 +1,7 @@
 # Resources
 
 Status: Vision draft
-Date: 2026-06-30
+Date: 2026-07-06
 
 ## Decision
 
@@ -117,6 +117,23 @@ The runtime computes offsets, stride, and padding from the declared layout for t
 - **Sub-32-bit types.** WGSL has no `i8`/`u8` storage scalar. An 8-bit field is fine as a vertex attribute (`sint8x4`, `unorm8x4`) and for readback, but a compute shader reads it as `u32` and unpacks. Choose the field type by who consumes it.
 
 Readback follows the same composition through an explicit `ReadbackOperation` (see `07-transfers-epochs`). A segment is addressed by name: a scalar segment can yield a `TypedArray` through `await readback.toArray()` after creating `scratch.readback({ source: buf.segment('flags'), after })`; a struct segment yields an `ArrayBuffer` plus layout-derived `ArrayBufferView`s. AoS fields are strided, so they use a `DataView` or an explicit deinterleaved copy rather than one fixed typed array. Core resources do not expose `buf.toArray()` / `buf.toBytes()` sugar.
+
+### Layout Artifact And Codec
+
+The layout compiler should emit an inspectable `LayoutArtifact` and an optional `LayoutCodec` (see `08-programs-codecs`):
+
+- `LayoutArtifact` is data: resolved byte offsets, stride, padding, alignment mode, total byte length, usage lowering, and structural hash.
+- `LayoutCodec` is preparation logic: CPU writers, upload byte views, readback view factories, and WGSL accessor modules derived from the same artifact.
+
+This is the preferred path for CPU arrays that need GPU-aligned storage-buffer layout:
+
+```text
+source array -> CPU writer fills GPU-aligned bytes -> one explicit UploadCommand
+```
+
+The writer skips padding on the CPU and writes one contiguous upload range. It avoids per-structure CPU/GPU calls and avoids a GPU repack pass that would temporarily require a second full buffer in VRAM. Raw packed buffers remain possible as an escape hatch, but the default model should not force WGSL authors to manually reproduce storage-buffer padding.
+
+External AoS feature schemas can lower into this grammar by producing a compatible `LayoutSpec` or precomputed `LayoutArtifact`. If their memory is already GPU-aligned, upload may use a direct bulk view; otherwise the CPU writer performs the alignment step before the explicit upload.
 
 ## TextureResource
 

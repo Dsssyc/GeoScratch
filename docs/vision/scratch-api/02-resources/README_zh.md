@@ -1,7 +1,7 @@
 # Resources
 
 状态: Vision draft
-日期: 2026-06-30
+日期: 2026-07-06
 
 ## 决策
 
@@ -117,6 +117,23 @@ runtime 按目标 usage 从声明 layout 算出 offset、stride、padding 并暴
 - **子 32 位类型。** WGSL 没有 `i8`/`u8` storage 标量。8 位字段作为 vertex 属性(`sint8x4`、`unorm8x4`)或用于 readback 都没问题，但 compute 着色器要按 `u32` 读再 unpack。按消费者选字段类型。
 
 Readback 通过显式 `ReadbackOperation` 遵循同样的组合(见 `07-transfers-epochs`)。segment 按名寻址: 创建 `scratch.readback({ source: buf.segment('flags'), after })` 后，标量 segment 可通过 `await readback.toArray()` 给出 `TypedArray`; struct segment 给出 `ArrayBuffer` 加上按 layout 派生的 `ArrayBufferView`。AoS 字段是 strided 的，所以用 `DataView` 或显式 deinterleaved copy，而不是一个定死的 typed array。核心 resource 不暴露 `buf.toArray()` / `buf.toBytes()` 糖。
+
+### Layout Artifact 与 Codec
+
+layout compiler 应产出可 inspect 的 `LayoutArtifact` 与可选 `LayoutCodec`(见 `08-programs-codecs`):
+
+- `LayoutArtifact` 是数据: 已解析的 byte offset、stride、padding、alignment mode、total byte length、usage lowering 与 structural hash。
+- `LayoutCodec` 是准备逻辑: 由同一个 artifact 派生的 CPU writer、upload byte view、readback view factory 与 WGSL accessor module。
+
+这是 CPU array 需要写入 GPU-aligned storage-buffer layout 时的推荐路径:
+
+```text
+source array -> CPU writer 填充 GPU-aligned bytes -> 一个显式 UploadCommand
+```
+
+writer 在 CPU 侧跳过 padding，并写出一个连续 upload range。它避免每个 structure 一次 CPU/GPU 调用，也避免 GPU repack pass 临时占用第二份完整 VRAM buffer。Raw packed buffer 仍可作为 escape hatch，但默认模型不应迫使 WGSL 作者手动复刻 storage-buffer padding。
+
+外部 AoS feature schema 可以通过产出兼容 `LayoutSpec` 或预计算 `LayoutArtifact` 降低到这套语法。如果它们的内存已经 GPU-aligned，upload 可使用 direct bulk view; 否则 CPU writer 在显式 upload 前执行 alignment step。
 
 ## TextureResource
 

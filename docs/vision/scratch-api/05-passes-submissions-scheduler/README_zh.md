@@ -1,7 +1,7 @@
 # Passes, Submissions 与 Scheduler
 
 状态: Vision draft
-日期: 2026-06-30
+日期: 2026-07-06
 
 ## 决策
 
@@ -136,6 +136,8 @@ type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 
 开发期应优先使用 `throw`。生产或性能 profiling 可选择 `warn` 或 `off`。
 
+Validation findings 应使用 `09-diagnostics-validation` 中的共享 `ScratchDiagnostic` envelope。Submission validation 应在 work 被提交时把确定性的 diagnostic report 挂到 `SubmittedWork` 上; 在 `throw` mode 下应抛出结构化 diagnostic error，而不是 prose-only `Error`。
+
 ## Readiness Policy 的关系
 
 Dependency validation 与 resource readiness policy 是两件事。
@@ -163,4 +165,5 @@ scratch.schedule(commands, {
 - 不把自动 render graph 排序作为默认 core 行为。
 - 不向需要 WebGPU 级控制的用户隐藏 submission order。
 - 不在 scratch scheduler 中编码 geospatial layer order。
+- 不把 submission validation 暴露成 prose-only errors。
 - 不把 `Frame` 作为 scratch core submission type; frame cadence 属于 geo、app 或 presentation layers。

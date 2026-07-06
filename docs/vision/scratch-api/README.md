@@ -1,7 +1,7 @@
 # Scratch API Redesign
 
 Status: Vision draft
-Date: 2026-06-30
+Date: 2026-07-06
 
 This directory records the modular target design for the next `scratch` API. It expands the GPU-kernel direction described in `docs/vision/scratch-graphics-kernel.md` into smaller interface layers.
 
@@ -16,7 +16,9 @@ The documents here are design references, not implementation status. They should
 - `04-pipelines-commands/`: stable pipelines and executable GPU commands
 - `05-passes-submissions-scheduler/`: persistent pass specs, submission builders, submitted work, and scheduler validation
 - `06-design-review/`: review of `00`–`05` against AI-assisted authoring and general-purpose compute parity
-- `07-transfers-epochs/`: submission-scoped transfers, allocation versions, content epochs, readback operation lifecycle, and indexed query-set transfer (resolves Gaps 2–4)
+- `07-transfers-epochs/`: submission-scoped transfers, allocation versions, content epochs, readback operation lifecycle, and indexed query-set transfer (resolves Gaps 2-4)
+- `08-programs-codecs/`: shader `Program`, layout codec, generated WGSL accessor, pipeline boundary, and explicit rejection of `Material`
+- `09-diagnostics-validation/`: unified machine-readable diagnostic envelope, validation phases, code stability, and repair suggestions
 
 Each module has an English `README.md` and a Chinese `README_zh.md`.
 
@@ -28,11 +30,15 @@ Each module has an English `README.md` and a Chinese `README_zh.md`.
 - The core API uses an explicit async `ScratchRuntime`. There is no implicit global device in the kernel contract.
 - `Surface` is separate from `ScratchRuntime`; the runtime must support compute-only and offscreen workflows.
 - Resources are logical handles with physical GPU allocation versions and content epochs.
+- Layout codecs are preparation artifacts connecting CPU packing, WGSL accessors, readback views, and layout diagnostics; submission hot paths consume explicit artifacts.
 - Resource missing/readiness policy must be declared by command or pass usage.
 - CPU/GPU transfer is explicit: uploads, readbacks, and copies are commands or operations, not hidden `Resource` methods.
 - `ReadbackOperation` has explicit lifecycle, retention, cancellation, disposal, budget, and diagnostic semantics.
 - `QuerySetResource` keeps the WebGPU `QuerySet` name but means indexed query slots. Core query types are `timestamp | occlusion`; pipeline statistics are not a core query type.
 - Bind layouts are explicit in the core API. Shader reflection is only a development helper or validator.
+- `Program` is a shader contract composed from user WGSL and generated modules; it does not own concrete resources.
+- `Material` is not a scratch core concept. Material-like style or scene packages belong above scratch and lower into `Program`, `BindSet`, `Pipeline`, and `Command`.
+- Diagnostics are part of the API contract: stable machine-readable codes and subjects, not prose-only logs.
 - `Command` is the canonical name for draw, dispatch, copy, upload, and related executable GPU actions.
 - `PassSpec` is persistent pass shape. `SubmissionBuilder` binds pass specs to the current command list; `.submit()` returns `SubmittedWork`.
 - The first scheduler model is explicit submission order plus dependency validation. Automatic sorting belongs in an optional upper orchestration layer.

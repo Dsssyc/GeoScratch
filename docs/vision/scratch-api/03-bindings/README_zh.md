@@ -1,7 +1,7 @@
 # Bindings
 
 状态: Vision draft
-日期: 2026-06-30
+日期: 2026-07-06
 
 ## 决策
 
@@ -66,6 +66,8 @@ const terrainSet = scratch.bindSet(terrainLayout, {
 
 `BindSet` 不会仅因已绑定 resource 的 `contentEpoch` 改变而重建。内容变化影响 dependency validation 与 readback，不代表 physical binding target 变化。
 
+`BindSet` 不是 material parameter object。它只为显式 `BindLayout` 提供具体资源; 它不拥有 shader source、生成 accessor module、pipeline state、render style、object assignment、draw count 或 dispatch count。command 才是 pipeline 与 bind sets 为一次可执行动作相遇的位置。
+
 ## Shader Inspection 与交叉校验
 
 Shader reflection 不是 source of truth，也不在核心 runtime 路径上。显式 `BindLayout` 仍然权威。但 reflection 应从"仅脚手架"提升为一道 *守卫*，针对最常见的绑定错误: `BindLayout` 与 shader 在 binding index、type 或 visibility 上不一致。
@@ -87,6 +89,8 @@ const draft = scratch.inspectShader(shader).suggestBindLayout({ group: 0 })
 
 Reflection 不能成为生产 layout 创建的真相来源。
 
+交叉校验 findings 应使用 `09-diagnostics-validation` 中的共享 diagnostic envelope，以 `BindLayoutEntry` 作为 `subject`，并把反射得到的 `ShaderBinding` 与 `Program` 作为 `related` context。
+
 ## 显式声明是核心契约
 
 Shader 和 bind layout 都应由用户有意识地编写。这能保留特殊 WebGPU layout 的表达能力，也避免内核绑定到某个 WGSL parser 或 reflection 实现。
@@ -96,4 +100,6 @@ Shader 和 bind layout 都应由用户有意识地编写。这能保留特殊 We
 - 不在 `BindSet` 中存储 vertex 或 index input state。
 - 不在 `BindSet` 中存储 draw 或 dispatch count。
 - 不在 `BindSet` 中存储 command readiness policy。
+- 不把 `BindSet` 当作 material、style 或 scene-object parameter bundle。
+- 不把 bind validation failures 暴露成 prose-only errors。
 - 不把 shader reflection 作为主要 runtime layout 机制。
