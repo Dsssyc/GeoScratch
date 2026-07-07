@@ -7,11 +7,11 @@
     "examples"
   ],
   "scripts": {
-    "dev": "npm --workspace examples run dev",
-    "build": "npm --workspace examples run build",
+    "dev": "npm --workspace geoscratch run build && npm --workspace examples run dev",
+    "build": "npm --workspace geoscratch run build && npm --workspace examples run build",
     "serve": "npm --workspace examples run serve",
-    "test": "mocha \"tests/**/*.test.js\"",
-    "typecheck": "tsc -p tsconfig.types.json"
+    "test": "npm --workspace geoscratch run build && mocha \"tests/**/*.test.js\"",
+    "typecheck": "npm --workspace geoscratch run build && tsc -p tsconfig.types.json"
   },
   "devDependencies": {
     "chai": "^5.1.0",

@@ -2,7 +2,7 @@ import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
     ScratchRuntime,
-} from '../packages/geoscratch/src/index.js'
+} from 'geoscratch'
 
 function createFakeGpu() {
 

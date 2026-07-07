@@ -4,10 +4,59 @@ import {
     throwScratchDiagnostic,
 } from './diagnostics.js'
 import { TextureResource } from './texture.js'
+import type { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+import type { ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
+import type { ComputePassSpec, RenderPassSpec } from './pass.js'
+import type { ScratchRuntime } from './runtime.js'
+
+export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
+
+export type SubmissionBuilderOptions = {
+    validation?: SubmissionValidationMode
+}
+
+export type RenderCommand = DrawCommand | BeginOcclusionQueryCommand | EndOcclusionQueryCommand
+
+type RenderStep = {
+    kind: 'render'
+    passSpec: RenderPassSpec
+    commands: RenderCommand[]
+}
+
+type ComputeStep = {
+    kind: 'compute'
+    passSpec: ComputePassSpec
+    commands: DispatchCommand[]
+}
+
+type UploadStep = {
+    kind: 'upload'
+    command: UploadCommand | TextureUploadCommand
+}
+
+type CopyStep = {
+    kind: 'copy'
+    command: CopyCommand
+}
+
+type ResolveStep = {
+    kind: 'resolve'
+    command: ResolveQuerySetCommand
+}
+
+type SubmissionStep = RenderStep | ComputeStep | UploadStep | CopyStep | ResolveStep
+
+export interface SubmissionBuilder {
+    runtime: ScratchRuntime
+    id: string
+    validation: SubmissionValidationMode
+    steps: SubmissionStep[]
+    isSubmitted: boolean
+}
 
 export class SubmissionBuilder {
 
-    constructor(runtime, options = {}) {
+    constructor(runtime: ScratchRuntime, options: SubmissionBuilderOptions = {}) {
 
         runtime.assertActive()
 
@@ -18,7 +67,7 @@ export class SubmissionBuilder {
         this.isSubmitted = false
     }
 
-    render(passSpec, commands = []) {
+    render(passSpec: RenderPassSpec, commands: RenderCommand[] = []) {
 
         this.steps.push({
             kind: 'render',
@@ -29,7 +78,7 @@ export class SubmissionBuilder {
         return this
     }
 
-    compute(passSpec, commands = []) {
+    compute(passSpec: ComputePassSpec, commands: DispatchCommand[] = []) {
 
         this.steps.push({
             kind: 'compute',
@@ -40,7 +89,7 @@ export class SubmissionBuilder {
         return this
     }
 
-    upload(command) {
+    upload(command: UploadCommand | TextureUploadCommand) {
 
         this.steps.push({
             kind: 'upload',
@@ -50,7 +99,7 @@ export class SubmissionBuilder {
         return this
     }
 
-    copy(command) {
+    copy(command: CopyCommand) {
 
         this.steps.push({
             kind: 'copy',
@@ -60,7 +109,7 @@ export class SubmissionBuilder {
         return this
     }
 
-    resolve(command) {
+    resolve(command: ResolveQuerySetCommand) {
 
         this.steps.push({
             kind: 'resolve',
@@ -85,7 +134,7 @@ export class SubmissionBuilder {
         }
 
         const submittedId = `scratch-submitted-${UUID()}`
-        const commandBuffers = []
+        const commandBuffers: GPUCommandBuffer[] = []
         const encoder = this.runtime.device.createCommandEncoder({
             label: submittedId,
         })
@@ -128,7 +177,7 @@ export class SubmissionBuilder {
             if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
             const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
-            let activeOcclusionQueryCommand
+            let activeOcclusionQueryCommand: any
             for (const command of step.commands) {
                 command.encode(passEncoder)
                 if (command.commandKind === 'begin-occlusion-query') {
@@ -165,7 +214,7 @@ export class SubmissionBuilder {
     }
 }
 
-function validateUploadStep(builder, step) {
+function validateUploadStep(builder: SubmissionBuilder, step: UploadStep) {
 
     const command = step.command
 
@@ -184,7 +233,7 @@ function validateUploadStep(builder, step) {
     command.assertRuntime(builder.runtime)
 }
 
-function validateCopyStep(builder, step) {
+function validateCopyStep(builder: SubmissionBuilder, step: CopyStep) {
 
     const command = step.command
 
@@ -203,7 +252,7 @@ function validateCopyStep(builder, step) {
     command.assertRuntime(builder.runtime)
 }
 
-function validateResolveStep(builder, step) {
+function validateResolveStep(builder: SubmissionBuilder, step: ResolveStep) {
 
     const command = step.command
 
@@ -224,7 +273,19 @@ function validateResolveStep(builder, step) {
 
 export class SubmittedWork {
 
-    constructor(runtime, options = {}) {
+    runtime: ScratchRuntime
+    id: string
+    commandBuffers: GPUCommandBuffer[]
+    report: ScratchDiagnosticReport
+    diagnostics: ScratchDiagnostic[]
+    done: Promise<unknown>
+
+    constructor(runtime: ScratchRuntime, options: {
+        id?: string
+        commandBuffers?: GPUCommandBuffer[]
+        report?: ScratchDiagnosticReport
+        done?: Promise<unknown>
+    } = {}) {
 
         this.runtime = runtime
         this.id = options.id ?? `scratch-submitted-${UUID()}`
@@ -243,7 +304,7 @@ export class SubmittedWork {
     }
 }
 
-function validateRenderStep(builder, step) {
+function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
 
     const passSpec = step.passSpec
 
@@ -297,7 +358,7 @@ function validateRenderStep(builder, step) {
     validateRenderOcclusionQueryOrder(builder, step)
 }
 
-function validateComputeStep(builder, step) {
+function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
 
     const passSpec = step.passSpec
 
@@ -334,7 +395,7 @@ function validateComputeStep(builder, step) {
     }
 }
 
-function validatePipelineTargets(command, passSpec) {
+function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec) {
 
     const targetFormats = command.pipeline.targetFormats
     for (let index = 0; index < passSpec.color.length; index++) {
@@ -359,11 +420,11 @@ function validatePipelineTargets(command, passSpec) {
     }
 }
 
-function validateRenderOcclusionQueryOrder(builder, step) {
+function validateRenderOcclusionQueryOrder(builder: SubmissionBuilder, step: RenderStep) {
 
     const passSpec = step.passSpec
-    const writtenIndices = new Set()
-    let activeCommand
+    const writtenIndices = new Set<number>()
+    let activeCommand: BeginOcclusionQueryCommand | undefined
 
     for (const command of step.commands) {
         if (command.commandKind === 'begin-occlusion-query') {
@@ -393,7 +454,7 @@ function validateRenderOcclusionQueryOrder(builder, step) {
             throwOcclusionQueryStateDiagnostic(builder, step, command, 'endWithoutBegin')
         }
 
-        writtenIndices.add(activeCommand.index)
+        writtenIndices.add(activeCommand!.index)
         activeCommand = undefined
     }
 
@@ -402,7 +463,7 @@ function validateRenderOcclusionQueryOrder(builder, step) {
     }
 }
 
-function isRenderCommand(command) {
+function isRenderCommand(command: any): command is RenderCommand {
 
     return Boolean(
         command &&
@@ -412,7 +473,13 @@ function isRenderCommand(command) {
     )
 }
 
-function throwOcclusionQueryStateDiagnostic(builder, step, command, reason, activeCommand) {
+function throwOcclusionQueryStateDiagnostic(
+    builder: SubmissionBuilder,
+    step: RenderStep,
+    command: any,
+    reason: string,
+    activeCommand?: BeginOcclusionQueryCommand
+) {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_SUBMISSION_OCCLUSION_QUERY_STATE_INVALID',
@@ -443,9 +510,9 @@ function throwOcclusionQueryStateDiagnostic(builder, step, command, reason, acti
     })
 }
 
-function advanceRenderAttachmentEpochs(passSpec) {
+function advanceRenderAttachmentEpochs(passSpec: RenderPassSpec) {
 
-    const writtenTargets = new Set()
+    const writtenTargets = new Set<any>()
 
     for (const attachment of passSpec.color) {
         const target = attachment.target
@@ -456,7 +523,7 @@ function advanceRenderAttachmentEpochs(passSpec) {
     }
 }
 
-function createDonePromise(queue) {
+function createDonePromise(queue: GPUQueue): Promise<unknown> {
 
     if (queue && typeof queue.onSubmittedWorkDone === 'function') {
         return queue.onSubmittedWorkDone()

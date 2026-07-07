@@ -12,12 +12,57 @@ import { SamplerResource } from './sampler.js'
 import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
 import { TextureResource } from './texture.js'
+import type { BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './binding.js'
+import type { BufferResourceDescriptor } from './buffer.js'
+import type { BeginOcclusionQueryCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
+import type { ComputePassSpecDescriptor, RenderPassSpecDescriptor } from './pass.js'
+import type { ComputePipelineDescriptor, RenderPipelineDescriptor } from './pipeline.js'
+import type { ProgramDescriptor } from './program.js'
+import type { QuerySetResourceDescriptor } from './query-set.js'
+import type { ReadbackOperationDescriptor } from './readback.js'
+import type { SamplerResourceDescriptor } from './sampler.js'
+import type { SubmissionBuilderOptions } from './submission.js'
+import type { SurfaceOptions } from './surface.js'
+import type { TextureResourceDescriptor } from './texture.js'
 
 const runtimeToken = Symbol('ScratchRuntime')
 
+export type ScratchRuntimeCreateOptions = {
+    gpu?: GPU
+    label?: string
+    powerPreference?: GPUPowerPreference
+    forceFallbackAdapter?: boolean
+    requiredFeatures?: Iterable<GPUFeatureName>
+    requiredLimits?: Record<string, number>
+}
+
+type ScratchRuntimeConstructorOptions = ScratchRuntimeCreateOptions & {
+    gpu: GPU
+    adapter: GPUAdapter
+    device: GPUDevice
+}
+
+export interface ScratchRuntime {
+    id: string
+    label?: string
+    gpu: GPU
+    adapter: GPUAdapter
+    device: GPUDevice
+    queue: GPUQueue
+    adapterFeatures: GPUSupportedFeatures
+    adapterLimits: GPUSupportedLimits
+    deviceFeatures: GPUSupportedFeatures
+    deviceLimits: GPUSupportedLimits
+    isDisposed: boolean
+    isDeviceLost: boolean
+    deviceLostInfo?: GPUDeviceLostInfo
+    _resources: Set<any>
+    _surfaces: Set<any>
+}
+
 export class ScratchRuntime {
 
-    constructor(token, options = {}) {
+    private constructor(token: symbol, options: ScratchRuntimeConstructorOptions) {
 
         if (token !== runtimeToken) {
             throwScratchDiagnostic({
@@ -54,7 +99,7 @@ export class ScratchRuntime {
         }
     }
 
-    static async create(options = {}) {
+    static async create(options: ScratchRuntimeCreateOptions = {}) {
 
         const gpu = options.gpu ?? globalThis.navigator?.gpu
 
@@ -111,7 +156,7 @@ export class ScratchRuntime {
 
     get subject() {
 
-        const subject = {
+        const subject: any = {
             kind: 'ScratchRuntime',
             id: this.id,
         }
@@ -146,244 +191,244 @@ export class ScratchRuntime {
         }
     }
 
-    createSurface(canvas, options = {}) {
+    createSurface(canvas: HTMLCanvasElement | OffscreenCanvas, options: SurfaceOptions = {}) {
 
         this.assertActive()
         return new Surface(this, canvas, options)
     }
 
-    surface(canvas, options = {}) {
+    surface(canvas: HTMLCanvasElement | OffscreenCanvas, options: SurfaceOptions = {}) {
 
         return this.createSurface(canvas, options)
     }
 
-    createBuffer(descriptor) {
+    createBuffer(descriptor: BufferResourceDescriptor) {
 
         this.assertActive()
         return new BufferResource(this, descriptor)
     }
 
-    buffer(descriptor) {
+    buffer(descriptor: BufferResourceDescriptor) {
 
         return this.createBuffer(descriptor)
     }
 
-    createTexture(descriptor) {
+    createTexture(descriptor: TextureResourceDescriptor) {
 
         this.assertActive()
         return new TextureResource(this, descriptor)
     }
 
-    texture(descriptor) {
+    texture(descriptor: TextureResourceDescriptor) {
 
         return this.createTexture(descriptor)
     }
 
-    createSampler(descriptor) {
+    createSampler(descriptor?: SamplerResourceDescriptor) {
 
         this.assertActive()
         return new SamplerResource(this, descriptor)
     }
 
-    sampler(descriptor) {
+    sampler(descriptor?: SamplerResourceDescriptor) {
 
         return this.createSampler(descriptor)
     }
 
-    createQuerySet(descriptor) {
+    createQuerySet(descriptor: QuerySetResourceDescriptor) {
 
         this.assertActive()
         return new QuerySetResource(this, descriptor)
     }
 
-    querySet(descriptor) {
+    querySet(descriptor: QuerySetResourceDescriptor) {
 
         return this.createQuerySet(descriptor)
     }
 
-    createBindLayout(descriptor) {
+    createBindLayout(descriptor: BindLayoutDescriptor) {
 
         this.assertActive()
         return new BindLayout(this, descriptor)
     }
 
-    bindLayout(descriptor) {
+    bindLayout(descriptor: BindLayoutDescriptor) {
 
         return this.createBindLayout(descriptor)
     }
 
-    createBindSet(layout, bindings, options) {
+    createBindSet(layout: BindLayout, bindings: BindSetBindings, options?: BindSetOptions) {
 
         this.assertActive()
         return new BindSet(this, layout, bindings, options)
     }
 
-    bindSet(layout, bindings, options) {
+    bindSet(layout: BindLayout, bindings: BindSetBindings, options?: BindSetOptions) {
 
         return this.createBindSet(layout, bindings, options)
     }
 
-    createProgram(descriptor) {
+    createProgram(descriptor: ProgramDescriptor) {
 
         this.assertActive()
         return new Program(this, descriptor)
     }
 
-    program(descriptor) {
+    program(descriptor: ProgramDescriptor) {
 
         return this.createProgram(descriptor)
     }
 
-    createRenderPipeline(descriptor) {
+    createRenderPipeline(descriptor: RenderPipelineDescriptor) {
 
         this.assertActive()
         return new RenderPipeline(this, descriptor)
     }
 
-    renderPipeline(descriptor) {
+    renderPipeline(descriptor: RenderPipelineDescriptor) {
 
         return this.createRenderPipeline(descriptor)
     }
 
-    createComputePipeline(descriptor) {
+    createComputePipeline(descriptor: ComputePipelineDescriptor) {
 
         this.assertActive()
         return new ComputePipeline(this, descriptor)
     }
 
-    computePipeline(descriptor) {
+    computePipeline(descriptor: ComputePipelineDescriptor) {
 
         return this.createComputePipeline(descriptor)
     }
 
-    createDrawCommand(descriptor) {
+    createDrawCommand(descriptor: DrawCommandDescriptor) {
 
         this.assertActive()
         return new DrawCommand(this, descriptor)
     }
 
-    drawCommand(descriptor) {
+    drawCommand(descriptor: DrawCommandDescriptor) {
 
         return this.createDrawCommand(descriptor)
     }
 
-    createBeginOcclusionQueryCommand(descriptor) {
+    createBeginOcclusionQueryCommand(descriptor: BeginOcclusionQueryCommandDescriptor) {
 
         this.assertActive()
         return new BeginOcclusionQueryCommand(this, descriptor)
     }
 
-    beginOcclusionQueryCommand(descriptor) {
+    beginOcclusionQueryCommand(descriptor: BeginOcclusionQueryCommandDescriptor) {
 
         return this.createBeginOcclusionQueryCommand(descriptor)
     }
 
-    createEndOcclusionQueryCommand(descriptor) {
+    createEndOcclusionQueryCommand(descriptor?: EndOcclusionQueryCommandDescriptor) {
 
         this.assertActive()
         return new EndOcclusionQueryCommand(this, descriptor)
     }
 
-    endOcclusionQueryCommand(descriptor) {
+    endOcclusionQueryCommand(descriptor?: EndOcclusionQueryCommandDescriptor) {
 
         return this.createEndOcclusionQueryCommand(descriptor)
     }
 
-    createDispatchCommand(descriptor) {
+    createDispatchCommand(descriptor: DispatchCommandDescriptor) {
 
         this.assertActive()
         return new DispatchCommand(this, descriptor)
     }
 
-    dispatchCommand(descriptor) {
+    dispatchCommand(descriptor: DispatchCommandDescriptor) {
 
         return this.createDispatchCommand(descriptor)
     }
 
-    createUploadCommand(descriptor) {
+    createUploadCommand(descriptor: UploadCommandDescriptor) {
 
         this.assertActive()
         return new UploadCommand(this, descriptor)
     }
 
-    uploadCommand(descriptor) {
+    uploadCommand(descriptor: UploadCommandDescriptor) {
 
         return this.createUploadCommand(descriptor)
     }
 
-    createCopyCommand(descriptor) {
+    createCopyCommand(descriptor: CopyCommandDescriptor) {
 
         this.assertActive()
         return new CopyCommand(this, descriptor)
     }
 
-    copyCommand(descriptor) {
+    copyCommand(descriptor: CopyCommandDescriptor) {
 
         return this.createCopyCommand(descriptor)
     }
 
-    createResolveQuerySetCommand(descriptor) {
+    createResolveQuerySetCommand(descriptor: ResolveQuerySetCommandDescriptor) {
 
         this.assertActive()
         return new ResolveQuerySetCommand(this, descriptor)
     }
 
-    resolveQuerySetCommand(descriptor) {
+    resolveQuerySetCommand(descriptor: ResolveQuerySetCommandDescriptor) {
 
         return this.createResolveQuerySetCommand(descriptor)
     }
 
-    createTextureUploadCommand(descriptor) {
+    createTextureUploadCommand(descriptor: TextureUploadCommandDescriptor) {
 
         this.assertActive()
         return new TextureUploadCommand(this, descriptor)
     }
 
-    textureUploadCommand(descriptor) {
+    textureUploadCommand(descriptor: TextureUploadCommandDescriptor) {
 
         return this.createTextureUploadCommand(descriptor)
     }
 
-    createRenderPass(descriptor) {
+    createRenderPass(descriptor: RenderPassSpecDescriptor) {
 
         this.assertActive()
         return new RenderPassSpec(this, descriptor)
     }
 
-    renderPass(descriptor) {
+    renderPass(descriptor: RenderPassSpecDescriptor) {
 
         return this.createRenderPass(descriptor)
     }
 
-    createComputePass(descriptor) {
+    createComputePass(descriptor?: ComputePassSpecDescriptor) {
 
         this.assertActive()
         return new ComputePassSpec(this, descriptor)
     }
 
-    computePass(descriptor) {
+    computePass(descriptor?: ComputePassSpecDescriptor) {
 
         return this.createComputePass(descriptor)
     }
 
-    createReadback(descriptor) {
+    createReadback(descriptor: ReadbackOperationDescriptor) {
 
         this.assertActive()
         return new ReadbackOperation(this, descriptor)
     }
 
-    readback(descriptor) {
+    readback(descriptor: ReadbackOperationDescriptor) {
 
         return this.createReadback(descriptor)
     }
 
-    createSubmission(options = {}) {
+    createSubmission(options: SubmissionBuilderOptions = {}) {
 
         this.assertActive()
         return new SubmissionBuilder(this, options)
     }
 
-    submission(options = {}) {
+    submission(options: SubmissionBuilderOptions = {}) {
 
         return this.createSubmission(options)
     }
@@ -407,30 +452,30 @@ export class ScratchRuntime {
         this.isDisposed = true
     }
 
-    _registerResource(resource) {
+    _registerResource(resource: any) {
 
         this._resources.add(resource)
     }
 
-    _unregisterResource(resource) {
+    _unregisterResource(resource: any) {
 
         this._resources.delete(resource)
     }
 
-    _registerSurface(surface) {
+    _registerSurface(surface: any) {
 
         this._surfaces.add(surface)
     }
 
-    _unregisterSurface(surface) {
+    _unregisterSurface(surface: any) {
 
         this._surfaces.delete(surface)
     }
 }
 
-function createAdapterOptions(options) {
+function createAdapterOptions(options: ScratchRuntimeCreateOptions): GPURequestAdapterOptions | undefined {
 
-    const adapterOptions = {}
+    const adapterOptions: GPURequestAdapterOptions = {}
 
     if (options.powerPreference !== undefined) adapterOptions.powerPreference = options.powerPreference
     if (options.forceFallbackAdapter !== undefined) adapterOptions.forceFallbackAdapter = options.forceFallbackAdapter
@@ -438,12 +483,12 @@ function createAdapterOptions(options) {
     return Object.keys(adapterOptions).length ? adapterOptions : undefined
 }
 
-function createDeviceDescriptor(options) {
+function createDeviceDescriptor(options: ScratchRuntimeCreateOptions): GPUDeviceDescriptor {
 
-    const descriptor = {}
+    const descriptor: GPUDeviceDescriptor = {}
 
     if (options.label !== undefined) descriptor.label = options.label
-    if (options.requiredFeatures !== undefined) descriptor.requiredFeatures = options.requiredFeatures
+    if (options.requiredFeatures !== undefined) descriptor.requiredFeatures = Array.from(options.requiredFeatures)
     if (options.requiredLimits !== undefined) descriptor.requiredLimits = options.requiredLimits
 
     return descriptor

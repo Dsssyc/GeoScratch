@@ -1,9 +1,40 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchRuntime } from './runtime.js'
+
+export type SurfaceSize = {
+    width: number
+    height: number
+}
+
+export type SurfaceFormat = GPUTextureFormat | 'preferred'
+
+export type SurfaceOptions = {
+    label?: string
+    format?: SurfaceFormat
+    alphaMode?: GPUCanvasAlphaMode
+    size?: SurfaceSize
+}
+
+type ScratchCanvas = HTMLCanvasElement | OffscreenCanvas
+
+export interface Surface {
+    runtime: ScratchRuntime
+    id: string
+    label?: string
+    canvas: ScratchCanvas
+    context: GPUCanvasContext
+    format: GPUTextureFormat
+    alphaMode: GPUCanvasAlphaMode
+    size: SurfaceSize
+    isConfigured: boolean
+    isDisposed: boolean
+}
 
 export class Surface {
 
-    constructor(runtime, canvas, options = {}) {
+    constructor(runtime: ScratchRuntime, canvas: ScratchCanvas, options: SurfaceOptions = {}) {
 
         runtime.assertActive()
 
@@ -22,9 +53,9 @@ export class Surface {
         runtime._registerSurface(this)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject = {
+        const subject: DiagnosticSubject = {
             kind: 'Surface',
             id: this.id,
         }
@@ -33,7 +64,7 @@ export class Surface {
         return subject
     }
 
-    assertUsable() {
+    assertUsable(): void {
 
         if (this.isDisposed) {
             throwScratchDiagnostic({
@@ -49,7 +80,7 @@ export class Surface {
         this.runtime.assertActive()
     }
 
-    configure(options = {}) {
+    configure(options: SurfaceOptions = {}): void {
 
         this.assertUsable()
 
@@ -67,22 +98,22 @@ export class Surface {
         this.isConfigured = true
     }
 
-    resize(sizeOrWidth, height) {
+    resize(sizeOrWidth: SurfaceSize | number, height?: number): void {
 
-        const size = typeof sizeOrWidth === 'number'
+        const size = (typeof sizeOrWidth === 'number'
             ? { width: sizeOrWidth, height }
-            : sizeOrWidth
+            : sizeOrWidth) as SurfaceSize
 
         this.configure({ size })
     }
 
-    getCurrentTexture() {
+    getCurrentTexture(): GPUTexture {
 
         this.assertUsable()
         return this.context.getCurrentTexture()
     }
 
-    dispose() {
+    dispose(): void {
 
         if (this.isDisposed) return
 
@@ -96,7 +127,7 @@ export class Surface {
     }
 }
 
-function createCanvasContext(surface, canvas) {
+function createCanvasContext(surface: Surface, canvas: ScratchCanvas): GPUCanvasContext {
 
     if (!canvas || typeof canvas.getContext !== 'function') {
         throwScratchDiagnostic({
@@ -110,7 +141,7 @@ function createCanvasContext(surface, canvas) {
         })
     }
 
-    const context = canvas.getContext('webgpu')
+    const context = canvas.getContext('webgpu') as GPUCanvasContext | null
 
     if (!context || typeof context.configure !== 'function') {
         throwScratchDiagnostic({
@@ -127,7 +158,7 @@ function createCanvasContext(surface, canvas) {
     return context
 }
 
-function resolveSurfaceFormat(runtime, format) {
+function resolveSurfaceFormat(runtime: ScratchRuntime, format: SurfaceFormat): GPUTextureFormat {
 
     if (format !== 'preferred') return format
 
@@ -138,7 +169,7 @@ function resolveSurfaceFormat(runtime, format) {
     return 'bgra8unorm'
 }
 
-function normalizeSurfaceSize(size, canvas) {
+function normalizeSurfaceSize(size: SurfaceSize | undefined, canvas: ScratchCanvas): SurfaceSize {
 
     if (size === undefined) {
         return {
@@ -153,7 +184,7 @@ function normalizeSurfaceSize(size, canvas) {
     }
 }
 
-function applyCanvasSize(canvas, size) {
+function applyCanvasSize(canvas: ScratchCanvas, size: SurfaceSize): void {
 
     if (!canvas) return
     if ('width' in canvas) canvas.width = size.width

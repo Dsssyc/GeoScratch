@@ -3,7 +3,7 @@ import {
     Program,
     ScratchDiagnosticError,
     ScratchRuntime,
-} from '../packages/geoscratch/src/index.js'
+} from 'geoscratch'
 import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
 describe('scratch Program', () => {

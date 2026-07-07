@@ -1,9 +1,18 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { Resource } from './resource.js'
+import type { ScratchRuntime } from './runtime.js'
+
+export type BufferResourceDescriptor = GPUBufferDescriptor
+
+export interface BufferResource {
+    gpuBuffer: GPUBuffer
+    size: number
+    usage: GPUBufferUsageFlags
+}
 
 export class BufferResource extends Resource {
 
-    constructor(runtime, descriptor = {}) {
+    constructor(runtime: ScratchRuntime, descriptor: BufferResourceDescriptor) {
 
         const normalizedDescriptor = normalizeBufferDescriptor(runtime, descriptor)
 
@@ -18,12 +27,12 @@ export class BufferResource extends Resource {
         this.gpuBuffer = runtime.device.createBuffer(normalizedDescriptor)
     }
 
-    static create(runtime, descriptor = {}) {
+    static create(runtime: ScratchRuntime, descriptor: BufferResourceDescriptor): BufferResource {
 
         return new BufferResource(runtime, descriptor)
     }
 
-    dispose() {
+    dispose(): void {
 
         if (this.isDisposed) return
 
@@ -35,7 +44,7 @@ export class BufferResource extends Resource {
     }
 }
 
-function normalizeBufferDescriptor(runtime, descriptor) {
+function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: any): BufferResourceDescriptor {
 
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
@@ -87,7 +96,7 @@ function normalizeBufferDescriptor(runtime, descriptor) {
         })
     }
 
-    const normalized = {
+    const normalized: any = {
         size: descriptor.size,
         usage: descriptor.usage,
     }

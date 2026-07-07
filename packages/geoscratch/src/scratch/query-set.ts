@@ -1,11 +1,28 @@
 import { Resource } from './resource.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchRuntime } from './runtime.js'
 
 const QUERY_SET_TYPES = new Set([ 'timestamp', 'occlusion' ])
 
+export type QuerySetType = 'timestamp' | 'occlusion'
+
+export type QuerySetResourceDescriptor = {
+    label?: string
+    type: QuerySetType
+    count: number
+}
+
+export interface QuerySetResource {
+    type: QuerySetType
+    count: number
+    slotContentEpochs: number[]
+    gpuQuerySet: GPUQuerySet
+}
+
 export class QuerySetResource extends Resource {
 
-    constructor(runtime, descriptor = {}) {
+    constructor(runtime: ScratchRuntime, descriptor: QuerySetResourceDescriptor) {
 
         const normalizedDescriptor = normalizeQuerySetDescriptor(runtime, descriptor)
 
@@ -21,14 +38,14 @@ export class QuerySetResource extends Resource {
         this.gpuQuerySet = runtime.device.createQuerySet(normalizedDescriptor)
     }
 
-    static create(runtime, descriptor = {}) {
+    static create(runtime: ScratchRuntime, descriptor: QuerySetResourceDescriptor): QuerySetResource {
 
         return new QuerySetResource(runtime, descriptor)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject = {
+        const subject: DiagnosticSubject = {
             kind: 'QuerySet',
             id: this.id,
             queryType: this.type,
@@ -38,7 +55,7 @@ export class QuerySetResource extends Resource {
         return subject
     }
 
-    dispose() {
+    dispose(): void {
 
         if (this.isDisposed) return
 
@@ -49,13 +66,13 @@ export class QuerySetResource extends Resource {
         super.dispose()
     }
 
-    _advanceSlotContentEpoch(index) {
+    _advanceSlotContentEpoch(index: number): void {
 
         this.slotContentEpochs[index]++
     }
 }
 
-function normalizeQuerySetDescriptor(runtime, descriptor) {
+function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: any): QuerySetResourceDescriptor {
 
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
@@ -95,7 +112,7 @@ function normalizeQuerySetDescriptor(runtime, descriptor) {
         })
     }
 
-    const normalized = {
+    const normalized: any = {
         type: descriptor.type,
         count: descriptor.count,
     }
@@ -105,7 +122,7 @@ function normalizeQuerySetDescriptor(runtime, descriptor) {
     return normalized
 }
 
-function throwQuerySetDescriptorDiagnostic(subject, descriptor, reason) {
+function throwQuerySetDescriptorDiagnostic(subject: DiagnosticSubject, descriptor: any, reason: string): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',

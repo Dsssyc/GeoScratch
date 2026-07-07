@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by ADR-006 for Scratch source and package dist exports.
 
 ## Date
 
@@ -24,7 +24,7 @@ For this branch:
 - Keep package exports and public import paths unchanged.
 - Use `tsc` with `allowJs`, `checkJs`, and focused `include` entries for stable leaf modules.
 - Add `// @ts-check` and JSDoc to checked JavaScript files so source intent is explicit.
-- Keep adjacent `.d.ts` files synchronized until a later build-boundary ADR allows compiler-emitted declarations.
+- Keep adjacent `.d.ts` files synchronized until a later build-boundary ADR allows compiler-emitted declarations. ADR-006 supersedes this for Scratch source: Scratch declarations are emitted from TypeScript source into `dist`.
 
 The first checked source slice is `packages/geoscratch/src/core/utils/uuid.js` because it is a stable leaf module with no WebGPU or runtime ownership dependencies.
 
@@ -39,4 +39,4 @@ The first checked source slice is `packages/geoscratch/src/core/utils/uuid.js` b
 
 - Do not rename runtime source files to `.ts` in this branch.
 - Do not introduce a package build output directory in this branch.
-- Do not remove hand-written declarations yet.
+- Do not remove hand-written declarations in this phase. ADR-006 supersedes this for Scratch source.

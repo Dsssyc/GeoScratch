@@ -20,27 +20,35 @@ describe('workspace layout', () => {
             'examples',
         ])
         expect(pkg).to.not.have.property('dependencies')
-        expect(pkg.scripts.dev).to.equal('npm --workspace examples run dev')
-        expect(pkg.scripts.build).to.equal('npm --workspace examples run build')
+        expect(pkg.scripts.dev).to.equal('npm --workspace geoscratch run build && npm --workspace examples run dev')
+        expect(pkg.scripts.build).to.equal('npm --workspace geoscratch run build && npm --workspace examples run build')
+        expect(pkg.scripts.test).to.equal('npm --workspace geoscratch run build && mocha "tests/**/*.test.js"')
+        expect(pkg.scripts.typecheck).to.equal('npm --workspace geoscratch run build && tsc -p tsconfig.types.json')
     })
 
     it('publishes the library from packages/geoscratch only', () => {
 
         expect(exists('src')).to.equal(false)
-        expect(exists('packages', 'geoscratch', 'src', 'index.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'index.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'scratch.ts')).to.equal(true)
 
         const pkg = readJson('packages', 'geoscratch', 'package.json')
 
         expect(pkg.name).to.equal('geoscratch')
-        expect(pkg.main).to.equal('src/index.js')
-        expect(pkg.types).to.equal('src/index.d.ts')
-        expect(pkg.exports['.'].import).to.equal('./src/index.js')
-        expect(pkg.exports['./geo'].import).to.equal('./src/geo/index.js')
+        expect(pkg.main).to.equal('dist/index.js')
+        expect(pkg.types).to.equal('dist/index.d.ts')
+        expect(pkg.exports['.'].import).to.equal('./dist/index.js')
+        expect(pkg.exports['.'].types).to.equal('./dist/index.d.ts')
+        expect(pkg.exports['./scratch'].import).to.equal('./dist/scratch.js')
+        expect(pkg.exports['./scratch'].types).to.equal('./dist/scratch.d.ts')
+        expect(pkg.exports['./geo'].import).to.equal('./dist/geo/index.js')
         expect(pkg.files).to.deep.equal([
             'README.md',
             'README_zh.md',
+            'dist',
             'src',
         ])
+        expect(pkg.scripts.build).to.equal('tsc -p tsconfig.build.json')
         expect(Object.keys(pkg.dependencies)).to.deep.equal(['@webgpu/types'])
     })
 

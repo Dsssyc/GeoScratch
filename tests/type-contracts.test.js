@@ -11,20 +11,21 @@ describe('type contracts', () => {
 
     it('keeps the public API typecheck entrypoint wired', () => {
 
-        expect(readJson('package.json').scripts.typecheck).to.equal('tsc -p tsconfig.types.json')
+        expect(readJson('package.json').scripts.typecheck).to.equal('npm --workspace geoscratch run build && tsc -p tsconfig.types.json')
         expect(exists('tests', 'types', 'public-api.ts')).to.equal(true)
     })
 
-    it('tracks the first source-compatible checked JavaScript slice', () => {
+    it('builds the package through TypeScript into dist outputs', () => {
 
         const tsconfig = readJson('tsconfig.types.json')
-        const uuidSource = read('packages', 'geoscratch', 'src', 'core', 'utils', 'uuid.js')
+        const buildConfig = readJson('packages', 'geoscratch', 'tsconfig.build.json')
 
-        expect(tsconfig.compilerOptions.allowJs).to.equal(true)
-        expect(tsconfig.compilerOptions.checkJs).to.equal(true)
-        expect(tsconfig.include).to.include('packages/geoscratch/src/core/utils/uuid.js')
-        expect(uuidSource.startsWith('// @ts-check')).to.equal(true)
-        expect(uuidSource).to.include('@returns {string}')
-        expect(exists('packages', 'geoscratch', 'src', 'core', 'utils', 'uuid.d.ts')).to.equal(true)
+        expect(tsconfig.compilerOptions.noEmit).to.equal(true)
+        expect(buildConfig.compilerOptions.rootDir).to.equal('src')
+        expect(buildConfig.compilerOptions.outDir).to.equal('dist')
+        expect(buildConfig.compilerOptions.declaration).to.equal(true)
+        expect(buildConfig.compilerOptions.allowJs).to.equal(true)
+        expect(buildConfig.include).to.deep.equal([ 'src/**/*' ])
+        expect(exists('packages', 'geoscratch', 'tsconfig.build.json')).to.equal(true)
     })
 })

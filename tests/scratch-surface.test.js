@@ -3,7 +3,7 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
     Surface,
-} from '../packages/geoscratch/src/index.js'
+} from 'geoscratch'
 
 function createFakeGpu() {
 

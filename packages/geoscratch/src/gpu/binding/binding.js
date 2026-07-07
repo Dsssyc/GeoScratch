@@ -10,6 +10,10 @@ import director from '../director/director.js'
 import { ScratchObject } from '../../core/object/object.js'
 
 /**
+ * @typedef {import('../../core/numericType/numeric.js').Numeric} Numeric
+ */
+
+/**
  * @typedef {Object} VertexBindingDescription
  * @property {VertexBuffer} buffer
  * @property {number} [visibility]

@@ -3,6 +3,7 @@ import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { SamplerResource } from './sampler.js'
 import { TextureResource } from './texture.js'
+import type { ScratchRuntime } from './runtime.js'
 
 const SHADER_STAGE_FLAGS = {
     vertex: 0x1,
@@ -29,9 +30,76 @@ const REQUIRED_BUFFER_USAGE = {
     storage: BUFFER_USAGE_STORAGE,
 }
 
+export type BindVisibility = 'vertex' | 'fragment' | 'compute'
+
+export type UniformBindLayoutEntry = {
+    binding: number
+    name: string
+    type: 'uniform'
+    visibility: BindVisibility[]
+}
+
+export type StorageBindLayoutEntry = {
+    binding: number
+    name: string
+    type: 'read-storage' | 'storage'
+    visibility: BindVisibility[]
+}
+
+export type TextureBindLayoutEntry = {
+    binding: number
+    name: string
+    type: 'texture'
+    visibility: BindVisibility[]
+    sampleType?: GPUTextureSampleType
+    viewDimension?: GPUTextureViewDimension
+    multisampled?: boolean
+}
+
+export type SamplerBindLayoutEntry = {
+    binding: number
+    name: string
+    type: 'sampler'
+    visibility: BindVisibility[]
+    samplerType?: GPUSamplerBindingType
+}
+
+export type BindLayoutEntry =
+    | UniformBindLayoutEntry
+    | StorageBindLayoutEntry
+    | TextureBindLayoutEntry
+    | SamplerBindLayoutEntry
+
+export type BindLayoutDescriptor = {
+    label?: string
+    group: number
+    entries: BindLayoutEntry[]
+}
+
+export type BindSetBindings = Record<string, BufferResource | TextureResource | SamplerResource>
+
+export type BindSetOptions = {
+    label?: string
+}
+
+type NormalizedBindSetBinding = {
+    entry: BindLayoutEntry
+    resource: BufferResource | TextureResource | SamplerResource
+}
+
+export interface BindLayout {
+    runtime: ScratchRuntime
+    id: string
+    label?: string
+    group: number
+    entries: BindLayoutEntry[]
+    gpuBindGroupLayout: GPUBindGroupLayout
+    isDisposed: boolean
+}
+
 export class BindLayout {
 
-    constructor(runtime, descriptor = {}) {
+    constructor(runtime: ScratchRuntime, descriptor: BindLayoutDescriptor) {
 
         runtime.assertActive()
 
@@ -49,7 +117,7 @@ export class BindLayout {
 
     get subject() {
 
-        const subject = {
+        const subject: any = {
             kind: 'BindLayout',
             id: this.id,
         }
@@ -58,7 +126,7 @@ export class BindLayout {
         return subject
     }
 
-    assertRuntime(runtime) {
+    assertRuntime(runtime: ScratchRuntime) {
 
         this.assertUsable()
 
@@ -94,7 +162,7 @@ export class BindLayout {
         this.runtime.assertActive()
     }
 
-    entrySubject(entry) {
+    entrySubject(entry: BindLayoutEntry) {
 
         return {
             kind: 'BindLayoutEntry',
@@ -104,15 +172,26 @@ export class BindLayout {
         }
     }
 
-    dispose() {
+    dispose(): void {
 
         this.isDisposed = true
     }
 }
 
+export interface BindSet {
+    runtime: ScratchRuntime
+    id: string
+    label?: string
+    layout: BindLayout
+    bindings: Map<string, NormalizedBindSetBinding>
+    gpuBindGroup?: GPUBindGroup
+    boundAllocationVersions: Map<string, number>
+    isDisposed: boolean
+}
+
 export class BindSet {
 
-    constructor(runtime, layout, bindings = {}, options = {}) {
+    constructor(runtime: ScratchRuntime, layout: BindLayout, bindings: BindSetBindings, options: BindSetOptions = {}) {
 
         runtime.assertActive()
 
@@ -142,7 +221,7 @@ export class BindSet {
 
     get subject() {
 
-        const subject = {
+        const subject: any = {
             kind: 'BindSet',
             id: this.id,
         }
@@ -151,7 +230,7 @@ export class BindSet {
         return subject
     }
 
-    assertRuntime(runtime) {
+    assertRuntime(runtime: ScratchRuntime) {
 
         this.assertUsable()
 
@@ -191,7 +270,7 @@ export class BindSet {
         }
     }
 
-    getBindGroup() {
+    getBindGroup(): GPUBindGroup {
 
         this.assertUsable()
 
@@ -204,7 +283,7 @@ export class BindSet {
 
                     return {
                         binding: entry.binding,
-                        resource: createBindingResource(binding),
+                        resource: createBindingResource(binding!),
                     }
                 }),
             })
@@ -219,7 +298,7 @@ export class BindSet {
         return this.gpuBindGroup
     }
 
-    hasStaleAllocationVersions() {
+    hasStaleAllocationVersions(): boolean {
 
         for (const binding of this.bindings.values()) {
             if (this.boundAllocationVersions.get(binding.resource.id) !== binding.resource.allocationVersion) {
@@ -230,13 +309,13 @@ export class BindSet {
         return false
     }
 
-    dispose() {
+    dispose(): void {
 
         this.isDisposed = true
     }
 }
 
-function normalizeGroup(layout, group) {
+function normalizeGroup(layout: BindLayout, group: number) {
 
     if (!Number.isInteger(group) || group < 0) {
         throwScratchDiagnostic({
@@ -253,7 +332,7 @@ function normalizeGroup(layout, group) {
     return group
 }
 
-function normalizeEntries(layout, entries) {
+function normalizeEntries(layout: BindLayout, entries: BindLayoutEntry[]): BindLayoutEntry[] {
 
     if (!Array.isArray(entries) || entries.length === 0) {
         throwScratchDiagnostic({
@@ -294,7 +373,7 @@ function normalizeEntries(layout, entries) {
         names.add(entry.name)
         bindings.add(entry.binding)
 
-        const normalized = {
+        const normalized: any = {
             binding: entry.binding,
             name: entry.name,
             type: entry.type,
@@ -315,12 +394,12 @@ function normalizeEntries(layout, entries) {
     })
 }
 
-function isSupportedBindingType(type) {
+function isSupportedBindingType(type: any): boolean {
 
     return BUFFER_BINDING_TYPES.has(type) || type === 'texture' || type === 'sampler'
 }
 
-function normalizeVisibility(layout, entry) {
+function normalizeVisibility(layout: BindLayout, entry: any): BindVisibility[] {
 
     if (!Array.isArray(entry.visibility) || entry.visibility.length === 0) {
         throwBindEntryDiagnostic(layout, entry)
@@ -335,7 +414,7 @@ function normalizeVisibility(layout, entry) {
     return [ ...entry.visibility ]
 }
 
-function normalizeBindings(bindSet, bindings) {
+function normalizeBindings(bindSet: BindSet, bindings: BindSetBindings): Map<string, NormalizedBindSetBinding> {
 
     if (!bindings || typeof bindings !== 'object') {
         throwScratchDiagnostic({
@@ -365,7 +444,7 @@ function normalizeBindings(bindSet, bindings) {
         }
     }
 
-    const normalized = new Map()
+    const normalized = new Map<string, NormalizedBindSetBinding>()
 
     for (const entry of bindSet.layout.entries) {
         const resource = bindings[entry.name]
@@ -389,7 +468,7 @@ function normalizeBindings(bindSet, bindings) {
     return normalized
 }
 
-function validateBindingResource(bindSet, entry, resource) {
+function validateBindingResource(bindSet: BindSet, entry: BindLayoutEntry, resource: any) {
 
     if (BUFFER_BINDING_TYPES.has(entry.type)) {
         validateBufferResource(bindSet, entry, resource)
@@ -409,7 +488,7 @@ function validateBindingResource(bindSet, entry, resource) {
     throwBindEntryDiagnostic(bindSet.layout, entry)
 }
 
-function validateBufferResource(bindSet, entry, resource) {
+function validateBufferResource(bindSet: BindSet, entry: BindLayoutEntry, resource: any) {
 
     if (!(resource instanceof BufferResource)) {
         throwScratchDiagnostic({
@@ -441,7 +520,7 @@ function validateBufferResource(bindSet, entry, resource) {
     }
 }
 
-function validateTextureResource(bindSet, entry, resource) {
+function validateTextureResource(bindSet: BindSet, entry: BindLayoutEntry, resource: any) {
 
     if (!(resource instanceof TextureResource)) {
         throwScratchDiagnostic({
@@ -472,7 +551,7 @@ function validateTextureResource(bindSet, entry, resource) {
     }
 }
 
-function validateSamplerResource(bindSet, entry, resource) {
+function validateSamplerResource(bindSet: BindSet, entry: BindLayoutEntry, resource: any) {
 
     if (!(resource instanceof SamplerResource)) {
         throwScratchDiagnostic({
@@ -490,9 +569,9 @@ function validateSamplerResource(bindSet, entry, resource) {
     resource.assertRuntime(bindSet.runtime)
 }
 
-function lowerBindLayoutEntry(entry) {
+function lowerBindLayoutEntry(entry: BindLayoutEntry): GPUBindGroupLayoutEntry {
 
-    const lowered = {
+    const lowered: any = {
         binding: entry.binding,
         visibility: entry.visibility.reduce((flags, stage) => flags | SHADER_STAGE_FLAGS[stage], 0),
     }
@@ -519,28 +598,30 @@ function lowerBindLayoutEntry(entry) {
     return lowered
 }
 
-function createBindingResource(binding) {
+function createBindingResource(binding: NormalizedBindSetBinding): GPUBindingResource {
+
+    const resource: any = binding.resource
 
     if (BUFFER_BINDING_TYPES.has(binding.entry.type)) {
         return {
-            buffer: binding.resource.gpuBuffer,
+            buffer: resource.gpuBuffer,
         }
     }
 
     if (binding.entry.type === 'texture') {
-        return binding.resource.createView()
+        return resource.createView()
     }
 
     if (binding.entry.type === 'sampler') {
-        return binding.resource.gpuSampler
+        return resource.gpuSampler
     }
 
     return {
-        buffer: binding.resource.gpuBuffer,
+        buffer: resource.gpuBuffer,
     }
 }
 
-function normalizeTextureSampleType(layout, entry) {
+function normalizeTextureSampleType(layout: BindLayout, entry: any): GPUTextureSampleType {
 
     const sampleType = entry.sampleType ?? 'float'
     if (!TEXTURE_SAMPLE_TYPES.has(sampleType)) {
@@ -550,7 +631,7 @@ function normalizeTextureSampleType(layout, entry) {
     return sampleType
 }
 
-function normalizeTextureViewDimension(layout, entry) {
+function normalizeTextureViewDimension(layout: BindLayout, entry: any): GPUTextureViewDimension {
 
     const viewDimension = entry.viewDimension ?? '2d'
     if (!TEXTURE_VIEW_DIMENSIONS.has(viewDimension)) {
@@ -560,7 +641,7 @@ function normalizeTextureViewDimension(layout, entry) {
     return viewDimension
 }
 
-function normalizeTextureMultisampled(layout, entry) {
+function normalizeTextureMultisampled(layout: BindLayout, entry: any): boolean {
 
     const multisampled = entry.multisampled ?? false
     if (typeof multisampled !== 'boolean') {
@@ -570,7 +651,7 @@ function normalizeTextureMultisampled(layout, entry) {
     return multisampled
 }
 
-function normalizeSamplerBindingType(layout, entry) {
+function normalizeSamplerBindingType(layout: BindLayout, entry: any): GPUSamplerBindingType {
 
     const samplerType = entry.samplerType ?? 'filtering'
     if (!SAMPLER_BINDING_TYPES.has(samplerType)) {
@@ -580,7 +661,7 @@ function normalizeSamplerBindingType(layout, entry) {
     return samplerType
 }
 
-function throwBindEntryDiagnostic(layout, entry) {
+function throwBindEntryDiagnostic(layout: BindLayout, entry: any) {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',

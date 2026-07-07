@@ -1,11 +1,42 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { Resource } from './resource.js'
+import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchRuntime } from './runtime.js'
 
 const TEXTURE_DIMENSIONS = new Set([ '2d' ])
 
+export type TextureResourceDescriptor = Omit<GPUTextureDescriptor, 'size'> & {
+    size: GPUTextureDescriptor['size'] | [number, number] | [number, number, number]
+}
+
+export type TextureViewDescriptor = GPUTextureViewDescriptor
+
+export interface TextureResource {
+    gpuTexture: GPUTexture
+    size: { width: number, height: number, depthOrArrayLayers: number }
+    width: number
+    height: number
+    depthOrArrayLayers: number
+    format: GPUTextureFormat
+    usage: GPUTextureUsageFlags
+    dimension: GPUTextureDimension
+    mipLevelCount: number
+    sampleCount: number
+    _viewCache: Map<string, GPUTextureView>
+}
+
+type NormalizedTextureDescriptor = GPUTextureDescriptor & {
+    size: { width: number, height: number, depthOrArrayLayers: number }
+    format: GPUTextureFormat
+    usage: GPUTextureUsageFlags
+    dimension: GPUTextureDimension
+    mipLevelCount: number
+    sampleCount: number
+}
+
 export class TextureResource extends Resource {
 
-    constructor(runtime, descriptor = {}) {
+    constructor(runtime: ScratchRuntime, descriptor: TextureResourceDescriptor) {
 
         const normalizedDescriptor = normalizeTextureDescriptor(runtime, descriptor)
 
@@ -28,12 +59,12 @@ export class TextureResource extends Resource {
         this._viewCache = new Map()
     }
 
-    static create(runtime, descriptor = {}) {
+    static create(runtime: ScratchRuntime, descriptor: TextureResourceDescriptor): TextureResource {
 
         return new TextureResource(runtime, descriptor)
     }
 
-    createView(descriptor = {}) {
+    createView(descriptor: TextureViewDescriptor = {}): GPUTextureView {
 
         this.assertUsable()
 
@@ -43,16 +74,16 @@ export class TextureResource extends Resource {
             this._viewCache.set(key, this.gpuTexture.createView(normalizedDescriptor))
         }
 
-        return this._viewCache.get(key)
+        return this._viewCache.get(key)!
     }
 
-    _replaceAllocation(descriptor) {
+    _replaceAllocation(descriptor: object): void {
 
         super._replaceAllocation(descriptor)
         this._viewCache.clear()
     }
 
-    dispose() {
+    dispose(): void {
 
         if (this.isDisposed) return
 
@@ -65,7 +96,7 @@ export class TextureResource extends Resource {
     }
 }
 
-function normalizeTextureDescriptor(runtime, descriptor) {
+function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: any): NormalizedTextureDescriptor {
 
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
@@ -90,7 +121,7 @@ function normalizeTextureDescriptor(runtime, descriptor) {
     const size = normalizeTextureSize(subject, descriptor.size)
     const format = normalizeTextureFormat(subject, descriptor.format)
     const usage = normalizeTextureUsage(subject, descriptor.usage)
-    const dimension = descriptor.dimension ?? '2d'
+    const dimension = (descriptor.dimension ?? '2d') as GPUTextureDimension
     if (!TEXTURE_DIMENSIONS.has(dimension)) {
         throwTextureDescriptorDiagnostic(subject, descriptor, {
             dimension: [ ...TEXTURE_DIMENSIONS ],
@@ -100,7 +131,7 @@ function normalizeTextureDescriptor(runtime, descriptor) {
     const mipLevelCount = normalizePositiveInteger(subject, descriptor.mipLevelCount ?? 1, 'mipLevelCount')
     const sampleCount = normalizePositiveInteger(subject, descriptor.sampleCount ?? 1, 'sampleCount')
 
-    const normalized = {
+    const normalized: any = {
         size,
         format,
         usage,
@@ -114,7 +145,7 @@ function normalizeTextureDescriptor(runtime, descriptor) {
     return normalized
 }
 
-function normalizeTextureSize(subject, size) {
+function normalizeTextureSize(subject: DiagnosticSubject, size: any): { width: number, height: number, depthOrArrayLayers: number } {
 
     let width
     let height
@@ -145,7 +176,7 @@ function normalizeTextureSize(subject, size) {
     return { width, height, depthOrArrayLayers }
 }
 
-function normalizeTextureFormat(subject, format) {
+function normalizeTextureFormat(subject: DiagnosticSubject, format: any): GPUTextureFormat {
 
     if (typeof format !== 'string' || format.length === 0) {
         throwTextureDescriptorDiagnostic(subject, { format }, {
@@ -153,10 +184,10 @@ function normalizeTextureFormat(subject, format) {
         })
     }
 
-    return format
+    return format as GPUTextureFormat
 }
 
-function normalizeTextureUsage(subject, usage) {
+function normalizeTextureUsage(subject: DiagnosticSubject, usage: any): GPUTextureUsageFlags {
 
     if (usage === undefined) {
         throwScratchDiagnostic({
@@ -179,7 +210,7 @@ function normalizeTextureUsage(subject, usage) {
     return usage
 }
 
-function normalizePositiveInteger(subject, value, key) {
+function normalizePositiveInteger(subject: DiagnosticSubject, value: any, key: string): number {
 
     if (!Number.isInteger(value) || value <= 0) {
         throwTextureDescriptorDiagnostic(subject, { [key]: value }, {
@@ -190,7 +221,7 @@ function normalizePositiveInteger(subject, value, key) {
     return value
 }
 
-function normalizeTextureViewDescriptor(texture, descriptor) {
+function normalizeTextureViewDescriptor(texture: TextureResource, descriptor: any): GPUTextureViewDescriptor {
 
     if (!descriptor || typeof descriptor !== 'object') {
         throwTextureDescriptorDiagnostic(texture.subject, descriptor, {
@@ -201,18 +232,18 @@ function normalizeTextureViewDescriptor(texture, descriptor) {
     return sortObjectKeys(descriptor)
 }
 
-function sortObjectKeys(value) {
+function sortObjectKeys(value: any): any {
 
     if (Array.isArray(value)) return value.map(sortObjectKeys)
     if (!value || typeof value !== 'object') return value
 
-    return Object.keys(value).sort().reduce((result, key) => {
+    return Object.keys(value).sort().reduce((result: any, key) => {
         result[key] = sortObjectKeys(value[key])
         return result
     }, {})
 }
 
-function throwTextureDescriptorDiagnostic(subject, actual, expected) {
+function throwTextureDescriptorDiagnostic(subject: DiagnosticSubject, actual: unknown, expected: unknown): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',

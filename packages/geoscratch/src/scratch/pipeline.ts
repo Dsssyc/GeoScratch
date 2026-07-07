@@ -1,9 +1,52 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import type { BindLayout } from './binding.js'
+import type { Program } from './program.js'
+import type { ScratchRuntime } from './runtime.js'
+
+export type RenderPipelineDescriptor = {
+    label?: string
+    program: Program
+    vertex?: string
+    fragment?: string
+    bindLayouts?: BindLayout[]
+    vertexBuffers?: GPUVertexBufferLayout[]
+    targets: GPUColorTargetState[]
+    primitive?: GPUPrimitiveState
+    depthStencil?: GPUDepthStencilState
+    multisample?: GPUMultisampleState
+}
+
+export type ComputePipelineDescriptor = {
+    label?: string
+    program: Program
+    compute?: string
+    bindLayouts?: BindLayout[]
+    constants?: Record<string, GPUPipelineConstantValue>
+}
+
+export interface RenderPipeline {
+    runtime: ScratchRuntime
+    id: string
+    label?: string
+    pipelineKind: 'render'
+    program: Program
+    vertexEntryPoint: string
+    fragmentEntryPoint: string
+    bindLayouts: BindLayout[]
+    bindLayoutsByGroup: Map<number, BindLayout>
+    vertexBuffers: GPUVertexBufferLayout[]
+    targets: GPUColorTargetState[]
+    targetFormats: GPUTextureFormat[]
+    shaderModule: GPUShaderModule
+    pipelineLayout: GPUPipelineLayout
+    gpuPipeline: GPURenderPipeline
+    isDisposed: boolean
+}
 
 export class RenderPipeline {
 
-    constructor(runtime, descriptor = {}) {
+    constructor(runtime: ScratchRuntime, descriptor: RenderPipelineDescriptor = {} as RenderPipelineDescriptor) {
 
         runtime.assertActive()
 
@@ -27,8 +70,8 @@ export class RenderPipeline {
         this.label = descriptor.label
         this.pipelineKind = 'render'
         this.program = program
-        this.vertexEntryPoint = descriptor.vertex ?? program.entryPoints.vertex
-        this.fragmentEntryPoint = descriptor.fragment ?? program.entryPoints.fragment
+        this.vertexEntryPoint = (descriptor.vertex ?? program.entryPoints.vertex) as string
+        this.fragmentEntryPoint = (descriptor.fragment ?? program.entryPoints.fragment) as string
         this.bindLayouts = normalizeBindLayouts(this, descriptor.bindLayouts)
         this.bindLayoutsByGroup = new Map(this.bindLayouts.map(layout => [ layout.group, layout ]))
         this.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
@@ -67,7 +110,7 @@ export class RenderPipeline {
 
     get subject() {
 
-        const subject = {
+        const subject: any = {
             kind: 'Pipeline',
             id: this.id,
             pipelineKind: 'render',
@@ -77,7 +120,7 @@ export class RenderPipeline {
         return subject
     }
 
-    assertRuntime(runtime) {
+    assertRuntime(runtime: ScratchRuntime) {
 
         this.assertUsable()
 
@@ -117,15 +160,31 @@ export class RenderPipeline {
         }
     }
 
-    dispose() {
+    dispose(): void {
 
         this.isDisposed = true
     }
 }
 
+export interface ComputePipeline {
+    runtime: ScratchRuntime
+    id: string
+    label?: string
+    pipelineKind: 'compute'
+    program: Program
+    computeEntryPoint: string
+    bindLayouts: BindLayout[]
+    bindLayoutsByGroup: Map<number, BindLayout>
+    constants?: Record<string, GPUPipelineConstantValue>
+    shaderModule: GPUShaderModule
+    pipelineLayout: GPUPipelineLayout
+    gpuPipeline: GPUComputePipeline
+    isDisposed: boolean
+}
+
 export class ComputePipeline {
 
-    constructor(runtime, descriptor = {}) {
+    constructor(runtime: ScratchRuntime, descriptor: ComputePipelineDescriptor = {} as ComputePipelineDescriptor) {
 
         runtime.assertActive()
 
@@ -149,7 +208,7 @@ export class ComputePipeline {
         this.label = descriptor.label
         this.pipelineKind = 'compute'
         this.program = program
-        this.computeEntryPoint = descriptor.compute ?? program.entryPoints.compute
+        this.computeEntryPoint = (descriptor.compute ?? program.entryPoints.compute) as string
         this.bindLayouts = normalizeBindLayouts(this, descriptor.bindLayouts)
         this.bindLayoutsByGroup = new Map(this.bindLayouts.map(layout => [ layout.group, layout ]))
         this.constants = descriptor.constants
@@ -180,7 +239,7 @@ export class ComputePipeline {
 
     get subject() {
 
-        const subject = {
+        const subject: any = {
             kind: 'Pipeline',
             id: this.id,
             pipelineKind: 'compute',
@@ -190,7 +249,7 @@ export class ComputePipeline {
         return subject
     }
 
-    assertRuntime(runtime) {
+    assertRuntime(runtime: ScratchRuntime) {
 
         this.assertUsable()
 
@@ -230,13 +289,13 @@ export class ComputePipeline {
         }
     }
 
-    dispose() {
+    dispose(): void {
 
         this.isDisposed = true
     }
 }
 
-function normalizeVertexBuffers(pipeline, vertexBuffers = []) {
+function normalizeVertexBuffers(pipeline: RenderPipeline, vertexBuffers: GPUVertexBufferLayout[] = []): GPUVertexBufferLayout[] {
 
     if (!Array.isArray(vertexBuffers)) {
         throwVertexLayoutDiagnostic(pipeline, {
@@ -245,7 +304,7 @@ function normalizeVertexBuffers(pipeline, vertexBuffers = []) {
         })
     }
 
-    return vertexBuffers.map((layout, slot) => {
+    return vertexBuffers.map((layout: any, slot) => {
         if (!layout || typeof layout !== 'object') {
             throwVertexLayoutDiagnostic(pipeline, {
                 expected: { layout: 'GPUVertexBufferLayout' },
@@ -274,7 +333,7 @@ function normalizeVertexBuffers(pipeline, vertexBuffers = []) {
             })
         }
 
-        const normalized = {
+        const normalized: any = {
             arrayStride: layout.arrayStride,
             attributes: layout.attributes.map((attribute, attributeIndex) => normalizeVertexAttribute(
                 pipeline,
@@ -289,7 +348,7 @@ function normalizeVertexBuffers(pipeline, vertexBuffers = []) {
     })
 }
 
-function normalizeVertexAttribute(pipeline, attribute, slot, attributeIndex) {
+function normalizeVertexAttribute(pipeline: RenderPipeline, attribute: any, slot: number, attributeIndex: number): GPUVertexAttribute {
 
     if (!attribute || typeof attribute !== 'object') {
         throwVertexLayoutDiagnostic(pipeline, {
@@ -330,7 +389,7 @@ function normalizeVertexAttribute(pipeline, attribute, slot, attributeIndex) {
     }
 }
 
-function throwVertexLayoutDiagnostic(pipeline, { expected, actual }) {
+function throwVertexLayoutDiagnostic(pipeline: RenderPipeline, { expected, actual }: { expected: any, actual: any }) {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_PIPELINE_VERTEX_LAYOUT_MISMATCH',
@@ -344,7 +403,10 @@ function throwVertexLayoutDiagnostic(pipeline, { expected, actual }) {
     })
 }
 
-function normalizeBindLayouts(pipeline, bindLayouts = []) {
+function normalizeBindLayouts(
+    pipeline: RenderPipeline | ComputePipeline,
+    bindLayouts: BindLayout[] = []
+): BindLayout[] {
 
     if (!Array.isArray(bindLayouts)) {
         throwScratchDiagnostic({
@@ -358,8 +420,8 @@ function normalizeBindLayouts(pipeline, bindLayouts = []) {
         })
     }
 
-    const groups = new Set()
-    return bindLayouts.map((layout) => {
+    const groups = new Set<number>()
+    return bindLayouts.map((layout: any) => {
         if (!layout || typeof layout.assertRuntime !== 'function') {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
@@ -392,7 +454,7 @@ function normalizeBindLayouts(pipeline, bindLayouts = []) {
     })
 }
 
-function normalizeTargets(pipeline, targets) {
+function normalizeTargets(pipeline: RenderPipeline, targets: GPUColorTargetState[]): GPUColorTargetState[] {
 
     if (!Array.isArray(targets) || targets.length === 0) {
         throwScratchDiagnostic({
@@ -423,7 +485,7 @@ function normalizeTargets(pipeline, targets) {
     })
 }
 
-function validateEntryPoints(pipeline) {
+function validateEntryPoints(pipeline: RenderPipeline) {
 
     if (!pipeline.vertexEntryPoint) {
         throwMissingEntryPoint(pipeline, 'vertex')
@@ -434,7 +496,7 @@ function validateEntryPoints(pipeline) {
     }
 }
 
-function throwMissingEntryPoint(pipeline, stage) {
+function throwMissingEntryPoint(pipeline: RenderPipeline | ComputePipeline, stage: 'vertex' | 'fragment' | 'compute') {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_PROGRAM_ENTRY_POINT_MISSING',
@@ -453,7 +515,7 @@ function throwMissingEntryPoint(pipeline, stage) {
     })
 }
 
-function labelWithSuffix(label, suffix) {
+function labelWithSuffix(label: string | undefined, suffix: string) {
 
     return label === undefined ? undefined : `${label} ${suffix}`
 }

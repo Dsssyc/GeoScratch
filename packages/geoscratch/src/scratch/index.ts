@@ -4,6 +4,10 @@ export {
     createScratchDiagnosticReport,
     throwScratchDiagnostic,
 } from './diagnostics.js'
+export type {
+    ScratchDiagnostic,
+    ScratchDiagnosticReport,
+} from './diagnostics.js'
 export { ScratchRuntime } from './runtime.js'
 export { Surface } from './surface.js'
 export { Resource } from './resource.js'
@@ -18,3 +22,4 @@ export { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, 
 export { ComputePassSpec, RenderPassSpec } from './pass.js'
 export { ReadbackOperation } from './readback.js'
 export { SubmissionBuilder, SubmittedWork } from './submission.js'
+export type { RenderCommand } from './submission.js'

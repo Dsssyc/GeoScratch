@@ -16,9 +16,9 @@ describe('module layout', () => {
         expect(exists('packages', 'geoscratch', 'src', 'geometry', 'sphere', 'sphere.js')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'geometry', 'plane', 'plane.js')).to.equal(true)
 
-        const entry = await import('../packages/geoscratch/src/index.js')
-        const geo = await import('../packages/geoscratch/src/geo/index.js')
-        const geometry = await import('../packages/geoscratch/src/geometry/index.js')
+        const entry = await import('geoscratch')
+        const geo = await import('geoscratch/geo')
+        const geometry = await import('geoscratch/geometry')
 
         expect(geo.MercatorCoordinate).to.equal(entry.MercatorCoordinate)
         expect(geo.Node2D).to.equal(entry.Node2D)

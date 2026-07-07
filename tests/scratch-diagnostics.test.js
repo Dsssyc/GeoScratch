@@ -3,7 +3,7 @@ import {
     ScratchDiagnosticError,
     createScratchDiagnostic,
     createScratchDiagnosticReport,
-} from '../packages/geoscratch/src/index.js'
+} from 'geoscratch'
 
 describe('scratch diagnostics', () => {
 

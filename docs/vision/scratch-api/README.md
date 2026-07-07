@@ -5,7 +5,7 @@ Date: 2026-07-06
 
 This directory records the modular target design for the next `scratch` API. It expands the GPU-kernel direction described in `docs/vision/scratch-graphics-kernel.md` into smaller interface layers.
 
-The documents here are design references, not implementation status. They should be read before changing `packages/geoscratch/src/gpu/`, `packages/geoscratch/src/scratch.js`, or the public `scratch` API shape.
+The documents here are design references, not implementation status. They should be read before changing `packages/geoscratch/src/gpu/`, `packages/geoscratch/src/scratch.ts`, `packages/geoscratch/src/scratch/`, or the public `scratch` API shape.
 
 ## Module Map
 

@@ -24,17 +24,19 @@ npm run dev
 | 命令 | 说明 |
 | --- | --- |
 | `npm install` | 根据 `package-lock.json` 安装依赖。 |
-| `npm run dev` | 从 `examples/` 启动 Vite 示例浏览器。 |
-| `npm test` | 运行 `tests/` 中的 Mocha 测试。 |
-| `npm run build` | 将示例浏览器和独立示例页面构建到 `dist/examples/`。 |
+| `npm run dev` | 先构建库包，再从 `examples/` 启动 Vite 示例浏览器。 |
+| `npm test` | 先构建库包，再运行 `tests/` 中的 Mocha 测试。 |
+| `npm run build` | 构建库包，并将示例浏览器和独立示例页面构建到 `dist/examples/`。 |
 | `npm run serve` | 本地预览构建后的示例。 |
 
 ## 项目结构
 
 | 路径 | 作用 |
 | --- | --- |
-| `src/index.js` | 包的主要公开入口。 |
-| `src/scratch.js` | 为旧导入方式保留的兼容入口。 |
+| `src/index.ts` | 包主要公开入口的 TypeScript 源文件。 |
+| `src/scratch.ts` | `geoscratch/scratch` 兼容入口的 TypeScript 源文件。 |
+| `src/scratch/` | TypeScript source-first 的 Scratch API 核心。 |
+| `dist/` | 生成的包 JavaScript 和声明文件输出。 |
 | `src/core/` | 共享数据引用、数学、对象和包围盒基础类型。 |
 | `src/geo/` | 地理坐标辅助工具和地理瓦片结构。 |
 | `src/geometry/` | sphere、plane 等可复用几何生成器。 |
@@ -130,15 +132,19 @@ function main(canvas) {
 
 | 示例 | 路径 |
 | --- | --- |
-| Hello Triangle | `examples/1_helloTriangle/` |
-| Hello Vertex Buffer | `examples/2_helloVertexBuffer/` |
-| DEM Layer | `examples/m_demLayer/` |
-| Flow Layer | `examples/m_flowLayer/` |
-| Hello GAW | `examples/x_helloGAW/` |
+| Hello Triangle | `examples/scratch_helloTriangle/` |
+| Uniform Triangle | `examples/scratch_uniformTriangle/` |
+| Compute Readback | `examples/scratch_computeReadback/` |
+| Hello Vertex Buffer | `examples/scratch_helloVertexBuffer/` |
+| Texture Sampling | `examples/scratch_textureSampling/` |
+| Render To Texture | `examples/scratch_renderToTexture/` |
+| DEM Layer (legacy) | `examples/m_demLayer/` |
+| Flow Layer (legacy) | `examples/m_flowLayer/` |
+| Hello GAW (legacy) | `examples/x_helloGAW/` |
 
 ## 开发说明
 
-- 公开 API 统一从 `src/index.js` 导出。
+- 公开 API 统一从 `src/index.ts` 导出，包入口指向 `dist/`。
 - 浏览器或 WebGPU 示例放在 `examples/<name>/index.html` 和 `examples/<name>/main.js`。
 - 普通示例图片和 shader 放在所属 example 目录旁边，通过相对资源 URL 或 raw shader import 使用。
 - 库自带运行资源放在拥有它的 `src/` 模块旁边。

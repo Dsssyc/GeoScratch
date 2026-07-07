@@ -5,7 +5,7 @@
 
 本目录记录下一版 `scratch` API 的模块化目标设计。它把 `docs/vision/scratch-graphics-kernel.md` 中的 GPU 内核方向拆成更小的接口层级。
 
-这里的文档是设计参考，不代表实现已完成。修改 `packages/geoscratch/src/gpu/`、`packages/geoscratch/src/scratch.js` 或公开 `scratch` API 形状前，应先阅读这些文档。
+这里的文档是设计参考，不代表实现已完成。修改 `packages/geoscratch/src/gpu/`、`packages/geoscratch/src/scratch.ts`、`packages/geoscratch/src/scratch/` 或公开 `scratch` API 形状前，应先阅读这些文档。
 
 ## 模块地图
 

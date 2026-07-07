@@ -24,17 +24,19 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 | Command | Description |
 | --- | --- |
 | `npm install` | Install dependencies from `package-lock.json`. |
-| `npm run dev` | Start the Vite examples browser from `examples/`. |
-| `npm test` | Run Mocha tests in `tests/`. |
-| `npm run build` | Build the examples browser and standalone example pages into `dist/examples/`. |
+| `npm run dev` | Build the library package, then start the Vite examples browser from `examples/`. |
+| `npm test` | Build the library package, then run Mocha tests in `tests/`. |
+| `npm run build` | Build the library package and standalone example pages into `dist/examples/`. |
 | `npm run serve` | Preview the built examples locally. |
 
 ## Project Structure
 
 | Path | Purpose |
 | --- | --- |
-| `src/index.js` | Main public package entrypoint. |
-| `src/scratch.js` | Compatibility re-export for older imports. |
+| `src/index.ts` | TypeScript source for the main public package entrypoint. |
+| `src/scratch.ts` | TypeScript source for the `geoscratch/scratch` compatibility entrypoint. |
+| `src/scratch/` | TypeScript source-first Scratch API core. |
+| `dist/` | Generated package JavaScript and declaration output. |
 | `src/core/` | Shared data references, math, object, and bounding box primitives. |
 | `src/geo/` | Geospatial helpers and geographic tiling structures. |
 | `src/geometry/` | Reusable geometry generators such as sphere and plane meshes. |
@@ -130,15 +132,19 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 
 | Example | Path |
 | --- | --- |
-| Hello Triangle | `examples/1_helloTriangle/` |
-| Hello Vertex Buffer | `examples/2_helloVertexBuffer/` |
-| DEM Layer | `examples/m_demLayer/` |
-| Flow Layer | `examples/m_flowLayer/` |
-| Hello GAW | `examples/x_helloGAW/` |
+| Hello Triangle | `examples/scratch_helloTriangle/` |
+| Uniform Triangle | `examples/scratch_uniformTriangle/` |
+| Compute Readback | `examples/scratch_computeReadback/` |
+| Hello Vertex Buffer | `examples/scratch_helloVertexBuffer/` |
+| Texture Sampling | `examples/scratch_textureSampling/` |
+| Render To Texture | `examples/scratch_renderToTexture/` |
+| DEM Layer (legacy) | `examples/m_demLayer/` |
+| Flow Layer (legacy) | `examples/m_flowLayer/` |
+| Hello GAW (legacy) | `examples/x_helloGAW/` |
 
 ## Development Notes
 
-- Keep public exports routed through `src/index.js`.
+- Keep public exports routed through `src/index.ts` and package exports pointed at `dist/`.
 - Add browser/WebGPU demos under `examples/<name>/index.html` and `examples/<name>/main.js`.
 - Keep ordinary example images and shaders beside their owning example, using relative asset URLs or raw shader imports.
 - Keep library-owned runtime assets beside the source module that owns them, under `src/`.

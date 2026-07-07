@@ -29,6 +29,11 @@ export {
     SubmissionBuilder,
     SubmittedWork,
 } from './scratch/index.js'
+export type {
+    RenderCommand,
+    ScratchDiagnostic,
+    ScratchDiagnosticReport,
+} from './scratch/index.js'
 
 import getDevice from './gpu/context/device.js'
 export { getDevice }

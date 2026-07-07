@@ -1,14 +1,65 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import type { BufferResource } from './buffer.js'
+import type { ScratchRuntime } from './runtime.js'
+import type { SubmittedWork } from './submission.js'
 
 const BUFFER_USAGE_MAP_READ = 0x1
 const BUFFER_USAGE_COPY_SRC = 0x4
 const BUFFER_USAGE_COPY_DST = 0x8
 const MAP_MODE_READ = globalThis.GPUMapMode?.READ ?? 0x1
 
+export type ReadbackRange = {
+    offset?: number
+    byteLength?: number
+}
+
+export type ReadbackState =
+    | 'requested'
+    | 'scheduled'
+    | 'submitted'
+    | 'mapping'
+    | 'ready'
+    | 'consumed'
+    | 'cancelled'
+    | 'failed'
+    | 'disposed'
+
+export type ReadbackOperationDescriptor = {
+    label?: string
+    source: BufferResource
+    after?: SubmittedWork
+    range?: ReadbackRange
+}
+
+export type TypedArrayConstructor<T extends ArrayBufferView = ArrayBufferView> = {
+    readonly BYTES_PER_ELEMENT: number
+    readonly name: string
+    new(buffer: ArrayBufferLike, byteOffset?: number, length?: number): T
+}
+
+export interface ReadbackOperation {
+    runtime: ScratchRuntime
+    id: string
+    label?: string
+    state: ReadbackState
+    source: BufferResource
+    range: {
+        offset: number
+        byteLength: number
+    }
+    after?: SubmittedWork
+    contentEpoch: number
+    allocationVersion: number
+    isDisposed: boolean
+    isCancelled: boolean
+    cancelReason?: string
+    stagingBuffer?: GPUBuffer
+}
+
 export class ReadbackOperation {
 
-    constructor(runtime, descriptor = {}) {
+    constructor(runtime: ScratchRuntime, descriptor: ReadbackOperationDescriptor) {
 
         runtime.assertActive()
 
@@ -28,7 +79,7 @@ export class ReadbackOperation {
 
     get subject() {
 
-        const subject = {
+        const subject: any = {
             kind: 'ReadbackOperation',
             id: this.id,
         }
@@ -37,12 +88,14 @@ export class ReadbackOperation {
         return subject
     }
 
-    async toBytes() {
+    async toBytes(): Promise<Uint8Array> {
 
         return this._consumeBytes()
     }
 
-    async toArray(TypedArrayConstructor = Uint8Array) {
+    async toArray<T extends ArrayBufferView>(
+        TypedArrayConstructor: TypedArrayConstructor<T> = Uint8Array as unknown as TypedArrayConstructor<T>
+    ): Promise<T> {
 
         const bytes = await this._consumeBytes()
         const elementSize = TypedArrayConstructor.BYTES_PER_ELEMENT
@@ -67,7 +120,7 @@ export class ReadbackOperation {
         )
     }
 
-    cancel(reason) {
+    cancel(reason?: string) {
 
         if (this.state === 'consumed' || this.state === 'disposed') return
 
@@ -87,7 +140,7 @@ export class ReadbackOperation {
         this.state = 'disposed'
     }
 
-    async _consumeBytes() {
+    async _consumeBytes(): Promise<Uint8Array> {
 
         this._assertConsumable()
 
@@ -137,7 +190,7 @@ export class ReadbackOperation {
 
             this.state = 'consumed'
             return bytes
-        } catch (error) {
+        } catch (error: any) {
             this.state = 'failed'
             if (this.stagingBuffer && typeof this.stagingBuffer.destroy === 'function') {
                 this.stagingBuffer.destroy()
@@ -201,7 +254,7 @@ export class ReadbackOperation {
     }
 }
 
-function normalizeSource(operation, source) {
+function normalizeSource(operation: ReadbackOperation, source: any): BufferResource {
 
     if (!source || typeof source.assertRuntime !== 'function' || !source.gpuBuffer) {
         throwScratchDiagnostic({
@@ -233,7 +286,7 @@ function normalizeSource(operation, source) {
     return source
 }
 
-function normalizeRange(operation, range) {
+function normalizeRange(operation: ReadbackOperation, range?: ReadbackRange) {
 
     const offset = range?.offset ?? 0
     const byteLength = range?.byteLength ?? operation.source.size - offset

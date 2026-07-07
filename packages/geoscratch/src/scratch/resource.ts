@@ -1,9 +1,28 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchRuntime } from './runtime.js'
+
+export type ResourceOptions = {
+    label?: string
+    resourceKind?: string
+    descriptor?: object
+}
+
+export interface Resource {
+    runtime: ScratchRuntime
+    id: string
+    label?: string
+    resourceKind: string
+    descriptor: object
+    isDisposed: boolean
+    allocationVersion: number
+    contentEpoch: number
+}
 
 export class Resource {
 
-    constructor(runtime, options = {}) {
+    constructor(runtime: ScratchRuntime, options: ResourceOptions = {}) {
 
         if (!runtime || typeof runtime._registerResource !== 'function') {
             throwScratchDiagnostic({
@@ -31,9 +50,9 @@ export class Resource {
         runtime._registerResource(this)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject = {
+        const subject: DiagnosticSubject = {
             kind: 'Resource',
             id: this.id,
         }
@@ -43,7 +62,7 @@ export class Resource {
         return subject
     }
 
-    assertRuntime(runtime) {
+    assertRuntime(runtime: ScratchRuntime): void {
 
         this.assertUsable()
 
@@ -65,7 +84,7 @@ export class Resource {
         }
     }
 
-    assertUsable() {
+    assertUsable(): void {
 
         if (this.isDisposed) {
             throwScratchDiagnostic({
@@ -81,7 +100,7 @@ export class Resource {
         this.runtime.assertActive()
     }
 
-    dispose() {
+    dispose(): void {
 
         if (this.isDisposed) return
 
@@ -89,13 +108,13 @@ export class Resource {
         this.runtime._unregisterResource(this)
     }
 
-    _replaceAllocation(descriptor) {
+    _replaceAllocation(descriptor: object): void {
 
         this.descriptor = descriptor
         this.allocationVersion++
     }
 
-    _advanceContentEpoch() {
+    _advanceContentEpoch(): void {
 
         this.contentEpoch++
     }

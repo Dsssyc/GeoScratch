@@ -4,7 +4,7 @@ import {
     CopyCommand,
     ScratchDiagnosticError,
     ScratchRuntime,
-} from '../packages/geoscratch/src/index.js'
+} from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4

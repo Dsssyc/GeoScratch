@@ -5,7 +5,7 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
     UploadCommand,
-} from '../packages/geoscratch/src/index.js'
+} from 'geoscratch'
 import { createFakeCanvas, createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x8

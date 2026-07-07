@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded in part by ADR-006. The default runtime decision remains accepted; the `./src/*` package export decision is superseded by ADR-006.
 
 ## Date
 
@@ -17,7 +17,7 @@ ADR-003 requires an architecture boundary pass before broad TypeScript migration
 - The exported `director` owns frame orchestration and many resource creation events.
 - Existing examples and consumers already import `StartDash`, `getDevice`, `device`, and `director` from the package entrypoint.
 
-The package also still exposes `./src/*`. That wildcard makes migration easier for legacy consumers, but it weakens the public/internal boundary because any internal file can become observable API.
+The package also exposed `./src/*` in this phase. That wildcard made migration easier for legacy consumers, but it weakened the public/internal boundary because any internal file could become observable API. This source wildcard conclusion is now superseded by ADR-006.
 
 ## Decision
 
@@ -27,7 +27,7 @@ Keep the default global runtime in this branch.
 
 `getDevice()` is a fast contract check. It returns the initialized default `GPUDevice` or throws a clear error telling the caller to invoke `StartDash()` first. It must not busy-wait for initialization.
 
-Keep `./src/*` in `packages/geoscratch/package.json` as a deprecated compatibility aperture. New examples, docs, and tests must use explicit public entrypoints such as `geoscratch`, `geoscratch/scratch`, `geoscratch/geo`, and `geoscratch/geometry`. Removing `./src/*` requires a separate deprecation or major-version decision.
+Keep `./src/*` in `packages/geoscratch/package.json` as a deprecated compatibility aperture for this phase. New examples, docs, and tests must use explicit public entrypoints such as `geoscratch`, `geoscratch/scratch`, `geoscratch/geo`, and `geoscratch/geometry`. This compatibility aperture is now superseded by ADR-006, which removes `./src/*` as part of the Scratch TypeScript source and dist package boundary.
 
 ## Consequences
 
@@ -40,6 +40,6 @@ Keep `./src/*` in `packages/geoscratch/package.json` as a deprecated compatibili
 ## Non-Goals
 
 - Do not replace the global `director` with a new runtime/context object in this phase.
-- Do not remove `./src/*` in this phase.
+- This phase did not remove `./src/*`; ADR-006 removes it later as part of the TypeScript Scratch and dist package boundary.
 - Do not change examples to import internal source paths.
 - Do not convert source files to TypeScript in this phase.

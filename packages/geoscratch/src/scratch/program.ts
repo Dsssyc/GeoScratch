@@ -1,9 +1,34 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchRuntime } from './runtime.js'
+
+export type ProgramEntryPoints = {
+    vertex?: string
+    fragment?: string
+    compute?: string
+}
+
+export type ProgramDescriptor = {
+    label?: string
+    modules: string[]
+    entryPoints?: ProgramEntryPoints
+    requiredFeatures?: Iterable<GPUFeatureName>
+}
+
+export interface Program {
+    runtime: ScratchRuntime
+    id: string
+    label?: string
+    modules: string[]
+    entryPoints: ProgramEntryPoints
+    requiredFeatures: GPUFeatureName[]
+    isDisposed: boolean
+}
 
 export class Program {
 
-    constructor(runtime, descriptor = {}) {
+    constructor(runtime: ScratchRuntime, descriptor: ProgramDescriptor) {
 
         runtime.assertActive()
 
@@ -18,9 +43,9 @@ export class Program {
         validateRequiredFeatures(this)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject = {
+        const subject: DiagnosticSubject = {
             kind: 'Program',
             id: this.id,
         }
@@ -29,7 +54,7 @@ export class Program {
         return subject
     }
 
-    assertRuntime(runtime) {
+    assertRuntime(runtime: ScratchRuntime): void {
 
         this.assertUsable()
 
@@ -50,7 +75,7 @@ export class Program {
         }
     }
 
-    assertUsable() {
+    assertUsable(): void {
 
         if (this.isDisposed) {
             throwScratchDiagnostic({
@@ -65,13 +90,13 @@ export class Program {
         this.runtime.assertActive()
     }
 
-    dispose() {
+    dispose(): void {
 
         this.isDisposed = true
     }
 }
 
-function normalizeModules(program, modules) {
+function normalizeModules(program: Program, modules: any): string[] {
 
     if (!Array.isArray(modules) || modules.length === 0 || modules.some(module => typeof module !== 'string')) {
         throwScratchDiagnostic({
@@ -88,7 +113,7 @@ function normalizeModules(program, modules) {
     return [ ...modules ]
 }
 
-function normalizeEntryPoints(program, entryPoints) {
+function normalizeEntryPoints(program: Program, entryPoints: any): ProgramEntryPoints {
 
     const normalized = {
         vertex: entryPoints?.vertex,
@@ -113,13 +138,13 @@ function normalizeEntryPoints(program, entryPoints) {
     )
 }
 
-function normalizeRequiredFeatures(requiredFeatures) {
+function normalizeRequiredFeatures(requiredFeatures: Iterable<GPUFeatureName> | undefined): GPUFeatureName[] {
 
     if (requiredFeatures === undefined) return []
     return [ ...requiredFeatures ]
 }
 
-function validateRequiredFeatures(program) {
+function validateRequiredFeatures(program: Program): void {
 
     for (const feature of program.requiredFeatures) {
         if (!program.runtime.deviceFeatures?.has?.(feature)) {
@@ -136,7 +161,7 @@ function validateRequiredFeatures(program) {
     }
 }
 
-function throwEntryPointDiagnostic(program, stage, actual) {
+function throwEntryPointDiagnostic(program: Program, stage: string, actual: unknown): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_PROGRAM_ENTRY_POINT_MISSING',

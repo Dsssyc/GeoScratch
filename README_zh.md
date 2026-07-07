@@ -24,9 +24,9 @@ npm run dev
 | 命令 | 说明 |
 | --- | --- |
 | `npm install` | 根据 `package-lock.json` 安装依赖。 |
-| `npm run dev` | 从 `examples/` 启动 Vite 示例浏览器。 |
-| `npm test` | 运行 `tests/` 中的 Mocha 测试。 |
-| `npm run build` | 将示例浏览器和独立示例页面构建到 `dist/examples/`。 |
+| `npm run dev` | 先构建库包，再从 `examples/` 启动 Vite 示例浏览器。 |
+| `npm test` | 先构建库包，再运行 `tests/` 中的 Mocha 测试。 |
+| `npm run build` | 构建库包，并将示例浏览器和独立示例页面构建到 `dist/examples/`。 |
 | `npm run serve` | 本地预览构建后的示例。 |
 
 ## 项目结构
@@ -34,8 +34,10 @@ npm run dev
 | 路径 | 作用 |
 | --- | --- |
 | `packages/geoscratch/` | 可发布的库包。 |
-| `packages/geoscratch/src/index.js` | 包的主要公开入口。 |
-| `packages/geoscratch/src/scratch.js` | 为旧导入方式保留的兼容入口。 |
+| `packages/geoscratch/src/index.ts` | 包主要公开入口的 TypeScript 源文件。 |
+| `packages/geoscratch/src/scratch.ts` | `geoscratch/scratch` 兼容入口的 TypeScript 源文件。 |
+| `packages/geoscratch/src/scratch/` | TypeScript source-first 的 Scratch API 核心。 |
+| `packages/geoscratch/dist/` | 生成的包 JavaScript 和声明文件输出。 |
 | `packages/geoscratch/src/core/` | 共享数据引用、数学、对象和包围盒基础类型。 |
 | `packages/geoscratch/src/geo/` | 地理坐标辅助工具和地理瓦片结构。 |
 | `packages/geoscratch/src/geometry/` | sphere、plane 等可复用几何生成器。 |
@@ -143,7 +145,7 @@ function main(canvas) {
 
 ## 开发说明
 
-- 公开 API 统一从 `packages/geoscratch/src/index.js` 导出。
+- 公开 API 统一从 `packages/geoscratch/src/index.ts` 导出，包入口指向 `packages/geoscratch/dist/`。
 - 浏览器或 WebGPU 示例放在 `examples/<name>/index.html` 和 `examples/<name>/main.js`。
 - 示例必须通过 `geoscratch` 包入口导入库，不允许用相对路径进入库源码。
 - 普通示例图片和 shader 放在所属 example 目录旁边，通过相对资源 URL 或 raw shader import 使用。

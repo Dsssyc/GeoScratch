@@ -1,8 +1,6 @@
 import { expect } from 'chai'
-import * as scr from '../packages/geoscratch/src/index.js'
-import * as scratchCompat from '../packages/geoscratch/src/scratch.js'
-import * as pkg from 'geoscratch'
-import * as pkgScratchCompat from 'geoscratch/scratch'
+import * as scr from 'geoscratch'
+import * as scratchCompat from 'geoscratch/scratch'
 
 describe('public entrypoints', () => {
 
@@ -61,25 +59,13 @@ describe('public entrypoints', () => {
 
     it('exposes package-level entrypoints', () => {
 
-        expect(pkg).to.have.property('StartDash').that.equals(scr.StartDash)
-        expect(pkgScratchCompat).to.have.property('renderPass').that.equals(scr.renderPass)
-        expect(pkg).to.have.property('Program').that.equals(scr.Program)
-        expect(pkg).to.have.property('BindLayout').that.equals(scr.BindLayout)
-        expect(pkg).to.have.property('BindSet').that.equals(scr.BindSet)
-        expect(pkg).to.have.property('ScratchRenderPipeline').that.equals(scr.ScratchRenderPipeline)
-        expect(pkg).to.have.property('ScratchComputePipeline').that.equals(scr.ScratchComputePipeline)
-        expect(pkg).to.have.property('BeginOcclusionQueryCommand').that.equals(scr.BeginOcclusionQueryCommand)
-        expect(pkg).to.have.property('EndOcclusionQueryCommand').that.equals(scr.EndOcclusionQueryCommand)
-        expect(pkg).to.have.property('DispatchCommand').that.equals(scr.DispatchCommand)
-        expect(pkg).to.have.property('UploadCommand').that.equals(scr.UploadCommand)
-        expect(pkg).to.have.property('CopyCommand').that.equals(scr.CopyCommand)
-        expect(pkg).to.have.property('QuerySetResource').that.equals(scr.QuerySetResource)
-        expect(pkg).to.have.property('ResolveQuerySetCommand').that.equals(scr.ResolveQuerySetCommand)
-        expect(pkg).to.have.property('ReadbackOperation').that.equals(scr.ReadbackOperation)
-        expect(pkg).to.have.property('TextureResource').that.equals(scr.TextureResource)
-        expect(pkg).to.have.property('SamplerResource').that.equals(scr.SamplerResource)
-        expect(pkg).to.have.property('TextureUploadCommand').that.equals(scr.TextureUploadCommand)
-        expect(pkgScratchCompat).to.have.property('SubmittedWork').that.equals(scr.SubmittedWork)
-        expect(pkgScratchCompat).to.have.property('TextureResource').that.equals(scr.TextureResource)
+        expect(scr).to.have.property('ScratchRuntime').that.is.a('function')
+        expect(scr).to.have.property('ScratchRenderPipeline').that.is.a('function')
+        expect(scr).to.have.property('ScratchComputePipeline').that.is.a('function')
+        expect(scratchCompat).to.have.property('ScratchRuntime').that.equals(scr.ScratchRuntime)
+        expect(scratchCompat).to.have.property('RenderPassSpec').that.equals(scr.RenderPassSpec)
+        expect(scratchCompat).to.have.property('ComputePassSpec').that.equals(scr.ComputePassSpec)
+        expect(scratchCompat).to.have.property('SubmittedWork').that.equals(scr.SubmittedWork)
+        expect(scratchCompat).to.have.property('TextureResource').that.equals(scr.TextureResource)
     })
 })

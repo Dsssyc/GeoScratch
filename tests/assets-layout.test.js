@@ -57,6 +57,7 @@ describe('asset layout', () => {
         expect(pkg.files).to.deep.equal([
             'README.md',
             'README_zh.md',
+            'dist',
             'src',
         ])
     })

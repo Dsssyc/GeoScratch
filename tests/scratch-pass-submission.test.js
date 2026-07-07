@@ -7,7 +7,7 @@ import {
     SubmissionBuilder,
     SubmittedWork,
     TextureResource,
-} from '../packages/geoscratch/src/index.js'
+} from 'geoscratch'
 import { createFakeCanvas, createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4

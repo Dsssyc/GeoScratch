@@ -24,9 +24,9 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 | Command | Description |
 | --- | --- |
 | `npm install` | Install dependencies from `package-lock.json`. |
-| `npm run dev` | Start the Vite examples browser from `examples/`. |
-| `npm test` | Run Mocha tests in `tests/`. |
-| `npm run build` | Build the examples browser and standalone example pages into `dist/examples/`. |
+| `npm run dev` | Build the library package, then start the Vite examples browser from `examples/`. |
+| `npm test` | Build the library package, then run Mocha tests in `tests/`. |
+| `npm run build` | Build the library package and standalone example pages into `dist/examples/`. |
 | `npm run serve` | Preview the built examples locally. |
 
 ## Project Structure
@@ -34,8 +34,10 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 | Path | Purpose |
 | --- | --- |
 | `packages/geoscratch/` | Publishable library package. |
-| `packages/geoscratch/src/index.js` | Main public package entrypoint. |
-| `packages/geoscratch/src/scratch.js` | Compatibility re-export for older imports. |
+| `packages/geoscratch/src/index.ts` | TypeScript source for the main public package entrypoint. |
+| `packages/geoscratch/src/scratch.ts` | TypeScript source for the `geoscratch/scratch` compatibility entrypoint. |
+| `packages/geoscratch/src/scratch/` | TypeScript source-first Scratch API core. |
+| `packages/geoscratch/dist/` | Generated package JavaScript and declaration output. |
 | `packages/geoscratch/src/core/` | Shared data references, math, object, and bounding box primitives. |
 | `packages/geoscratch/src/geo/` | Geospatial helpers and geographic tiling structures. |
 | `packages/geoscratch/src/geometry/` | Reusable geometry generators such as sphere and plane meshes. |
@@ -143,7 +145,7 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 
 ## Development Notes
 
-- Keep public exports routed through `packages/geoscratch/src/index.js`.
+- Keep public exports routed through `packages/geoscratch/src/index.ts` and package exports pointed at `packages/geoscratch/dist/`.
 - Add browser/WebGPU demos under `examples/<name>/index.html` and `examples/<name>/main.js`.
 - Examples must import the package as `geoscratch`, not reach into library source by relative path.
 - Keep ordinary example images and shaders beside their owning example, using relative asset URLs or raw shader imports.

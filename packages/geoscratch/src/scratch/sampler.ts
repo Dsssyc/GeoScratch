@@ -1,12 +1,20 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { Resource } from './resource.js'
+import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchRuntime } from './runtime.js'
 
 const ADDRESS_MODES = new Set([ 'clamp-to-edge', 'repeat', 'mirror-repeat' ])
 const FILTER_MODES = new Set([ 'nearest', 'linear' ])
 
+export type SamplerResourceDescriptor = GPUSamplerDescriptor
+
+export interface SamplerResource {
+    gpuSampler: GPUSampler
+}
+
 export class SamplerResource extends Resource {
 
-    constructor(runtime, descriptor = {}) {
+    constructor(runtime: ScratchRuntime, descriptor: SamplerResourceDescriptor = {}) {
 
         const normalizedDescriptor = normalizeSamplerDescriptor(runtime, descriptor)
 
@@ -19,13 +27,13 @@ export class SamplerResource extends Resource {
         this.gpuSampler = runtime.device.createSampler(normalizedDescriptor)
     }
 
-    static create(runtime, descriptor = {}) {
+    static create(runtime: ScratchRuntime, descriptor: SamplerResourceDescriptor = {}): SamplerResource {
 
         return new SamplerResource(runtime, descriptor)
     }
 }
 
-function normalizeSamplerDescriptor(runtime, descriptor) {
+function normalizeSamplerDescriptor(runtime: ScratchRuntime, descriptor: any): GPUSamplerDescriptor {
 
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
@@ -47,7 +55,7 @@ function normalizeSamplerDescriptor(runtime, descriptor) {
         })
     }
 
-    const normalized = {
+    const normalized: any = {
         addressModeU: normalizeEnum(subject, descriptor.addressModeU ?? 'clamp-to-edge', ADDRESS_MODES, 'addressModeU'),
         addressModeV: normalizeEnum(subject, descriptor.addressModeV ?? 'clamp-to-edge', ADDRESS_MODES, 'addressModeV'),
         addressModeW: normalizeEnum(subject, descriptor.addressModeW ?? 'clamp-to-edge', ADDRESS_MODES, 'addressModeW'),
@@ -65,7 +73,7 @@ function normalizeSamplerDescriptor(runtime, descriptor) {
     return normalized
 }
 
-function normalizeEnum(subject, value, allowed, key) {
+function normalizeEnum(subject: DiagnosticSubject, value: any, allowed: Set<string>, key: string): any {
 
     if (!allowed.has(value)) {
         throwSamplerDescriptorDiagnostic(subject, { [key]: value }, {
@@ -76,7 +84,7 @@ function normalizeEnum(subject, value, allowed, key) {
     return value
 }
 
-function throwSamplerDescriptorDiagnostic(subject, actual, expected) {
+function throwSamplerDescriptorDiagnostic(subject: DiagnosticSubject, actual: unknown, expected: unknown): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',

@@ -27,6 +27,10 @@ import {
     demPaletteImageDataUrl,
 } from './assets/index.js'
 
+/**
+ * @typedef {import('../../geo/tiling/geoQuadNode2D.js').MapOptions} MapOptions
+ */
+
 function inlineShader(name, code) {
 
     return shader({ name, codeFunc: () => code })
