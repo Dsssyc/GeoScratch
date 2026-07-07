@@ -839,7 +839,7 @@ function historyModeToValue(mode) {
     if (mode === 'off') return 0
     if (mode === 'clear') return 1
     if (mode === 'reproject') return 2
-    throw new Error(`Unsupported DEM flow history mode: ${mode}`)
+    throw new Error(`Unsupported flow history mode: ${mode}`)
 }
 
 function copyVec2(source, target) {

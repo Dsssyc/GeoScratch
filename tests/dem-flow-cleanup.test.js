@@ -26,7 +26,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('makes trail history decay and cutoff configurable in the swap shader', () => {
 
-        const shader = read('examples', 'm_demLayer', 'shaders', 'flow', 'swap.wgsl')
+        const shader = read('examples', 'm_flowLayer', 'shaders', 'flow', 'swap.wgsl')
 
         expect(shader).to.include('struct CleanupUniformBlock')
         expect(shader).to.include('trailDecay: f32')
@@ -39,7 +39,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('wires cleanup controls and camera invalidation from the flow layer', () => {
 
-        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
 
         expect(layer).to.include('constructor(options = {})')
         expect(layer).to.include('this.trailDecay = scr.f32(')
@@ -56,10 +56,10 @@ describe('DEM flow layer cleanup', () => {
 
     it('wires a flow-domain mask through velocity, simulation, and history cleanup', () => {
 
-        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
-        const voronoi = read('examples', 'm_demLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
-        const simulation = read('examples', 'm_demLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
-        const swap = read('examples', 'm_demLayer', 'shaders', 'flow', 'swap.wgsl')
+        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
+        const voronoi = read('examples', 'm_flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+        const simulation = read('examples', 'm_flowLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
+        const swap = read('examples', 'm_flowLayer', 'shaders', 'flow', 'swap.wgsl')
 
         expect(layer).to.include('this.useFlowMask = options.useFlowMask ?? true')
         expect(layer).to.include('this.flowMaskCutoff = scr.f32(')
@@ -84,8 +84,8 @@ describe('DEM flow layer cleanup', () => {
 
     it('stores the flow-domain mask as a single-channel render target', () => {
 
-        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
-        const voronoi = read('examples', 'm_demLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
+        const voronoi = read('examples', 'm_flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
 
         expect(layer).to.include("this.flowMaskTexture = this.map.screen.createScreenDependentTexture('Texture (Flow Mask)', 'r8unorm')")
         expect(voronoi).to.include('@location(1) mask: f32')
@@ -96,7 +96,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('guards simulation drop-rate scaling against a zero max speed', () => {
 
-        const simulation = read('examples', 'm_demLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
+        const simulation = read('examples', 'm_flowLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
 
         expect(simulation).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
         expect(simulation).to.not.include('length(velocity) / frameUniform.maxSpeed')
@@ -114,14 +114,14 @@ describe('DEM flow layer cleanup', () => {
 
         for (const shaderName of shaderNames) {
 
-            const shader = stripLineComments(read('examples', 'm_demLayer', 'shaders', 'flow', shaderName))
+            const shader = stripLineComments(read('examples', 'm_flowLayer', 'shaders', 'flow', shaderName))
 
             expect(shader, shaderName).to.not.match(/\/\s*frameUniform\.maxSpeed/)
         }
 
-        expect(read('examples', 'm_demLayer', 'shaders', 'flow', 'particles.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
-        expect(read('examples', 'm_demLayer', 'shaders', 'flow', 'flowShow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
-        expect(read('examples', 'm_demLayer', 'shaders', 'flow', 'arrow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
+        expect(read('examples', 'm_flowLayer', 'shaders', 'flow', 'particles.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
+        expect(read('examples', 'm_flowLayer', 'shaders', 'flow', 'flowShow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
+        expect(read('examples', 'm_flowLayer', 'shaders', 'flow', 'arrow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
     })
 
     it('clamps flow velocity palette indices to the ramp bounds', () => {
@@ -134,7 +134,7 @@ describe('DEM flow layer cleanup', () => {
 
         for (const shaderName of shaderNames) {
 
-            const shader = stripLineComments(read('examples', 'm_demLayer', 'shaders', 'flow', shaderName))
+            const shader = stripLineComments(read('examples', 'm_flowLayer', 'shaders', 'flow', shaderName))
 
             expect(shader, shaderName).to.include('let palettePosition = clamp(speed * 8.0, 0.0, 7.0)')
             expect(shader, shaderName).to.include('let bottomIndex = u32(floor(palettePosition))')
@@ -147,8 +147,8 @@ describe('DEM flow layer cleanup', () => {
 
     it('derives the flow-domain mask from supported Voronoi geometry, not speed alone', () => {
 
-        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
-        const voronoi = read('examples', 'm_demLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
+        const voronoi = read('examples', 'm_flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
 
         expect(layer).to.include('this.flowDomainMaxEdge = options.flowDomainMaxEdge ??')
         expect(layer).to.include('this.triangleVertexIndices = undefined')
@@ -171,7 +171,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('cleans up flow camera listeners and worker resources when removed', () => {
 
-        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
 
         expect(layer).to.include('this.cameraInvalidationHandlers = []')
         expect(layer).to.include('onRemove()')
@@ -185,7 +185,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('keeps current flow rendering active while camera movement clears history', () => {
 
-        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
         const idle = methodBody(layer, 'idle')
         const restart = methodBody(layer, 'restart')
 

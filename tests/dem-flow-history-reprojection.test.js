@@ -48,7 +48,7 @@ describe('DEM flow history reprojection', () => {
 
     it('adds history mode options and camera state for reprojection', () => {
 
-        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
 
         expect(layer).to.include("this.historyMode = options.historyMode ?? (options.clearOnMove === false ? 'off' : 'reproject')")
         expect(layer).to.include("this.historyModeValue = scr.f32(historyModeToValue(this.historyMode))")
@@ -66,7 +66,7 @@ describe('DEM flow history reprojection', () => {
 
     it('keeps reproject movement from clearing history or resetting particles', () => {
 
-        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
         const idle = methodBody(layer, 'idle')
         const restart = methodBody(layer, 'restart')
 
@@ -81,7 +81,7 @@ describe('DEM flow history reprojection', () => {
 
     it('exposes history reprojection uniforms to the swap pass', () => {
 
-        const layer = read('examples', 'm_demLayer', 'steadyFlowLayer.js')
+        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
 
         expect(layer).to.include('historyMode: this.historyModeValue')
         expect(layer).to.include('historyValid: this.historyValid')
@@ -96,7 +96,7 @@ describe('DEM flow history reprojection', () => {
 
     it('reprojects retained trail history by reverse gathering in the swap shader', () => {
 
-        const swap = read('examples', 'm_demLayer', 'shaders', 'flow', 'swap.wgsl')
+        const swap = read('examples', 'm_flowLayer', 'shaders', 'flow', 'swap.wgsl')
 
         expect(swap).to.include('historyMode: f32')
         expect(swap).to.include('historyValid: f32')
@@ -121,7 +121,7 @@ describe('DEM flow history reprojection', () => {
 
     it('keeps static trail feedback pixel-exact and filters only during reprojection', () => {
 
-        const swap = read('examples', 'm_demLayer', 'shaders', 'flow', 'swap.wgsl')
+        const swap = read('examples', 'm_flowLayer', 'shaders', 'flow', 'swap.wgsl')
 
         expect(swap).to.include('var color = textureLoad(bgTexture, pixel, 0)')
         expect(swap).to.match(/if \(cleanupUniform\.historyMode > 1\.5 && cleanupUniform\.historyReprojecting > 0\.5\)[\s\S]*color = linearSampling\(bgTexture, historyPixel, dim\)/)

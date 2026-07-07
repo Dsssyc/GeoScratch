@@ -134,7 +134,8 @@ function main(canvas) {
 | Hello Triangle | `examples/1_helloTriangle/` |
 | Hello Vertex Buffer | `examples/2_helloVertexBuffer/` |
 | Hello Map | `examples/m_helloMap/` |
-| DEM Flow Layer | `examples/m_demLayer/` |
+| DEM Layer | `examples/m_demLayer/` |
+| Flow Layer | `examples/m_flowLayer/` |
 | Hello GAW | `examples/x_helloGAW/` |
 
 ## 开发说明

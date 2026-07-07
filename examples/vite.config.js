@@ -12,6 +12,7 @@ const examplePages = {
   helloVertexBuffer: path.resolve(examplesRoot, '2_helloVertexBuffer/index.html'),
   helloMap: path.resolve(examplesRoot, 'm_helloMap/index.html'),
   demLayer: path.resolve(examplesRoot, 'm_demLayer/index.html'),
+  flowLayer: path.resolve(examplesRoot, 'm_flowLayer/index.html'),
   helloGAW: path.resolve(examplesRoot, 'x_helloGAW/index.html'),
 }
 

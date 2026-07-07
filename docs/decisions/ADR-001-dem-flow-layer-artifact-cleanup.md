@@ -12,7 +12,7 @@ Mask cleanup remains accepted. Camera movement handling is superseded by ADR-002
 
 ## Context
 
-The `examples/m_demLayer` flow visualization uses a strong static rendering strategy:
+The `examples/m_flowLayer` flow visualization uses a strong static rendering strategy:
 
 - `flowVoronoi.wgsl` renders a screen-space velocity texture.
 - `simulation.compute.wgsl` advances particles by sampling that velocity texture.
@@ -44,7 +44,7 @@ Implementation note: the current example data does not include an independent ph
 
 ## Implementation Status
 
-Implemented for `examples/m_demLayer` on 2026-06-15.
+Implemented for `examples/m_flowLayer` on 2026-06-15.
 
 - The flow-domain mask is stored in a separate `r8unorm` screen-dependent texture.
 - `flowVoronoi.wgsl` writes velocity gated by optional speed cutoff plus geometry support, while the cleanup mask itself represents geometry support so low-speed in-domain pixels are not erased as holes.
@@ -54,7 +54,7 @@ Implemented for `examples/m_demLayer` on 2026-06-15.
 - Camera movement clears screen-space history while keeping simulation and current flow rendering active, then restarts particles after movement settles.
 - Follow-up hardening guards zero `maxSpeed` normalization and clamps velocity color-ramp indices, without changing the retained-history rendering model.
 
-Verification is covered by `tests/dem-flow-cleanup.test.js`, `npm test`, `npm run build`, and WebGPU browser screenshots of `examples/m_demLayer`.
+Verification is covered by `tests/dem-flow-cleanup.test.js`, `npm test`, `npm run build`, and WebGPU browser screenshots of `examples/m_flowLayer`.
 
 ## Non-Goals
 

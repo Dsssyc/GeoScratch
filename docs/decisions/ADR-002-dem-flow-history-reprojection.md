@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-`examples/m_demLayer` uses particle line segments plus ping-pong screen textures to build dense flow trails. ADR-001 added mask-based cleanup and a clear-on-move fallback, but clearing screen-space history during drag weakens the static accumulation that makes the example valuable.
+`examples/m_flowLayer` uses particle line segments plus ping-pong screen textures to build dense flow trails. ADR-001 added mask-based cleanup and a clear-on-move fallback, but clearing screen-space history during drag weakens the static accumulation that makes the example valuable.
 
 The alternative world-space or vector trail buffer was previously tested and rejected for this case because memory use scales with line count and retained trail nodes. The current raster trail model is lighter: particles generate the current frame, and the texture stores history.
 
