@@ -15,6 +15,7 @@ describe('HTTP client dependency removal', () => {
             .split('\n')
             .filter(Boolean)
             .filter(file => !file.startsWith('tests/http-client-removal.test.js'))
+            .filter(file => fs.existsSync(path.join(root, file)))
 
         const offenders = trackedFiles.filter(file => {
 

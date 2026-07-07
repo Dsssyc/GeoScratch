@@ -2,14 +2,34 @@ import * as scr from 'geoscratch'
 import TerrainLayer from './terrainLayer.js'
 import SteadyFlowLayer from './steadyFlowLayer.js'
 
-const mapboxAccessToken =
-    import.meta.env?.VITE_MAPBOX_ACCESS_TOKEN ?? globalThis.GEOSCRATCH_MAPBOX_ACCESS_TOKEN
+const mapApi = globalThis.maplibregl ?? globalThis.mapboxgl
 
-if (!mapboxAccessToken) {
-    throw new Error('Set VITE_MAPBOX_ACCESS_TOKEN to run examples/m_demLayer')
+if (!mapApi) {
+    throw new Error('Map runtime failed to load for examples/m_demLayer')
 }
 
-mapboxgl.accessToken = mapboxAccessToken
+const rasterStyle = {
+    version: 8,
+    sources: {
+        osm: {
+            type: 'raster',
+            tiles: [
+                'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            ],
+            tileSize: 256,
+            attribution: 'OpenStreetMap contributors',
+        },
+    },
+    layers: [
+        {
+            id: 'osm',
+            type: 'raster',
+            source: 'osm',
+        },
+    ],
+}
 
 // DOM Configuration //////////////////////////////////////////////////////////////////////////////////////////////////////
 const GPUFrame = document.getElementById('GPUFrame')
@@ -27,7 +47,7 @@ document.body.appendChild(mapDiv)
 scr.StartDash().then(() => {
 
     const map = new ScratchMap({
-        style: "mapbox://styles/ycsoku/cldjl0d2m000501qlpmmex490",
+        style: rasterStyle,
         center: [ 120.980697, 31.684162 ],
         projection: 'mercator',
         GPUFrame: GPUFrame,
@@ -43,7 +63,7 @@ scr.StartDash().then(() => {
 })
 
 // Map //////////////////////////////////////////////////////////////////////////////////////////////////////
-class ScratchMap extends mapboxgl.Map {
+class ScratchMap extends mapApi.Map {
 
     constructor(options) {
 
@@ -111,7 +131,7 @@ class ScratchMap extends mapboxgl.Map {
 
     update() {
 
-        this.mercatorCenter = new mapboxgl.MercatorCoordinate(...this.transform._computeCameraPosition().slice(0, 3))
+        this.mercatorCenter = new mapApi.MercatorCoordinate(...this.transform._computeCameraPosition().slice(0, 3))
         this.zoom.n = this.getZoom()
         
         const { far, near, matrix} = getMercatorMatrix(this.transform.clone())

@@ -40,11 +40,20 @@ describe('examples structure', () => {
         }
     })
 
-    it('loads mapbox only for the mapbox-backed terrain example', () => {
+    it('loads MapLibre only for the map-backed terrain example', () => {
         const html = read('examples', 'm_demLayer', 'index.html')
 
-        expect(html).to.include('mapbox-gl-js/v3.2.0/mapbox-gl.js')
-        expect(html).to.include('mapbox-gl-js/v3.2.0/mapbox-gl.css')
+        expect(html).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.js')
+        expect(html).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.css')
+    })
+
+    it('lets the DEM layer example start without a committed Mapbox token', () => {
+        const source = read('examples', 'm_demLayer', 'main.js')
+
+        expect(source).to.include('globalThis.maplibregl')
+        expect(source).to.include('rasterStyle')
+        expect(source).to.not.include('VITE_MAPBOX_ACCESS_TOKEN')
+        expect(source).to.not.include('accessToken')
     })
 
     it('keeps filtered examples hidden in the examples browser', () => {

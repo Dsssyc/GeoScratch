@@ -28,4 +28,12 @@ describe('secret hygiene', () => {
 
         expect(offenders).to.deep.equal([])
     })
+
+    it('keeps local env files ignored', () => {
+
+        const ignored = execFileSync('git', ['check-ignore', 'examples/.env.local'], { encoding: 'utf8' })
+            .trim()
+
+        expect(ignored).to.equal('examples/.env.local')
+    })
 })
