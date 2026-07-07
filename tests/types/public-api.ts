@@ -189,6 +189,19 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         layout: { bytesPerRow: 8, rowsPerImage: 2 },
         size: { width: 2, height: 2 },
     })
+    const copy: scr.CopyCommand = runtime.createCopyCommand({
+        label: 'typed scratch copy',
+        source: storageOutput,
+        sourceOffset: 0,
+        target: storageInput,
+        targetOffset: 0,
+        byteLength: 16,
+    })
+    const copyAlias: scr.CopyCommand = runtime.copyCommand({
+        source: storageOutput,
+        target: storageInput,
+        byteLength: 16,
+    })
     const scratchPipeline: scr.ScratchRenderPipeline = runtime.createRenderPipeline({
         label: 'typed scratch pipeline',
         program,
@@ -252,7 +265,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const computePass: scr.ComputePassSpec = runtime.createComputePass()
     const builder: scr.SubmissionBuilder = runtime.createSubmission({ validation: 'throw' })
-    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).render(passSpec, [ draw ]).submit()
+    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).render(passSpec, [ draw ]).submit()
     const readback: scr.ReadbackOperation = runtime.createReadback({
         source: storageOutput,
         after: submitted,
@@ -265,6 +278,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void scratchTextureView
     void textureSet
     void textureTargetPass
+    void copy
+    void copyAlias
     void error
     void submitted
     void readbackBytes

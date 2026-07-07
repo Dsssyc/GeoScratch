@@ -1,7 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BindLayout, BindSet } from './binding.js'
 import { BufferResource } from './buffer.js'
-import { DispatchCommand, DrawCommand, TextureUploadCommand, UploadCommand } from './command.js'
+import { CopyCommand, DispatchCommand, DrawCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import { ComputePipeline, RenderPipeline } from './pipeline.js'
@@ -275,6 +275,17 @@ export class ScratchRuntime {
     uploadCommand(descriptor) {
 
         return this.createUploadCommand(descriptor)
+    }
+
+    createCopyCommand(descriptor) {
+
+        this.assertActive()
+        return new CopyCommand(this, descriptor)
+    }
+
+    copyCommand(descriptor) {
+
+        return this.createCopyCommand(descriptor)
     }
 
     createTextureUploadCommand(descriptor) {

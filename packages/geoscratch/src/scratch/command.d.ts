@@ -48,6 +48,15 @@ export type UploadCommandDescriptor = {
     size?: number
 }
 
+export type CopyCommandDescriptor = {
+    label?: string
+    source: BufferResource
+    sourceOffset?: number
+    target: BufferResource
+    targetOffset?: number
+    byteLength: number
+}
+
 export type TextureUploadOrigin = {
     x?: number
     y?: number
@@ -130,6 +139,26 @@ export class UploadCommand {
     assertRuntime(runtime: ScratchRuntime): void
     assertUsable(): void
     execute(queue: GPUQueue): void
+    dispose(): void
+}
+
+export class CopyCommand {
+    constructor(runtime: ScratchRuntime, descriptor: CopyCommandDescriptor)
+
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'copy'
+    readonly source: BufferResource
+    readonly sourceOffset: number
+    readonly target: BufferResource
+    readonly targetOffset: number
+    readonly byteLength: number
+    readonly isDisposed: boolean
+
+    assertRuntime(runtime: ScratchRuntime): void
+    assertUsable(): void
+    encode(commandEncoder: GPUCommandEncoder): void
     dispose(): void
 }
 

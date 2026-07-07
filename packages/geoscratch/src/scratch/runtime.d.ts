@@ -1,6 +1,6 @@
 import { BufferResource, BufferResourceDescriptor } from './buffer'
 import { BindLayout, BindLayoutDescriptor, BindSet, BindSetBindings, BindSetOptions } from './binding'
-import { DispatchCommand, DispatchCommandDescriptor, DrawCommand, DrawCommandDescriptor, TextureUploadCommand, TextureUploadCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
+import { CopyCommand, CopyCommandDescriptor, DispatchCommand, DispatchCommandDescriptor, DrawCommand, DrawCommandDescriptor, TextureUploadCommand, TextureUploadCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
 import { ComputePassSpec, ComputePassSpecDescriptor, RenderPassSpec, RenderPassSpecDescriptor } from './pass'
 import { ComputePipeline, ComputePipelineDescriptor, RenderPipeline, RenderPipelineDescriptor } from './pipeline'
 import { Program, ProgramDescriptor } from './program'
@@ -63,6 +63,8 @@ export class ScratchRuntime {
     dispatchCommand(descriptor: DispatchCommandDescriptor): DispatchCommand
     createUploadCommand(descriptor: UploadCommandDescriptor): UploadCommand
     uploadCommand(descriptor: UploadCommandDescriptor): UploadCommand
+    createCopyCommand(descriptor: CopyCommandDescriptor): CopyCommand
+    copyCommand(descriptor: CopyCommandDescriptor): CopyCommand
     createTextureUploadCommand(descriptor: TextureUploadCommandDescriptor): TextureUploadCommand
     textureUploadCommand(descriptor: TextureUploadCommandDescriptor): TextureUploadCommand
     createRenderPass(descriptor: RenderPassSpecDescriptor): RenderPassSpec

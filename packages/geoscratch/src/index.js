@@ -18,6 +18,7 @@ export {
     DispatchCommand,
     TextureUploadCommand,
     UploadCommand,
+    CopyCommand,
     RenderPassSpec,
     ComputePassSpec,
     ReadbackOperation,

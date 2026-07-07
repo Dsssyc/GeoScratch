@@ -50,6 +50,16 @@ export class SubmissionBuilder {
         return this
     }
 
+    copy(command) {
+
+        this.steps.push({
+            kind: 'copy',
+            command,
+        })
+
+        return this
+    }
+
     submit() {
 
         this.runtime.assertActive()
@@ -74,6 +84,12 @@ export class SubmissionBuilder {
             if (step.kind === 'upload') {
                 validateUploadStep(this, step)
                 step.command.execute(this.runtime.queue)
+                continue
+            }
+
+            if (step.kind === 'copy') {
+                validateCopyStep(this, step)
+                step.command.encode(encoder)
                 continue
             }
 
@@ -136,6 +152,25 @@ function validateUploadStep(builder, step) {
             subject: builder.subject,
             message: 'Submission upload step requires an upload command.',
             expected: { command: 'UploadCommand or TextureUploadCommand' },
+            actual: { command: command === undefined || command === null ? String(command) : typeof command },
+        })
+    }
+
+    command.assertRuntime(builder.runtime)
+}
+
+function validateCopyStep(builder, step) {
+
+    const command = step.command
+
+    if (!command || typeof command.assertRuntime !== 'function' || command.commandKind !== 'copy') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'submission',
+            subject: builder.subject,
+            message: 'Submission copy step requires a CopyCommand.',
+            expected: { command: 'CopyCommand' },
             actual: { command: command === undefined || command === null ? String(command) : typeof command },
         })
     }

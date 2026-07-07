@@ -34,6 +34,8 @@ export {
 export { Program, ProgramDescriptor, ProgramEntryPoints } from './program'
 export { ComputePipeline, ComputePipelineDescriptor, RenderPipeline, RenderPipelineDescriptor } from './pipeline'
 export {
+    CopyCommand,
+    CopyCommandDescriptor,
     DispatchCommand,
     DispatchCommandDescriptor,
     DrawCommand,

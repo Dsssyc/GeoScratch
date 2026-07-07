@@ -55,6 +55,8 @@ export {
     TextureUploadSize,
     UploadCommand,
     UploadCommandDescriptor,
+    CopyCommand,
+    CopyCommandDescriptor,
     ComputePassSpec,
     ComputePassSpecDescriptor,
     RenderPassColorAttachmentSpec,

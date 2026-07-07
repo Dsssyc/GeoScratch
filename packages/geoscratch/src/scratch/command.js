@@ -4,6 +4,8 @@ import { throwScratchDiagnostic } from './diagnostics.js'
 import { TextureResource } from './texture.js'
 
 const GPU_BUFFER_USAGE_VERTEX = globalThis.GPUBufferUsage?.VERTEX ?? 0x20
+const GPU_BUFFER_USAGE_COPY_SRC = globalThis.GPUBufferUsage?.COPY_SRC ?? 0x4
+const GPU_BUFFER_USAGE_COPY_DST = globalThis.GPUBufferUsage?.COPY_DST ?? 0x8
 const GPU_TEXTURE_USAGE_COPY_DST = globalThis.GPUTextureUsage?.COPY_DST ?? 0x2
 
 export class DrawCommand {
@@ -376,6 +378,141 @@ export class UploadCommand {
             this.target.gpuBuffer,
             this.offset,
             createUploadSource(this.data, this.dataOffset, this.byteLength)
+        )
+        this.target._advanceContentEpoch()
+    }
+
+    dispose() {
+
+        this.isDisposed = true
+    }
+}
+
+export class CopyCommand {
+
+    constructor(runtime, descriptor = {}) {
+
+        runtime.assertActive()
+
+        const source = descriptor.source
+        if (!(source instanceof BufferResource)) {
+            throwCopyDiagnostic({
+                runtime,
+                source,
+                target: descriptor.target,
+                sourceOffset: descriptor.sourceOffset,
+                targetOffset: descriptor.targetOffset,
+                byteLength: descriptor.byteLength,
+                reason: 'source',
+            })
+        }
+
+        source.assertRuntime(runtime)
+
+        const target = descriptor.target
+        if (!(target instanceof BufferResource)) {
+            throwCopyDiagnostic({
+                runtime,
+                source,
+                target,
+                sourceOffset: descriptor.sourceOffset,
+                targetOffset: descriptor.targetOffset,
+                byteLength: descriptor.byteLength,
+                reason: 'target',
+            })
+        }
+
+        target.assertRuntime(runtime)
+        validateBufferCopyUsage(runtime, source, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
+        validateBufferCopyUsage(runtime, target, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
+
+        this.runtime = runtime
+        this.id = `scratch-command-${UUID()}`
+        this.label = descriptor.label
+        this.commandKind = 'copy'
+        this.source = source
+        this.target = target
+        this.sourceOffset = normalizeCopyOffset(runtime, descriptor.sourceOffset ?? 0, 'sourceOffset')
+        this.targetOffset = normalizeCopyOffset(runtime, descriptor.targetOffset ?? 0, 'targetOffset')
+        this.byteLength = normalizeCopyByteLength(runtime, descriptor.byteLength)
+        this.isDisposed = false
+
+        validateCopyRange(this)
+    }
+
+    get subject() {
+
+        const subject = {
+            kind: 'Command',
+            id: this.id,
+            commandKind: 'copy',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    assertRuntime(runtime) {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'Command belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable() {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DISPOSED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Command has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+        this.source.assertUsable()
+        this.target.assertUsable()
+    }
+
+    encode(commandEncoder) {
+
+        this.assertUsable()
+
+        if (!commandEncoder || typeof commandEncoder.copyBufferToBuffer !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                severity: 'error',
+                phase: 'runtime',
+                subject: this.runtime.subject,
+                related: [ this.subject ],
+                message: 'ScratchRuntime command encoder cannot copy GPU buffers.',
+                expected: { commandEncoder: 'GPUCommandEncoder with copyBufferToBuffer()' },
+                actual: { copyBufferToBuffer: typeof commandEncoder?.copyBufferToBuffer },
+            })
+        }
+
+        commandEncoder.copyBufferToBuffer(
+            this.source.gpuBuffer,
+            this.sourceOffset,
+            this.target.gpuBuffer,
+            this.targetOffset,
+            this.byteLength
         )
         this.target._advanceContentEpoch()
     }
@@ -853,6 +990,105 @@ function createUploadSource(data, byteOffset, byteLength) {
     }
 
     return new Uint8Array(data.buffer, data.byteOffset + byteOffset, byteLength)
+}
+
+function validateBufferCopyUsage(runtime, buffer, requiredUsage, role, usageName) {
+
+    if ((buffer.usage & requiredUsage) !== 0) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+        severity: 'error',
+        phase: 'resource',
+        subject: buffer.subject,
+        related: [ runtime.subject ],
+        message: `CopyCommand ${role} requires ${usageName}.`,
+        expected: { usage: usageName },
+        actual: { usage: buffer.usage },
+    })
+}
+
+function normalizeCopyOffset(runtime, value, key) {
+
+    if (!Number.isInteger(value) || value < 0 || value % 4 !== 0) {
+        throwCopyDiagnostic({ runtime, [key]: value, reason: key })
+    }
+
+    return value
+}
+
+function normalizeCopyByteLength(runtime, byteLength) {
+
+    if (!Number.isInteger(byteLength) || byteLength <= 0 || byteLength % 4 !== 0) {
+        throwCopyDiagnostic({ runtime, byteLength, reason: 'byteLength' })
+    }
+
+    return byteLength
+}
+
+function validateCopyRange(command) {
+
+    const sourceEnd = command.sourceOffset + command.byteLength
+    const targetEnd = command.targetOffset + command.byteLength
+
+    if (sourceEnd > command.source.size || targetEnd > command.target.size) {
+        throwCopyDiagnostic({
+            runtime: command.runtime,
+            source: command.source,
+            target: command.target,
+            sourceOffset: command.sourceOffset,
+            targetOffset: command.targetOffset,
+            byteLength: command.byteLength,
+            reason: 'range',
+        })
+    }
+
+    if (
+        command.source === command.target &&
+        command.sourceOffset < targetEnd &&
+        command.targetOffset < sourceEnd
+    ) {
+        throwCopyDiagnostic({
+            runtime: command.runtime,
+            source: command.source,
+            target: command.target,
+            sourceOffset: command.sourceOffset,
+            targetOffset: command.targetOffset,
+            byteLength: command.byteLength,
+            reason: 'overlap',
+        })
+    }
+}
+
+function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffset, byteLength, reason }) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: { kind: 'Command', commandKind: 'copy' },
+        related: [
+            runtime?.subject,
+            source?.subject,
+            target?.subject,
+        ].filter(Boolean),
+        message: 'CopyCommand requires BufferResource source and target buffers with a valid aligned byte range.',
+        expected: {
+            source: 'BufferResource with GPUBufferUsage.COPY_SRC',
+            target: 'BufferResource with GPUBufferUsage.COPY_DST',
+            sourceOffset: 'non-negative integer aligned to 4 bytes',
+            targetOffset: 'non-negative integer aligned to 4 bytes',
+            byteLength: 'positive integer aligned to 4 bytes within source and target',
+        },
+        actual: {
+            reason,
+            source: source === undefined || source === null ? String(source) : typeof source,
+            target: target === undefined || target === null ? String(target) : typeof target,
+            sourceOffset,
+            targetOffset,
+            byteLength,
+        },
+    })
 }
 
 function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size, reason }) {
