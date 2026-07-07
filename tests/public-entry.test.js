@@ -24,6 +24,9 @@ describe('public entrypoints', () => {
         expect(scr).to.have.property('SubmissionBuilder').that.is.a('function')
         expect(scr).to.have.property('SubmittedWork').that.is.a('function')
         expect(scr).to.have.property('ReadbackOperation').that.is.a('function')
+        expect(scr).to.have.property('TextureResource').that.is.a('function')
+        expect(scr).to.have.property('SamplerResource').that.is.a('function')
+        expect(scr).to.have.property('TextureUploadCommand').that.is.a('function')
     })
 
     it('keeps the scratch compatibility entrypoint', () => {
@@ -41,6 +44,9 @@ describe('public entrypoints', () => {
         expect(scratchCompat).to.have.property('ComputePassSpec').that.equals(scr.ComputePassSpec)
         expect(scratchCompat).to.have.property('SubmissionBuilder').that.equals(scr.SubmissionBuilder)
         expect(scratchCompat).to.have.property('ReadbackOperation').that.equals(scr.ReadbackOperation)
+        expect(scratchCompat).to.have.property('TextureResource').that.equals(scr.TextureResource)
+        expect(scratchCompat).to.have.property('SamplerResource').that.equals(scr.SamplerResource)
+        expect(scratchCompat).to.have.property('TextureUploadCommand').that.equals(scr.TextureUploadCommand)
     })
 
     it('exposes package-level entrypoints', () => {
@@ -55,6 +61,10 @@ describe('public entrypoints', () => {
         expect(pkg).to.have.property('DispatchCommand').that.equals(scr.DispatchCommand)
         expect(pkg).to.have.property('UploadCommand').that.equals(scr.UploadCommand)
         expect(pkg).to.have.property('ReadbackOperation').that.equals(scr.ReadbackOperation)
+        expect(pkg).to.have.property('TextureResource').that.equals(scr.TextureResource)
+        expect(pkg).to.have.property('SamplerResource').that.equals(scr.SamplerResource)
+        expect(pkg).to.have.property('TextureUploadCommand').that.equals(scr.TextureUploadCommand)
         expect(pkgScratchCompat).to.have.property('SubmittedWork').that.equals(scr.SubmittedWork)
+        expect(pkgScratchCompat).to.have.property('TextureResource').that.equals(scr.TextureResource)
     })
 })

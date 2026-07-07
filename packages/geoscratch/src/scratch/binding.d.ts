@@ -1,5 +1,7 @@
 import { BufferResource } from './buffer'
+import { SamplerResource } from './sampler'
 import { ScratchRuntime } from './runtime'
+import { TextureResource } from './texture'
 
 export type BindVisibility = 'vertex' | 'fragment' | 'compute'
 
@@ -17,7 +19,29 @@ export type StorageBindLayoutEntry = {
     visibility: BindVisibility[]
 }
 
-export type BindLayoutEntry = UniformBindLayoutEntry | StorageBindLayoutEntry
+export type TextureBindLayoutEntry = {
+    binding: number
+    name: string
+    type: 'texture'
+    visibility: BindVisibility[]
+    sampleType?: GPUTextureSampleType
+    viewDimension?: GPUTextureViewDimension
+    multisampled?: boolean
+}
+
+export type SamplerBindLayoutEntry = {
+    binding: number
+    name: string
+    type: 'sampler'
+    visibility: BindVisibility[]
+    samplerType?: GPUSamplerBindingType
+}
+
+export type BindLayoutEntry =
+    | UniformBindLayoutEntry
+    | StorageBindLayoutEntry
+    | TextureBindLayoutEntry
+    | SamplerBindLayoutEntry
 
 export type BindLayoutDescriptor = {
     label?: string
@@ -25,7 +49,7 @@ export type BindLayoutDescriptor = {
     entries: BindLayoutEntry[]
 }
 
-export type BindSetBindings = Record<string, BufferResource>
+export type BindSetBindings = Record<string, BufferResource | TextureResource | SamplerResource>
 
 export type BindSetOptions = {
     label?: string

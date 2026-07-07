@@ -16,6 +16,8 @@ export { ScratchRuntime, ScratchRuntimeCreateOptions } from './runtime'
 export { Surface, SurfaceFormat, SurfaceOptions, SurfaceSize } from './surface'
 export { Resource, ResourceOptions } from './resource'
 export { BufferResource, BufferResourceDescriptor } from './buffer'
+export { TextureResource, TextureResourceDescriptor, TextureViewDescriptor } from './texture'
+export { SamplerResource, SamplerResourceDescriptor } from './sampler'
 export {
     BindLayout,
     BindLayoutDescriptor,
@@ -24,8 +26,10 @@ export {
     BindSetBindings,
     BindSetOptions,
     BindVisibility,
+    SamplerBindLayoutEntry,
     UniformBindLayoutEntry,
     StorageBindLayoutEntry,
+    TextureBindLayoutEntry,
 } from './binding'
 export { Program, ProgramDescriptor, ProgramEntryPoints } from './program'
 export { ComputePipeline, ComputePipelineDescriptor, RenderPipeline, RenderPipelineDescriptor } from './pipeline'
@@ -39,6 +43,11 @@ export {
     ResourceReadinessPolicy,
     StaticDispatchCount,
     StaticDrawCount,
+    TextureUploadCommand,
+    TextureUploadCommandDescriptor,
+    TextureUploadLayout,
+    TextureUploadOrigin,
+    TextureUploadSize,
     UploadCommand,
     UploadCommandDescriptor,
 } from './command'

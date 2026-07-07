@@ -131,11 +131,14 @@ function main(canvas) {
 
 | 示例 | 路径 |
 | --- | --- |
-| Hello Triangle | `examples/1_helloTriangle/` |
-| Hello Vertex Buffer | `examples/2_helloVertexBuffer/` |
-| DEM Layer | `examples/m_demLayer/` |
-| Flow Layer | `examples/m_flowLayer/` |
-| Hello GAW | `examples/x_helloGAW/` |
+| Hello Triangle | `examples/scratch_helloTriangle/` |
+| Uniform Triangle | `examples/scratch_uniformTriangle/` |
+| Compute Readback | `examples/scratch_computeReadback/` |
+| Hello Vertex Buffer | `examples/scratch_helloVertexBuffer/` |
+| Texture Sampling | `examples/scratch_textureSampling/` |
+| DEM Layer (legacy) | `examples/m_demLayer/` |
+| Flow Layer (legacy) | `examples/m_flowLayer/` |
+| Hello GAW (legacy) | `examples/x_helloGAW/` |
 
 ## 开发说明
 

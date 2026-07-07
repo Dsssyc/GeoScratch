@@ -1,14 +1,16 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BindLayout, BindSet } from './binding.js'
 import { BufferResource } from './buffer.js'
-import { DispatchCommand, DrawCommand, UploadCommand } from './command.js'
+import { DispatchCommand, DrawCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import { ComputePipeline, RenderPipeline } from './pipeline.js'
 import { Program } from './program.js'
 import { ReadbackOperation } from './readback.js'
+import { SamplerResource } from './sampler.js'
 import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
+import { TextureResource } from './texture.js'
 
 const runtimeToken = Symbol('ScratchRuntime')
 
@@ -165,6 +167,28 @@ export class ScratchRuntime {
         return this.createBuffer(descriptor)
     }
 
+    createTexture(descriptor) {
+
+        this.assertActive()
+        return new TextureResource(this, descriptor)
+    }
+
+    texture(descriptor) {
+
+        return this.createTexture(descriptor)
+    }
+
+    createSampler(descriptor) {
+
+        this.assertActive()
+        return new SamplerResource(this, descriptor)
+    }
+
+    sampler(descriptor) {
+
+        return this.createSampler(descriptor)
+    }
+
     createBindLayout(descriptor) {
 
         this.assertActive()
@@ -251,6 +275,17 @@ export class ScratchRuntime {
     uploadCommand(descriptor) {
 
         return this.createUploadCommand(descriptor)
+    }
+
+    createTextureUploadCommand(descriptor) {
+
+        this.assertActive()
+        return new TextureUploadCommand(this, descriptor)
+    }
+
+    textureUploadCommand(descriptor) {
+
+        return this.createTextureUploadCommand(descriptor)
     }
 
     createRenderPass(descriptor) {

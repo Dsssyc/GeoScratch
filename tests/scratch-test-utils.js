@@ -5,11 +5,15 @@ export function createFakeGpu() {
         shaderModules: [],
         bindGroupLayouts: [],
         bindGroups: [],
+        textures: [],
+        textureViews: [],
+        samplers: [],
         pipelineLayouts: [],
         renderPipelines: [],
         computePipelines: [],
         commandEncoders: [],
         queueWrites: [],
+        queueTextureWrites: [],
         queueSubmissions: [],
         renderPasses: [],
         computePasses: [],
@@ -31,6 +35,20 @@ export function createFakeGpu() {
             })
             const source = bytesFrom(data, dataOffset ?? 0, size)
             buffer.data.set(source, offset)
+        },
+        writeTexture(destination, data, layout, size) {
+            calls.queueTextureWrites.push({
+                destination,
+                data,
+                layout,
+                size,
+            })
+            destination.texture.writes.push({
+                destination,
+                data: bytesFrom(data),
+                layout,
+                size,
+            })
         },
         submit(commandBuffers) {
             calls.queueSubmissions.push(commandBuffers)
@@ -94,6 +112,38 @@ export function createFakeGpu() {
             }
             calls.bindGroups.push(bindGroup)
             return bindGroup
+        },
+        createTexture(descriptor) {
+            const texture = {
+                type: 'texture',
+                descriptor,
+                views: [],
+                writes: [],
+                destroyed: false,
+                createView(viewDescriptor = {}) {
+                    const view = {
+                        type: 'textureView',
+                        texture: this,
+                        descriptor: viewDescriptor,
+                    }
+                    this.views.push(view)
+                    calls.textureViews.push(view)
+                    return view
+                },
+                destroy() {
+                    this.destroyed = true
+                },
+            }
+            calls.textures.push(texture)
+            return texture
+        },
+        createSampler(descriptor) {
+            const sampler = {
+                type: 'sampler',
+                descriptor,
+            }
+            calls.samplers.push(sampler)
+            return sampler
         },
         createPipelineLayout(descriptor) {
             const layout = {

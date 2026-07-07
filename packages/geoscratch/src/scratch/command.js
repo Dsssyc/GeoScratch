@@ -1,8 +1,10 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { TextureResource } from './texture.js'
 
 const GPU_BUFFER_USAGE_VERTEX = globalThis.GPUBufferUsage?.VERTEX ?? 0x20
+const GPU_TEXTURE_USAGE_COPY_DST = globalThis.GPUTextureUsage?.COPY_DST ?? 0x2
 
 export class DrawCommand {
 
@@ -384,6 +386,141 @@ export class UploadCommand {
     }
 }
 
+export class TextureUploadCommand {
+
+    constructor(runtime, descriptor = {}) {
+
+        runtime.assertActive()
+
+        const target = descriptor.target
+        if (!(target instanceof TextureResource)) {
+            throwTextureUploadDiagnostic({
+                runtime,
+                target,
+                data: descriptor.data,
+                layout: descriptor.layout,
+                size: descriptor.size,
+                reason: 'target',
+            })
+        }
+
+        target.assertRuntime(runtime)
+
+        if ((target.usage & GPU_TEXTURE_USAGE_COPY_DST) === 0) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+                severity: 'error',
+                phase: 'resource',
+                subject: target.subject,
+                related: [ runtime.subject ],
+                message: 'TextureUploadCommand target requires GPUTextureUsage.COPY_DST.',
+                expected: { usage: 'GPUTextureUsage.COPY_DST' },
+                actual: { usage: target.usage },
+            })
+        }
+
+        this.runtime = runtime
+        this.id = `scratch-command-${UUID()}`
+        this.label = descriptor.label
+        this.commandKind = 'upload'
+        this.uploadKind = 'texture'
+        this.target = target
+        this.data = descriptor.data
+        this.origin = normalizeTextureUploadOrigin(runtime, descriptor.origin)
+        this.mipLevel = normalizeTextureUploadMipLevel(runtime, target, descriptor.mipLevel ?? 0)
+        this.size = normalizeTextureUploadSize(runtime, target, descriptor.size, this.origin)
+        this.layout = normalizeTextureUploadLayout(runtime, target, descriptor.layout, this.size)
+        this.isDisposed = false
+
+        validateTextureUploadRange(this)
+    }
+
+    get subject() {
+
+        const subject = {
+            kind: 'Command',
+            id: this.id,
+            commandKind: 'upload',
+            uploadKind: 'texture',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    assertRuntime(runtime) {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'Command belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable() {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DISPOSED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Command has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+        this.target.assertUsable()
+    }
+
+    execute(queue) {
+
+        this.assertUsable()
+
+        if (!queue || typeof queue.writeTexture !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                severity: 'error',
+                phase: 'runtime',
+                subject: this.runtime.subject,
+                related: [ this.subject ],
+                message: 'ScratchRuntime queue cannot write GPU textures.',
+                expected: { queue: 'GPUQueue with writeTexture()' },
+                actual: { writeTexture: typeof queue?.writeTexture },
+            })
+        }
+
+        queue.writeTexture(
+            {
+                texture: this.target.gpuTexture,
+                mipLevel: this.mipLevel,
+                origin: this.origin,
+            },
+            this.data,
+            this.layout,
+            this.size
+        )
+        this.target._advanceContentEpoch()
+    }
+
+    dispose() {
+
+        this.isDisposed = true
+    }
+}
+
 function normalizeBindSets(command, bindSets = []) {
 
     if (!Array.isArray(bindSets)) {
@@ -744,6 +881,217 @@ function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size
             offset,
             dataOffset,
             size,
+        },
+    })
+}
+
+function normalizeTextureUploadOrigin(runtime, origin = { x: 0, y: 0, z: 0 }) {
+
+    let x
+    let y
+    let z
+
+    if (Array.isArray(origin)) {
+        x = origin[0] ?? 0
+        y = origin[1] ?? 0
+        z = origin[2] ?? 0
+    } else if (origin && typeof origin === 'object') {
+        x = origin.x ?? 0
+        y = origin.y ?? 0
+        z = origin.z ?? 0
+    } else {
+        throwTextureUploadDiagnostic({ runtime, origin, reason: 'origin' })
+    }
+
+    for (const value of [ x, y, z ]) {
+        if (!Number.isInteger(value) || value < 0) {
+            throwTextureUploadDiagnostic({ runtime, origin, reason: 'origin' })
+        }
+    }
+
+    return { x, y, z }
+}
+
+function normalizeTextureUploadMipLevel(runtime, target, mipLevel) {
+
+    if (!Number.isInteger(mipLevel) || mipLevel < 0 || mipLevel >= target.mipLevelCount) {
+        throwTextureUploadDiagnostic({
+            runtime,
+            target,
+            mipLevel,
+            reason: 'mipLevel',
+        })
+    }
+
+    return mipLevel
+}
+
+function normalizeTextureUploadSize(runtime, target, size, origin) {
+
+    let width
+    let height
+    let depthOrArrayLayers
+
+    if (Array.isArray(size)) {
+        width = size[0]
+        height = size[1] ?? 1
+        depthOrArrayLayers = size[2] ?? 1
+    } else if (size && typeof size === 'object') {
+        width = size.width
+        height = size.height ?? 1
+        depthOrArrayLayers = size.depthOrArrayLayers ?? 1
+    } else {
+        throwTextureUploadDiagnostic({ runtime, target, size, reason: 'size' })
+    }
+
+    for (const value of [ width, height, depthOrArrayLayers ]) {
+        if (!Number.isInteger(value) || value <= 0) {
+            throwTextureUploadDiagnostic({ runtime, target, size, reason: 'size' })
+        }
+    }
+
+    if (
+        origin.x + width > target.width ||
+        origin.y + height > target.height ||
+        origin.z + depthOrArrayLayers > target.depthOrArrayLayers
+    ) {
+        throwTextureUploadDiagnostic({
+            runtime,
+            target,
+            origin,
+            size,
+            reason: 'range',
+        })
+    }
+
+    return { width, height, depthOrArrayLayers }
+}
+
+function normalizeTextureUploadLayout(runtime, target, layout = {}, size) {
+
+    if (!layout || typeof layout !== 'object') {
+        throwTextureUploadDiagnostic({ runtime, target, layout, size, reason: 'layout' })
+    }
+
+    const bytesPerPixel = getTextureBytesPerPixel(target.format)
+    if (bytesPerPixel === undefined) {
+        throwTextureUploadDiagnostic({
+            runtime,
+            target,
+            layout,
+            size,
+            reason: 'format',
+        })
+    }
+
+    const offset = layout.offset ?? 0
+    const bytesPerRow = layout.bytesPerRow ?? size.width * bytesPerPixel
+    const rowsPerImage = layout.rowsPerImage ?? size.height
+
+    for (const [ key, value ] of Object.entries({ offset, bytesPerRow, rowsPerImage })) {
+        if (!Number.isInteger(value) || value < 0 || (key !== 'offset' && value === 0)) {
+            throwTextureUploadDiagnostic({
+                runtime,
+                target,
+                layout,
+                size,
+                reason: key,
+            })
+        }
+    }
+
+    if (bytesPerRow < size.width * bytesPerPixel || rowsPerImage < size.height) {
+        throwTextureUploadDiagnostic({
+            runtime,
+            target,
+            layout,
+            size,
+            reason: 'layout',
+        })
+    }
+
+    return { offset, bytesPerRow, rowsPerImage }
+}
+
+function validateTextureUploadRange(command) {
+
+    const dataByteLength = getDataByteLength(command.data)
+    if (dataByteLength === undefined) {
+        throwTextureUploadDiagnostic({
+            runtime: command.runtime,
+            target: command.target,
+            data: command.data,
+            layout: command.layout,
+            size: command.size,
+            reason: 'data',
+        })
+    }
+
+    const bytesPerPixel = getTextureBytesPerPixel(command.target.format)
+    const rowBytes = command.size.width * bytesPerPixel
+    const imageBytes = command.layout.bytesPerRow * command.layout.rowsPerImage
+    const requiredBytes =
+        command.layout.offset +
+        imageBytes * (command.size.depthOrArrayLayers - 1) +
+        command.layout.bytesPerRow * (command.size.height - 1) +
+        rowBytes
+
+    if (requiredBytes > dataByteLength) {
+        throwTextureUploadDiagnostic({
+            runtime: command.runtime,
+            target: command.target,
+            data: command.data,
+            layout: command.layout,
+            size: command.size,
+            reason: 'range',
+        })
+    }
+}
+
+function getTextureBytesPerPixel(format) {
+
+    if ([
+        'rgba8unorm',
+        'rgba8unorm-srgb',
+        'rgba8snorm',
+        'rgba8uint',
+        'rgba8sint',
+        'bgra8unorm',
+        'bgra8unorm-srgb',
+    ].includes(format)) {
+        return 4
+    }
+
+    return undefined
+}
+
+function throwTextureUploadDiagnostic({ runtime, target, data, layout, origin, size, mipLevel, reason }) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_TEXTURE_UPLOAD_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: { kind: 'Command', commandKind: 'upload', uploadKind: 'texture' },
+        related: [
+            runtime?.subject,
+            target?.subject,
+        ].filter(Boolean),
+        message: 'TextureUploadCommand requires a TextureResource target, byte data, texture layout, and upload size.',
+        expected: {
+            target: 'TextureResource with GPUTextureUsage.COPY_DST',
+            data: 'ArrayBuffer or ArrayBufferView',
+            layout: '{ offset?: number, bytesPerRow: number, rowsPerImage?: number }',
+            origin: '{ x?: number, y?: number, z?: number }',
+            size: '{ width: number, height: number, depthOrArrayLayers?: number }',
+        },
+        actual: {
+            reason,
+            target: target === undefined || target === null ? String(target) : typeof target,
+            data: data === undefined || data === null ? String(data) : typeof data,
+            layout,
+            origin,
+            size,
+            mipLevel,
         },
     })
 }

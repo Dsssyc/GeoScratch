@@ -132,8 +132,8 @@ function validateUploadStep(builder, step) {
             severity: 'error',
             phase: 'submission',
             subject: builder.subject,
-            message: 'Submission upload step requires an UploadCommand.',
-            expected: { command: 'UploadCommand' },
+            message: 'Submission upload step requires an upload command.',
+            expected: { command: 'UploadCommand or TextureUploadCommand' },
             actual: { command: command === undefined || command === null ? String(command) : typeof command },
         })
     }

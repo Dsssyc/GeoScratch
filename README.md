@@ -131,11 +131,14 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 
 | Example | Path |
 | --- | --- |
-| Hello Triangle | `examples/1_helloTriangle/` |
-| Hello Vertex Buffer | `examples/2_helloVertexBuffer/` |
-| DEM Layer | `examples/m_demLayer/` |
-| Flow Layer | `examples/m_flowLayer/` |
-| Hello GAW | `examples/x_helloGAW/` |
+| Hello Triangle | `examples/scratch_helloTriangle/` |
+| Uniform Triangle | `examples/scratch_uniformTriangle/` |
+| Compute Readback | `examples/scratch_computeReadback/` |
+| Hello Vertex Buffer | `examples/scratch_helloVertexBuffer/` |
+| Texture Sampling | `examples/scratch_textureSampling/` |
+| DEM Layer (legacy) | `examples/m_demLayer/` |
+| Flow Layer (legacy) | `examples/m_flowLayer/` |
+| Hello GAW (legacy) | `examples/x_helloGAW/` |
 
 ## Development Notes
 

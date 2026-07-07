@@ -78,6 +78,18 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 0x4 | 0x80,
     })
+    const scratchTexture: scr.TextureResource = runtime.createTexture({
+        label: 'typed scratch texture',
+        size: { width: 2, height: 2 },
+        format: 'rgba8unorm',
+        usage: 0x2 | 0x4,
+    })
+    const scratchSampler: scr.SamplerResource = runtime.createSampler({
+        label: 'typed scratch sampler',
+        magFilter: 'nearest',
+        minFilter: 'nearest',
+    })
+    const scratchTextureView: GPUTextureView = scratchTexture.createView()
 
     const diagnostic: scr.ScratchDiagnostic = scr.createScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
@@ -141,10 +153,41 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         inputValues: storageInput,
         outputValues: storageOutput,
     })
+    const textureLayout: scr.BindLayout = runtime.createBindLayout({
+        label: 'typed texture layout',
+        group: 2,
+        entries: [
+            {
+                binding: 0,
+                name: 'colorTexture',
+                type: 'texture',
+                sampleType: 'float',
+                viewDimension: '2d',
+                visibility: [ 'fragment' ],
+            },
+            {
+                binding: 1,
+                name: 'colorSampler',
+                type: 'sampler',
+                samplerType: 'filtering',
+                visibility: [ 'fragment' ],
+            },
+        ],
+    })
+    const textureSet: scr.BindSet = runtime.createBindSet(textureLayout, {
+        colorTexture: scratchTexture,
+        colorSampler: scratchSampler,
+    })
     const upload: scr.UploadCommand = runtime.createUploadCommand({
         target: uniformBuffer,
         data: new Float32Array([ 1, 0, 0, 1 ]),
         offset: 0,
+    })
+    const textureUpload: scr.TextureUploadCommand = runtime.createTextureUploadCommand({
+        target: scratchTexture,
+        data: new Uint8Array(16),
+        layout: { bytesPerRow: 8, rowsPerImage: 2 },
+        size: { width: 2, height: 2 },
     })
     const scratchPipeline: scr.ScratchRenderPipeline = runtime.createRenderPipeline({
         label: 'typed scratch pipeline',
@@ -201,7 +244,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const computePass: scr.ComputePassSpec = runtime.createComputePass()
     const builder: scr.SubmissionBuilder = runtime.createSubmission({ validation: 'throw' })
-    const submitted: scr.SubmittedWork = builder.upload(upload).compute(computePass, [ dispatch ]).render(passSpec, [ draw ]).submit()
+    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).render(passSpec, [ draw ]).submit()
     const readback: scr.ReadbackOperation = runtime.createReadback({
         source: storageOutput,
         after: submitted,
@@ -211,6 +254,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const readbackValues: Promise<Float32Array> = readback.toArray(Float32Array)
 
     void surface
+    void scratchTextureView
+    void textureSet
     void error
     void submitted
     void readbackBytes

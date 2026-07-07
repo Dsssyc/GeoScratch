@@ -4,6 +4,7 @@ import { ComputePipeline, RenderPipeline } from './pipeline'
 import { ComputePassSpec, RenderPassSpec } from './pass'
 import { Resource } from './resource'
 import { ScratchRuntime } from './runtime'
+import { TextureResource } from './texture'
 
 export type ResourceReadinessPolicy =
     | 'throw'
@@ -45,6 +46,34 @@ export type UploadCommandDescriptor = {
     offset?: number
     dataOffset?: number
     size?: number
+}
+
+export type TextureUploadOrigin = {
+    x?: number
+    y?: number
+    z?: number
+} | [number, number?, number?]
+
+export type TextureUploadSize = {
+    width: number
+    height: number
+    depthOrArrayLayers?: number
+} | [number, number] | [number, number, number]
+
+export type TextureUploadLayout = {
+    offset?: number
+    bytesPerRow?: number
+    rowsPerImage?: number
+}
+
+export type TextureUploadCommandDescriptor = {
+    label?: string
+    target: TextureResource
+    data: ArrayBuffer | ArrayBufferView
+    layout?: TextureUploadLayout
+    size: TextureUploadSize
+    origin?: TextureUploadOrigin
+    mipLevel?: number
 }
 
 export type StaticDispatchCount = {
@@ -96,6 +125,28 @@ export class UploadCommand {
     readonly offset: number
     readonly dataOffset: number
     readonly byteLength: number
+    readonly isDisposed: boolean
+
+    assertRuntime(runtime: ScratchRuntime): void
+    assertUsable(): void
+    execute(queue: GPUQueue): void
+    dispose(): void
+}
+
+export class TextureUploadCommand {
+    constructor(runtime: ScratchRuntime, descriptor: TextureUploadCommandDescriptor)
+
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'upload'
+    readonly uploadKind: 'texture'
+    readonly target: TextureResource
+    readonly data: ArrayBuffer | ArrayBufferView
+    readonly layout: Required<TextureUploadLayout>
+    readonly origin: { x: number, y: number, z: number }
+    readonly size: { width: number, height: number, depthOrArrayLayers: number }
+    readonly mipLevel: number
     readonly isDisposed: boolean
 
     assertRuntime(runtime: ScratchRuntime): void

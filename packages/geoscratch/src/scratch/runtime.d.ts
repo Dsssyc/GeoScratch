@@ -1,12 +1,14 @@
 import { BufferResource, BufferResourceDescriptor } from './buffer'
 import { BindLayout, BindLayoutDescriptor, BindSet, BindSetBindings, BindSetOptions } from './binding'
-import { DispatchCommand, DispatchCommandDescriptor, DrawCommand, DrawCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
+import { DispatchCommand, DispatchCommandDescriptor, DrawCommand, DrawCommandDescriptor, TextureUploadCommand, TextureUploadCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
 import { ComputePassSpec, ComputePassSpecDescriptor, RenderPassSpec, RenderPassSpecDescriptor } from './pass'
 import { ComputePipeline, ComputePipelineDescriptor, RenderPipeline, RenderPipelineDescriptor } from './pipeline'
 import { Program, ProgramDescriptor } from './program'
 import { ReadbackOperation, ReadbackOperationDescriptor } from './readback'
+import { SamplerResource, SamplerResourceDescriptor } from './sampler'
 import { SubmissionBuilder, SubmissionBuilderOptions } from './submission'
 import { Surface, SurfaceOptions } from './surface'
+import { TextureResource, TextureResourceDescriptor } from './texture'
 
 export type ScratchRuntimeCreateOptions = {
     gpu?: GPU
@@ -41,6 +43,10 @@ export class ScratchRuntime {
     surface(canvas: HTMLCanvasElement | OffscreenCanvas, options?: SurfaceOptions): Surface
     createBuffer(descriptor: BufferResourceDescriptor): BufferResource
     buffer(descriptor: BufferResourceDescriptor): BufferResource
+    createTexture(descriptor: TextureResourceDescriptor): TextureResource
+    texture(descriptor: TextureResourceDescriptor): TextureResource
+    createSampler(descriptor?: SamplerResourceDescriptor): SamplerResource
+    sampler(descriptor?: SamplerResourceDescriptor): SamplerResource
     createBindLayout(descriptor: BindLayoutDescriptor): BindLayout
     bindLayout(descriptor: BindLayoutDescriptor): BindLayout
     createBindSet(layout: BindLayout, bindings: BindSetBindings, options?: BindSetOptions): BindSet
@@ -57,6 +63,8 @@ export class ScratchRuntime {
     dispatchCommand(descriptor: DispatchCommandDescriptor): DispatchCommand
     createUploadCommand(descriptor: UploadCommandDescriptor): UploadCommand
     uploadCommand(descriptor: UploadCommandDescriptor): UploadCommand
+    createTextureUploadCommand(descriptor: TextureUploadCommandDescriptor): TextureUploadCommand
+    textureUploadCommand(descriptor: TextureUploadCommandDescriptor): TextureUploadCommand
     createRenderPass(descriptor: RenderPassSpecDescriptor): RenderPassSpec
     renderPass(descriptor: RenderPassSpecDescriptor): RenderPassSpec
     createComputePass(descriptor?: ComputePassSpecDescriptor): ComputePassSpec
