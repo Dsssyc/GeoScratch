@@ -78,6 +78,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 0x4 | 0x80,
     })
+    const queryDestination: scr.BufferResource = runtime.createBuffer({
+        label: 'typed scratch query destination',
+        size: 256,
+        usage: 0x4 | 0x200,
+    })
     const scratchTexture: scr.TextureResource = runtime.createTexture({
         label: 'typed scratch texture',
         size: { width: 2, height: 2 },
@@ -202,6 +207,28 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         target: storageInput,
         byteLength: 16,
     })
+    const querySet: scr.QuerySetResource = runtime.createQuerySet({
+        label: 'typed timestamp queries',
+        type: 'timestamp',
+        count: 2,
+    })
+    const querySetAlias: scr.QuerySetResource = runtime.querySet({
+        type: 'occlusion',
+        count: 1,
+    })
+    const resolveQueries: scr.ResolveQuerySetCommand = runtime.createResolveQuerySetCommand({
+        label: 'typed query resolve',
+        querySet,
+        firstQuery: 0,
+        queryCount: 2,
+        destination: queryDestination,
+        destinationOffset: 0,
+    })
+    const resolveAlias: scr.ResolveQuerySetCommand = runtime.resolveQuerySetCommand({
+        querySet,
+        queryCount: 1,
+        destination: queryDestination,
+    })
     const scratchPipeline: scr.ScratchRenderPipeline = runtime.createRenderPipeline({
         label: 'typed scratch pipeline',
         program,
@@ -232,6 +259,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             store: 'store',
             clear: { r: 0, g: 0, b: 0, a: 1 },
         } ],
+        timestampWrites: {
+            querySet,
+            begin: 0,
+            end: 1,
+        },
     })
     const textureTargetPass: scr.RenderPassSpec = runtime.createRenderPass({
         color: [ {
@@ -263,9 +295,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         },
         whenMissing: 'throw',
     })
-    const computePass: scr.ComputePassSpec = runtime.createComputePass()
+    const computePass: scr.ComputePassSpec = runtime.createComputePass({
+        timestampWrites: {
+            querySet,
+            begin: 0,
+        },
+    })
     const builder: scr.SubmissionBuilder = runtime.createSubmission({ validation: 'throw' })
-    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).render(passSpec, [ draw ]).submit()
+    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, [ draw ]).submit()
     const readback: scr.ReadbackOperation = runtime.createReadback({
         source: storageOutput,
         after: submitted,
@@ -280,6 +317,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void textureTargetPass
     void copy
     void copyAlias
+    void querySet
+    void querySetAlias
+    void resolveQueries
+    void resolveAlias
     void error
     void submitted
     void readbackBytes

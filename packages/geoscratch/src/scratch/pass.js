@@ -1,5 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { QuerySetResource } from './query-set.js'
 import { TextureResource } from './texture.js'
 
 const TEXTURE_USAGE_RENDER_ATTACHMENT = globalThis.GPUTextureUsage?.RENDER_ATTACHMENT ?? 0x10
@@ -15,6 +16,7 @@ export class RenderPassSpec {
         this.label = descriptor.label
         this.passKind = 'render'
         this.color = normalizeColorAttachments(this, descriptor.color)
+        this.timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
         this.isDisposed = false
     }
 
@@ -83,7 +85,18 @@ export class RenderPassSpec {
                     ...(attachment.clear !== undefined ? { clearValue: attachment.clear } : {}),
                 }
             }),
+            ...(this.timestampWrites !== undefined ? { timestampWrites: createTimestampWritesDescriptor(this.timestampWrites) } : {}),
         }
+    }
+
+    hasEncoderSideEffects() {
+
+        return this.timestampWrites !== undefined
+    }
+
+    advanceTimestampWriteEpochs() {
+
+        advanceTimestampWriteEpochs(this.timestampWrites)
     }
 
     dispose() {
@@ -102,6 +115,7 @@ export class ComputePassSpec {
         this.id = `scratch-pass-${UUID()}`
         this.label = descriptor.label
         this.passKind = 'compute'
+        this.timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
         this.isDisposed = false
     }
 
@@ -159,13 +173,107 @@ export class ComputePassSpec {
 
         return {
             label: this.label,
+            ...(this.timestampWrites !== undefined ? { timestampWrites: createTimestampWritesDescriptor(this.timestampWrites) } : {}),
         }
+    }
+
+    hasEncoderSideEffects() {
+
+        return this.timestampWrites !== undefined
+    }
+
+    advanceTimestampWriteEpochs() {
+
+        advanceTimestampWriteEpochs(this.timestampWrites)
     }
 
     dispose() {
 
         this.isDisposed = true
     }
+}
+
+function normalizeTimestampWrites(pass, timestampWrites) {
+
+    if (timestampWrites === undefined) return undefined
+
+    const querySet = timestampWrites?.querySet
+    if (!(querySet instanceof QuerySetResource)) {
+        throwTimestampWritesDiagnostic(pass, timestampWrites, 'querySet')
+    }
+
+    querySet.assertRuntime(pass.runtime)
+
+    if (querySet.type !== 'timestamp') {
+        throwTimestampWritesDiagnostic(pass, timestampWrites, 'querySetType')
+    }
+
+    const begin = normalizeTimestampWriteIndex(pass, querySet, timestampWrites.begin, 'begin')
+    const end = normalizeTimestampWriteIndex(pass, querySet, timestampWrites.end, 'end')
+
+    if (begin === undefined && end === undefined) {
+        throwTimestampWritesDiagnostic(pass, timestampWrites, 'empty')
+    }
+
+    return {
+        querySet,
+        begin,
+        end,
+    }
+}
+
+function normalizeTimestampWriteIndex(pass, querySet, index, key) {
+
+    if (index === undefined) return undefined
+
+    if (!Number.isInteger(index) || index < 0 || index >= querySet.count) {
+        throwTimestampWritesDiagnostic(pass, { querySet, [key]: index }, key)
+    }
+
+    return index
+}
+
+function createTimestampWritesDescriptor(timestampWrites) {
+
+    return {
+        querySet: timestampWrites.querySet.gpuQuerySet,
+        ...(timestampWrites.begin !== undefined ? { beginningOfPassWriteIndex: timestampWrites.begin } : {}),
+        ...(timestampWrites.end !== undefined ? { endOfPassWriteIndex: timestampWrites.end } : {}),
+    }
+}
+
+function advanceTimestampWriteEpochs(timestampWrites) {
+
+    if (timestampWrites === undefined) return
+
+    for (const index of new Set([ timestampWrites.begin, timestampWrites.end ].filter((value) => value !== undefined))) {
+        timestampWrites.querySet._advanceSlotContentEpoch(index)
+    }
+}
+
+function throwTimestampWritesDiagnostic(pass, timestampWrites, reason) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PASS_TIMESTAMP_WRITES_INVALID',
+        severity: 'error',
+        phase: 'submission',
+        subject: pass.subject,
+        related: [
+            timestampWrites?.querySet?.subject,
+        ].filter(Boolean),
+        message: 'PassSpec timestampWrites requires a timestamp QuerySetResource and at least one valid query slot index.',
+        expected: {
+            querySet: 'timestamp QuerySetResource owned by this ScratchRuntime',
+            begin: 'optional integer query index within querySet.count',
+            end: 'optional integer query index within querySet.count',
+        },
+        actual: {
+            reason,
+            querySet: timestampWrites?.querySet === undefined || timestampWrites?.querySet === null ? String(timestampWrites?.querySet) : typeof timestampWrites?.querySet,
+            begin: timestampWrites?.begin,
+            end: timestampWrites?.end,
+        },
+    })
 }
 
 function normalizeColorAttachments(pass, color) {

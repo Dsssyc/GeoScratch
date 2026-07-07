@@ -1,11 +1,12 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BindLayout, BindSet } from './binding.js'
 import { BufferResource } from './buffer.js'
-import { CopyCommand, DispatchCommand, DrawCommand, TextureUploadCommand, UploadCommand } from './command.js'
+import { CopyCommand, DispatchCommand, DrawCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import { ComputePipeline, RenderPipeline } from './pipeline.js'
 import { Program } from './program.js'
+import { QuerySetResource } from './query-set.js'
 import { ReadbackOperation } from './readback.js'
 import { SamplerResource } from './sampler.js'
 import { SubmissionBuilder } from './submission.js'
@@ -189,6 +190,17 @@ export class ScratchRuntime {
         return this.createSampler(descriptor)
     }
 
+    createQuerySet(descriptor) {
+
+        this.assertActive()
+        return new QuerySetResource(this, descriptor)
+    }
+
+    querySet(descriptor) {
+
+        return this.createQuerySet(descriptor)
+    }
+
     createBindLayout(descriptor) {
 
         this.assertActive()
@@ -286,6 +298,17 @@ export class ScratchRuntime {
     copyCommand(descriptor) {
 
         return this.createCopyCommand(descriptor)
+    }
+
+    createResolveQuerySetCommand(descriptor) {
+
+        this.assertActive()
+        return new ResolveQuerySetCommand(this, descriptor)
+    }
+
+    resolveQuerySetCommand(descriptor) {
+
+        return this.createResolveQuerySetCommand(descriptor)
     }
 
     createTextureUploadCommand(descriptor) {

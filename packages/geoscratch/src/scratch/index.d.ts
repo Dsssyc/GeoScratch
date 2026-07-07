@@ -18,6 +18,7 @@ export { Resource, ResourceOptions } from './resource'
 export { BufferResource, BufferResourceDescriptor } from './buffer'
 export { TextureResource, TextureResourceDescriptor, TextureViewDescriptor } from './texture'
 export { SamplerResource, SamplerResourceDescriptor } from './sampler'
+export { QuerySetResource, QuerySetResourceDescriptor, QuerySetType } from './query-set'
 export {
     BindLayout,
     BindLayoutDescriptor,
@@ -42,6 +43,8 @@ export {
     DrawCommandDescriptor,
     DrawVertexBufferBinding,
     NormalizedDrawVertexBufferBinding,
+    ResolveQuerySetCommand,
+    ResolveQuerySetCommandDescriptor,
     ResourceReadinessPolicy,
     StaticDispatchCount,
     StaticDrawCount,
@@ -59,6 +62,7 @@ export {
     RenderPassColorAttachmentSpec,
     RenderPassSpec,
     RenderPassSpecDescriptor,
+    TimestampWritesSpec,
 } from './pass'
 export {
     ReadbackOperation,

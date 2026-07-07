@@ -60,6 +60,16 @@ export class SubmissionBuilder {
         return this
     }
 
+    resolve(command) {
+
+        this.steps.push({
+            kind: 'resolve',
+            command,
+        })
+
+        return this
+    }
+
     submit() {
 
         this.runtime.assertActive()
@@ -93,28 +103,36 @@ export class SubmissionBuilder {
                 continue
             }
 
+            if (step.kind === 'resolve') {
+                validateResolveStep(this, step)
+                step.command.encode(encoder)
+                continue
+            }
+
             if (step.kind === 'compute') {
                 validateComputeStep(this, step)
 
-                if (step.commands.length === 0) continue
+                if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
                 const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
                 for (const command of step.commands) {
                     command.encode(passEncoder)
                 }
                 passEncoder.end()
+                step.passSpec.advanceTimestampWriteEpochs()
                 continue
             }
 
             validateRenderStep(this, step)
 
-            if (step.commands.length === 0) continue
+            if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
             const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
             for (const command of step.commands) {
                 command.encode(passEncoder)
             }
             passEncoder.end()
+            step.passSpec.advanceTimestampWriteEpochs()
             advanceRenderAttachmentEpochs(step.passSpec)
         }
 
@@ -171,6 +189,25 @@ function validateCopyStep(builder, step) {
             subject: builder.subject,
             message: 'Submission copy step requires a CopyCommand.',
             expected: { command: 'CopyCommand' },
+            actual: { command: command === undefined || command === null ? String(command) : typeof command },
+        })
+    }
+
+    command.assertRuntime(builder.runtime)
+}
+
+function validateResolveStep(builder, step) {
+
+    const command = step.command
+
+    if (!command || typeof command.assertRuntime !== 'function' || command.commandKind !== 'resolve-query-set') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'submission',
+            subject: builder.subject,
+            message: 'Submission resolve step requires a ResolveQuerySetCommand.',
+            expected: { command: 'ResolveQuerySetCommand' },
             actual: { command: command === undefined || command === null ? String(command) : typeof command },
         })
     }

@@ -1,11 +1,13 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { QuerySetResource } from './query-set.js'
 import { TextureResource } from './texture.js'
 
 const GPU_BUFFER_USAGE_VERTEX = globalThis.GPUBufferUsage?.VERTEX ?? 0x20
 const GPU_BUFFER_USAGE_COPY_SRC = globalThis.GPUBufferUsage?.COPY_SRC ?? 0x4
 const GPU_BUFFER_USAGE_COPY_DST = globalThis.GPUBufferUsage?.COPY_DST ?? 0x8
+const GPU_BUFFER_USAGE_QUERY_RESOLVE = globalThis.GPUBufferUsage?.QUERY_RESOLVE ?? 0x200
 const GPU_TEXTURE_USAGE_COPY_DST = globalThis.GPUTextureUsage?.COPY_DST ?? 0x2
 
 export class DrawCommand {
@@ -515,6 +517,140 @@ export class CopyCommand {
             this.byteLength
         )
         this.target._advanceContentEpoch()
+    }
+
+    dispose() {
+
+        this.isDisposed = true
+    }
+}
+
+export class ResolveQuerySetCommand {
+
+    constructor(runtime, descriptor = {}) {
+
+        runtime.assertActive()
+
+        const querySet = descriptor.querySet
+        if (!(querySet instanceof QuerySetResource)) {
+            throwResolveQuerySetDiagnostic({
+                runtime,
+                querySet,
+                firstQuery: descriptor.firstQuery,
+                queryCount: descriptor.queryCount,
+                destination: descriptor.destination,
+                destinationOffset: descriptor.destinationOffset,
+                reason: 'querySet',
+            })
+        }
+
+        querySet.assertRuntime(runtime)
+
+        const destination = descriptor.destination
+        if (!(destination instanceof BufferResource)) {
+            throwResolveQuerySetDiagnostic({
+                runtime,
+                querySet,
+                firstQuery: descriptor.firstQuery,
+                queryCount: descriptor.queryCount,
+                destination,
+                destinationOffset: descriptor.destinationOffset,
+                reason: 'destination',
+            })
+        }
+
+        destination.assertRuntime(runtime)
+        validateResolveDestinationUsage(runtime, destination)
+
+        this.runtime = runtime
+        this.id = `scratch-command-${UUID()}`
+        this.label = descriptor.label
+        this.commandKind = 'resolve-query-set'
+        this.querySet = querySet
+        this.firstQuery = normalizeResolveFirstQuery(runtime, descriptor.firstQuery ?? 0)
+        this.queryCount = normalizeResolveQueryCount(runtime, descriptor.queryCount)
+        this.destination = destination
+        this.destinationOffset = normalizeResolveDestinationOffset(runtime, descriptor.destinationOffset ?? 0)
+        this.isDisposed = false
+
+        validateResolveQuerySetRange(this)
+    }
+
+    get subject() {
+
+        const subject = {
+            kind: 'Command',
+            id: this.id,
+            commandKind: 'resolve-query-set',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    assertRuntime(runtime) {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'Command belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable() {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DISPOSED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Command has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+        this.querySet.assertUsable()
+        this.destination.assertUsable()
+    }
+
+    encode(commandEncoder) {
+
+        this.assertUsable()
+
+        if (!commandEncoder || typeof commandEncoder.resolveQuerySet !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                severity: 'error',
+                phase: 'runtime',
+                subject: this.runtime.subject,
+                related: [ this.subject ],
+                message: 'ScratchRuntime command encoder cannot resolve GPU query sets.',
+                expected: { commandEncoder: 'GPUCommandEncoder with resolveQuerySet()' },
+                actual: { resolveQuerySet: typeof commandEncoder?.resolveQuerySet },
+            })
+        }
+
+        commandEncoder.resolveQuerySet(
+            this.querySet.gpuQuerySet,
+            this.firstQuery,
+            this.queryCount,
+            this.destination.gpuBuffer,
+            this.destinationOffset
+        )
+        this.destination._advanceContentEpoch()
     }
 
     dispose() {
@@ -1087,6 +1223,108 @@ function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffs
             sourceOffset,
             targetOffset,
             byteLength,
+        },
+    })
+}
+
+function validateResolveDestinationUsage(runtime, destination) {
+
+    if ((destination.usage & GPU_BUFFER_USAGE_QUERY_RESOLVE) !== 0) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+        severity: 'error',
+        phase: 'resource',
+        subject: destination.subject,
+        related: [ runtime.subject ],
+        message: 'ResolveQuerySetCommand destination requires GPUBufferUsage.QUERY_RESOLVE.',
+        expected: { usage: 'GPUBufferUsage.QUERY_RESOLVE' },
+        actual: { usage: destination.usage },
+    })
+}
+
+function normalizeResolveFirstQuery(runtime, firstQuery) {
+
+    if (!Number.isInteger(firstQuery) || firstQuery < 0) {
+        throwResolveQuerySetDiagnostic({ runtime, firstQuery, reason: 'firstQuery' })
+    }
+
+    return firstQuery
+}
+
+function normalizeResolveQueryCount(runtime, queryCount) {
+
+    if (!Number.isInteger(queryCount) || queryCount <= 0) {
+        throwResolveQuerySetDiagnostic({ runtime, queryCount, reason: 'queryCount' })
+    }
+
+    return queryCount
+}
+
+function normalizeResolveDestinationOffset(runtime, destinationOffset) {
+
+    if (!Number.isInteger(destinationOffset) || destinationOffset < 0 || destinationOffset % 256 !== 0) {
+        throwResolveQuerySetDiagnostic({ runtime, destinationOffset, reason: 'destinationOffset' })
+    }
+
+    return destinationOffset
+}
+
+function validateResolveQuerySetRange(command) {
+
+    if (command.firstQuery >= command.querySet.count || command.firstQuery + command.queryCount > command.querySet.count) {
+        throwResolveQuerySetDiagnostic({
+            runtime: command.runtime,
+            querySet: command.querySet,
+            firstQuery: command.firstQuery,
+            queryCount: command.queryCount,
+            destination: command.destination,
+            destinationOffset: command.destinationOffset,
+            reason: 'queryRange',
+        })
+    }
+
+    const byteLength = command.queryCount * 8
+    if (command.destinationOffset + byteLength > command.destination.size) {
+        throwResolveQuerySetDiagnostic({
+            runtime: command.runtime,
+            querySet: command.querySet,
+            firstQuery: command.firstQuery,
+            queryCount: command.queryCount,
+            destination: command.destination,
+            destinationOffset: command.destinationOffset,
+            reason: 'destinationRange',
+        })
+    }
+}
+
+function throwResolveQuerySetDiagnostic({ runtime, querySet, firstQuery, queryCount, destination, destinationOffset, reason }) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_RESOLVE_QUERY_SET_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: { kind: 'Command', commandKind: 'resolve-query-set' },
+        related: [
+            runtime?.subject,
+            querySet?.subject,
+            destination?.subject,
+        ].filter(Boolean),
+        message: 'ResolveQuerySetCommand requires a QuerySetResource source, BufferResource destination, and valid query and byte ranges.',
+        expected: {
+            querySet: 'QuerySetResource',
+            firstQuery: 'non-negative integer within querySet.count',
+            queryCount: 'positive integer fitting inside querySet.count',
+            destination: 'BufferResource with GPUBufferUsage.QUERY_RESOLVE',
+            destinationOffset: 'non-negative integer aligned to 256 bytes with 8 bytes per query available',
+        },
+        actual: {
+            reason,
+            querySet: querySet === undefined || querySet === null ? String(querySet) : typeof querySet,
+            firstQuery,
+            queryCount,
+            destination: destination === undefined || destination === null ? String(destination) : typeof destination,
+            destinationOffset,
         },
     })
 }

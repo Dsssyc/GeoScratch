@@ -11,6 +11,7 @@ export function createFakeGpu() {
         pipelineLayouts: [],
         renderPipelines: [],
         computePipelines: [],
+        querySets: [],
         commandEncoders: [],
         queueWrites: [],
         queueTextureWrites: [],
@@ -20,6 +21,7 @@ export function createFakeGpu() {
         drawCalls: [],
         dispatchCalls: [],
         copies: [],
+        resolveQueries: [],
         maps: [],
     }
 
@@ -169,6 +171,19 @@ export function createFakeGpu() {
             calls.computePipelines.push(pipeline)
             return pipeline
         },
+        createQuerySet(descriptor) {
+            const querySet = {
+                type: 'querySet',
+                descriptor,
+                values: new BigUint64Array(descriptor.count ?? 0),
+                destroyed: false,
+                destroy() {
+                    this.destroyed = true
+                },
+            }
+            calls.querySets.push(querySet)
+            return querySet
+        },
         createCommandEncoder(descriptor) {
             const encoder = createFakeCommandEncoder(calls, descriptor)
             calls.commandEncoders.push(encoder)
@@ -278,6 +293,19 @@ function createFakeCommandEncoder(calls, descriptor) {
                 destination,
                 destinationOffset,
                 size,
+            })
+        },
+        resolveQuerySet(querySet, firstQuery, queryCount, destination, destinationOffset) {
+            const view = new DataView(destination.data.buffer)
+            for (let index = 0; index < queryCount; index++) {
+                view.setBigUint64(destinationOffset + index * 8, querySet.values[firstQuery + index], true)
+            }
+            calls.resolveQueries.push({
+                querySet,
+                firstQuery,
+                queryCount,
+                destination,
+                destinationOffset,
             })
         },
         finish() {

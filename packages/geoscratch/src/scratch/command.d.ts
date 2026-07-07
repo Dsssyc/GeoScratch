@@ -2,6 +2,7 @@ import { BindSet } from './binding'
 import { BufferResource } from './buffer'
 import { ComputePipeline, RenderPipeline } from './pipeline'
 import { ComputePassSpec, RenderPassSpec } from './pass'
+import { QuerySetResource } from './query-set'
 import { Resource } from './resource'
 import { ScratchRuntime } from './runtime'
 import { TextureResource } from './texture'
@@ -55,6 +56,15 @@ export type CopyCommandDescriptor = {
     target: BufferResource
     targetOffset?: number
     byteLength: number
+}
+
+export type ResolveQuerySetCommandDescriptor = {
+    label?: string
+    querySet: QuerySetResource
+    firstQuery?: number
+    queryCount: number
+    destination: BufferResource
+    destinationOffset?: number
 }
 
 export type TextureUploadOrigin = {
@@ -154,6 +164,26 @@ export class CopyCommand {
     readonly target: BufferResource
     readonly targetOffset: number
     readonly byteLength: number
+    readonly isDisposed: boolean
+
+    assertRuntime(runtime: ScratchRuntime): void
+    assertUsable(): void
+    encode(commandEncoder: GPUCommandEncoder): void
+    dispose(): void
+}
+
+export class ResolveQuerySetCommand {
+    constructor(runtime: ScratchRuntime, descriptor: ResolveQuerySetCommandDescriptor)
+
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'resolve-query-set'
+    readonly querySet: QuerySetResource
+    readonly firstQuery: number
+    readonly queryCount: number
+    readonly destination: BufferResource
+    readonly destinationOffset: number
     readonly isDisposed: boolean
 
     assertRuntime(runtime: ScratchRuntime): void

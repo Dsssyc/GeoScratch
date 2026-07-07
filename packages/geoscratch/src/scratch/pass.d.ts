@@ -1,6 +1,13 @@
 import { Surface } from './surface'
 import { ScratchRuntime } from './runtime'
+import { QuerySetResource } from './query-set'
 import { TextureResource } from './texture'
+
+export type TimestampWritesSpec = {
+    querySet: QuerySetResource
+    begin?: number
+    end?: number
+}
 
 export type RenderPassColorAttachmentSpec = {
     target: Surface | TextureResource
@@ -14,10 +21,12 @@ export type RenderPassColorAttachmentSpec = {
 export type RenderPassSpecDescriptor = {
     label?: string
     color: RenderPassColorAttachmentSpec[]
+    timestampWrites?: TimestampWritesSpec
 }
 
 export type ComputePassSpecDescriptor = {
     label?: string
+    timestampWrites?: TimestampWritesSpec
 }
 
 export class RenderPassSpec {
@@ -28,11 +37,14 @@ export class RenderPassSpec {
     readonly label?: string
     readonly passKind: 'render'
     readonly color: RenderPassColorAttachmentSpec[]
+    readonly timestampWrites?: TimestampWritesSpec
     readonly isDisposed: boolean
 
     assertRuntime(runtime: ScratchRuntime): void
     assertUsable(): void
     createRenderPassDescriptor(): GPURenderPassDescriptor
+    hasEncoderSideEffects(): boolean
+    advanceTimestampWriteEpochs(): void
     dispose(): void
 }
 
@@ -43,10 +55,13 @@ export class ComputePassSpec {
     readonly id: string
     readonly label?: string
     readonly passKind: 'compute'
+    readonly timestampWrites?: TimestampWritesSpec
     readonly isDisposed: boolean
 
     assertRuntime(runtime: ScratchRuntime): void
     assertUsable(): void
     createComputePassDescriptor(): GPUComputePassDescriptor
+    hasEncoderSideEffects(): boolean
+    advanceTimestampWriteEpochs(): void
     dispose(): void
 }

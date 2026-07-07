@@ -1,4 +1,4 @@
-import { CopyCommand, DispatchCommand, DrawCommand, TextureUploadCommand, UploadCommand } from './command'
+import { CopyCommand, DispatchCommand, DrawCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command'
 import { ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics'
 import { ComputePassSpec, RenderPassSpec } from './pass'
 import { ScratchRuntime } from './runtime'
@@ -21,6 +21,7 @@ export class SubmissionBuilder {
     compute(passSpec: ComputePassSpec, commands: DispatchCommand[]): this
     upload(command: UploadCommand | TextureUploadCommand): this
     copy(command: CopyCommand): this
+    resolve(command: ResolveQuerySetCommand): this
     submit(): SubmittedWork
 }
 

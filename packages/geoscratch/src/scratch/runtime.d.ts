@@ -1,9 +1,10 @@
 import { BufferResource, BufferResourceDescriptor } from './buffer'
 import { BindLayout, BindLayoutDescriptor, BindSet, BindSetBindings, BindSetOptions } from './binding'
-import { CopyCommand, CopyCommandDescriptor, DispatchCommand, DispatchCommandDescriptor, DrawCommand, DrawCommandDescriptor, TextureUploadCommand, TextureUploadCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
+import { CopyCommand, CopyCommandDescriptor, DispatchCommand, DispatchCommandDescriptor, DrawCommand, DrawCommandDescriptor, ResolveQuerySetCommand, ResolveQuerySetCommandDescriptor, TextureUploadCommand, TextureUploadCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
 import { ComputePassSpec, ComputePassSpecDescriptor, RenderPassSpec, RenderPassSpecDescriptor } from './pass'
 import { ComputePipeline, ComputePipelineDescriptor, RenderPipeline, RenderPipelineDescriptor } from './pipeline'
 import { Program, ProgramDescriptor } from './program'
+import { QuerySetResource, QuerySetResourceDescriptor } from './query-set'
 import { ReadbackOperation, ReadbackOperationDescriptor } from './readback'
 import { SamplerResource, SamplerResourceDescriptor } from './sampler'
 import { SubmissionBuilder, SubmissionBuilderOptions } from './submission'
@@ -47,6 +48,8 @@ export class ScratchRuntime {
     texture(descriptor: TextureResourceDescriptor): TextureResource
     createSampler(descriptor?: SamplerResourceDescriptor): SamplerResource
     sampler(descriptor?: SamplerResourceDescriptor): SamplerResource
+    createQuerySet(descriptor: QuerySetResourceDescriptor): QuerySetResource
+    querySet(descriptor: QuerySetResourceDescriptor): QuerySetResource
     createBindLayout(descriptor: BindLayoutDescriptor): BindLayout
     bindLayout(descriptor: BindLayoutDescriptor): BindLayout
     createBindSet(layout: BindLayout, bindings: BindSetBindings, options?: BindSetOptions): BindSet
@@ -65,6 +68,8 @@ export class ScratchRuntime {
     uploadCommand(descriptor: UploadCommandDescriptor): UploadCommand
     createCopyCommand(descriptor: CopyCommandDescriptor): CopyCommand
     copyCommand(descriptor: CopyCommandDescriptor): CopyCommand
+    createResolveQuerySetCommand(descriptor: ResolveQuerySetCommandDescriptor): ResolveQuerySetCommand
+    resolveQuerySetCommand(descriptor: ResolveQuerySetCommandDescriptor): ResolveQuerySetCommand
     createTextureUploadCommand(descriptor: TextureUploadCommandDescriptor): TextureUploadCommand
     textureUploadCommand(descriptor: TextureUploadCommandDescriptor): TextureUploadCommand
     createRenderPass(descriptor: RenderPassSpecDescriptor): RenderPassSpec
