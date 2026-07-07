@@ -33,6 +33,36 @@ describe('examples structure', () => {
         }
     })
 
+    it('defaults the examples browser to the new Scratch API path', () => {
+        const html = read('examples', 'index.html')
+
+        expect(html).to.include('class="example-link is-active" href="?sample=scratch_helloTriangle"')
+        expect(html).to.include('<h1 id="stage-title">Scratch Hello Triangle</h1>')
+        expect(html).to.include('href="./scratch_helloTriangle/main.js"')
+        expect(html).to.include('href="./scratch_helloTriangle/"')
+        expect(html).to.include('src="./scratch_helloTriangle/"')
+    })
+
+    it('marks old public API examples as legacy in the browser', () => {
+        const html = read('examples', 'index.html')
+        const legacyExamples = [
+            '1_helloTriangle',
+            '2_helloVertexBuffer',
+            'm_helloMap',
+            'm_demLayer',
+            'x_helloGAW',
+        ]
+
+        for (const name of legacyExamples) {
+            const linkStart = html.indexOf(`data-id="${name}"`)
+            const linkEnd = html.indexOf('</a>', linkStart)
+            const linkHtml = html.slice(linkStart, linkEnd)
+
+            expect(linkStart, `${name} link`).to.be.greaterThan(-1)
+            expect(linkHtml, `${name} legacy label`).to.include('Legacy API')
+        }
+    })
+
     it('gives each runnable example its own standalone html shell', () => {
         for (const name of examples) {
             const html = read('examples', name, 'index.html')

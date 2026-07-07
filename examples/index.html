@@ -21,15 +21,7 @@
                 </label>
 
                 <nav id="examples-nav" class="examples-nav" aria-label="GeoScratch examples">
-                    <a class="example-link is-active" href="?sample=1_helloTriangle" data-id="1_helloTriangle" data-path="./1_helloTriangle/" data-title="Hello Triangle" data-description="Minimal WebGPU triangle using the GeoScratch public entrypoint." data-tags="triangle basic render pass shader">
-                        <span class="example-title">Hello Triangle</span>
-                        <span class="example-desc">Minimal render pass and inline shader.</span>
-                    </a>
-                    <a class="example-link" href="?sample=2_helloVertexBuffer" data-id="2_helloVertexBuffer" data-path="./2_helloVertexBuffer/" data-title="Hello Vertex Buffer" data-description="Animated triangle driven by vertex and instance buffers." data-tags="vertex buffer animation binding">
-                        <span class="example-title">Hello Vertex Buffer</span>
-                        <span class="example-desc">Vertex and instance buffers.</span>
-                    </a>
-                    <a class="example-link" href="?sample=scratch_helloTriangle" data-id="scratch_helloTriangle" data-path="./scratch_helloTriangle/" data-title="Scratch Hello Triangle" data-description="Minimal triangle rendered through the new explicit Scratch runtime, surface, program, pipeline, command, and submission path." data-tags="scratch triangle runtime surface program pipeline command submission">
+                    <a class="example-link is-active" href="?sample=scratch_helloTriangle" data-id="scratch_helloTriangle" data-path="./scratch_helloTriangle/" data-title="Scratch Hello Triangle" data-description="Minimal triangle rendered through the new explicit Scratch runtime, surface, program, pipeline, command, and submission path." data-tags="scratch triangle runtime surface program pipeline command submission">
                         <span class="example-title">Scratch Hello Triangle</span>
                         <span class="example-desc">New Scratch execution path.</span>
                     </a>
@@ -41,17 +33,25 @@
                         <span class="example-title">Scratch Compute Readback</span>
                         <span class="example-desc">Storage dispatch and readback.</span>
                     </a>
-                    <a class="example-link" href="?sample=m_helloMap" data-id="m_helloMap" data-path="./m_helloMap/" data-title="Hello Map" data-description="Tile and vector data rendering experiments on a canvas map." data-tags="map vector tile interaction">
-                        <span class="example-title">Hello Map</span>
-                        <span class="example-desc">Interactive vector tile canvas map.</span>
+                    <a class="example-link" href="?sample=1_helloTriangle" data-id="1_helloTriangle" data-path="./1_helloTriangle/" data-title="Legacy API Hello Triangle" data-description="Legacy API example using StartDash, director stages, binding, renderPipeline, and renderPass." data-tags="legacy triangle basic render pass shader">
+                        <span class="example-title">Legacy API Hello Triangle</span>
+                        <span class="example-desc">Old StartDash render path.</span>
                     </a>
-                    <a class="example-link" href="?sample=m_demLayer" data-id="m_demLayer" data-path="./m_demLayer/" data-title="DEM Flow Layer" data-description="Tokenless dark basemap with underwater terrain and particle flow layer integration." data-tags="maplibre carto terrain dem flow particles">
-                        <span class="example-title">DEM Flow Layer</span>
-                        <span class="example-desc">Dark basemap terrain and flow overlay.</span>
+                    <a class="example-link" href="?sample=2_helloVertexBuffer" data-id="2_helloVertexBuffer" data-path="./2_helloVertexBuffer/" data-title="Legacy API Hello Vertex Buffer" data-description="Legacy API example with animated triangles driven by vertex and instance buffers." data-tags="legacy vertex buffer animation binding">
+                        <span class="example-title">Legacy API Hello Vertex Buffer</span>
+                        <span class="example-desc">Old vertex buffer binding path.</span>
                     </a>
-                    <a class="example-link" href="?sample=x_helloGAW" data-id="x_helloGAW" data-path="./x_helloGAW/" data-title="Hello GAW" data-description="Earth rendering demo with textured globe, particles, and post effects." data-tags="earth globe particles textures">
-                        <span class="example-title">Hello GAW</span>
-                        <span class="example-desc">Textured globe and particle links.</span>
+                    <a class="example-link" href="?sample=m_helloMap" data-id="m_helloMap" data-path="./m_helloMap/" data-title="Legacy API Hello Map" data-description="Legacy API tile and vector data rendering experiments on a canvas map." data-tags="legacy map vector tile interaction">
+                        <span class="example-title">Legacy API Hello Map</span>
+                        <span class="example-desc">Old API vector tile canvas map.</span>
+                    </a>
+                    <a class="example-link" href="?sample=m_demLayer" data-id="m_demLayer" data-path="./m_demLayer/" data-title="Legacy API DEM Flow Layer" data-description="Legacy API dark basemap with underwater terrain and particle flow layer integration." data-tags="legacy maplibre carto terrain dem flow particles">
+                        <span class="example-title">Legacy API DEM Flow Layer</span>
+                        <span class="example-desc">Old API terrain and flow overlay.</span>
+                    </a>
+                    <a class="example-link" href="?sample=x_helloGAW" data-id="x_helloGAW" data-path="./x_helloGAW/" data-title="Legacy API Hello GAW" data-description="Legacy API earth rendering demo with textured globe, particles, and post effects." data-tags="legacy earth globe particles textures">
+                        <span class="example-title">Legacy API Hello GAW</span>
+                        <span class="example-desc">Old API textured globe demo.</span>
                     </a>
                 </nav>
                 <div id="empty-state" class="empty-state">No examples match this filter.</div>
@@ -60,16 +60,16 @@
             <section class="example-stage">
                 <header class="stage-toolbar">
                     <div class="stage-title">
-                        <h1 id="stage-title">Hello Triangle</h1>
-                        <p id="stage-description">Minimal WebGPU triangle using the GeoScratch public entrypoint.</p>
+                        <h1 id="stage-title">Scratch Hello Triangle</h1>
+                        <p id="stage-description">Minimal triangle rendered through the new explicit Scratch runtime, surface, program, pipeline, command, and submission path.</p>
                     </div>
                     <div class="stage-actions">
-                        <a id="source-link" href="./1_helloTriangle/main.js">Source</a>
-                        <a id="standalone-link" href="./1_helloTriangle/">Standalone</a>
+                        <a id="source-link" href="./scratch_helloTriangle/main.js">Source</a>
+                        <a id="standalone-link" href="./scratch_helloTriangle/">Standalone</a>
                         <a href="https://github.com/YcSoku/GeoScratch">GitHub</a>
                     </div>
                 </header>
-                <iframe id="example-frame" class="example-frame" title="GeoScratch example preview" src="./1_helloTriangle/"></iframe>
+                <iframe id="example-frame" class="example-frame" title="GeoScratch example preview" src="./scratch_helloTriangle/"></iframe>
             </section>
         </main>
 
