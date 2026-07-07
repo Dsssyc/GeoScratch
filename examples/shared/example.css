@@ -1,0 +1,26 @@
+html,
+body {
+    position: absolute;
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #080b10;
+}
+
+#GPUFrame,
+#map {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    width: 100%;
+}
+
+#GPUFrame {
+    z-index: 1;
+    touch-action: none;
+}
+
+#map {
+    z-index: 0;
+}

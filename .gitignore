@@ -40,4 +40,8 @@ Thumbs.db
 # Directories #
 ######################
 node_modules/
-public/json/examples/*
+dist/
+.playwright-cli/
+output/
+examples/public/json/examples/*
+*.bin

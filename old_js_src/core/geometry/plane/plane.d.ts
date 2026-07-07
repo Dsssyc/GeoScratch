@@ -1,1 +1,0 @@
-export function plane(time = 5): { positions: number[], indices: number[] }

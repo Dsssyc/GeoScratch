@@ -1,0 +1,236 @@
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    min-height: 100%;
+    margin: 0;
+    color: #d8dee9;
+    background: #111418;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+    overflow: hidden;
+}
+
+a {
+    color: inherit;
+}
+
+.examples-shell {
+    display: grid;
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    height: 100vh;
+}
+
+.examples-sidebar {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-right: 1px solid #2a3038;
+    background: #151a20;
+}
+
+.examples-header {
+    padding: 22px 20px 16px;
+    border-bottom: 1px solid #2a3038;
+}
+
+.examples-brand {
+    display: block;
+    margin: 0 0 6px;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-decoration: none;
+}
+
+.examples-subtitle {
+    margin: 0;
+    color: #9aa7b8;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.examples-search {
+    display: grid;
+    gap: 8px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #2a3038;
+}
+
+.examples-search span {
+    color: #aab4c3;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.examples-search input {
+    width: 100%;
+    min-height: 38px;
+    border: 1px solid #394250;
+    border-radius: 6px;
+    padding: 0 12px;
+    color: #edf2f7;
+    background: #0d1117;
+    font: inherit;
+}
+
+.examples-search input:focus {
+    border-color: #55c2a2;
+    outline: none;
+}
+
+.examples-nav {
+    min-height: 0;
+    overflow: auto;
+    padding: 10px;
+}
+
+.example-link {
+    display: grid;
+    gap: 4px;
+    border-radius: 6px;
+    padding: 12px 10px;
+    text-decoration: none;
+}
+
+.example-link[hidden] {
+    display: none;
+}
+
+.example-link:hover,
+.example-link:focus,
+.example-link.is-active {
+    background: #202833;
+    outline: none;
+}
+
+.example-title {
+    color: #f6f8fb;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.example-desc {
+    color: #9aa7b8;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.example-stage {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+}
+
+.stage-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 76px;
+    padding: 14px 18px;
+    border-bottom: 1px solid #2a3038;
+    background: #111418;
+}
+
+.stage-title {
+    min-width: 0;
+}
+
+.stage-title h1 {
+    margin: 0;
+    color: #f6f8fb;
+    font-size: 18px;
+    line-height: 1.25;
+}
+
+.stage-title p {
+    margin: 4px 0 0;
+    color: #9aa7b8;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.stage-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.stage-actions a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    border: 1px solid #394250;
+    border-radius: 6px;
+    padding: 0 11px;
+    color: #e5ebf3;
+    background: #171d25;
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.stage-actions a:hover,
+.stage-actions a:focus {
+    border-color: #55c2a2;
+    outline: none;
+}
+
+.example-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #080b10;
+}
+
+.empty-state {
+    display: none;
+    padding: 14px 20px;
+    color: #9aa7b8;
+    font-size: 13px;
+}
+
+.empty-state.is-visible {
+    display: block;
+}
+
+@media (max-width: 860px) {
+    body {
+        overflow: auto;
+    }
+
+    .examples-shell {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(480px, 1fr);
+        min-height: 100vh;
+        height: auto;
+    }
+
+    .examples-sidebar {
+        border-right: 0;
+        border-bottom: 1px solid #2a3038;
+    }
+
+    .examples-nav {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        max-height: 280px;
+    }
+
+    .stage-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .stage-actions {
+        justify-content: flex-start;
+    }
+}
