@@ -28,6 +28,16 @@ export class SubmissionBuilder {
         return this
     }
 
+    upload(command) {
+
+        this.steps.push({
+            kind: 'upload',
+            command,
+        })
+
+        return this
+    }
+
     submit() {
 
         this.runtime.assertActive()
@@ -49,6 +59,12 @@ export class SubmissionBuilder {
         })
 
         for (const step of this.steps) {
+            if (step.kind === 'upload') {
+                validateUploadStep(this, step)
+                step.command.execute(this.runtime.queue)
+                continue
+            }
+
             validateRenderStep(this, step)
 
             if (step.commands.length === 0) continue
@@ -80,6 +96,25 @@ export class SubmissionBuilder {
             id: this.id,
         }
     }
+}
+
+function validateUploadStep(builder, step) {
+
+    const command = step.command
+
+    if (!command || typeof command.assertRuntime !== 'function' || command.commandKind !== 'upload') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'submission',
+            subject: builder.subject,
+            message: 'Submission upload step requires an UploadCommand.',
+            expected: { command: 'UploadCommand' },
+            actual: { command: command === undefined || command === null ? String(command) : typeof command },
+        })
+    }
+
+    command.assertRuntime(builder.runtime)
 }
 
 export class SubmittedWork {

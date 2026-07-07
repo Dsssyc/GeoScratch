@@ -1,10 +1,14 @@
 export function createFakeGpu() {
 
     const calls = {
+        buffers: [],
         shaderModules: [],
+        bindGroupLayouts: [],
+        bindGroups: [],
         pipelineLayouts: [],
         renderPipelines: [],
         commandEncoders: [],
+        queueWrites: [],
         queueSubmissions: [],
         renderPasses: [],
         drawCalls: [],
@@ -12,6 +16,15 @@ export function createFakeGpu() {
 
     const queue = {
         submittedWorkDoneCalls: 0,
+        writeBuffer(buffer, offset, data, dataOffset, size) {
+            calls.queueWrites.push({
+                buffer,
+                offset,
+                data,
+                dataOffset,
+                size,
+            })
+        },
         submit(commandBuffers) {
             calls.queueSubmissions.push(commandBuffers)
         },
@@ -27,13 +40,16 @@ export function createFakeGpu() {
         queue,
         lost: new Promise(() => {}),
         createBuffer(descriptor) {
-            return {
+            const buffer = {
+                type: 'buffer',
                 descriptor,
                 destroyed: false,
                 destroy() {
                     this.destroyed = true
                 },
             }
+            calls.buffers.push(buffer)
+            return buffer
         },
         createShaderModule(descriptor) {
             const shaderModule = {
@@ -42,6 +58,22 @@ export function createFakeGpu() {
             }
             calls.shaderModules.push(shaderModule)
             return shaderModule
+        },
+        createBindGroupLayout(descriptor) {
+            const layout = {
+                type: 'bindGroupLayout',
+                descriptor,
+            }
+            calls.bindGroupLayouts.push(layout)
+            return layout
+        },
+        createBindGroup(descriptor) {
+            const bindGroup = {
+                type: 'bindGroup',
+                descriptor,
+            }
+            calls.bindGroups.push(bindGroup)
+            return bindGroup
         },
         createPipelineLayout(descriptor) {
             const layout = {
@@ -170,6 +202,9 @@ function createFakeRenderPassEncoder(calls, descriptor) {
         actions: [],
         setPipeline(pipeline) {
             this.actions.push({ type: 'setPipeline', pipeline })
+        },
+        setBindGroup(group, bindGroup) {
+            this.actions.push({ type: 'setBindGroup', group, bindGroup })
         },
         draw(vertexCount, instanceCount, firstVertex, firstInstance) {
             const call = {

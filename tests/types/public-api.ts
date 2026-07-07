@@ -58,6 +58,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 1,
     })
+    const uniformBuffer: scr.BufferResource = runtime.createBuffer({
+        label: 'typed scratch uniform buffer',
+        size: 16,
+        usage: 0x8 | 0x40,
+    })
 
     const diagnostic: scr.ScratchDiagnostic = scr.createScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
@@ -82,13 +87,37 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             fragment: 'fsMain',
         },
     })
+    const bindLayout: scr.BindLayout = runtime.createBindLayout({
+        label: 'typed bind layout',
+        group: 0,
+        entries: [
+            {
+                binding: 0,
+                name: 'uniforms',
+                type: 'uniform',
+                visibility: [ 'vertex', 'fragment' ],
+            },
+        ],
+    })
+    const bindSet: scr.BindSet = runtime.createBindSet(bindLayout, {
+        uniforms: uniformBuffer,
+    }, {
+        label: 'typed bind set',
+    })
+    const upload: scr.UploadCommand = runtime.createUploadCommand({
+        target: uniformBuffer,
+        data: new Float32Array([ 1, 0, 0, 1 ]),
+        offset: 0,
+    })
     const scratchPipeline: scr.ScratchRenderPipeline = runtime.createRenderPipeline({
         label: 'typed scratch pipeline',
         program,
+        bindLayouts: [ bindLayout ],
         targets: [ { format: surface.format } ],
     })
     const draw: scr.DrawCommand = runtime.createDrawCommand({
         pipeline: scratchPipeline,
+        bindSets: [ bindSet ],
         count: { vertexCount: 3 },
         whenMissing: 'throw',
     })
@@ -101,7 +130,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         } ],
     })
     const builder: scr.SubmissionBuilder = runtime.createSubmission({ validation: 'throw' })
-    const submitted: scr.SubmittedWork = builder.render(passSpec, [ draw ]).submit()
+    const submitted: scr.SubmittedWork = builder.upload(upload).render(passSpec, [ draw ]).submit()
 
     void surface
     void error

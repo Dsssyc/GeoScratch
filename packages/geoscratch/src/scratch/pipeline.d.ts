@@ -1,3 +1,4 @@
+import { BindLayout } from './binding'
 import { Program } from './program'
 import { ScratchRuntime } from './runtime'
 
@@ -6,6 +7,7 @@ export type RenderPipelineDescriptor = {
     program: Program
     vertex?: string
     fragment?: string
+    bindLayouts?: BindLayout[]
     targets: GPUColorTargetState[]
     primitive?: GPUPrimitiveState
     depthStencil?: GPUDepthStencilState
@@ -22,6 +24,7 @@ export class RenderPipeline {
     readonly program: Program
     readonly vertexEntryPoint: string
     readonly fragmentEntryPoint: string
+    readonly bindLayouts: BindLayout[]
     readonly targets: GPUColorTargetState[]
     readonly targetFormats: GPUTextureFormat[]
     readonly shaderModule: GPUShaderModule

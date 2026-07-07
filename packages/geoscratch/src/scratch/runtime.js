@@ -1,6 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
+import { BindLayout, BindSet } from './binding.js'
 import { BufferResource } from './buffer.js'
-import { DrawCommand } from './command.js'
+import { DrawCommand, UploadCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { RenderPassSpec } from './pass.js'
 import { RenderPipeline } from './pipeline.js'
@@ -163,6 +164,28 @@ export class ScratchRuntime {
         return this.createBuffer(descriptor)
     }
 
+    createBindLayout(descriptor) {
+
+        this.assertActive()
+        return new BindLayout(this, descriptor)
+    }
+
+    bindLayout(descriptor) {
+
+        return this.createBindLayout(descriptor)
+    }
+
+    createBindSet(layout, bindings, options) {
+
+        this.assertActive()
+        return new BindSet(this, layout, bindings, options)
+    }
+
+    bindSet(layout, bindings, options) {
+
+        return this.createBindSet(layout, bindings, options)
+    }
+
     createProgram(descriptor) {
 
         this.assertActive()
@@ -194,6 +217,17 @@ export class ScratchRuntime {
     drawCommand(descriptor) {
 
         return this.createDrawCommand(descriptor)
+    }
+
+    createUploadCommand(descriptor) {
+
+        this.assertActive()
+        return new UploadCommand(this, descriptor)
+    }
+
+    uploadCommand(descriptor) {
+
+        return this.createUploadCommand(descriptor)
     }
 
     createRenderPass(descriptor) {

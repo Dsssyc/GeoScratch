@@ -29,6 +29,8 @@ export class RenderPipeline {
         this.program = program
         this.vertexEntryPoint = descriptor.vertex ?? program.entryPoints.vertex
         this.fragmentEntryPoint = descriptor.fragment ?? program.entryPoints.fragment
+        this.bindLayouts = normalizeBindLayouts(this, descriptor.bindLayouts)
+        this.bindLayoutsByGroup = new Map(this.bindLayouts.map(layout => [ layout.group, layout ]))
         this.targets = normalizeTargets(this, descriptor.targets)
         this.targetFormats = this.targets.map(target => target.format)
         this.isDisposed = false
@@ -41,7 +43,7 @@ export class RenderPipeline {
         })
         this.pipelineLayout = runtime.device.createPipelineLayout({
             label: labelWithSuffix(this.label, 'layout'),
-            bindGroupLayouts: [],
+            bindGroupLayouts: this.bindLayouts.map(layout => layout.gpuBindGroupLayout),
         })
         this.gpuPipeline = runtime.device.createRenderPipeline({
             label: this.label,
@@ -109,12 +111,63 @@ export class RenderPipeline {
 
         this.runtime.assertActive()
         this.program.assertUsable()
+        for (const layout of this.bindLayouts) {
+            layout.assertUsable()
+        }
     }
 
     dispose() {
 
         this.isDisposed = true
     }
+}
+
+function normalizeBindLayouts(pipeline, bindLayouts = []) {
+
+    if (!Array.isArray(bindLayouts)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: pipeline.subject,
+            message: 'RenderPipeline bindLayouts must be an array.',
+            expected: { bindLayouts: 'BindLayout[]' },
+            actual: { bindLayouts },
+        })
+    }
+
+    const groups = new Set()
+    return bindLayouts.map((layout) => {
+        if (!layout || typeof layout.assertRuntime !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
+                severity: 'error',
+                phase: 'pipeline',
+                subject: pipeline.subject,
+                message: 'RenderPipeline bindLayouts must contain BindLayout objects.',
+                expected: { bindLayout: 'BindLayout' },
+                actual: { bindLayout: layout === undefined || layout === null ? String(layout) : typeof layout },
+            })
+        }
+
+        layout.assertRuntime(pipeline.runtime)
+
+        if (groups.has(layout.group)) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
+                severity: 'error',
+                phase: 'pipeline',
+                subject: pipeline.subject,
+                related: [ layout.subject ],
+                message: 'RenderPipeline cannot use more than one BindLayout for the same group.',
+                expected: { group: 'unique' },
+                actual: { group: layout.group },
+            })
+        }
+        groups.add(layout.group)
+
+        return layout
+    })
 }
 
 function normalizeTargets(pipeline, targets) {
