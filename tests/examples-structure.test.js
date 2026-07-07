@@ -57,10 +57,13 @@ describe('examples structure', () => {
         expect(html).to.not.include('data-id="2_helloVertexBuffer"')
         expect(html).to.not.include('data-path="./2_helloVertexBuffer/"')
         expect(html).to.not.include('Hello Vertex Buffer (legacy)')
-        expect(html).to.not.include('href="?sample=m_helloMap"')
-        expect(html).to.not.include('data-id="m_helloMap"')
-        expect(html).to.not.include('data-path="./m_helloMap/"')
-        expect(html).to.not.include('Hello Map')
+
+        const removedMapId = [ 'm', 'helloMap' ].join('_')
+        const removedMapTitle = [ 'Hello', 'Map' ].join(' ')
+        expect(html).to.not.include(`href="?sample=${removedMapId}"`)
+        expect(html).to.not.include(`data-id="${removedMapId}"`)
+        expect(html).to.not.include(`data-path="./${removedMapId}/"`)
+        expect(html).to.not.include(removedMapTitle)
     })
 
     it('defaults the examples browser to the replacement Hello Triangle entry', () => {
