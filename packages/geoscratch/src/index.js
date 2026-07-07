@@ -1,4 +1,13 @@
 export { ScratchObject } from './core/object/object.js'
+export {
+    ScratchRuntime,
+    Surface,
+    ScratchDiagnosticError,
+    createScratchDiagnostic,
+    createScratchDiagnosticReport,
+    Resource,
+    BufferResource,
+} from './scratch/index.js'
 
 import getDevice from './gpu/context/device.js'
 export { getDevice }

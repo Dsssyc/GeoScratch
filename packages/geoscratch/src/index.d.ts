@@ -1,4 +1,22 @@
 export { ScratchObject } from './core/object/object'
+export {
+    ScratchRuntime,
+    ScratchRuntimeCreateOptions,
+    Surface,
+    SurfaceFormat,
+    SurfaceOptions,
+    SurfaceSize,
+    ScratchDiagnostic,
+    ScratchDiagnosticError,
+    ScratchDiagnosticInput,
+    ScratchDiagnosticReport,
+    createScratchDiagnostic,
+    createScratchDiagnosticReport,
+    Resource,
+    ResourceOptions,
+    BufferResource,
+    BufferResourceDescriptor,
+} from './scratch/index'
 
 export { Buffer } from './gpu/buffer/buffer'
 export { vertexBuffer, VertexBuffer } from './gpu/buffer/vertexBuffer'
