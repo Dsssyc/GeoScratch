@@ -69,6 +69,9 @@ describe('workspace layout', () => {
         const exampleFiles = [
             'examples/1_helloTriangle/main.js',
             'examples/2_helloVertexBuffer/main.js',
+            'examples/scratch_helloTriangle/main.js',
+            'examples/scratch_uniformTriangle/main.js',
+            'examples/scratch_computeReadback/main.js',
             'examples/m_helloMap/main.js',
             'examples/shared/scratchMap.js',
             'examples/m_demLayer/terrainLayer.js',
