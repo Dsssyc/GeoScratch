@@ -70,6 +70,7 @@ describe('workspace layout', () => {
             'examples/1_helloTriangle/main.js',
             'examples/2_helloVertexBuffer/main.js',
             'examples/scratch_helloTriangle/main.js',
+            'examples/scratch_uniformTriangle/main.js',
             'examples/m_helloMap/main.js',
             'examples/m_demLayer/main.js',
             'examples/m_demLayer/terrainLayer.js',

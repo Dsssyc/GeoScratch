@@ -197,10 +197,11 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         expect(fixture.calls.queueWrites[0]).to.deep.include({
             buffer: fixture.uniformBuffer.gpuBuffer,
             offset: 0,
-            dataOffset: 0,
-            size: fixture.upload.byteLength,
+            dataOffset: undefined,
+            size: undefined,
         })
-        expect(fixture.calls.queueWrites[0].data).to.equal(fixture.upload.data)
+        expect(fixture.calls.queueWrites[0].data).to.be.instanceOf(Uint8Array)
+        expect(fixture.calls.queueWrites[0].data.byteLength).to.equal(fixture.upload.byteLength)
         expect(fixture.calls.pipelineLayouts[0].descriptor).to.deep.equal({
             label: 'uniform triangle pipeline layout',
             bindGroupLayouts: [ fixture.bindLayout.gpuBindGroupLayout ],

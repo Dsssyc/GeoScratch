@@ -230,9 +230,7 @@ export class UploadCommand {
         queue.writeBuffer(
             this.target.gpuBuffer,
             this.offset,
-            this.data,
-            this.dataOffset,
-            this.byteLength
+            createUploadSource(this.data, this.dataOffset, this.byteLength)
         )
         this.target._advanceContentEpoch()
     }
@@ -394,6 +392,15 @@ function getDataByteLength(data) {
     if (data instanceof ArrayBuffer) return data.byteLength
     if (ArrayBuffer.isView(data)) return data.byteLength
     return undefined
+}
+
+function createUploadSource(data, byteOffset, byteLength) {
+
+    if (data instanceof ArrayBuffer) {
+        return new Uint8Array(data, byteOffset, byteLength)
+    }
+
+    return new Uint8Array(data.buffer, data.byteOffset + byteOffset, byteLength)
 }
 
 function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size, reason }) {

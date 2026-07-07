@@ -11,6 +11,7 @@ describe('examples structure', () => {
         '1_helloTriangle',
         '2_helloVertexBuffer',
         'scratch_helloTriangle',
+        'scratch_uniformTriangle',
         'm_helloMap',
         'm_demLayer',
         'x_helloGAW',
