@@ -34,6 +34,8 @@ export {
     DispatchCommandDescriptor,
     DrawCommand,
     DrawCommandDescriptor,
+    DrawVertexBufferBinding,
+    NormalizedDrawVertexBufferBinding,
     ResourceReadinessPolicy,
     StaticDispatchCount,
     StaticDrawCount,

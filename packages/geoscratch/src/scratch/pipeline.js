@@ -31,6 +31,7 @@ export class RenderPipeline {
         this.fragmentEntryPoint = descriptor.fragment ?? program.entryPoints.fragment
         this.bindLayouts = normalizeBindLayouts(this, descriptor.bindLayouts)
         this.bindLayoutsByGroup = new Map(this.bindLayouts.map(layout => [ layout.group, layout ]))
+        this.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
         this.targets = normalizeTargets(this, descriptor.targets)
         this.targetFormats = this.targets.map(target => target.format)
         this.isDisposed = false
@@ -51,7 +52,7 @@ export class RenderPipeline {
             vertex: {
                 module: this.shaderModule,
                 entryPoint: this.vertexEntryPoint,
-                buffers: [],
+                buffers: this.vertexBuffers,
             },
             fragment: {
                 module: this.shaderModule,
@@ -233,6 +234,114 @@ export class ComputePipeline {
 
         this.isDisposed = true
     }
+}
+
+function normalizeVertexBuffers(pipeline, vertexBuffers = []) {
+
+    if (!Array.isArray(vertexBuffers)) {
+        throwVertexLayoutDiagnostic(pipeline, {
+            expected: { vertexBuffers: 'GPUVertexBufferLayout[]' },
+            actual: { vertexBuffers },
+        })
+    }
+
+    return vertexBuffers.map((layout, slot) => {
+        if (!layout || typeof layout !== 'object') {
+            throwVertexLayoutDiagnostic(pipeline, {
+                expected: { layout: 'GPUVertexBufferLayout' },
+                actual: { slot, layout: layout === undefined || layout === null ? String(layout) : typeof layout },
+            })
+        }
+
+        if (!Number.isInteger(layout.arrayStride) || layout.arrayStride <= 0) {
+            throwVertexLayoutDiagnostic(pipeline, {
+                expected: { arrayStride: 'positive finite number' },
+                actual: { slot, arrayStride: layout.arrayStride },
+            })
+        }
+
+        if (layout.stepMode !== undefined && ![ 'vertex', 'instance' ].includes(layout.stepMode)) {
+            throwVertexLayoutDiagnostic(pipeline, {
+                expected: { stepMode: [ 'vertex', 'instance' ] },
+                actual: { slot, stepMode: layout.stepMode },
+            })
+        }
+
+        if (!Array.isArray(layout.attributes) || layout.attributes.length === 0) {
+            throwVertexLayoutDiagnostic(pipeline, {
+                expected: { attributes: 'non-empty GPUVertexAttribute[]' },
+                actual: { slot, attributes: layout.attributes },
+            })
+        }
+
+        const normalized = {
+            arrayStride: layout.arrayStride,
+            attributes: layout.attributes.map((attribute, attributeIndex) => normalizeVertexAttribute(
+                pipeline,
+                attribute,
+                slot,
+                attributeIndex
+            )),
+        }
+        if (layout.stepMode !== undefined) normalized.stepMode = layout.stepMode
+
+        return normalized
+    })
+}
+
+function normalizeVertexAttribute(pipeline, attribute, slot, attributeIndex) {
+
+    if (!attribute || typeof attribute !== 'object') {
+        throwVertexLayoutDiagnostic(pipeline, {
+            expected: { attribute: 'GPUVertexAttribute' },
+            actual: {
+                slot,
+                attributeIndex,
+                attribute: attribute === undefined || attribute === null ? String(attribute) : typeof attribute,
+            },
+        })
+    }
+
+    if (!Number.isInteger(attribute.shaderLocation) || attribute.shaderLocation < 0) {
+        throwVertexLayoutDiagnostic(pipeline, {
+            expected: { shaderLocation: 'non-negative integer' },
+            actual: { slot, attributeIndex, shaderLocation: attribute.shaderLocation },
+        })
+    }
+
+    if (!Number.isInteger(attribute.offset) || attribute.offset < 0) {
+        throwVertexLayoutDiagnostic(pipeline, {
+            expected: { offset: 'non-negative integer' },
+            actual: { slot, attributeIndex, offset: attribute.offset },
+        })
+    }
+
+    if (typeof attribute.format !== 'string' || attribute.format.length === 0) {
+        throwVertexLayoutDiagnostic(pipeline, {
+            expected: { format: 'GPUVertexFormat' },
+            actual: { slot, attributeIndex, format: attribute.format },
+        })
+    }
+
+    return {
+        shaderLocation: attribute.shaderLocation,
+        offset: attribute.offset,
+        format: attribute.format,
+    }
+}
+
+function throwVertexLayoutDiagnostic(pipeline, { expected, actual }) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PIPELINE_VERTEX_LAYOUT_MISMATCH',
+        severity: 'error',
+        phase: 'pipeline',
+        subject: pipeline.subject,
+        related: [ pipeline.program?.subject ].filter(Boolean),
+        message: 'RenderPipeline vertex buffer layout is invalid.',
+        expected,
+        actual,
+    })
 }
 
 function normalizeBindLayouts(pipeline, bindLayouts = []) {

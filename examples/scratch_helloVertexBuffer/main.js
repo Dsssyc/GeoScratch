@@ -1,0 +1,162 @@
+import {
+    ScratchRuntime,
+} from 'geoscratch'
+
+const canvas = document.getElementById('GPUFrame')
+
+const vertexBufferWgsl = `
+struct VertexInput {
+    @location(0) position: vec2f,
+    @location(1) color: vec3f,
+    @location(2) size: f32,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4f,
+    @location(0) @interpolate(perspective, center) color: vec3f,
+};
+
+@vertex
+fn vsMain(input: VertexInput) -> VertexOutput {
+    var output: VertexOutput;
+    output.position = vec4f(input.position * input.size, 0.0, 1.0);
+    output.color = input.color;
+    return output;
+}
+
+@fragment
+fn fsMain(input: VertexOutput) -> @location(0) vec4f {
+    return vec4f(input.color, 1.0);
+}
+`
+
+const vertices = new Float32Array([
+    // x,    y,     r,    g,    b
+    -0.5, -0.5,   1.0,  0.0,  0.0,
+     0.0,  0.5,   0.0,  1.0,  0.0,
+     0.5, -0.5,   0.0,  0.0,  1.0,
+])
+const instanceSize = new Float32Array([ 1 ])
+
+main().catch((error) => {
+    console.error(error)
+})
+
+async function main() {
+
+    const runtime = await ScratchRuntime.create({
+        label: 'hello vertex buffer runtime',
+    })
+    const surface = runtime.createSurface(canvas, {
+        label: 'hello vertex buffer surface',
+        format: 'preferred',
+        alphaMode: 'opaque',
+    })
+    const vertexBuffer = runtime.createBuffer({
+        label: 'hello vertex attributes',
+        size: vertices.byteLength,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    })
+    const instanceSizeBuffer = runtime.createBuffer({
+        label: 'hello vertex instance size',
+        size: instanceSize.byteLength,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    })
+    const program = runtime.createProgram({
+        label: 'hello vertex buffer program',
+        modules: [ vertexBufferWgsl ],
+        entryPoints: {
+            vertex: 'vsMain',
+            fragment: 'fsMain',
+        },
+    })
+    const pipeline = runtime.createRenderPipeline({
+        label: 'hello vertex buffer pipeline',
+        program,
+        vertexBuffers: [
+            {
+                arrayStride: 20,
+                stepMode: 'vertex',
+                attributes: [
+                    { shaderLocation: 0, offset: 0, format: 'float32x2' },
+                    { shaderLocation: 1, offset: 8, format: 'float32x3' },
+                ],
+            },
+            {
+                arrayStride: 4,
+                stepMode: 'instance',
+                attributes: [
+                    { shaderLocation: 2, offset: 0, format: 'float32' },
+                ],
+            },
+        ],
+        targets: [ { format: surface.format } ],
+    })
+    const pass = runtime.createRenderPass({
+        label: 'hello vertex buffer pass',
+        color: [
+            {
+                target: surface,
+                load: 'clear',
+                store: 'store',
+                clear: [ 0.03, 0.05, 0.08, 1 ],
+            },
+        ],
+    })
+    const uploadVertices = runtime.createUploadCommand({
+        label: 'upload hello vertex attributes',
+        target: vertexBuffer,
+        data: vertices,
+    })
+    const uploadInstanceSize = runtime.createUploadCommand({
+        label: 'upload hello vertex instance size',
+        target: instanceSizeBuffer,
+        data: instanceSize,
+    })
+    const draw = runtime.createDrawCommand({
+        label: 'draw hello vertex buffer',
+        pipeline,
+        vertexBuffers: [
+            { slot: 0, buffer: vertexBuffer },
+            { slot: 1, buffer: instanceSizeBuffer },
+        ],
+        count: { vertexCount: 3, instanceCount: 1 },
+        whenMissing: 'throw',
+    })
+
+    let frame = 0
+    let needsVertexUpload = true
+
+    function render() {
+
+        resizeSurface(surface, canvas)
+        instanceSize[0] = 0.75 + 0.2 * Math.cos(frame++ * 0.04)
+
+        const submission = runtime.createSubmission({ validation: 'throw' })
+        if (needsVertexUpload) {
+            submission.upload(uploadVertices)
+            needsVertexUpload = false
+        }
+
+        const submitted = submission
+            .upload(uploadInstanceSize)
+            .render(pass, [ draw ])
+            .submit()
+        void submitted.done
+
+        requestAnimationFrame(render)
+    }
+
+    render()
+}
+
+function resizeSurface(surface, canvas) {
+
+    const devicePixelRatio = window.devicePixelRatio || 1
+    const width = Math.max(1, Math.floor(canvas.clientWidth * devicePixelRatio))
+    const height = Math.max(1, Math.floor(canvas.clientHeight * devicePixelRatio))
+
+    if (surface.size.width !== width || surface.size.height !== height) {
+        surface.resize({ width, height })
+    }
+}

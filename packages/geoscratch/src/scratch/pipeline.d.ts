@@ -8,6 +8,7 @@ export type RenderPipelineDescriptor = {
     vertex?: string
     fragment?: string
     bindLayouts?: BindLayout[]
+    vertexBuffers?: GPUVertexBufferLayout[]
     targets: GPUColorTargetState[]
     primitive?: GPUPrimitiveState
     depthStencil?: GPUDepthStencilState
@@ -33,6 +34,7 @@ export class RenderPipeline {
     readonly vertexEntryPoint: string
     readonly fragmentEntryPoint: string
     readonly bindLayouts: BindLayout[]
+    readonly vertexBuffers: GPUVertexBufferLayout[]
     readonly targets: GPUColorTargetState[]
     readonly targetFormats: GPUTextureFormat[]
     readonly shaderModule: GPUShaderModule

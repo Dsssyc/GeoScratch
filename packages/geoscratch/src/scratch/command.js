@@ -1,5 +1,8 @@
 import { UUID } from '../core/utils/uuid.js'
+import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+
+const GPU_BUFFER_USAGE_VERTEX = globalThis.GPUBufferUsage?.VERTEX ?? 0x20
 
 export class DrawCommand {
 
@@ -28,6 +31,7 @@ export class DrawCommand {
         this.commandKind = 'draw'
         this.pipeline = pipeline
         this.bindSets = normalizeBindSets(this, descriptor.bindSets)
+        this.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
         this.count = normalizeDrawCount(this, descriptor.count)
         this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
@@ -83,6 +87,9 @@ export class DrawCommand {
         for (const bindSet of this.bindSets) {
             bindSet.assertUsable()
         }
+        for (const binding of this.vertexBuffers) {
+            binding.buffer.assertUsable()
+        }
     }
 
     validateForPass(passSpec) {
@@ -113,6 +120,9 @@ export class DrawCommand {
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
         for (const bindSet of this.bindSets) {
             passEncoder.setBindGroup(bindSet.layout.group, bindSet.getBindGroup())
+        }
+        for (const binding of this.vertexBuffers) {
+            passEncoder.setVertexBuffer(binding.slot, binding.buffer.gpuBuffer, binding.offset, binding.size)
         }
         passEncoder.draw(
             this.count.vertexCount,
@@ -427,6 +437,105 @@ function normalizeBindSets(command, bindSets = []) {
     return [ ...bindSets ]
 }
 
+function normalizeVertexBuffers(command, vertexBuffers = []) {
+
+    if (!Array.isArray(vertexBuffers)) {
+        throwVertexBufferDiagnostic(command, {
+            expected: { vertexBuffers: 'DrawVertexBufferBinding[]' },
+            actual: { vertexBuffers },
+        })
+    }
+
+    const slots = new Set()
+    return vertexBuffers.map((binding) => {
+        if (!binding || typeof binding !== 'object') {
+            throwVertexBufferDiagnostic(command, {
+                expected: { binding: 'DrawVertexBufferBinding' },
+                actual: { binding: binding === undefined || binding === null ? String(binding) : typeof binding },
+            })
+        }
+
+        if (!Number.isInteger(binding.slot) || binding.slot < 0) {
+            throwVertexBufferDiagnostic(command, {
+                expected: { slot: 'non-negative integer' },
+                actual: { slot: binding.slot },
+            })
+        }
+
+        if (binding.slot >= command.pipeline.vertexBuffers.length) {
+            throwVertexBufferDiagnostic(command, {
+                expected: { slot: `0..${Math.max(0, command.pipeline.vertexBuffers.length - 1)}` },
+                actual: { slot: binding.slot },
+            })
+        }
+
+        if (slots.has(binding.slot)) {
+            throwVertexBufferDiagnostic(command, {
+                expected: { slot: 'unique' },
+                actual: { slot: binding.slot },
+            })
+        }
+        slots.add(binding.slot)
+
+        const buffer = binding.buffer
+        if (!(buffer instanceof BufferResource)) {
+            throwVertexBufferDiagnostic(command, {
+                expected: { buffer: 'BufferResource' },
+                actual: {
+                    buffer: buffer === undefined || buffer === null ? String(buffer) : typeof buffer,
+                },
+            })
+        }
+
+        buffer.assertRuntime(command.runtime)
+
+        const offset = binding.offset ?? 0
+        if (!Number.isInteger(offset) || offset < 0) {
+            throwVertexBufferDiagnostic(command, {
+                expected: { offset: 'non-negative integer' },
+                actual: { slot: binding.slot, offset },
+                related: [ buffer.subject ],
+            })
+        }
+
+        if (binding.size !== undefined && (!Number.isInteger(binding.size) || binding.size <= 0)) {
+            throwVertexBufferDiagnostic(command, {
+                expected: { size: 'positive integer' },
+                actual: { slot: binding.slot, size: binding.size },
+                related: [ buffer.subject ],
+            })
+        }
+
+        if (offset > buffer.size || (binding.size !== undefined && offset + binding.size > buffer.size)) {
+            throwVertexBufferDiagnostic(command, {
+                expected: { range: 'within BufferResource size' },
+                actual: { slot: binding.slot, offset, size: binding.size, bufferSize: buffer.size },
+                related: [ buffer.subject ],
+            })
+        }
+
+        if ((buffer.usage & GPU_BUFFER_USAGE_VERTEX) === 0) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+                severity: 'error',
+                phase: 'resource',
+                subject: buffer.subject,
+                related: [ command.subject, command.pipeline.subject ],
+                message: 'DrawCommand vertex buffer binding requires GPUBufferUsage.VERTEX.',
+                expected: { usage: 'GPUBufferUsage.VERTEX' },
+                actual: { usage: buffer.usage },
+            })
+        }
+
+        return {
+            slot: binding.slot,
+            buffer,
+            offset,
+            size: binding.size,
+        }
+    })
+}
+
 function normalizeDispatchCount(command, count) {
 
     if (!count || typeof count !== 'object' || !Array.isArray(count.workgroups)) {
@@ -668,6 +777,23 @@ function throwCountDiagnostic(command, count) {
         message: 'DrawCommand requires a static draw count for this slice.',
         expected: { count: '{ vertexCount: number }' },
         actual: { count },
+    })
+}
+
+function throwVertexBufferDiagnostic(command, { expected, actual, related = [] }) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_VERTEX_BUFFER_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [
+            command.pipeline?.subject,
+            ...related,
+        ].filter(Boolean),
+        message: 'DrawCommand vertex buffer binding is invalid.',
+        expected,
+        actual,
     })
 }
 

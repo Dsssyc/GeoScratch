@@ -11,7 +11,7 @@ describe('examples structure', () => {
         'scratch_helloTriangle',
         'scratch_uniformTriangle',
         'scratch_computeReadback',
-        '2_helloVertexBuffer',
+        'scratch_helloVertexBuffer',
         'm_helloMap',
         'm_demLayer',
         'm_flowLayer',
@@ -23,6 +23,7 @@ describe('examples structure', () => {
         'scratch_helloTriangle',
         'scratch_uniformTriangle',
         'scratch_computeReadback',
+        'scratch_helloVertexBuffer',
         'm_helloMap',
         'm_demLayer',
         'm_flowLayer',
@@ -50,6 +51,10 @@ describe('examples structure', () => {
         expect(html).to.not.include('href="?sample=1_helloTriangle"')
         expect(html).to.not.include('data-id="1_helloTriangle"')
         expect(html).to.not.include('data-path="./1_helloTriangle/"')
+        expect(html).to.not.include('href="?sample=2_helloVertexBuffer"')
+        expect(html).to.not.include('data-id="2_helloVertexBuffer"')
+        expect(html).to.not.include('data-path="./2_helloVertexBuffer/"')
+        expect(html).to.not.include('Hello Vertex Buffer (legacy)')
     })
 
     it('defaults the examples browser to the replacement Hello Triangle entry', () => {
@@ -68,6 +73,7 @@ describe('examples structure', () => {
             [ 'scratch_helloTriangle', 'Hello Triangle' ],
             [ 'scratch_uniformTriangle', 'Uniform Triangle' ],
             [ 'scratch_computeReadback', 'Compute Readback' ],
+            [ 'scratch_helloVertexBuffer', 'Hello Vertex Buffer' ],
         ]
 
         for (const [ name, title ] of scratchBackedExamples) {
@@ -85,7 +91,6 @@ describe('examples structure', () => {
     it('marks only not-yet-replaced old API examples as legacy in the browser', () => {
         const html = read('examples', 'index.html')
         const legacyExamples = [
-            '2_helloVertexBuffer',
             'm_helloMap',
             'm_demLayer',
             'm_flowLayer',

@@ -89,10 +89,35 @@ type DrawCount =
 Static values are the default path:
 
 ```ts
+const vertexBuffer = scratch.buffer({
+    label: 'triangle vertices',
+    usage: ['vertex', 'copyDst'],
+    size: vertexBytes.byteLength,
+})
+
+const trianglePipeline = scratch.pipeline.render({
+    label: 'triangle pipeline',
+    program: triangleProgram,
+    vertexBuffers: [
+        {
+            arrayStride: 20,
+            stepMode: 'vertex',
+            attributes: [
+                { shaderLocation: 0, offset: 0, format: 'float32x2' },
+                { shaderLocation: 1, offset: 8, format: 'float32x3' },
+            ],
+        },
+    ],
+    targets: [{ format: surface.format }],
+})
+
 const drawTriangle = scratch.command.draw({
     label: 'draw triangle',
-    pipeline,
+    pipeline: trianglePipeline,
     bindSets: [],
+    vertexBuffers: [
+        { slot: 0, buffer: vertexBuffer },
+    ],
     count: { vertexCount: 3 },
     resources: {
         read: [],

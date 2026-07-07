@@ -250,6 +250,9 @@ function createFakeRenderPassEncoder(calls, descriptor) {
         setBindGroup(group, bindGroup) {
             this.actions.push({ type: 'setBindGroup', group, bindGroup })
         },
+        setVertexBuffer(slot, buffer, offset, size) {
+            this.actions.push({ type: 'setVertexBuffer', slot, buffer, offset, size })
+        },
         draw(vertexCount, instanceCount, firstVertex, firstInstance) {
             const call = {
                 vertexCount,

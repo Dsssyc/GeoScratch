@@ -72,6 +72,7 @@ describe('workspace layout', () => {
             'examples/scratch_helloTriangle/main.js',
             'examples/scratch_uniformTriangle/main.js',
             'examples/scratch_computeReadback/main.js',
+            'examples/scratch_helloVertexBuffer/main.js',
             'examples/m_helloMap/main.js',
             'examples/shared/scratchMap.js',
             'examples/m_demLayer/terrainLayer.js',

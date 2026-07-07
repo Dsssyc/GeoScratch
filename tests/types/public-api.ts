@@ -63,6 +63,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 0x8 | 0x40,
     })
+    const vertexBuffer: scr.BufferResource = runtime.createBuffer({
+        label: 'typed scratch vertex buffer',
+        size: 24,
+        usage: 0x20 | 0x8,
+    })
     const storageInput: scr.BufferResource = runtime.createBuffer({
         label: 'typed scratch storage input',
         size: 16,
@@ -145,11 +150,22 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         label: 'typed scratch pipeline',
         program,
         bindLayouts: [ bindLayout ],
+        vertexBuffers: [
+            {
+                arrayStride: 8,
+                attributes: [
+                    { shaderLocation: 0, offset: 0, format: 'float32x2' },
+                ],
+            },
+        ],
         targets: [ { format: surface.format } ],
     })
     const draw: scr.DrawCommand = runtime.createDrawCommand({
         pipeline: scratchPipeline,
         bindSets: [ bindSet ],
+        vertexBuffers: [
+            { slot: 0, buffer: vertexBuffer, offset: 0, size: 24 },
+        ],
         count: { vertexCount: 3 },
         whenMissing: 'throw',
     })

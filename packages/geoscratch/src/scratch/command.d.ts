@@ -18,10 +18,22 @@ export type StaticDrawCount = {
     firstInstance?: number
 }
 
+export type DrawVertexBufferBinding = {
+    slot: number
+    buffer: BufferResource
+    offset?: number
+    size?: number
+}
+
+export type NormalizedDrawVertexBufferBinding = DrawVertexBufferBinding & {
+    offset: number
+}
+
 export type DrawCommandDescriptor = {
     label?: string
     pipeline: RenderPipeline
     bindSets?: BindSet[]
+    vertexBuffers?: DrawVertexBufferBinding[]
     count: StaticDrawCount
     whenMissing: ResourceReadinessPolicy
 }
@@ -60,6 +72,7 @@ export class DrawCommand {
     readonly commandKind: 'draw'
     readonly pipeline: RenderPipeline
     readonly bindSets: BindSet[]
+    readonly vertexBuffers: NormalizedDrawVertexBufferBinding[]
     readonly count: StaticDrawCount
     readonly whenMissing: ResourceReadinessPolicy
     readonly isDisposed: boolean
