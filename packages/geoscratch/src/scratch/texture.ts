@@ -1,9 +1,10 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { Resource } from './resource.js'
+import { isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
-const TEXTURE_DIMENSIONS = new Set([ '2d' ])
+const TEXTURE_DIMENSIONS = new Set<GPUTextureDimension>([ '2d' ])
 
 export type TextureResourceDescriptor = Omit<GPUTextureDescriptor, 'size'> & {
     size: GPUTextureDescriptor['size'] | [number, number] | [number, number, number]
@@ -41,9 +42,9 @@ export class TextureResource extends Resource {
         const normalizedDescriptor = normalizeTextureDescriptor(runtime, descriptor)
 
         super(runtime, {
-            label: normalizedDescriptor.label,
             resourceKind: 'TextureResource',
             descriptor: normalizedDescriptor,
+            ...(normalizedDescriptor.label !== undefined ? { label: normalizedDescriptor.label } : {}),
         })
 
         this.size = normalizedDescriptor.size
@@ -96,7 +97,7 @@ export class TextureResource extends Resource {
     }
 }
 
-function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: any): NormalizedTextureDescriptor {
+function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: unknown): NormalizedTextureDescriptor {
 
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
@@ -112,7 +113,7 @@ function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: any): N
         })
     }
 
-    if (!descriptor || typeof descriptor !== 'object') {
+    if (!isRecord(descriptor)) {
         throwTextureDescriptorDiagnostic(subject, descriptor, {
             descriptor: 'object with size, format, and usage',
         })
@@ -121,7 +122,7 @@ function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: any): N
     const size = normalizeTextureSize(subject, descriptor.size)
     const format = normalizeTextureFormat(subject, descriptor.format)
     const usage = normalizeTextureUsage(subject, descriptor.usage)
-    const dimension = (descriptor.dimension ?? '2d') as GPUTextureDimension
+    const dimension = normalizeTextureDimension(subject, descriptor, descriptor.dimension ?? '2d')
     if (!TEXTURE_DIMENSIONS.has(dimension)) {
         throwTextureDescriptorDiagnostic(subject, descriptor, {
             dimension: [ ...TEXTURE_DIMENSIONS ],
@@ -131,7 +132,7 @@ function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: any): N
     const mipLevelCount = normalizePositiveInteger(subject, descriptor.mipLevelCount ?? 1, 'mipLevelCount')
     const sampleCount = normalizePositiveInteger(subject, descriptor.sampleCount ?? 1, 'sampleCount')
 
-    const normalized: any = {
+    const normalized: NormalizedTextureDescriptor = {
         size,
         format,
         usage,
@@ -140,22 +141,22 @@ function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: any): N
         sampleCount,
     }
 
-    if (descriptor.label !== undefined) normalized.label = descriptor.label
+    if (typeof descriptor.label === 'string') normalized.label = descriptor.label
 
     return normalized
 }
 
-function normalizeTextureSize(subject: DiagnosticSubject, size: any): { width: number, height: number, depthOrArrayLayers: number } {
+function normalizeTextureSize(subject: DiagnosticSubject, size: unknown): { width: number, height: number, depthOrArrayLayers: number } {
 
-    let width
-    let height
-    let depthOrArrayLayers
+    let width: unknown
+    let height: unknown
+    let depthOrArrayLayers: unknown
 
     if (Array.isArray(size)) {
         width = size[0]
         height = size[1] ?? 1
         depthOrArrayLayers = size[2] ?? 1
-    } else if (size && typeof size === 'object') {
+    } else if (isRecord(size)) {
         width = size.width
         height = size.height ?? 1
         depthOrArrayLayers = size.depthOrArrayLayers ?? 1
@@ -166,17 +167,21 @@ function normalizeTextureSize(subject: DiagnosticSubject, size: any): { width: n
     }
 
     for (const [ key, value ] of Object.entries({ width, height, depthOrArrayLayers })) {
-        if (!Number.isInteger(value) || value <= 0) {
+        if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
             throwTextureDescriptorDiagnostic(subject, { size }, {
                 [key]: 'positive integer',
             })
         }
     }
 
-    return { width, height, depthOrArrayLayers }
+    return {
+        width: width as number,
+        height: height as number,
+        depthOrArrayLayers: depthOrArrayLayers as number,
+    }
 }
 
-function normalizeTextureFormat(subject: DiagnosticSubject, format: any): GPUTextureFormat {
+function normalizeTextureFormat(subject: DiagnosticSubject, format: unknown): GPUTextureFormat {
 
     if (typeof format !== 'string' || format.length === 0) {
         throwTextureDescriptorDiagnostic(subject, { format }, {
@@ -187,7 +192,7 @@ function normalizeTextureFormat(subject: DiagnosticSubject, format: any): GPUTex
     return format as GPUTextureFormat
 }
 
-function normalizeTextureUsage(subject: DiagnosticSubject, usage: any): GPUTextureUsageFlags {
+function normalizeTextureUsage(subject: DiagnosticSubject, usage: unknown): GPUTextureUsageFlags {
 
     if (usage === undefined) {
         throwScratchDiagnostic({
@@ -210,9 +215,9 @@ function normalizeTextureUsage(subject: DiagnosticSubject, usage: any): GPUTextu
     return usage
 }
 
-function normalizePositiveInteger(subject: DiagnosticSubject, value: any, key: string): number {
+function normalizePositiveInteger(subject: DiagnosticSubject, value: unknown, key: string): number {
 
-    if (!Number.isInteger(value) || value <= 0) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
         throwTextureDescriptorDiagnostic(subject, { [key]: value }, {
             [key]: 'positive integer',
         })
@@ -221,26 +226,37 @@ function normalizePositiveInteger(subject: DiagnosticSubject, value: any, key: s
     return value
 }
 
-function normalizeTextureViewDescriptor(texture: TextureResource, descriptor: any): GPUTextureViewDescriptor {
+function normalizeTextureViewDescriptor(texture: TextureResource, descriptor: unknown): GPUTextureViewDescriptor {
 
-    if (!descriptor || typeof descriptor !== 'object') {
+    if (!isRecord(descriptor)) {
         throwTextureDescriptorDiagnostic(texture.subject, descriptor, {
             viewDescriptor: 'object',
         })
     }
 
-    return sortObjectKeys(descriptor)
+    return sortObjectKeys(descriptor) as GPUTextureViewDescriptor
 }
 
-function sortObjectKeys(value: any): any {
+function sortObjectKeys(value: unknown): unknown {
 
     if (Array.isArray(value)) return value.map(sortObjectKeys)
-    if (!value || typeof value !== 'object') return value
+    if (!isRecord(value)) return value
 
-    return Object.keys(value).sort().reduce((result: any, key) => {
+    return Object.keys(value).sort().reduce<Record<string, unknown>>((result, key) => {
         result[key] = sortObjectKeys(value[key])
         return result
     }, {})
+}
+
+function normalizeTextureDimension(subject: DiagnosticSubject, descriptor: unknown, dimension: unknown): GPUTextureDimension {
+
+    if (typeof dimension !== 'string' || !TEXTURE_DIMENSIONS.has(dimension as GPUTextureDimension)) {
+        throwTextureDescriptorDiagnostic(subject, descriptor, {
+            dimension: [ ...TEXTURE_DIMENSIONS ],
+        })
+    }
+
+    return dimension as GPUTextureDimension
 }
 
 function throwTextureDescriptorDiagnostic(subject: DiagnosticSubject, actual: unknown, expected: unknown): never {

@@ -1,13 +1,15 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { describeValue, getGlobalConstant } from './type-utils.js'
 import type { BufferResource } from './buffer.js'
+import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { SubmittedWork } from './submission.js'
 
 const BUFFER_USAGE_MAP_READ = 0x1
 const BUFFER_USAGE_COPY_SRC = 0x4
 const BUFFER_USAGE_COPY_DST = 0x8
-const MAP_MODE_READ = globalThis.GPUMapMode?.READ ?? 0x1
+const MAP_MODE_READ = getGlobalConstant('GPUMapMode', 'READ', 0x1)
 
 export type ReadbackRange = {
     offset?: number
@@ -65,21 +67,21 @@ export class ReadbackOperation {
 
         this.runtime = runtime
         this.id = `scratch-readback-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.state = 'requested'
         this.source = normalizeSource(this, descriptor.source)
         this.range = normalizeRange(this, descriptor.range)
-        this.after = normalizeAfter(this, descriptor.after)
+        const after = normalizeAfter(this, descriptor.after)
+        if (after !== undefined) this.after = after
         this.contentEpoch = this.source.contentEpoch
         this.allocationVersion = this.source.allocationVersion
         this.isDisposed = false
         this.isCancelled = false
-        this.stagingBuffer = undefined
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'ReadbackOperation',
             id: this.id,
         }
@@ -93,12 +95,17 @@ export class ReadbackOperation {
         return this._consumeBytes()
     }
 
+    async toArray(): Promise<Uint8Array>
+
+    async toArray<T extends ArrayBufferView>(TypedArrayConstructor: TypedArrayConstructor<T>): Promise<T>
+
     async toArray<T extends ArrayBufferView>(
-        TypedArrayConstructor: TypedArrayConstructor<T> = Uint8Array as unknown as TypedArrayConstructor<T>
-    ): Promise<T> {
+        TypedArrayConstructor?: TypedArrayConstructor<T>
+    ): Promise<T | Uint8Array> {
 
         const bytes = await this._consumeBytes()
-        const elementSize = TypedArrayConstructor.BYTES_PER_ELEMENT
+        const ViewConstructor = TypedArrayConstructor ?? Uint8Array
+        const elementSize = ViewConstructor.BYTES_PER_ELEMENT
 
         if (!Number.isInteger(elementSize) || elementSize <= 0 || bytes.byteLength % elementSize !== 0) {
             throwScratchDiagnostic({
@@ -108,12 +115,12 @@ export class ReadbackOperation {
                 subject: this.subject,
                 related: [ this.source.subject ],
                 message: 'ReadbackOperation typed array view does not evenly divide the byte range.',
-                expected: { byteLength: `multiple of ${TypedArrayConstructor.name}.BYTES_PER_ELEMENT` },
+                expected: { byteLength: `multiple of ${ViewConstructor.name}.BYTES_PER_ELEMENT` },
                 actual: { byteLength: bytes.byteLength, bytesPerElement: elementSize },
             })
         }
 
-        return new TypedArrayConstructor(
+        return new ViewConstructor(
             bytes.buffer,
             bytes.byteOffset,
             bytes.byteLength / elementSize
@@ -125,7 +132,7 @@ export class ReadbackOperation {
         if (this.state === 'consumed' || this.state === 'disposed') return
 
         this.isCancelled = true
-        this.cancelReason = reason
+        if (reason !== undefined) this.cancelReason = reason
         this.state = 'cancelled'
     }
 
@@ -152,15 +159,18 @@ export class ReadbackOperation {
             this.state = 'scheduled'
             const device = this.runtime.device
             const queue = this.runtime.queue
-            this.stagingBuffer = device.createBuffer({
-                label: labelWithSuffix(this.label, 'staging'),
+            const stagingDescriptor: GPUBufferDescriptor = {
                 size: this.range.byteLength,
                 usage: BUFFER_USAGE_MAP_READ | BUFFER_USAGE_COPY_DST,
-            })
+            }
+            const stagingLabel = labelWithSuffix(this.label, 'staging')
+            if (stagingLabel !== undefined) stagingDescriptor.label = stagingLabel
+            this.stagingBuffer = device.createBuffer(stagingDescriptor)
 
-            const encoder = device.createCommandEncoder({
-                label: labelWithSuffix(this.label, 'copy'),
-            })
+            const encoderDescriptor: GPUCommandEncoderDescriptor = {}
+            const encoderLabel = labelWithSuffix(this.label, 'copy')
+            if (encoderLabel !== undefined) encoderDescriptor.label = encoderLabel
+            const encoder = device.createCommandEncoder(encoderDescriptor)
             encoder.copyBufferToBuffer(
                 this.source.gpuBuffer,
                 this.range.offset,
@@ -186,15 +196,15 @@ export class ReadbackOperation {
             if (typeof this.stagingBuffer.destroy === 'function') {
                 this.stagingBuffer.destroy()
             }
-            this.stagingBuffer = undefined
+            delete this.stagingBuffer
 
             this.state = 'consumed'
             return bytes
-        } catch (error: any) {
+        } catch (error: unknown) {
             this.state = 'failed'
             if (this.stagingBuffer && typeof this.stagingBuffer.destroy === 'function') {
                 this.stagingBuffer.destroy()
-                this.stagingBuffer = undefined
+                delete this.stagingBuffer
             }
             throwScratchDiagnostic({
                 code: 'SCRATCH_READBACK_MAP_FAILED',
@@ -205,7 +215,7 @@ export class ReadbackOperation {
                 message: 'ReadbackOperation failed while copying or mapping staging data.',
                 actual: {
                     state: this.state,
-                    error: error?.message ?? String(error),
+                    error: error instanceof Error ? error.message : String(error),
                 },
             })
         }
@@ -254,7 +264,7 @@ export class ReadbackOperation {
     }
 }
 
-function normalizeSource(operation: ReadbackOperation, source: any): BufferResource {
+function normalizeSource(operation: ReadbackOperation, source: BufferResource): BufferResource {
 
     if (!source || typeof source.assertRuntime !== 'function' || !source.gpuBuffer) {
         throwScratchDiagnostic({
@@ -264,7 +274,7 @@ function normalizeSource(operation: ReadbackOperation, source: any): BufferResou
             subject: operation.subject,
             message: 'ReadbackOperation requires a BufferResource source.',
             expected: { source: 'BufferResource' },
-            actual: { source: source === undefined || source === null ? String(source) : typeof source },
+            actual: { source: describeValue(source) },
         })
     }
 
@@ -313,7 +323,7 @@ function normalizeRange(operation: ReadbackOperation, range?: ReadbackRange) {
     return { offset, byteLength }
 }
 
-function normalizeAfter(operation, after) {
+function normalizeAfter(operation: ReadbackOperation, after?: SubmittedWork): SubmittedWork | undefined {
 
     if (after === undefined) return undefined
 
@@ -325,14 +335,14 @@ function normalizeAfter(operation, after) {
             subject: operation.subject,
             message: 'ReadbackOperation after must be a SubmittedWork from the same ScratchRuntime.',
             expected: { after: 'SubmittedWork' },
-            actual: { after: after === undefined || after === null ? String(after) : typeof after },
+            actual: { after: describeValue(after) },
         })
     }
 
     return after
 }
 
-function labelWithSuffix(label, suffix) {
+function labelWithSuffix(label: string | undefined, suffix: string): string | undefined {
 
     return label === undefined ? undefined : `${label} ${suffix}`
 }

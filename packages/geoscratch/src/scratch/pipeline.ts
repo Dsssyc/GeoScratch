@@ -1,6 +1,8 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { describeValue } from './type-utils.js'
 import type { BindLayout } from './binding.js'
+import type { DiagnosticSubject } from './diagnostics.js'
 import type { Program } from './program.js'
 import type { ScratchRuntime } from './runtime.js'
 
@@ -67,7 +69,7 @@ export class RenderPipeline {
 
         this.runtime = runtime
         this.id = `scratch-pipeline-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.pipelineKind = 'render'
         this.program = program
         this.vertexEntryPoint = (descriptor.vertex ?? program.entryPoints.vertex) as string
@@ -81,16 +83,21 @@ export class RenderPipeline {
 
         validateEntryPoints(this)
 
-        this.shaderModule = runtime.device.createShaderModule({
-            label: labelWithSuffix(this.label, 'shader module'),
+        const shaderModuleDescriptor: GPUShaderModuleDescriptor = {
             code: program.modules.join('\n'),
-        })
-        this.pipelineLayout = runtime.device.createPipelineLayout({
-            label: labelWithSuffix(this.label, 'layout'),
+        }
+        const shaderModuleLabel = labelWithSuffix(this.label, 'shader module')
+        if (shaderModuleLabel !== undefined) shaderModuleDescriptor.label = shaderModuleLabel
+        this.shaderModule = runtime.device.createShaderModule(shaderModuleDescriptor)
+
+        const pipelineLayoutDescriptor: GPUPipelineLayoutDescriptor = {
             bindGroupLayouts: this.bindLayouts.map(layout => layout.gpuBindGroupLayout),
-        })
-        this.gpuPipeline = runtime.device.createRenderPipeline({
-            label: this.label,
+        }
+        const pipelineLayoutLabel = labelWithSuffix(this.label, 'layout')
+        if (pipelineLayoutLabel !== undefined) pipelineLayoutDescriptor.label = pipelineLayoutLabel
+        this.pipelineLayout = runtime.device.createPipelineLayout(pipelineLayoutDescriptor)
+
+        const pipelineDescriptor: GPURenderPipelineDescriptor = {
             layout: this.pipelineLayout,
             vertex: {
                 module: this.shaderModule,
@@ -103,14 +110,16 @@ export class RenderPipeline {
                 targets: this.targets,
             },
             primitive: descriptor.primitive ?? { topology: 'triangle-list' },
-            ...(descriptor.depthStencil !== undefined ? { depthStencil: descriptor.depthStencil } : {}),
-            ...(descriptor.multisample !== undefined ? { multisample: descriptor.multisample } : {}),
-        })
+        }
+        if (this.label !== undefined) pipelineDescriptor.label = this.label
+        if (descriptor.depthStencil !== undefined) pipelineDescriptor.depthStencil = descriptor.depthStencil
+        if (descriptor.multisample !== undefined) pipelineDescriptor.multisample = descriptor.multisample
+        this.gpuPipeline = runtime.device.createRenderPipeline(pipelineDescriptor)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Pipeline',
             id: this.id,
             pipelineKind: 'render',
@@ -205,41 +214,50 @@ export class ComputePipeline {
 
         this.runtime = runtime
         this.id = `scratch-pipeline-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.pipelineKind = 'compute'
         this.program = program
         this.computeEntryPoint = (descriptor.compute ?? program.entryPoints.compute) as string
         this.bindLayouts = normalizeBindLayouts(this, descriptor.bindLayouts)
         this.bindLayoutsByGroup = new Map(this.bindLayouts.map(layout => [ layout.group, layout ]))
-        this.constants = descriptor.constants
+        if (descriptor.constants !== undefined) this.constants = descriptor.constants
         this.isDisposed = false
 
         if (!this.computeEntryPoint) {
             throwMissingEntryPoint(this, 'compute')
         }
 
-        this.shaderModule = runtime.device.createShaderModule({
-            label: labelWithSuffix(this.label, 'shader module'),
+        const shaderModuleDescriptor: GPUShaderModuleDescriptor = {
             code: program.modules.join('\n'),
-        })
-        this.pipelineLayout = runtime.device.createPipelineLayout({
-            label: labelWithSuffix(this.label, 'layout'),
+        }
+        const shaderModuleLabel = labelWithSuffix(this.label, 'shader module')
+        if (shaderModuleLabel !== undefined) shaderModuleDescriptor.label = shaderModuleLabel
+        this.shaderModule = runtime.device.createShaderModule(shaderModuleDescriptor)
+
+        const pipelineLayoutDescriptor: GPUPipelineLayoutDescriptor = {
             bindGroupLayouts: this.bindLayouts.map(layout => layout.gpuBindGroupLayout),
-        })
-        this.gpuPipeline = runtime.device.createComputePipeline({
-            label: this.label,
+        }
+        const pipelineLayoutLabel = labelWithSuffix(this.label, 'layout')
+        if (pipelineLayoutLabel !== undefined) pipelineLayoutDescriptor.label = pipelineLayoutLabel
+        this.pipelineLayout = runtime.device.createPipelineLayout(pipelineLayoutDescriptor)
+
+        const computeStage: GPUProgrammableStage = {
+            module: this.shaderModule,
+            entryPoint: this.computeEntryPoint,
+        }
+        if (this.constants !== undefined) computeStage.constants = this.constants
+
+        const pipelineDescriptor: GPUComputePipelineDescriptor = {
             layout: this.pipelineLayout,
-            compute: {
-                module: this.shaderModule,
-                entryPoint: this.computeEntryPoint,
-                ...(this.constants !== undefined ? { constants: this.constants } : {}),
-            },
-        })
+            compute: computeStage,
+        }
+        if (this.label !== undefined) pipelineDescriptor.label = this.label
+        this.gpuPipeline = runtime.device.createComputePipeline(pipelineDescriptor)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Pipeline',
             id: this.id,
             pipelineKind: 'compute',
@@ -304,11 +322,11 @@ function normalizeVertexBuffers(pipeline: RenderPipeline, vertexBuffers: GPUVert
         })
     }
 
-    return vertexBuffers.map((layout: any, slot) => {
+    return vertexBuffers.map((layout: GPUVertexBufferLayout, slot) => {
         if (!layout || typeof layout !== 'object') {
             throwVertexLayoutDiagnostic(pipeline, {
                 expected: { layout: 'GPUVertexBufferLayout' },
-                actual: { slot, layout: layout === undefined || layout === null ? String(layout) : typeof layout },
+                actual: { slot, layout: describeValue(layout) },
             })
         }
 
@@ -333,9 +351,9 @@ function normalizeVertexBuffers(pipeline: RenderPipeline, vertexBuffers: GPUVert
             })
         }
 
-        const normalized: any = {
+        const normalized: GPUVertexBufferLayout = {
             arrayStride: layout.arrayStride,
-            attributes: layout.attributes.map((attribute, attributeIndex) => normalizeVertexAttribute(
+            attributes: layout.attributes.map((attribute: GPUVertexAttribute, attributeIndex: number) => normalizeVertexAttribute(
                 pipeline,
                 attribute,
                 slot,
@@ -348,7 +366,7 @@ function normalizeVertexBuffers(pipeline: RenderPipeline, vertexBuffers: GPUVert
     })
 }
 
-function normalizeVertexAttribute(pipeline: RenderPipeline, attribute: any, slot: number, attributeIndex: number): GPUVertexAttribute {
+function normalizeVertexAttribute(pipeline: RenderPipeline, attribute: GPUVertexAttribute, slot: number, attributeIndex: number): GPUVertexAttribute {
 
     if (!attribute || typeof attribute !== 'object') {
         throwVertexLayoutDiagnostic(pipeline, {
@@ -356,7 +374,7 @@ function normalizeVertexAttribute(pipeline: RenderPipeline, attribute: any, slot
             actual: {
                 slot,
                 attributeIndex,
-                attribute: attribute === undefined || attribute === null ? String(attribute) : typeof attribute,
+                attribute: describeValue(attribute),
             },
         })
     }
@@ -389,7 +407,7 @@ function normalizeVertexAttribute(pipeline: RenderPipeline, attribute: any, slot
     }
 }
 
-function throwVertexLayoutDiagnostic(pipeline: RenderPipeline, { expected, actual }: { expected: any, actual: any }) {
+function throwVertexLayoutDiagnostic(pipeline: RenderPipeline, { expected, actual }: { expected: unknown, actual: unknown }): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_PIPELINE_VERTEX_LAYOUT_MISMATCH',
@@ -421,7 +439,7 @@ function normalizeBindLayouts(
     }
 
     const groups = new Set<number>()
-    return bindLayouts.map((layout: any) => {
+    return bindLayouts.map((layout: BindLayout) => {
         if (!layout || typeof layout.assertRuntime !== 'function') {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
@@ -430,7 +448,7 @@ function normalizeBindLayouts(
                 subject: pipeline.subject,
                 message: 'RenderPipeline bindLayouts must contain BindLayout objects.',
                 expected: { bindLayout: 'BindLayout' },
-                actual: { bindLayout: layout === undefined || layout === null ? String(layout) : typeof layout },
+                actual: { bindLayout: describeValue(layout) },
             })
         }
 

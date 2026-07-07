@@ -15,11 +15,13 @@ import { TextureResource } from './texture.js'
 import type { BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './binding.js'
 import type { BufferResourceDescriptor } from './buffer.js'
 import type { BeginOcclusionQueryCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
+import type { DiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpecDescriptor, RenderPassSpecDescriptor } from './pass.js'
 import type { ComputePipelineDescriptor, RenderPipelineDescriptor } from './pipeline.js'
 import type { ProgramDescriptor } from './program.js'
 import type { QuerySetResourceDescriptor } from './query-set.js'
 import type { ReadbackOperationDescriptor } from './readback.js'
+import type { Resource } from './resource.js'
 import type { SamplerResourceDescriptor } from './sampler.js'
 import type { SubmissionBuilderOptions } from './submission.js'
 import type { SurfaceOptions } from './surface.js'
@@ -56,8 +58,8 @@ export interface ScratchRuntime {
     isDisposed: boolean
     isDeviceLost: boolean
     deviceLostInfo?: GPUDeviceLostInfo
-    _resources: Set<any>
-    _surfaces: Set<any>
+    _resources: Set<Resource>
+    _surfaces: Set<Surface>
 }
 
 export class ScratchRuntime {
@@ -76,7 +78,7 @@ export class ScratchRuntime {
         }
 
         this.id = `scratch-runtime-${UUID()}`
-        this.label = options.label
+        if (options.label !== undefined) this.label = options.label
         this.gpu = options.gpu
         this.adapter = options.adapter
         this.device = options.device
@@ -87,7 +89,6 @@ export class ScratchRuntime {
         this.deviceLimits = options.device.limits
         this.isDisposed = false
         this.isDeviceLost = false
-        this.deviceLostInfo = undefined
         this._resources = new Set()
         this._surfaces = new Set()
 
@@ -150,13 +151,13 @@ export class ScratchRuntime {
             gpu,
             adapter,
             device,
-            label: options.label,
+            ...(options.label !== undefined ? { label: options.label } : {}),
         })
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'ScratchRuntime',
             id: this.id,
         }
@@ -452,22 +453,22 @@ export class ScratchRuntime {
         this.isDisposed = true
     }
 
-    _registerResource(resource: any) {
+    _registerResource(resource: Resource): void {
 
         this._resources.add(resource)
     }
 
-    _unregisterResource(resource: any) {
+    _unregisterResource(resource: Resource): void {
 
         this._resources.delete(resource)
     }
 
-    _registerSurface(surface: any) {
+    _registerSurface(surface: Surface): void {
 
         this._surfaces.add(surface)
     }
 
-    _unregisterSurface(surface: any) {
+    _unregisterSurface(surface: Surface): void {
 
         this._surfaces.delete(surface)
     }

@@ -40,12 +40,12 @@ export class Resource {
 
         this.runtime = runtime
         this.id = `scratch-resource-${UUID()}`
-        this.label = options.label
         this.resourceKind = options.resourceKind ?? 'Resource'
         this.descriptor = options.descriptor ?? {}
         this.isDisposed = false
         this.allocationVersion = 1
         this.contentEpoch = 0
+        if (options.label !== undefined) this.label = options.label
 
         runtime._registerResource(this)
     }

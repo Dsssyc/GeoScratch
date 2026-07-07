@@ -40,7 +40,7 @@ export class Surface {
 
         this.runtime = runtime
         this.id = `scratch-surface-${UUID()}`
-        this.label = options.label
+        if (options.label !== undefined) this.label = options.label
         this.canvas = canvas
         this.context = createCanvasContext(this, canvas)
         this.format = resolveSurfaceFormat(runtime, options.format ?? 'preferred')

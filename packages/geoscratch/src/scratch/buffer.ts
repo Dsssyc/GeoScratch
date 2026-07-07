@@ -1,5 +1,7 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { Resource } from './resource.js'
+import { describeValue, isRecord } from './type-utils.js'
+import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type BufferResourceDescriptor = GPUBufferDescriptor
@@ -17,9 +19,9 @@ export class BufferResource extends Resource {
         const normalizedDescriptor = normalizeBufferDescriptor(runtime, descriptor)
 
         super(runtime, {
-            label: normalizedDescriptor.label,
             resourceKind: 'BufferResource',
             descriptor: normalizedDescriptor,
+            ...(normalizedDescriptor.label !== undefined ? { label: normalizedDescriptor.label } : {}),
         })
 
         this.size = normalizedDescriptor.size
@@ -44,9 +46,9 @@ export class BufferResource extends Resource {
     }
 }
 
-function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: any): BufferResourceDescriptor {
+function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown): BufferResourceDescriptor {
 
-    const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
+    const subject: DiagnosticSubject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
     if (runtime?.device && typeof runtime.device.createBuffer !== 'function') {
         throwScratchDiagnostic({
@@ -60,7 +62,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: any): Bu
         })
     }
 
-    if (!descriptor || typeof descriptor !== 'object') {
+    if (!isRecord(descriptor)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
@@ -68,7 +70,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: any): Bu
             subject,
             message: 'BufferResource requires a descriptor object.',
             expected: { descriptor: 'object with size and usage' },
-            actual: { descriptor: descriptor === null ? 'null' : typeof descriptor },
+            actual: { descriptor: describeValue(descriptor) },
         })
     }
 
@@ -96,13 +98,25 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: any): Bu
         })
     }
 
-    const normalized: any = {
+    if (typeof descriptor.usage !== 'number' || !Number.isFinite(descriptor.usage)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject,
+            message: 'BufferResource usage must be GPUBufferUsageFlags.',
+            expected: { usage: 'GPUBufferUsageFlags' },
+            actual: { usage: descriptor.usage },
+        })
+    }
+
+    const normalized: BufferResourceDescriptor = {
         size: descriptor.size,
         usage: descriptor.usage,
     }
 
-    if (descriptor.label !== undefined) normalized.label = descriptor.label
-    if (descriptor.mappedAtCreation !== undefined) normalized.mappedAtCreation = descriptor.mappedAtCreation
+    if (typeof descriptor.label === 'string') normalized.label = descriptor.label
+    if (typeof descriptor.mappedAtCreation === 'boolean') normalized.mappedAtCreation = descriptor.mappedAtCreation
 
     return normalized
 }

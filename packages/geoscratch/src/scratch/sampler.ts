@@ -1,10 +1,11 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { Resource } from './resource.js'
+import { isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
-const ADDRESS_MODES = new Set([ 'clamp-to-edge', 'repeat', 'mirror-repeat' ])
-const FILTER_MODES = new Set([ 'nearest', 'linear' ])
+const ADDRESS_MODES = new Set<GPUAddressMode>([ 'clamp-to-edge', 'repeat', 'mirror-repeat' ])
+const FILTER_MODES = new Set<GPUFilterMode | GPUMipmapFilterMode>([ 'nearest', 'linear' ])
 
 export type SamplerResourceDescriptor = GPUSamplerDescriptor
 
@@ -19,9 +20,9 @@ export class SamplerResource extends Resource {
         const normalizedDescriptor = normalizeSamplerDescriptor(runtime, descriptor)
 
         super(runtime, {
-            label: normalizedDescriptor.label,
             resourceKind: 'SamplerResource',
             descriptor: normalizedDescriptor,
+            ...(normalizedDescriptor.label !== undefined ? { label: normalizedDescriptor.label } : {}),
         })
 
         this.gpuSampler = runtime.device.createSampler(normalizedDescriptor)
@@ -33,7 +34,7 @@ export class SamplerResource extends Resource {
     }
 }
 
-function normalizeSamplerDescriptor(runtime: ScratchRuntime, descriptor: any): GPUSamplerDescriptor {
+function normalizeSamplerDescriptor(runtime: ScratchRuntime, descriptor: unknown): GPUSamplerDescriptor {
 
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
@@ -49,13 +50,13 @@ function normalizeSamplerDescriptor(runtime: ScratchRuntime, descriptor: any): G
         })
     }
 
-    if (!descriptor || typeof descriptor !== 'object') {
+    if (!isRecord(descriptor)) {
         throwSamplerDescriptorDiagnostic(subject, descriptor, {
             descriptor: 'object',
         })
     }
 
-    const normalized: any = {
+    const normalized: GPUSamplerDescriptor = {
         addressModeU: normalizeEnum(subject, descriptor.addressModeU ?? 'clamp-to-edge', ADDRESS_MODES, 'addressModeU'),
         addressModeV: normalizeEnum(subject, descriptor.addressModeV ?? 'clamp-to-edge', ADDRESS_MODES, 'addressModeV'),
         addressModeW: normalizeEnum(subject, descriptor.addressModeW ?? 'clamp-to-edge', ADDRESS_MODES, 'addressModeW'),
@@ -64,24 +65,24 @@ function normalizeSamplerDescriptor(runtime: ScratchRuntime, descriptor: any): G
         mipmapFilter: normalizeEnum(subject, descriptor.mipmapFilter ?? 'nearest', FILTER_MODES, 'mipmapFilter'),
     }
 
-    if (descriptor.label !== undefined) normalized.label = descriptor.label
-    if (descriptor.lodMinClamp !== undefined) normalized.lodMinClamp = descriptor.lodMinClamp
-    if (descriptor.lodMaxClamp !== undefined) normalized.lodMaxClamp = descriptor.lodMaxClamp
-    if (descriptor.compare !== undefined) normalized.compare = descriptor.compare
-    if (descriptor.maxAnisotropy !== undefined) normalized.maxAnisotropy = descriptor.maxAnisotropy
+    if (typeof descriptor.label === 'string') normalized.label = descriptor.label
+    if (typeof descriptor.lodMinClamp === 'number') normalized.lodMinClamp = descriptor.lodMinClamp
+    if (typeof descriptor.lodMaxClamp === 'number') normalized.lodMaxClamp = descriptor.lodMaxClamp
+    if (descriptor.compare !== undefined) normalized.compare = descriptor.compare as GPUCompareFunction
+    if (typeof descriptor.maxAnisotropy === 'number') normalized.maxAnisotropy = descriptor.maxAnisotropy
 
     return normalized
 }
 
-function normalizeEnum(subject: DiagnosticSubject, value: any, allowed: Set<string>, key: string): any {
+function normalizeEnum<T extends string>(subject: DiagnosticSubject, value: unknown, allowed: ReadonlySet<T>, key: string): T {
 
-    if (!allowed.has(value)) {
+    if (typeof value !== 'string' || !allowed.has(value as T)) {
         throwSamplerDescriptorDiagnostic(subject, { [key]: value }, {
             [key]: [ ...allowed ],
         })
     }
 
-    return value
+    return value as T
 }
 
 function throwSamplerDescriptorDiagnostic(subject: DiagnosticSubject, actual: unknown, expected: unknown): never {

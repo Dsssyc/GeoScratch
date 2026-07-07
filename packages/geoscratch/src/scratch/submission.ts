@@ -4,6 +4,7 @@ import {
     throwScratchDiagnostic,
 } from './diagnostics.js'
 import { TextureResource } from './texture.js'
+import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import type { ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
@@ -177,13 +178,13 @@ export class SubmissionBuilder {
             if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
             const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
-            let activeOcclusionQueryCommand: any
+            let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
             for (const command of step.commands) {
                 command.encode(passEncoder)
                 if (command.commandKind === 'begin-occlusion-query') {
                     activeOcclusionQueryCommand = command
                 } else if (command.commandKind === 'end-occlusion-query') {
-                    activeOcclusionQueryCommand.querySet._advanceSlotContentEpoch(activeOcclusionQueryCommand.index)
+                    activeOcclusionQueryCommand?.querySet._advanceSlotContentEpoch(activeOcclusionQueryCommand.index)
                     activeOcclusionQueryCommand = undefined
                 }
             }
@@ -399,7 +400,7 @@ function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec)
 
     const targetFormats = command.pipeline.targetFormats
     for (let index = 0; index < passSpec.color.length; index++) {
-        const expected = passSpec.color[index].format
+        const expected = passSpec.color[index]?.format
         const actual = targetFormats[index]
 
         if (expected !== actual) {
@@ -463,36 +464,40 @@ function validateRenderOcclusionQueryOrder(builder: SubmissionBuilder, step: Ren
     }
 }
 
-function isRenderCommand(command: any): command is RenderCommand {
+function isRenderCommand(command: unknown): command is RenderCommand {
+
+    if (!isRecord(command)) return false
 
     return Boolean(
-        command &&
         typeof command.assertRuntime === 'function' &&
         typeof command.validateForPass === 'function' &&
-        new Set([ 'draw', 'begin-occlusion-query', 'end-occlusion-query' ]).has(command.commandKind)
+        new Set([ 'draw', 'begin-occlusion-query', 'end-occlusion-query' ]).has(String(command.commandKind))
     )
 }
 
 function throwOcclusionQueryStateDiagnostic(
     builder: SubmissionBuilder,
     step: RenderStep,
-    command: any,
+    command: unknown,
     reason: string,
     activeCommand?: BeginOcclusionQueryCommand
 ) {
+
+    const commandRecord = isRecord(command) ? command : {}
+    const querySet = commandRecord.querySet
 
     throwScratchDiagnostic({
         code: 'SCRATCH_SUBMISSION_OCCLUSION_QUERY_STATE_INVALID',
         severity: 'error',
         phase: 'submission',
-        subject: command?.subject ?? builder.subject,
+        subject: diagnosticSubjectOf(command) ?? builder.subject,
         related: [
             builder.subject,
             step.passSpec?.subject,
-            command?.querySet?.subject,
+            diagnosticSubjectOf(querySet),
             step.passSpec?.occlusionQuerySet?.subject,
             activeCommand?.subject,
-        ].filter(Boolean),
+        ].filter(isDefined),
         message: 'Render submission occlusion query commands must form non-nested begin/end pairs against the pass occlusionQuerySet.',
         expected: {
             pass: 'RenderPassSpec with matching occlusionQuerySet',
@@ -500,11 +505,11 @@ function throwOcclusionQueryStateDiagnostic(
         },
         actual: {
             reason,
-            commandKind: command?.commandKind,
-            queryIndex: command?.index,
+            commandKind: commandRecord.commandKind,
+            queryIndex: commandRecord.index,
             hasPassQuerySet: step.passSpec?.occlusionQuerySet !== undefined,
             passQuerySetId: step.passSpec?.occlusionQuerySet?.id,
-            commandQuerySetId: command?.querySet?.id,
+            commandQuerySetId: isRecord(querySet) ? querySet.id : undefined,
             activeQueryIndex: activeCommand?.index,
         },
     })
@@ -512,7 +517,7 @@ function throwOcclusionQueryStateDiagnostic(
 
 function advanceRenderAttachmentEpochs(passSpec: RenderPassSpec) {
 
-    const writtenTargets = new Set<any>()
+    const writtenTargets = new Set<TextureResource>()
 
     for (const attachment of passSpec.color) {
         const target = attachment.target

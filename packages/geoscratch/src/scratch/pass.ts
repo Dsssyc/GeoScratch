@@ -2,10 +2,12 @@ import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { QuerySetResource } from './query-set.js'
 import { TextureResource } from './texture.js'
+import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
+import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { Surface } from './surface.js'
 
-const TEXTURE_USAGE_RENDER_ATTACHMENT = globalThis.GPUTextureUsage?.RENDER_ATTACHMENT ?? 0x10
+const TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
 
 export type TimestampWritesSpec = {
     querySet: QuerySetResource
@@ -53,17 +55,19 @@ export class RenderPassSpec {
 
         this.runtime = runtime
         this.id = `scratch-pass-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.passKind = 'render'
         this.color = normalizeColorAttachments(this, descriptor.color)
-        this.timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
-        this.occlusionQuerySet = normalizeOcclusionQuerySet(this, descriptor.occlusionQuerySet)
+        const timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
+        const occlusionQuerySet = normalizeOcclusionQuerySet(this, descriptor.occlusionQuerySet)
+        if (timestampWrites !== undefined) this.timestampWrites = timestampWrites
+        if (occlusionQuerySet !== undefined) this.occlusionQuerySet = occlusionQuerySet
         this.isDisposed = false
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'PassSpec',
             id: this.id,
             passKind: 'render',
@@ -114,22 +118,26 @@ export class RenderPassSpec {
         this.assertUsable()
         this.occlusionQuerySet?.assertUsable()
 
-        return {
-            label: this.label,
+        const descriptor: GPURenderPassDescriptor = {
             colorAttachments: this.color.map((attachment) => {
                 const target = attachment.target
                 target.assertUsable()
 
-                return {
+                const colorAttachment: GPURenderPassColorAttachment = {
                     view: createColorAttachmentView(attachment),
                     loadOp: attachment.load ?? 'clear',
                     storeOp: attachment.store ?? 'store',
-                    ...(attachment.clear !== undefined ? { clearValue: attachment.clear } : {}),
                 }
+                if (attachment.clear !== undefined) colorAttachment.clearValue = attachment.clear
+
+                return colorAttachment
             }),
-            ...(this.timestampWrites !== undefined ? { timestampWrites: createTimestampWritesDescriptor(this.timestampWrites) } : {}),
-            ...(this.occlusionQuerySet !== undefined ? { occlusionQuerySet: this.occlusionQuerySet.gpuQuerySet } : {}),
         }
+        if (this.label !== undefined) descriptor.label = this.label
+        if (this.timestampWrites !== undefined) descriptor.timestampWrites = createTimestampWritesDescriptor(this.timestampWrites)
+        if (this.occlusionQuerySet !== undefined) descriptor.occlusionQuerySet = this.occlusionQuerySet.gpuQuerySet
+
+        return descriptor
     }
 
     hasEncoderSideEffects(): boolean {
@@ -165,15 +173,16 @@ export class ComputePassSpec {
 
         this.runtime = runtime
         this.id = `scratch-pass-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.passKind = 'compute'
-        this.timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
+        const timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
+        if (timestampWrites !== undefined) this.timestampWrites = timestampWrites
         this.isDisposed = false
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'PassSpec',
             id: this.id,
             passKind: 'compute',
@@ -223,10 +232,11 @@ export class ComputePassSpec {
 
         this.assertUsable()
 
-        return {
-            label: this.label,
-            ...(this.timestampWrites !== undefined ? { timestampWrites: createTimestampWritesDescriptor(this.timestampWrites) } : {}),
-        }
+        const descriptor: GPUComputePassDescriptor = {}
+        if (this.label !== undefined) descriptor.label = this.label
+        if (this.timestampWrites !== undefined) descriptor.timestampWrites = createTimestampWritesDescriptor(this.timestampWrites)
+
+        return descriptor
     }
 
     hasEncoderSideEffects(): boolean {
@@ -270,11 +280,13 @@ function normalizeTimestampWrites(
         throwTimestampWritesDiagnostic(pass, timestampWrites, 'empty')
     }
 
-    return {
+    const normalized: TimestampWritesSpec = {
         querySet,
-        begin,
-        end,
     }
+    if (begin !== undefined) normalized.begin = begin
+    if (end !== undefined) normalized.end = end
+
+    return normalized
 }
 
 function normalizeOcclusionQuerySet(pass: RenderPassSpec, querySet?: QuerySetResource): QuerySetResource | undefined {
@@ -329,7 +341,9 @@ function advanceTimestampWriteEpochs(timestampWrites?: TimestampWritesSpec) {
     }
 }
 
-function throwTimestampWritesDiagnostic(pass: RenderPassSpec | ComputePassSpec, timestampWrites: any, reason: string) {
+function throwTimestampWritesDiagnostic(pass: RenderPassSpec | ComputePassSpec, timestampWrites: unknown, reason: string): never {
+
+    const querySet = isRecord(timestampWrites) ? timestampWrites.querySet : undefined
 
     throwScratchDiagnostic({
         code: 'SCRATCH_PASS_TIMESTAMP_WRITES_INVALID',
@@ -337,8 +351,8 @@ function throwTimestampWritesDiagnostic(pass: RenderPassSpec | ComputePassSpec, 
         phase: 'submission',
         subject: pass.subject,
         related: [
-            timestampWrites?.querySet?.subject,
-        ].filter(Boolean),
+            diagnosticSubjectOf(querySet),
+        ].filter(isDefined),
         message: 'PassSpec timestampWrites requires a timestamp QuerySetResource and at least one valid query slot index.',
         expected: {
             querySet: 'timestamp QuerySetResource owned by this ScratchRuntime',
@@ -347,14 +361,14 @@ function throwTimestampWritesDiagnostic(pass: RenderPassSpec | ComputePassSpec, 
         },
         actual: {
             reason,
-            querySet: timestampWrites?.querySet === undefined || timestampWrites?.querySet === null ? String(timestampWrites?.querySet) : typeof timestampWrites?.querySet,
-            begin: timestampWrites?.begin,
-            end: timestampWrites?.end,
+            querySet: describeValue(querySet),
+            begin: isRecord(timestampWrites) ? timestampWrites.begin : undefined,
+            end: isRecord(timestampWrites) ? timestampWrites.end : undefined,
         },
     })
 }
 
-function throwOcclusionQuerySetDiagnostic(pass: RenderPassSpec, querySet: any, reason: string) {
+function throwOcclusionQuerySetDiagnostic(pass: RenderPassSpec, querySet: unknown, reason: string): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_PASS_OCCLUSION_QUERY_SET_INVALID',
@@ -362,14 +376,14 @@ function throwOcclusionQuerySetDiagnostic(pass: RenderPassSpec, querySet: any, r
         phase: 'submission',
         subject: pass.subject,
         related: [
-            querySet?.subject,
-        ].filter(Boolean),
+            diagnosticSubjectOf(querySet),
+        ].filter(isDefined),
         message: 'RenderPassSpec occlusionQuerySet requires an occlusion QuerySetResource owned by this ScratchRuntime.',
         expected: { occlusionQuerySet: 'occlusion QuerySetResource owned by this ScratchRuntime' },
         actual: {
             reason,
-            occlusionQuerySet: querySet === undefined || querySet === null ? String(querySet) : typeof querySet,
-            querySetType: querySet?.type,
+            occlusionQuerySet: describeValue(querySet),
+            querySetType: querySet instanceof QuerySetResource ? querySet.type : undefined,
         },
     })
 }
@@ -402,14 +416,16 @@ function normalizeColorAttachment(
         target.assertRuntime(pass.runtime)
         validateTextureColorAttachmentUsage(pass, target)
 
-        return {
+        const normalized: RenderPassColorAttachmentSpec = {
             target,
             format: attachment.format ?? target.format,
             load: attachment.load ?? 'clear',
             store: attachment.store ?? 'store',
-            clear: attachment.clear,
-            viewDescriptor: attachment.viewDescriptor,
         }
+        if (attachment.clear !== undefined) normalized.clear = attachment.clear
+        if (attachment.viewDescriptor !== undefined) normalized.viewDescriptor = attachment.viewDescriptor
+
+        return normalized
     }
 
     if (!target || typeof target.assertUsable !== 'function' || typeof target.getCurrentTexture !== 'function') {
@@ -442,14 +458,16 @@ function normalizeColorAttachment(
         })
     }
 
-    return {
+    const normalized: RenderPassColorAttachmentSpec = {
         target,
         format: attachment.format ?? target.format,
         load: attachment.load ?? 'clear',
         store: attachment.store ?? 'store',
-        clear: attachment.clear,
-        viewDescriptor: attachment.viewDescriptor,
     }
+    if (attachment.clear !== undefined) normalized.clear = attachment.clear
+    if (attachment.viewDescriptor !== undefined) normalized.viewDescriptor = attachment.viewDescriptor
+
+    return normalized
 }
 
 function createColorAttachmentView(attachment: RenderPassColorAttachmentSpec): GPUTextureView {

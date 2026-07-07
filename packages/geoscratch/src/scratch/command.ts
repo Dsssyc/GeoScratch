@@ -3,17 +3,19 @@ import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { QuerySetResource } from './query-set.js'
 import { TextureResource } from './texture.js'
+import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined } from './type-utils.js'
 import type { BindSet } from './binding.js'
+import type { DiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { ComputePipeline, RenderPipeline } from './pipeline.js'
 import type { Resource } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
-const GPU_BUFFER_USAGE_VERTEX = globalThis.GPUBufferUsage?.VERTEX ?? 0x20
-const GPU_BUFFER_USAGE_COPY_SRC = globalThis.GPUBufferUsage?.COPY_SRC ?? 0x4
-const GPU_BUFFER_USAGE_COPY_DST = globalThis.GPUBufferUsage?.COPY_DST ?? 0x8
-const GPU_BUFFER_USAGE_QUERY_RESOLVE = globalThis.GPUBufferUsage?.QUERY_RESOLVE ?? 0x200
-const GPU_TEXTURE_USAGE_COPY_DST = globalThis.GPUTextureUsage?.COPY_DST ?? 0x2
+const GPU_BUFFER_USAGE_VERTEX = getGlobalConstant('GPUBufferUsage', 'VERTEX', 0x20)
+const GPU_BUFFER_USAGE_COPY_SRC = getGlobalConstant('GPUBufferUsage', 'COPY_SRC', 0x4)
+const GPU_BUFFER_USAGE_COPY_DST = getGlobalConstant('GPUBufferUsage', 'COPY_DST', 0x8)
+const GPU_BUFFER_USAGE_QUERY_RESOLVE = getGlobalConstant('GPUBufferUsage', 'QUERY_RESOLVE', 0x200)
+const GPU_TEXTURE_USAGE_COPY_DST = getGlobalConstant('GPUTextureUsage', 'COPY_DST', 0x2)
 
 export type ResourceReadinessPolicy =
     | 'throw'
@@ -35,8 +37,9 @@ export type DrawVertexBufferBinding = {
     size?: number
 }
 
-export type NormalizedDrawVertexBufferBinding = DrawVertexBufferBinding & {
+export type NormalizedDrawVertexBufferBinding = Omit<DrawVertexBufferBinding, 'size'> & {
     offset: number
+    size: number | undefined
 }
 
 export type DrawCommandDescriptor = {
@@ -129,6 +132,62 @@ export type DispatchCommandDescriptor = {
     whenMissing: ResourceReadinessPolicy
 }
 
+type DrawCountOptionalKey = Exclude<keyof StaticDrawCount, 'vertexCount'>
+
+type OcclusionQueryCommandDiagnosticInput = {
+    runtime?: ScratchRuntime
+    querySet?: unknown
+    index?: unknown
+    reason: string
+}
+
+type CopyDiagnosticInput = {
+    runtime?: ScratchRuntime
+    source?: unknown
+    target?: unknown
+    sourceOffset?: unknown
+    targetOffset?: unknown
+    byteLength?: unknown
+    reason: string
+}
+
+type ResolveQuerySetDiagnosticInput = {
+    runtime?: ScratchRuntime
+    querySet?: unknown
+    firstQuery?: unknown
+    queryCount?: unknown
+    destination?: unknown
+    destinationOffset?: unknown
+    reason: string
+}
+
+type UploadDiagnosticInput = {
+    runtime?: ScratchRuntime
+    target?: unknown
+    data?: unknown
+    offset?: unknown
+    dataOffset?: unknown
+    size?: unknown
+    reason: string
+}
+
+type TextureUploadDiagnosticInput = {
+    runtime?: ScratchRuntime
+    target?: unknown
+    data?: unknown
+    layout?: unknown
+    origin?: unknown
+    size?: unknown
+    mipLevel?: unknown
+    reason: string
+}
+
+type VertexBufferDiagnosticDetails = {
+    expected: unknown
+    actual: unknown
+    related?: DiagnosticSubject[]
+}
+
 export interface DrawCommand {
     runtime: ScratchRuntime
     id: string
@@ -165,7 +224,7 @@ export class DrawCommand {
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'draw'
         this.pipeline = pipeline
         this.bindSets = normalizeBindSets(this, descriptor.bindSets)
@@ -175,9 +234,9 @@ export class DrawCommand {
         this.isDisposed = false
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Command',
             id: this.id,
             commandKind: 'draw',
@@ -315,16 +374,16 @@ export class BeginOcclusionQueryCommand {
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'begin-occlusion-query'
         this.querySet = querySet
         this.index = normalizeOcclusionQueryIndex(runtime, querySet, descriptor.index)
         this.isDisposed = false
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Command',
             id: this.id,
             commandKind: 'begin-occlusion-query',
@@ -434,14 +493,14 @@ export class EndOcclusionQueryCommand {
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'end-occlusion-query'
         this.isDisposed = false
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Command',
             id: this.id,
             commandKind: 'end-occlusion-query',
@@ -572,7 +631,7 @@ export class DispatchCommand {
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'dispatch'
         this.pipeline = pipeline
         this.bindSets = normalizeBindSets(this, descriptor.bindSets)
@@ -582,9 +641,9 @@ export class DispatchCommand {
         this.isDisposed = false
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Command',
             id: this.id,
             commandKind: 'dispatch',
@@ -716,7 +775,7 @@ export class UploadCommand {
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'upload'
         this.target = target
         this.data = descriptor.data
@@ -728,9 +787,9 @@ export class UploadCommand {
         validateUploadRange(this)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Command',
             id: this.id,
             commandKind: 'upload',
@@ -861,7 +920,7 @@ export class CopyCommand {
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'copy'
         this.source = source
         this.target = target
@@ -873,9 +932,9 @@ export class CopyCommand {
         validateCopyRange(this)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Command',
             id: this.id,
             commandKind: 'copy',
@@ -1008,7 +1067,7 @@ export class ResolveQuerySetCommand {
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'resolve-query-set'
         this.querySet = querySet
         this.firstQuery = normalizeResolveFirstQuery(runtime, descriptor.firstQuery ?? 0)
@@ -1020,9 +1079,9 @@ export class ResolveQuerySetCommand {
         validateResolveQuerySetRange(this)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Command',
             id: this.id,
             commandKind: 'resolve-query-set',
@@ -1153,7 +1212,7 @@ export class TextureUploadCommand {
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'upload'
         this.uploadKind = 'texture'
         this.target = target
@@ -1167,9 +1226,9 @@ export class TextureUploadCommand {
         validateTextureUploadRange(this)
     }
 
-    get subject() {
+    get subject(): DiagnosticSubject {
 
-        const subject: any = {
+        const subject: DiagnosticSubject = {
             kind: 'Command',
             id: this.id,
             commandKind: 'upload',
@@ -1253,7 +1312,7 @@ export class TextureUploadCommand {
     }
 }
 
-function normalizeOcclusionQueryIndex(runtime, querySet, index) {
+function normalizeOcclusionQueryIndex(runtime: ScratchRuntime, querySet: QuerySetResource, index: number): number {
 
     if (!Number.isInteger(index) || index < 0 || index >= querySet.count) {
         throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason: 'index' })
@@ -1262,7 +1321,7 @@ function normalizeOcclusionQueryIndex(runtime, querySet, index) {
     return index
 }
 
-function throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason }: any): never {
+function throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason }: OcclusionQueryCommandDiagnosticInput): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_OCCLUSION_QUERY_INVALID',
@@ -1271,8 +1330,8 @@ function throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason
         subject: { kind: 'Command', commandKind: 'begin-occlusion-query' },
         related: [
             runtime?.subject,
-            querySet?.subject,
-        ].filter(Boolean),
+            diagnosticSubjectOf(querySet),
+        ].filter(isDefined),
         message: 'BeginOcclusionQueryCommand requires an occlusion QuerySetResource and a valid query slot index.',
         expected: {
             querySet: 'occlusion QuerySetResource owned by this ScratchRuntime',
@@ -1280,8 +1339,8 @@ function throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason
         },
         actual: {
             reason,
-            querySet: querySet === undefined || querySet === null ? String(querySet) : typeof querySet,
-            querySetType: querySet?.type,
+            querySet: describeValue(querySet),
+            querySetType: querySet instanceof QuerySetResource ? querySet.type : undefined,
             index,
         },
     })
@@ -1353,7 +1412,7 @@ function normalizeVertexBuffers(
     }
 
     const slots = new Set<number>()
-    return vertexBuffers.map((binding: any) => {
+    return vertexBuffers.map((binding: DrawVertexBufferBinding) => {
         if (!binding || typeof binding !== 'object') {
             throwVertexBufferDiagnostic(command, {
                 expected: { binding: 'DrawVertexBufferBinding' },
@@ -1388,7 +1447,7 @@ function normalizeVertexBuffers(
             throwVertexBufferDiagnostic(command, {
                 expected: { buffer: 'BufferResource' },
                 actual: {
-                    buffer: buffer === undefined || buffer === null ? String(buffer) : typeof buffer,
+                    buffer: describeValue(buffer),
                 },
             })
         }
@@ -1433,12 +1492,14 @@ function normalizeVertexBuffers(
             })
         }
 
-        return {
+        const normalized: NormalizedDrawVertexBufferBinding = {
             slot: binding.slot,
             buffer,
             offset,
             size: binding.size,
         }
+
+        return normalized
     })
 }
 
@@ -1533,7 +1594,7 @@ function normalizeDrawCount(command: DrawCommand, count: StaticDrawCount): Stati
         })
     }
 
-    for (const key of [ 'instanceCount', 'firstVertex', 'firstInstance' ]) {
+    for (const key of [ 'instanceCount', 'firstVertex', 'firstInstance' ] satisfies DrawCountOptionalKey[]) {
         if (count[key] !== undefined && !isNonNegativeFinite(count[key])) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_COUNT_INVALID',
@@ -1608,7 +1669,7 @@ function validateUploadRange(command: UploadCommand) {
     }
 }
 
-function getDataByteLength(data: any): number | undefined {
+function getDataByteLength(data: unknown): number | undefined {
 
     if (data instanceof ArrayBuffer) return data.byteLength
     if (ArrayBuffer.isView(data)) return data.byteLength
@@ -1698,7 +1759,7 @@ function validateCopyRange(command: CopyCommand) {
     }
 }
 
-function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffset, byteLength, reason }: any): never {
+function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffset, byteLength, reason }: CopyDiagnosticInput): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
@@ -1707,9 +1768,9 @@ function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffs
         subject: { kind: 'Command', commandKind: 'copy' },
         related: [
             runtime?.subject,
-            source?.subject,
-            target?.subject,
-        ].filter(Boolean),
+            diagnosticSubjectOf(source),
+            diagnosticSubjectOf(target),
+        ].filter(isDefined),
         message: 'CopyCommand requires BufferResource source and target buffers with a valid aligned byte range.',
         expected: {
             source: 'BufferResource with GPUBufferUsage.COPY_SRC',
@@ -1720,8 +1781,8 @@ function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffs
         },
         actual: {
             reason,
-            source: source === undefined || source === null ? String(source) : typeof source,
-            target: target === undefined || target === null ? String(target) : typeof target,
+            source: describeValue(source),
+            target: describeValue(target),
             sourceOffset,
             targetOffset,
             byteLength,
@@ -1800,7 +1861,15 @@ function validateResolveQuerySetRange(command: ResolveQuerySetCommand) {
     }
 }
 
-function throwResolveQuerySetDiagnostic({ runtime, querySet, firstQuery, queryCount, destination, destinationOffset, reason }: any): never {
+function throwResolveQuerySetDiagnostic({
+    runtime,
+    querySet,
+    firstQuery,
+    queryCount,
+    destination,
+    destinationOffset,
+    reason,
+}: ResolveQuerySetDiagnosticInput): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_RESOLVE_QUERY_SET_INVALID',
@@ -1809,9 +1878,9 @@ function throwResolveQuerySetDiagnostic({ runtime, querySet, firstQuery, queryCo
         subject: { kind: 'Command', commandKind: 'resolve-query-set' },
         related: [
             runtime?.subject,
-            querySet?.subject,
-            destination?.subject,
-        ].filter(Boolean),
+            diagnosticSubjectOf(querySet),
+            diagnosticSubjectOf(destination),
+        ].filter(isDefined),
         message: 'ResolveQuerySetCommand requires a QuerySetResource source, BufferResource destination, and valid query and byte ranges.',
         expected: {
             querySet: 'QuerySetResource',
@@ -1822,16 +1891,16 @@ function throwResolveQuerySetDiagnostic({ runtime, querySet, firstQuery, queryCo
         },
         actual: {
             reason,
-            querySet: querySet === undefined || querySet === null ? String(querySet) : typeof querySet,
+            querySet: describeValue(querySet),
             firstQuery,
             queryCount,
-            destination: destination === undefined || destination === null ? String(destination) : typeof destination,
+            destination: describeValue(destination),
             destinationOffset,
         },
     })
 }
 
-function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size, reason }: any): never {
+function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size, reason }: UploadDiagnosticInput): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_UPLOAD_RANGE_INVALID',
@@ -1840,8 +1909,8 @@ function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size
         subject: { kind: 'Command', commandKind: 'upload' },
         related: [
             runtime?.subject,
-            target?.subject,
-        ].filter(Boolean),
+            diagnosticSubjectOf(target),
+        ].filter(isDefined),
         message: 'UploadCommand requires a BufferResource target, byte data, and a valid byte range.',
         expected: {
             target: 'BufferResource',
@@ -1852,8 +1921,8 @@ function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size
         },
         actual: {
             reason,
-            target: target === undefined || target === null ? String(target) : typeof target,
-            data: data === undefined || data === null ? String(data) : typeof data,
+            target: describeValue(target),
+            data: describeValue(data),
             offset,
             dataOffset,
             size,
@@ -1863,7 +1932,7 @@ function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size
 
 function normalizeTextureUploadOrigin(
     runtime: ScratchRuntime,
-    origin: any = { x: 0, y: 0, z: 0 }
+    origin: TextureUploadOrigin = { x: 0, y: 0, z: 0 }
 ): { x: number, y: number, z: number } {
 
     let x
@@ -1954,7 +2023,7 @@ function normalizeTextureUploadSize(
 function normalizeTextureUploadLayout(
     runtime: ScratchRuntime,
     target: TextureResource,
-    layout: any = {},
+    layout: TextureUploadLayout = {},
     size: { width: number, height: number, depthOrArrayLayers: number }
 ): Required<TextureUploadLayout> {
 
@@ -2064,7 +2133,16 @@ function getTextureBytesPerPixel(format: GPUTextureFormat): number | undefined {
     return undefined
 }
 
-function throwTextureUploadDiagnostic({ runtime, target, data, layout, origin, size, mipLevel, reason }: any): never {
+function throwTextureUploadDiagnostic({
+    runtime,
+    target,
+    data,
+    layout,
+    origin,
+    size,
+    mipLevel,
+    reason,
+}: TextureUploadDiagnosticInput): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_TEXTURE_UPLOAD_INVALID',
@@ -2073,8 +2151,8 @@ function throwTextureUploadDiagnostic({ runtime, target, data, layout, origin, s
         subject: { kind: 'Command', commandKind: 'upload', uploadKind: 'texture' },
         related: [
             runtime?.subject,
-            target?.subject,
-        ].filter(Boolean),
+            diagnosticSubjectOf(target),
+        ].filter(isDefined),
         message: 'TextureUploadCommand requires a TextureResource target, byte data, texture layout, and upload size.',
         expected: {
             target: 'TextureResource with GPUTextureUsage.COPY_DST',
@@ -2085,8 +2163,8 @@ function throwTextureUploadDiagnostic({ runtime, target, data, layout, origin, s
         },
         actual: {
             reason,
-            target: target === undefined || target === null ? String(target) : typeof target,
-            data: data === undefined || data === null ? String(data) : typeof data,
+            target: describeValue(target),
+            data: describeValue(data),
             layout,
             origin,
             size,
@@ -2095,7 +2173,7 @@ function throwTextureUploadDiagnostic({ runtime, target, data, layout, origin, s
     })
 }
 
-function normalizeReadinessPolicy(command, whenMissing) {
+function normalizeReadinessPolicy(command: DrawCommand | DispatchCommand, whenMissing: ResourceReadinessPolicy): ResourceReadinessPolicy {
 
     const allowed = new Set([ 'throw', 'skip-command', 'skip-pass', 'use-fallback' ])
 
@@ -2114,7 +2192,7 @@ function normalizeReadinessPolicy(command, whenMissing) {
     return whenMissing
 }
 
-function throwCountDiagnostic(command: DrawCommand, count: any): never {
+function throwCountDiagnostic(command: DrawCommand, count: unknown): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_COUNT_INVALID',
@@ -2129,7 +2207,7 @@ function throwCountDiagnostic(command: DrawCommand, count: any): never {
 
 function throwVertexBufferDiagnostic(
     command: DrawCommand,
-    { expected, actual, related = [] }: { expected: any, actual: any, related?: any[] }
+    { expected, actual, related = [] }: VertexBufferDiagnosticDetails
 ): never {
 
     throwScratchDiagnostic({
@@ -2147,7 +2225,7 @@ function throwVertexBufferDiagnostic(
     })
 }
 
-function throwDispatchCountDiagnostic(command: DispatchCommand, count: any): never {
+function throwDispatchCountDiagnostic(command: DispatchCommand, count: unknown): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_COUNT_INVALID',
@@ -2160,12 +2238,12 @@ function throwDispatchCountDiagnostic(command: DispatchCommand, count: any): nev
     })
 }
 
-function isPositiveFinite(value: any): boolean {
+function isPositiveFinite(value: unknown): value is number {
 
     return typeof value === 'number' && Number.isFinite(value) && value > 0
 }
 
-function isNonNegativeFinite(value: any): boolean {
+function isNonNegativeFinite(value: unknown): value is number {
 
     return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }

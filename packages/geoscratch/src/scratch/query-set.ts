@@ -1,11 +1,12 @@
 import { Resource } from './resource.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
-const QUERY_SET_TYPES = new Set([ 'timestamp', 'occlusion' ])
-
 export type QuerySetType = 'timestamp' | 'occlusion'
+
+const QUERY_SET_TYPES = new Set<QuerySetType>([ 'timestamp', 'occlusion' ])
 
 export type QuerySetResourceDescriptor = {
     label?: string
@@ -27,9 +28,9 @@ export class QuerySetResource extends Resource {
         const normalizedDescriptor = normalizeQuerySetDescriptor(runtime, descriptor)
 
         super(runtime, {
-            label: normalizedDescriptor.label,
             resourceKind: 'QuerySetResource',
             descriptor: normalizedDescriptor,
+            ...(normalizedDescriptor.label !== undefined ? { label: normalizedDescriptor.label } : {}),
         })
 
         this.type = normalizedDescriptor.type
@@ -68,11 +69,11 @@ export class QuerySetResource extends Resource {
 
     _advanceSlotContentEpoch(index: number): void {
 
-        this.slotContentEpochs[index]++
+        this.slotContentEpochs[index] = (this.slotContentEpochs[index] ?? 0) + 1
     }
 }
 
-function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: any): QuerySetResourceDescriptor {
+function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: unknown): QuerySetResourceDescriptor {
 
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
@@ -88,15 +89,15 @@ function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: any): 
         })
     }
 
-    if (!descriptor || typeof descriptor !== 'object') {
+    if (!isRecord(descriptor)) {
         throwQuerySetDescriptorDiagnostic(subject, descriptor, 'descriptor')
     }
 
-    if (!QUERY_SET_TYPES.has(descriptor.type)) {
+    if (!isQuerySetType(descriptor.type)) {
         throwQuerySetDescriptorDiagnostic(subject, descriptor, 'type')
     }
 
-    if (!Number.isInteger(descriptor.count) || descriptor.count <= 0) {
+    if (typeof descriptor.count !== 'number' || !Number.isInteger(descriptor.count) || descriptor.count <= 0) {
         throwQuerySetDescriptorDiagnostic(subject, descriptor, 'count')
     }
 
@@ -112,17 +113,19 @@ function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: any): 
         })
     }
 
-    const normalized: any = {
+    const normalized: QuerySetResourceDescriptor = {
         type: descriptor.type,
         count: descriptor.count,
     }
 
-    if (descriptor.label !== undefined) normalized.label = descriptor.label
+    if (typeof descriptor.label === 'string') normalized.label = descriptor.label
 
     return normalized
 }
 
-function throwQuerySetDescriptorDiagnostic(subject: DiagnosticSubject, descriptor: any, reason: string): never {
+function throwQuerySetDescriptorDiagnostic(subject: DiagnosticSubject, descriptor: unknown, reason: string): never {
+
+    const descriptorRecord = isRecord(descriptor) ? descriptor : {}
 
     throwScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
@@ -136,8 +139,13 @@ function throwQuerySetDescriptorDiagnostic(subject: DiagnosticSubject, descripto
         },
         actual: {
             reason,
-            type: descriptor?.type,
-            count: descriptor?.count,
+            type: descriptorRecord.type,
+            count: descriptorRecord.count,
         },
     })
+}
+
+function isQuerySetType(type: unknown): type is QuerySetType {
+
+    return QUERY_SET_TYPES.has(type as QuerySetType)
 }

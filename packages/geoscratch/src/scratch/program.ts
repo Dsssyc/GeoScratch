@@ -1,5 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
@@ -34,7 +35,7 @@ export class Program {
 
         this.runtime = runtime
         this.id = `scratch-program-${UUID()}`
-        this.label = descriptor.label
+        if (descriptor.label !== undefined) this.label = descriptor.label
         this.modules = normalizeModules(this, descriptor.modules)
         this.entryPoints = normalizeEntryPoints(this, descriptor.entryPoints)
         this.requiredFeatures = normalizeRequiredFeatures(descriptor.requiredFeatures)
@@ -96,9 +97,13 @@ export class Program {
     }
 }
 
-function normalizeModules(program: Program, modules: any): string[] {
+function normalizeModules(program: Program, modules: unknown): string[] {
 
-    if (!Array.isArray(modules) || modules.length === 0 || modules.some(module => typeof module !== 'string')) {
+    if (
+        !Array.isArray(modules) ||
+        modules.length === 0 ||
+        !modules.every((module): module is string => typeof module === 'string')
+    ) {
         throwScratchDiagnostic({
             code: 'SCRATCH_PROGRAM_MODULES_INVALID',
             severity: 'error',
@@ -113,29 +118,34 @@ function normalizeModules(program: Program, modules: any): string[] {
     return [ ...modules ]
 }
 
-function normalizeEntryPoints(program: Program, entryPoints: any): ProgramEntryPoints {
+function normalizeEntryPoints(program: Program, entryPoints: unknown): ProgramEntryPoints {
 
-    const normalized = {
-        vertex: entryPoints?.vertex,
-        fragment: entryPoints?.fragment,
-        compute: entryPoints?.compute,
+    if (entryPoints !== undefined && !isRecord(entryPoints)) {
+        throwEntryPointDiagnostic(program, 'entryPoints', entryPoints)
     }
 
-    if (normalized.vertex !== undefined && typeof normalized.vertex !== 'string') {
-        throwEntryPointDiagnostic(program, 'vertex', normalized.vertex)
+    const vertex = entryPoints?.vertex
+    const fragment = entryPoints?.fragment
+    const compute = entryPoints?.compute
+    const normalized: ProgramEntryPoints = {}
+
+    if (vertex !== undefined && typeof vertex !== 'string') {
+        throwEntryPointDiagnostic(program, 'vertex', vertex)
     }
 
-    if (normalized.fragment !== undefined && typeof normalized.fragment !== 'string') {
-        throwEntryPointDiagnostic(program, 'fragment', normalized.fragment)
+    if (fragment !== undefined && typeof fragment !== 'string') {
+        throwEntryPointDiagnostic(program, 'fragment', fragment)
     }
 
-    if (normalized.compute !== undefined && typeof normalized.compute !== 'string') {
-        throwEntryPointDiagnostic(program, 'compute', normalized.compute)
+    if (compute !== undefined && typeof compute !== 'string') {
+        throwEntryPointDiagnostic(program, 'compute', compute)
     }
 
-    return Object.fromEntries(
-        Object.entries(normalized).filter((entry) => entry[1] !== undefined)
-    )
+    if (vertex !== undefined) normalized.vertex = vertex
+    if (fragment !== undefined) normalized.fragment = fragment
+    if (compute !== undefined) normalized.compute = compute
+
+    return normalized
 }
 
 function normalizeRequiredFeatures(requiredFeatures: Iterable<GPUFeatureName> | undefined): GPUFeatureName[] {
