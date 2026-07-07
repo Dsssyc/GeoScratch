@@ -10,6 +10,7 @@ const examplePages = {
   index: path.resolve(examplesRoot, 'index.html'),
   helloTriangle: path.resolve(examplesRoot, '1_helloTriangle/index.html'),
   helloVertexBuffer: path.resolve(examplesRoot, '2_helloVertexBuffer/index.html'),
+  scratchHelloTriangle: path.resolve(examplesRoot, 'scratch_helloTriangle/index.html'),
   helloMap: path.resolve(examplesRoot, 'm_helloMap/index.html'),
   demLayer: path.resolve(examplesRoot, 'm_demLayer/index.html'),
   helloGAW: path.resolve(examplesRoot, 'x_helloGAW/index.html'),

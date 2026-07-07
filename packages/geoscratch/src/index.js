@@ -7,6 +7,12 @@ export {
     createScratchDiagnosticReport,
     Resource,
     BufferResource,
+    Program,
+    RenderPipeline as ScratchRenderPipeline,
+    DrawCommand,
+    RenderPassSpec,
+    SubmissionBuilder,
+    SubmittedWork,
 } from './scratch/index.js'
 
 import getDevice from './gpu/context/device.js'

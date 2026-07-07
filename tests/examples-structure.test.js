@@ -10,6 +10,7 @@ describe('examples structure', () => {
     const examples = [
         '1_helloTriangle',
         '2_helloVertexBuffer',
+        'scratch_helloTriangle',
         'm_helloMap',
         'm_demLayer',
         'x_helloGAW',

@@ -16,6 +16,22 @@ export {
     ResourceOptions,
     BufferResource,
     BufferResourceDescriptor,
+    Program,
+    ProgramDescriptor,
+    ProgramEntryPoints,
+    RenderPipeline as ScratchRenderPipeline,
+    RenderPipelineDescriptor as ScratchRenderPipelineDescriptor,
+    DrawCommand,
+    DrawCommandDescriptor,
+    ResourceReadinessPolicy,
+    StaticDrawCount,
+    RenderPassColorAttachmentSpec,
+    RenderPassSpec,
+    RenderPassSpecDescriptor,
+    SubmissionBuilder,
+    SubmissionBuilderOptions,
+    SubmissionValidationMode,
+    SubmittedWork,
 } from './scratch/index'
 
 export { Buffer } from './gpu/buffer/buffer'

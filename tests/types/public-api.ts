@@ -72,8 +72,40 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
 
     buffer.assertRuntime(runtime)
 
+    const program: scr.Program = runtime.createProgram({
+        label: 'typed program',
+        modules: [
+            '@vertex fn vsMain() -> @builtin(position) vec4f { return vec4f(); } @fragment fn fsMain() -> @location(0) vec4f { return vec4f(); }',
+        ],
+        entryPoints: {
+            vertex: 'vsMain',
+            fragment: 'fsMain',
+        },
+    })
+    const scratchPipeline: scr.ScratchRenderPipeline = runtime.createRenderPipeline({
+        label: 'typed scratch pipeline',
+        program,
+        targets: [ { format: surface.format } ],
+    })
+    const draw: scr.DrawCommand = runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        count: { vertexCount: 3 },
+        whenMissing: 'throw',
+    })
+    const passSpec: scr.RenderPassSpec = runtime.createRenderPass({
+        color: [ {
+            target: surface,
+            load: 'clear',
+            store: 'store',
+            clear: { r: 0, g: 0, b: 0, a: 1 },
+        } ],
+    })
+    const builder: scr.SubmissionBuilder = runtime.createSubmission({ validation: 'throw' })
+    const submitted: scr.SubmittedWork = builder.render(passSpec, [ draw ]).submit()
+
     void surface
     void error
+    void submitted
 }
 
 void startResult

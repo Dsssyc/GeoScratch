@@ -1,6 +1,11 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferResource } from './buffer.js'
+import { DrawCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { RenderPassSpec } from './pass.js'
+import { RenderPipeline } from './pipeline.js'
+import { Program } from './program.js'
+import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
 
 const runtimeToken = Symbol('ScratchRuntime')
@@ -156,6 +161,61 @@ export class ScratchRuntime {
     buffer(descriptor) {
 
         return this.createBuffer(descriptor)
+    }
+
+    createProgram(descriptor) {
+
+        this.assertActive()
+        return new Program(this, descriptor)
+    }
+
+    program(descriptor) {
+
+        return this.createProgram(descriptor)
+    }
+
+    createRenderPipeline(descriptor) {
+
+        this.assertActive()
+        return new RenderPipeline(this, descriptor)
+    }
+
+    renderPipeline(descriptor) {
+
+        return this.createRenderPipeline(descriptor)
+    }
+
+    createDrawCommand(descriptor) {
+
+        this.assertActive()
+        return new DrawCommand(this, descriptor)
+    }
+
+    drawCommand(descriptor) {
+
+        return this.createDrawCommand(descriptor)
+    }
+
+    createRenderPass(descriptor) {
+
+        this.assertActive()
+        return new RenderPassSpec(this, descriptor)
+    }
+
+    renderPass(descriptor) {
+
+        return this.createRenderPass(descriptor)
+    }
+
+    createSubmission(options = {}) {
+
+        this.assertActive()
+        return new SubmissionBuilder(this, options)
+    }
+
+    submission(options = {}) {
+
+        return this.createSubmission(options)
     }
 
     dispose() {
