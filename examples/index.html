@@ -21,36 +21,32 @@
                 </label>
 
                 <nav id="examples-nav" class="examples-nav" aria-label="GeoScratch examples">
-                    <a class="example-link is-active" href="?sample=scratch_helloTriangle" data-id="scratch_helloTriangle" data-path="./scratch_helloTriangle/" data-title="Scratch Hello Triangle" data-description="Minimal triangle rendered through the new explicit Scratch runtime, surface, program, pipeline, command, and submission path." data-tags="scratch triangle runtime surface program pipeline command submission">
-                        <span class="example-title">Scratch Hello Triangle</span>
-                        <span class="example-desc">New Scratch execution path.</span>
+                    <a class="example-link is-active" href="?sample=scratch_helloTriangle" data-id="scratch_helloTriangle" data-path="./scratch_helloTriangle/" data-title="Hello Triangle" data-description="Minimal triangle rendered through the explicit runtime, surface, program, pipeline, command, and submission path." data-tags="scratch triangle runtime surface program pipeline command submission">
+                        <span class="example-title">Hello Triangle</span>
+                        <span class="example-desc">Explicit runtime render path.</span>
                     </a>
-                    <a class="example-link" href="?sample=scratch_uniformTriangle" data-id="scratch_uniformTriangle" data-path="./scratch_uniformTriangle/" data-title="Scratch Uniform Triangle" data-description="Triangle rendered through Scratch BindLayout, BindSet, UploadCommand, uniform buffer, pipeline, command, and submission path." data-tags="scratch triangle uniform buffer bind layout set upload command submission">
-                        <span class="example-title">Scratch Uniform Triangle</span>
+                    <a class="example-link" href="?sample=scratch_uniformTriangle" data-id="scratch_uniformTriangle" data-path="./scratch_uniformTriangle/" data-title="Uniform Triangle" data-description="Triangle rendered with explicit bind layout, bind set, upload command, uniform buffer, pipeline, command, and submission path." data-tags="scratch triangle uniform buffer bind layout set upload command submission">
+                        <span class="example-title">Uniform Triangle</span>
                         <span class="example-desc">Uniform buffer binding path.</span>
                     </a>
-                    <a class="example-link" href="?sample=scratch_computeReadback" data-id="scratch_computeReadback" data-path="./scratch_computeReadback/" data-title="Scratch Compute Readback" data-description="Compute-only Scratch submission that doubles storage-buffer values and reads the result back through ReadbackOperation." data-tags="scratch compute storage buffer dispatch readback submission">
-                        <span class="example-title">Scratch Compute Readback</span>
+                    <a class="example-link" href="?sample=scratch_computeReadback" data-id="scratch_computeReadback" data-path="./scratch_computeReadback/" data-title="Compute Readback" data-description="Compute-only submission that doubles storage-buffer values and reads the result back through ReadbackOperation." data-tags="scratch compute storage buffer dispatch readback submission">
+                        <span class="example-title">Compute Readback</span>
                         <span class="example-desc">Storage dispatch and readback.</span>
                     </a>
-                    <a class="example-link" href="?sample=1_helloTriangle" data-id="1_helloTriangle" data-path="./1_helloTriangle/" data-title="Legacy API Hello Triangle" data-description="Legacy API example using StartDash, director stages, binding, renderPipeline, and renderPass." data-tags="legacy triangle basic render pass shader">
-                        <span class="example-title">Legacy API Hello Triangle</span>
-                        <span class="example-desc">Old StartDash render path.</span>
-                    </a>
-                    <a class="example-link" href="?sample=2_helloVertexBuffer" data-id="2_helloVertexBuffer" data-path="./2_helloVertexBuffer/" data-title="Legacy API Hello Vertex Buffer" data-description="Legacy API example with animated triangles driven by vertex and instance buffers." data-tags="legacy vertex buffer animation binding">
-                        <span class="example-title">Legacy API Hello Vertex Buffer</span>
+                    <a class="example-link" href="?sample=2_helloVertexBuffer" data-id="2_helloVertexBuffer" data-path="./2_helloVertexBuffer/" data-title="Hello Vertex Buffer (legacy)" data-description="Old API example with animated triangles driven by vertex and instance buffers." data-tags="legacy vertex buffer animation binding">
+                        <span class="example-title">Hello Vertex Buffer (legacy)</span>
                         <span class="example-desc">Old vertex buffer binding path.</span>
                     </a>
-                    <a class="example-link" href="?sample=m_helloMap" data-id="m_helloMap" data-path="./m_helloMap/" data-title="Legacy API Hello Map" data-description="Legacy API tile and vector data rendering experiments on a canvas map." data-tags="legacy map vector tile interaction">
-                        <span class="example-title">Legacy API Hello Map</span>
+                    <a class="example-link" href="?sample=m_helloMap" data-id="m_helloMap" data-path="./m_helloMap/" data-title="Hello Map (legacy)" data-description="Old API tile and vector data rendering experiments on a canvas map." data-tags="legacy map vector tile interaction">
+                        <span class="example-title">Hello Map (legacy)</span>
                         <span class="example-desc">Old API vector tile canvas map.</span>
                     </a>
-                    <a class="example-link" href="?sample=m_demLayer" data-id="m_demLayer" data-path="./m_demLayer/" data-title="Legacy API DEM Flow Layer" data-description="Legacy API dark basemap with underwater terrain and particle flow layer integration." data-tags="legacy maplibre carto terrain dem flow particles">
-                        <span class="example-title">Legacy API DEM Flow Layer</span>
+                    <a class="example-link" href="?sample=m_demLayer" data-id="m_demLayer" data-path="./m_demLayer/" data-title="DEM Flow Layer (legacy)" data-description="Old API dark basemap with underwater terrain and particle flow layer integration." data-tags="legacy maplibre carto terrain dem flow particles">
+                        <span class="example-title">DEM Flow Layer (legacy)</span>
                         <span class="example-desc">Old API terrain and flow overlay.</span>
                     </a>
-                    <a class="example-link" href="?sample=x_helloGAW" data-id="x_helloGAW" data-path="./x_helloGAW/" data-title="Legacy API Hello GAW" data-description="Legacy API earth rendering demo with textured globe, particles, and post effects." data-tags="legacy earth globe particles textures">
-                        <span class="example-title">Legacy API Hello GAW</span>
+                    <a class="example-link" href="?sample=x_helloGAW" data-id="x_helloGAW" data-path="./x_helloGAW/" data-title="Hello GAW (legacy)" data-description="Old API earth rendering demo with textured globe, particles, and post effects." data-tags="legacy earth globe particles textures">
+                        <span class="example-title">Hello GAW (legacy)</span>
                         <span class="example-desc">Old API textured globe demo.</span>
                     </a>
                 </nav>
@@ -60,8 +56,8 @@
             <section class="example-stage">
                 <header class="stage-toolbar">
                     <div class="stage-title">
-                        <h1 id="stage-title">Scratch Hello Triangle</h1>
-                        <p id="stage-description">Minimal triangle rendered through the new explicit Scratch runtime, surface, program, pipeline, command, and submission path.</p>
+                        <h1 id="stage-title">Hello Triangle</h1>
+                        <p id="stage-description">Minimal triangle rendered through the explicit runtime, surface, program, pipeline, command, and submission path.</p>
                     </div>
                     <div class="stage-actions">
                         <a id="source-link" href="./scratch_helloTriangle/main.js">Source</a>
