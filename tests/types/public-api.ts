@@ -216,6 +216,19 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         type: 'occlusion',
         count: 1,
     })
+    const beginOcclusion: scr.BeginOcclusionQueryCommand = runtime.createBeginOcclusionQueryCommand({
+        label: 'typed begin occlusion',
+        querySet: querySetAlias,
+        index: 0,
+    })
+    const beginOcclusionAlias: scr.BeginOcclusionQueryCommand = runtime.beginOcclusionQueryCommand({
+        querySet: querySetAlias,
+        index: 0,
+    })
+    const endOcclusion: scr.EndOcclusionQueryCommand = runtime.createEndOcclusionQueryCommand({
+        label: 'typed end occlusion',
+    })
+    const endOcclusionAlias: scr.EndOcclusionQueryCommand = runtime.endOcclusionQueryCommand()
     const resolveQueries: scr.ResolveQuerySetCommand = runtime.createResolveQuerySetCommand({
         label: 'typed query resolve',
         querySet,
@@ -264,6 +277,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             begin: 0,
             end: 1,
         },
+        occlusionQuerySet: querySetAlias,
     })
     const textureTargetPass: scr.RenderPassSpec = runtime.createRenderPass({
         color: [ {
@@ -301,8 +315,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             begin: 0,
         },
     })
+    const renderCommands: scr.RenderCommand[] = [ beginOcclusion, draw, endOcclusion ]
     const builder: scr.SubmissionBuilder = runtime.createSubmission({ validation: 'throw' })
-    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, [ draw ]).submit()
+    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
     const readback: scr.ReadbackOperation = runtime.createReadback({
         source: storageOutput,
         after: submitted,
@@ -319,6 +334,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void copyAlias
     void querySet
     void querySetAlias
+    void beginOcclusion
+    void beginOcclusionAlias
+    void endOcclusion
+    void endOcclusionAlias
     void resolveQueries
     void resolveAlias
     void error

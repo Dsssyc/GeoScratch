@@ -15,6 +15,8 @@ export {
     Program,
     RenderPipeline as ScratchRenderPipeline,
     ComputePipeline as ScratchComputePipeline,
+    BeginOcclusionQueryCommand,
+    EndOcclusionQueryCommand,
     DrawCommand,
     DispatchCommand,
     TextureUploadCommand,

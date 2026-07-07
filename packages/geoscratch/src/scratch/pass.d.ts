@@ -22,6 +22,7 @@ export type RenderPassSpecDescriptor = {
     label?: string
     color: RenderPassColorAttachmentSpec[]
     timestampWrites?: TimestampWritesSpec
+    occlusionQuerySet?: QuerySetResource
 }
 
 export type ComputePassSpecDescriptor = {
@@ -38,6 +39,7 @@ export class RenderPassSpec {
     readonly passKind: 'render'
     readonly color: RenderPassColorAttachmentSpec[]
     readonly timestampWrites?: TimestampWritesSpec
+    readonly occlusionQuerySet?: QuerySetResource
     readonly isDisposed: boolean
 
     assertRuntime(runtime: ScratchRuntime): void

@@ -20,6 +20,7 @@ export function createFakeGpu() {
         computePasses: [],
         drawCalls: [],
         dispatchCalls: [],
+        occlusionQueries: [],
         copies: [],
         resolveQueries: [],
         maps: [],
@@ -340,6 +341,16 @@ function createFakeRenderPassEncoder(calls, descriptor) {
             }
             this.actions.push({ type: 'draw', call })
             calls.drawCalls.push(call)
+        },
+        beginOcclusionQuery(queryIndex) {
+            const call = { type: 'begin', queryIndex }
+            this.actions.push({ type: 'beginOcclusionQuery', queryIndex })
+            calls.occlusionQueries.push(call)
+        },
+        endOcclusionQuery() {
+            const call = { type: 'end' }
+            this.actions.push({ type: 'endOcclusionQuery' })
+            calls.occlusionQueries.push(call)
         },
         end() {
             this.actions.push({ type: 'end' })

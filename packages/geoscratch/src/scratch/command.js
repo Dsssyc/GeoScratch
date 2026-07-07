@@ -144,6 +144,245 @@ export class DrawCommand {
     }
 }
 
+export class BeginOcclusionQueryCommand {
+
+    constructor(runtime, descriptor = {}) {
+
+        runtime.assertActive()
+
+        const querySet = descriptor.querySet
+        if (!(querySet instanceof QuerySetResource)) {
+            throwOcclusionQueryCommandDiagnostic({
+                runtime,
+                querySet,
+                index: descriptor.index,
+                reason: 'querySet',
+            })
+        }
+
+        querySet.assertRuntime(runtime)
+
+        if (querySet.type !== 'occlusion') {
+            throwOcclusionQueryCommandDiagnostic({
+                runtime,
+                querySet,
+                index: descriptor.index,
+                reason: 'querySetType',
+            })
+        }
+
+        this.runtime = runtime
+        this.id = `scratch-command-${UUID()}`
+        this.label = descriptor.label
+        this.commandKind = 'begin-occlusion-query'
+        this.querySet = querySet
+        this.index = normalizeOcclusionQueryIndex(runtime, querySet, descriptor.index)
+        this.isDisposed = false
+    }
+
+    get subject() {
+
+        const subject = {
+            kind: 'Command',
+            id: this.id,
+            commandKind: 'begin-occlusion-query',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    assertRuntime(runtime) {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'Command belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable() {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DISPOSED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Command has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+        this.querySet.assertUsable()
+    }
+
+    validateForPass(passSpec) {
+
+        this.assertUsable()
+
+        if (passSpec.passKind !== 'render') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    passSpec.subject,
+                    this.querySet.subject,
+                ].filter(Boolean),
+                message: 'BeginOcclusionQueryCommand can only be recorded into a render pass.',
+                expected: { passKind: 'render' },
+                actual: { passKind: passSpec.passKind },
+            })
+        }
+    }
+
+    encode(passEncoder) {
+
+        this.assertUsable()
+
+        if (!passEncoder || typeof passEncoder.beginOcclusionQuery !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                severity: 'error',
+                phase: 'runtime',
+                subject: this.runtime.subject,
+                related: [ this.subject ],
+                message: 'ScratchRuntime render pass encoder cannot begin occlusion queries.',
+                expected: { passEncoder: 'GPURenderPassEncoder with beginOcclusionQuery()' },
+                actual: { beginOcclusionQuery: typeof passEncoder?.beginOcclusionQuery },
+            })
+        }
+
+        passEncoder.beginOcclusionQuery(this.index)
+    }
+
+    dispose() {
+
+        this.isDisposed = true
+    }
+}
+
+export class EndOcclusionQueryCommand {
+
+    constructor(runtime, descriptor = {}) {
+
+        runtime.assertActive()
+
+        this.runtime = runtime
+        this.id = `scratch-command-${UUID()}`
+        this.label = descriptor.label
+        this.commandKind = 'end-occlusion-query'
+        this.isDisposed = false
+    }
+
+    get subject() {
+
+        const subject = {
+            kind: 'Command',
+            id: this.id,
+            commandKind: 'end-occlusion-query',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    assertRuntime(runtime) {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'Command belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable() {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DISPOSED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Command has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+    }
+
+    validateForPass(passSpec) {
+
+        this.assertUsable()
+
+        if (passSpec.passKind !== 'render') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    passSpec.subject,
+                ].filter(Boolean),
+                message: 'EndOcclusionQueryCommand can only be recorded into a render pass.',
+                expected: { passKind: 'render' },
+                actual: { passKind: passSpec.passKind },
+            })
+        }
+    }
+
+    encode(passEncoder) {
+
+        this.assertUsable()
+
+        if (!passEncoder || typeof passEncoder.endOcclusionQuery !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                severity: 'error',
+                phase: 'runtime',
+                subject: this.runtime.subject,
+                related: [ this.subject ],
+                message: 'ScratchRuntime render pass encoder cannot end occlusion queries.',
+                expected: { passEncoder: 'GPURenderPassEncoder with endOcclusionQuery()' },
+                actual: { endOcclusionQuery: typeof passEncoder?.endOcclusionQuery },
+            })
+        }
+
+        passEncoder.endOcclusionQuery()
+    }
+
+    dispose() {
+
+        this.isDisposed = true
+    }
+}
+
 export class DispatchCommand {
 
     constructor(runtime, descriptor = {}) {
@@ -792,6 +1031,40 @@ export class TextureUploadCommand {
 
         this.isDisposed = true
     }
+}
+
+function normalizeOcclusionQueryIndex(runtime, querySet, index) {
+
+    if (!Number.isInteger(index) || index < 0 || index >= querySet.count) {
+        throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason: 'index' })
+    }
+
+    return index
+}
+
+function throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason }) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_OCCLUSION_QUERY_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: { kind: 'Command', commandKind: 'begin-occlusion-query' },
+        related: [
+            runtime?.subject,
+            querySet?.subject,
+        ].filter(Boolean),
+        message: 'BeginOcclusionQueryCommand requires an occlusion QuerySetResource and a valid query slot index.',
+        expected: {
+            querySet: 'occlusion QuerySetResource owned by this ScratchRuntime',
+            index: 'integer query index within querySet.count',
+        },
+        actual: {
+            reason,
+            querySet: querySet === undefined || querySet === null ? String(querySet) : typeof querySet,
+            querySetType: querySet?.type,
+            index,
+        },
+    })
 }
 
 function normalizeBindSets(command, bindSets = []) {

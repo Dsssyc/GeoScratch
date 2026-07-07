@@ -35,6 +35,8 @@ export {
 export { Program, ProgramDescriptor, ProgramEntryPoints } from './program'
 export { ComputePipeline, ComputePipelineDescriptor, RenderPipeline, RenderPipelineDescriptor } from './pipeline'
 export {
+    BeginOcclusionQueryCommand,
+    BeginOcclusionQueryCommandDescriptor,
     CopyCommand,
     CopyCommandDescriptor,
     DispatchCommand,
@@ -42,6 +44,8 @@ export {
     DrawCommand,
     DrawCommandDescriptor,
     DrawVertexBufferBinding,
+    EndOcclusionQueryCommand,
+    EndOcclusionQueryCommandDescriptor,
     NormalizedDrawVertexBufferBinding,
     ResolveQuerySetCommand,
     ResolveQuerySetCommandDescriptor,
@@ -72,6 +76,7 @@ export {
     TypedArrayConstructor,
 } from './readback'
 export {
+    RenderCommand,
     SubmissionBuilder,
     SubmissionBuilderOptions,
     SubmissionValidationMode,

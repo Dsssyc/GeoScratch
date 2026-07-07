@@ -1,4 +1,4 @@
-import { CopyCommand, DispatchCommand, DrawCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command'
+import { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command'
 import { ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics'
 import { ComputePassSpec, RenderPassSpec } from './pass'
 import { ScratchRuntime } from './runtime'
@@ -9,6 +9,8 @@ export type SubmissionBuilderOptions = {
     validation?: SubmissionValidationMode
 }
 
+export type RenderCommand = DrawCommand | BeginOcclusionQueryCommand | EndOcclusionQueryCommand
+
 export class SubmissionBuilder {
     constructor(runtime: ScratchRuntime, options?: SubmissionBuilderOptions)
 
@@ -17,7 +19,7 @@ export class SubmissionBuilder {
     readonly validation: SubmissionValidationMode
     readonly isSubmitted: boolean
 
-    render(passSpec: RenderPassSpec, commands: DrawCommand[]): this
+    render(passSpec: RenderPassSpec, commands: RenderCommand[]): this
     compute(passSpec: ComputePassSpec, commands: DispatchCommand[]): this
     upload(command: UploadCommand | TextureUploadCommand): this
     copy(command: CopyCommand): this

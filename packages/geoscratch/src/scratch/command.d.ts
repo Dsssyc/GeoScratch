@@ -40,6 +40,16 @@ export type DrawCommandDescriptor = {
     whenMissing: ResourceReadinessPolicy
 }
 
+export type BeginOcclusionQueryCommandDescriptor = {
+    label?: string
+    querySet: QuerySetResource
+    index: number
+}
+
+export type EndOcclusionQueryCommandDescriptor = {
+    label?: string
+}
+
 export type UploadCommandDescriptor = {
     label?: string
     target: BufferResource
@@ -123,6 +133,40 @@ export class DrawCommand {
     readonly vertexBuffers: NormalizedDrawVertexBufferBinding[]
     readonly count: StaticDrawCount
     readonly whenMissing: ResourceReadinessPolicy
+    readonly isDisposed: boolean
+
+    assertRuntime(runtime: ScratchRuntime): void
+    assertUsable(): void
+    validateForPass(passSpec: RenderPassSpec): void
+    encode(passEncoder: GPURenderPassEncoder): void
+    dispose(): void
+}
+
+export class BeginOcclusionQueryCommand {
+    constructor(runtime: ScratchRuntime, descriptor: BeginOcclusionQueryCommandDescriptor)
+
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'begin-occlusion-query'
+    readonly querySet: QuerySetResource
+    readonly index: number
+    readonly isDisposed: boolean
+
+    assertRuntime(runtime: ScratchRuntime): void
+    assertUsable(): void
+    validateForPass(passSpec: RenderPassSpec): void
+    encode(passEncoder: GPURenderPassEncoder): void
+    dispose(): void
+}
+
+export class EndOcclusionQueryCommand {
+    constructor(runtime: ScratchRuntime, descriptor?: EndOcclusionQueryCommandDescriptor)
+
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'end-occlusion-query'
     readonly isDisposed: boolean
 
     assertRuntime(runtime: ScratchRuntime): void

@@ -128,8 +128,15 @@ export class SubmissionBuilder {
             if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
             const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
+            let activeOcclusionQueryCommand
             for (const command of step.commands) {
                 command.encode(passEncoder)
+                if (command.commandKind === 'begin-occlusion-query') {
+                    activeOcclusionQueryCommand = command
+                } else if (command.commandKind === 'end-occlusion-query') {
+                    activeOcclusionQueryCommand.querySet._advanceSlotContentEpoch(activeOcclusionQueryCommand.index)
+                    activeOcclusionQueryCommand = undefined
+                }
             }
             passEncoder.end()
             step.passSpec.advanceTimestampWriteEpochs()
@@ -268,10 +275,26 @@ function validateRenderStep(builder, step) {
     }
 
     for (const command of step.commands) {
+        if (!isRenderCommand(command)) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+                severity: 'error',
+                phase: 'submission',
+                subject: builder.subject,
+                message: 'Submission render step requires render commands.',
+                expected: { command: 'DrawCommand, BeginOcclusionQueryCommand, or EndOcclusionQueryCommand' },
+                actual: { command: command === undefined || command === null ? String(command) : typeof command },
+            })
+        }
+
         command.assertRuntime(builder.runtime)
         command.validateForPass(passSpec)
-        validatePipelineTargets(command, passSpec)
+        if (command.commandKind === 'draw') {
+            validatePipelineTargets(command, passSpec)
+        }
     }
+
+    validateRenderOcclusionQueryOrder(builder, step)
 }
 
 function validateComputeStep(builder, step) {
@@ -334,6 +357,90 @@ function validatePipelineTargets(command, passSpec) {
             })
         }
     }
+}
+
+function validateRenderOcclusionQueryOrder(builder, step) {
+
+    const passSpec = step.passSpec
+    const writtenIndices = new Set()
+    let activeCommand
+
+    for (const command of step.commands) {
+        if (command.commandKind === 'begin-occlusion-query') {
+            if (passSpec.occlusionQuerySet === undefined) {
+                throwOcclusionQueryStateDiagnostic(builder, step, command, 'missingPassQuerySet')
+            }
+
+            if (command.querySet !== passSpec.occlusionQuerySet) {
+                throwOcclusionQueryStateDiagnostic(builder, step, command, 'querySetMismatch')
+            }
+
+            if (activeCommand !== undefined) {
+                throwOcclusionQueryStateDiagnostic(builder, step, command, 'nestedBegin', activeCommand)
+            }
+
+            if (writtenIndices.has(command.index)) {
+                throwOcclusionQueryStateDiagnostic(builder, step, command, 'queryIndexAlreadyWritten')
+            }
+
+            activeCommand = command
+            continue
+        }
+
+        if (command.commandKind !== 'end-occlusion-query') continue
+
+        if (activeCommand === undefined) {
+            throwOcclusionQueryStateDiagnostic(builder, step, command, 'endWithoutBegin')
+        }
+
+        writtenIndices.add(activeCommand.index)
+        activeCommand = undefined
+    }
+
+    if (activeCommand !== undefined) {
+        throwOcclusionQueryStateDiagnostic(builder, step, activeCommand, 'unclosedBegin', activeCommand)
+    }
+}
+
+function isRenderCommand(command) {
+
+    return Boolean(
+        command &&
+        typeof command.assertRuntime === 'function' &&
+        typeof command.validateForPass === 'function' &&
+        new Set([ 'draw', 'begin-occlusion-query', 'end-occlusion-query' ]).has(command.commandKind)
+    )
+}
+
+function throwOcclusionQueryStateDiagnostic(builder, step, command, reason, activeCommand) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_SUBMISSION_OCCLUSION_QUERY_STATE_INVALID',
+        severity: 'error',
+        phase: 'submission',
+        subject: command?.subject ?? builder.subject,
+        related: [
+            builder.subject,
+            step.passSpec?.subject,
+            command?.querySet?.subject,
+            step.passSpec?.occlusionQuerySet?.subject,
+            activeCommand?.subject,
+        ].filter(Boolean),
+        message: 'Render submission occlusion query commands must form non-nested begin/end pairs against the pass occlusionQuerySet.',
+        expected: {
+            pass: 'RenderPassSpec with matching occlusionQuerySet',
+            commands: 'begin/end pairs in explicit order with one active query at a time',
+        },
+        actual: {
+            reason,
+            commandKind: command?.commandKind,
+            queryIndex: command?.index,
+            hasPassQuerySet: step.passSpec?.occlusionQuerySet !== undefined,
+            passQuerySetId: step.passSpec?.occlusionQuerySet?.id,
+            commandQuerySetId: command?.querySet?.id,
+            activeQueryIndex: activeCommand?.index,
+        },
+    })
 }
 
 function advanceRenderAttachmentEpochs(passSpec) {

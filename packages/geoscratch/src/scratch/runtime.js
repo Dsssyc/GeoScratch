@@ -1,7 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BindLayout, BindSet } from './binding.js'
 import { BufferResource } from './buffer.js'
-import { CopyCommand, DispatchCommand, DrawCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+import { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import { ComputePipeline, RenderPipeline } from './pipeline.js'
@@ -265,6 +265,28 @@ export class ScratchRuntime {
     drawCommand(descriptor) {
 
         return this.createDrawCommand(descriptor)
+    }
+
+    createBeginOcclusionQueryCommand(descriptor) {
+
+        this.assertActive()
+        return new BeginOcclusionQueryCommand(this, descriptor)
+    }
+
+    beginOcclusionQueryCommand(descriptor) {
+
+        return this.createBeginOcclusionQueryCommand(descriptor)
+    }
+
+    createEndOcclusionQueryCommand(descriptor) {
+
+        this.assertActive()
+        return new EndOcclusionQueryCommand(this, descriptor)
+    }
+
+    endOcclusionQueryCommand(descriptor) {
+
+        return this.createEndOcclusionQueryCommand(descriptor)
     }
 
     createDispatchCommand(descriptor) {

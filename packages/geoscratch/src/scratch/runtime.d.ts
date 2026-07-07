@@ -1,6 +1,6 @@
 import { BufferResource, BufferResourceDescriptor } from './buffer'
 import { BindLayout, BindLayoutDescriptor, BindSet, BindSetBindings, BindSetOptions } from './binding'
-import { CopyCommand, CopyCommandDescriptor, DispatchCommand, DispatchCommandDescriptor, DrawCommand, DrawCommandDescriptor, ResolveQuerySetCommand, ResolveQuerySetCommandDescriptor, TextureUploadCommand, TextureUploadCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
+import { BeginOcclusionQueryCommand, BeginOcclusionQueryCommandDescriptor, CopyCommand, CopyCommandDescriptor, DispatchCommand, DispatchCommandDescriptor, DrawCommand, DrawCommandDescriptor, EndOcclusionQueryCommand, EndOcclusionQueryCommandDescriptor, ResolveQuerySetCommand, ResolveQuerySetCommandDescriptor, TextureUploadCommand, TextureUploadCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
 import { ComputePassSpec, ComputePassSpecDescriptor, RenderPassSpec, RenderPassSpecDescriptor } from './pass'
 import { ComputePipeline, ComputePipelineDescriptor, RenderPipeline, RenderPipelineDescriptor } from './pipeline'
 import { Program, ProgramDescriptor } from './program'
@@ -62,6 +62,10 @@ export class ScratchRuntime {
     computePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline
     createDrawCommand(descriptor: DrawCommandDescriptor): DrawCommand
     drawCommand(descriptor: DrawCommandDescriptor): DrawCommand
+    createBeginOcclusionQueryCommand(descriptor: BeginOcclusionQueryCommandDescriptor): BeginOcclusionQueryCommand
+    beginOcclusionQueryCommand(descriptor: BeginOcclusionQueryCommandDescriptor): BeginOcclusionQueryCommand
+    createEndOcclusionQueryCommand(descriptor?: EndOcclusionQueryCommandDescriptor): EndOcclusionQueryCommand
+    endOcclusionQueryCommand(descriptor?: EndOcclusionQueryCommandDescriptor): EndOcclusionQueryCommand
     createDispatchCommand(descriptor: DispatchCommandDescriptor): DispatchCommand
     dispatchCommand(descriptor: DispatchCommandDescriptor): DispatchCommand
     createUploadCommand(descriptor: UploadCommandDescriptor): UploadCommand

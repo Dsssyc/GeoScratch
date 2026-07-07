@@ -17,6 +17,7 @@ export class RenderPassSpec {
         this.passKind = 'render'
         this.color = normalizeColorAttachments(this, descriptor.color)
         this.timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
+        this.occlusionQuerySet = normalizeOcclusionQuerySet(this, descriptor.occlusionQuerySet)
         this.isDisposed = false
     }
 
@@ -71,6 +72,7 @@ export class RenderPassSpec {
     createRenderPassDescriptor() {
 
         this.assertUsable()
+        this.occlusionQuerySet?.assertUsable()
 
         return {
             label: this.label,
@@ -86,6 +88,7 @@ export class RenderPassSpec {
                 }
             }),
             ...(this.timestampWrites !== undefined ? { timestampWrites: createTimestampWritesDescriptor(this.timestampWrites) } : {}),
+            ...(this.occlusionQuerySet !== undefined ? { occlusionQuerySet: this.occlusionQuerySet.gpuQuerySet } : {}),
         }
     }
 
@@ -222,6 +225,23 @@ function normalizeTimestampWrites(pass, timestampWrites) {
     }
 }
 
+function normalizeOcclusionQuerySet(pass, querySet) {
+
+    if (querySet === undefined) return undefined
+
+    if (!(querySet instanceof QuerySetResource)) {
+        throwOcclusionQuerySetDiagnostic(pass, querySet, 'querySet')
+    }
+
+    querySet.assertRuntime(pass.runtime)
+
+    if (querySet.type !== 'occlusion') {
+        throwOcclusionQuerySetDiagnostic(pass, querySet, 'querySetType')
+    }
+
+    return querySet
+}
+
 function normalizeTimestampWriteIndex(pass, querySet, index, key) {
 
     if (index === undefined) return undefined
@@ -272,6 +292,26 @@ function throwTimestampWritesDiagnostic(pass, timestampWrites, reason) {
             querySet: timestampWrites?.querySet === undefined || timestampWrites?.querySet === null ? String(timestampWrites?.querySet) : typeof timestampWrites?.querySet,
             begin: timestampWrites?.begin,
             end: timestampWrites?.end,
+        },
+    })
+}
+
+function throwOcclusionQuerySetDiagnostic(pass, querySet, reason) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PASS_OCCLUSION_QUERY_SET_INVALID',
+        severity: 'error',
+        phase: 'submission',
+        subject: pass.subject,
+        related: [
+            querySet?.subject,
+        ].filter(Boolean),
+        message: 'RenderPassSpec occlusionQuerySet requires an occlusion QuerySetResource owned by this ScratchRuntime.',
+        expected: { occlusionQuerySet: 'occlusion QuerySetResource owned by this ScratchRuntime' },
+        actual: {
+            reason,
+            occlusionQuerySet: querySet === undefined || querySet === null ? String(querySet) : typeof querySet,
+            querySetType: querySet?.type,
         },
     })
 }
