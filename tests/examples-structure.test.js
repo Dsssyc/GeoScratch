@@ -12,7 +12,6 @@ describe('examples structure', () => {
         'scratch_uniformTriangle',
         'scratch_computeReadback',
         'scratch_helloVertexBuffer',
-        'm_helloMap',
         'm_demLayer',
         'm_flowLayer',
         'x_helloGAW',
@@ -24,7 +23,6 @@ describe('examples structure', () => {
         'scratch_uniformTriangle',
         'scratch_computeReadback',
         'scratch_helloVertexBuffer',
-        'm_helloMap',
         'm_demLayer',
         'm_flowLayer',
         'x_helloGAW',
@@ -55,6 +53,10 @@ describe('examples structure', () => {
         expect(html).to.not.include('data-id="2_helloVertexBuffer"')
         expect(html).to.not.include('data-path="./2_helloVertexBuffer/"')
         expect(html).to.not.include('Hello Vertex Buffer (legacy)')
+        expect(html).to.not.include('href="?sample=m_helloMap"')
+        expect(html).to.not.include('data-id="m_helloMap"')
+        expect(html).to.not.include('data-path="./m_helloMap/"')
+        expect(html).to.not.include('Hello Map')
     })
 
     it('defaults the examples browser to the replacement Hello Triangle entry', () => {
@@ -91,7 +93,6 @@ describe('examples structure', () => {
     it('marks only not-yet-replaced old API examples as legacy in the browser', () => {
         const html = read('examples', 'index.html')
         const legacyExamples = [
-            'm_helloMap',
             'm_demLayer',
             'm_flowLayer',
             'x_helloGAW',

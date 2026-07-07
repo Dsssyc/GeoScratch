@@ -21,11 +21,9 @@ describe('asset layout', () => {
         expect(exists('examples', 'x_helloGAW', 'assets', 'images', 'earth.jpg')).to.equal(true)
         expect(exists('examples', 'x_helloGAW', 'shaders', 'land.wgsl')).to.equal(true)
         expect(exists('examples', 'm_flowLayer', 'shaders', 'flow', 'particles.wgsl')).to.equal(true)
-        expect(exists('examples', 'm_helloMap', 'shaders', 'test.wgsl')).to.equal(true)
 
         const helloGAW = read('examples', 'x_helloGAW', 'main.js')
         const steadyFlowLayer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
-        const helloMap = read('examples', 'm_helloMap', 'main.js')
 
         expect(helloGAW).to.not.include('/images/Earth/')
         expect(helloGAW).to.not.include('/shaders/examples/GAW/')
@@ -33,8 +31,6 @@ describe('asset layout', () => {
         expect(helloGAW).to.include('./shaders/land.wgsl?raw')
         expect(steadyFlowLayer).to.not.include('/shaders/examples/flow/')
         expect(steadyFlowLayer).to.include('./shaders/flow/particles.wgsl?raw')
-        expect(helloMap).to.not.include('/shaders/examples/map/')
-        expect(helloMap).to.include('./shaders/test.wgsl?raw')
     })
 
     it('keeps public directories only for large URL-addressed local data', () => {

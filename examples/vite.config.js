@@ -14,7 +14,6 @@ const examplePages = {
   scratchUniformTriangle: path.resolve(examplesRoot, 'scratch_uniformTriangle/index.html'),
   scratchComputeReadback: path.resolve(examplesRoot, 'scratch_computeReadback/index.html'),
   scratchHelloVertexBuffer: path.resolve(examplesRoot, 'scratch_helloVertexBuffer/index.html'),
-  helloMap: path.resolve(examplesRoot, 'm_helloMap/index.html'),
   demLayer: path.resolve(examplesRoot, 'm_demLayer/index.html'),
   flowLayer: path.resolve(examplesRoot, 'm_flowLayer/index.html'),
   helloGAW: path.resolve(examplesRoot, 'x_helloGAW/index.html'),
