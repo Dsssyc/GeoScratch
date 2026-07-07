@@ -30,6 +30,8 @@ describe('public entrypoints', () => {
         expect(scr).to.have.property('TextureResource').that.is.a('function')
         expect(scr).to.have.property('SamplerResource').that.is.a('function')
         expect(scr).to.have.property('TextureUploadCommand').that.is.a('function')
+        expect(scr).to.have.property('LayoutCodec').that.is.a('function')
+        expect(scr).to.have.property('layoutCodec').that.is.a('function')
     })
 
     it('keeps the scratch compatibility entrypoint', () => {
@@ -55,6 +57,8 @@ describe('public entrypoints', () => {
         expect(scratchCompat).to.have.property('TextureResource').that.equals(scr.TextureResource)
         expect(scratchCompat).to.have.property('SamplerResource').that.equals(scr.SamplerResource)
         expect(scratchCompat).to.have.property('TextureUploadCommand').that.equals(scr.TextureUploadCommand)
+        expect(scratchCompat).to.have.property('LayoutCodec').that.equals(scr.LayoutCodec)
+        expect(scratchCompat).to.have.property('layoutCodec').that.equals(scr.layoutCodec)
     })
 
     it('exposes package-level entrypoints', () => {

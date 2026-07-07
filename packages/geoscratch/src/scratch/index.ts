@@ -16,6 +16,23 @@ export { TextureResource } from './texture.js'
 export { SamplerResource } from './sampler.js'
 export { QuerySetResource } from './query-set.js'
 export { BindLayout, BindSet } from './binding.js'
+export { LayoutCodec, layoutCodec } from './layout-codec.js'
+export type {
+    LayoutArtifact,
+    LayoutCodecOptions,
+    LayoutCodecUsage,
+    LayoutFieldArtifact,
+    LayoutFieldDescriptor,
+    LayoutFieldType,
+    LayoutPrimitiveType,
+    LayoutReadbackView,
+    LayoutScalarType,
+    LayoutSpec,
+    LayoutUploadView,
+    LayoutUsageCompatibility,
+    LayoutVectorType,
+    LayoutWriteOptions,
+} from './layout-codec.js'
 export { Program } from './program.js'
 export { ComputePipeline, RenderPipeline } from './pipeline.js'
 export { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'

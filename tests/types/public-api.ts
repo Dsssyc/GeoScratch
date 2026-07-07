@@ -107,6 +107,44 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const report: scr.ScratchDiagnosticReport = scr.createScratchDiagnosticReport([ diagnostic ])
     const error = new scr.ScratchDiagnosticError(diagnostic, report)
 
+    const codec: scr.LayoutCodec = scr.layoutCodec({
+        label: 'typed layout codec',
+        name: 'TypedUniforms',
+        fields: [
+            { name: 'position', type: 'vec3f' },
+            { name: 'flags', type: { element: 'u32', count: 3 } },
+            { name: 'transform', type: 'mat4x4f' },
+        ],
+    }, {
+        usage: [ 'uniform', 'storage', 'readback' ],
+    })
+    const packed: Uint8Array = codec.pack({
+        position: [ 1, 2, 3 ],
+        flags: [ 1, 2, 3 ],
+        transform: [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ],
+    })
+    const uploadView = codec.uploadView({
+        position: [ 1, 2, 3 ],
+        flags: [ 1, 2, 3 ],
+        transform: [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ],
+    })
+    const typedReadback = codec.createReadbackView(packed)
+    const wgslAccessors: string = codec.wgslAccessors({ namespace: 'TypedUniformsLayout' })
+    const artifactByteLength: number = codec.artifact.byteLength
+    const usageCompatibility: scr.LayoutUsageCompatibility = codec.artifact.usageCompatibility
+    const readbackCount: number = typedReadback.count
+    const readbackObject: Record<string, unknown> = typedReadback.toObject()
+
     buffer.assertRuntime(runtime)
 
     const program: scr.Program = runtime.createProgram({
