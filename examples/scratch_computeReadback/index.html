@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" type="image/png" href="../../docs/assets/icons/icon_light.png" />
+        <link rel="stylesheet" href="../shared/example.css" />
+        <title>Scratch Compute Readback | GeoScratch Examples</title>
+        <style>
+            #readback-result {
+                position: absolute;
+                left: 24px;
+                bottom: 24px;
+                z-index: 2;
+                max-width: calc(100% - 48px);
+                color: #eef5f2;
+                background: rgba(5, 9, 12, 0.78);
+                border: 1px solid rgba(238, 245, 242, 0.16);
+                border-radius: 6px;
+                padding: 10px 12px;
+                font: 600 14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="GPUFrame"></canvas>
+        <div id="readback-result">GPU result: pending</div>
+        <script type="module" src="./main.js"></script>
+    </body>
+</html>

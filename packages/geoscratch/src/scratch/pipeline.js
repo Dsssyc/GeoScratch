@@ -122,6 +122,119 @@ export class RenderPipeline {
     }
 }
 
+export class ComputePipeline {
+
+    constructor(runtime, descriptor = {}) {
+
+        runtime.assertActive()
+
+        const program = descriptor.program
+        if (!program || typeof program.assertRuntime !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PIPELINE_PROGRAM_INVALID',
+                severity: 'error',
+                phase: 'pipeline',
+                subject: { kind: 'Pipeline', pipelineKind: 'compute' },
+                message: 'ComputePipeline requires a Program.',
+                expected: { program: 'Program' },
+                actual: { program: program === undefined || program === null ? String(program) : typeof program },
+            })
+        }
+
+        program.assertRuntime(runtime)
+
+        this.runtime = runtime
+        this.id = `scratch-pipeline-${UUID()}`
+        this.label = descriptor.label
+        this.pipelineKind = 'compute'
+        this.program = program
+        this.computeEntryPoint = descriptor.compute ?? program.entryPoints.compute
+        this.bindLayouts = normalizeBindLayouts(this, descriptor.bindLayouts)
+        this.bindLayoutsByGroup = new Map(this.bindLayouts.map(layout => [ layout.group, layout ]))
+        this.constants = descriptor.constants
+        this.isDisposed = false
+
+        if (!this.computeEntryPoint) {
+            throwMissingEntryPoint(this, 'compute')
+        }
+
+        this.shaderModule = runtime.device.createShaderModule({
+            label: labelWithSuffix(this.label, 'shader module'),
+            code: program.modules.join('\n'),
+        })
+        this.pipelineLayout = runtime.device.createPipelineLayout({
+            label: labelWithSuffix(this.label, 'layout'),
+            bindGroupLayouts: this.bindLayouts.map(layout => layout.gpuBindGroupLayout),
+        })
+        this.gpuPipeline = runtime.device.createComputePipeline({
+            label: this.label,
+            layout: this.pipelineLayout,
+            compute: {
+                module: this.shaderModule,
+                entryPoint: this.computeEntryPoint,
+                ...(this.constants !== undefined ? { constants: this.constants } : {}),
+            },
+        })
+    }
+
+    get subject() {
+
+        const subject = {
+            kind: 'Pipeline',
+            id: this.id,
+            pipelineKind: 'compute',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    assertRuntime(runtime) {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PIPELINE_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'pipeline',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'Pipeline belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable() {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PIPELINE_DISPOSED',
+                severity: 'error',
+                phase: 'pipeline',
+                subject: this.subject,
+                message: 'Pipeline has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+        this.program.assertUsable()
+        for (const layout of this.bindLayouts) {
+            layout.assertUsable()
+        }
+    }
+
+    dispose() {
+
+        this.isDisposed = true
+    }
+}
+
 function normalizeBindLayouts(pipeline, bindLayouts = []) {
 
     if (!Array.isArray(bindLayouts)) {

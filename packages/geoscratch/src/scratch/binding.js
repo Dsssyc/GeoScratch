@@ -8,6 +8,19 @@ const SHADER_STAGE_FLAGS = {
 }
 
 const BUFFER_USAGE_UNIFORM = 0x40
+const BUFFER_USAGE_STORAGE = 0x80
+
+const BUFFER_BINDING_TYPES = new Set([ 'uniform', 'read-storage', 'storage' ])
+const WEBGPU_BUFFER_BINDING_TYPES = {
+    uniform: 'uniform',
+    'read-storage': 'read-only-storage',
+    storage: 'storage',
+}
+const REQUIRED_BUFFER_USAGE = {
+    uniform: BUFFER_USAGE_UNIFORM,
+    'read-storage': BUFFER_USAGE_STORAGE,
+    storage: BUFFER_USAGE_STORAGE,
+}
 
 export class BindLayout {
 
@@ -255,7 +268,7 @@ function normalizeEntries(layout, entries) {
             throwBindEntryDiagnostic(layout, entry)
         }
 
-        if (!Number.isInteger(entry.binding) || entry.binding < 0 || entry.type !== 'uniform') {
+        if (!Number.isInteger(entry.binding) || entry.binding < 0 || !BUFFER_BINDING_TYPES.has(entry.type)) {
             throwBindEntryDiagnostic(layout, entry)
         }
 
@@ -345,14 +358,14 @@ function normalizeBindings(bindSet, bindings) {
             })
         }
 
-        validateUniformResource(bindSet, entry, resource)
+        validateBufferResource(bindSet, entry, resource)
         normalized.set(entry.name, { entry, resource })
     }
 
     return normalized
 }
 
-function validateUniformResource(bindSet, entry, resource) {
+function validateBufferResource(bindSet, entry, resource) {
 
     if (!resource || typeof resource.assertRuntime !== 'function' || !resource.gpuBuffer) {
         throwScratchDiagnostic({
@@ -361,7 +374,7 @@ function validateUniformResource(bindSet, entry, resource) {
             phase: 'binding',
             subject: bindSet.layout.entrySubject(entry),
             related: [ bindSet.subject ],
-            message: 'This slice only supports BufferResource uniform bindings.',
+            message: 'BindSet buffer entries require BufferResource bindings.',
             expected: { type: 'BufferResource' },
             actual: { resource: resource === undefined || resource === null ? String(resource) : typeof resource },
         })
@@ -369,15 +382,16 @@ function validateUniformResource(bindSet, entry, resource) {
 
     resource.assertRuntime(bindSet.runtime)
 
-    if (typeof resource.usage === 'number' && (resource.usage & BUFFER_USAGE_UNIFORM) === 0) {
+    const requiredUsage = REQUIRED_BUFFER_USAGE[entry.type]
+    if (typeof resource.usage === 'number' && (resource.usage & requiredUsage) === 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'binding',
             subject: resource.subject,
             related: [ bindSet.layout.entrySubject(entry), bindSet.subject ],
-            message: 'Uniform binding requires a buffer created with uniform usage.',
-            expected: { usage: 'uniform' },
+            message: 'Buffer binding requires a buffer created with compatible usage.',
+            expected: { usage: entry.type },
             actual: { usage: resource.usage },
         })
     }
@@ -388,7 +402,7 @@ function lowerBindLayoutEntry(entry) {
     return {
         binding: entry.binding,
         visibility: entry.visibility.reduce((flags, stage) => flags | SHADER_STAGE_FLAGS[stage], 0),
-        buffer: { type: 'uniform' },
+        buffer: { type: WEBGPU_BUFFER_BINDING_TYPES[entry.type] },
     }
 }
 
@@ -406,12 +420,12 @@ function throwBindEntryDiagnostic(layout, entry) {
         severity: 'error',
         phase: 'binding',
         subject: layout.subject,
-        message: 'BindLayout entry must declare a uniform buffer binding with name, binding, and visibility.',
+        message: 'BindLayout entry must declare a supported buffer binding with name, binding, and visibility.',
         expected: {
             entry: {
                 name: 'string',
                 binding: 'non-negative integer',
-                type: 'uniform',
+                type: [ 'uniform', 'read-storage', 'storage' ],
                 visibility: [ 'vertex', 'fragment', 'compute' ],
             },
         },

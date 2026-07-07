@@ -11,9 +11,13 @@ export {
     BindSet,
     Program,
     RenderPipeline as ScratchRenderPipeline,
+    ComputePipeline as ScratchComputePipeline,
     DrawCommand,
+    DispatchCommand,
     UploadCommand,
     RenderPassSpec,
+    ComputePassSpec,
+    ReadbackOperation,
     SubmissionBuilder,
     SubmittedWork,
 } from './scratch/index.js'

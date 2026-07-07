@@ -10,7 +10,14 @@ export type UniformBindLayoutEntry = {
     visibility: BindVisibility[]
 }
 
-export type BindLayoutEntry = UniformBindLayoutEntry
+export type StorageBindLayoutEntry = {
+    binding: number
+    name: string
+    type: 'read-storage' | 'storage'
+    visibility: BindVisibility[]
+}
+
+export type BindLayoutEntry = UniformBindLayoutEntry | StorageBindLayoutEntry
 
 export type BindLayoutDescriptor = {
     label?: string

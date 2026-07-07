@@ -12,6 +12,7 @@ const examplePages = {
   helloVertexBuffer: path.resolve(examplesRoot, '2_helloVertexBuffer/index.html'),
   scratchHelloTriangle: path.resolve(examplesRoot, 'scratch_helloTriangle/index.html'),
   scratchUniformTriangle: path.resolve(examplesRoot, 'scratch_uniformTriangle/index.html'),
+  scratchComputeReadback: path.resolve(examplesRoot, 'scratch_computeReadback/index.html'),
   helloMap: path.resolve(examplesRoot, 'm_helloMap/index.html'),
   demLayer: path.resolve(examplesRoot, 'm_demLayer/index.html'),
   helloGAW: path.resolve(examplesRoot, 'x_helloGAW/index.html'),

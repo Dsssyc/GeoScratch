@@ -1,9 +1,10 @@
 import { BufferResource, BufferResourceDescriptor } from './buffer'
 import { BindLayout, BindLayoutDescriptor, BindSet, BindSetBindings, BindSetOptions } from './binding'
-import { DrawCommand, DrawCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
-import { RenderPassSpec, RenderPassSpecDescriptor } from './pass'
-import { RenderPipeline, RenderPipelineDescriptor } from './pipeline'
+import { DispatchCommand, DispatchCommandDescriptor, DrawCommand, DrawCommandDescriptor, UploadCommand, UploadCommandDescriptor } from './command'
+import { ComputePassSpec, ComputePassSpecDescriptor, RenderPassSpec, RenderPassSpecDescriptor } from './pass'
+import { ComputePipeline, ComputePipelineDescriptor, RenderPipeline, RenderPipelineDescriptor } from './pipeline'
 import { Program, ProgramDescriptor } from './program'
+import { ReadbackOperation, ReadbackOperationDescriptor } from './readback'
 import { SubmissionBuilder, SubmissionBuilderOptions } from './submission'
 import { Surface, SurfaceOptions } from './surface'
 
@@ -48,12 +49,20 @@ export class ScratchRuntime {
     program(descriptor: ProgramDescriptor): Program
     createRenderPipeline(descriptor: RenderPipelineDescriptor): RenderPipeline
     renderPipeline(descriptor: RenderPipelineDescriptor): RenderPipeline
+    createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline
+    computePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline
     createDrawCommand(descriptor: DrawCommandDescriptor): DrawCommand
     drawCommand(descriptor: DrawCommandDescriptor): DrawCommand
+    createDispatchCommand(descriptor: DispatchCommandDescriptor): DispatchCommand
+    dispatchCommand(descriptor: DispatchCommandDescriptor): DispatchCommand
     createUploadCommand(descriptor: UploadCommandDescriptor): UploadCommand
     uploadCommand(descriptor: UploadCommandDescriptor): UploadCommand
     createRenderPass(descriptor: RenderPassSpecDescriptor): RenderPassSpec
     renderPass(descriptor: RenderPassSpecDescriptor): RenderPassSpec
+    createComputePass(descriptor?: ComputePassSpecDescriptor): ComputePassSpec
+    computePass(descriptor?: ComputePassSpecDescriptor): ComputePassSpec
+    createReadback(descriptor: ReadbackOperationDescriptor): ReadbackOperation
+    readback(descriptor: ReadbackOperationDescriptor): ReadbackOperation
     createSubmission(options?: SubmissionBuilderOptions): SubmissionBuilder
     submission(options?: SubmissionBuilderOptions): SubmissionBuilder
     dispose(): void

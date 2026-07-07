@@ -128,6 +128,139 @@ export class DrawCommand {
     }
 }
 
+export class DispatchCommand {
+
+    constructor(runtime, descriptor = {}) {
+
+        runtime.assertActive()
+
+        const pipeline = descriptor.pipeline
+        if (!pipeline || typeof pipeline.assertRuntime !== 'function' || pipeline.pipelineKind !== 'compute') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+                severity: 'error',
+                phase: 'command',
+                subject: { kind: 'Command', commandKind: 'dispatch' },
+                message: 'DispatchCommand requires a compute pipeline.',
+                expected: { pipeline: 'ComputePipeline' },
+                actual: { pipeline: pipeline === undefined || pipeline === null ? String(pipeline) : typeof pipeline },
+            })
+        }
+
+        pipeline.assertRuntime(runtime)
+
+        this.runtime = runtime
+        this.id = `scratch-command-${UUID()}`
+        this.label = descriptor.label
+        this.commandKind = 'dispatch'
+        this.pipeline = pipeline
+        this.bindSets = normalizeBindSets(this, descriptor.bindSets)
+        this.count = normalizeDispatchCount(this, descriptor.count)
+        this.resources = normalizeResourceAccess(this, descriptor.resources)
+        this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
+        this.isDisposed = false
+    }
+
+    get subject() {
+
+        const subject = {
+            kind: 'Command',
+            id: this.id,
+            commandKind: 'dispatch',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    assertRuntime(runtime) {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'Command belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable() {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DISPOSED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Command has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+        this.pipeline.assertUsable()
+        for (const bindSet of this.bindSets) {
+            bindSet.assertUsable()
+        }
+        for (const resource of [ ...this.resources.read, ...this.resources.write ]) {
+            resource.assertUsable()
+        }
+    }
+
+    validateForPass(passSpec) {
+
+        this.assertUsable()
+
+        if (passSpec.passKind !== 'compute') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    passSpec.subject,
+                    this.pipeline.subject,
+                ].filter(Boolean),
+                message: 'DispatchCommand can only be recorded into a compute pass.',
+                expected: { passKind: 'compute' },
+                actual: { passKind: passSpec.passKind },
+            })
+        }
+    }
+
+    encode(passEncoder) {
+
+        this.assertUsable()
+
+        passEncoder.setPipeline(this.pipeline.gpuPipeline)
+        for (const bindSet of this.bindSets) {
+            passEncoder.setBindGroup(bindSet.layout.group, bindSet.getBindGroup())
+        }
+        passEncoder.dispatchWorkgroups(
+            this.count.workgroups[0],
+            this.count.workgroups[1],
+            this.count.workgroups[2]
+        )
+        for (const resource of this.resources.write) {
+            resource._advanceContentEpoch()
+        }
+    }
+
+    dispose() {
+
+        this.isDisposed = true
+    }
+}
+
 export class UploadCommand {
 
     constructor(runtime, descriptor = {}) {
@@ -250,7 +383,7 @@ function normalizeBindSets(command, bindSets = []) {
             phase: 'pipeline',
             subject: command.pipeline.subject,
             related: [ command.subject ],
-            message: 'DrawCommand bindSets must be an array.',
+            message: 'Command bindSets must be an array.',
             expected: { bindSets: 'BindSet[]' },
             actual: { bindSets },
         })
@@ -264,7 +397,7 @@ function normalizeBindSets(command, bindSets = []) {
                 phase: 'pipeline',
                 subject: command.pipeline.subject,
                 related: [ command.subject ],
-                message: 'DrawCommand bindSets must contain BindSet objects.',
+                message: 'Command bindSets must contain BindSet objects.',
                 expected: { bindSet: 'BindSet' },
                 actual: { bindSet: bindSet === undefined || bindSet === null ? String(bindSet) : typeof bindSet },
             })
@@ -284,7 +417,7 @@ function normalizeBindSets(command, bindSets = []) {
                     bindSet.subject,
                     bindSet.layout.subject,
                 ],
-                message: 'DrawCommand BindSet layout is not part of its RenderPipeline layout.',
+                message: 'Command BindSet layout is not part of its Pipeline layout.',
                 expected: { group: bindSet.layout.group, layoutId: expectedLayout?.id },
                 actual: { group: bindSet.layout.group, layoutId: bindSet.layout.id },
             })
@@ -292,6 +425,79 @@ function normalizeBindSets(command, bindSets = []) {
     }
 
     return [ ...bindSets ]
+}
+
+function normalizeDispatchCount(command, count) {
+
+    if (!count || typeof count !== 'object' || !Array.isArray(count.workgroups)) {
+        throwDispatchCountDiagnostic(command, count)
+    }
+
+    if (count.workgroups.length < 1 || count.workgroups.length > 3) {
+        throwDispatchCountDiagnostic(command, count)
+    }
+
+    const workgroups = [
+        count.workgroups[0],
+        count.workgroups[1] ?? 1,
+        count.workgroups[2] ?? 1,
+    ]
+
+    for (const value of workgroups) {
+        if (!Number.isInteger(value) || value <= 0) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_COUNT_INVALID',
+                severity: 'error',
+                phase: 'command',
+                subject: command.subject,
+                message: 'DispatchCommand workgroup counts must be positive integers.',
+                expected: { workgroups: 'positive integer tuple' },
+                actual: { workgroups: count.workgroups },
+            })
+        }
+    }
+
+    return { workgroups }
+}
+
+function normalizeResourceAccess(command, resources) {
+
+    if (!resources || typeof resources !== 'object' || !Array.isArray(resources.read) || !Array.isArray(resources.write)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+            severity: 'error',
+            phase: 'command',
+            subject: command.subject,
+            message: 'DispatchCommand requires explicit read and write resource declarations.',
+            expected: { resources: { read: 'Resource[]', write: 'Resource[]' } },
+            actual: { resources },
+        })
+    }
+
+    return {
+        read: normalizeResourceList(command, resources.read, 'read'),
+        write: normalizeResourceList(command, resources.write, 'write'),
+    }
+}
+
+function normalizeResourceList(command, resources, access) {
+
+    return resources.map((resource) => {
+        if (!resource || typeof resource.assertRuntime !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+                severity: 'error',
+                phase: 'command',
+                subject: command.subject,
+                message: 'Command resource access declarations must contain Resource objects.',
+                expected: { [access]: 'Resource[]' },
+                actual: { resource: resource === undefined || resource === null ? String(resource) : typeof resource },
+            })
+        }
+
+        resource.assertRuntime(command.runtime)
+        return resource
+    })
 }
 
 function normalizeDrawCount(command, count) {
@@ -443,7 +649,7 @@ function normalizeReadinessPolicy(command, whenMissing) {
             severity: 'error',
             phase: 'command',
             subject: command.subject,
-            message: 'DrawCommand requires an explicit readiness policy.',
+            message: 'Command requires an explicit readiness policy.',
             expected: { whenMissing: [ ...allowed ] },
             actual: { whenMissing },
         })
@@ -461,6 +667,19 @@ function throwCountDiagnostic(command, count) {
         subject: command.subject,
         message: 'DrawCommand requires a static draw count for this slice.',
         expected: { count: '{ vertexCount: number }' },
+        actual: { count },
+    })
+}
+
+function throwDispatchCountDiagnostic(command, count) {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_COUNT_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        message: 'DispatchCommand requires a static workgroup count for this slice.',
+        expected: { count: '{ workgroups: [number, number?, number?] }' },
         actual: { count },
     })
 }

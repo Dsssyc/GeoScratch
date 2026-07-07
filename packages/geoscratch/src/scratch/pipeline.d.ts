@@ -14,6 +14,14 @@ export type RenderPipelineDescriptor = {
     multisample?: GPUMultisampleState
 }
 
+export type ComputePipelineDescriptor = {
+    label?: string
+    program: Program
+    compute?: string
+    bindLayouts?: BindLayout[]
+    constants?: Record<string, GPUPipelineConstantValue>
+}
+
 export class RenderPipeline {
     constructor(runtime: ScratchRuntime, descriptor: RenderPipelineDescriptor)
 
@@ -30,6 +38,27 @@ export class RenderPipeline {
     readonly shaderModule: GPUShaderModule
     readonly pipelineLayout: GPUPipelineLayout
     readonly gpuPipeline: GPURenderPipeline
+    readonly isDisposed: boolean
+
+    assertRuntime(runtime: ScratchRuntime): void
+    assertUsable(): void
+    dispose(): void
+}
+
+export class ComputePipeline {
+    constructor(runtime: ScratchRuntime, descriptor: ComputePipelineDescriptor)
+
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly pipelineKind: 'compute'
+    readonly program: Program
+    readonly computeEntryPoint: string
+    readonly bindLayouts: BindLayout[]
+    readonly constants?: Record<string, GPUPipelineConstantValue>
+    readonly shaderModule: GPUShaderModule
+    readonly pipelineLayout: GPUPipelineLayout
+    readonly gpuPipeline: GPUComputePipeline
     readonly isDisposed: boolean
 
     assertRuntime(runtime: ScratchRuntime): void

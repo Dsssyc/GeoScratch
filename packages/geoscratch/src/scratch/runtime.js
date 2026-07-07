@@ -1,11 +1,12 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BindLayout, BindSet } from './binding.js'
 import { BufferResource } from './buffer.js'
-import { DrawCommand, UploadCommand } from './command.js'
+import { DispatchCommand, DrawCommand, UploadCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { RenderPassSpec } from './pass.js'
-import { RenderPipeline } from './pipeline.js'
+import { ComputePassSpec, RenderPassSpec } from './pass.js'
+import { ComputePipeline, RenderPipeline } from './pipeline.js'
 import { Program } from './program.js'
+import { ReadbackOperation } from './readback.js'
 import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
 
@@ -208,6 +209,17 @@ export class ScratchRuntime {
         return this.createRenderPipeline(descriptor)
     }
 
+    createComputePipeline(descriptor) {
+
+        this.assertActive()
+        return new ComputePipeline(this, descriptor)
+    }
+
+    computePipeline(descriptor) {
+
+        return this.createComputePipeline(descriptor)
+    }
+
     createDrawCommand(descriptor) {
 
         this.assertActive()
@@ -217,6 +229,17 @@ export class ScratchRuntime {
     drawCommand(descriptor) {
 
         return this.createDrawCommand(descriptor)
+    }
+
+    createDispatchCommand(descriptor) {
+
+        this.assertActive()
+        return new DispatchCommand(this, descriptor)
+    }
+
+    dispatchCommand(descriptor) {
+
+        return this.createDispatchCommand(descriptor)
     }
 
     createUploadCommand(descriptor) {
@@ -239,6 +262,28 @@ export class ScratchRuntime {
     renderPass(descriptor) {
 
         return this.createRenderPass(descriptor)
+    }
+
+    createComputePass(descriptor) {
+
+        this.assertActive()
+        return new ComputePassSpec(this, descriptor)
+    }
+
+    computePass(descriptor) {
+
+        return this.createComputePass(descriptor)
+    }
+
+    createReadback(descriptor) {
+
+        this.assertActive()
+        return new ReadbackOperation(this, descriptor)
+    }
+
+    readback(descriptor) {
+
+        return this.createReadback(descriptor)
     }
 
     createSubmission(options = {}) {

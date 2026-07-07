@@ -1,6 +1,6 @@
-import { DrawCommand, UploadCommand } from './command'
+import { DispatchCommand, DrawCommand, UploadCommand } from './command'
 import { ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics'
-import { RenderPassSpec } from './pass'
+import { ComputePassSpec, RenderPassSpec } from './pass'
 import { ScratchRuntime } from './runtime'
 
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
@@ -18,6 +18,7 @@ export class SubmissionBuilder {
     readonly isSubmitted: boolean
 
     render(passSpec: RenderPassSpec, commands: DrawCommand[]): this
+    compute(passSpec: ComputePassSpec, commands: DispatchCommand[]): this
     upload(command: UploadCommand): this
     submit(): SubmittedWork
 }

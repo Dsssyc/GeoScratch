@@ -25,22 +25,35 @@ export {
     BindSetOptions,
     BindVisibility,
     UniformBindLayoutEntry,
+    StorageBindLayoutEntry,
 } from './binding'
 export { Program, ProgramDescriptor, ProgramEntryPoints } from './program'
-export { RenderPipeline, RenderPipelineDescriptor } from './pipeline'
+export { ComputePipeline, ComputePipelineDescriptor, RenderPipeline, RenderPipelineDescriptor } from './pipeline'
 export {
+    DispatchCommand,
+    DispatchCommandDescriptor,
     DrawCommand,
     DrawCommandDescriptor,
     ResourceReadinessPolicy,
+    StaticDispatchCount,
     StaticDrawCount,
     UploadCommand,
     UploadCommandDescriptor,
 } from './command'
 export {
+    ComputePassSpec,
+    ComputePassSpecDescriptor,
     RenderPassColorAttachmentSpec,
     RenderPassSpec,
     RenderPassSpecDescriptor,
 } from './pass'
+export {
+    ReadbackOperation,
+    ReadbackOperationDescriptor,
+    ReadbackRange,
+    ReadbackState,
+    TypedArrayConstructor,
+} from './readback'
 export {
     SubmissionBuilder,
     SubmissionBuilderOptions,

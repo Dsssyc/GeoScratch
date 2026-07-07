@@ -89,6 +89,82 @@ export class RenderPassSpec {
     }
 }
 
+export class ComputePassSpec {
+
+    constructor(runtime, descriptor = {}) {
+
+        runtime.assertActive()
+
+        this.runtime = runtime
+        this.id = `scratch-pass-${UUID()}`
+        this.label = descriptor.label
+        this.passKind = 'compute'
+        this.isDisposed = false
+    }
+
+    get subject() {
+
+        const subject = {
+            kind: 'PassSpec',
+            id: this.id,
+            passKind: 'compute',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    assertRuntime(runtime) {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PASS_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'submission',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'PassSpec belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable() {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PASS_DISPOSED',
+                severity: 'error',
+                phase: 'submission',
+                subject: this.subject,
+                message: 'PassSpec has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+    }
+
+    createComputePassDescriptor() {
+
+        this.assertUsable()
+
+        return {
+            label: this.label,
+        }
+    }
+
+    dispose() {
+
+        this.isDisposed = true
+    }
+}
+
 function normalizeColorAttachments(pass, color) {
 
     if (!Array.isArray(color) || color.length === 0) {

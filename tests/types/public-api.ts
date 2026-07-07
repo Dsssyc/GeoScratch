@@ -63,6 +63,16 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 0x8 | 0x40,
     })
+    const storageInput: scr.BufferResource = runtime.createBuffer({
+        label: 'typed scratch storage input',
+        size: 16,
+        usage: 0x8 | 0x80,
+    })
+    const storageOutput: scr.BufferResource = runtime.createBuffer({
+        label: 'typed scratch storage output',
+        size: 16,
+        usage: 0x4 | 0x80,
+    })
 
     const diagnostic: scr.ScratchDiagnostic = scr.createScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
@@ -104,6 +114,28 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     }, {
         label: 'typed bind set',
     })
+    const storageLayout: scr.BindLayout = runtime.createBindLayout({
+        label: 'typed storage layout',
+        group: 1,
+        entries: [
+            {
+                binding: 0,
+                name: 'inputValues',
+                type: 'read-storage',
+                visibility: [ 'compute' ],
+            },
+            {
+                binding: 1,
+                name: 'outputValues',
+                type: 'storage',
+                visibility: [ 'compute' ],
+            },
+        ],
+    })
+    const storageSet: scr.BindSet = runtime.createBindSet(storageLayout, {
+        inputValues: storageInput,
+        outputValues: storageOutput,
+    })
     const upload: scr.UploadCommand = runtime.createUploadCommand({
         target: uniformBuffer,
         data: new Float32Array([ 1, 0, 0, 1 ]),
@@ -129,12 +161,44 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             clear: { r: 0, g: 0, b: 0, a: 1 },
         } ],
     })
+    const computeProgram: scr.Program = runtime.createProgram({
+        modules: [
+            '@group(1) @binding(0) var<storage, read> inputValues: array<f32>; @group(1) @binding(1) var<storage, read_write> outputValues: array<f32>; @compute @workgroup_size(4) fn csMain(@builtin(global_invocation_id) id: vec3u) { outputValues[id.x] = inputValues[id.x]; }',
+        ],
+        entryPoints: {
+            compute: 'csMain',
+        },
+    })
+    const computePipeline: scr.ScratchComputePipeline = runtime.createComputePipeline({
+        program: computeProgram,
+        bindLayouts: [ storageLayout ],
+    })
+    const dispatch: scr.DispatchCommand = runtime.createDispatchCommand({
+        pipeline: computePipeline,
+        bindSets: [ storageSet ],
+        count: { workgroups: [ 1 ] },
+        resources: {
+            read: [ storageInput ],
+            write: [ storageOutput ],
+        },
+        whenMissing: 'throw',
+    })
+    const computePass: scr.ComputePassSpec = runtime.createComputePass()
     const builder: scr.SubmissionBuilder = runtime.createSubmission({ validation: 'throw' })
-    const submitted: scr.SubmittedWork = builder.upload(upload).render(passSpec, [ draw ]).submit()
+    const submitted: scr.SubmittedWork = builder.upload(upload).compute(computePass, [ dispatch ]).render(passSpec, [ draw ]).submit()
+    const readback: scr.ReadbackOperation = runtime.createReadback({
+        source: storageOutput,
+        after: submitted,
+        range: { offset: 0, byteLength: 16 },
+    })
+    const readbackBytes: Promise<Uint8Array> = readback.toBytes()
+    const readbackValues: Promise<Float32Array> = readback.toArray(Float32Array)
 
     void surface
     void error
     void submitted
+    void readbackBytes
+    void readbackValues
 }
 
 void startResult

@@ -28,6 +28,17 @@ export class SubmissionBuilder {
         return this
     }
 
+    compute(passSpec, commands = []) {
+
+        this.steps.push({
+            kind: 'compute',
+            passSpec,
+            commands: [ ...commands ],
+        })
+
+        return this
+    }
+
     upload(command) {
 
         this.steps.push({
@@ -62,6 +73,19 @@ export class SubmissionBuilder {
             if (step.kind === 'upload') {
                 validateUploadStep(this, step)
                 step.command.execute(this.runtime.queue)
+                continue
+            }
+
+            if (step.kind === 'compute') {
+                validateComputeStep(this, step)
+
+                if (step.commands.length === 0) continue
+
+                const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
+                for (const command of step.commands) {
+                    command.encode(passEncoder)
+                }
+                passEncoder.end()
                 continue
             }
 
@@ -173,6 +197,43 @@ function validateRenderStep(builder, step) {
         command.assertRuntime(builder.runtime)
         command.validateForPass(passSpec)
         validatePipelineTargets(command, passSpec)
+    }
+}
+
+function validateComputeStep(builder, step) {
+
+    const passSpec = step.passSpec
+
+    if (!passSpec || typeof passSpec.assertRuntime !== 'function') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'submission',
+            subject: builder.subject,
+            message: 'Submission compute step requires a PassSpec.',
+            expected: { passSpec: 'ComputePassSpec' },
+            actual: { passSpec: passSpec === undefined || passSpec === null ? String(passSpec) : typeof passSpec },
+        })
+    }
+
+    passSpec.assertRuntime(builder.runtime)
+
+    if (passSpec.passKind !== 'compute') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
+            severity: 'error',
+            phase: 'command',
+            subject: step.commands[0]?.subject ?? builder.subject,
+            related: [ passSpec.subject ].filter(Boolean),
+            message: 'Compute submission step requires a compute pass.',
+            expected: { passKind: 'compute' },
+            actual: { passKind: passSpec.passKind },
+        })
+    }
+
+    for (const command of step.commands) {
+        command.assertRuntime(builder.runtime)
+        command.validateForPass(passSpec)
     }
 }
 

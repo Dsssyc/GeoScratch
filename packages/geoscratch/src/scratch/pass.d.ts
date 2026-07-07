@@ -15,6 +15,10 @@ export type RenderPassSpecDescriptor = {
     color: RenderPassColorAttachmentSpec[]
 }
 
+export type ComputePassSpecDescriptor = {
+    label?: string
+}
+
 export class RenderPassSpec {
     constructor(runtime: ScratchRuntime, descriptor: RenderPassSpecDescriptor)
 
@@ -28,5 +32,20 @@ export class RenderPassSpec {
     assertRuntime(runtime: ScratchRuntime): void
     assertUsable(): void
     createRenderPassDescriptor(): GPURenderPassDescriptor
+    dispose(): void
+}
+
+export class ComputePassSpec {
+    constructor(runtime: ScratchRuntime, descriptor?: ComputePassSpecDescriptor)
+
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly passKind: 'compute'
+    readonly isDisposed: boolean
+
+    assertRuntime(runtime: ScratchRuntime): void
+    assertUsable(): void
+    createComputePassDescriptor(): GPUComputePassDescriptor
     dispose(): void
 }

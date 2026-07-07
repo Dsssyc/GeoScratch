@@ -12,6 +12,7 @@ describe('examples structure', () => {
         '2_helloVertexBuffer',
         'scratch_helloTriangle',
         'scratch_uniformTriangle',
+        'scratch_computeReadback',
         'm_helloMap',
         'm_demLayer',
         'x_helloGAW',
@@ -39,6 +40,14 @@ describe('examples structure', () => {
             expect(html).to.include('id="GPUFrame"')
             expect(html).to.include('src="./main.js"')
             expect(html).to.include('../shared/example.css')
+        }
+    })
+
+    it('builds each runnable example as a Vite input page', () => {
+        const config = read('examples', 'vite.config.js')
+
+        for (const name of examples) {
+            expect(config).to.include(`${name}/index.html`)
         }
     })
 

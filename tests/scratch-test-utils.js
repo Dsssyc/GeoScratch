@@ -7,11 +7,16 @@ export function createFakeGpu() {
         bindGroups: [],
         pipelineLayouts: [],
         renderPipelines: [],
+        computePipelines: [],
         commandEncoders: [],
         queueWrites: [],
         queueSubmissions: [],
         renderPasses: [],
+        computePasses: [],
         drawCalls: [],
+        dispatchCalls: [],
+        copies: [],
+        maps: [],
     }
 
     const queue = {
@@ -24,6 +29,8 @@ export function createFakeGpu() {
                 dataOffset,
                 size,
             })
+            const source = bytesFrom(data, dataOffset ?? 0, size)
+            buffer.data.set(source, offset)
         },
         submit(commandBuffers) {
             calls.queueSubmissions.push(commandBuffers)
@@ -40,10 +47,23 @@ export function createFakeGpu() {
         queue,
         lost: new Promise(() => {}),
         createBuffer(descriptor) {
+            const data = new Uint8Array(descriptor.size ?? 0)
             const buffer = {
                 type: 'buffer',
                 descriptor,
+                data,
                 destroyed: false,
+                mapped: false,
+                async mapAsync(mode, offset = 0, size = data.byteLength - offset) {
+                    this.mapped = true
+                    calls.maps.push({ buffer: this, mode, offset, size })
+                },
+                getMappedRange(offset = 0, size = data.byteLength - offset) {
+                    return data.buffer.slice(offset, offset + size)
+                },
+                unmap() {
+                    this.mapped = false
+                },
                 destroy() {
                     this.destroyed = true
                 },
@@ -89,6 +109,14 @@ export function createFakeGpu() {
                 descriptor,
             }
             calls.renderPipelines.push(pipeline)
+            return pipeline
+        },
+        createComputePipeline(descriptor) {
+            const pipeline = {
+                type: 'computePipeline',
+                descriptor,
+            }
+            calls.computePipelines.push(pipeline)
             return pipeline
         },
         createCommandEncoder(descriptor) {
@@ -186,6 +214,22 @@ function createFakeCommandEncoder(calls, descriptor) {
             calls.renderPasses.push(passEncoder)
             return passEncoder
         },
+        beginComputePass(computePassDescriptor) {
+            const passEncoder = createFakeComputePassEncoder(calls, computePassDescriptor)
+            calls.computePasses.push(passEncoder)
+            return passEncoder
+        },
+        copyBufferToBuffer(source, sourceOffset, destination, destinationOffset, size) {
+            const sourceBytes = source.data.subarray(sourceOffset, sourceOffset + size)
+            destination.data.set(sourceBytes, destinationOffset)
+            calls.copies.push({
+                source,
+                sourceOffset,
+                destination,
+                destinationOffset,
+                size,
+            })
+        },
         finish() {
             return {
                 type: 'commandBuffer',
@@ -220,4 +264,37 @@ function createFakeRenderPassEncoder(calls, descriptor) {
             this.actions.push({ type: 'end' })
         },
     }
+}
+
+function createFakeComputePassEncoder(calls, descriptor) {
+
+    return {
+        descriptor,
+        actions: [],
+        setPipeline(pipeline) {
+            this.actions.push({ type: 'setPipeline', pipeline })
+        },
+        setBindGroup(group, bindGroup) {
+            this.actions.push({ type: 'setBindGroup', group, bindGroup })
+        },
+        dispatchWorkgroups(x, y, z) {
+            const call = { x, y, z }
+            this.actions.push({ type: 'dispatchWorkgroups', call })
+            calls.dispatchCalls.push(call)
+        },
+        end() {
+            this.actions.push({ type: 'end' })
+        },
+    }
+}
+
+function bytesFrom(data, dataOffset = 0, size) {
+
+    if (data instanceof ArrayBuffer) {
+        const byteLength = size ?? data.byteLength - dataOffset
+        return new Uint8Array(data, dataOffset, byteLength)
+    }
+
+    const byteLength = size ?? data.byteLength - dataOffset
+    return new Uint8Array(data.buffer, data.byteOffset + dataOffset, byteLength)
 }
