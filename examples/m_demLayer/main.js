@@ -2,7 +2,14 @@ import * as scr from 'geoscratch'
 import TerrainLayer from './terrainLayer.js'
 import SteadyFlowLayer from './steadyFlowLayer.js'
 
-mapboxgl.accessToken = '__REMOVED_MAPBOX_TOKEN__'
+const mapboxAccessToken =
+    import.meta.env?.VITE_MAPBOX_ACCESS_TOKEN ?? globalThis.GEOSCRATCH_MAPBOX_ACCESS_TOKEN
+
+if (!mapboxAccessToken) {
+    throw new Error('Set VITE_MAPBOX_ACCESS_TOKEN to run examples/m_demLayer')
+}
+
+mapboxgl.accessToken = mapboxAccessToken
 
 // DOM Configuration //////////////////////////////////////////////////////////////////////////////////////////////////////
 const GPUFrame = document.getElementById('GPUFrame')
