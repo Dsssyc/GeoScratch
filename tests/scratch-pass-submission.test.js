@@ -1,12 +1,17 @@
 import { expect } from 'chai'
 import {
+    BindSet,
     RenderPassSpec,
     ScratchDiagnosticError,
     ScratchRuntime,
     SubmissionBuilder,
     SubmittedWork,
+    TextureResource,
 } from '../packages/geoscratch/src/index.js'
 import { createFakeCanvas, createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+
+const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
+const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
 async function createTriangleScene(format = 'bgra8unorm') {
 
@@ -48,6 +53,76 @@ async function createTriangleScene(format = 'bgra8unorm') {
     return { ...fake, ...canvas, runtime, surface, program, pipeline, draw, pass }
 }
 
+async function createRenderTargetScene(format = 'rgba8unorm') {
+
+    const fake = createFakeGpu()
+    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const renderTarget = runtime.createTexture({
+        label: 'offscreen color target',
+        size: { width: 64, height: 64 },
+        format,
+        usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+    })
+    const sampler = runtime.createSampler({
+        label: 'offscreen sampler',
+        magFilter: 'nearest',
+        minFilter: 'nearest',
+    })
+    const bindLayout = runtime.createBindLayout({
+        label: 'sample offscreen layout',
+        group: 0,
+        entries: [
+            {
+                binding: 0,
+                name: 'colorTexture',
+                type: 'texture',
+                visibility: [ 'fragment' ],
+            },
+            {
+                binding: 1,
+                name: 'colorSampler',
+                type: 'sampler',
+                visibility: [ 'fragment' ],
+            },
+        ],
+    })
+    const bindSet = runtime.createBindSet(bindLayout, {
+        colorTexture: renderTarget,
+        colorSampler: sampler,
+    }, {
+        label: 'sample offscreen set',
+    })
+    const program = runtime.createProgram({
+        modules: [ triangleWgsl ],
+        entryPoints: {
+            vertex: 'vsMain',
+            fragment: 'fsMain',
+        },
+    })
+    const pipeline = runtime.createRenderPipeline({
+        program,
+        targets: [ { format } ],
+    })
+    const draw = runtime.createDrawCommand({
+        pipeline,
+        count: { vertexCount: 3 },
+        whenMissing: 'throw',
+    })
+    const pass = runtime.createRenderPass({
+        label: 'offscreen pass',
+        color: [
+            {
+                target: renderTarget,
+                load: 'clear',
+                store: 'store',
+                clear: [ 0.1, 0.2, 0.3, 1 ],
+            },
+        ],
+    })
+
+    return { ...fake, runtime, renderTarget, sampler, bindLayout, bindSet, program, pipeline, draw, pass }
+}
+
 describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
     it('creates persistent render pass specs without storing commands', async() => {
@@ -85,6 +160,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         })
         expect(fixture.context.currentTextureCalls).to.equal(1)
         expect(fixture.textureViews).to.have.length(1)
+        expect(fixture.calls.textureViews).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(1)
         expect(fixture.calls.renderPasses[0].descriptor.colorAttachments[0]).to.deep.equal({
             view: fixture.textureViews[0],
@@ -99,6 +175,70 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(fixture.calls.queueSubmissions[0]).to.deep.equal([
             { type: 'commandBuffer', descriptor: { label: submitted.id } },
         ])
+
+        await submitted.done
+    })
+
+    it('lowers TextureResource color attachments into WebGPU render pass descriptors', async() => {
+
+        const fixture = await createRenderTargetScene()
+
+        expect(fixture.renderTarget).to.be.instanceOf(TextureResource)
+        expect(fixture.pass.color).to.have.length(1)
+        expect(fixture.pass.color[0].target).to.equal(fixture.renderTarget)
+        expect(fixture.pass.color[0].format).to.equal('rgba8unorm')
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ fixture.draw ])
+            .submit()
+
+        expect(fixture.calls.textureViews).to.have.length(1)
+        expect(fixture.calls.textureViews[0].texture).to.equal(fixture.renderTarget.gpuTexture)
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({})
+        expect(fixture.calls.renderPasses).to.have.length(1)
+        expect(fixture.calls.renderPasses[0].descriptor.colorAttachments[0]).to.deep.equal({
+            view: fixture.calls.textureViews[0],
+            loadOp: 'clear',
+            storeOp: 'store',
+            clearValue: [ 0.1, 0.2, 0.3, 1 ],
+        })
+
+        await submitted.done
+    })
+
+    it('advances TextureResource contentEpoch after render attachment writes', async() => {
+
+        const fixture = await createRenderTargetScene()
+
+        expect(fixture.renderTarget.contentEpoch).to.equal(0)
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ fixture.draw ])
+            .submit()
+
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+
+        await submitted.done
+    })
+
+    it('does not rebuild BindSet only because a rendered texture contentEpoch changes', async() => {
+
+        const fixture = await createRenderTargetScene()
+        const firstBindGroup = fixture.bindSet.getBindGroup()
+
+        expect(fixture.bindSet).to.be.instanceOf(BindSet)
+        expect(fixture.calls.bindGroups).to.have.length(1)
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ fixture.draw ])
+            .submit()
+
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+
+        const secondBindGroup = fixture.bindSet.getBindGroup()
+
+        expect(secondBindGroup).to.equal(firstBindGroup)
+        expect(fixture.calls.bindGroups).to.have.length(1)
 
         await submitted.done
     })
@@ -132,6 +272,110 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             })
             expect(error.diagnostic.expected).to.deep.equal({ format: 'rgba8unorm' })
             expect(error.diagnostic.actual).to.deep.equal({ format: 'bgra8unorm' })
+        }
+    })
+
+    it('rejects render pipeline target format mismatches against TextureResource attachments', async() => {
+
+        const fixture = await createRenderTargetScene('rgba8unorm')
+        const mismatchedPipeline = fixture.runtime.createRenderPipeline({
+            program: fixture.program,
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+        const mismatchedDraw = fixture.runtime.createDrawCommand({
+            pipeline: mismatchedPipeline,
+            count: { vertexCount: 3 },
+            whenMissing: 'throw',
+        })
+
+        try {
+            fixture.runtime.createSubmission({ validation: 'throw' })
+                .render(fixture.pass, [ mismatchedDraw ])
+                .submit()
+            throw new Error('expected texture target format mismatch to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
+                severity: 'error',
+                phase: 'pipeline',
+            })
+            expect(error.diagnostic.expected).to.deep.equal({ format: 'rgba8unorm' })
+            expect(error.diagnostic.actual).to.deep.equal({ format: 'bgra8unorm' })
+        }
+    })
+
+    it('rejects invalid TextureResource render attachment targets with structured diagnostics', async() => {
+
+        const fixtureA = await createRenderTargetScene()
+        const fixtureB = await createRenderTargetScene()
+
+        try {
+            fixtureA.runtime.createRenderPass({
+                color: [
+                    {
+                        target: fixtureB.renderTarget,
+                        load: 'clear',
+                        store: 'store',
+                    },
+                ],
+            })
+            throw new Error('expected wrong-runtime texture attachment to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        fixtureA.renderTarget.dispose()
+
+        try {
+            fixtureA.runtime.createRenderPass({
+                color: [
+                    {
+                        target: fixtureA.renderTarget,
+                        load: 'clear',
+                        store: 'store',
+                    },
+                ],
+            })
+            throw new Error('expected disposed texture attachment to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_RESOURCE_DISPOSED',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        const textureOnlyForSampling = fixtureB.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+
+        try {
+            fixtureB.runtime.createRenderPass({
+                color: [
+                    {
+                        target: textureOnlyForSampling,
+                        load: 'clear',
+                        store: 'store',
+                    },
+                ],
+            })
+            throw new Error('expected missing render attachment usage to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+                severity: 'error',
+                phase: 'resource',
+            })
         }
     })
 

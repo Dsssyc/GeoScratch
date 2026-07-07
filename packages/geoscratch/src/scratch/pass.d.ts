@@ -1,8 +1,9 @@
 import { Surface } from './surface'
 import { ScratchRuntime } from './runtime'
+import { TextureResource } from './texture'
 
 export type RenderPassColorAttachmentSpec = {
-    target: Surface
+    target: Surface | TextureResource
     format?: GPUTextureFormat
     load?: GPULoadOp
     store?: GPUStoreOp

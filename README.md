@@ -136,6 +136,7 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 | Compute Readback | `examples/scratch_computeReadback/` |
 | Hello Vertex Buffer | `examples/scratch_helloVertexBuffer/` |
 | Texture Sampling | `examples/scratch_textureSampling/` |
+| Render To Texture | `examples/scratch_renderToTexture/` |
 | DEM Layer (legacy) | `examples/m_demLayer/` |
 | Flow Layer (legacy) | `examples/m_flowLayer/` |
 | Hello GAW (legacy) | `examples/x_helloGAW/` |

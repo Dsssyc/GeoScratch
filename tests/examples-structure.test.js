@@ -13,6 +13,7 @@ describe('examples structure', () => {
         'scratch_computeReadback',
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
+        'scratch_renderToTexture',
         'm_demLayer',
         'm_flowLayer',
         'x_helloGAW',
@@ -25,6 +26,7 @@ describe('examples structure', () => {
         'scratch_computeReadback',
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
+        'scratch_renderToTexture',
         'm_demLayer',
         'm_flowLayer',
         'x_helloGAW',
@@ -79,6 +81,7 @@ describe('examples structure', () => {
             [ 'scratch_computeReadback', 'Compute Readback' ],
             [ 'scratch_helloVertexBuffer', 'Hello Vertex Buffer' ],
             [ 'scratch_textureSampling', 'Texture Sampling' ],
+            [ 'scratch_renderToTexture', 'Render To Texture' ],
         ]
 
         for (const [ name, title ] of scratchBackedExamples) {

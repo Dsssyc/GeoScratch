@@ -3,6 +3,7 @@ import {
     createScratchDiagnosticReport,
     throwScratchDiagnostic,
 } from './diagnostics.js'
+import { TextureResource } from './texture.js'
 
 export class SubmissionBuilder {
 
@@ -98,6 +99,7 @@ export class SubmissionBuilder {
                 command.encode(passEncoder)
             }
             passEncoder.end()
+            advanceRenderAttachmentEpochs(step.passSpec)
         }
 
         const commandBuffer = encoder.finish()
@@ -259,6 +261,19 @@ function validatePipelineTargets(command, passSpec) {
                 actual: { format: actual },
             })
         }
+    }
+}
+
+function advanceRenderAttachmentEpochs(passSpec) {
+
+    const writtenTargets = new Set()
+
+    for (const attachment of passSpec.color) {
+        const target = attachment.target
+        if (!(target instanceof TextureResource) || writtenTargets.has(target)) continue
+
+        target._advanceContentEpoch()
+        writtenTargets.add(target)
     }
 }
 

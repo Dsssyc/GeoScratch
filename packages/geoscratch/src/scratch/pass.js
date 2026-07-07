@@ -1,5 +1,8 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { TextureResource } from './texture.js'
+
+const TEXTURE_USAGE_RENDER_ATTACHMENT = globalThis.GPUTextureUsage?.RENDER_ATTACHMENT ?? 0x10
 
 export class RenderPassSpec {
 
@@ -74,7 +77,7 @@ export class RenderPassSpec {
                 target.assertUsable()
 
                 return {
-                    view: target.getCurrentTexture().createView(attachment.viewDescriptor),
+                    view: createColorAttachmentView(attachment),
                     loadOp: attachment.load,
                     storeOp: attachment.store,
                     ...(attachment.clear !== undefined ? { clearValue: attachment.clear } : {}),
@@ -185,14 +188,28 @@ function normalizeColorAttachments(pass, color) {
 function normalizeColorAttachment(pass, attachment, index) {
 
     const target = attachment?.target
+    if (target instanceof TextureResource) {
+        target.assertRuntime(pass.runtime)
+        validateTextureColorAttachmentUsage(pass, target)
+
+        return {
+            target,
+            format: attachment.format ?? target.format,
+            load: attachment.load ?? 'clear',
+            store: attachment.store ?? 'store',
+            clear: attachment.clear,
+            viewDescriptor: attachment.viewDescriptor,
+        }
+    }
+
     if (!target || typeof target.assertUsable !== 'function' || typeof target.getCurrentTexture !== 'function') {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE',
             severity: 'error',
             phase: 'submission',
             subject: pass.subject,
-            message: 'This slice only supports Surface color attachments.',
-            expected: { target: 'Surface' },
+            message: 'RenderPassSpec color attachment target must be a Surface or TextureResource.',
+            expected: { target: 'Surface or TextureResource' },
             actual: { index, target: target === undefined || target === null ? String(target) : typeof target },
         })
     }
@@ -223,4 +240,30 @@ function normalizeColorAttachment(pass, attachment, index) {
         clear: attachment.clear,
         viewDescriptor: attachment.viewDescriptor,
     }
+}
+
+function createColorAttachmentView(attachment) {
+
+    const target = attachment.target
+    if (target instanceof TextureResource) {
+        return target.createView(attachment.viewDescriptor)
+    }
+
+    return target.getCurrentTexture().createView(attachment.viewDescriptor)
+}
+
+function validateTextureColorAttachmentUsage(pass, texture) {
+
+    if ((texture.usage & TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+        severity: 'error',
+        phase: 'resource',
+        subject: texture.subject,
+        related: [ pass.subject ],
+        message: 'TextureResource color attachment requires GPUTextureUsage.RENDER_ATTACHMENT.',
+        expected: { usage: 'GPUTextureUsage.RENDER_ATTACHMENT' },
+        actual: { usage: texture.usage },
+    })
 }
