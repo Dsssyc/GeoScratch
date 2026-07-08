@@ -15,6 +15,7 @@ export {
     LayoutCodec,
     layoutCodec,
     Program,
+    inspectShader,
     RenderPipeline as ScratchRenderPipeline,
     ComputePipeline as ScratchComputePipeline,
     BeginOcclusionQueryCommand,
@@ -72,6 +73,12 @@ export type {
     LayoutVectorType,
     LayoutWriteOptions,
     ProgramBufferLayoutRequirement,
+    ShaderBindLayoutComparisonOptions,
+    ShaderBinding,
+    ShaderBindingResourceType,
+    ShaderInspection,
+    ShaderInspectionInput,
+    ShaderInspectionOptions,
 } from './scratch/index.js'
 
 import getDevice from './gpu/context/device.js'

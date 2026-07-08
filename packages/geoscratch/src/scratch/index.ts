@@ -46,6 +46,15 @@ export type {
 } from './layout-codec.js'
 export { Program } from './program.js'
 export type { ProgramBufferLayoutRequirement } from './program.js'
+export { inspectShader } from './shader-inspection.js'
+export type {
+    ShaderBindLayoutComparisonOptions,
+    ShaderBinding,
+    ShaderBindingResourceType,
+    ShaderInspection,
+    ShaderInspectionInput,
+    ShaderInspectionOptions,
+} from './shader-inspection.js'
 export { ComputePipeline, RenderPipeline } from './pipeline.js'
 export { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 export type {

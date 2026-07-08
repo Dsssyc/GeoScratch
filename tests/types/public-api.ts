@@ -397,6 +397,38 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             compute: 'csMain',
         },
     })
+    const shaderInspectionInput: scr.ShaderInspectionInput = computeProgram
+    const shaderInspectionOptions: scr.ShaderInspectionOptions = { program: computeProgram }
+    const shaderInspection: scr.ShaderInspection = scr.inspectShader(shaderInspectionInput, shaderInspectionOptions)
+    const shaderBinding: scr.ShaderBinding | undefined = shaderInspection.bindings[0]
+    const shaderBindingType: scr.ShaderBindingResourceType | undefined = shaderBinding?.type
+    const shaderComparisonOptions: scr.ShaderBindLayoutComparisonOptions = {
+        program: computeProgram,
+        suppress: [
+            {
+                code: 'SCRATCH_BIND_SHADER_INDEX_MISMATCH',
+                group: 3,
+                binding: 0,
+            },
+        ],
+    }
+    const shaderComparisonReport: scr.ScratchDiagnosticReport = shaderInspection.compareBindLayouts([ storageLayout ], shaderComparisonOptions)
+    const compatShaderInspectionInput: scratchCompat.ShaderInspectionInput = computeProgram
+    const compatShaderInspectionOptions: scratchCompat.ShaderInspectionOptions = { program: computeProgram }
+    const compatShaderInspection: scratchCompat.ShaderInspection = scratchCompat.inspectShader(compatShaderInspectionInput, compatShaderInspectionOptions)
+    const compatShaderBinding: scratchCompat.ShaderBinding | undefined = compatShaderInspection.bindings[0]
+    const compatShaderBindingType: scratchCompat.ShaderBindingResourceType | undefined = compatShaderBinding?.type
+    const compatShaderComparisonOptions: scratchCompat.ShaderBindLayoutComparisonOptions = {
+        suppress: [
+            {
+                group: 9,
+                binding: 9,
+            },
+        ],
+    }
+    const compatShaderReport: scratchCompat.ScratchDiagnosticReport = scratchCompat.inspectShader([
+        '@group(9) @binding(9) var<uniform> camera: Camera;',
+    ]).compareBindLayouts([], compatShaderComparisonOptions)
     const computePipeline: scr.ScratchComputePipeline = runtime.createComputePipeline({
         program: computeProgram,
         bindLayouts: [ storageLayout ],
@@ -491,6 +523,20 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void readbackLayoutView
     void compatReadback
     void compatReadbackLayoutView
+    void shaderInspection
+    void shaderInspectionInput
+    void shaderInspectionOptions
+    void shaderBinding
+    void shaderBindingType
+    void shaderComparisonOptions
+    void shaderComparisonReport
+    void compatShaderInspection
+    void compatShaderInspectionInput
+    void compatShaderInspectionOptions
+    void compatShaderBinding
+    void compatShaderBindingType
+    void compatShaderComparisonOptions
+    void compatShaderReport
 }
 
 void startResult
