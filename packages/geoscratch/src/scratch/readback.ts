@@ -1,8 +1,10 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { createLayoutReadbackView } from './layout-codec.js'
 import { describeValue, getGlobalConstant } from './type-utils.js'
 import type { BufferResource } from './buffer.js'
 import type { DiagnosticSubject } from './diagnostics.js'
+import type { LayoutArtifact, LayoutReadbackView } from './layout-codec.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { SubmittedWork } from './submission.js'
 
@@ -46,6 +48,7 @@ export interface ReadbackOperation {
     label?: string
     state: ReadbackState
     source: BufferResource
+    layout?: LayoutArtifact
     range: {
         offset: number
         byteLength: number
@@ -70,6 +73,7 @@ export class ReadbackOperation {
         if (descriptor.label !== undefined) this.label = descriptor.label
         this.state = 'requested'
         this.source = normalizeSource(this, descriptor.source)
+        if (this.source.layout !== undefined) this.layout = this.source.layout
         this.range = normalizeRange(this, descriptor.range)
         const after = normalizeAfter(this, descriptor.after)
         if (after !== undefined) this.after = after
@@ -125,6 +129,27 @@ export class ReadbackOperation {
             bytes.byteOffset,
             bytes.byteLength / elementSize
         )
+    }
+
+    async toLayoutView(): Promise<LayoutReadbackView> {
+
+        this._assertConsumable()
+
+        if (this.layout === undefined) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_READBACK_LAYOUT_MISSING',
+                severity: 'error',
+                phase: 'readback',
+                subject: this.subject,
+                related: [ this.source.subject ],
+                message: 'ReadbackOperation requires source layout metadata to create a layout view.',
+                expected: { layout: 'LayoutArtifact' },
+                actual: { layout: undefined },
+            })
+        }
+
+        const bytes = await this._consumeBytes()
+        return createLayoutReadbackView(this.layout, bytes)
     }
 
     cancel(reason?: string) {

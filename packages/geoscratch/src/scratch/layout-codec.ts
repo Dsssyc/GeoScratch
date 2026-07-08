@@ -219,16 +219,7 @@ export class LayoutCodec {
 
     createReadbackView(bytes: ArrayBuffer | ArrayBufferView): LayoutReadbackView {
 
-        const source = normalizeBytes(this, bytes)
-
-        if (source.byteLength === 0 || source.byteLength % this.artifact.stride !== 0) {
-            throwByteLengthDiagnostic(this, {
-                expected: { byteLength: `positive multiple of ${this.artifact.stride}` },
-                actual: { byteLength: source.byteLength },
-            })
-        }
-
-        return new LayoutReadbackViewImpl(this, source)
+        return createLayoutReadbackView(this.artifact, bytes)
     }
 
     wgslAccessors(options: { namespace?: string } = {}): string {
@@ -259,6 +250,35 @@ export class LayoutCodec {
 export function layoutCodec(spec: LayoutSpec, options?: LayoutCodecOptions): LayoutCodec {
 
     return new LayoutCodec(spec, options)
+}
+
+export function createLayoutReadbackView(
+    artifact: LayoutArtifact,
+    bytes: ArrayBuffer | ArrayBufferView
+): LayoutReadbackView {
+
+    if (!isLayoutArtifact(artifact)) {
+        throwUnsupportedFormat({
+            kind: 'LayoutArtifact',
+            hash: 'unresolved',
+        }, {
+            expected: { layout: 'LayoutArtifact' },
+            actual: { layout: describeValue(artifact) },
+            message: 'Layout readback view requires a LayoutArtifact.',
+        })
+    }
+
+    const subject = layoutArtifactSubject(artifact)
+    const source = normalizeBytes(subject, bytes)
+
+    if (source.byteLength === 0 || source.byteLength % artifact.stride !== 0) {
+        throwByteLengthDiagnostic(subject, {
+            expected: { byteLength: `positive multiple of ${artifact.stride}` },
+            actual: { byteLength: source.byteLength },
+        })
+    }
+
+    return new LayoutReadbackViewImpl(artifact, source)
 }
 
 export function isLayoutArtifact(value: unknown): value is LayoutArtifact {
@@ -303,15 +323,13 @@ class LayoutReadbackViewImpl implements LayoutReadbackView {
     dataView: DataView
     count: number
     byteLength: number
-    #codec: LayoutCodec
 
-    constructor(codec: LayoutCodec, bytes: Uint8Array) {
+    constructor(artifact: LayoutArtifact, bytes: Uint8Array) {
 
-        this.#codec = codec
-        this.artifact = codec.artifact
+        this.artifact = artifact
         this.bytes = bytes
         this.dataView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-        this.count = bytes.byteLength / codec.artifact.stride
+        this.count = bytes.byteLength / artifact.stride
         this.byteLength = bytes.byteLength
     }
 
@@ -322,7 +340,7 @@ class LayoutReadbackViewImpl implements LayoutReadbackView {
                 code: 'SCRATCH_CODEC_READBACK_VIEW_UNSAFE',
                 severity: 'error',
                 phase: 'layout-codec',
-                subject: this.#codec.subject,
+                subject: layoutArtifactSubject(this.artifact),
                 message: 'LayoutCodec readback index is outside the view.',
                 expected: { index: `integer in [0, ${this.count})` },
                 actual: { index },
@@ -333,7 +351,7 @@ class LayoutReadbackViewImpl implements LayoutReadbackView {
         const baseOffset = index * this.artifact.stride
 
         for (const field of this.artifact.fields) {
-            record[field.name] = readFieldValue(this.#codec, this.dataView, baseOffset + field.offset, field)
+            record[field.name] = readFieldValue(this.artifact, this.dataView, baseOffset + field.offset, field)
         }
 
         return record
@@ -713,12 +731,12 @@ function createByteView(
     })
 }
 
-function normalizeBytes(codec: LayoutCodec, bytes: ArrayBuffer | ArrayBufferView): Uint8Array {
+function normalizeBytes(subject: LayoutCodec | DiagnosticSubject, bytes: ArrayBuffer | ArrayBufferView): Uint8Array {
 
     if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes)
     if (ArrayBuffer.isView(bytes)) return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 
-    throwByteLengthDiagnostic(codec, {
+    throwByteLengthDiagnostic(subject, {
         expected: { bytes: 'ArrayBuffer or ArrayBufferView' },
         actual: { bytes: describeValue(bytes) },
     })
@@ -780,11 +798,11 @@ function writePrimitiveValue(
     })
 }
 
-function readFieldValue(codec: LayoutCodec, dataView: DataView, offset: number, field: LayoutFieldArtifact): unknown {
+function readFieldValue(artifact: LayoutArtifact, dataView: DataView, offset: number, field: LayoutFieldArtifact): unknown {
 
     if (field.arrayLength !== undefined) {
         return Array.from({ length: field.arrayLength }, (_, index) => {
-            return readPrimitiveValue(dataView, offset + index * requireArrayStride(codec, field), field)
+            return readPrimitiveValue(dataView, offset + index * requireArrayStride(artifact, field), field)
         })
     }
 
@@ -818,10 +836,10 @@ function readScalar(dataView: DataView, offset: number, type: LayoutScalarType):
     return dataView.getUint32(offset, true)
 }
 
-function requireArrayStride(codec: LayoutCodec, field: LayoutFieldArtifact): number {
+function requireArrayStride(context: LayoutCodec | LayoutArtifact, field: LayoutFieldArtifact): number {
 
     if (field.arrayStride !== undefined) return field.arrayStride
-    throwUnsupportedFormat(codec.subject, {
+    throwUnsupportedFormat(layoutDiagnosticSubject(context), {
         expected: { field: 'array field stride metadata' },
         actual: { field },
         message: 'LayoutCodec array field is missing stride metadata.',
@@ -857,7 +875,7 @@ function throwUnsupportedFormat(
 }
 
 function throwByteLengthDiagnostic(
-    codec: LayoutCodec,
+    subject: LayoutCodec | DiagnosticSubject,
     details: { expected: unknown, actual: unknown }
 ): never {
 
@@ -865,11 +883,19 @@ function throwByteLengthDiagnostic(
         code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
         severity: 'error',
         phase: 'layout-codec',
-        subject: codec.subject,
+        subject: layoutDiagnosticSubject(subject),
         message: 'LayoutCodec byte length does not match its LayoutArtifact.',
         expected: details.expected,
         actual: details.actual,
     })
+}
+
+function layoutDiagnosticSubject(context: LayoutCodec | LayoutArtifact | DiagnosticSubject): DiagnosticSubject {
+
+    if (context instanceof LayoutCodec) return context.subject
+    if (isLayoutArtifact(context)) return layoutArtifactSubject(context)
+
+    return context
 }
 
 function isPrimitiveType(type: string): type is LayoutPrimitiveType {
