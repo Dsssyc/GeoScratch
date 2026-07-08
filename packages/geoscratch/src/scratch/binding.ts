@@ -39,6 +39,7 @@ export type UniformBindLayoutEntry = {
     name: string
     type: 'uniform'
     visibility: BindVisibility[]
+    hasDynamicOffset?: boolean
 }
 
 export type StorageBindLayoutEntry = {
@@ -46,6 +47,7 @@ export type StorageBindLayoutEntry = {
     name: string
     type: 'read-storage' | 'storage'
     visibility: BindVisibility[]
+    hasDynamicOffset?: boolean
 }
 
 export type TextureBindLayoutEntry = {
@@ -74,6 +76,7 @@ export type BindLayoutEntry =
 
 type BufferBindingType = UniformBindLayoutEntry['type'] | StorageBindLayoutEntry['type']
 type BufferBindLayoutEntry = UniformBindLayoutEntry | StorageBindLayoutEntry
+type EntryWithDynamicOffsetFlag = BindLayoutEntry & { hasDynamicOffset?: unknown }
 
 export type BindLayoutDescriptor = {
     label?: string
@@ -389,6 +392,8 @@ function normalizeEntries(layout: BindLayout, entries: BindLayoutEntry[]): BindL
         }
 
         if (entry.type === 'texture') {
+            rejectDynamicOffsetFlag(layout, entry)
+
             return {
                 ...base,
                 type: entry.type,
@@ -399,10 +404,21 @@ function normalizeEntries(layout: BindLayout, entries: BindLayoutEntry[]): BindL
         }
 
         if (entry.type === 'sampler') {
+            rejectDynamicOffsetFlag(layout, entry)
+
             return {
                 ...base,
                 type: entry.type,
                 samplerType: normalizeSamplerBindingType(layout, entry),
+            }
+        }
+
+        const hasDynamicOffset = normalizeDynamicOffsetFlag(layout, entry)
+        if (hasDynamicOffset === true) {
+            return {
+                ...base,
+                type: entry.type,
+                hasDynamicOffset,
             }
         }
 
@@ -597,7 +613,9 @@ function lowerBindLayoutEntry(entry: BindLayoutEntry): GPUBindGroupLayoutEntry {
     }
 
     if (isBufferBindLayoutEntry(entry)) {
-        lowered.buffer = { type: WEBGPU_BUFFER_BINDING_TYPES[entry.type] }
+        const buffer: GPUBufferBindingLayout = { type: WEBGPU_BUFFER_BINDING_TYPES[entry.type] }
+        if (entry.hasDynamicOffset === true) buffer.hasDynamicOffset = true
+        lowered.buffer = buffer
         return lowered
     }
 
@@ -691,6 +709,52 @@ function normalizeSamplerBindingType(layout: BindLayout, entry: SamplerBindLayou
     }
 
     return samplerType
+}
+
+function normalizeDynamicOffsetFlag(layout: BindLayout, entry: BufferBindLayoutEntry): true | undefined {
+
+    const hasDynamicOffset = (entry as EntryWithDynamicOffsetFlag).hasDynamicOffset
+    if (hasDynamicOffset === undefined) return undefined
+
+    if (typeof hasDynamicOffset !== 'boolean') {
+        throwDynamicOffsetFlagDiagnostic(layout, entry, hasDynamicOffset, {
+            hasDynamicOffset: 'boolean',
+        })
+    }
+
+    return hasDynamicOffset === true ? true : undefined
+}
+
+function rejectDynamicOffsetFlag(layout: BindLayout, entry: TextureBindLayoutEntry | SamplerBindLayoutEntry): void {
+
+    const hasDynamicOffset = (entry as EntryWithDynamicOffsetFlag).hasDynamicOffset
+    if (hasDynamicOffset === undefined) return
+
+    throwDynamicOffsetFlagDiagnostic(layout, entry, hasDynamicOffset, {
+        hasDynamicOffset: 'only supported for uniform, read-storage, and storage entries',
+    })
+}
+
+function throwDynamicOffsetFlagDiagnostic(
+    layout: BindLayout,
+    entry: BindLayoutEntry,
+    hasDynamicOffset: unknown,
+    expected: unknown
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+        severity: 'error',
+        phase: 'binding',
+        subject: layout.entrySubject(entry),
+        related: [ layout.subject ],
+        message: 'BindLayout entry dynamic offset flag is invalid.',
+        expected,
+        actual: {
+            type: entry.type,
+            hasDynamicOffset,
+        },
+    })
 }
 
 function throwBindEntryDiagnostic(layout: BindLayout, entry: unknown): never {

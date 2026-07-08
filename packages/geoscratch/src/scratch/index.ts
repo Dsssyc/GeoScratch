@@ -16,6 +16,17 @@ export { TextureResource } from './texture.js'
 export { SamplerResource } from './sampler.js'
 export { QuerySetResource } from './query-set.js'
 export { BindLayout, BindSet } from './binding.js'
+export type {
+    BindLayoutDescriptor,
+    BindLayoutEntry,
+    BindSetBindings,
+    BindSetOptions,
+    BindVisibility,
+    SamplerBindLayoutEntry,
+    StorageBindLayoutEntry,
+    TextureBindLayoutEntry,
+    UniformBindLayoutEntry,
+} from './binding.js'
 export { LayoutCodec, layoutCodec } from './layout-codec.js'
 export type {
     LayoutArtifact,
@@ -37,6 +48,21 @@ export { Program } from './program.js'
 export type { ProgramBufferLayoutRequirement } from './program.js'
 export { ComputePipeline, RenderPipeline } from './pipeline.js'
 export { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+export type {
+    BeginOcclusionQueryCommandDescriptor,
+    CommandDynamicOffsets,
+    CopyCommandDescriptor,
+    DispatchCommandDescriptor,
+    DrawCommandDescriptor,
+    DrawVertexBufferBinding,
+    EndOcclusionQueryCommandDescriptor,
+    ResolveQuerySetCommandDescriptor,
+    ResourceReadinessPolicy,
+    StaticDispatchCount,
+    StaticDrawCount,
+    TextureUploadCommandDescriptor,
+    UploadCommandDescriptor,
+} from './command.js'
 export { ComputePassSpec, RenderPassSpec } from './pass.js'
 export { ReadbackOperation } from './readback.js'
 export { SubmissionBuilder, SubmittedWork } from './submission.js'

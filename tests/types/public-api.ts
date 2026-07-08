@@ -219,6 +219,40 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         inputValues: storageInput,
         outputValues: storageOutput,
     })
+    const dynamicStorageLayout: scr.BindLayout = runtime.createBindLayout({
+        label: 'typed dynamic storage layout',
+        group: 3,
+        entries: [
+            {
+                binding: 0,
+                name: 'dynamicInputValues',
+                type: 'read-storage',
+                visibility: [ 'compute' ],
+                hasDynamicOffset: true,
+            },
+            {
+                binding: 1,
+                name: 'dynamicOutputValues',
+                type: 'storage',
+                visibility: [ 'compute' ],
+                hasDynamicOffset: true,
+            },
+        ],
+    })
+    const dynamicStorageSet: scr.BindSet = runtime.createBindSet(dynamicStorageLayout, {
+        dynamicInputValues: storageInput,
+        dynamicOutputValues: storageOutput,
+    })
+    const compatDynamicUniformEntry: scratchCompat.UniformBindLayoutEntry = {
+        binding: 0,
+        name: 'compatDynamicUniforms',
+        type: 'uniform',
+        visibility: [ 'vertex' ],
+        hasDynamicOffset: true,
+    }
+    const compatDynamicDispatchOffsets: scratchCompat.DispatchCommandDescriptor['dynamicOffsets'] = {
+        3: [ 256, 512 ],
+    }
     const textureLayout: scr.BindLayout = runtime.createBindLayout({
         label: 'typed texture layout',
         group: 2,
@@ -367,6 +401,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         program: computeProgram,
         bindLayouts: [ storageLayout ],
     })
+    const dynamicComputePipeline: scr.ScratchComputePipeline = runtime.createComputePipeline({
+        program: computeProgram,
+        bindLayouts: [ dynamicStorageLayout ],
+    })
     const dispatch: scr.DispatchCommand = runtime.createDispatchCommand({
         pipeline: computePipeline,
         bindSets: [ storageSet ],
@@ -377,6 +415,31 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         },
         whenMissing: 'throw',
     })
+    const dynamicDispatch: scr.DispatchCommand = runtime.createDispatchCommand({
+        pipeline: dynamicComputePipeline,
+        bindSets: [ dynamicStorageSet ],
+        count: { workgroups: [ 1 ] },
+        resources: {
+            read: [ storageInput ],
+            write: [ storageOutput ],
+        },
+        whenMissing: 'throw',
+        dynamicOffsets: {
+            3: [ 256, 512 ],
+        },
+    })
+    const compatDynamicDispatchDescriptor: scratchCompat.DispatchCommandDescriptor = {
+        pipeline: dynamicComputePipeline,
+        bindSets: [ dynamicStorageSet ],
+        count: { workgroups: [ 1 ] },
+        resources: {
+            read: [ storageInput ],
+            write: [ storageOutput ],
+        },
+        whenMissing: 'throw',
+        dynamicOffsets: compatDynamicDispatchOffsets,
+    }
+    const compatDynamicDispatch: scratchCompat.DispatchCommand = runtime.createDispatchCommand(compatDynamicDispatchDescriptor)
     const computePass: scr.ComputePassSpec = runtime.createComputePass({
         timestampWrites: {
             querySet,
@@ -402,6 +465,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void scratchTextureView
     void textureSet
     void textureTargetPass
+    void dynamicStorageLayout
+    void dynamicStorageSet
+    void compatDynamicUniformEntry
+    void dynamicComputePipeline
+    void dynamicDispatch
+    void compatDynamicDispatch
     void copy
     void copyAlias
     void querySet

@@ -41,6 +41,8 @@ export type DrawVertexBufferBinding = {
     size?: number
 }
 
+export type CommandDynamicOffsets = Record<number, number[]>
+
 export type NormalizedDrawVertexBufferBinding = Omit<DrawVertexBufferBinding, 'size'> & {
     offset: number
     size: number | undefined
@@ -50,6 +52,7 @@ export type DrawCommandDescriptor = {
     label?: string
     pipeline: RenderPipeline
     bindSets?: BindSet[]
+    dynamicOffsets?: CommandDynamicOffsets
     vertexBuffers?: DrawVertexBufferBinding[]
     count: StaticDrawCount
     whenMissing: ResourceReadinessPolicy
@@ -130,6 +133,7 @@ export type DispatchCommandDescriptor = {
     label?: string
     pipeline: ComputePipeline
     bindSets?: BindSet[]
+    dynamicOffsets?: CommandDynamicOffsets
     count: StaticDispatchCount
     resources: {
         read: Resource[]
@@ -209,6 +213,7 @@ export interface DrawCommand {
     commandKind: 'draw'
     pipeline: RenderPipeline
     bindSets: BindSet[]
+    dynamicOffsets: Map<number, number[]>
     vertexBuffers: NormalizedDrawVertexBufferBinding[]
     count: StaticDrawCount
     whenMissing: ResourceReadinessPolicy
@@ -242,6 +247,7 @@ export class DrawCommand {
         this.commandKind = 'draw'
         this.pipeline = pipeline
         this.bindSets = normalizeBindSets(this, descriptor.bindSets)
+        this.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
         this.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
         this.count = normalizeDrawCount(this, descriptor.count)
         this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
@@ -332,7 +338,7 @@ export class DrawCommand {
 
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
         for (const bindSet of this.bindSets) {
-            passEncoder.setBindGroup(bindSet.layout.group, bindSet.getBindGroup())
+            setBindGroupWithDynamicOffsets(this, passEncoder, bindSet)
         }
         for (const binding of this.vertexBuffers) {
             passEncoder.setVertexBuffer(binding.slot, binding.buffer.gpuBuffer, binding.offset, binding.size)
@@ -615,6 +621,7 @@ export interface DispatchCommand {
     commandKind: 'dispatch'
     pipeline: ComputePipeline
     bindSets: BindSet[]
+    dynamicOffsets: Map<number, number[]>
     count: { workgroups: [number, number, number] }
     resources: {
         read: Resource[]
@@ -651,6 +658,7 @@ export class DispatchCommand {
         this.commandKind = 'dispatch'
         this.pipeline = pipeline
         this.bindSets = normalizeBindSets(this, descriptor.bindSets)
+        this.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
         this.count = normalizeDispatchCount(this, descriptor.count)
         this.resources = normalizeResourceAccess(this, descriptor.resources)
         this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
@@ -741,7 +749,7 @@ export class DispatchCommand {
 
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
         for (const bindSet of this.bindSets) {
-            passEncoder.setBindGroup(bindSet.layout.group, bindSet.getBindGroup())
+            setBindGroupWithDynamicOffsets(this, passEncoder, bindSet)
         }
         passEncoder.dispatchWorkgroups(
             this.count.workgroups[0],
@@ -1420,6 +1428,267 @@ function normalizeBindSets(command: DrawCommand | DispatchCommand, bindSets: Bin
     }
 
     return [ ...bindSets ]
+}
+
+type DynamicOffsetCommand = DrawCommand | DispatchCommand
+type DynamicBufferBindLayoutEntry = BindLayoutEntry & {
+    type: 'uniform' | 'read-storage' | 'storage'
+    hasDynamicOffset: true
+}
+
+function normalizeDynamicOffsets(
+    command: DynamicOffsetCommand,
+    dynamicOffsets: CommandDynamicOffsets | undefined
+): Map<number, number[]> {
+
+    const suppliedOffsets = normalizeDynamicOffsetRecord(command, dynamicOffsets)
+    const bindSetGroups = command.bindSets.map(bindSet => bindSet.layout.group)
+
+    for (const group of suppliedOffsets.keys()) {
+        if (!bindSetGroups.includes(group)) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+                severity: 'error',
+                phase: 'binding',
+                subject: command.pipeline.subject,
+                related: [ command.subject ],
+                message: 'Command dynamic offsets reference a bind group not used by this command.',
+                expected: { groups: bindSetGroups },
+                actual: { group },
+            })
+        }
+    }
+
+    const normalized = new Map<number, number[]>()
+    for (const bindSet of command.bindSets) {
+        const entries = dynamicBufferEntries(bindSet)
+        const group = bindSet.layout.group
+        const offsets = suppliedOffsets.get(group)
+
+        if (entries.length === 0) {
+            if (offsets !== undefined && offsets.length > 0) {
+                throwDynamicOffsetCountDiagnostic(command, bindSet, [], offsets, bindSet.subject)
+            }
+            continue
+        }
+
+        if (offsets === undefined) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_BIND_DYNAMIC_OFFSET_MISSING',
+                severity: 'error',
+                phase: 'binding',
+                subject: bindSet.layout.entrySubject(entries[0]),
+                related: dynamicOffsetRelatedSubjects(command, bindSet, entries[0]),
+                message: 'Command is missing dynamic offsets required by its BindLayout.',
+                expected: dynamicOffsetExpected(group, entries),
+                actual: {
+                    group,
+                    offsets: undefined,
+                },
+            })
+        }
+
+        if (offsets.length !== entries.length) {
+            throwDynamicOffsetCountDiagnostic(command, bindSet, entries, offsets, bindSet.layout.entrySubject(entries[0]))
+        }
+
+        const normalizedOffsets = offsets.map((offset, index) => {
+            const entry = entries[index]
+            validateDynamicOffsetValue(command, bindSet, entry, offset, index)
+            return offset
+        })
+
+        normalized.set(group, normalizedOffsets)
+    }
+
+    return normalized
+}
+
+function normalizeDynamicOffsetRecord(
+    command: DynamicOffsetCommand,
+    dynamicOffsets: CommandDynamicOffsets | undefined
+): Map<number, number[]> {
+
+    const normalized = new Map<number, number[]>()
+    if (dynamicOffsets === undefined) return normalized
+
+    if (!dynamicOffsets || typeof dynamicOffsets !== 'object' || Array.isArray(dynamicOffsets)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+            severity: 'error',
+            phase: 'binding',
+            subject: command.subject,
+            related: [ command.pipeline.subject ],
+            message: 'Command dynamicOffsets must be an object keyed by bind group.',
+            expected: { dynamicOffsets: 'Record<number, number[]>' },
+            actual: { dynamicOffsets: describeValue(dynamicOffsets) },
+        })
+    }
+
+    for (const [ key, offsets ] of Object.entries(dynamicOffsets)) {
+        const group = Number(key)
+        if (!Number.isInteger(group) || group < 0 || String(group) !== key) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+                severity: 'error',
+                phase: 'binding',
+                subject: command.subject,
+                related: [ command.pipeline.subject ],
+                message: 'Command dynamic offset groups must be non-negative integers.',
+                expected: { group: 'non-negative integer' },
+                actual: { group: key },
+            })
+        }
+
+        if (!Array.isArray(offsets)) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+                severity: 'error',
+                phase: 'binding',
+                subject: command.subject,
+                related: [ command.pipeline.subject ],
+                message: 'Command dynamic offsets for a bind group must be an array.',
+                expected: { offsets: 'number[]' },
+                actual: { group, offsets: describeValue(offsets) },
+            })
+        }
+
+        normalized.set(group, [ ...offsets ])
+    }
+
+    return normalized
+}
+
+function dynamicBufferEntries(bindSet: BindSet): DynamicBufferBindLayoutEntry[] {
+
+    return bindSet.layout.entries
+        .filter((entry): entry is DynamicBufferBindLayoutEntry =>
+            (entry.type === 'uniform' || entry.type === 'read-storage' || entry.type === 'storage') &&
+            entry.hasDynamicOffset === true
+        )
+        .sort((a, b) => a.binding - b.binding)
+}
+
+function throwDynamicOffsetCountDiagnostic(
+    command: DynamicOffsetCommand,
+    bindSet: BindSet,
+    entries: DynamicBufferBindLayoutEntry[],
+    offsets: number[],
+    subject: DiagnosticSubject
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+        severity: 'error',
+        phase: 'binding',
+        subject,
+        related: dynamicOffsetRelatedSubjects(command, bindSet, entries[0]),
+        message: 'Command dynamic offset count does not match its BindLayout dynamic buffer entries.',
+        expected: dynamicOffsetExpected(bindSet.layout.group, entries),
+        actual: {
+            group: bindSet.layout.group,
+            count: offsets.length,
+            offsets,
+        },
+    })
+}
+
+function validateDynamicOffsetValue(
+    command: DynamicOffsetCommand,
+    bindSet: BindSet,
+    entry: DynamicBufferBindLayoutEntry,
+    offset: unknown,
+    index: number
+): void {
+
+    if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+            severity: 'error',
+            phase: 'binding',
+            subject: bindSet.layout.entrySubject(entry),
+            related: dynamicOffsetRelatedSubjects(command, bindSet, entry),
+            message: 'Command dynamic offsets must be non-negative integers.',
+            expected: { offset: 'non-negative integer' },
+            actual: {
+                group: bindSet.layout.group,
+                binding: entry.binding,
+                index,
+                offset,
+            },
+        })
+    }
+
+    const alignment = dynamicOffsetAlignment(command, entry)
+    if (offset % alignment !== 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_UNALIGNED',
+            severity: 'error',
+            phase: 'binding',
+            subject: bindSet.layout.entrySubject(entry),
+            related: dynamicOffsetRelatedSubjects(command, bindSet, entry),
+            message: 'Command dynamic offset does not satisfy WebGPU alignment limits.',
+            expected: { alignment },
+            actual: {
+                group: bindSet.layout.group,
+                binding: entry.binding,
+                index,
+                offset,
+            },
+        })
+    }
+}
+
+function dynamicOffsetAlignment(command: DynamicOffsetCommand, entry: DynamicBufferBindLayoutEntry): number {
+
+    const limits = command.runtime.device.limits
+    const alignment = entry.type === 'uniform'
+        ? limits.minUniformBufferOffsetAlignment
+        : limits.minStorageBufferOffsetAlignment
+
+    if (Number.isInteger(alignment) && alignment > 0) return alignment
+
+    return 256
+}
+
+function dynamicOffsetExpected(group: number, entries: DynamicBufferBindLayoutEntry[]) {
+
+    return {
+        group,
+        count: entries.length,
+        bindings: entries.map(entry => entry.binding),
+    }
+}
+
+function dynamicOffsetRelatedSubjects(
+    command: DynamicOffsetCommand,
+    bindSet: BindSet,
+    entry?: DynamicBufferBindLayoutEntry
+): DiagnosticSubject[] {
+
+    const binding = entry === undefined ? undefined : bindSet.bindings.get(entry.name)
+
+    return [
+        command.subject,
+        bindSet.subject,
+        bindSet.layout.subject,
+        binding === undefined ? undefined : diagnosticSubjectOf(binding.resource),
+    ].filter(isDefined)
+}
+
+function setBindGroupWithDynamicOffsets(
+    command: DynamicOffsetCommand,
+    passEncoder: GPURenderPassEncoder | GPUComputePassEncoder,
+    bindSet: BindSet
+): void {
+
+    const dynamicOffsets = command.dynamicOffsets.get(bindSet.layout.group)
+    if (dynamicOffsets !== undefined) {
+        passEncoder.setBindGroup(bindSet.layout.group, bindSet.getBindGroup(), dynamicOffsets)
+        return
+    }
+
+    passEncoder.setBindGroup(bindSet.layout.group, bindSet.getBindGroup())
 }
 
 function validateProgramLayoutRequirementsForCommand(command: DrawCommand | DispatchCommand): void {

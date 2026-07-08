@@ -64,7 +64,11 @@ export function createFakeGpu() {
 
     const device = {
         features: new Set([ 'timestamp-query' ]),
-        limits: { maxColorAttachments: 8 },
+        limits: {
+            maxColorAttachments: 8,
+            minUniformBufferOffsetAlignment: 256,
+            minStorageBufferOffsetAlignment: 256,
+        },
         queue,
         lost: new Promise(() => {}),
         createBuffer(descriptor) {
@@ -195,7 +199,11 @@ export function createFakeGpu() {
 
     const adapter = {
         features: new Set([ 'timestamp-query' ]),
-        limits: { maxColorAttachments: 8 },
+        limits: {
+            maxColorAttachments: 8,
+            minUniformBufferOffsetAlignment: 256,
+            minStorageBufferOffsetAlignment: 256,
+        },
         async requestDevice() {
             return device
         },
@@ -326,8 +334,10 @@ function createFakeRenderPassEncoder(calls, descriptor) {
         setPipeline(pipeline) {
             this.actions.push({ type: 'setPipeline', pipeline })
         },
-        setBindGroup(group, bindGroup) {
-            this.actions.push({ type: 'setBindGroup', group, bindGroup })
+        setBindGroup(group, bindGroup, dynamicOffsets) {
+            const action = { type: 'setBindGroup', group, bindGroup }
+            if (dynamicOffsets !== undefined) action.dynamicOffsets = [ ...dynamicOffsets ]
+            this.actions.push(action)
         },
         setVertexBuffer(slot, buffer, offset, size) {
             this.actions.push({ type: 'setVertexBuffer', slot, buffer, offset, size })
@@ -366,8 +376,10 @@ function createFakeComputePassEncoder(calls, descriptor) {
         setPipeline(pipeline) {
             this.actions.push({ type: 'setPipeline', pipeline })
         },
-        setBindGroup(group, bindGroup) {
-            this.actions.push({ type: 'setBindGroup', group, bindGroup })
+        setBindGroup(group, bindGroup, dynamicOffsets) {
+            const action = { type: 'setBindGroup', group, bindGroup }
+            if (dynamicOffsets !== undefined) action.dynamicOffsets = [ ...dynamicOffsets ]
+            this.actions.push(action)
         },
         dispatchWorkgroups(x, y, z) {
             const call = { x, y, z }
