@@ -1,9 +1,10 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { describeValue } from './type-utils.js'
+import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import type { BindLayout } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
-import type { Program } from './program.js'
+import type { Program, ProgramBufferLayoutRequirement } from './program.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type RenderPipelineDescriptor = {
@@ -82,6 +83,7 @@ export class RenderPipeline {
         this.isDisposed = false
 
         validateEntryPoints(this)
+        validateProgramLayoutRequirements(this)
 
         const shaderModuleDescriptor: GPUShaderModuleDescriptor = {
             code: program.modules.join('\n'),
@@ -226,6 +228,7 @@ export class ComputePipeline {
         if (!this.computeEntryPoint) {
             throwMissingEntryPoint(this, 'compute')
         }
+        validateProgramLayoutRequirements(this)
 
         const shaderModuleDescriptor: GPUShaderModuleDescriptor = {
             code: program.modules.join('\n'),
@@ -500,6 +503,91 @@ function normalizeTargets(pipeline: RenderPipeline, targets: GPUColorTargetState
         }
 
         return { ...target }
+    })
+}
+
+function validateProgramLayoutRequirements(pipeline: RenderPipeline | ComputePipeline): void {
+
+    for (const requirement of pipeline.program.layoutRequirements) {
+        const bindLayout = pipeline.bindLayoutsByGroup.get(requirement.group)
+        if (bindLayout === undefined) {
+            throwProgramLayoutMismatch(pipeline, requirement, {
+                related: [ pipeline.program.subject, pipeline.subject ],
+                actual: { group: undefined },
+            })
+        }
+
+        const entry = bindLayout.entries.find(candidate => candidate.binding === requirement.binding)
+        if (entry === undefined) {
+            throwProgramLayoutMismatch(pipeline, requirement, {
+                related: [
+                    pipeline.program.subject,
+                    pipeline.subject,
+                    bindLayout.subject,
+                ],
+                actual: {
+                    group: bindLayout.group,
+                    bindings: bindLayout.entries.map(candidate => candidate.binding),
+                },
+            })
+        }
+
+        if (requirement.name !== undefined && entry.name !== requirement.name) {
+            throwProgramLayoutMismatch(pipeline, requirement, {
+                related: [
+                    pipeline.program.subject,
+                    pipeline.subject,
+                    bindLayout.subject,
+                    bindLayout.entrySubject(entry),
+                ],
+                actual: { name: entry.name },
+            })
+        }
+
+        if (entry.type !== requirement.type) {
+            throwProgramLayoutMismatch(pipeline, requirement, {
+                related: [
+                    pipeline.program.subject,
+                    pipeline.subject,
+                    bindLayout.subject,
+                    bindLayout.entrySubject(entry),
+                ],
+                actual: { type: entry.type },
+            })
+        }
+
+        if (requirement.visibility !== undefined && !requirement.visibility.every(stage => entry.visibility.includes(stage))) {
+            throwProgramLayoutMismatch(pipeline, requirement, {
+                related: [
+                    pipeline.program.subject,
+                    pipeline.subject,
+                    bindLayout.subject,
+                    bindLayout.entrySubject(entry),
+                ],
+                actual: { visibility: entry.visibility },
+            })
+        }
+    }
+}
+
+function throwProgramLayoutMismatch(
+    pipeline: RenderPipeline | ComputePipeline,
+    requirement: ProgramBufferLayoutRequirement,
+    details: {
+        actual: unknown
+        related: DiagnosticSubject[]
+    }
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH',
+        severity: 'error',
+        phase: 'program',
+        subject: programLayoutRequirementSubject(requirement),
+        related: details.related,
+        message: 'Pipeline bind layouts do not satisfy Program buffer layout requirements.',
+        expected: programLayoutRequirementExpected(requirement),
+        actual: details.actual,
     })
 }
 

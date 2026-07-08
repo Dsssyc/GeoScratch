@@ -34,6 +34,7 @@ export type {
     LayoutWriteOptions,
 } from './layout-codec.js'
 export { Program } from './program.js'
+export type { ProgramBufferLayoutRequirement } from './program.js'
 export { ComputePipeline, RenderPipeline } from './pipeline.js'
 export { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 export { ComputePassSpec, RenderPassSpec } from './pass.js'

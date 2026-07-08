@@ -1,4 +1,5 @@
 import * as scr from 'geoscratch'
+import * as scratchCompat from 'geoscratch/scratch'
 import { MercatorCoordinate } from 'geoscratch/geo'
 import { plane, sphere } from 'geoscratch/geometry'
 
@@ -155,6 +156,15 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const bufferElementCount: number | undefined = layoutBuffer.elementCount
     const bufferLayoutByteLength: number | undefined = layoutBuffer.layoutByteLength
     const bufferLayoutSubject: unknown = layoutBuffer.layoutSubject
+    const programBufferRequirement: scr.ProgramBufferLayoutRequirement = {
+        group: 0,
+        binding: 0,
+        name: 'uniforms',
+        type: 'uniform',
+        visibility: [ 'vertex', 'fragment' ],
+        layout: codec.artifact,
+    }
+    const compatProgramBufferRequirement: scratchCompat.ProgramBufferLayoutRequirement = programBufferRequirement
 
     buffer.assertRuntime(runtime)
 
@@ -167,7 +177,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             vertex: 'vsMain',
             fragment: 'fsMain',
         },
+        layoutRequirements: [ programBufferRequirement ],
     })
+    const normalizedRequirement: scr.ProgramBufferLayoutRequirement = program.layoutRequirements[0]
     const bindLayout: scr.BindLayout = runtime.createBindLayout({
         label: 'typed bind layout',
         group: 0,
@@ -390,6 +402,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void copyAlias
     void querySet
     void querySetAlias
+    void normalizedRequirement
+    void compatProgramBufferRequirement
     void beginOcclusion
     void beginOcclusionAlias
     void endOcclusion

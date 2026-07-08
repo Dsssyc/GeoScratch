@@ -49,6 +49,7 @@ export type {
     LayoutUsageCompatibility,
     LayoutVectorType,
     LayoutWriteOptions,
+    ProgramBufferLayoutRequirement,
 } from './scratch/index.js'
 
 import getDevice from './gpu/context/device.js'

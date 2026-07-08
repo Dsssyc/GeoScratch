@@ -2,14 +2,16 @@ import { UUID } from '../core/utils/uuid.js'
 import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { isLayoutArtifact, isLayoutUploadView, layoutArtifactSubject } from './layout-codec.js'
+import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import { QuerySetResource } from './query-set.js'
 import { TextureResource } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined } from './type-utils.js'
-import type { BindSet } from './binding.js'
+import type { BindLayoutEntry, BindSet } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { ComputePipeline, RenderPipeline } from './pipeline.js'
 import type { LayoutArtifact, LayoutUploadView } from './layout-codec.js'
+import type { ProgramBufferLayoutRequirement } from './program.js'
 import type { Resource } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
@@ -244,6 +246,8 @@ export class DrawCommand {
         this.count = normalizeDrawCount(this, descriptor.count)
         this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
+
+        validateProgramLayoutRequirementsForCommand(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -651,6 +655,8 @@ export class DispatchCommand {
         this.resources = normalizeResourceAccess(this, descriptor.resources)
         this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
+
+        validateProgramLayoutRequirementsForCommand(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -1414,6 +1420,98 @@ function normalizeBindSets(command: DrawCommand | DispatchCommand, bindSets: Bin
     }
 
     return [ ...bindSets ]
+}
+
+function validateProgramLayoutRequirementsForCommand(command: DrawCommand | DispatchCommand): void {
+
+    for (const requirement of command.pipeline.program.layoutRequirements) {
+        const bindSet = command.bindSets.find(candidate => candidate.layout.group === requirement.group)
+        if (bindSet === undefined) {
+            throwCommandProgramLayoutMismatch(command, requirement, {
+                actual: {
+                    bindSetGroups: command.bindSets.map(candidate => candidate.layout.group),
+                },
+            })
+        }
+
+        const binding = [ ...bindSet.bindings.values() ].find(candidate => candidate.entry.binding === requirement.binding)
+        if (binding === undefined) {
+            throwCommandProgramLayoutMismatch(command, requirement, {
+                bindSet,
+                actual: {
+                    group: bindSet.layout.group,
+                    bindings: [ ...bindSet.bindings.values() ].map(candidate => candidate.entry.binding),
+                },
+            })
+        }
+
+        if (!(binding.resource instanceof BufferResource)) {
+            throwCommandProgramLayoutMismatch(command, requirement, {
+                bindSet,
+                entry: binding.entry,
+                resource: diagnosticSubjectOf(binding.resource),
+                actual: { resource: describeValue(binding.resource) },
+            })
+        }
+
+        const buffer = binding.resource
+        if (buffer.layout === undefined) {
+            throwCommandProgramLayoutMismatch(command, requirement, {
+                bindSet,
+                entry: binding.entry,
+                resource: buffer.subject,
+                actual: { structuralHash: undefined },
+            })
+        }
+
+        if (buffer.layout.structuralHash !== requirement.layout.structuralHash) {
+            throwCommandProgramLayoutMismatch(command, requirement, {
+                bindSet,
+                entry: binding.entry,
+                resource: buffer.subject,
+                actualLayout: buffer.layoutSubject,
+                actual: { structuralHash: buffer.layout.structuralHash },
+            })
+        }
+    }
+}
+
+function throwCommandProgramLayoutMismatch(
+    command: DrawCommand | DispatchCommand,
+    requirement: ProgramBufferLayoutRequirement,
+    details: {
+        actual: unknown
+        bindSet?: BindSet
+        entry?: BindLayoutEntry
+        resource?: DiagnosticSubject | undefined
+        actualLayout?: DiagnosticSubject | undefined
+    }
+): never {
+
+    const related: Array<DiagnosticSubject | undefined> = [
+        command.pipeline.program.subject,
+        command.pipeline.subject,
+        command.subject,
+        details.bindSet?.subject,
+        details.bindSet?.layout.subject,
+        details.bindSet !== undefined && details.entry !== undefined
+            ? details.bindSet.layout.entrySubject(details.entry)
+            : undefined,
+        details.resource,
+        layoutArtifactSubject(requirement.layout),
+        details.actualLayout,
+    ]
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH',
+        severity: 'error',
+        phase: 'program',
+        subject: programLayoutRequirementSubject(requirement),
+        related: related.filter(isDefined),
+        message: 'Command bind sets do not satisfy Program buffer layout requirements.',
+        expected: programLayoutRequirementExpected(requirement),
+        actual: details.actual,
+    })
 }
 
 function normalizeVertexBuffers(
