@@ -1,6 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { isLayoutArtifact, isLayoutUploadView, layoutArtifactSubject } from './layout-codec.js'
 import { QuerySetResource } from './query-set.js'
 import { TextureResource } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined } from './type-utils.js'
@@ -8,6 +9,7 @@ import type { BindSet } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { ComputePipeline, RenderPipeline } from './pipeline.js'
+import type { LayoutArtifact, LayoutUploadView } from './layout-codec.js'
 import type { Resource } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
@@ -64,10 +66,12 @@ export type EndOcclusionQueryCommandDescriptor = {
 export type UploadCommandDescriptor = {
     label?: string
     target: BufferResource
-    data: ArrayBuffer | ArrayBufferView
+    data: ArrayBuffer | ArrayBufferView | LayoutUploadView
     offset?: number
     dataOffset?: number
     size?: number
+    layout?: LayoutArtifact
+    artifact?: LayoutArtifact
 }
 
 export type CopyCommandDescriptor = {
@@ -168,6 +172,7 @@ type UploadDiagnosticInput = {
     offset?: unknown
     dataOffset?: unknown
     size?: unknown
+    layout?: unknown
     reason: string
 }
 
@@ -186,6 +191,13 @@ type VertexBufferDiagnosticDetails = {
     expected: unknown
     actual: unknown
     related?: DiagnosticSubject[]
+}
+
+type NormalizedUploadSource = {
+    data: ArrayBuffer | ArrayBufferView
+    dataOffset: number
+    byteLength?: number
+    layout?: LayoutArtifact
 }
 
 export interface DrawCommand {
@@ -748,6 +760,7 @@ export interface UploadCommand {
     commandKind: 'upload'
     target: BufferResource
     data: ArrayBuffer | ArrayBufferView
+    layout?: LayoutArtifact
     offset: number
     dataOffset: number
     byteLength: number
@@ -772,16 +785,20 @@ export class UploadCommand {
         }
 
         target.assertRuntime(runtime)
+        const uploadSource = normalizeUploadSource(runtime, descriptor)
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
         if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'upload'
         this.target = target
-        this.data = descriptor.data
+        this.data = uploadSource.data
+        const layout = normalizeUploadLayout(runtime, descriptor.layout ?? descriptor.artifact ?? uploadSource.layout, descriptor)
+        if (layout !== undefined) this.layout = layout
         this.offset = normalizeUploadOffset(runtime, descriptor.offset ?? 0)
-        this.dataOffset = normalizeUploadOffset(runtime, descriptor.dataOffset ?? 0)
-        this.byteLength = normalizeUploadByteLength(runtime, descriptor)
+        this.dataOffset = normalizeUploadOffset(runtime, descriptor.dataOffset ?? uploadSource.dataOffset)
+        const sourceByteLength = descriptor.dataOffset === undefined ? uploadSource.byteLength : undefined
+        this.byteLength = normalizeUploadByteLength(runtime, this.data, this.dataOffset, descriptor, sourceByteLength)
         this.isDisposed = false
 
         validateUploadRange(this)
@@ -1611,6 +1628,91 @@ function normalizeDrawCount(command: DrawCommand, count: StaticDrawCount): Stati
     return { ...count }
 }
 
+function normalizeUploadSource(runtime: ScratchRuntime, descriptor: UploadCommandDescriptor): NormalizedUploadSource {
+
+    const data = descriptor.data
+    if (isLayoutUploadView(data)) {
+        const bytes = createLayoutUploadBytes(runtime, data)
+        return {
+            data: bytes,
+            dataOffset: 0,
+            byteLength: bytes.byteLength,
+            layout: data.artifact,
+        }
+    }
+
+    if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+        return {
+            data,
+            dataOffset: 0,
+        }
+    }
+
+    throwUploadDiagnostic({
+        runtime,
+        target: descriptor.target,
+        data,
+        offset: descriptor.offset,
+        dataOffset: descriptor.dataOffset,
+        size: descriptor.size,
+        layout: descriptor.layout ?? descriptor.artifact,
+        reason: 'data',
+    })
+}
+
+function createLayoutUploadBytes(runtime: ScratchRuntime, uploadView: LayoutUploadView): Uint8Array {
+
+    if (
+        !Number.isInteger(uploadView.byteOffset) ||
+        !Number.isInteger(uploadView.byteLength) ||
+        uploadView.byteOffset < 0 ||
+        uploadView.byteLength < 0 ||
+        uploadView.byteOffset + uploadView.byteLength > uploadView.bytes.buffer.byteLength
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
+            severity: 'error',
+            phase: 'layout-codec',
+            subject: layoutArtifactSubject(uploadView.artifact),
+            related: [ runtime.subject ],
+            message: 'LayoutUploadView byte range must fit inside its byte storage.',
+            expected: { byteRange: 'non-negative byte range inside bytes.buffer' },
+            actual: {
+                byteOffset: uploadView.byteOffset,
+                byteLength: uploadView.byteLength,
+                bufferByteLength: uploadView.bytes.buffer.byteLength,
+            },
+        })
+    }
+
+    if (uploadView.byteOffset === uploadView.bytes.byteOffset && uploadView.byteLength === uploadView.bytes.byteLength) {
+        return uploadView.bytes
+    }
+
+    return new Uint8Array(uploadView.bytes.buffer, uploadView.byteOffset, uploadView.byteLength)
+}
+
+function normalizeUploadLayout(
+    runtime: ScratchRuntime,
+    layout: unknown,
+    descriptor: UploadCommandDescriptor
+): LayoutArtifact | undefined {
+
+    if (layout === undefined) return undefined
+    if (isLayoutArtifact(layout)) return layout
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
+        severity: 'error',
+        phase: 'layout-codec',
+        subject: runtime.subject,
+        related: [ diagnosticSubjectOf(descriptor.target) ].filter(isDefined),
+        message: 'UploadCommand layout must be a LayoutArtifact.',
+        expected: { layout: 'LayoutArtifact' },
+        actual: { layout: describeValue(layout) },
+    })
+}
+
 function normalizeUploadOffset(runtime: ScratchRuntime, value: number): number {
 
     if (!Number.isInteger(value) || value < 0) {
@@ -1620,9 +1722,14 @@ function normalizeUploadOffset(runtime: ScratchRuntime, value: number): number {
     return value
 }
 
-function normalizeUploadByteLength(runtime: ScratchRuntime, descriptor: UploadCommandDescriptor): number {
+function normalizeUploadByteLength(
+    runtime: ScratchRuntime,
+    data: ArrayBuffer | ArrayBufferView,
+    dataOffset: number,
+    descriptor: UploadCommandDescriptor,
+    sourceByteLength?: number
+): number {
 
-    const data = descriptor.data
     const dataByteLength = getDataByteLength(data)
     if (dataByteLength === undefined) {
         throwUploadDiagnostic({
@@ -1634,7 +1741,7 @@ function normalizeUploadByteLength(runtime: ScratchRuntime, descriptor: UploadCo
         })
     }
 
-    const size = descriptor.size ?? dataByteLength - (descriptor.dataOffset ?? 0)
+    const size = descriptor.size ?? sourceByteLength ?? dataByteLength - dataOffset
     if (!Number.isInteger(size) || size < 0) {
         throwUploadDiagnostic({
             runtime,
@@ -1665,6 +1772,46 @@ function validateUploadRange(command: UploadCommand) {
             dataOffset: command.dataOffset,
             size: command.byteLength,
             reason: 'range',
+        })
+    }
+
+    validateUploadLayout(command)
+}
+
+function validateUploadLayout(command: UploadCommand) {
+
+    const targetLayout = command.target.layout
+    if (targetLayout === undefined) return
+
+    if (command.layout !== undefined && command.layout.structuralHash !== targetLayout.structuralHash) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_CODEC_STRUCTURAL_HASH_MISMATCH',
+            severity: 'error',
+            phase: 'layout-codec',
+            subject: command.target.layoutSubject ?? layoutArtifactSubject(targetLayout),
+            related: [ command.subject, layoutArtifactSubject(command.layout), command.target.subject ],
+            message: 'UploadCommand LayoutArtifact does not match the target BufferResource layout.',
+            expected: { structuralHash: targetLayout.structuralHash },
+            actual: { structuralHash: command.layout.structuralHash },
+        })
+    }
+
+    const layoutByteLength = command.target.layoutByteLength ?? targetLayout.byteLength
+    const rangeEnd = command.offset + command.byteLength
+    if (rangeEnd > layoutByteLength) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
+            severity: 'error',
+            phase: 'layout-codec',
+            subject: command.target.layoutSubject ?? layoutArtifactSubject(targetLayout),
+            related: [ command.subject, command.target.subject ],
+            message: 'UploadCommand byte range exceeds the target BufferResource layout byte length.',
+            expected: { layoutByteLength },
+            actual: {
+                offset: command.offset,
+                byteLength: command.byteLength,
+                rangeEnd,
+            },
         })
     }
 }
@@ -1900,7 +2047,7 @@ function throwResolveQuerySetDiagnostic({
     })
 }
 
-function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size, reason }: UploadDiagnosticInput): never {
+function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size, layout, reason }: UploadDiagnosticInput): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_UPLOAD_RANGE_INVALID',
@@ -1914,7 +2061,7 @@ function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size
         message: 'UploadCommand requires a BufferResource target, byte data, and a valid byte range.',
         expected: {
             target: 'BufferResource',
-            data: 'ArrayBuffer or ArrayBufferView',
+            data: 'ArrayBuffer, ArrayBufferView, or LayoutUploadView',
             offset: 'non-negative integer',
             dataOffset: 'non-negative integer',
             size: 'byte length within source and target',
@@ -1926,6 +2073,7 @@ function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size
             offset,
             dataOffset,
             size,
+            layout: describeValue(layout),
         },
     })
 }

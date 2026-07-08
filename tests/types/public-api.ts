@@ -144,6 +144,17 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const usageCompatibility: scr.LayoutUsageCompatibility = codec.artifact.usageCompatibility
     const readbackCount: number = typedReadback.count
     const readbackObject: Record<string, unknown> = typedReadback.toObject()
+    const layoutBuffer: scr.BufferResource = runtime.createBuffer({
+        label: 'typed scratch layout buffer',
+        size: codec.artifact.stride * 2,
+        usage: 0x8 | 0x80,
+        layout: codec.artifact,
+        elementCount: 2,
+    })
+    const bufferLayout: scr.LayoutArtifact | undefined = layoutBuffer.layout
+    const bufferElementCount: number | undefined = layoutBuffer.elementCount
+    const bufferLayoutByteLength: number | undefined = layoutBuffer.layoutByteLength
+    const bufferLayoutSubject: unknown = layoutBuffer.layoutSubject
 
     buffer.assertRuntime(runtime)
 
@@ -226,6 +237,13 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         data: new Float32Array([ 1, 0, 0, 1 ]),
         offset: 0,
     })
+    const layoutUpload: scr.UploadCommand = runtime.createUploadCommand({
+        target: layoutBuffer,
+        data: uploadView,
+        layout: codec.artifact,
+        offset: 0,
+    })
+    const uploadLayout: scr.LayoutArtifact | undefined = layoutUpload.layout
     const textureUpload: scr.TextureUploadCommand = runtime.createTextureUploadCommand({
         target: scratchTexture,
         data: new Uint8Array(16),

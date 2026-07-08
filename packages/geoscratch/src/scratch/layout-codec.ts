@@ -261,6 +261,41 @@ export function layoutCodec(spec: LayoutSpec, options?: LayoutCodecOptions): Lay
     return new LayoutCodec(spec, options)
 }
 
+export function isLayoutArtifact(value: unknown): value is LayoutArtifact {
+
+    return isRecord(value) &&
+        value.kind === 'LayoutArtifact' &&
+        typeof value.name === 'string' &&
+        value.alignmentMode === 'host-shareable' &&
+        isPositiveSafeInteger(value.alignment) &&
+        isPositiveSafeInteger(value.byteLength) &&
+        isPositiveSafeInteger(value.stride) &&
+        Array.isArray(value.fields) &&
+        typeof value.structuralHash === 'string' &&
+        Array.isArray(value.usages) &&
+        isRecord(value.usageCompatibility)
+}
+
+export function isLayoutUploadView(value: unknown): value is LayoutUploadView {
+
+    return isRecord(value) &&
+        value.bytes instanceof Uint8Array &&
+        typeof value.byteOffset === 'number' &&
+        typeof value.byteLength === 'number' &&
+        isLayoutArtifact(value.artifact)
+}
+
+export function layoutArtifactSubject(artifact: LayoutArtifact): DiagnosticSubject {
+
+    const subject: DiagnosticSubject = {
+        kind: 'LayoutArtifact',
+        hash: artifact.structuralHash,
+    }
+    subject.label = artifact.label ?? artifact.name
+
+    return subject
+}
+
 class LayoutReadbackViewImpl implements LayoutReadbackView {
 
     artifact: LayoutArtifact
@@ -845,6 +880,11 @@ function isPrimitiveType(type: string): type is LayoutPrimitiveType {
 function isUsage(value: unknown): value is LayoutCodecUsage {
 
     return value === 'uniform' || value === 'storage' || value === 'readback' || value === 'vertex'
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+
+    return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 }
 
 function isIdentifier(value: string): boolean {
