@@ -481,6 +481,15 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const renderCommands: scr.RenderCommand[] = [ beginOcclusion, draw, endOcclusion ]
     const builder: scr.SubmissionBuilder = runtime.createSubmission({ validation: 'throw' })
     const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
+    const resourceAccesses: readonly scr.SubmissionResourceAccess[] = submitted.resourceAccesses
+    const producerEpochs: readonly scr.SubmittedResourceEpoch[] = submitted.producerEpochs
+    const accessKind: scr.SubmissionResourceAccessKind | undefined = resourceAccesses[0]?.access
+    const stepKind: scr.SubmissionStepKind | undefined = resourceAccesses[0]?.stepKind
+    const producedStepKind: scr.SubmissionStepKind | undefined = producerEpochs[0]?.producedBy.stepKind
+    const compatResourceAccesses: readonly scratchCompat.SubmissionResourceAccess[] = submitted.resourceAccesses
+    const compatProducerEpochs: readonly scratchCompat.SubmittedResourceEpoch[] = submitted.producerEpochs
+    const compatAccessKind: scratchCompat.SubmissionResourceAccessKind | undefined = compatResourceAccesses[0]?.access
+    const compatStepKind: scratchCompat.SubmissionStepKind | undefined = compatProducerEpochs[0]?.producedBy.stepKind
     const readback: scr.ReadbackOperation = runtime.createReadback({
         source: storageOutput,
         after: submitted,
@@ -517,6 +526,15 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void resolveAlias
     void error
     void submitted
+    void resourceAccesses
+    void producerEpochs
+    void accessKind
+    void stepKind
+    void producedStepKind
+    void compatResourceAccesses
+    void compatProducerEpochs
+    void compatAccessKind
+    void compatStepKind
     void readbackBytes
     void readbackValues
     void readbackLayout

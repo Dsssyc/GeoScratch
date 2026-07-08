@@ -75,4 +75,10 @@ export type {
 export { ComputePassSpec, RenderPassSpec } from './pass.js'
 export { ReadbackOperation } from './readback.js'
 export { SubmissionBuilder, SubmittedWork } from './submission.js'
-export type { RenderCommand } from './submission.js'
+export type {
+    RenderCommand,
+    SubmittedResourceEpoch,
+    SubmissionResourceAccess,
+    SubmissionResourceAccessKind,
+    SubmissionStepKind,
+} from './submission.js'

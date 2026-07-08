@@ -79,6 +79,10 @@ export type {
     ShaderInspection,
     ShaderInspectionInput,
     ShaderInspectionOptions,
+    SubmittedResourceEpoch,
+    SubmissionResourceAccess,
+    SubmissionResourceAccessKind,
+    SubmissionStepKind,
 } from './scratch/index.js'
 
 import getDevice from './gpu/context/device.js'

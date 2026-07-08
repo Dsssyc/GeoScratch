@@ -6,11 +6,52 @@ import {
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
-import type { ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
+import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
+import type { Resource } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
+
+export type SubmissionStepKind = 'upload' | 'copy' | 'resolve' | 'compute' | 'render'
+
+export type SubmissionResourceAccessKind = 'read' | 'write'
+
+type SubmissionAccessOrigin = {
+    stepIndex: number
+    stepKind: SubmissionStepKind
+    commandKind?: string
+    commandId?: string
+    passId?: string
+}
+
+export type SubmissionResourceAccess = SubmissionAccessOrigin & {
+    resourceId: string
+    resourceKind: string
+    label?: string
+    subject: DiagnosticSubject
+    access: SubmissionResourceAccessKind
+    contentEpochBefore: number
+    contentEpochAfter: number
+    allocationVersion: number
+}
+
+export type SubmittedResourceEpoch = {
+    resourceId: string
+    resourceKind: string
+    label?: string
+    subject: DiagnosticSubject
+    contentEpoch: number
+    allocationVersion: number
+    producedBy: SubmissionAccessOrigin
+}
+
+type PendingSubmissionResourceAccess = {
+    origin: SubmissionAccessOrigin
+    resource: Resource
+    access: SubmissionResourceAccessKind
+    contentEpochBefore: number
+}
 
 export type SubmissionBuilderOptions = {
     validation?: SubmissionValidationMode
@@ -136,26 +177,41 @@ export class SubmissionBuilder {
 
         const submittedId = `scratch-submitted-${UUID()}`
         const commandBuffers: GPUCommandBuffer[] = []
+        const resourceAccesses: SubmissionResourceAccess[] = []
         const encoder = this.runtime.device.createCommandEncoder({
             label: submittedId,
         })
 
-        for (const step of this.steps) {
+        for (const [stepIndex, step] of this.steps.entries()) {
             if (step.kind === 'upload') {
                 validateUploadStep(this, step)
+                const writes = [
+                    captureResourceAccess(step.command.target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
+                ]
                 step.command.execute(this.runtime.queue)
+                completeResourceAccesses(resourceAccesses, writes)
                 continue
             }
 
             if (step.kind === 'copy') {
                 validateCopyStep(this, step)
+                const origin = commandAccessOrigin(stepIndex, 'copy', step.command)
+                const accesses = [
+                    captureResourceAccess(step.command.source, 'read', origin),
+                    captureResourceAccess(step.command.target, 'write', origin),
+                ]
                 step.command.encode(encoder)
+                completeResourceAccesses(resourceAccesses, accesses)
                 continue
             }
 
             if (step.kind === 'resolve') {
                 validateResolveStep(this, step)
+                const writes = [
+                    captureResourceAccess(step.command.destination, 'write', commandAccessOrigin(stepIndex, 'resolve', step.command)),
+                ]
                 step.command.encode(encoder)
+                completeResourceAccesses(resourceAccesses, writes)
                 continue
             }
 
@@ -166,7 +222,13 @@ export class SubmissionBuilder {
 
                 const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
                 for (const command of step.commands) {
+                    const origin = commandAccessOrigin(stepIndex, 'compute', command, step.passSpec)
+                    const accesses = [
+                        ...command.resources.read.map(resource => captureResourceAccess(resource, 'read', origin)),
+                        ...command.resources.write.map(resource => captureResourceAccess(resource, 'write', origin)),
+                    ]
                     command.encode(passEncoder)
+                    completeResourceAccesses(resourceAccesses, accesses)
                 }
                 passEncoder.end()
                 step.passSpec.advanceTimestampWriteEpochs()
@@ -177,6 +239,7 @@ export class SubmissionBuilder {
 
             if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
+            const colorWrites = captureRenderAttachmentWrites(stepIndex, step.passSpec)
             const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
             let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
             for (const command of step.commands) {
@@ -191,6 +254,7 @@ export class SubmissionBuilder {
             passEncoder.end()
             step.passSpec.advanceTimestampWriteEpochs()
             advanceRenderAttachmentEpochs(step.passSpec)
+            completeResourceAccesses(resourceAccesses, colorWrites)
         }
 
         const commandBuffer = encoder.finish()
@@ -202,6 +266,7 @@ export class SubmissionBuilder {
             id: submittedId,
             commandBuffers,
             report: createScratchDiagnosticReport([]),
+            resourceAccesses,
             done: createDonePromise(this.runtime.queue),
         })
     }
@@ -279,12 +344,15 @@ export class SubmittedWork {
     commandBuffers: GPUCommandBuffer[]
     report: ScratchDiagnosticReport
     diagnostics: ScratchDiagnostic[]
+    resourceAccesses: readonly SubmissionResourceAccess[]
+    producerEpochs: readonly SubmittedResourceEpoch[]
     done: Promise<unknown>
 
     constructor(runtime: ScratchRuntime, options: {
         id?: string
         commandBuffers?: GPUCommandBuffer[]
         report?: ScratchDiagnosticReport
+        resourceAccesses?: SubmissionResourceAccess[]
         done?: Promise<unknown>
     } = {}) {
 
@@ -293,6 +361,8 @@ export class SubmittedWork {
         this.commandBuffers = options.commandBuffers ?? []
         this.report = options.report ?? createScratchDiagnosticReport([])
         this.diagnostics = this.report.diagnostics
+        this.resourceAccesses = freezeResourceAccesses(options.resourceAccesses ?? [])
+        this.producerEpochs = freezeProducerEpochs(createProducerEpochs(this.resourceAccesses))
         this.done = options.done ?? Promise.resolve()
     }
 
@@ -303,6 +373,155 @@ export class SubmittedWork {
             id: this.id,
         }
     }
+}
+
+function commandAccessOrigin(
+    stepIndex: number,
+    stepKind: SubmissionStepKind,
+    command: { id: string, commandKind: string },
+    passSpec?: RenderPassSpec | ComputePassSpec
+): SubmissionAccessOrigin {
+
+    const origin: SubmissionAccessOrigin = {
+        stepIndex,
+        stepKind,
+        commandKind: command.commandKind,
+        commandId: command.id,
+    }
+    if (passSpec !== undefined) origin.passId = passSpec.id
+
+    return origin
+}
+
+function passAccessOrigin(stepIndex: number, stepKind: SubmissionStepKind, passSpec: RenderPassSpec | ComputePassSpec): SubmissionAccessOrigin {
+
+    return {
+        stepIndex,
+        stepKind,
+        passId: passSpec.id,
+    }
+}
+
+function captureResourceAccess(
+    resource: Resource,
+    access: SubmissionResourceAccessKind,
+    origin: SubmissionAccessOrigin
+): PendingSubmissionResourceAccess {
+
+    return {
+        origin,
+        resource,
+        access,
+        contentEpochBefore: resource.contentEpoch,
+    }
+}
+
+function completeResourceAccesses(
+    resourceAccesses: SubmissionResourceAccess[],
+    pendingAccesses: PendingSubmissionResourceAccess[]
+): void {
+
+    for (const pendingAccess of pendingAccesses) {
+        resourceAccesses.push(createResourceAccess(pendingAccess))
+    }
+}
+
+function createResourceAccess(pendingAccess: PendingSubmissionResourceAccess): SubmissionResourceAccess {
+
+    const resource = pendingAccess.resource
+    const access: SubmissionResourceAccess = {
+        ...pendingAccess.origin,
+        resourceId: resource.id,
+        resourceKind: resource.resourceKind,
+        subject: resource.subject,
+        access: pendingAccess.access,
+        contentEpochBefore: pendingAccess.contentEpochBefore,
+        contentEpochAfter: pendingAccess.access === 'write' ? resource.contentEpoch : pendingAccess.contentEpochBefore,
+        allocationVersion: resource.allocationVersion,
+    }
+    if (resource.label !== undefined) access.label = resource.label
+
+    return access
+}
+
+function captureRenderAttachmentWrites(stepIndex: number, passSpec: RenderPassSpec): PendingSubmissionResourceAccess[] {
+
+    const origin = passAccessOrigin(stepIndex, 'render', passSpec)
+    const writes: PendingSubmissionResourceAccess[] = []
+    const writtenTargets = new Set<TextureResource>()
+
+    for (const attachment of passSpec.color) {
+        const target = attachment.target
+        if (!(target instanceof TextureResource) || writtenTargets.has(target)) continue
+
+        writes.push(captureResourceAccess(target, 'write', origin))
+        writtenTargets.add(target)
+    }
+
+    return writes
+}
+
+function createProducerEpochs(resourceAccesses: readonly SubmissionResourceAccess[]): SubmittedResourceEpoch[] {
+
+    const producerEpochs: SubmittedResourceEpoch[] = []
+
+    for (const access of resourceAccesses) {
+        if (access.access !== 'write') continue
+
+        producerEpochs.push(createProducerEpoch(access))
+    }
+
+    return producerEpochs
+}
+
+function createProducerEpoch(access: SubmissionResourceAccess): SubmittedResourceEpoch {
+
+    const producerEpoch: SubmittedResourceEpoch = {
+        resourceId: access.resourceId,
+        resourceKind: access.resourceKind,
+        subject: access.subject,
+        contentEpoch: access.contentEpochAfter,
+        allocationVersion: access.allocationVersion,
+        producedBy: accessOriginFromAccess(access),
+    }
+    if (access.label !== undefined) producerEpoch.label = access.label
+
+    return producerEpoch
+}
+
+function accessOriginFromAccess(access: SubmissionResourceAccess): SubmissionAccessOrigin {
+
+    const origin: SubmissionAccessOrigin = {
+        stepIndex: access.stepIndex,
+        stepKind: access.stepKind,
+    }
+    if (access.commandKind !== undefined) origin.commandKind = access.commandKind
+    if (access.commandId !== undefined) origin.commandId = access.commandId
+    if (access.passId !== undefined) origin.passId = access.passId
+
+    return origin
+}
+
+function freezeResourceAccesses(resourceAccesses: SubmissionResourceAccess[]): readonly SubmissionResourceAccess[] {
+
+    return Object.freeze(resourceAccesses.map((access) => Object.freeze({
+        ...access,
+        subject: freezeDiagnosticSubject(access.subject),
+    } as SubmissionResourceAccess)))
+}
+
+function freezeProducerEpochs(producerEpochs: SubmittedResourceEpoch[]): readonly SubmittedResourceEpoch[] {
+
+    return Object.freeze(producerEpochs.map((producerEpoch) => Object.freeze({
+        ...producerEpoch,
+        subject: freezeDiagnosticSubject(producerEpoch.subject),
+        producedBy: Object.freeze({ ...producerEpoch.producedBy }) as SubmissionAccessOrigin,
+    } as SubmittedResourceEpoch)))
+}
+
+function freezeDiagnosticSubject(subject: DiagnosticSubject): DiagnosticSubject {
+
+    return Object.freeze({ ...subject }) as DiagnosticSubject
 }
 
 function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
