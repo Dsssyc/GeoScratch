@@ -499,8 +499,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const readbackBytes: Promise<Uint8Array> = readback.toBytes()
     const readbackValues: Promise<Float32Array> = readback.toArray(Float32Array)
     const readbackLayoutView: Promise<scr.LayoutReadbackView> = readback.toLayoutView()
+    const readbackProducerEpoch: scr.SubmittedResourceEpoch | undefined = readback.producerEpoch
     const compatReadback: scratchCompat.ReadbackOperation = readback
     const compatReadbackLayoutView: Promise<scratchCompat.LayoutReadbackView> = compatReadback.toLayoutView()
+    const compatReadbackProducerEpoch: scratchCompat.SubmittedResourceEpoch | undefined = compatReadback.producerEpoch
 
     void surface
     void scratchTextureView
@@ -539,8 +541,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void readbackValues
     void readbackLayout
     void readbackLayoutView
+    void readbackProducerEpoch
     void compatReadback
     void compatReadbackLayoutView
+    void compatReadbackProducerEpoch
     void shaderInspection
     void shaderInspectionInput
     void shaderInspectionOptions

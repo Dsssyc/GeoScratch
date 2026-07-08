@@ -1,12 +1,12 @@
 import { UUID } from '../core/utils/uuid.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { ScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
 import { createLayoutReadbackView } from './layout-codec.js'
 import { describeValue, getGlobalConstant } from './type-utils.js'
 import type { BufferResource } from './buffer.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { LayoutArtifact, LayoutReadbackView } from './layout-codec.js'
 import type { ScratchRuntime } from './runtime.js'
-import type { SubmittedWork } from './submission.js'
+import type { SubmittedResourceEpoch, SubmittedWork } from './submission.js'
 
 const BUFFER_USAGE_MAP_READ = 0x1
 const BUFFER_USAGE_COPY_SRC = 0x4
@@ -54,6 +54,7 @@ export interface ReadbackOperation {
         byteLength: number
     }
     after?: SubmittedWork
+    producerEpoch?: SubmittedResourceEpoch
     contentEpoch: number
     allocationVersion: number
     isDisposed: boolean
@@ -77,8 +78,11 @@ export class ReadbackOperation {
         this.range = normalizeRange(this, descriptor.range)
         const after = normalizeAfter(this, descriptor.after)
         if (after !== undefined) this.after = after
-        this.contentEpoch = this.source.contentEpoch
-        this.allocationVersion = this.source.allocationVersion
+        const producerEpoch = findSourceProducerEpoch(after, this.source)
+        if (producerEpoch !== undefined) this.producerEpoch = producerEpoch
+        this.contentEpoch = producerEpoch?.contentEpoch ?? this.source.contentEpoch
+        this.allocationVersion = producerEpoch?.allocationVersion ?? this.source.allocationVersion
+        assertReadbackSourceCurrent(this)
         this.isDisposed = false
         this.isCancelled = false
     }
@@ -181,6 +185,7 @@ export class ReadbackOperation {
                 await this.after.done
             }
 
+            this._assertConsumable()
             this.state = 'scheduled'
             const device = this.runtime.device
             const queue = this.runtime.queue
@@ -226,6 +231,8 @@ export class ReadbackOperation {
             this.state = 'consumed'
             return bytes
         } catch (error: unknown) {
+            if (error instanceof ScratchDiagnosticError) throw error
+
             this.state = 'failed'
             if (this.stagingBuffer && typeof this.stagingBuffer.destroy === 'function') {
                 this.stagingBuffer.destroy()
@@ -286,7 +293,66 @@ export class ReadbackOperation {
                 actual: { state: this.state },
             })
         }
+
+        assertReadbackSourceCurrent(this)
     }
+}
+
+function findSourceProducerEpoch(after: SubmittedWork | undefined, source: BufferResource): SubmittedResourceEpoch | undefined {
+
+    if (after === undefined) return undefined
+
+    for (let index = after.producerEpochs.length - 1; index >= 0; index--) {
+        const producerEpoch = after.producerEpochs[index]
+        if (producerEpoch.resourceId === source.id) return producerEpoch
+    }
+
+    return undefined
+}
+
+function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
+
+    if (operation.source.contentEpoch !== operation.contentEpoch) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_READBACK_SOURCE_EPOCH_STALE',
+            severity: 'error',
+            phase: 'readback',
+            subject: operation.subject,
+            related: readbackRelatedSubjects(operation),
+            message: 'ReadbackOperation source content epoch no longer matches the captured readback epoch.',
+            expected: { contentEpoch: operation.contentEpoch },
+            actual: {
+                contentEpoch: operation.source.contentEpoch,
+                sourceId: operation.source.id,
+                producerEpoch: operation.producerEpoch?.contentEpoch,
+            },
+        })
+    }
+
+    if (operation.source.allocationVersion !== operation.allocationVersion) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE',
+            severity: 'error',
+            phase: 'readback',
+            subject: operation.subject,
+            related: readbackRelatedSubjects(operation),
+            message: 'ReadbackOperation source allocation version no longer matches the captured readback allocation.',
+            expected: { allocationVersion: operation.allocationVersion },
+            actual: {
+                allocationVersion: operation.source.allocationVersion,
+                sourceId: operation.source.id,
+                producerAllocationVersion: operation.producerEpoch?.allocationVersion,
+            },
+        })
+    }
+}
+
+function readbackRelatedSubjects(operation: ReadbackOperation): DiagnosticSubject[] {
+
+    return [
+        operation.source.subject,
+        operation.after?.subject,
+    ].filter((subject): subject is DiagnosticSubject => subject !== undefined)
 }
 
 function normalizeSource(operation: ReadbackOperation, source: BufferResource): BufferResource {
