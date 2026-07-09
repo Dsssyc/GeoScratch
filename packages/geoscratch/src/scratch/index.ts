@@ -79,7 +79,9 @@ export { SubmissionBuilder, SubmittedWork } from './submission.js'
 export type {
     RenderCommand,
     SubmittedResourceEpoch,
+    SubmissionBuilderOptions,
     SubmissionResourceAccess,
     SubmissionResourceAccessKind,
     SubmissionStepKind,
+    SubmissionValidationMode,
 } from './submission.js'

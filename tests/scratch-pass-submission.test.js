@@ -435,12 +435,105 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
                 contentEpoch: 0,
                 allocationVersion: 1,
             })
+            expect(error.report).to.deep.equal({
+                version: 1,
+                diagnostics: [ error.diagnostic ],
+                hasErrors: true,
+                errorCount: 1,
+                warningCount: 0,
+            })
         }
 
         expect(fixture.renderTarget.contentEpoch).to.equal(0)
+        expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(0)
         expect(fixture.calls.drawCalls).to.have.length(0)
         expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('attaches render resource conflict diagnostics and continues in warn mode', async() => {
+
+        const fixture = await createRenderTargetScene()
+        const conflictingDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { vertexCount: 3 },
+            resources: {
+                read: [ fixture.renderTarget ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'warn' })
+            .render(fixture.pass, [ conflictingDraw ])
+            .submit()
+
+        expect(submitted.report).to.deep.equal({
+            version: 1,
+            diagnostics: submitted.diagnostics,
+            hasErrors: true,
+            errorCount: 1,
+            warningCount: 0,
+        })
+        expect(submitted.diagnostics).to.equal(submitted.report.diagnostics)
+        expect(submitted.diagnostics).to.have.length(1)
+        expect(submitted.diagnostics[0]).to.include({
+            code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
+            severity: 'error',
+            phase: 'submission',
+        })
+        expect(submitted.diagnostics[0].subject).to.deep.equal(conflictingDraw.subject)
+        expect(submitted.diagnostics[0].actual).to.deep.include({
+            stepIndex: 0,
+            passId: fixture.pass.id,
+            commandId: conflictingDraw.id,
+            access: 'read',
+            resourceId: fixture.renderTarget.id,
+            resourceKind: 'TextureResource',
+            contentEpoch: 0,
+            allocationVersion: 1,
+        })
+        expect(fixture.calls.renderPasses).to.have.length(1)
+        expect(fixture.calls.drawCalls).to.have.length(1)
+        expect(fixture.calls.queueSubmissions).to.have.length(1)
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => access.access)).to.deep.equal([ 'read', 'write' ])
+        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ fixture.renderTarget.id ])
+
+        await submitted.done
+    })
+
+    it('skips render resource conflict diagnostics and continues in off mode', async() => {
+
+        const fixture = await createRenderTargetScene()
+        const conflictingDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { vertexCount: 3 },
+            resources: {
+                read: [ fixture.renderTarget ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'off' })
+            .render(fixture.pass, [ conflictingDraw ])
+            .submit()
+
+        expect(submitted.report).to.deep.equal({
+            version: 1,
+            diagnostics: [],
+            hasErrors: false,
+            errorCount: 0,
+            warningCount: 0,
+        })
+        expect(submitted.diagnostics).to.equal(submitted.report.diagnostics)
+        expect(fixture.calls.renderPasses).to.have.length(1)
+        expect(fixture.calls.drawCalls).to.have.length(1)
+        expect(fixture.calls.queueSubmissions).to.have.length(1)
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+
+        await submitted.done
     })
 
     it('rejects draw writes of the current TextureResource color attachment before encoding', async() => {
@@ -481,9 +574,17 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
                 contentEpoch: 0,
                 allocationVersion: 1,
             })
+            expect(error.report).to.deep.equal({
+                version: 1,
+                diagnostics: [ error.diagnostic ],
+                hasErrors: true,
+                errorCount: 1,
+                warningCount: 0,
+            })
         }
 
         expect(fixture.renderTarget.contentEpoch).to.equal(0)
+        expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(0)
         expect(fixture.calls.drawCalls).to.have.length(0)
         expect(fixture.calls.queueSubmissions).to.have.length(0)
@@ -625,6 +726,32 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             expect(error.diagnostic.expected).to.deep.equal({ runtimeId: fixtureB.runtime.id })
             expect(error.diagnostic.actual).to.deep.equal({ runtimeId: fixtureA.runtime.id })
         }
+    })
+
+    it('keeps wrong-runtime command errors hard in warn and off modes', async() => {
+
+        const fixtureA = await createTriangleScene()
+        const fixtureB = await createTriangleScene()
+
+        for (const validation of [ 'warn', 'off' ]) {
+            try {
+                fixtureA.runtime.createSubmission({ validation })
+                    .render(fixtureA.pass, [ fixtureB.draw ])
+                    .submit()
+                throw new Error(`expected wrong-runtime command to fail in ${validation} mode`)
+            } catch (error) {
+                expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                expect(error.diagnostic).to.include({
+                    code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                    severity: 'error',
+                    phase: 'command',
+                })
+            }
+        }
+
+        expect(fixtureA.calls.renderPasses).to.have.length(0)
+        expect(fixtureA.calls.drawCalls).to.have.length(0)
+        expect(fixtureA.calls.queueSubmissions).to.have.length(0)
     })
 
     it('rejects disposed commands during submission with structured diagnostics', async() => {

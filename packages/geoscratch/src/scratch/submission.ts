@@ -1,5 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import {
+    ScratchDiagnosticError,
+    createScratchDiagnostic,
     createScratchDiagnosticReport,
     throwScratchDiagnostic,
 } from './diagnostics.js'
@@ -175,6 +177,9 @@ export class SubmissionBuilder {
             })
         }
 
+        const validationReport = validateSubmissionBeforeEncoding(this)
+        applySubmissionValidationDisposition(this, validationReport)
+
         const submittedId = `scratch-submitted-${UUID()}`
         const commandBuffers: GPUCommandBuffer[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
@@ -184,7 +189,6 @@ export class SubmissionBuilder {
 
         for (const [stepIndex, step] of this.steps.entries()) {
             if (step.kind === 'upload') {
-                validateUploadStep(this, step)
                 const writes = [
                     captureResourceAccess(step.command.target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
                 ]
@@ -194,7 +198,6 @@ export class SubmissionBuilder {
             }
 
             if (step.kind === 'copy') {
-                validateCopyStep(this, step)
                 const origin = commandAccessOrigin(stepIndex, 'copy', step.command)
                 const accesses = [
                     captureResourceAccess(step.command.source, 'read', origin),
@@ -206,7 +209,6 @@ export class SubmissionBuilder {
             }
 
             if (step.kind === 'resolve') {
-                validateResolveStep(this, step)
                 const writes = [
                     captureResourceAccess(step.command.destination, 'write', commandAccessOrigin(stepIndex, 'resolve', step.command)),
                 ]
@@ -216,8 +218,6 @@ export class SubmissionBuilder {
             }
 
             if (step.kind === 'compute') {
-                validateComputeStep(this, step)
-
                 if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
                 const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
@@ -234,9 +234,6 @@ export class SubmissionBuilder {
                 step.passSpec.advanceTimestampWriteEpochs()
                 continue
             }
-
-            validateRenderStep(this, step)
-            validateRenderPassResourceConflicts(this, step, stepIndex)
 
             if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
@@ -274,7 +271,7 @@ export class SubmissionBuilder {
         return new SubmittedWork(this.runtime, {
             id: submittedId,
             commandBuffers,
-            report: createScratchDiagnosticReport([]),
+            report: validationReport,
             resourceAccesses,
             done: createDonePromise(this.runtime.queue),
         })
@@ -287,6 +284,48 @@ export class SubmissionBuilder {
             id: this.id,
         }
     }
+}
+
+function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDiagnosticReport {
+
+    const diagnostics: ScratchDiagnostic[] = []
+
+    for (const [stepIndex, step] of builder.steps.entries()) {
+        if (step.kind === 'upload') {
+            validateUploadStep(builder, step)
+            continue
+        }
+
+        if (step.kind === 'copy') {
+            validateCopyStep(builder, step)
+            continue
+        }
+
+        if (step.kind === 'resolve') {
+            validateResolveStep(builder, step)
+            continue
+        }
+
+        if (step.kind === 'compute') {
+            validateComputeStep(builder, step)
+            continue
+        }
+
+        validateRenderStep(builder, step)
+        if (builder.validation !== 'off') {
+            diagnostics.push(...collectRenderPassResourceConflictDiagnostics(builder, step, stepIndex))
+        }
+    }
+
+    return createScratchDiagnosticReport(diagnostics)
+}
+
+function applySubmissionValidationDisposition(builder: SubmissionBuilder, report: ScratchDiagnosticReport): void {
+
+    if (builder.validation !== 'throw' || !report.hasErrors) return
+
+    const diagnostic = report.diagnostics.find(candidate => candidate.severity === 'error')
+    if (diagnostic !== undefined) throw new ScratchDiagnosticError(diagnostic, report)
 }
 
 function validateUploadStep(builder: SubmissionBuilder, step: UploadStep) {
@@ -624,32 +663,36 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
     }
 }
 
-function validateRenderPassResourceConflicts(builder: SubmissionBuilder, step: RenderStep, stepIndex: number): void {
+function collectRenderPassResourceConflictDiagnostics(builder: SubmissionBuilder, step: RenderStep, stepIndex: number): ScratchDiagnostic[] {
 
+    const diagnostics: ScratchDiagnostic[] = []
     const attachmentTargets = collectRenderAttachmentTargets(step.passSpec)
-    if (attachmentTargets.size === 0) return
+    if (attachmentTargets.size === 0) return diagnostics
 
     for (const command of step.commands) {
         if (command.commandKind !== 'draw') continue
 
-        validateRenderCommandResources(builder, step, stepIndex, command, attachmentTargets, 'read')
-        validateRenderCommandResources(builder, step, stepIndex, command, attachmentTargets, 'write')
+        collectRenderCommandResourceConflictDiagnostics(builder, step, stepIndex, command, attachmentTargets, 'read', diagnostics)
+        collectRenderCommandResourceConflictDiagnostics(builder, step, stepIndex, command, attachmentTargets, 'write', diagnostics)
     }
+
+    return diagnostics
 }
 
-function validateRenderCommandResources(
+function collectRenderCommandResourceConflictDiagnostics(
     builder: SubmissionBuilder,
     step: RenderStep,
     stepIndex: number,
     command: DrawCommand,
     attachmentTargets: Set<TextureResource>,
-    access: SubmissionResourceAccessKind
+    access: SubmissionResourceAccessKind,
+    diagnostics: ScratchDiagnostic[]
 ): void {
 
     for (const resource of command.resources[access]) {
         if (!(resource instanceof TextureResource) || !attachmentTargets.has(resource)) continue
 
-        throwScratchDiagnostic({
+        diagnostics.push(createScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
             severity: 'error',
             phase: 'submission',
@@ -674,7 +717,7 @@ function validateRenderCommandResources(
                 contentEpoch: resource.contentEpoch,
                 allocationVersion: resource.allocationVersion,
             },
-        })
+        }))
     }
 }
 
