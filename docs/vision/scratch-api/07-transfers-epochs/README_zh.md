@@ -137,7 +137,7 @@ type ReadbackState =
 - `scheduled` -> 已选择 copy、resolve 或 map 路径。
 - `submitted` -> GPU work 已在飞行中。它可能无法撤回，但结果仍可标记为不再需要。
 - `mapping` -> staging copy 已存在，正在等待 `mapAsync` 或等价 host 可用性。
-- `ready` -> CPU 可读结果已存在，但尚未消费或显式 retain。
+- `ready` -> retained host bytes 已存在，并可在 cancel 或 dispose 前重复读取。默认 consume-on-read 路径不使用 `ready`。
 - `consumed` -> `toArray()` 或 `toBytes()` 已返回 owned copy，runtime staging 可释放。
 - `cancelled` -> 调用方声明不再需要结果。已提交的 GPU work 仍可能完成，但 runtime 应丢弃结果并释放 staging。
 - `failed` -> device loss、copy 前 source disposal、map failure、validation error 或 budget failure 导致无法得到可用结果。
@@ -159,6 +159,8 @@ const readback = scratch.readback({
     retain: 'until-dispose',
 })
 ```
+
+对 host-copy retention 路径，第一次成功读取会 materialize 并存储 operation-owned host bytes，释放 GPU staging，并返回 owned copy。之后的 `toBytes()`、`toArray()` 和 layout-view 读取从 retained bytes 克隆结果，不会重新 staging GPU work。即使 source resource 后续推进 epoch，retained result 仍代表已 materialize 的那份 epoch。
 
 Zero-copy 或 mapped view 必须以 lease 表达，因为 mapped range 在 unmap 后失效:
 

@@ -552,17 +552,34 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatAccessKind: scratchCompat.SubmissionResourceAccessKind | undefined = compatResourceAccesses[0]?.access
     const compatStepKind: scratchCompat.SubmissionStepKind | undefined = compatProducerEpochs[0]?.producedBy.stepKind
     const compatBuilder: scratchCompat.SubmissionBuilder = runtime.createSubmission(compatSubmissionOptions)
+    const readbackRetention: scr.ReadbackRetentionPolicy = 'until-dispose'
+    const compatReadbackRetention: scratchCompat.ReadbackRetentionPolicy = 'consume-on-read'
+    const readbackDescriptor: scr.ReadbackOperationDescriptor = {
+        source: storageOutput,
+        after: submitted,
+        range: { offset: 0, byteLength: 16 },
+        retain: readbackRetention,
+    }
+    const compatReadbackDescriptor: scratchCompat.ReadbackOperationDescriptor = {
+        source: storageOutput,
+        retain: compatReadbackRetention,
+    }
     const readback: scr.ReadbackOperation = runtime.createReadback({
         source: storageOutput,
         after: submitted,
         range: { offset: 0, byteLength: 16 },
+        retain: readbackRetention,
     })
     const readbackLayout: scr.LayoutArtifact | undefined = readback.layout
+    const readbackRetain: scr.ReadbackRetentionPolicy = readback.retain
+    const readbackIsResultRetained: boolean = readback.isResultRetained
+    const readbackRetainedByteLength: number | undefined = readback.retainedByteLength
     const readbackBytes: Promise<Uint8Array> = readback.toBytes()
     const readbackValues: Promise<Float32Array> = readback.toArray(Float32Array)
     const readbackLayoutView: Promise<scr.LayoutReadbackView> = readback.toLayoutView()
     const readbackProducerEpoch: scr.SubmittedResourceEpoch | undefined = readback.producerEpoch
     const compatReadback: scratchCompat.ReadbackOperation = readback
+    const compatReadbackRetain: scratchCompat.ReadbackRetentionPolicy = compatReadback.retain
     const compatReadbackLayoutView: Promise<scratchCompat.LayoutReadbackView> = compatReadback.toLayoutView()
     const compatReadbackProducerEpoch: scratchCompat.SubmittedResourceEpoch | undefined = compatReadback.producerEpoch
 
@@ -621,12 +638,20 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void compatProducerEpochs
     void compatAccessKind
     void compatStepKind
+    void readbackRetention
+    void compatReadbackRetention
+    void readbackDescriptor
+    void compatReadbackDescriptor
     void readbackBytes
     void readbackValues
     void readbackLayout
+    void readbackRetain
+    void readbackIsResultRetained
+    void readbackRetainedByteLength
     void readbackLayoutView
     void readbackProducerEpoch
     void compatReadback
+    void compatReadbackRetain
     void compatReadbackLayoutView
     void compatReadbackProducerEpoch
     void shaderInspection

@@ -187,7 +187,11 @@ describe('scratch layout-aware ReadbackOperation', () => {
         })
         expect(layoutConsumed.subject).to.deep.equal(layoutReadback.subject)
         expect(layoutConsumed.related).to.deep.equal([ buffer.subject ])
-        expect(layoutConsumed.actual).to.deep.equal({ state: 'consumed' })
+        expect(layoutConsumed.actual).to.deep.include({
+            state: 'consumed',
+            retain: 'consume-on-read',
+            sourceId: buffer.id,
+        })
 
         const bytesReadback = runtime.createReadback({ source: buffer })
         await bytesReadback.toBytes()
@@ -199,7 +203,11 @@ describe('scratch layout-aware ReadbackOperation', () => {
         })
         expect(bytesConsumed.subject).to.deep.equal(bytesReadback.subject)
         expect(bytesConsumed.related).to.deep.equal([ buffer.subject ])
-        expect(bytesConsumed.actual).to.deep.equal({ state: 'consumed' })
+        expect(bytesConsumed.actual).to.deep.include({
+            state: 'consumed',
+            retain: 'consume-on-read',
+            sourceId: buffer.id,
+        })
     })
 
     it('rejects layout views on raw buffers with structured diagnostics', async() => {
@@ -221,7 +229,12 @@ describe('scratch layout-aware ReadbackOperation', () => {
         expect(diagnostic.subject).to.deep.equal(readback.subject)
         expect(diagnostic.related).to.deep.equal([ raw.subject ])
         expect(diagnostic.expected).to.deep.equal({ layout: 'LayoutArtifact' })
-        expect(diagnostic.actual).to.deep.equal({ layout: undefined })
+        expect(diagnostic.actual).to.deep.include({
+            state: 'requested',
+            retain: 'consume-on-read',
+            sourceId: raw.id,
+            layout: undefined,
+        })
     })
 
     it('rejects layout views whose byte length is not a positive stride multiple', async() => {

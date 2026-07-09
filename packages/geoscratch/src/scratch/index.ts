@@ -81,6 +81,12 @@ export type {
 } from './command.js'
 export { ComputePassSpec, RenderPassSpec } from './pass.js'
 export { ReadbackOperation } from './readback.js'
+export type {
+    ReadbackOperationDescriptor,
+    ReadbackRange,
+    ReadbackRetentionPolicy,
+    ReadbackState,
+} from './readback.js'
 export { SubmissionBuilder, SubmittedWork } from './submission.js'
 export type {
     RenderCommand,

@@ -137,7 +137,7 @@ State semantics:
 - `scheduled` -> a copy, resolve, or map path has been assigned.
 - `submitted` -> GPU work is in flight. It may not be possible to retract, but the result can still be marked unwanted.
 - `mapping` -> staging copy exists and `mapAsync` or equivalent host availability is pending.
-- `ready` -> a CPU-readable result exists but has not been consumed or explicitly retained.
+- `ready` -> retained host bytes exist and can be read repeatedly until cancellation or disposal. The default consume-on-read path does not use `ready`.
 - `consumed` -> `toArray()` or `toBytes()` returned an owned copy and runtime staging can be released.
 - `cancelled` -> the caller declared that the result is no longer needed. Already submitted GPU work may still finish, but the runtime should discard the result and release staging.
 - `failed` -> device loss, source disposal before copy, map failure, validation error, or budget failure prevented a usable result.
@@ -159,6 +159,8 @@ const readback = scratch.readback({
     retain: 'until-dispose',
 })
 ```
+
+For the host-copy retention path, the first successful read materializes and stores operation-owned host bytes, releases GPU staging, and returns an owned copy. Later `toBytes()`, `toArray()`, and layout-view reads clone from those retained bytes instead of re-staging GPU work. The retained result represents the materialized epoch even if the source resource later advances.
 
 Zero-copy or mapped views must be leased, because a mapped range is invalid after unmap:
 

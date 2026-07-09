@@ -29,11 +29,16 @@ export type ReadbackState =
     | 'failed'
     | 'disposed'
 
+export type ReadbackRetentionPolicy =
+    | 'consume-on-read'
+    | 'until-dispose'
+
 export type ReadbackOperationDescriptor = {
     label?: string
     source: BufferResource
     after?: SubmittedWork
     range?: ReadbackRange
+    retain?: ReadbackRetentionPolicy
 }
 
 export type TypedArrayConstructor<T extends ArrayBufferView = ArrayBufferView> = {
@@ -57,6 +62,9 @@ export interface ReadbackOperation {
     producerEpoch?: SubmittedResourceEpoch
     contentEpoch: number
     allocationVersion: number
+    retain: ReadbackRetentionPolicy
+    isResultRetained: boolean
+    retainedByteLength?: number
     isDisposed: boolean
     isCancelled: boolean
     cancelReason?: string
@@ -64,6 +72,8 @@ export interface ReadbackOperation {
 }
 
 export class ReadbackOperation {
+
+    private _retainedBytes?: Uint8Array
 
     constructor(runtime: ScratchRuntime, descriptor: ReadbackOperationDescriptor) {
 
@@ -82,9 +92,11 @@ export class ReadbackOperation {
         if (producerEpoch !== undefined) this.producerEpoch = producerEpoch
         this.contentEpoch = producerEpoch?.contentEpoch ?? this.source.contentEpoch
         this.allocationVersion = producerEpoch?.allocationVersion ?? this.source.allocationVersion
-        assertReadbackSourceCurrent(this)
         this.isDisposed = false
         this.isCancelled = false
+        this.isResultRetained = false
+        this.retain = normalizeRetentionPolicy(this, descriptor.retain)
+        assertReadbackSourceCurrent(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -100,7 +112,7 @@ export class ReadbackOperation {
 
     async toBytes(): Promise<Uint8Array> {
 
-        return this._consumeBytes()
+        return this._readBytes()
     }
 
     async toArray(): Promise<Uint8Array>
@@ -111,7 +123,7 @@ export class ReadbackOperation {
         TypedArrayConstructor?: TypedArrayConstructor<T>
     ): Promise<T | Uint8Array> {
 
-        const bytes = await this._consumeBytes()
+        const bytes = await this._readBytes()
         const ViewConstructor = TypedArrayConstructor ?? Uint8Array
         const elementSize = ViewConstructor.BYTES_PER_ELEMENT
 
@@ -124,7 +136,7 @@ export class ReadbackOperation {
                 related: [ this.source.subject ],
                 message: 'ReadbackOperation typed array view does not evenly divide the byte range.',
                 expected: { byteLength: `multiple of ${ViewConstructor.name}.BYTES_PER_ELEMENT` },
-                actual: { byteLength: bytes.byteLength, bytesPerElement: elementSize },
+                actual: readbackDiagnosticActual(this, { byteLength: bytes.byteLength, bytesPerElement: elementSize }),
             })
         }
 
@@ -137,7 +149,7 @@ export class ReadbackOperation {
 
     async toLayoutView(): Promise<LayoutReadbackView> {
 
-        this._assertConsumable()
+        this._assertReadableLifecycle()
 
         if (this.layout === undefined) {
             throwScratchDiagnostic({
@@ -148,11 +160,11 @@ export class ReadbackOperation {
                 related: [ this.source.subject ],
                 message: 'ReadbackOperation requires source layout metadata to create a layout view.',
                 expected: { layout: 'LayoutArtifact' },
-                actual: { layout: undefined },
+                actual: readbackDiagnosticActual(this, { layout: undefined }),
             })
         }
 
-        const bytes = await this._consumeBytes()
+        const bytes = await this._readBytes()
         return createLayoutReadbackView(this.layout, bytes)
     }
 
@@ -160,6 +172,8 @@ export class ReadbackOperation {
 
         if (this.state === 'consumed' || this.state === 'disposed') return
 
+        this._clearRetainedBytes()
+        this._releaseStagingBuffer(true)
         this.isCancelled = true
         if (reason !== undefined) this.cancelReason = reason
         this.state = 'cancelled'
@@ -169,23 +183,28 @@ export class ReadbackOperation {
 
         if (this.state === 'disposed') return
 
+        this._clearRetainedBytes()
+        this._releaseStagingBuffer(true)
         this.isDisposed = true
-        if (this.stagingBuffer && typeof this.stagingBuffer.destroy === 'function') {
-            this.stagingBuffer.destroy()
-        }
         this.state = 'disposed'
     }
 
-    async _consumeBytes(): Promise<Uint8Array> {
+    async _readBytes(): Promise<Uint8Array> {
 
-        this._assertConsumable()
+        this._assertReadableLifecycle()
+
+        if (this._retainedBytes !== undefined) {
+            return cloneBytes(this._retainedBytes)
+        }
 
         try {
+            this._assertBeforeMaterialization()
+
             if (this.after?.done) {
                 await this.after.done
             }
 
-            this._assertConsumable()
+            this._assertBeforeMaterialization()
             this.state = 'scheduled'
             const device = this.runtime.device
             const queue = this.runtime.queue
@@ -215,29 +234,39 @@ export class ReadbackOperation {
                 await queue.onSubmittedWorkDone()
             }
 
+            this._assertReadableLifecycle()
             this.state = 'mapping'
             await this.stagingBuffer.mapAsync(MAP_MODE_READ, 0, this.range.byteLength)
+            this._assertReadableLifecycle()
             const mapped = this.stagingBuffer.getMappedRange(0, this.range.byteLength)
             const bytes = new Uint8Array(mapped.slice(0))
 
-            if (typeof this.stagingBuffer.unmap === 'function') {
-                this.stagingBuffer.unmap()
-            }
-            if (typeof this.stagingBuffer.destroy === 'function') {
-                this.stagingBuffer.destroy()
-            }
-            delete this.stagingBuffer
+            this._releaseStagingBuffer(true)
 
+            if (this.retain === 'until-dispose') {
+                this._retainedBytes = bytes
+                this.isResultRetained = true
+                this.retainedByteLength = bytes.byteLength
+                this.state = 'ready'
+                return cloneBytes(bytes)
+            }
+
+            this._clearRetainedBytes()
             this.state = 'consumed'
             return bytes
         } catch (error: unknown) {
-            if (error instanceof ScratchDiagnosticError) throw error
+            if (error instanceof ScratchDiagnosticError) {
+                this._releaseStagingBuffer(true)
+                if (this.state !== 'cancelled' && this.state !== 'disposed') this._clearRetainedBytes()
+                throw error
+            }
 
             this.state = 'failed'
-            if (this.stagingBuffer && typeof this.stagingBuffer.destroy === 'function') {
-                this.stagingBuffer.destroy()
-                delete this.stagingBuffer
-            }
+            const actual = readbackDiagnosticActual(this, {
+                error: error instanceof Error ? error.message : String(error),
+            })
+            this._clearRetainedBytes()
+            this._releaseStagingBuffer(true)
             throwScratchDiagnostic({
                 code: 'SCRATCH_READBACK_MAP_FAILED',
                 severity: 'error',
@@ -245,18 +274,14 @@ export class ReadbackOperation {
                 subject: this.subject,
                 related: [ this.source.subject ],
                 message: 'ReadbackOperation failed while copying or mapping staging data.',
-                actual: {
-                    state: this.state,
-                    error: error instanceof Error ? error.message : String(error),
-                },
+                actual,
             })
         }
     }
 
-    _assertConsumable() {
+    _assertReadableLifecycle() {
 
         this.runtime.assertActive()
-        this.source.assertUsable()
 
         if (this.isDisposed || this.state === 'disposed') {
             throwScratchDiagnostic({
@@ -266,7 +291,7 @@ export class ReadbackOperation {
                 subject: this.subject,
                 related: [ this.source.subject ],
                 message: 'ReadbackOperation has been disposed.',
-                actual: { state: this.state },
+                actual: readbackDiagnosticActual(this),
             })
         }
 
@@ -278,7 +303,7 @@ export class ReadbackOperation {
                 subject: this.subject,
                 related: [ this.source.subject ],
                 message: 'ReadbackOperation has been cancelled.',
-                actual: { state: this.state, reason: this.cancelReason },
+                actual: readbackDiagnosticActual(this),
             })
         }
 
@@ -290,11 +315,53 @@ export class ReadbackOperation {
                 subject: this.subject,
                 related: [ this.source.subject ],
                 message: 'ReadbackOperation has already been consumed.',
-                actual: { state: this.state },
+                actual: readbackDiagnosticActual(this),
             })
         }
 
+        if (this.state === 'failed') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_READBACK_MAP_FAILED',
+                severity: 'error',
+                phase: 'readback',
+                subject: this.subject,
+                related: [ this.source.subject ],
+                message: 'ReadbackOperation has already failed.',
+                actual: readbackDiagnosticActual(this),
+            })
+        }
+    }
+
+    _assertBeforeMaterialization() {
+
+        this._assertReadableLifecycle()
+        this.source.assertUsable()
         assertReadbackSourceCurrent(this)
+    }
+
+    _clearRetainedBytes() {
+
+        delete this._retainedBytes
+        this.isResultRetained = false
+        delete this.retainedByteLength
+    }
+
+    _releaseStagingBuffer(unmap = false) {
+
+        if (this.stagingBuffer === undefined) return
+
+        const stagingBuffer = this.stagingBuffer
+        delete this.stagingBuffer
+        if (unmap && typeof stagingBuffer.unmap === 'function') {
+            try {
+                stagingBuffer.unmap()
+            } catch {}
+        }
+        if (typeof stagingBuffer.destroy === 'function') {
+            try {
+                stagingBuffer.destroy()
+            } catch {}
+        }
     }
 }
 
@@ -321,11 +388,11 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
             related: readbackRelatedSubjects(operation),
             message: 'ReadbackOperation source content epoch no longer matches the captured readback epoch.',
             expected: { contentEpoch: operation.contentEpoch },
-            actual: {
+            actual: readbackDiagnosticActual(operation, {
                 contentEpoch: operation.source.contentEpoch,
-                sourceId: operation.source.id,
+                capturedContentEpoch: operation.contentEpoch,
                 producerEpoch: operation.producerEpoch?.contentEpoch,
-            },
+            }),
         })
     }
 
@@ -338,11 +405,11 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
             related: readbackRelatedSubjects(operation),
             message: 'ReadbackOperation source allocation version no longer matches the captured readback allocation.',
             expected: { allocationVersion: operation.allocationVersion },
-            actual: {
+            actual: readbackDiagnosticActual(operation, {
                 allocationVersion: operation.source.allocationVersion,
-                sourceId: operation.source.id,
+                capturedAllocationVersion: operation.allocationVersion,
                 producerAllocationVersion: operation.producerEpoch?.allocationVersion,
-            },
+            }),
         })
     }
 }
@@ -414,6 +481,23 @@ function normalizeRange(operation: ReadbackOperation, range?: ReadbackRange) {
     return { offset, byteLength }
 }
 
+function normalizeRetentionPolicy(operation: ReadbackOperation, retain: unknown): ReadbackRetentionPolicy {
+
+    if (retain === undefined) return 'consume-on-read'
+    if (retain === 'consume-on-read' || retain === 'until-dispose') return retain
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_READBACK_RETAIN_INVALID',
+        severity: 'error',
+        phase: 'readback',
+        subject: operation.subject,
+        related: [ operation.source.subject ],
+        message: 'ReadbackOperation retain must be consume-on-read or until-dispose.',
+        expected: { retain: [ 'consume-on-read', 'until-dispose' ] },
+        actual: readbackDiagnosticActual(operation, { retain }),
+    })
+}
+
 function normalizeAfter(operation: ReadbackOperation, after?: SubmittedWork): SubmittedWork | undefined {
 
     if (after === undefined) return undefined
@@ -436,4 +520,39 @@ function normalizeAfter(operation: ReadbackOperation, after?: SubmittedWork): Su
 function labelWithSuffix(label: string | undefined, suffix: string): string | undefined {
 
     return label === undefined ? undefined : `${label} ${suffix}`
+}
+
+function cloneBytes(bytes: Uint8Array): Uint8Array {
+
+    return new Uint8Array(bytes)
+}
+
+function readbackDiagnosticActual(
+    operation: ReadbackOperation,
+    actual: Record<string, unknown> = {}
+): Record<string, unknown> {
+
+    const result: Record<string, unknown> = {
+        state: operation.state,
+        retain: operation.retain,
+        sourceId: operation.source.id,
+        range: operation.range,
+        contentEpoch: operation.contentEpoch,
+        allocationVersion: operation.allocationVersion,
+    }
+
+    if (operation.producerEpoch !== undefined && operation.after !== undefined) {
+        result.producerSubmissionId = operation.after.id
+    }
+    if (operation.retainedByteLength !== undefined) {
+        result.retainedByteLength = operation.retainedByteLength
+    }
+    if (operation.stagingBuffer !== undefined) {
+        result.stagingBytes = operation.range.byteLength
+    }
+    if (operation.cancelReason !== undefined) {
+        result.reason = operation.cancelReason
+    }
+
+    return { ...result, ...actual }
 }
