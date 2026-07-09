@@ -4,11 +4,13 @@ import {
     Resource,
     ScratchDiagnosticError,
     ScratchRuntime,
+    TextureResource,
 } from 'geoscratch'
 
 function createFakeGpu() {
 
     const buffers = []
+    const textures = []
     const device = {
         features: new Set(),
         limits: {},
@@ -25,6 +27,26 @@ function createFakeGpu() {
             buffers.push(buffer)
             return buffer
         },
+        createTexture(descriptor) {
+            const texture = {
+                descriptor,
+                views: [],
+                destroyed: false,
+                createView(viewDescriptor = {}) {
+                    const view = {
+                        texture: this,
+                        descriptor: viewDescriptor,
+                    }
+                    this.views.push(view)
+                    return view
+                },
+                destroy() {
+                    this.destroyed = true
+                },
+            }
+            textures.push(texture)
+            return texture
+        },
         destroy() {},
     }
     const adapter = {
@@ -40,7 +62,7 @@ function createFakeGpu() {
         },
     }
 
-    return { gpu, buffers }
+    return { gpu, buffers, textures }
 }
 
 describe('scratch resources', () => {
@@ -61,12 +83,16 @@ describe('scratch resources', () => {
         expect(resource.resourceKind).to.equal('TestResource')
         expect(resource.descriptor).to.deep.equal({ role: 'test' })
         expect(resource.isDisposed).to.equal(false)
+        expect(resource.state).to.equal('empty')
+        expect(resource.isReady).to.equal(false)
         expect(resource.allocationVersion).to.equal(1)
         expect(resource.contentEpoch).to.equal(0)
 
         resource.dispose()
 
         expect(resource.isDisposed).to.equal(true)
+        expect(resource.state).to.equal('disposed')
+        expect(resource.isReady).to.equal(false)
         expect(() => resource.assertUsable()).to.throw(ScratchDiagnosticError)
     })
 
@@ -125,6 +151,8 @@ describe('scratch resources', () => {
         })
         expect(buffer.allocationVersion).to.equal(1)
         expect(buffer.contentEpoch).to.equal(0)
+        expect(buffer.state).to.equal('empty')
+        expect(buffer.isReady).to.equal(false)
         expect(buffer.write).to.equal(undefined)
         expect(buffer.toArray).to.equal(undefined)
         expect(buffer.toBytes).to.equal(undefined)
@@ -132,7 +160,57 @@ describe('scratch resources', () => {
         buffer.dispose()
 
         expect(buffer.isDisposed).to.equal(true)
+        expect(buffer.state).to.equal('disposed')
         expect(buffers[0].destroyed).to.equal(true)
         expect(() => buffer.assertUsable()).to.throw(ScratchDiagnosticError)
+    })
+
+    it('tracks readiness separately from allocation and disposal', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const buffer = runtime.createBuffer({
+            label: 'readiness buffer',
+            size: 64,
+            usage: 1,
+        })
+        const texture = runtime.createTexture({
+            label: 'readiness texture',
+            size: { width: 2, height: 2 },
+            format: 'rgba8unorm',
+            usage: 4,
+        })
+
+        expect(buffer).to.be.instanceOf(BufferResource)
+        expect(texture).to.be.instanceOf(TextureResource)
+        expect(buffer.state).to.equal('empty')
+        expect(texture.state).to.equal('empty')
+        expect(buffer.isReady).to.equal(false)
+        expect(texture.isReady).to.equal(false)
+
+        buffer._advanceContentEpoch()
+        texture._advanceContentEpoch()
+
+        expect(buffer.contentEpoch).to.equal(1)
+        expect(texture.contentEpoch).to.equal(1)
+        expect(buffer.state).to.equal('ready')
+        expect(texture.state).to.equal('ready')
+        expect(buffer.isReady).to.equal(true)
+        expect(texture.isReady).to.equal(true)
+
+        const bufferAllocationVersion = buffer.allocationVersion
+        const textureAllocationVersion = texture.allocationVersion
+
+        buffer._replaceAllocation(buffer.descriptor)
+        texture._replaceAllocation(texture.descriptor)
+
+        expect(buffer.allocationVersion).to.equal(bufferAllocationVersion + 1)
+        expect(texture.allocationVersion).to.equal(textureAllocationVersion + 1)
+        expect(buffer.contentEpoch).to.equal(1)
+        expect(texture.contentEpoch).to.equal(1)
+        expect(buffer.state).to.equal('empty')
+        expect(texture.state).to.equal('empty')
+        expect(buffer.isReady).to.equal(false)
+        expect(texture.isReady).to.equal(false)
     })
 })

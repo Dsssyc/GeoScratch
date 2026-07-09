@@ -11,6 +11,7 @@ export type {
 export { ScratchRuntime } from './runtime.js'
 export { Surface } from './surface.js'
 export { Resource } from './resource.js'
+export type { ResourceState } from './resource.js'
 export { BufferResource } from './buffer.js'
 export { TextureResource } from './texture.js'
 export { SamplerResource } from './sampler.js'

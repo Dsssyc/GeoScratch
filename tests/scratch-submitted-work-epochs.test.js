@@ -1,5 +1,6 @@
 import { expect } from 'chai'
 import {
+    ScratchDiagnosticError,
     ScratchRuntime,
 } from 'geoscratch'
 import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
@@ -18,6 +19,18 @@ async function createRuntimeFixture() {
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
 
     return { ...fake, runtime }
+}
+
+async function expectScratchDiagnostic(action, expected) {
+
+    try {
+        await action()
+        throw new Error('expected Scratch diagnostic')
+    } catch (error) {
+        expect(error).to.be.instanceOf(ScratchDiagnosticError)
+        expect(error.diagnostic).to.include(expected)
+        return error.diagnostic
+    }
 }
 
 function accessFacts(access) {
@@ -183,6 +196,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             .upload(upload)
             .submit()
 
+        expect(target.state).to.equal('ready')
+        expect(target.isReady).to.equal(true)
         expect(submitted.resourceAccesses.map(accessFacts)).to.deep.equal([
             {
                 stepIndex: 0,
@@ -234,6 +249,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             .upload(upload)
             .submit()
 
+        expect(target.state).to.equal('ready')
+        expect(target.isReady).to.equal(true)
         expect(submitted.resourceAccesses.map(accessFacts)).to.deep.equal([
             {
                 stepIndex: 0,
@@ -302,6 +319,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             },
         ])
         expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ target.id ])
+        expect(target.state).to.equal('ready')
+        expect(target.isReady).to.equal(true)
 
         await submitted.done
     })
@@ -346,8 +365,88 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             },
         ])
         expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ destination.id ])
+        expect(destination.state).to.equal('ready')
+        expect(destination.isReady).to.equal(true)
 
         await submitted.done
+    })
+
+    it('rejects dispatch reads of an empty buffer before creating a command encoder in every validation mode', async() => {
+
+        for (const validation of [ 'throw', 'warn', 'off' ]) {
+            const { runtime, calls } = await createRuntimeFixture()
+            const input = createBuffer(runtime, `empty compute input ${validation}`)
+            const output = createBuffer(runtime, `empty compute output ${validation}`)
+            const compute = createCompute(runtime, input, output)
+            const builder = runtime.createSubmission({ validation })
+                .compute(compute.pass, [ compute.dispatch ])
+
+            const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+                code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
+                severity: 'error',
+                phase: 'command',
+            })
+
+            expect(diagnostic.subject).to.deep.equal(compute.dispatch.subject)
+            expect(diagnostic.related).to.deep.include(input.subject)
+            expect(diagnostic.related).to.deep.include(compute.pass.subject)
+            expect(diagnostic.related).to.deep.include(builder.subject)
+            expect(diagnostic.expected).to.deep.equal({ resourceState: 'ready' })
+            expect(diagnostic.actual).to.deep.include({
+                stepIndex: 0,
+                commandId: compute.dispatch.id,
+                commandKind: 'dispatch',
+                access: 'read',
+                resourceId: input.id,
+                resourceKind: 'BufferResource',
+                resourceState: 'empty',
+                contentEpoch: 0,
+                allocationVersion: 1,
+                whenMissing: 'throw',
+            })
+            expect(input.contentEpoch).to.equal(0)
+            expect(output.contentEpoch).to.equal(0)
+            expect(input.state).to.equal('empty')
+            expect(output.state).to.equal('empty')
+            expect(calls.commandEncoders).to.have.length(0)
+            expect(calls.computePasses).to.have.length(0)
+            expect(calls.dispatchCalls).to.have.length(0)
+            expect(calls.queueSubmissions).to.have.length(0)
+        }
+    })
+
+    it('does not mutate real resource readiness when a simulated producer precedes a failing read', async() => {
+
+        const { runtime, calls } = await createRuntimeFixture()
+        const staged = createBuffer(runtime, 'simulated upload target')
+        const input = createBuffer(runtime, 'failing compute input')
+        const output = createBuffer(runtime, 'failing compute output')
+        const upload = runtime.createUploadCommand({
+            label: 'simulated upload',
+            target: staged,
+            data: new Uint8Array(16),
+        })
+        const compute = createCompute(runtime, input, output)
+        const builder = runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .compute(compute.pass, [ compute.dispatch ])
+
+        await expectScratchDiagnostic(() => builder.submit(), {
+            code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
+            severity: 'error',
+            phase: 'command',
+        })
+
+        expect(staged.contentEpoch).to.equal(0)
+        expect(input.contentEpoch).to.equal(0)
+        expect(output.contentEpoch).to.equal(0)
+        expect(staged.state).to.equal('empty')
+        expect(input.state).to.equal('empty')
+        expect(output.state).to.equal('empty')
+        expect(calls.queueWrites).to.have.length(0)
+        expect(calls.commandEncoders).to.have.length(0)
+        expect(calls.computePasses).to.have.length(0)
+        expect(calls.queueSubmissions).to.have.length(0)
     })
 
     it('records compute dispatch declared reads and writes', async() => {
@@ -356,13 +455,37 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const input = createBuffer(runtime, 'compute input')
         const output = createBuffer(runtime, 'compute output')
         const compute = createCompute(runtime, input, output)
+        const uploadInput = runtime.createUploadCommand({
+            label: 'upload compute input',
+            target: input,
+            data: new Uint8Array(16),
+        })
         const submitted = runtime.createSubmission({ validation: 'throw' })
+            .upload(uploadInput)
             .compute(compute.pass, [ compute.dispatch ])
             .submit()
 
+        expect(input.state).to.equal('ready')
+        expect(output.state).to.equal('ready')
+        expect(input.isReady).to.equal(true)
+        expect(output.isReady).to.equal(true)
         expect(submitted.resourceAccesses.map(accessFacts)).to.deep.equal([
             {
                 stepIndex: 0,
+                stepKind: 'upload',
+                commandKind: 'upload',
+                commandId: uploadInput.id,
+                resourceId: input.id,
+                resourceKind: 'BufferResource',
+                label: 'compute input',
+                subject: input.subject,
+                access: 'write',
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+                allocationVersion: 1,
+            },
+            {
+                stepIndex: 1,
                 stepKind: 'compute',
                 commandKind: 'dispatch',
                 commandId: compute.dispatch.id,
@@ -372,12 +495,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 label: 'compute input',
                 subject: input.subject,
                 access: 'read',
-                contentEpochBefore: 0,
-                contentEpochAfter: 0,
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
                 allocationVersion: 1,
             },
             {
-                stepIndex: 0,
+                stepIndex: 1,
                 stepKind: 'compute',
                 commandKind: 'dispatch',
                 commandId: compute.dispatch.id,
@@ -394,6 +517,20 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         ])
         expect(submitted.producerEpochs.map(producerFacts)).to.deep.equal([
             {
+                resourceId: input.id,
+                resourceKind: 'BufferResource',
+                label: 'compute input',
+                subject: input.subject,
+                contentEpoch: 1,
+                allocationVersion: 1,
+                producedBy: {
+                    stepIndex: 0,
+                    stepKind: 'upload',
+                    commandKind: 'upload',
+                    commandId: uploadInput.id,
+                },
+            },
+            {
                 resourceId: output.id,
                 resourceKind: 'BufferResource',
                 label: 'compute output',
@@ -401,7 +538,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 contentEpoch: 1,
                 allocationVersion: 1,
                 producedBy: {
-                    stepIndex: 0,
+                    stepIndex: 1,
                     stepKind: 'compute',
                     commandKind: 'dispatch',
                     commandId: compute.dispatch.id,
@@ -448,19 +585,42 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const input = createBuffer(runtime, 'draw input')
         const output = createBuffer(runtime, 'draw output')
         const target = createTexture(runtime, 'draw render target')
+        const uploadInput = runtime.createUploadCommand({
+            label: 'upload draw input',
+            target: input,
+            data: new Uint8Array(16),
+        })
         const render = createRender(runtime, target, {
             read: [ input ],
             write: [ output ],
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
+            .upload(uploadInput)
             .render(render.pass, [ render.draw ])
             .submit()
 
+        expect(input.state).to.equal('ready')
+        expect(output.state).to.equal('ready')
+        expect(target.state).to.equal('ready')
         expect(output.contentEpoch).to.equal(1)
         expect(target.contentEpoch).to.equal(1)
         expect(submitted.resourceAccesses.map(accessFacts)).to.deep.equal([
             {
                 stepIndex: 0,
+                stepKind: 'upload',
+                commandKind: 'upload',
+                commandId: uploadInput.id,
+                resourceId: input.id,
+                resourceKind: 'BufferResource',
+                label: 'draw input',
+                subject: input.subject,
+                access: 'write',
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+                allocationVersion: 1,
+            },
+            {
+                stepIndex: 1,
                 stepKind: 'render',
                 commandKind: 'draw',
                 commandId: render.draw.id,
@@ -470,12 +630,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 label: 'draw input',
                 subject: input.subject,
                 access: 'read',
-                contentEpochBefore: 0,
-                contentEpochAfter: 0,
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
                 allocationVersion: 1,
             },
             {
-                stepIndex: 0,
+                stepIndex: 1,
                 stepKind: 'render',
                 commandKind: 'draw',
                 commandId: render.draw.id,
@@ -490,7 +650,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 allocationVersion: 1,
             },
             {
-                stepIndex: 0,
+                stepIndex: 1,
                 stepKind: 'render',
                 passId: render.pass.id,
                 resourceId: target.id,
@@ -503,7 +663,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 allocationVersion: 1,
             },
         ])
-        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ output.id, target.id ])
+        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ input.id, output.id, target.id ])
 
         await submitted.done
     })

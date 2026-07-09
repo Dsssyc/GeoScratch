@@ -47,6 +47,7 @@ export type {
     DrawVertexBufferBinding,
     EndOcclusionQueryCommandDescriptor,
     RenderCommand,
+    ResourceState,
     ResourceReadinessPolicy,
     ScratchDiagnostic,
     ScratchDiagnosticReport,

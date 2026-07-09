@@ -59,6 +59,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 1,
     })
+    const resourceState: scr.ResourceState = buffer.state
+    const resourceReady: boolean = buffer.isReady
+    const compatResourceState: scratchCompat.ResourceState = resourceState
     const uniformBuffer: scr.BufferResource = runtime.createBuffer({
         label: 'typed scratch uniform buffer',
         size: 16,
@@ -517,6 +520,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatReadbackProducerEpoch: scratchCompat.SubmittedResourceEpoch | undefined = compatReadback.producerEpoch
 
     void surface
+    void resourceState
+    void resourceReady
+    void compatResourceState
     void scratchTextureView
     void textureSet
     void textureTargetPass

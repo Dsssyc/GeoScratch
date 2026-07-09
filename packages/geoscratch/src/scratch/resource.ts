@@ -9,6 +9,8 @@ export type ResourceOptions = {
     descriptor?: object
 }
 
+export type ResourceState = 'empty' | 'ready' | 'disposed'
+
 export interface Resource {
     runtime: ScratchRuntime
     id: string
@@ -16,6 +18,7 @@ export interface Resource {
     resourceKind: string
     descriptor: object
     isDisposed: boolean
+    state: ResourceState
     allocationVersion: number
     contentEpoch: number
 }
@@ -43,6 +46,7 @@ export class Resource {
         this.resourceKind = options.resourceKind ?? 'Resource'
         this.descriptor = options.descriptor ?? {}
         this.isDisposed = false
+        this.state = 'empty'
         this.allocationVersion = 1
         this.contentEpoch = 0
         if (options.label !== undefined) this.label = options.label
@@ -60,6 +64,11 @@ export class Resource {
         if (this.resourceKind !== undefined) subject.resourceKind = this.resourceKind
 
         return subject
+    }
+
+    get isReady(): boolean {
+
+        return this.state === 'ready'
     }
 
     assertRuntime(runtime: ScratchRuntime): void {
@@ -105,6 +114,7 @@ export class Resource {
         if (this.isDisposed) return
 
         this.isDisposed = true
+        this.state = 'disposed'
         this.runtime._unregisterResource(this)
     }
 
@@ -112,10 +122,12 @@ export class Resource {
 
         this.descriptor = descriptor
         this.allocationVersion++
+        this.state = this.isDisposed ? 'disposed' : 'empty'
     }
 
     _advanceContentEpoch(): void {
 
         this.contentEpoch++
+        this.state = this.isDisposed ? 'disposed' : 'ready'
     }
 }

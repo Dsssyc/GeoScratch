@@ -10,7 +10,7 @@ import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
-import type { Resource } from './resource.js'
+import type { Resource, ResourceState } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
@@ -89,6 +89,8 @@ type ResolveStep = {
 }
 
 type SubmissionStep = RenderStep | ComputeStep | UploadStep | CopyStep | ResolveStep
+
+type ReadinessSimulation = Map<string, ResourceState>
 
 export interface SubmissionBuilder {
     runtime: ScratchRuntime
@@ -289,25 +291,30 @@ export class SubmissionBuilder {
 function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDiagnosticReport {
 
     const diagnostics: ScratchDiagnostic[] = []
+    const readiness = new Map<string, ResourceState>()
 
     for (const [stepIndex, step] of builder.steps.entries()) {
         if (step.kind === 'upload') {
             validateUploadStep(builder, step)
+            markSimulatedReady(readiness, step.command.target)
             continue
         }
 
         if (step.kind === 'copy') {
             validateCopyStep(builder, step)
+            markSimulatedReady(readiness, step.command.target)
             continue
         }
 
         if (step.kind === 'resolve') {
             validateResolveStep(builder, step)
+            markSimulatedReady(readiness, step.command.destination)
             continue
         }
 
         if (step.kind === 'compute') {
             validateComputeStep(builder, step)
+            validateComputeReadiness(builder, step, stepIndex, readiness)
             continue
         }
 
@@ -315,6 +322,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
         if (builder.validation !== 'off') {
             diagnostics.push(...collectRenderPassResourceConflictDiagnostics(builder, step, stepIndex))
         }
+        validateRenderReadiness(builder, step, stepIndex, readiness)
     }
 
     return createScratchDiagnosticReport(diagnostics)
@@ -383,6 +391,109 @@ function validateResolveStep(builder: SubmissionBuilder, step: ResolveStep) {
     }
 
     command.assertRuntime(builder.runtime)
+}
+
+function validateComputeReadiness(
+    builder: SubmissionBuilder,
+    step: ComputeStep,
+    stepIndex: number,
+    readiness: ReadinessSimulation
+): void {
+
+    for (const command of step.commands) {
+        validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, step.passSpec)
+        for (const resource of command.resources.write) {
+            markSimulatedReady(readiness, resource)
+        }
+    }
+}
+
+function validateRenderReadiness(
+    builder: SubmissionBuilder,
+    step: RenderStep,
+    stepIndex: number,
+    readiness: ReadinessSimulation
+): void {
+
+    for (const command of step.commands) {
+        if (command.commandKind !== 'draw') continue
+
+        validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, step.passSpec)
+        for (const resource of command.resources.write) {
+            markSimulatedReady(readiness, resource)
+        }
+    }
+
+    for (const attachment of step.passSpec.color) {
+        if (attachment.target instanceof TextureResource) {
+            markSimulatedReady(readiness, attachment.target)
+        }
+    }
+}
+
+function validateCommandReadiness(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    command: DrawCommand | DispatchCommand,
+    resources: Resource[],
+    readiness: ReadinessSimulation,
+    passSpec: RenderPassSpec | ComputePassSpec
+): void {
+
+    if (command.whenMissing !== 'throw') return
+
+    for (const resource of resources) {
+        const resourceState = simulatedResourceState(readiness, resource)
+        if (resourceState === 'ready') continue
+
+        throwCommandResourceNotReadyDiagnostic(builder, stepIndex, command, resource, resourceState, passSpec)
+    }
+}
+
+function simulatedResourceState(readiness: ReadinessSimulation, resource: Resource): ResourceState {
+
+    return readiness.get(resource.id) ?? resource.state
+}
+
+function markSimulatedReady(readiness: ReadinessSimulation, resource: Resource): void {
+
+    readiness.set(resource.id, 'ready')
+}
+
+function throwCommandResourceNotReadyDiagnostic(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    command: DrawCommand | DispatchCommand,
+    resource: Resource,
+    resourceState: ResourceState,
+    passSpec: RenderPassSpec | ComputePassSpec
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [
+            resource.subject,
+            passSpec.subject,
+            builder.subject,
+        ],
+        message: 'Command read resource is not ready.',
+        expected: { resourceState: 'ready' },
+        actual: {
+            stepIndex,
+            commandId: command.id,
+            commandKind: command.commandKind,
+            access: 'read',
+            resourceId: resource.id,
+            resourceKind: resource.resourceKind,
+            resourceState,
+            contentEpoch: resource.contentEpoch,
+            allocationVersion: resource.allocationVersion,
+            whenMissing: command.whenMissing,
+        },
+    })
 }
 
 export class SubmittedWork {
