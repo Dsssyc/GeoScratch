@@ -22,6 +22,7 @@ export function createFakeGpu() {
         dispatchCalls: [],
         occlusionQueries: [],
         copies: [],
+        textureCopies: [],
         resolveQueries: [],
         maps: [],
     }
@@ -301,6 +302,13 @@ function createFakeCommandEncoder(calls, descriptor) {
                 sourceOffset,
                 destination,
                 destinationOffset,
+                size,
+            })
+        },
+        copyTextureToTexture(source, destination, size) {
+            calls.textureCopies.push({
+                source,
+                destination,
                 size,
             })
         },

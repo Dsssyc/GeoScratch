@@ -19,6 +19,7 @@ const GPU_BUFFER_USAGE_VERTEX = getGlobalConstant('GPUBufferUsage', 'VERTEX', 0x
 const GPU_BUFFER_USAGE_COPY_SRC = getGlobalConstant('GPUBufferUsage', 'COPY_SRC', 0x4)
 const GPU_BUFFER_USAGE_COPY_DST = getGlobalConstant('GPUBufferUsage', 'COPY_DST', 0x8)
 const GPU_BUFFER_USAGE_QUERY_RESOLVE = getGlobalConstant('GPUBufferUsage', 'QUERY_RESOLVE', 0x200)
+const GPU_TEXTURE_USAGE_COPY_SRC = getGlobalConstant('GPUTextureUsage', 'COPY_SRC', 0x1)
 const GPU_TEXTURE_USAGE_COPY_DST = getGlobalConstant('GPUTextureUsage', 'COPY_DST', 0x2)
 
 export type ResourceReadinessPolicy =
@@ -53,10 +54,19 @@ export type CommandResourceReadDescriptor = {
     contentEpoch: number
 }
 
-export type CopyCommandSourceDescriptor = {
+export type BufferCopyCommandSourceDescriptor = {
     resource: BufferResource
     contentEpoch: number
 }
+
+export type TextureCopyCommandSourceDescriptor = {
+    resource: TextureResource
+    contentEpoch: number
+}
+
+export type CopyCommandSourceDescriptor =
+    | BufferCopyCommandSourceDescriptor
+    | TextureCopyCommandSourceDescriptor
 
 export type QuerySetSlotReadDescriptor = {
     index: number
@@ -105,15 +115,41 @@ export type UploadCommandDescriptor = {
     artifact?: LayoutArtifact
 }
 
-export type CopyCommandDescriptor = {
+export type BufferCopyCommandDescriptor = {
     label?: string
-    source: CopyCommandSourceDescriptor
+    source: BufferCopyCommandSourceDescriptor
     sourceOffset?: number
     target: BufferResource
     targetOffset?: number
     byteLength: number
     whenMissing: 'throw'
 }
+
+export type TextureCopyOrigin = {
+    x?: number
+    y?: number
+    z?: number
+} | [number, number?, number?]
+
+export type TextureCopySize = {
+    width: number
+    height: number
+    depthOrArrayLayers?: number
+} | [number, number] | [number, number, number]
+
+export type TextureCopyCommandDescriptor = {
+    label?: string
+    source: TextureCopyCommandSourceDescriptor
+    sourceOrigin?: TextureCopyOrigin
+    target: TextureResource
+    targetOrigin?: TextureCopyOrigin
+    size: TextureCopySize
+    whenMissing: 'throw'
+}
+
+export type CopyCommandDescriptor =
+    | BufferCopyCommandDescriptor
+    | TextureCopyCommandDescriptor
 
 export type ResolveQuerySetCommandDescriptor = {
     label?: string
@@ -181,6 +217,9 @@ type CopyDiagnosticInput = {
     sourceOffset?: unknown
     targetOffset?: unknown
     byteLength?: unknown
+    sourceOrigin?: unknown
+    targetOrigin?: unknown
+    size?: unknown
     reason: string
 }
 
@@ -191,6 +230,9 @@ type CopySourceDiagnosticInput = {
     sourceOffset?: unknown
     targetOffset?: unknown
     byteLength?: unknown
+    sourceOrigin?: unknown
+    targetOrigin?: unknown
+    size?: unknown
     reason: string
 }
 
@@ -951,11 +993,15 @@ export interface CopyCommand {
     id: string
     label?: string
     commandKind: 'copy'
+    copyKind: 'buffer-to-buffer' | 'texture-to-texture'
     source: CopyCommandSourceDescriptor
-    sourceOffset: number
-    target: BufferResource
-    targetOffset: number
-    byteLength: number
+    sourceOffset?: number
+    target: BufferResource | TextureResource
+    targetOffset?: number
+    byteLength?: number
+    sourceOrigin?: { x: number, y: number, z: number }
+    targetOrigin?: { x: number, y: number, z: number }
+    size?: { width: number, height: number, depthOrArrayLayers: number }
     whenMissing: 'throw'
     isDisposed: boolean
 }
@@ -969,36 +1015,40 @@ export class CopyCommand {
         const source = normalizeCopySource(runtime, descriptor)
         source.resource.assertRuntime(runtime)
 
-        const target = descriptor.target
-        if (!(target instanceof BufferResource)) {
-            throwCopyDiagnostic({
-                runtime,
-                source: source.resource,
-                target,
-                sourceOffset: descriptor.sourceOffset,
-                targetOffset: descriptor.targetOffset,
-                byteLength: descriptor.byteLength,
-                reason: 'target',
-            })
-        }
-
-        target.assertRuntime(runtime)
-        validateBufferCopyUsage(runtime, source.resource, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
-        validateBufferCopyUsage(runtime, target, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
-
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
         if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'copy'
         this.source = source
-        this.target = target
-        this.sourceOffset = normalizeCopyOffset(runtime, descriptor.sourceOffset ?? 0, 'sourceOffset')
-        this.targetOffset = normalizeCopyOffset(runtime, descriptor.targetOffset ?? 0, 'targetOffset')
-        this.byteLength = normalizeCopyByteLength(runtime, descriptor.byteLength)
+        this.target = descriptor.target
         this.whenMissing = normalizeCopyReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
 
-        validateCopyRange(this)
+        if (source.resource instanceof BufferResource) {
+            const bufferDescriptor = descriptor as BufferCopyCommandDescriptor
+            const target = normalizeBufferCopyTarget(runtime, bufferDescriptor, source.resource)
+
+            this.copyKind = 'buffer-to-buffer'
+            this.target = target
+            this.sourceOffset = normalizeCopyOffset(runtime, bufferDescriptor.sourceOffset ?? 0, 'sourceOffset')
+            this.targetOffset = normalizeCopyOffset(runtime, bufferDescriptor.targetOffset ?? 0, 'targetOffset')
+            this.byteLength = normalizeCopyByteLength(runtime, bufferDescriptor.byteLength)
+            validateBufferCopyUsage(runtime, source.resource, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
+            validateBufferCopyUsage(runtime, target, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
+            validateBufferCopyRange(this)
+        } else {
+            const textureDescriptor = descriptor as TextureCopyCommandDescriptor
+            const target = normalizeTextureCopyTarget(runtime, textureDescriptor, source.resource)
+
+            this.copyKind = 'texture-to-texture'
+            this.target = target
+            this.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.sourceOrigin)
+            this.targetOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.targetOrigin)
+            this.size = normalizeTextureCopySize(runtime, source.resource, target, textureDescriptor.size, this.sourceOrigin, this.targetOrigin)
+            validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
+            validateTextureCopyUsage(runtime, target, GPU_TEXTURE_USAGE_COPY_DST, 'target', 'GPUTextureUsage.COPY_DST')
+            validateTextureCopyRange(this)
+        }
     }
 
     get subject(): DiagnosticSubject {
@@ -1055,26 +1105,54 @@ export class CopyCommand {
 
         this.assertUsable()
 
-        if (!commandEncoder || typeof commandEncoder.copyBufferToBuffer !== 'function') {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
-                severity: 'error',
-                phase: 'runtime',
-                subject: this.runtime.subject,
-                related: [ this.subject ],
-                message: 'ScratchRuntime command encoder cannot copy GPU buffers.',
-                expected: { commandEncoder: 'GPUCommandEncoder with copyBufferToBuffer()' },
-                actual: { copyBufferToBuffer: typeof commandEncoder?.copyBufferToBuffer },
-            })
+        if (this.copyKind === 'buffer-to-buffer') {
+            if (!commandEncoder || typeof commandEncoder.copyBufferToBuffer !== 'function') {
+                throwScratchDiagnostic({
+                    code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                    severity: 'error',
+                    phase: 'runtime',
+                    subject: this.runtime.subject,
+                    related: [ this.subject ],
+                    message: 'ScratchRuntime command encoder cannot copy GPU buffers.',
+                    expected: { commandEncoder: 'GPUCommandEncoder with copyBufferToBuffer()' },
+                    actual: { copyBufferToBuffer: typeof commandEncoder?.copyBufferToBuffer },
+                })
+            }
+
+            commandEncoder.copyBufferToBuffer(
+                (this.source.resource as BufferResource).gpuBuffer,
+                this.sourceOffset!,
+                (this.target as BufferResource).gpuBuffer,
+                this.targetOffset!,
+                this.byteLength!
+            )
+        } else {
+            if (!commandEncoder || typeof commandEncoder.copyTextureToTexture !== 'function') {
+                throwScratchDiagnostic({
+                    code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                    severity: 'error',
+                    phase: 'runtime',
+                    subject: this.runtime.subject,
+                    related: [ this.subject ],
+                    message: 'ScratchRuntime command encoder cannot copy GPU textures.',
+                    expected: { commandEncoder: 'GPUCommandEncoder with copyTextureToTexture()' },
+                    actual: { copyTextureToTexture: typeof commandEncoder?.copyTextureToTexture },
+                })
+            }
+
+            commandEncoder.copyTextureToTexture(
+                {
+                    texture: (this.source.resource as TextureResource).gpuTexture,
+                    origin: this.sourceOrigin!,
+                },
+                {
+                    texture: (this.target as TextureResource).gpuTexture,
+                    origin: this.targetOrigin!,
+                },
+                this.size!
+            )
         }
 
-        commandEncoder.copyBufferToBuffer(
-            this.source.resource.gpuBuffer,
-            this.sourceOffset,
-            this.target.gpuBuffer,
-            this.targetOffset,
-            this.byteLength
-        )
         this.target._advanceContentEpoch()
     }
 
@@ -2330,31 +2408,54 @@ function validateBufferCopyUsage(
     })
 }
 
+function validateTextureCopyUsage(
+    runtime: ScratchRuntime,
+    texture: TextureResource,
+    requiredUsage: GPUTextureUsageFlags,
+    role: string,
+    usageName: string
+) {
+
+    if ((texture.usage & requiredUsage) !== 0) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+        severity: 'error',
+        phase: 'resource',
+        subject: texture.subject,
+        related: [ runtime.subject ],
+        message: `CopyCommand ${role} requires ${usageName}.`,
+        expected: { usage: usageName },
+        actual: { usage: texture.usage },
+    })
+}
+
 function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDescriptor): CopyCommandSourceDescriptor {
 
     const source = descriptor.source
+    const bufferDescriptor = descriptor as Partial<BufferCopyCommandDescriptor>
     if (!isRecord(source)) {
         throwCopySourceDiagnostic({
             runtime,
             source,
             target: descriptor.target,
-            sourceOffset: descriptor.sourceOffset,
-            targetOffset: descriptor.targetOffset,
-            byteLength: descriptor.byteLength,
+            sourceOffset: bufferDescriptor.sourceOffset,
+            targetOffset: bufferDescriptor.targetOffset,
+            byteLength: bufferDescriptor.byteLength,
             reason: 'source',
         })
     }
 
     const resource = source.resource
     const contentEpoch = source.contentEpoch
-    if (!(resource instanceof BufferResource)) {
+    if (!(resource instanceof BufferResource) && !(resource instanceof TextureResource)) {
         throwCopySourceDiagnostic({
             runtime,
             source,
             target: descriptor.target,
-            sourceOffset: descriptor.sourceOffset,
-            targetOffset: descriptor.targetOffset,
-            byteLength: descriptor.byteLength,
+            sourceOffset: bufferDescriptor.sourceOffset,
+            targetOffset: bufferDescriptor.targetOffset,
+            byteLength: bufferDescriptor.byteLength,
             reason: 'source.resource',
         })
     }
@@ -2364,14 +2465,14 @@ function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDes
             runtime,
             source,
             target: descriptor.target,
-            sourceOffset: descriptor.sourceOffset,
-            targetOffset: descriptor.targetOffset,
-            byteLength: descriptor.byteLength,
+            sourceOffset: bufferDescriptor.sourceOffset,
+            targetOffset: bufferDescriptor.targetOffset,
+            byteLength: bufferDescriptor.byteLength,
             reason: 'source.contentEpoch',
         })
     }
 
-    return { resource, contentEpoch }
+    return { resource, contentEpoch } as CopyCommandSourceDescriptor
 }
 
 function normalizeCopyReadinessPolicy(command: CopyCommand, whenMissing: ResourceReadinessPolicy): 'throw' {
@@ -2409,16 +2510,105 @@ function normalizeCopyByteLength(runtime: ScratchRuntime, byteLength: number): n
     return byteLength
 }
 
-function validateCopyRange(command: CopyCommand) {
+function normalizeBufferCopyTarget(runtime: ScratchRuntime, descriptor: BufferCopyCommandDescriptor, source: BufferResource): BufferResource {
 
-    const sourceEnd = command.sourceOffset + command.byteLength
-    const targetEnd = command.targetOffset + command.byteLength
+    const target = descriptor.target
+    if (!(target instanceof BufferResource)) {
+        throwCopyDiagnostic({
+            runtime,
+            source,
+            target,
+            sourceOffset: descriptor.sourceOffset,
+            targetOffset: descriptor.targetOffset,
+            byteLength: descriptor.byteLength,
+            reason: 'target',
+        })
+    }
 
-    if (sourceEnd > command.source.resource.size || targetEnd > command.target.size) {
+    target.assertRuntime(runtime)
+    return target
+}
+
+function normalizeTextureCopyTarget(runtime: ScratchRuntime, descriptor: TextureCopyCommandDescriptor, source: TextureResource): TextureResource {
+
+    const target = descriptor.target
+    if (!(target instanceof TextureResource)) {
+        throwCopyDiagnostic({
+            runtime,
+            source,
+            target,
+            sourceOrigin: descriptor.sourceOrigin,
+            targetOrigin: descriptor.targetOrigin,
+            size: descriptor.size,
+            reason: 'target',
+        })
+    }
+
+    target.assertRuntime(runtime)
+    return target
+}
+
+function normalizeTextureCopyOrigin(runtime: ScratchRuntime, origin: TextureCopyOrigin | undefined): { x: number, y: number, z: number } {
+
+    const x = Array.isArray(origin) ? origin[0] ?? 0 : origin?.x ?? 0
+    const y = Array.isArray(origin) ? origin[1] ?? 0 : origin?.y ?? 0
+    const z = Array.isArray(origin) ? origin[2] ?? 0 : origin?.z ?? 0
+
+    for (const value of [ x, y, z ]) {
+        if (!Number.isInteger(value) || value < 0) {
+            throwCopyDiagnostic({ runtime, sourceOrigin: origin, reason: 'origin' })
+        }
+    }
+
+    return { x, y, z }
+}
+
+function normalizeTextureCopySize(
+    runtime: ScratchRuntime,
+    source: TextureResource,
+    target: TextureResource,
+    size: TextureCopySize,
+    sourceOrigin: { x: number, y: number, z: number },
+    targetOrigin: { x: number, y: number, z: number }
+): { width: number, height: number, depthOrArrayLayers: number } {
+
+    let width
+    let height
+    let depthOrArrayLayers
+
+    if (Array.isArray(size)) {
+        width = size[0]
+        height = size[1] ?? 1
+        depthOrArrayLayers = size[2] ?? 1
+    } else if (size && typeof size === 'object') {
+        width = size.width
+        height = size.height
+        depthOrArrayLayers = size.depthOrArrayLayers ?? 1
+    } else {
+        throwCopyDiagnostic({ runtime, source, target, size, sourceOrigin, targetOrigin, reason: 'size' })
+    }
+
+    for (const value of [ width, height, depthOrArrayLayers ]) {
+        if (!Number.isInteger(value) || value <= 0) {
+            throwCopyDiagnostic({ runtime, source, target, size, sourceOrigin, targetOrigin, reason: 'size' })
+        }
+    }
+
+    return { width, height, depthOrArrayLayers }
+}
+
+function validateBufferCopyRange(command: CopyCommand) {
+
+    const source = command.source.resource as BufferResource
+    const target = command.target as BufferResource
+    const sourceEnd = command.sourceOffset! + command.byteLength!
+    const targetEnd = command.targetOffset! + command.byteLength!
+
+    if (sourceEnd > source.size || targetEnd > target.size) {
         throwCopyDiagnostic({
             runtime: command.runtime,
-            source: command.source.resource,
-            target: command.target,
+            source,
+            target,
             sourceOffset: command.sourceOffset,
             targetOffset: command.targetOffset,
             byteLength: command.byteLength,
@@ -2427,14 +2617,14 @@ function validateCopyRange(command: CopyCommand) {
     }
 
     if (
-        command.source.resource === command.target &&
-        command.sourceOffset < targetEnd &&
-        command.targetOffset < sourceEnd
+        source === target &&
+        command.sourceOffset! < targetEnd &&
+        command.targetOffset! < sourceEnd
     ) {
         throwCopyDiagnostic({
             runtime: command.runtime,
-            source: command.source.resource,
-            target: command.target,
+            source,
+            target,
             sourceOffset: command.sourceOffset,
             targetOffset: command.targetOffset,
             byteLength: command.byteLength,
@@ -2443,7 +2633,56 @@ function validateCopyRange(command: CopyCommand) {
     }
 }
 
-function throwCopySourceDiagnostic({ runtime, source, target, sourceOffset, targetOffset, byteLength, reason }: CopySourceDiagnosticInput): never {
+function validateTextureCopyRange(command: CopyCommand) {
+
+    const source = command.source.resource as TextureResource
+    const target = command.target as TextureResource
+    const sourceOrigin = command.sourceOrigin!
+    const targetOrigin = command.targetOrigin!
+    const size = command.size!
+
+    if (
+        source === target ||
+        source.format !== target.format ||
+        source.sampleCount !== 1 ||
+        target.sampleCount !== 1 ||
+        sourceOrigin.x + size.width > source.width ||
+        sourceOrigin.y + size.height > source.height ||
+        sourceOrigin.z + size.depthOrArrayLayers > source.depthOrArrayLayers ||
+        targetOrigin.x + size.width > target.width ||
+        targetOrigin.y + size.height > target.height ||
+        targetOrigin.z + size.depthOrArrayLayers > target.depthOrArrayLayers
+    ) {
+        throwCopyDiagnostic({
+            runtime: command.runtime,
+            source,
+            target,
+            sourceOrigin,
+            targetOrigin,
+            size,
+            reason: source === target
+                ? 'overlap'
+                : source.format !== target.format
+                    ? 'format'
+                    : source.sampleCount !== 1 || target.sampleCount !== 1
+                        ? 'sampleCount'
+                        : 'range',
+        })
+    }
+}
+
+function throwCopySourceDiagnostic({
+    runtime,
+    source,
+    target,
+    sourceOffset,
+    targetOffset,
+    byteLength,
+    sourceOrigin,
+    targetOrigin,
+    size,
+    reason,
+}: CopySourceDiagnosticInput): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_COPY_SOURCE_INVALID',
@@ -2455,13 +2694,16 @@ function throwCopySourceDiagnostic({ runtime, source, target, sourceOffset, targ
             diagnosticSubjectOf(source),
             diagnosticSubjectOf(target),
         ].filter(isDefined),
-        message: 'CopyCommand source must declare a BufferResource and required content epoch.',
+        message: 'CopyCommand source must declare a BufferResource or TextureResource and required content epoch.',
         expected: {
-            source: '{ resource: BufferResource with GPUBufferUsage.COPY_SRC, contentEpoch: non-negative integer }',
-            target: 'BufferResource with GPUBufferUsage.COPY_DST',
+            source: '{ resource: BufferResource or TextureResource with copy source usage, contentEpoch: non-negative integer }',
+            target: 'BufferResource or TextureResource with matching copy destination usage',
             sourceOffset: 'non-negative integer aligned to 4 bytes',
             targetOffset: 'non-negative integer aligned to 4 bytes',
             byteLength: 'positive integer aligned to 4 bytes within source and target',
+            sourceOrigin: '{ x?: non-negative integer, y?: non-negative integer, z?: non-negative integer }',
+            targetOrigin: '{ x?: non-negative integer, y?: non-negative integer, z?: non-negative integer }',
+            size: '{ width: positive integer, height: positive integer, depthOrArrayLayers?: positive integer }',
         },
         actual: {
             reason,
@@ -2470,11 +2712,25 @@ function throwCopySourceDiagnostic({ runtime, source, target, sourceOffset, targ
             sourceOffset,
             targetOffset,
             byteLength,
+            sourceOrigin,
+            targetOrigin,
+            size,
         },
     })
 }
 
-function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffset, byteLength, reason }: CopyDiagnosticInput): never {
+function throwCopyDiagnostic({
+    runtime,
+    source,
+    target,
+    sourceOffset,
+    targetOffset,
+    byteLength,
+    sourceOrigin,
+    targetOrigin,
+    size,
+    reason,
+}: CopyDiagnosticInput): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
@@ -2486,13 +2742,16 @@ function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffs
             diagnosticSubjectOf(source),
             diagnosticSubjectOf(target),
         ].filter(isDefined),
-        message: 'CopyCommand requires BufferResource source and target buffers with a valid aligned byte range.',
+        message: 'CopyCommand requires compatible source and target resources with a valid copy range.',
         expected: {
-            source: 'BufferResource with GPUBufferUsage.COPY_SRC',
-            target: 'BufferResource with GPUBufferUsage.COPY_DST',
+            source: 'BufferResource or TextureResource with copy source usage',
+            target: 'matching BufferResource or TextureResource with copy destination usage',
             sourceOffset: 'non-negative integer aligned to 4 bytes',
             targetOffset: 'non-negative integer aligned to 4 bytes',
             byteLength: 'positive integer aligned to 4 bytes within source and target',
+            sourceOrigin: '{ x?: non-negative integer, y?: non-negative integer, z?: non-negative integer }',
+            targetOrigin: '{ x?: non-negative integer, y?: non-negative integer, z?: non-negative integer }',
+            size: '{ width: positive integer, height: positive integer, depthOrArrayLayers?: positive integer }',
         },
         actual: {
             reason,
@@ -2501,6 +2760,9 @@ function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffs
             sourceOffset,
             targetOffset,
             byteLength,
+            sourceOrigin,
+            targetOrigin,
+            size,
         },
     })
 }

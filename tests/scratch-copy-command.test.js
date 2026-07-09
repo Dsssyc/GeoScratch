@@ -4,12 +4,16 @@ import {
     CopyCommand,
     ScratchDiagnosticError,
     ScratchRuntime,
+    TextureResource,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_BUFFER_USAGE_UNIFORM = 0x40
+const GPU_TEXTURE_USAGE_COPY_SRC = 0x1
+const GPU_TEXTURE_USAGE_COPY_DST = 0x2
+const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 
 function sourceBytes() {
 
@@ -80,6 +84,42 @@ async function createCopyFixture() {
     return { ...fake, runtime, source, target, upload, copy, bindLayout, bindSet }
 }
 
+async function createTextureCopyFixture() {
+
+    const fake = createFakeGpu()
+    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const source = runtime.createTexture({
+        label: 'texture copy source',
+        size: { width: 4, height: 4 },
+        format: 'rgba8unorm',
+        usage: GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+    })
+    const target = runtime.createTexture({
+        label: 'texture copy target',
+        size: { width: 4, height: 4 },
+        format: 'rgba8unorm',
+        usage: GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+    })
+    const upload = runtime.createTextureUploadCommand({
+        label: 'upload texture copy source',
+        target: source,
+        data: new Uint8Array(4 * 4 * 4),
+        layout: { bytesPerRow: 16, rowsPerImage: 4 },
+        size: { width: 4, height: 4 },
+    })
+    const copy = runtime.createCopyCommand({
+        label: 'copy texture region',
+        source: copySource(source, 1),
+        sourceOrigin: [ 1, 1 ],
+        target,
+        targetOrigin: { x: 2, y: 0 },
+        size: { width: 2, height: 2 },
+        whenMissing: 'throw',
+    })
+
+    return { ...fake, runtime, source, target, upload, copy }
+}
+
 async function expectScratchDiagnostic(action, expected) {
 
     try {
@@ -139,9 +179,73 @@ describe('scratch CopyCommand', () => {
         await submitted.done
     })
 
+    it('copies texture regions through an explicit submission copy step', async() => {
+
+        const fixture = await createTextureCopyFixture()
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+            .copy(fixture.copy)
+            .submit()
+
+        expect(fixture.source).to.be.instanceOf(TextureResource)
+        expect(fixture.target).to.be.instanceOf(TextureResource)
+        expect(fixture.copy).to.be.instanceOf(CopyCommand)
+        expect(fixture.copy.commandKind).to.equal('copy')
+        expect(fixture.copy.copyKind).to.equal('texture-to-texture')
+        expect(fixture.copy.source).to.deep.equal({
+            resource: fixture.source,
+            contentEpoch: 1,
+        })
+        expect(fixture.copy.target).to.equal(fixture.target)
+        expect(fixture.copy.whenMissing).to.equal('throw')
+        expect(fixture.copy.sourceOrigin).to.deep.equal({ x: 1, y: 1, z: 0 })
+        expect(fixture.copy.targetOrigin).to.deep.equal({ x: 2, y: 0, z: 0 })
+        expect(fixture.copy.size).to.deep.equal({ width: 2, height: 2, depthOrArrayLayers: 1 })
+
+        expect(fixture.calls.queueTextureWrites).to.have.length(1)
+        expect(fixture.calls.textureCopies).to.deep.equal([
+            {
+                source: {
+                    texture: fixture.source.gpuTexture,
+                    origin: { x: 1, y: 1, z: 0 },
+                },
+                destination: {
+                    texture: fixture.target.gpuTexture,
+                    origin: { x: 2, y: 0, z: 0 },
+                },
+                size: { width: 2, height: 2, depthOrArrayLayers: 1 },
+            },
+        ])
+        expect(fixture.calls.queueSubmissions).to.have.length(1)
+        expect(fixture.source.contentEpoch).to.equal(1)
+        expect(fixture.target.contentEpoch).to.equal(1)
+
+        await submitted.done
+    })
+
     it('advances only the copy target contentEpoch and preserves allocationVersion', async() => {
 
         const fixture = await createCopyFixture()
+        const sourceAllocationVersion = fixture.source.allocationVersion
+        const targetAllocationVersion = fixture.target.allocationVersion
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+            .copy(fixture.copy)
+            .submit()
+
+        expect(fixture.source.contentEpoch).to.equal(1)
+        expect(fixture.target.contentEpoch).to.equal(1)
+        expect(fixture.source.allocationVersion).to.equal(sourceAllocationVersion)
+        expect(fixture.target.allocationVersion).to.equal(targetAllocationVersion)
+
+        await submitted.done
+    })
+
+    it('advances only the texture copy target contentEpoch and preserves allocationVersion', async() => {
+
+        const fixture = await createTextureCopyFixture()
         const sourceAllocationVersion = fixture.source.allocationVersion
         const targetAllocationVersion = fixture.target.allocationVersion
 
@@ -330,6 +434,58 @@ describe('scratch CopyCommand', () => {
             severity: 'error',
             phase: 'resource',
         })
+    })
+
+    it('rejects invalid texture copy descriptors with structured diagnostics', async() => {
+
+        const fixture = await createTextureCopyFixture()
+        const nonCopySource = fixture.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const nonCopyTarget = fixture.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const mismatchedFormatTarget = fixture.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8uint',
+            usage: GPU_TEXTURE_USAGE_COPY_DST,
+        })
+        const multisampledTarget = fixture.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_COPY_DST,
+            sampleCount: 4,
+        })
+
+        for (const descriptor of [
+            { source: copySource(nonCopySource), target: fixture.target, size: { width: 1, height: 1 }, whenMissing: 'throw' },
+            { source: copySource(fixture.source), target: nonCopyTarget, size: { width: 1, height: 1 }, whenMissing: 'throw' },
+        ]) {
+            await expectScratchDiagnostic(() => fixture.runtime.createCopyCommand(descriptor), {
+                code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        for (const descriptor of [
+            { source: copySource(fixture.source), target: mismatchedFormatTarget, size: { width: 1, height: 1 }, whenMissing: 'throw' },
+            { source: copySource(fixture.source), target: multisampledTarget, size: { width: 1, height: 1 }, whenMissing: 'throw' },
+            { source: copySource(fixture.source), target: fixture.source, size: { width: 1, height: 1 }, whenMissing: 'throw' },
+            { source: copySource(fixture.source), target: fixture.target, size: { width: 0, height: 1 }, whenMissing: 'throw' },
+            { source: copySource(fixture.source), sourceOrigin: { x: 3, y: 3 }, target: fixture.target, size: { width: 2, height: 2 }, whenMissing: 'throw' },
+            { source: copySource(fixture.source), target: fixture.target, targetOrigin: { x: 3, y: 3 }, size: { width: 2, height: 2 }, whenMissing: 'throw' },
+        ]) {
+            await expectScratchDiagnostic(() => fixture.runtime.createCopyCommand(descriptor), {
+                code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
+                severity: 'error',
+                phase: 'command',
+            })
+        }
     })
 
     it('rejects invalid copy ranges and overlapping same-buffer copies', async() => {
