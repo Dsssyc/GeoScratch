@@ -9,6 +9,7 @@ const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_BUFFER_USAGE_STORAGE = 0x80
 const GPU_BUFFER_USAGE_QUERY_RESOLVE = 0x200
+const GPU_TEXTURE_USAGE_COPY_SRC = 0x1
 const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
@@ -342,6 +343,68 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         await submitted.done
     })
 
+    it('records texture copy source reads and target writes in order', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const source = createTexture(
+            runtime,
+            'texture copy source',
+            GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const target = createTexture(
+            runtime,
+            'texture copy target',
+            GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        source._advanceContentEpoch()
+        const copy = runtime.createCopyCommand({
+            label: 'copy texture',
+            source: copySource(source, 1),
+            target,
+            size: { width: 2, height: 2 },
+            whenMissing: 'throw',
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .copy(copy)
+            .submit()
+
+        expect(submitted.resourceAccesses.map(accessFacts)).to.deep.equal([
+            {
+                stepIndex: 0,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                commandId: copy.id,
+                resourceId: source.id,
+                resourceKind: 'TextureResource',
+                label: 'texture copy source',
+                subject: source.subject,
+                access: 'read',
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
+                allocationVersion: 1,
+            },
+            {
+                stepIndex: 0,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                commandId: copy.id,
+                resourceId: target.id,
+                resourceKind: 'TextureResource',
+                label: 'texture copy target',
+                subject: target.subject,
+                access: 'write',
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+                allocationVersion: 1,
+            },
+        ])
+        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ target.id ])
+        expect(target.state).to.equal('ready')
+        expect(target.isReady).to.equal(true)
+
+        await submitted.done
+    })
+
     it('rejects copy reads of an empty source before creating a command encoder in every validation mode', async() => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
@@ -390,6 +453,66 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             expect(target.state).to.equal('empty')
             expect(calls.commandEncoders).to.have.length(0)
             expect(calls.copies).to.have.length(0)
+            expect(calls.queueSubmissions).to.have.length(0)
+        }
+    })
+
+    it('rejects texture copy reads of an empty source before creating a command encoder in every validation mode', async() => {
+
+        for (const validation of [ 'throw', 'warn', 'off' ]) {
+            const { runtime, calls } = await createRuntimeFixture()
+            const source = createTexture(
+                runtime,
+                `empty texture copy source ${validation}`,
+                GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+            )
+            const target = createTexture(
+                runtime,
+                `empty texture copy target ${validation}`,
+                GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+            )
+            const copy = runtime.createCopyCommand({
+                label: `copy empty texture source ${validation}`,
+                source: copySource(source, 0),
+                target,
+                size: { width: 2, height: 2 },
+                whenMissing: 'throw',
+            })
+            const builder = runtime.createSubmission({ validation })
+                .copy(copy)
+
+            const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+                code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
+                severity: 'error',
+                phase: 'command',
+            })
+
+            expect(diagnostic.subject).to.deep.equal(copy.subject)
+            expect(diagnostic.related).to.deep.include(source.subject)
+            expect(diagnostic.related).to.deep.include(builder.subject)
+            expect(diagnostic.related).to.not.deep.include(target.subject)
+            expect(diagnostic.expected).to.deep.equal({ resourceState: 'ready' })
+            expect(diagnostic.actual).to.deep.include({
+                stepIndex: 0,
+                commandId: copy.id,
+                commandKind: 'copy',
+                access: 'read',
+                role: 'source',
+                resourceId: source.id,
+                resourceKind: 'TextureResource',
+                resourceState: 'empty',
+                requiredContentEpoch: 0,
+                simulatedContentEpoch: 0,
+                currentContentEpoch: 0,
+                allocationVersion: 1,
+                whenMissing: 'throw',
+            })
+            expect(source.contentEpoch).to.equal(0)
+            expect(target.contentEpoch).to.equal(0)
+            expect(source.state).to.equal('empty')
+            expect(target.state).to.equal('empty')
+            expect(calls.commandEncoders).to.have.length(0)
+            expect(calls.textureCopies).to.have.length(0)
             expect(calls.queueSubmissions).to.have.length(0)
         }
     })
@@ -551,6 +674,178 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         }
     })
 
+    it('applies validation mode to texture copy read-before-write diagnostics', async() => {
+
+        for (const validation of [ 'throw', 'warn', 'off' ]) {
+            const { runtime, calls } = await createRuntimeFixture()
+            const source = createTexture(
+                runtime,
+                `future texture copy source ${validation}`,
+                GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+            )
+            const target = createTexture(
+                runtime,
+                `future texture copy target ${validation}`,
+                GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+            )
+            source._advanceContentEpoch()
+            const copy = runtime.createCopyCommand({
+                label: `copy future texture source ${validation}`,
+                source: copySource(source, 2),
+                target,
+                size: { width: 2, height: 2 },
+                whenMissing: 'throw',
+            })
+            const builder = runtime.createSubmission({ validation })
+                .copy(copy)
+
+            if (validation === 'throw') {
+                const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+                    code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+
+                expect(diagnostic.subject).to.deep.equal(copy.subject)
+                expect(diagnostic.related).to.deep.include(source.subject)
+                expect(diagnostic.related).to.deep.include(builder.subject)
+                expect(diagnostic.expected).to.deep.equal({ contentEpoch: 2 })
+                expect(diagnostic.actual).to.deep.include({
+                    stepIndex: 0,
+                    commandId: copy.id,
+                    commandKind: 'copy',
+                    access: 'read',
+                    role: 'source',
+                    resourceId: source.id,
+                    resourceKind: 'TextureResource',
+                    resourceState: 'ready',
+                    requiredContentEpoch: 2,
+                    simulatedContentEpoch: 1,
+                    currentContentEpoch: 1,
+                    allocationVersion: 1,
+                    whenMissing: 'throw',
+                })
+                expect(source.contentEpoch).to.equal(1)
+                expect(target.contentEpoch).to.equal(0)
+                expect(calls.commandEncoders).to.have.length(0)
+                expect(calls.textureCopies).to.have.length(0)
+                expect(calls.queueSubmissions).to.have.length(0)
+                continue
+            }
+
+            const submitted = builder.submit()
+
+            if (validation === 'warn') {
+                expect(submitted.diagnostics).to.have.length(1)
+                expect(submitted.diagnostics[0]).to.include({
+                    code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+                expect(submitted.diagnostics[0].expected).to.deep.equal({ contentEpoch: 2 })
+            } else {
+                expect(submitted.diagnostics).to.deep.equal([])
+            }
+            expect(source.contentEpoch).to.equal(1)
+            expect(target.contentEpoch).to.equal(1)
+            expect(calls.commandEncoders).to.have.length(1)
+            expect(calls.textureCopies).to.have.length(1)
+            expect(calls.queueSubmissions).to.have.length(1)
+
+            await submitted.done
+        }
+    })
+
+    it('applies validation mode to texture copy stale-read diagnostics without mutating on throw', async() => {
+
+        for (const validation of [ 'throw', 'warn', 'off' ]) {
+            const { runtime, calls } = await createRuntimeFixture()
+            const source = createTexture(
+                runtime,
+                `stale texture copy source ${validation}`,
+                GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+            )
+            const target = createTexture(
+                runtime,
+                `stale texture copy target ${validation}`,
+                GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+            )
+            source._advanceContentEpoch()
+            const upload = runtime.createTextureUploadCommand({
+                label: `refresh texture copy source ${validation}`,
+                target: source,
+                data: new Uint8Array(16),
+                layout: { bytesPerRow: 8, rowsPerImage: 2 },
+                size: { width: 2, height: 2 },
+            })
+            const copy = runtime.createCopyCommand({
+                label: `copy stale texture source ${validation}`,
+                source: copySource(source, 1),
+                target,
+                size: { width: 2, height: 2 },
+                whenMissing: 'throw',
+            })
+            const builder = runtime.createSubmission({ validation })
+                .upload(upload)
+                .copy(copy)
+
+            if (validation === 'throw') {
+                const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+                    code: 'SCRATCH_SUBMISSION_STALE_READ',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+
+                expect(diagnostic.subject).to.deep.equal(copy.subject)
+                expect(diagnostic.related).to.deep.include(source.subject)
+                expect(diagnostic.related).to.deep.include(builder.subject)
+                expect(diagnostic.expected).to.deep.equal({ contentEpoch: 1 })
+                expect(diagnostic.actual).to.deep.include({
+                    stepIndex: 1,
+                    commandId: copy.id,
+                    commandKind: 'copy',
+                    access: 'read',
+                    role: 'source',
+                    resourceId: source.id,
+                    resourceKind: 'TextureResource',
+                    resourceState: 'ready',
+                    requiredContentEpoch: 1,
+                    simulatedContentEpoch: 2,
+                    currentContentEpoch: 1,
+                    allocationVersion: 1,
+                    whenMissing: 'throw',
+                })
+                expect(source.contentEpoch).to.equal(1)
+                expect(target.contentEpoch).to.equal(0)
+                expect(calls.queueTextureWrites).to.have.length(0)
+                expect(calls.textureCopies).to.have.length(0)
+                expect(calls.queueSubmissions).to.have.length(0)
+                continue
+            }
+
+            const submitted = builder.submit()
+
+            if (validation === 'warn') {
+                expect(submitted.diagnostics).to.have.length(1)
+                expect(submitted.diagnostics[0]).to.include({
+                    code: 'SCRATCH_SUBMISSION_STALE_READ',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+                expect(submitted.diagnostics[0].expected).to.deep.equal({ contentEpoch: 1 })
+            } else {
+                expect(submitted.diagnostics).to.deep.equal([])
+            }
+            expect(source.contentEpoch).to.equal(2)
+            expect(target.contentEpoch).to.equal(1)
+            expect(calls.queueTextureWrites).to.have.length(1)
+            expect(calls.textureCopies).to.have.length(1)
+            expect(calls.queueSubmissions).to.have.length(1)
+
+            await submitted.done
+        }
+    })
+
     it('allows same-submission upload to satisfy a copy source requiring the produced epoch', async() => {
 
         const { runtime } = await createRuntimeFixture()
@@ -612,6 +907,177 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 contentEpochBefore: 0,
                 contentEpochAfter: 1,
             },
+        ])
+
+        await submitted.done
+    })
+
+    it('allows same-submission texture upload to satisfy a texture copy source requiring the produced epoch', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const source = createTexture(
+            runtime,
+            'same submission texture copy source',
+            GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const target = createTexture(
+            runtime,
+            'same submission texture copy target',
+            GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const upload = runtime.createTextureUploadCommand({
+            label: 'produce texture copy source',
+            target: source,
+            data: new Uint8Array(16),
+            layout: { bytesPerRow: 8, rowsPerImage: 2 },
+            size: { width: 2, height: 2 },
+        })
+        const copy = runtime.createCopyCommand({
+            label: 'copy produced texture source',
+            source: copySource(source, 1),
+            target,
+            size: { width: 2, height: 2 },
+            whenMissing: 'throw',
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .copy(copy)
+            .submit()
+
+        expect(submitted.diagnostics).to.deep.equal([])
+        expect(source.contentEpoch).to.equal(1)
+        expect(target.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            access: access.access,
+            resourceId: access.resourceId,
+            contentEpochBefore: access.contentEpochBefore,
+            contentEpochAfter: access.contentEpochAfter,
+        }))).to.deep.equal([
+            {
+                stepIndex: 0,
+                stepKind: 'upload',
+                commandKind: 'upload',
+                access: 'write',
+                resourceId: source.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                access: 'read',
+                resourceId: source.id,
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                access: 'write',
+                resourceId: target.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+        ])
+
+        await submitted.done
+    })
+
+    it('allows same-submission render attachment writes to satisfy later texture copy sources', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const source = createTexture(
+            runtime,
+            'rendered texture copy source',
+            GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const target = createTexture(
+            runtime,
+            'rendered texture copy target',
+            GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const render = createRender(runtime, source)
+        const copy = runtime.createCopyCommand({
+            label: 'copy rendered texture source',
+            source: copySource(source, 1),
+            target,
+            size: { width: 2, height: 2 },
+            whenMissing: 'throw',
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .render(render.pass, [ render.draw ])
+            .copy(copy)
+            .submit()
+
+        expect(submitted.diagnostics).to.deep.equal([])
+        expect(source.contentEpoch).to.equal(1)
+        expect(target.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            access: access.access,
+            label: access.label,
+        }))).to.deep.equal([
+            { stepIndex: 0, stepKind: 'render', commandKind: undefined, access: 'write', label: 'rendered texture copy source' },
+            { stepIndex: 1, stepKind: 'copy', commandKind: 'copy', access: 'read', label: 'rendered texture copy source' },
+            { stepIndex: 1, stepKind: 'copy', commandKind: 'copy', access: 'write', label: 'rendered texture copy target' },
+        ])
+        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ source.id, target.id ])
+
+        await submitted.done
+    })
+
+    it('allows same-submission texture copy targets to satisfy later draw reads', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const source = createTexture(
+            runtime,
+            'draw texture copy source',
+            GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const copied = createTexture(
+            runtime,
+            'draw texture copy target',
+            GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const renderTarget = createTexture(runtime, 'draw after texture copy render target')
+        source._advanceContentEpoch()
+        const copy = runtime.createCopyCommand({
+            label: 'copy before draw read',
+            source: copySource(source, 1),
+            target: copied,
+            size: { width: 2, height: 2 },
+            whenMissing: 'throw',
+        })
+        const render = createRender(runtime, renderTarget, {
+            read: [ readResource(copied, 1) ],
+            write: [],
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .copy(copy)
+            .render(render.pass, [ render.draw ])
+            .submit()
+
+        expect(submitted.diagnostics).to.deep.equal([])
+        expect(copied.contentEpoch).to.equal(1)
+        expect(renderTarget.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            access: access.access,
+            label: access.label,
+        }))).to.deep.equal([
+            { stepIndex: 0, stepKind: 'copy', commandKind: 'copy', access: 'read', label: 'draw texture copy source' },
+            { stepIndex: 0, stepKind: 'copy', commandKind: 'copy', access: 'write', label: 'draw texture copy target' },
+            { stepIndex: 1, stepKind: 'render', commandKind: 'draw', access: 'read', label: 'draw texture copy target' },
+            { stepIndex: 1, stepKind: 'render', commandKind: undefined, access: 'write', label: 'draw after texture copy render target' },
         ])
 
         await submitted.done
