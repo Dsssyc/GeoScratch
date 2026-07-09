@@ -1042,8 +1042,8 @@ export class CopyCommand {
 
             this.copyKind = 'texture-to-texture'
             this.target = target
-            this.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.sourceOrigin)
-            this.targetOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.targetOrigin)
+            this.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.sourceOrigin, 'sourceOrigin')
+            this.targetOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.targetOrigin, 'targetOrigin')
             this.size = normalizeTextureCopySize(runtime, source.resource, target, textureDescriptor.size, this.sourceOrigin, this.targetOrigin)
             validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
             validateTextureCopyUsage(runtime, target, GPU_TEXTURE_USAGE_COPY_DST, 'target', 'GPUTextureUsage.COPY_DST')
@@ -2548,15 +2548,31 @@ function normalizeTextureCopyTarget(runtime: ScratchRuntime, descriptor: Texture
     return target
 }
 
-function normalizeTextureCopyOrigin(runtime: ScratchRuntime, origin: TextureCopyOrigin | undefined): { x: number, y: number, z: number } {
+function normalizeTextureCopyOrigin(
+    runtime: ScratchRuntime,
+    origin: TextureCopyOrigin | undefined = { x: 0, y: 0, z: 0 },
+    key: 'sourceOrigin' | 'targetOrigin'
+): { x: number, y: number, z: number } {
 
-    const x = Array.isArray(origin) ? origin[0] ?? 0 : origin?.x ?? 0
-    const y = Array.isArray(origin) ? origin[1] ?? 0 : origin?.y ?? 0
-    const z = Array.isArray(origin) ? origin[2] ?? 0 : origin?.z ?? 0
+    let x
+    let y
+    let z
+
+    if (Array.isArray(origin)) {
+        x = origin[0] ?? 0
+        y = origin[1] ?? 0
+        z = origin[2] ?? 0
+    } else if (origin && typeof origin === 'object') {
+        x = origin.x ?? 0
+        y = origin.y ?? 0
+        z = origin.z ?? 0
+    } else {
+        throwCopyDiagnostic({ runtime, [key]: origin, reason: key })
+    }
 
     for (const value of [ x, y, z ]) {
         if (!Number.isInteger(value) || value < 0) {
-            throwCopyDiagnostic({ runtime, sourceOrigin: origin, reason: 'origin' })
+            throwCopyDiagnostic({ runtime, [key]: origin, reason: key })
         }
     }
 

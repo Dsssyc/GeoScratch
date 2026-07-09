@@ -477,6 +477,8 @@ describe('scratch CopyCommand', () => {
             { source: copySource(fixture.source), target: multisampledTarget, size: { width: 1, height: 1 }, whenMissing: 'throw' },
             { source: copySource(fixture.source), target: fixture.source, size: { width: 1, height: 1 }, whenMissing: 'throw' },
             { source: copySource(fixture.source), target: fixture.target, size: { width: 0, height: 1 }, whenMissing: 'throw' },
+            { source: copySource(fixture.source), sourceOrigin: 5, target: fixture.target, size: { width: 1, height: 1 }, whenMissing: 'throw' },
+            { source: copySource(fixture.source), target: fixture.target, targetOrigin: 'bad', size: { width: 1, height: 1 }, whenMissing: 'throw' },
             { source: copySource(fixture.source), sourceOrigin: { x: 3, y: 3 }, target: fixture.target, size: { width: 2, height: 2 }, whenMissing: 'throw' },
             { source: copySource(fixture.source), target: fixture.target, targetOrigin: { x: 3, y: 3 }, size: { width: 2, height: 2 }, whenMissing: 'throw' },
         ]) {
