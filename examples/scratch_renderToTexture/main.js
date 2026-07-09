@@ -198,6 +198,10 @@ async function main() {
         label: 'draw render to texture offscreen quad',
         pipeline: offscreenPipeline,
         count: { vertexCount: 6 },
+        resources: {
+            read: [],
+            write: [],
+        },
         whenMissing: 'throw',
     })
     const sampleDraw = runtime.createDrawCommand({
@@ -205,6 +209,10 @@ async function main() {
         pipeline: samplePipeline,
         bindSets: [ sampleBindSet ],
         count: { vertexCount: 6 },
+        resources: {
+            read: [ offscreenTexture, sampler ],
+            write: [],
+        },
         whenMissing: 'throw',
     })
 

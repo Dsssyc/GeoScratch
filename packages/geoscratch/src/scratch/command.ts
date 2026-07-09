@@ -48,6 +48,11 @@ export type NormalizedDrawVertexBufferBinding = Omit<DrawVertexBufferBinding, 's
     size: number | undefined
 }
 
+export type CommandResourceAccessDescriptor = {
+    read: Resource[]
+    write: Resource[]
+}
+
 export type DrawCommandDescriptor = {
     label?: string
     pipeline: RenderPipeline
@@ -55,6 +60,7 @@ export type DrawCommandDescriptor = {
     dynamicOffsets?: CommandDynamicOffsets
     vertexBuffers?: DrawVertexBufferBinding[]
     count: StaticDrawCount
+    resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
 }
 
@@ -135,10 +141,7 @@ export type DispatchCommandDescriptor = {
     bindSets?: BindSet[]
     dynamicOffsets?: CommandDynamicOffsets
     count: StaticDispatchCount
-    resources: {
-        read: Resource[]
-        write: Resource[]
-    }
+    resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
 }
 
@@ -216,6 +219,7 @@ export interface DrawCommand {
     dynamicOffsets: Map<number, number[]>
     vertexBuffers: NormalizedDrawVertexBufferBinding[]
     count: StaticDrawCount
+    resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
     isDisposed: boolean
 }
@@ -250,6 +254,7 @@ export class DrawCommand {
         this.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
         this.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
         this.count = normalizeDrawCount(this, descriptor.count)
+        this.resources = normalizeResourceAccess(this, descriptor.resources)
         this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
 
@@ -309,6 +314,9 @@ export class DrawCommand {
         for (const binding of this.vertexBuffers) {
             binding.buffer.assertUsable()
         }
+        for (const resource of [ ...this.resources.read, ...this.resources.write ]) {
+            resource.assertUsable()
+        }
     }
 
     validateForPass(passSpec: RenderPassSpec) {
@@ -349,6 +357,9 @@ export class DrawCommand {
             this.count.firstVertex ?? 0,
             this.count.firstInstance ?? 0
         )
+        for (const resource of this.resources.write) {
+            resource._advanceContentEpoch()
+        }
     }
 
     dispose(): void {
@@ -623,10 +634,7 @@ export interface DispatchCommand {
     bindSets: BindSet[]
     dynamicOffsets: Map<number, number[]>
     count: { workgroups: [number, number, number] }
-    resources: {
-        read: Resource[]
-        write: Resource[]
-    }
+    resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
     isDisposed: boolean
 }
@@ -1920,7 +1928,7 @@ function normalizeDispatchCount(command: DispatchCommand, count: StaticDispatchC
     return { workgroups }
 }
 
-function normalizeResourceAccess(command: DispatchCommand, resources: DispatchCommandDescriptor['resources']) {
+function normalizeResourceAccess(command: DrawCommand | DispatchCommand, resources: CommandResourceAccessDescriptor) {
 
     if (!resources || typeof resources !== 'object' || !Array.isArray(resources.read) || !Array.isArray(resources.write)) {
         throwScratchDiagnostic({
@@ -1928,7 +1936,7 @@ function normalizeResourceAccess(command: DispatchCommand, resources: DispatchCo
             severity: 'error',
             phase: 'command',
             subject: command.subject,
-            message: 'DispatchCommand requires explicit read and write resource declarations.',
+            message: 'Command requires explicit read and write resource declarations.',
             expected: { resources: { read: 'Resource[]', write: 'Resource[]' } },
             actual: { resources },
         })
@@ -1940,7 +1948,7 @@ function normalizeResourceAccess(command: DispatchCommand, resources: DispatchCo
     }
 }
 
-function normalizeResourceList(command: DispatchCommand, resources: Resource[], access: 'read' | 'write'): Resource[] {
+function normalizeResourceList(command: DrawCommand | DispatchCommand, resources: Resource[], access: 'read' | 'write'): Resource[] {
 
     return resources.map((resource) => {
         if (!resource || typeof resource.assertRuntime !== 'function') {

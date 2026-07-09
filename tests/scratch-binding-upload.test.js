@@ -89,6 +89,10 @@ async function createUniformFixture(format = 'bgra8unorm') {
         pipeline,
         bindSets: [ bindSet ],
         count: { vertexCount: 3 },
+        resources: {
+            read: [ uniformBuffer ],
+            write: [],
+        },
         whenMissing: 'throw',
     })
     const pass = runtime.createRenderPass({
@@ -310,6 +314,10 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
                 pipeline: fixtureA.pipeline,
                 bindSets: [ fixtureB.bindSet ],
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [ fixtureA.uniformBuffer ],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
             throw new Error('expected wrong-runtime bind set to fail')
@@ -343,6 +351,10 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
                 pipeline: fixtureA.pipeline,
                 bindSets: [ fixtureA.bindSet ],
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [ fixtureA.uniformBuffer ],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
             throw new Error('expected disposed bind set to fail')
@@ -405,6 +417,10 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
                 pipeline: fixture.pipeline,
                 bindSets: [ otherSet ],
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [ otherBuffer ],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
             throw new Error('expected bind layout mismatch to fail')

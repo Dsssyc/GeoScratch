@@ -36,6 +36,10 @@ async function createTriangleScene(format = 'bgra8unorm') {
     const draw = runtime.createDrawCommand({
         pipeline,
         count: { vertexCount: 3 },
+        resources: {
+            read: [],
+            write: [],
+        },
         whenMissing: 'throw',
     })
     const pass = runtime.createRenderPass({
@@ -106,6 +110,10 @@ async function createRenderTargetScene(format = 'rgba8unorm') {
     const draw = runtime.createDrawCommand({
         pipeline,
         count: { vertexCount: 3 },
+        resources: {
+            read: [ renderTarget, sampler ],
+            write: [],
+        },
         whenMissing: 'throw',
     })
     const pass = runtime.createRenderPass({
@@ -285,6 +293,10 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         const mismatchedDraw = fixture.runtime.createDrawCommand({
             pipeline: mismatchedPipeline,
             count: { vertexCount: 3 },
+            resources: {
+                read: [ fixture.renderTarget, fixture.sampler ],
+                write: [],
+            },
             whenMissing: 'throw',
         })
 

@@ -161,6 +161,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             label: 'draw triangle',
             pipeline,
             count: { vertexCount: 3 },
+            resources: {
+                read: [],
+                write: [],
+            },
             whenMissing: 'throw',
         })
         const passEncoder = {
@@ -178,6 +182,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         expect(command.commandKind).to.equal('draw')
         expect(command.pipeline).to.equal(pipeline)
         expect(command.count).to.deep.equal({ vertexCount: 3 })
+        expect(command.resources).to.deep.equal({ read: [], write: [] })
         expect(command.whenMissing).to.equal('throw')
         expect(calls.drawCalls).to.deep.equal([
             { type: 'setPipeline', pipeline: pipeline.gpuPipeline },
@@ -228,6 +233,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 { slot: 1, buffer: instanceBuffer, offset: 0, size: 4 },
             ],
             count: { vertexCount: 3, instanceCount: 1 },
+            resources: {
+                read: [ vertexBuffer, instanceBuffer ],
+                write: [],
+            },
             whenMissing: 'throw',
         })
         const passEncoder = {
@@ -248,12 +257,155 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             { slot: 0, buffer: vertexBuffer, offset: 0, size: undefined },
             { slot: 1, buffer: instanceBuffer, offset: 0, size: 4 },
         ])
+        expect(command.resources).to.deep.equal({
+            read: [ vertexBuffer, instanceBuffer ],
+            write: [],
+        })
         expect(calls.drawCalls).to.deep.equal([
             { type: 'setPipeline', pipeline: pipeline.gpuPipeline },
             { type: 'setVertexBuffer', slot: 0, buffer: vertexBuffer.gpuBuffer, offset: 0, size: undefined },
             { type: 'setVertexBuffer', slot: 1, buffer: instanceBuffer.gpuBuffer, offset: 0, size: 4 },
             { type: 'draw', vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0 },
         ])
+    })
+
+    it('rejects missing draw resource declarations with structured diagnostics', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const program = createProgram(runtime)
+        const pipeline = runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+
+        try {
+            runtime.createDrawCommand({
+                pipeline,
+                count: { vertexCount: 3 },
+                whenMissing: 'throw',
+            })
+            throw new Error('expected missing draw resources validation to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+                severity: 'error',
+                phase: 'command',
+            })
+            expect(error.diagnostic.expected).to.deep.equal({
+                resources: { read: 'Resource[]', write: 'Resource[]' },
+            })
+            expect(error.diagnostic.actual).to.deep.equal({ resources: undefined })
+        }
+    })
+
+    it('rejects malformed draw resource declarations with structured diagnostics', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const program = createProgram(runtime)
+        const pipeline = runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+
+        try {
+            runtime.createDrawCommand({
+                pipeline,
+                count: { vertexCount: 3 },
+                resources: { read: 'positions', write: [] },
+                whenMissing: 'throw',
+            })
+            throw new Error('expected malformed draw resources validation to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+                severity: 'error',
+                phase: 'command',
+            })
+            expect(error.diagnostic.expected).to.deep.equal({
+                resources: { read: 'Resource[]', write: 'Resource[]' },
+            })
+            expect(error.diagnostic.actual).to.deep.equal({
+                resources: { read: 'positions', write: [] },
+            })
+        }
+    })
+
+    it('rejects wrong-runtime draw resources with structured diagnostics', async() => {
+
+        const runtimeA = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const runtimeB = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const program = createProgram(runtimeA)
+        const pipeline = runtimeA.createRenderPipeline({
+            program,
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+        const foreignBuffer = runtimeB.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_DST,
+        })
+
+        try {
+            runtimeA.createDrawCommand({
+                pipeline,
+                count: { vertexCount: 3 },
+                resources: {
+                    read: [ foreignBuffer ],
+                    write: [],
+                },
+                whenMissing: 'throw',
+            })
+            throw new Error('expected wrong-runtime draw resource validation to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'resource',
+            })
+            expect(error.diagnostic.expected).to.deep.equal({ runtimeId: runtimeB.id })
+            expect(error.diagnostic.actual).to.deep.equal({ runtimeId: runtimeA.id })
+        }
+    })
+
+    it('rejects disposed draw resources with structured diagnostics', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const program = createProgram(runtime)
+        const pipeline = runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+        const buffer = runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_DST,
+        })
+
+        buffer.dispose()
+
+        try {
+            runtime.createDrawCommand({
+                pipeline,
+                count: { vertexCount: 3 },
+                resources: {
+                    read: [ buffer ],
+                    write: [],
+                },
+                whenMissing: 'throw',
+            })
+            throw new Error('expected disposed draw resource validation to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_RESOURCE_DISPOSED',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
     })
 
     it('rejects wrong-runtime vertex buffers with structured diagnostics', async() => {
@@ -285,6 +437,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                     { slot: 0, buffer: foreignBuffer },
                 ],
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [ foreignBuffer ],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
             throw new Error('expected wrong-runtime vertex buffer validation to fail')
@@ -331,6 +487,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                     { slot: 0, buffer },
                 ],
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [ buffer ],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
             throw new Error('expected disposed vertex buffer validation to fail')
@@ -373,6 +533,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                     { slot: 0, buffer, offset: -4 },
                 ],
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [ buffer ],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
             throw new Error('expected invalid vertex buffer binding to fail')
@@ -403,6 +567,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             runtime.createDrawCommand({
                 pipeline,
                 count: { vertexCount: 0 },
+                resources: {
+                    read: [],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
             throw new Error('expected invalid draw count to fail')
@@ -436,6 +604,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             runtime.createDrawCommand({
                 pipeline,
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
             throw new Error('expected disposed pipeline validation to fail')

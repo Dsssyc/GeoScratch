@@ -101,6 +101,10 @@ async function main() {
         pipeline,
         bindSets: [ bindSet ],
         count: { vertexCount: 3 },
+        resources: {
+            read: [ uniformBuffer ],
+            write: [],
+        },
         whenMissing: 'throw',
     })
 

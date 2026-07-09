@@ -438,6 +438,10 @@ describe('scratch Program buffer layout requirements', () => {
             pipeline: renderPipeline,
             bindSets: [ renderSet ],
             count: { vertexCount: 3 },
+            resources: {
+                read: [ renderSet.bindings.get('particles').resource ],
+                write: [],
+            },
             whenMissing: 'throw',
         })
         const dispatch = runtime.createDispatchCommand({
@@ -480,6 +484,10 @@ describe('scratch Program buffer layout requirements', () => {
                 pipeline: renderPipeline,
                 bindSets: [],
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
         })
@@ -531,6 +539,10 @@ describe('scratch Program buffer layout requirements', () => {
                 pipeline: renderPipeline,
                 bindSets: [ renderSet ],
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [ renderSet.bindings.get('particles').resource ],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
         })
@@ -586,6 +598,10 @@ describe('scratch Program buffer layout requirements', () => {
                 pipeline: renderPipeline,
                 bindSets: [ renderSet ],
                 count: { vertexCount: 3 },
+                resources: {
+                    read: [ renderSet.bindings.get('particles').resource ],
+                    write: [],
+                },
                 whenMissing: 'throw',
             })
         })

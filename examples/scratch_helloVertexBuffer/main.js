@@ -121,6 +121,10 @@ async function main() {
             { slot: 1, buffer: instanceSizeBuffer },
         ],
         count: { vertexCount: 3, instanceCount: 1 },
+        resources: {
+            read: [ vertexBuffer, instanceSizeBuffer ],
+            write: [],
+        },
         whenMissing: 'throw',
     })
 

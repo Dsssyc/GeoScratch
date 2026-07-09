@@ -365,8 +365,15 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             { slot: 0, buffer: vertexBuffer, offset: 0, size: 24 },
         ],
         count: { vertexCount: 3 },
+        resources: {
+            read: [ uniformBuffer, vertexBuffer ],
+            write: [],
+        },
         whenMissing: 'throw',
     })
+    const drawResources: scr.CommandResourceAccessDescriptor = draw.resources
+    const compatDraw: scratchCompat.DrawCommand = draw
+    const compatDrawResources: scratchCompat.CommandResourceAccessDescriptor = compatDraw.resources
     const passSpec: scr.RenderPassSpec = runtime.createRenderPass({
         color: [ {
             target: surface,
@@ -524,6 +531,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void beginOcclusionAlias
     void endOcclusion
     void endOcclusionAlias
+    void drawResources
+    void compatDrawResources
     void resolveQueries
     void resolveAlias
     void error

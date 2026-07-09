@@ -243,6 +243,13 @@ export class SubmissionBuilder {
             const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
             let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
             for (const command of step.commands) {
+                const origin = commandAccessOrigin(stepIndex, 'render', command, step.passSpec)
+                const accesses = command.commandKind === 'draw'
+                    ? [
+                        ...command.resources.read.map(resource => captureResourceAccess(resource, 'read', origin)),
+                        ...command.resources.write.map(resource => captureResourceAccess(resource, 'write', origin)),
+                    ]
+                    : []
                 command.encode(passEncoder)
                 if (command.commandKind === 'begin-occlusion-query') {
                     activeOcclusionQueryCommand = command
@@ -250,6 +257,7 @@ export class SubmissionBuilder {
                     activeOcclusionQueryCommand?.querySet._advanceSlotContentEpoch(activeOcclusionQueryCommand.index)
                     activeOcclusionQueryCommand = undefined
                 }
+                completeResourceAccesses(resourceAccesses, accesses)
             }
             passEncoder.end()
             step.passSpec.advanceTimestampWriteEpochs()

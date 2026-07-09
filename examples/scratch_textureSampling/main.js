@@ -146,6 +146,10 @@ async function main() {
         pipeline,
         bindSets: [ bindSet ],
         count: { vertexCount: 6 },
+        resources: {
+            read: [ texture, sampler ],
+            write: [],
+        },
         whenMissing: 'throw',
     })
 

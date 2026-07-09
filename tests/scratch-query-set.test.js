@@ -110,6 +110,10 @@ async function createRenderCommandFixture(runtime, pass) {
         pipeline,
         bindSets: [],
         count: { vertexCount: 3 },
+        resources: {
+            read: [],
+            write: [],
+        },
         whenMissing: 'throw',
     })
 }

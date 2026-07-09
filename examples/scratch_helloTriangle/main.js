@@ -64,6 +64,10 @@ async function main() {
         label: 'draw scratch hello triangle',
         pipeline,
         count: { vertexCount: 3 },
+        resources: {
+            read: [],
+            write: [],
+        },
         whenMissing: 'throw',
     })
 

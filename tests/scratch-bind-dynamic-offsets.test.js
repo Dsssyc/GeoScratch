@@ -226,6 +226,10 @@ function createDrawCommand(fixture, overrides = {}) {
         pipeline: fixture.pipeline,
         bindSets: [ fixture.bindSet ],
         count: { vertexCount: 3 },
+        resources: {
+            read: fixture.buffers,
+            write: [],
+        },
         whenMissing: 'throw',
         ...overrides,
     })

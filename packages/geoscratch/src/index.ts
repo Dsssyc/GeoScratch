@@ -40,6 +40,7 @@ export type {
     BindSetOptions,
     BindVisibility,
     CommandDynamicOffsets,
+    CommandResourceAccessDescriptor,
     CopyCommandDescriptor,
     DispatchCommandDescriptor,
     DrawCommandDescriptor,

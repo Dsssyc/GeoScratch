@@ -132,7 +132,7 @@ function createCompute(runtime, input, output) {
     return { bindLayout, bindSet, program, pipeline, dispatch, pass }
 }
 
-function createRender(runtime, target) {
+function createRender(runtime, target, resources = { read: [], write: [] }) {
 
     const program = runtime.createProgram({
         modules: [ triangleWgsl ],
@@ -150,6 +150,7 @@ function createRender(runtime, target) {
         label: 'draw color',
         pipeline,
         count: { vertexCount: 3 },
+        resources,
         whenMissing: 'throw',
     })
     const pass = runtime.createRenderPass({
@@ -441,6 +442,72 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         await submitted.done
     })
 
+    it('records render draw declared reads and writes before pass attachment writes', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const input = createBuffer(runtime, 'draw input')
+        const output = createBuffer(runtime, 'draw output')
+        const target = createTexture(runtime, 'draw render target')
+        const render = createRender(runtime, target, {
+            read: [ input ],
+            write: [ output ],
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .render(render.pass, [ render.draw ])
+            .submit()
+
+        expect(output.contentEpoch).to.equal(1)
+        expect(target.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(accessFacts)).to.deep.equal([
+            {
+                stepIndex: 0,
+                stepKind: 'render',
+                commandKind: 'draw',
+                commandId: render.draw.id,
+                passId: render.pass.id,
+                resourceId: input.id,
+                resourceKind: 'BufferResource',
+                label: 'draw input',
+                subject: input.subject,
+                access: 'read',
+                contentEpochBefore: 0,
+                contentEpochAfter: 0,
+                allocationVersion: 1,
+            },
+            {
+                stepIndex: 0,
+                stepKind: 'render',
+                commandKind: 'draw',
+                commandId: render.draw.id,
+                passId: render.pass.id,
+                resourceId: output.id,
+                resourceKind: 'BufferResource',
+                label: 'draw output',
+                subject: output.subject,
+                access: 'write',
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+                allocationVersion: 1,
+            },
+            {
+                stepIndex: 0,
+                stepKind: 'render',
+                passId: render.pass.id,
+                resourceId: target.id,
+                resourceKind: 'TextureResource',
+                label: 'draw render target',
+                subject: target.subject,
+                access: 'write',
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+                allocationVersion: 1,
+            },
+        ])
+        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ output.id, target.id ])
+
+        await submitted.done
+    })
+
     it('preserves deterministic step order for mixed submissions', async() => {
 
         const { runtime } = await createRuntimeFixture()
@@ -458,7 +525,10 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             byteLength: 16,
         })
         const compute = createCompute(runtime, copyTarget, computeOutput)
-        const render = createRender(runtime, renderTarget)
+        const render = createRender(runtime, renderTarget, {
+            read: [ computeOutput ],
+            write: [],
+        })
         const submitted = runtime.createSubmission({ validation: 'throw' })
             .upload(upload)
             .copy(copy)
@@ -477,6 +547,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             { stepIndex: 1, stepKind: 'copy', access: 'write', label: 'ordered copy target' },
             { stepIndex: 2, stepKind: 'compute', access: 'read', label: 'ordered copy target' },
             { stepIndex: 2, stepKind: 'compute', access: 'write', label: 'ordered compute output' },
+            { stepIndex: 3, stepKind: 'render', access: 'read', label: 'ordered compute output' },
             { stepIndex: 3, stepKind: 'render', access: 'write', label: 'ordered render target' },
         ])
         expect(submitted.producerEpochs.map(epoch => epoch.producedBy.stepIndex)).to.deep.equal([ 0, 1, 2, 3 ])

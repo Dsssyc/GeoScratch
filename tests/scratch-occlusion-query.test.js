@@ -60,6 +60,10 @@ async function createOcclusionFixture() {
     const draw = runtime.createDrawCommand({
         pipeline,
         count: { vertexCount: 3 },
+        resources: {
+            read: [],
+            write: [],
+        },
         whenMissing: 'throw',
     })
     const begin = runtime.createBeginOcclusionQueryCommand({
