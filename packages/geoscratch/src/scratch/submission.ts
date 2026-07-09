@@ -236,6 +236,7 @@ export class SubmissionBuilder {
             }
 
             validateRenderStep(this, step)
+            validateRenderPassResourceConflicts(this, step, stepIndex)
 
             if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
@@ -621,6 +622,71 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
         command.assertRuntime(builder.runtime)
         command.validateForPass(passSpec)
     }
+}
+
+function validateRenderPassResourceConflicts(builder: SubmissionBuilder, step: RenderStep, stepIndex: number): void {
+
+    const attachmentTargets = collectRenderAttachmentTargets(step.passSpec)
+    if (attachmentTargets.size === 0) return
+
+    for (const command of step.commands) {
+        if (command.commandKind !== 'draw') continue
+
+        validateRenderCommandResources(builder, step, stepIndex, command, attachmentTargets, 'read')
+        validateRenderCommandResources(builder, step, stepIndex, command, attachmentTargets, 'write')
+    }
+}
+
+function validateRenderCommandResources(
+    builder: SubmissionBuilder,
+    step: RenderStep,
+    stepIndex: number,
+    command: DrawCommand,
+    attachmentTargets: Set<TextureResource>,
+    access: SubmissionResourceAccessKind
+): void {
+
+    for (const resource of command.resources[access]) {
+        if (!(resource instanceof TextureResource) || !attachmentTargets.has(resource)) continue
+
+        throwScratchDiagnostic({
+            code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
+            severity: 'error',
+            phase: 'submission',
+            subject: command.subject,
+            related: [
+                step.passSpec.subject,
+                resource.subject,
+                builder.subject,
+            ],
+            message: 'DrawCommand resources must not include the current render pass color attachment target.',
+            expected: {
+                attachment: 'pass-level write only',
+                drawResources: 'must exclude current render pass color attachment targets',
+            },
+            actual: {
+                stepIndex,
+                passId: step.passSpec.id,
+                commandId: command.id,
+                access,
+                resourceId: resource.id,
+                resourceKind: resource.resourceKind,
+                contentEpoch: resource.contentEpoch,
+                allocationVersion: resource.allocationVersion,
+            },
+        })
+    }
+}
+
+function collectRenderAttachmentTargets(passSpec: RenderPassSpec): Set<TextureResource> {
+
+    const attachmentTargets = new Set<TextureResource>()
+    for (const attachment of passSpec.color) {
+        const target = attachment.target
+        if (target instanceof TextureResource) attachmentTargets.add(target)
+    }
+
+    return attachmentTargets
 }
 
 function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec) {

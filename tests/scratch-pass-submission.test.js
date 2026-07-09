@@ -111,7 +111,7 @@ async function createRenderTargetScene(format = 'rgba8unorm') {
         pipeline,
         count: { vertexCount: 3 },
         resources: {
-            read: [ renderTarget, sampler ],
+            read: [],
             write: [],
         },
         whenMissing: 'throw',
@@ -294,7 +294,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             pipeline: mismatchedPipeline,
             count: { vertexCount: 3 },
             resources: {
-                read: [ fixture.renderTarget, fixture.sampler ],
+                read: [],
                 write: [],
             },
             whenMissing: 'throw',
@@ -389,6 +389,192 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
                 phase: 'resource',
             })
         }
+    })
+
+    it('rejects draw reads of the current TextureResource color attachment before encoding', async() => {
+
+        const fixture = await createRenderTargetScene()
+        const conflictingDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { vertexCount: 3 },
+            resources: {
+                read: [ fixture.renderTarget ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+
+        expect(fixture.renderTarget.contentEpoch).to.equal(0)
+
+        try {
+            fixture.runtime.createSubmission({ validation: 'throw' })
+                .render(fixture.pass, [ conflictingDraw ])
+                .submit()
+            throw new Error('expected render attachment read conflict to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
+                severity: 'error',
+                phase: 'submission',
+            })
+            expect(error.diagnostic.subject).to.deep.equal(conflictingDraw.subject)
+            expect(error.diagnostic.related).to.deep.include(fixture.pass.subject)
+            expect(error.diagnostic.related).to.deep.include(fixture.renderTarget.subject)
+            expect(error.diagnostic.expected).to.deep.equal({
+                attachment: 'pass-level write only',
+                drawResources: 'must exclude current render pass color attachment targets',
+            })
+            expect(error.diagnostic.actual).to.deep.equal({
+                stepIndex: 0,
+                passId: fixture.pass.id,
+                commandId: conflictingDraw.id,
+                access: 'read',
+                resourceId: fixture.renderTarget.id,
+                resourceKind: 'TextureResource',
+                contentEpoch: 0,
+                allocationVersion: 1,
+            })
+        }
+
+        expect(fixture.renderTarget.contentEpoch).to.equal(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.drawCalls).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('rejects draw writes of the current TextureResource color attachment before encoding', async() => {
+
+        const fixture = await createRenderTargetScene()
+        const conflictingDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { vertexCount: 3 },
+            resources: {
+                read: [],
+                write: [ fixture.renderTarget ],
+            },
+            whenMissing: 'throw',
+        })
+
+        try {
+            fixture.runtime.createSubmission({ validation: 'throw' })
+                .render(fixture.pass, [ conflictingDraw ])
+                .submit()
+            throw new Error('expected render attachment write conflict to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
+                severity: 'error',
+                phase: 'submission',
+            })
+            expect(error.diagnostic.subject).to.deep.equal(conflictingDraw.subject)
+            expect(error.diagnostic.related).to.deep.include(fixture.pass.subject)
+            expect(error.diagnostic.related).to.deep.include(fixture.renderTarget.subject)
+            expect(error.diagnostic.actual).to.deep.include({
+                stepIndex: 0,
+                passId: fixture.pass.id,
+                commandId: conflictingDraw.id,
+                access: 'write',
+                resourceId: fixture.renderTarget.id,
+                resourceKind: 'TextureResource',
+                contentEpoch: 0,
+                allocationVersion: 1,
+            })
+        }
+
+        expect(fixture.renderTarget.contentEpoch).to.equal(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.drawCalls).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('allows a draw to read a texture written by an earlier render step while rendering elsewhere', async() => {
+
+        const fixture = await createRenderTargetScene()
+        const secondTarget = fixture.runtime.createTexture({
+            label: 'second render target',
+            size: { width: 64, height: 64 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const secondPass = fixture.runtime.createRenderPass({
+            label: 'sample previous pass',
+            color: [
+                {
+                    target: secondTarget,
+                    load: 'clear',
+                    store: 'store',
+                    clear: [ 0, 0, 0, 1 ],
+                },
+            ],
+        })
+        const samplePrevious = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { vertexCount: 3 },
+            resources: {
+                read: [ fixture.renderTarget ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ fixture.draw ])
+            .render(secondPass, [ samplePrevious ])
+            .submit()
+
+        expect(fixture.calls.queueSubmissions).to.have.length(1)
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+        expect(secondTarget.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            commandId: access.commandId,
+            passId: access.passId,
+            resourceId: access.resourceId,
+            access: access.access,
+            contentEpochBefore: access.contentEpochBefore,
+            contentEpochAfter: access.contentEpochAfter,
+        }))).to.deep.equal([
+            {
+                stepIndex: 0,
+                stepKind: 'render',
+                commandKind: undefined,
+                commandId: undefined,
+                passId: fixture.pass.id,
+                resourceId: fixture.renderTarget.id,
+                access: 'write',
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'render',
+                commandKind: 'draw',
+                commandId: samplePrevious.id,
+                passId: secondPass.id,
+                resourceId: fixture.renderTarget.id,
+                access: 'read',
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'render',
+                commandKind: undefined,
+                commandId: undefined,
+                passId: secondPass.id,
+                resourceId: secondTarget.id,
+                access: 'write',
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+        ])
+        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ fixture.renderTarget.id, secondTarget.id ])
+
+        await submitted.done
     })
 
     it('rejects wrong pass kinds with structured diagnostics', async() => {
