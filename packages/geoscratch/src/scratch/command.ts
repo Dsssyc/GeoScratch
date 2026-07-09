@@ -53,6 +53,11 @@ export type CommandResourceReadDescriptor = {
     contentEpoch: number
 }
 
+export type CopyCommandSourceDescriptor = {
+    resource: BufferResource
+    contentEpoch: number
+}
+
 export type CommandResourceAccessDescriptor = {
     read: CommandResourceReadDescriptor[]
     write: Resource[]
@@ -92,11 +97,12 @@ export type UploadCommandDescriptor = {
 
 export type CopyCommandDescriptor = {
     label?: string
-    source: BufferResource
+    source: CopyCommandSourceDescriptor
     sourceOffset?: number
     target: BufferResource
     targetOffset?: number
     byteLength: number
+    whenMissing: 'throw'
 }
 
 export type ResolveQuerySetCommandDescriptor = {
@@ -160,6 +166,16 @@ type OcclusionQueryCommandDiagnosticInput = {
 }
 
 type CopyDiagnosticInput = {
+    runtime?: ScratchRuntime
+    source?: unknown
+    target?: unknown
+    sourceOffset?: unknown
+    targetOffset?: unknown
+    byteLength?: unknown
+    reason: string
+}
+
+type CopySourceDiagnosticInput = {
     runtime?: ScratchRuntime
     source?: unknown
     target?: unknown
@@ -922,11 +938,12 @@ export interface CopyCommand {
     id: string
     label?: string
     commandKind: 'copy'
-    source: BufferResource
+    source: CopyCommandSourceDescriptor
     sourceOffset: number
     target: BufferResource
     targetOffset: number
     byteLength: number
+    whenMissing: 'throw'
     isDisposed: boolean
 }
 
@@ -936,26 +953,14 @@ export class CopyCommand {
 
         runtime.assertActive()
 
-        const source = descriptor.source
-        if (!(source instanceof BufferResource)) {
-            throwCopyDiagnostic({
-                runtime,
-                source,
-                target: descriptor.target,
-                sourceOffset: descriptor.sourceOffset,
-                targetOffset: descriptor.targetOffset,
-                byteLength: descriptor.byteLength,
-                reason: 'source',
-            })
-        }
-
-        source.assertRuntime(runtime)
+        const source = normalizeCopySource(runtime, descriptor)
+        source.resource.assertRuntime(runtime)
 
         const target = descriptor.target
         if (!(target instanceof BufferResource)) {
             throwCopyDiagnostic({
                 runtime,
-                source,
+                source: source.resource,
                 target,
                 sourceOffset: descriptor.sourceOffset,
                 targetOffset: descriptor.targetOffset,
@@ -965,7 +970,7 @@ export class CopyCommand {
         }
 
         target.assertRuntime(runtime)
-        validateBufferCopyUsage(runtime, source, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
+        validateBufferCopyUsage(runtime, source.resource, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
         validateBufferCopyUsage(runtime, target, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
 
         this.runtime = runtime
@@ -977,6 +982,7 @@ export class CopyCommand {
         this.sourceOffset = normalizeCopyOffset(runtime, descriptor.sourceOffset ?? 0, 'sourceOffset')
         this.targetOffset = normalizeCopyOffset(runtime, descriptor.targetOffset ?? 0, 'targetOffset')
         this.byteLength = normalizeCopyByteLength(runtime, descriptor.byteLength)
+        this.whenMissing = normalizeCopyReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
 
         validateCopyRange(this)
@@ -1028,7 +1034,7 @@ export class CopyCommand {
         }
 
         this.runtime.assertActive()
-        this.source.assertUsable()
+        this.source.resource.assertUsable()
         this.target.assertUsable()
     }
 
@@ -1050,7 +1056,7 @@ export class CopyCommand {
         }
 
         commandEncoder.copyBufferToBuffer(
-            this.source.gpuBuffer,
+            this.source.resource.gpuBuffer,
             this.sourceOffset,
             this.target.gpuBuffer,
             this.targetOffset,
@@ -2314,6 +2320,67 @@ function validateBufferCopyUsage(
     })
 }
 
+function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDescriptor): CopyCommandSourceDescriptor {
+
+    const source = descriptor.source
+    if (!isRecord(source)) {
+        throwCopySourceDiagnostic({
+            runtime,
+            source,
+            target: descriptor.target,
+            sourceOffset: descriptor.sourceOffset,
+            targetOffset: descriptor.targetOffset,
+            byteLength: descriptor.byteLength,
+            reason: 'source',
+        })
+    }
+
+    const resource = source.resource
+    const contentEpoch = source.contentEpoch
+    if (!(resource instanceof BufferResource)) {
+        throwCopySourceDiagnostic({
+            runtime,
+            source,
+            target: descriptor.target,
+            sourceOffset: descriptor.sourceOffset,
+            targetOffset: descriptor.targetOffset,
+            byteLength: descriptor.byteLength,
+            reason: 'source.resource',
+        })
+    }
+
+    if (typeof contentEpoch !== 'number' || !Number.isInteger(contentEpoch) || contentEpoch < 0) {
+        throwCopySourceDiagnostic({
+            runtime,
+            source,
+            target: descriptor.target,
+            sourceOffset: descriptor.sourceOffset,
+            targetOffset: descriptor.targetOffset,
+            byteLength: descriptor.byteLength,
+            reason: 'source.contentEpoch',
+        })
+    }
+
+    return { resource, contentEpoch }
+}
+
+function normalizeCopyReadinessPolicy(command: CopyCommand, whenMissing: ResourceReadinessPolicy): 'throw' {
+
+    if (whenMissing !== 'throw') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
+            severity: 'error',
+            phase: 'command',
+            subject: command.subject,
+            message: 'CopyCommand requires an explicit throw readiness policy.',
+            expected: { whenMissing: [ 'throw' ] },
+            actual: { whenMissing },
+        })
+    }
+
+    return 'throw'
+}
+
 function normalizeCopyOffset(runtime: ScratchRuntime, value: number, key: 'sourceOffset' | 'targetOffset'): number {
 
     if (!Number.isInteger(value) || value < 0 || value % 4 !== 0) {
@@ -2337,10 +2404,10 @@ function validateCopyRange(command: CopyCommand) {
     const sourceEnd = command.sourceOffset + command.byteLength
     const targetEnd = command.targetOffset + command.byteLength
 
-    if (sourceEnd > command.source.size || targetEnd > command.target.size) {
+    if (sourceEnd > command.source.resource.size || targetEnd > command.target.size) {
         throwCopyDiagnostic({
             runtime: command.runtime,
-            source: command.source,
+            source: command.source.resource,
             target: command.target,
             sourceOffset: command.sourceOffset,
             targetOffset: command.targetOffset,
@@ -2350,13 +2417,13 @@ function validateCopyRange(command: CopyCommand) {
     }
 
     if (
-        command.source === command.target &&
+        command.source.resource === command.target &&
         command.sourceOffset < targetEnd &&
         command.targetOffset < sourceEnd
     ) {
         throwCopyDiagnostic({
             runtime: command.runtime,
-            source: command.source,
+            source: command.source.resource,
             target: command.target,
             sourceOffset: command.sourceOffset,
             targetOffset: command.targetOffset,
@@ -2364,6 +2431,37 @@ function validateCopyRange(command: CopyCommand) {
             reason: 'overlap',
         })
     }
+}
+
+function throwCopySourceDiagnostic({ runtime, source, target, sourceOffset, targetOffset, byteLength, reason }: CopySourceDiagnosticInput): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_COPY_SOURCE_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: { kind: 'Command', commandKind: 'copy' },
+        related: [
+            runtime?.subject,
+            diagnosticSubjectOf(source),
+            diagnosticSubjectOf(target),
+        ].filter(isDefined),
+        message: 'CopyCommand source must declare a BufferResource and required content epoch.',
+        expected: {
+            source: '{ resource: BufferResource with GPUBufferUsage.COPY_SRC, contentEpoch: non-negative integer }',
+            target: 'BufferResource with GPUBufferUsage.COPY_DST',
+            sourceOffset: 'non-negative integer aligned to 4 bytes',
+            targetOffset: 'non-negative integer aligned to 4 bytes',
+            byteLength: 'positive integer aligned to 4 bytes within source and target',
+        },
+        actual: {
+            reason,
+            source: describeValue(source),
+            target: describeValue(target),
+            sourceOffset,
+            targetOffset,
+            byteLength,
+        },
+    })
 }
 
 function throwCopyDiagnostic({ runtime, source, target, sourceOffset, targetOffset, byteLength, reason }: CopyDiagnosticInput): never {

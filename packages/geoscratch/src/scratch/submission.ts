@@ -90,6 +90,8 @@ type ResolveStep = {
 
 type SubmissionStep = RenderStep | ComputeStep | UploadStep | CopyStep | ResolveStep
 
+type ReadCommand = CopyCommand | DispatchCommand | DrawCommand
+
 type ResourceSimulationState = {
     state: ResourceState
     contentEpoch: number
@@ -207,7 +209,7 @@ export class SubmissionBuilder {
             if (step.kind === 'copy') {
                 const origin = commandAccessOrigin(stepIndex, 'copy', step.command)
                 const accesses = [
-                    captureResourceAccess(step.command.source, 'read', origin),
+                    captureResourceAccess(step.command.source.resource, 'read', origin),
                     captureResourceAccess(step.command.target, 'write', origin),
                 ]
                 step.command.encode(encoder)
@@ -307,6 +309,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
 
         if (step.kind === 'copy') {
             validateCopyStep(builder, step)
+            validateCopyReadiness(builder, step, stepIndex, readiness, diagnostics)
             markSimulatedReady(readiness, step.command.target)
             continue
         }
@@ -379,6 +382,17 @@ function validateCopyStep(builder: SubmissionBuilder, step: CopyStep) {
     command.assertRuntime(builder.runtime)
 }
 
+function validateCopyReadiness(
+    builder: SubmissionBuilder,
+    step: CopyStep,
+    stepIndex: number,
+    readiness: ReadinessSimulation,
+    diagnostics: ScratchDiagnostic[]
+): void {
+
+    validateCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, undefined, 'source')
+}
+
 function validateResolveStep(builder: SubmissionBuilder, step: ResolveStep) {
 
     const command = step.command
@@ -407,7 +421,7 @@ function validateComputeReadiness(
 ): void {
 
     for (const command of step.commands) {
-        validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, step.passSpec, diagnostics)
+        validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, diagnostics, step.passSpec)
         for (const resource of command.resources.write) {
             markSimulatedReady(readiness, resource)
         }
@@ -425,7 +439,7 @@ function validateRenderReadiness(
     for (const command of step.commands) {
         if (command.commandKind !== 'draw') continue
 
-        validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, step.passSpec, diagnostics)
+        validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, diagnostics, step.passSpec)
         for (const resource of command.resources.write) {
             markSimulatedReady(readiness, resource)
         }
@@ -441,11 +455,12 @@ function validateRenderReadiness(
 function validateCommandReadiness(
     builder: SubmissionBuilder,
     stepIndex: number,
-    command: DrawCommand | DispatchCommand,
+    command: ReadCommand,
     readRequirements: CommandResourceReadDescriptor[],
     readiness: ReadinessSimulation,
-    passSpec: RenderPassSpec | ComputePassSpec,
-    diagnostics: ScratchDiagnostic[]
+    diagnostics: ScratchDiagnostic[],
+    passSpec?: RenderPassSpec | ComputePassSpec,
+    role?: string
 ): void {
 
     for (const readRequirement of readRequirements) {
@@ -453,7 +468,7 @@ function validateCommandReadiness(
         const simulated = simulatedResourceState(readiness, resource)
 
         if (command.whenMissing === 'throw' && simulated.state !== 'ready') {
-            throwCommandResourceNotReadyDiagnostic(builder, stepIndex, command, resource, simulated, passSpec)
+            throwCommandResourceNotReadyDiagnostic(builder, stepIndex, command, readRequirement, simulated, passSpec, role)
         }
 
         if (builder.validation === 'off' || simulated.state !== 'ready') continue
@@ -466,6 +481,7 @@ function validateCommandReadiness(
                 readRequirement,
                 simulated,
                 passSpec,
+                role,
                 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE'
             ))
             continue
@@ -479,6 +495,7 @@ function validateCommandReadiness(
                 readRequirement,
                 simulated,
                 passSpec,
+                role,
                 'SCRATCH_SUBMISSION_STALE_READ'
             ))
         }
@@ -505,11 +522,14 @@ function markSimulatedReady(readiness: ReadinessSimulation, resource: Resource):
 function throwCommandResourceNotReadyDiagnostic(
     builder: SubmissionBuilder,
     stepIndex: number,
-    command: DrawCommand | DispatchCommand,
-    resource: Resource,
+    command: ReadCommand,
+    readRequirement: CommandResourceReadDescriptor,
     simulated: ResourceSimulationState,
-    passSpec: RenderPassSpec | ComputePassSpec
+    passSpec?: RenderPassSpec | ComputePassSpec,
+    role?: string
 ): never {
+
+    const resource = readRequirement.resource
 
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
@@ -518,9 +538,9 @@ function throwCommandResourceNotReadyDiagnostic(
         subject: command.subject,
         related: [
             resource.subject,
-            passSpec.subject,
+            passSpec?.subject,
             builder.subject,
-        ],
+        ].filter(isDefined),
         message: 'Command read resource is not ready.',
         expected: { resourceState: 'ready' },
         actual: {
@@ -528,10 +548,14 @@ function throwCommandResourceNotReadyDiagnostic(
             commandId: command.id,
             commandKind: command.commandKind,
             access: 'read',
+            ...(role !== undefined ? { role } : {}),
             resourceId: resource.id,
             resourceKind: resource.resourceKind,
             resourceState: simulated.state,
             contentEpoch: simulated.contentEpoch,
+            requiredContentEpoch: readRequirement.contentEpoch,
+            simulatedContentEpoch: simulated.contentEpoch,
+            currentContentEpoch: resource.contentEpoch,
             allocationVersion: resource.allocationVersion,
             whenMissing: command.whenMissing,
         },
@@ -541,10 +565,11 @@ function throwCommandResourceNotReadyDiagnostic(
 function createCommandReadEpochDiagnostic(
     builder: SubmissionBuilder,
     stepIndex: number,
-    command: DrawCommand | DispatchCommand,
+    command: ReadCommand,
     readRequirement: CommandResourceReadDescriptor,
     simulated: ResourceSimulationState,
-    passSpec: RenderPassSpec | ComputePassSpec,
+    passSpec: RenderPassSpec | ComputePassSpec | undefined,
+    role: string | undefined,
     code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE' | 'SCRATCH_SUBMISSION_STALE_READ'
 ): ScratchDiagnostic {
 
@@ -558,9 +583,9 @@ function createCommandReadEpochDiagnostic(
         subject: command.subject,
         related: [
             resource.subject,
-            passSpec.subject,
+            passSpec?.subject,
             builder.subject,
-        ],
+        ].filter(isDefined),
         message: isFutureRead
             ? 'Command requires a resource content epoch that has not been produced at its read point.'
             : 'Command requires an older resource content epoch than the one available at its read point.',
@@ -570,9 +595,11 @@ function createCommandReadEpochDiagnostic(
             commandId: command.id,
             commandKind: command.commandKind,
             access: 'read',
+            ...(role !== undefined ? { role } : {}),
             resourceId: resource.id,
             resourceKind: resource.resourceKind,
             resourceState: simulated.state,
+            requiredContentEpoch: readRequirement.contentEpoch,
             simulatedContentEpoch: simulated.contentEpoch,
             currentContentEpoch: resource.contentEpoch,
             allocationVersion: resource.allocationVersion,

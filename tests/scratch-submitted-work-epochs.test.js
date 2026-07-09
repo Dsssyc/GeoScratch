@@ -74,6 +74,11 @@ function readResource(resource, contentEpoch = resource.contentEpoch) {
     return { resource, contentEpoch }
 }
 
+function copySource(resource, contentEpoch = resource.contentEpoch) {
+
+    return { resource, contentEpoch }
+}
+
 function createBuffer(runtime, label, usage = GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE) {
 
     return runtime.createBuffer({
@@ -283,11 +288,13 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const { runtime } = await createRuntimeFixture()
         const source = createBuffer(runtime, 'copy source')
         const target = createBuffer(runtime, 'copy target')
+        source._advanceContentEpoch()
         const copy = runtime.createCopyCommand({
             label: 'copy bytes',
-            source,
+            source: copySource(source, 1),
             target,
             byteLength: 16,
+            whenMissing: 'throw',
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
             .copy(copy)
@@ -304,8 +311,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 label: 'copy source',
                 subject: source.subject,
                 access: 'read',
-                contentEpochBefore: 0,
-                contentEpochAfter: 0,
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
                 allocationVersion: 1,
             },
             {
@@ -328,6 +335,361 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         expect(target.isReady).to.equal(true)
 
         await submitted.done
+    })
+
+    it('rejects copy reads of an empty source before creating a command encoder in every validation mode', async() => {
+
+        for (const validation of [ 'throw', 'warn', 'off' ]) {
+            const { runtime, calls } = await createRuntimeFixture()
+            const source = createBuffer(runtime, `empty copy source ${validation}`)
+            const target = createBuffer(runtime, `empty copy target ${validation}`)
+            const copy = runtime.createCopyCommand({
+                label: `copy empty source ${validation}`,
+                source: copySource(source, 0),
+                target,
+                byteLength: 16,
+                whenMissing: 'throw',
+            })
+            const builder = runtime.createSubmission({ validation })
+                .copy(copy)
+
+            const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+                code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
+                severity: 'error',
+                phase: 'command',
+            })
+
+            expect(diagnostic.subject).to.deep.equal(copy.subject)
+            expect(diagnostic.related).to.deep.include(source.subject)
+            expect(diagnostic.related).to.deep.include(builder.subject)
+            expect(diagnostic.related).to.not.deep.include(target.subject)
+            expect(diagnostic.expected).to.deep.equal({ resourceState: 'ready' })
+            expect(diagnostic.actual).to.deep.include({
+                stepIndex: 0,
+                commandId: copy.id,
+                commandKind: 'copy',
+                access: 'read',
+                role: 'source',
+                resourceId: source.id,
+                resourceKind: 'BufferResource',
+                resourceState: 'empty',
+                requiredContentEpoch: 0,
+                simulatedContentEpoch: 0,
+                currentContentEpoch: 0,
+                allocationVersion: 1,
+                whenMissing: 'throw',
+            })
+            expect(source.contentEpoch).to.equal(0)
+            expect(target.contentEpoch).to.equal(0)
+            expect(source.state).to.equal('empty')
+            expect(target.state).to.equal('empty')
+            expect(calls.commandEncoders).to.have.length(0)
+            expect(calls.copies).to.have.length(0)
+            expect(calls.queueSubmissions).to.have.length(0)
+        }
+    })
+
+    it('applies validation mode to copy read-before-write diagnostics', async() => {
+
+        for (const validation of [ 'throw', 'warn', 'off' ]) {
+            const { runtime, calls } = await createRuntimeFixture()
+            const source = createBuffer(runtime, `future copy source ${validation}`)
+            const target = createBuffer(runtime, `future copy target ${validation}`)
+            source._advanceContentEpoch()
+            const copy = runtime.createCopyCommand({
+                label: `copy future source ${validation}`,
+                source: copySource(source, 2),
+                target,
+                byteLength: 16,
+                whenMissing: 'throw',
+            })
+            const builder = runtime.createSubmission({ validation })
+                .copy(copy)
+
+            if (validation === 'throw') {
+                const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+                    code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+
+                expect(diagnostic.subject).to.deep.equal(copy.subject)
+                expect(diagnostic.related).to.deep.include(source.subject)
+                expect(diagnostic.related).to.deep.include(builder.subject)
+                expect(diagnostic.expected).to.deep.equal({ contentEpoch: 2 })
+                expect(diagnostic.actual).to.deep.include({
+                    stepIndex: 0,
+                    commandId: copy.id,
+                    commandKind: 'copy',
+                    access: 'read',
+                    role: 'source',
+                    resourceId: source.id,
+                    resourceKind: 'BufferResource',
+                    resourceState: 'ready',
+                    requiredContentEpoch: 2,
+                    simulatedContentEpoch: 1,
+                    currentContentEpoch: 1,
+                    allocationVersion: 1,
+                    whenMissing: 'throw',
+                })
+                expect(source.contentEpoch).to.equal(1)
+                expect(target.contentEpoch).to.equal(0)
+                expect(calls.commandEncoders).to.have.length(0)
+                expect(calls.copies).to.have.length(0)
+                expect(calls.queueSubmissions).to.have.length(0)
+                continue
+            }
+
+            const submitted = builder.submit()
+
+            if (validation === 'warn') {
+                expect(submitted.diagnostics).to.have.length(1)
+                expect(submitted.diagnostics[0]).to.include({
+                    code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+                expect(submitted.diagnostics[0].expected).to.deep.equal({ contentEpoch: 2 })
+            } else {
+                expect(submitted.diagnostics).to.deep.equal([])
+            }
+            expect(source.contentEpoch).to.equal(1)
+            expect(target.contentEpoch).to.equal(1)
+            expect(calls.commandEncoders).to.have.length(1)
+            expect(calls.copies).to.have.length(1)
+            expect(calls.queueSubmissions).to.have.length(1)
+
+            await submitted.done
+        }
+    })
+
+    it('applies validation mode to copy stale-read diagnostics without mutating on throw', async() => {
+
+        for (const validation of [ 'throw', 'warn', 'off' ]) {
+            const { runtime, calls } = await createRuntimeFixture()
+            const source = createBuffer(runtime, `stale copy source ${validation}`)
+            const target = createBuffer(runtime, `stale copy target ${validation}`)
+            source._advanceContentEpoch()
+            const upload = runtime.createUploadCommand({
+                label: `refresh copy source ${validation}`,
+                target: source,
+                data: new Uint8Array(16),
+            })
+            const copy = runtime.createCopyCommand({
+                label: `copy stale source ${validation}`,
+                source: copySource(source, 1),
+                target,
+                byteLength: 16,
+                whenMissing: 'throw',
+            })
+            const builder = runtime.createSubmission({ validation })
+                .upload(upload)
+                .copy(copy)
+
+            if (validation === 'throw') {
+                const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+                    code: 'SCRATCH_SUBMISSION_STALE_READ',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+
+                expect(diagnostic.subject).to.deep.equal(copy.subject)
+                expect(diagnostic.related).to.deep.include(source.subject)
+                expect(diagnostic.related).to.deep.include(builder.subject)
+                expect(diagnostic.expected).to.deep.equal({ contentEpoch: 1 })
+                expect(diagnostic.actual).to.deep.include({
+                    stepIndex: 1,
+                    commandId: copy.id,
+                    commandKind: 'copy',
+                    access: 'read',
+                    role: 'source',
+                    resourceId: source.id,
+                    resourceKind: 'BufferResource',
+                    resourceState: 'ready',
+                    requiredContentEpoch: 1,
+                    simulatedContentEpoch: 2,
+                    currentContentEpoch: 1,
+                    allocationVersion: 1,
+                    whenMissing: 'throw',
+                })
+                expect(source.contentEpoch).to.equal(1)
+                expect(target.contentEpoch).to.equal(0)
+                expect(source.allocationVersion).to.equal(1)
+                expect(target.allocationVersion).to.equal(1)
+                expect(calls.queueWrites).to.have.length(0)
+                expect(calls.commandEncoders).to.have.length(0)
+                expect(calls.copies).to.have.length(0)
+                expect(calls.queueSubmissions).to.have.length(0)
+                continue
+            }
+
+            const submitted = builder.submit()
+
+            if (validation === 'warn') {
+                expect(submitted.diagnostics).to.have.length(1)
+                expect(submitted.diagnostics[0]).to.include({
+                    code: 'SCRATCH_SUBMISSION_STALE_READ',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+                expect(submitted.diagnostics[0].expected).to.deep.equal({ contentEpoch: 1 })
+            } else {
+                expect(submitted.diagnostics).to.deep.equal([])
+            }
+            expect(source.contentEpoch).to.equal(2)
+            expect(target.contentEpoch).to.equal(1)
+            expect(calls.queueWrites).to.have.length(1)
+            expect(calls.copies).to.have.length(1)
+            expect(calls.queueSubmissions).to.have.length(1)
+
+            await submitted.done
+        }
+    })
+
+    it('allows same-submission upload to satisfy a copy source requiring the produced epoch', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const source = createBuffer(runtime, 'same submission copy source')
+        const target = createBuffer(runtime, 'same submission copy target')
+        const upload = runtime.createUploadCommand({
+            label: 'produce copy source',
+            target: source,
+            data: new Uint8Array(16),
+        })
+        const copy = runtime.createCopyCommand({
+            label: 'copy produced source',
+            source: copySource(source, 1),
+            target,
+            byteLength: 16,
+            whenMissing: 'throw',
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .copy(copy)
+            .submit()
+
+        expect(submitted.diagnostics).to.deep.equal([])
+        expect(source.contentEpoch).to.equal(1)
+        expect(target.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            access: access.access,
+            resourceId: access.resourceId,
+            contentEpochBefore: access.contentEpochBefore,
+            contentEpochAfter: access.contentEpochAfter,
+        }))).to.deep.equal([
+            {
+                stepIndex: 0,
+                stepKind: 'upload',
+                commandKind: 'upload',
+                access: 'write',
+                resourceId: source.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                access: 'read',
+                resourceId: source.id,
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                access: 'write',
+                resourceId: target.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+        ])
+
+        await submitted.done
+    })
+
+    it('allows a same-submission copy target to satisfy a later copy source required epoch', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const firstSource = createBuffer(runtime, 'copy chain source')
+        const firstTarget = createBuffer(runtime, 'copy chain middle')
+        const secondTarget = createBuffer(runtime, 'copy chain target')
+        firstSource._advanceContentEpoch()
+        const firstCopy = runtime.createCopyCommand({
+            label: 'first copy in chain',
+            source: copySource(firstSource, 1),
+            target: firstTarget,
+            byteLength: 16,
+            whenMissing: 'throw',
+        })
+        const secondCopy = runtime.createCopyCommand({
+            label: 'second copy in chain',
+            source: copySource(firstTarget, 1),
+            target: secondTarget,
+            byteLength: 16,
+            whenMissing: 'throw',
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .copy(firstCopy)
+            .copy(secondCopy)
+            .submit()
+
+        expect(submitted.diagnostics).to.deep.equal([])
+        expect(firstSource.contentEpoch).to.equal(1)
+        expect(firstTarget.contentEpoch).to.equal(1)
+        expect(secondTarget.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            access: access.access,
+            label: access.label,
+        }))).to.deep.equal([
+            { stepIndex: 0, stepKind: 'copy', commandKind: 'copy', access: 'read', label: 'copy chain source' },
+            { stepIndex: 0, stepKind: 'copy', commandKind: 'copy', access: 'write', label: 'copy chain middle' },
+            { stepIndex: 1, stepKind: 'copy', commandKind: 'copy', access: 'read', label: 'copy chain middle' },
+            { stepIndex: 1, stepKind: 'copy', commandKind: 'copy', access: 'write', label: 'copy chain target' },
+        ])
+        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ firstTarget.id, secondTarget.id ])
+
+        await submitted.done
+    })
+
+    it('does not let a same-command copy target write satisfy its own source required epoch', async() => {
+
+        const { runtime, calls } = await createRuntimeFixture()
+        const buffer = runtime.createBuffer({
+            label: 'self copy buffer',
+            size: 32,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        buffer._advanceContentEpoch()
+        const copy = runtime.createCopyCommand({
+            label: 'self non-overlap copy',
+            source: copySource(buffer, 2),
+            sourceOffset: 0,
+            target: buffer,
+            targetOffset: 16,
+            byteLength: 16,
+            whenMissing: 'throw',
+        })
+        const builder = runtime.createSubmission({ validation: 'throw' })
+            .copy(copy)
+
+        await expectScratchDiagnostic(() => builder.submit(), {
+            code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+            severity: 'error',
+            phase: 'submission',
+        })
+
+        expect(buffer.contentEpoch).to.equal(1)
+        expect(calls.commandEncoders).to.have.length(0)
+        expect(calls.copies).to.have.length(0)
+        expect(calls.queueSubmissions).to.have.length(0)
     })
 
     it('records query resolve destination writes', async() => {
@@ -889,9 +1251,10 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             data: new Uint8Array(16),
         })
         const copy = runtime.createCopyCommand({
-            source: uploadTarget,
+            source: copySource(uploadTarget, 1),
             target: copyTarget,
             byteLength: 16,
+            whenMissing: 'throw',
         })
         const compute = createCompute(runtime, copyTarget, computeOutput, 1)
         const render = createRender(runtime, renderTarget, {

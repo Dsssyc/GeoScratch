@@ -98,6 +98,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         resource: storageInput,
         contentEpoch: storageInput.contentEpoch,
     }
+    const copySource: scr.CopyCommandSourceDescriptor = {
+        resource: storageOutput,
+        contentEpoch: storageOutput.contentEpoch,
+    }
+    const compatCopySource: scratchCompat.CopyCommandSourceDescriptor = copySource
     const queryDestination: scr.BufferResource = runtime.createBuffer({
         label: 'typed scratch query destination',
         size: 256,
@@ -317,16 +322,18 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const copy: scr.CopyCommand = runtime.createCopyCommand({
         label: 'typed scratch copy',
-        source: storageOutput,
+        source: copySource,
         sourceOffset: 0,
         target: storageInput,
         targetOffset: 0,
         byteLength: 16,
+        whenMissing: 'throw',
     })
     const copyAlias: scr.CopyCommand = runtime.copyCommand({
-        source: storageOutput,
+        source: compatCopySource,
         target: storageInput,
         byteLength: 16,
+        whenMissing: 'throw',
     })
     const querySet: scr.QuerySetResource = runtime.createQuerySet({
         label: 'typed timestamp queries',
@@ -547,6 +554,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void vertexRead
     void storageInputRead
     void compatStorageInputRead
+    void copySource
+    void compatCopySource
     void scratchTextureView
     void textureSet
     void textureTargetPass

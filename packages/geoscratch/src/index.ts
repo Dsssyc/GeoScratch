@@ -43,6 +43,7 @@ export type {
     CommandResourceAccessDescriptor,
     CommandResourceReadDescriptor,
     CopyCommandDescriptor,
+    CopyCommandSourceDescriptor,
     DispatchCommandDescriptor,
     DrawCommandDescriptor,
     DrawVertexBufferBinding,

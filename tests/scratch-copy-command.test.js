@@ -25,6 +25,11 @@ function sourceBytes() {
     ])
 }
 
+function copySource(resource, contentEpoch = resource.contentEpoch) {
+
+    return { resource, contentEpoch }
+}
+
 async function createCopyFixture() {
 
     const fake = createFakeGpu()
@@ -47,11 +52,12 @@ async function createCopyFixture() {
     })
     const copy = runtime.createCopyCommand({
         label: 'copy source slice',
-        source,
+        source: copySource(source, 1),
         sourceOffset: 4,
         target,
         targetOffset: 8,
         byteLength: 16,
+        whenMissing: 'throw',
     })
     const bindLayout = runtime.createBindLayout({
         label: 'copy target bind layout',
@@ -99,8 +105,12 @@ describe('scratch CopyCommand', () => {
 
         expect(fixture.copy).to.be.instanceOf(CopyCommand)
         expect(fixture.copy.commandKind).to.equal('copy')
-        expect(fixture.copy.source).to.equal(fixture.source)
+        expect(fixture.copy.source).to.deep.equal({
+            resource: fixture.source,
+            contentEpoch: 1,
+        })
         expect(fixture.copy.target).to.equal(fixture.target)
+        expect(fixture.copy.whenMissing).to.equal('throw')
         expect(fixture.copy.sourceOffset).to.equal(4)
         expect(fixture.copy.targetOffset).to.equal(8)
         expect(fixture.copy.byteLength).to.equal(16)
@@ -171,44 +181,35 @@ describe('scratch CopyCommand', () => {
         await submitted.done
     })
 
-    it('rejects invalid source and target resources with structured diagnostics', async() => {
+    it('rejects invalid source descriptors with structured diagnostics', async() => {
 
         const fixtureA = await createCopyFixture()
         const fixtureB = await createCopyFixture()
 
+        for (const source of [
+            fixtureA.source,
+            {},
+            { contentEpoch: 0 },
+            { resource: fixtureA.source },
+            { resource: fixtureA.source, contentEpoch: -1 },
+            { resource: fixtureA.source, contentEpoch: 0.5 },
+            { resource: fixtureA.source, contentEpoch: Number.NaN },
+        ]) {
+            await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
+                source,
+                target: fixtureA.target,
+                byteLength: 4,
+                whenMissing: 'throw',
+            }), {
+                code: 'SCRATCH_COMMAND_COPY_SOURCE_INVALID',
+                severity: 'error',
+                phase: 'command',
+            })
+        }
+
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
-            source: {},
+            source: copySource(fixtureB.source),
             target: fixtureA.target,
-            byteLength: 4,
-        }), {
-            code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
-            severity: 'error',
-            phase: 'command',
-        })
-
-        await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
-            source: fixtureA.source,
-            target: {},
-            byteLength: 4,
-        }), {
-            code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
-            severity: 'error',
-            phase: 'command',
-        })
-
-        await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
-            source: fixtureB.source,
-            target: fixtureA.target,
-            byteLength: 4,
-        }), {
-            code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
-            severity: 'error',
-            phase: 'resource',
-        })
-
-        await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
-            source: fixtureA.source,
-            target: fixtureB.target,
             byteLength: 4,
         }), {
             code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
@@ -219,11 +220,61 @@ describe('scratch CopyCommand', () => {
         fixtureA.source.dispose()
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
-            source: fixtureA.source,
+            source: copySource(fixtureA.source),
+            target: fixtureA.target,
+            byteLength: 4,
+            whenMissing: 'throw',
+        }), {
+            code: 'SCRATCH_RESOURCE_DISPOSED',
+            severity: 'error',
+            phase: 'resource',
+        })
+    })
+
+    it('rejects invalid targets and readiness policies with structured diagnostics', async() => {
+
+        const fixtureA = await createCopyFixture()
+        const fixtureB = await createCopyFixture()
+
+        await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
+            source: copySource(fixtureA.source),
+            target: {},
+            byteLength: 4,
+            whenMissing: 'throw',
+        }), {
+            code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
+            severity: 'error',
+            phase: 'command',
+        })
+
+        await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
+            source: copySource(fixtureA.source),
             target: fixtureA.target,
             byteLength: 4,
         }), {
-            code: 'SCRATCH_RESOURCE_DISPOSED',
+            code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
+            severity: 'error',
+            phase: 'command',
+        })
+
+        await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
+            source: copySource(fixtureA.source),
+            target: fixtureA.target,
+            byteLength: 4,
+            whenMissing: 'skip-command',
+        }), {
+            code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
+            severity: 'error',
+            phase: 'command',
+        })
+
+        await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
+            source: copySource(fixtureA.source),
+            target: fixtureB.target,
+            byteLength: 4,
+            whenMissing: 'throw',
+        }), {
+            code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
             severity: 'error',
             phase: 'resource',
         })
@@ -235,9 +286,10 @@ describe('scratch CopyCommand', () => {
         fixtureA.target.dispose()
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
-            source: replacementSource,
+            source: copySource(replacementSource),
             target: fixtureA.target,
             byteLength: 4,
+            whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_DISPOSED',
             severity: 'error',
@@ -258,9 +310,10 @@ describe('scratch CopyCommand', () => {
         })
 
         await expectScratchDiagnostic(() => fixture.runtime.createCopyCommand({
-            source: nonCopySource,
+            source: copySource(nonCopySource),
             target: fixture.target,
             byteLength: 4,
+            whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
@@ -268,9 +321,10 @@ describe('scratch CopyCommand', () => {
         })
 
         await expectScratchDiagnostic(() => fixture.runtime.createCopyCommand({
-            source: fixture.source,
+            source: copySource(fixture.source),
             target: nonCopyTarget,
             byteLength: 4,
+            whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
@@ -287,15 +341,15 @@ describe('scratch CopyCommand', () => {
         })
 
         for (const descriptor of [
-            { source: fixture.source, sourceOffset: -4, target: fixture.target, targetOffset: 0, byteLength: 4 },
-            { source: fixture.source, sourceOffset: 0, target: fixture.target, targetOffset: -4, byteLength: 4 },
-            { source: fixture.source, sourceOffset: 0, target: fixture.target, targetOffset: 0, byteLength: 0 },
-            { source: fixture.source, sourceOffset: 2, target: fixture.target, targetOffset: 0, byteLength: 4 },
-            { source: fixture.source, sourceOffset: 0, target: fixture.target, targetOffset: 2, byteLength: 4 },
-            { source: fixture.source, sourceOffset: 0, target: fixture.target, targetOffset: 0, byteLength: 6 },
-            { source: fixture.source, sourceOffset: 20, target: fixture.target, targetOffset: 0, byteLength: 16 },
-            { source: fixture.source, sourceOffset: 0, target: fixture.target, targetOffset: 20, byteLength: 16 },
-            { source: sameBuffer, sourceOffset: 0, target: sameBuffer, targetOffset: 4, byteLength: 8 },
+            { source: copySource(fixture.source), sourceOffset: -4, target: fixture.target, targetOffset: 0, byteLength: 4, whenMissing: 'throw' },
+            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: -4, byteLength: 4, whenMissing: 'throw' },
+            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: 0, byteLength: 0, whenMissing: 'throw' },
+            { source: copySource(fixture.source), sourceOffset: 2, target: fixture.target, targetOffset: 0, byteLength: 4, whenMissing: 'throw' },
+            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: 2, byteLength: 4, whenMissing: 'throw' },
+            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: 0, byteLength: 6, whenMissing: 'throw' },
+            { source: copySource(fixture.source), sourceOffset: 20, target: fixture.target, targetOffset: 0, byteLength: 16, whenMissing: 'throw' },
+            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: 20, byteLength: 16, whenMissing: 'throw' },
+            { source: copySource(sameBuffer), sourceOffset: 0, target: sameBuffer, targetOffset: 4, byteLength: 8, whenMissing: 'throw' },
         ]) {
             await expectScratchDiagnostic(() => fixture.runtime.createCopyCommand(descriptor), {
                 code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
