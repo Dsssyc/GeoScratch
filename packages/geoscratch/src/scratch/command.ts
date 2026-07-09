@@ -58,6 +58,16 @@ export type CopyCommandSourceDescriptor = {
     contentEpoch: number
 }
 
+export type QuerySetSlotReadDescriptor = {
+    index: number
+    contentEpoch: number
+}
+
+export type ResolveQuerySetSourceDescriptor = {
+    querySet: QuerySetResource
+    slots: QuerySetSlotReadDescriptor[]
+}
+
 export type CommandResourceAccessDescriptor = {
     read: CommandResourceReadDescriptor[]
     write: Resource[]
@@ -107,11 +117,10 @@ export type CopyCommandDescriptor = {
 
 export type ResolveQuerySetCommandDescriptor = {
     label?: string
-    querySet: QuerySetResource
-    firstQuery?: number
-    queryCount: number
+    source: ResolveQuerySetSourceDescriptor
     destination: BufferResource
     destinationOffset?: number
+    whenMissing: 'throw'
 }
 
 export type TextureUploadOrigin = {
@@ -187,11 +196,15 @@ type CopySourceDiagnosticInput = {
 
 type ResolveQuerySetDiagnosticInput = {
     runtime?: ScratchRuntime
+    source?: unknown
     querySet?: unknown
+    slots?: unknown
     firstQuery?: unknown
     queryCount?: unknown
     destination?: unknown
     destinationOffset?: unknown
+    whenMissing?: unknown
+    legacyInputs?: string[]
     reason: string
 }
 
@@ -1076,11 +1089,13 @@ export interface ResolveQuerySetCommand {
     id: string
     label?: string
     commandKind: 'resolve-query-set'
+    source: ResolveQuerySetSourceDescriptor
     querySet: QuerySetResource
     firstQuery: number
     queryCount: number
     destination: BufferResource
     destinationOffset: number
+    whenMissing: 'throw'
     isDisposed: boolean
 }
 
@@ -1090,46 +1105,41 @@ export class ResolveQuerySetCommand {
 
         runtime.assertActive()
 
-        const querySet = descriptor.querySet
-        if (!(querySet instanceof QuerySetResource)) {
-            throwResolveQuerySetDiagnostic({
-                runtime,
-                querySet,
-                firstQuery: descriptor.firstQuery,
-                queryCount: descriptor.queryCount,
-                destination: descriptor.destination,
-                destinationOffset: descriptor.destinationOffset,
-                reason: 'querySet',
-            })
-        }
+        const normalizedDescriptor = normalizeResolveDescriptor(runtime, descriptor)
+        const source = normalizeResolveSource(runtime, normalizedDescriptor.source)
 
-        querySet.assertRuntime(runtime)
-
-        const destination = descriptor.destination
+        const destination = normalizedDescriptor.destination
         if (!(destination instanceof BufferResource)) {
             throwResolveQuerySetDiagnostic({
                 runtime,
-                querySet,
-                firstQuery: descriptor.firstQuery,
-                queryCount: descriptor.queryCount,
+                source: normalizedDescriptor.source,
+                querySet: source.querySet,
+                slots: source.slots,
+                firstQuery: source.slots[0]?.index,
+                queryCount: source.slots.length,
                 destination,
-                destinationOffset: descriptor.destinationOffset,
+                destinationOffset: normalizedDescriptor.destinationOffset,
+                whenMissing: normalizedDescriptor.whenMissing,
                 reason: 'destination',
             })
         }
 
         destination.assertRuntime(runtime)
         validateResolveDestinationUsage(runtime, destination)
+        const destinationOffset = normalizeResolveDestinationOffset(runtime, normalizedDescriptor.destinationOffset ?? 0, source)
+        validateResolveReadinessPolicy(runtime, normalizedDescriptor.whenMissing, source, destination, destinationOffset)
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
+        if (normalizedDescriptor.label !== undefined) this.label = normalizedDescriptor.label
         this.commandKind = 'resolve-query-set'
-        this.querySet = querySet
-        this.firstQuery = normalizeResolveFirstQuery(runtime, descriptor.firstQuery ?? 0)
-        this.queryCount = normalizeResolveQueryCount(runtime, descriptor.queryCount)
+        this.source = source
+        this.querySet = source.querySet
+        this.firstQuery = source.slots[0]!.index
+        this.queryCount = source.slots.length
         this.destination = destination
-        this.destinationOffset = normalizeResolveDestinationOffset(runtime, descriptor.destinationOffset ?? 0)
+        this.destinationOffset = destinationOffset
+        this.whenMissing = normalizedDescriptor.whenMissing
         this.isDisposed = false
 
         validateResolveQuerySetRange(this)
@@ -2511,31 +2521,145 @@ function validateResolveDestinationUsage(runtime: ScratchRuntime, destination: B
     })
 }
 
-function normalizeResolveFirstQuery(runtime: ScratchRuntime, firstQuery: number): number {
+function normalizeResolveDescriptor(runtime: ScratchRuntime, descriptor: unknown): ResolveQuerySetCommandDescriptor {
 
-    if (!Number.isInteger(firstQuery) || firstQuery < 0) {
-        throwResolveQuerySetDiagnostic({ runtime, firstQuery, reason: 'firstQuery' })
+    if (!isRecord(descriptor)) {
+        throwResolveQuerySetDiagnostic({ runtime, reason: 'descriptor' })
     }
 
-    return firstQuery
-}
+    const legacyInputs = [ 'querySet', 'firstQuery', 'queryCount' ]
+        .filter(key => Object.prototype.hasOwnProperty.call(descriptor, key))
 
-function normalizeResolveQueryCount(runtime: ScratchRuntime, queryCount: number): number {
-
-    if (!Number.isInteger(queryCount) || queryCount <= 0) {
-        throwResolveQuerySetDiagnostic({ runtime, queryCount, reason: 'queryCount' })
+    if (legacyInputs.length > 0) {
+        throwResolveQuerySetDiagnostic({
+            runtime,
+            source: descriptor.source,
+            querySet: descriptor.querySet,
+            firstQuery: descriptor.firstQuery,
+            queryCount: descriptor.queryCount,
+            destination: descriptor.destination,
+            destinationOffset: descriptor.destinationOffset,
+            whenMissing: descriptor.whenMissing,
+            legacyInputs,
+            reason: 'legacyDescriptor',
+        })
     }
 
-    return queryCount
+    return descriptor as ResolveQuerySetCommandDescriptor
 }
 
-function normalizeResolveDestinationOffset(runtime: ScratchRuntime, destinationOffset: number): number {
+function normalizeResolveSource(runtime: ScratchRuntime, source: unknown): ResolveQuerySetSourceDescriptor {
+
+    if (!isRecord(source)) {
+        throwResolveQuerySetDiagnostic({ runtime, source, reason: 'source' })
+    }
+
+    const querySet = source.querySet
+    if (!(querySet instanceof QuerySetResource)) {
+        throwResolveQuerySetDiagnostic({
+            runtime,
+            source,
+            querySet,
+            slots: source.slots,
+            reason: 'querySet',
+        })
+    }
+
+    querySet.assertRuntime(runtime)
+
+    const slots = normalizeResolveQuerySlots(runtime, querySet, source.slots, source)
+
+    return {
+        querySet,
+        slots,
+    }
+}
+
+function normalizeResolveQuerySlots(
+    runtime: ScratchRuntime,
+    querySet: QuerySetResource,
+    slots: unknown,
+    source: unknown
+): QuerySetSlotReadDescriptor[] {
+
+    if (!Array.isArray(slots) || slots.length === 0) {
+        throwResolveQuerySetDiagnostic({ runtime, source, querySet, slots, reason: 'slots' })
+    }
+
+    const normalized: QuerySetSlotReadDescriptor[] = []
+
+    for (const [slotOffset, slot] of slots.entries()) {
+        if (!isRecord(slot)) {
+            throwResolveQuerySetDiagnostic({ runtime, source, querySet, slots, reason: 'slot' })
+        }
+
+        const index = slot.index
+        if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= querySet.count) {
+            throwResolveQuerySetDiagnostic({ runtime, source, querySet, slots, reason: 'slotIndex' })
+        }
+
+        const contentEpoch = slot.contentEpoch
+        if (typeof contentEpoch !== 'number' || !Number.isFinite(contentEpoch) || !Number.isInteger(contentEpoch) || contentEpoch < 0) {
+            throwResolveQuerySetDiagnostic({ runtime, source, querySet, slots, reason: 'slotContentEpoch' })
+        }
+
+        if (slotOffset > 0 && index !== normalized[slotOffset - 1].index + 1) {
+            throwResolveQuerySetDiagnostic({ runtime, source, querySet, slots, reason: 'slotRange' })
+        }
+
+        normalized.push({
+            index,
+            contentEpoch,
+        })
+    }
+
+    return normalized
+}
+
+function normalizeResolveDestinationOffset(
+    runtime: ScratchRuntime,
+    destinationOffset: number,
+    source?: ResolveQuerySetSourceDescriptor
+): number {
 
     if (!Number.isInteger(destinationOffset) || destinationOffset < 0 || destinationOffset % 256 !== 0) {
-        throwResolveQuerySetDiagnostic({ runtime, destinationOffset, reason: 'destinationOffset' })
+        throwResolveQuerySetDiagnostic({
+            runtime,
+            source,
+            querySet: source?.querySet,
+            slots: source?.slots,
+            firstQuery: source?.slots[0]?.index,
+            queryCount: source?.slots.length,
+            destinationOffset,
+            reason: 'destinationOffset',
+        })
     }
 
     return destinationOffset
+}
+
+function validateResolveReadinessPolicy(
+    runtime: ScratchRuntime,
+    whenMissing: unknown,
+    source: ResolveQuerySetSourceDescriptor,
+    destination: BufferResource,
+    destinationOffset: number
+) {
+
+    if (whenMissing === 'throw') return
+
+    throwResolveQuerySetDiagnostic({
+        runtime,
+        source,
+        querySet: source.querySet,
+        slots: source.slots,
+        firstQuery: source.slots[0]?.index,
+        queryCount: source.slots.length,
+        destination,
+        destinationOffset,
+        whenMissing,
+        reason: 'whenMissing',
+    })
 }
 
 function validateResolveQuerySetRange(command: ResolveQuerySetCommand) {
@@ -2544,10 +2668,12 @@ function validateResolveQuerySetRange(command: ResolveQuerySetCommand) {
         throwResolveQuerySetDiagnostic({
             runtime: command.runtime,
             querySet: command.querySet,
+            slots: command.source.slots,
             firstQuery: command.firstQuery,
             queryCount: command.queryCount,
             destination: command.destination,
             destinationOffset: command.destinationOffset,
+            whenMissing: command.whenMissing,
             reason: 'queryRange',
         })
     }
@@ -2557,10 +2683,12 @@ function validateResolveQuerySetRange(command: ResolveQuerySetCommand) {
         throwResolveQuerySetDiagnostic({
             runtime: command.runtime,
             querySet: command.querySet,
+            slots: command.source.slots,
             firstQuery: command.firstQuery,
             queryCount: command.queryCount,
             destination: command.destination,
             destinationOffset: command.destinationOffset,
+            whenMissing: command.whenMissing,
             reason: 'destinationRange',
         })
     }
@@ -2568,11 +2696,15 @@ function validateResolveQuerySetRange(command: ResolveQuerySetCommand) {
 
 function throwResolveQuerySetDiagnostic({
     runtime,
+    source,
     querySet,
+    slots,
     firstQuery,
     queryCount,
     destination,
     destinationOffset,
+    whenMissing,
+    legacyInputs,
     reason,
 }: ResolveQuerySetDiagnosticInput): never {
 
@@ -2586,21 +2718,32 @@ function throwResolveQuerySetDiagnostic({
             diagnosticSubjectOf(querySet),
             diagnosticSubjectOf(destination),
         ].filter(isDefined),
-        message: 'ResolveQuerySetCommand requires a QuerySetResource source, BufferResource destination, and valid query and byte ranges.',
+        message: 'ResolveQuerySetCommand requires an explicit QuerySetResource slot source, BufferResource destination, and valid query and byte ranges.',
         expected: {
-            querySet: 'QuerySetResource',
-            firstQuery: 'non-negative integer within querySet.count',
-            queryCount: 'positive integer fitting inside querySet.count',
+            source: {
+                querySet: 'QuerySetResource',
+                slots: 'non-empty contiguous QuerySetSlotReadDescriptor[]',
+            },
+            slot: {
+                index: 'integer within querySet.count',
+                contentEpoch: 'non-negative integer',
+            },
             destination: 'BufferResource with GPUBufferUsage.QUERY_RESOLVE',
             destinationOffset: 'non-negative integer aligned to 256 bytes with 8 bytes per query available',
+            whenMissing: 'throw',
+            legacyInputs: 'no top-level querySet, firstQuery, or queryCount fields',
         },
         actual: {
             reason,
+            legacyInputs,
+            source: describeValue(source),
             querySet: describeValue(querySet),
+            slots,
             firstQuery,
             queryCount,
             destination: describeValue(destination),
             destinationOffset,
+            whenMissing,
         },
     })
 }

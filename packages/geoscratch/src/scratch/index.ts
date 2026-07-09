@@ -16,6 +16,7 @@ export { BufferResource } from './buffer.js'
 export { TextureResource } from './texture.js'
 export { SamplerResource } from './sampler.js'
 export { QuerySetResource } from './query-set.js'
+export type { QuerySetSlotState } from './query-set.js'
 export { BindLayout, BindSet } from './binding.js'
 export type {
     BindLayoutDescriptor,
@@ -69,7 +70,9 @@ export type {
     DrawCommandDescriptor,
     DrawVertexBufferBinding,
     EndOcclusionQueryCommandDescriptor,
+    QuerySetSlotReadDescriptor,
     ResolveQuerySetCommandDescriptor,
+    ResolveQuerySetSourceDescriptor,
     ResourceReadinessPolicy,
     StaticDispatchCount,
     StaticDrawCount,

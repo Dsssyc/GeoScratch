@@ -302,16 +302,21 @@ Query results are not CPU-visible until explicitly resolved and read back:
 
 ```ts
 const resolveTiming = scratch.command.resolveQuerySet({
-    querySet: timingQueries,
-    first: 0,
-    count: 2,
+    source: {
+        querySet: timingQueries,
+        slots: [
+            { index: 0, contentEpoch: 1 },
+            { index: 1, contentEpoch: 1 },
+        ],
+    },
     destination: timingBuffer,
     destinationOffset: 0,
+    whenMissing: 'throw',
 })
 
 const submitted = scratch.submission()
     .compute(simulationPass, [simulateParticles])
-    .copy([resolveTiming])
+    .resolve(resolveTiming)
     .submit()
 
 const timingReadback = scratch.readback({
@@ -321,7 +326,13 @@ const timingReadback = scratch.readback({
         view: 'u64',
     },
     after: submitted,
-    provenance: { querySet: timingQueries, first: 0, count: 2 },
+    provenance: {
+        querySet: timingQueries,
+        slots: [
+            { index: 0, contentEpoch: 1 },
+            { index: 1, contentEpoch: 1 },
+        ],
+    },
 })
 
 const timingValues = await timingReadback.toBigUint64Array()

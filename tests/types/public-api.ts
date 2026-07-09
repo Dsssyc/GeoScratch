@@ -340,6 +340,18 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         type: 'timestamp',
         count: 2,
     })
+    const querySlotState: scr.QuerySetSlotState | undefined = querySet.slotStates[0]
+    const querySlotRead: scr.QuerySetSlotReadDescriptor = {
+        index: 0,
+        contentEpoch: 1,
+    }
+    const queryResolveSource: scr.ResolveQuerySetSourceDescriptor = {
+        querySet,
+        slots: [
+            querySlotRead,
+            { index: 1, contentEpoch: 1 },
+        ],
+    }
     const querySetAlias: scr.QuerySetResource = runtime.querySet({
         type: 'occlusion',
         count: 1,
@@ -359,17 +371,23 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const endOcclusionAlias: scr.EndOcclusionQueryCommand = runtime.endOcclusionQueryCommand()
     const resolveQueries: scr.ResolveQuerySetCommand = runtime.createResolveQuerySetCommand({
         label: 'typed query resolve',
-        querySet,
-        firstQuery: 0,
-        queryCount: 2,
+        source: queryResolveSource,
         destination: queryDestination,
         destinationOffset: 0,
+        whenMissing: 'throw',
     })
     const resolveAlias: scr.ResolveQuerySetCommand = runtime.resolveQuerySetCommand({
-        querySet,
-        queryCount: 1,
+        source: {
+            querySet,
+            slots: [
+                { index: 0, contentEpoch: 1 },
+            ],
+        },
         destination: queryDestination,
+        whenMissing: 'throw',
     })
+    const resolveSourceQuerySet: scr.QuerySetResource = resolveQueries.source.querySet
+    const resolveSourceSlotEpoch: number = resolveQueries.source.slots[0].contentEpoch
     const scratchPipeline: scr.ScratchRenderPipeline = runtime.createRenderPipeline({
         label: 'typed scratch pipeline',
         program,
@@ -404,6 +422,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatDrawResources: scratchCompat.CommandResourceAccessDescriptor = compatDraw.resources
     const compatDrawReadResource: scratchCompat.Resource = compatDrawResources.read[0].resource
     const compatDrawReadContentEpoch: number = compatDrawResources.read[0].contentEpoch
+    const compatQuerySlotState: scratchCompat.QuerySetSlotState | undefined = querySet.slotStates[0]
+    const compatQueryResolveSource: scratchCompat.ResolveQuerySetSourceDescriptor = resolveQueries.source
     const passSpec: scr.RenderPassSpec = runtime.createRenderPass({
         color: [ {
             target: surface,
@@ -569,6 +589,13 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void copyAlias
     void querySet
     void querySetAlias
+    void querySlotState
+    void querySlotRead
+    void queryResolveSource
+    void resolveSourceQuerySet
+    void resolveSourceSlotEpoch
+    void compatQuerySlotState
+    void compatQueryResolveSource
     void normalizedRequirement
     void compatProgramBufferRequirement
     void beginOcclusion

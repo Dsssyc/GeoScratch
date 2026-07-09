@@ -184,15 +184,20 @@ Query commands expose WebGPU query mechanics without inventing profiling abstrac
 ```ts
 const resolveTiming = scratch.command.resolveQuerySet({
     label: 'resolve timing',
-    querySet: timingQueries,
-    first: 0,
-    count: 2,
+    source: {
+        querySet: timingQueries,
+        slots: [
+            { index: 0, contentEpoch: 1 },
+            { index: 1, contentEpoch: 1 },
+        ],
+    },
     destination: timingBuffer,
     destinationOffset: 0,
+    whenMissing: 'throw',
 })
 ```
 
-`ResolveQuerySetCommand` is a copy/resolve command. Its source is an indexed query range, and its destination must be a buffer with query-resolve usage plus any later copy/readback usage the workflow needs. Later CPU access still uses `ReadbackOperation`.
+`ResolveQuerySetCommand` is a copy/resolve command. Its source is an explicit contiguous set of indexed query slots with required slot content epochs, and its destination must be a buffer with query-resolve usage plus any later copy/readback usage the workflow needs. Later CPU access still uses `ReadbackOperation`.
 
 Occlusion query brackets are render-pass-only command-like encoder actions:
 

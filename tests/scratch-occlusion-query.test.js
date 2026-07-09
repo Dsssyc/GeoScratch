@@ -16,6 +16,11 @@ const GPU_BUFFER_USAGE_QUERY_RESOLVE = 0x200
 const GPU_BUFFER_USAGE_UNIFORM = 0x40
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
+function querySlots(indices, contentEpoch) {
+
+    return indices.map(index => ({ index, contentEpoch }))
+}
+
 async function createOcclusionFixture() {
 
     const fake = createFakeGpu()
@@ -76,11 +81,13 @@ async function createOcclusionFixture() {
     })
     const resolve = runtime.createResolveQuerySetCommand({
         label: 'resolve tile visibility',
-        querySet,
-        firstQuery: 2,
-        queryCount: 1,
+        source: {
+            querySet,
+            slots: querySlots([ 2 ], 1),
+        },
         destination,
         destinationOffset: 0,
+        whenMissing: 'throw',
     })
     const bindLayout = runtime.createBindLayout({
         label: 'visibility destination bind layout',
@@ -162,6 +169,7 @@ describe('scratch occlusion query bracket commands', () => {
             { type: 'end' },
         ])
         expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 1, 0 ])
+        expect(fixture.querySet.slotStates).to.deep.equal([ 'empty', 'empty', 'ready', 'empty' ])
         expect(fixture.querySet.allocationVersion).to.equal(queryAllocationVersion)
 
         await submitted.done
@@ -186,6 +194,12 @@ describe('scratch occlusion query bracket commands', () => {
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 
         expect(fixture.resolve).to.be.instanceOf(ResolveQuerySetCommand)
+        expect(fixture.resolve.source).to.deep.equal({
+            querySet: fixture.querySet,
+            slots: [
+                { index: 2, contentEpoch: 1 },
+            ],
+        })
         expect(readback).to.be.instanceOf(ReadbackOperation)
         expect(fixture.calls.resolveQueries).to.deep.equal([
             {
@@ -198,8 +212,49 @@ describe('scratch occlusion query bracket commands', () => {
         ])
         expect(view.getBigUint64(0, true)).to.equal(1n)
         expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 1, 0 ])
+        expect(fixture.querySet.slotStates).to.deep.equal([ 'empty', 'empty', 'ready', 'empty' ])
         expect(fixture.destination.contentEpoch).to.equal(1)
         expect(readback.state).to.equal('consumed')
+    })
+
+    it('rejects resolving occlusion slots before the producing render pass', async() => {
+
+        const fixture = await createOcclusionFixture()
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .resolve(fixture.resolve)
+            .render(fixture.pass, [ fixture.begin, fixture.draw, fixture.end ])
+
+        const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+            code: 'SCRATCH_QUERY_RESOLVE_UNWRITTEN_RANGE',
+            severity: 'error',
+            phase: 'query',
+        })
+
+        expect(diagnostic.subject).to.deep.equal(fixture.resolve.subject)
+        expect(diagnostic.related).to.deep.include(fixture.querySet.subject)
+        expect(diagnostic.related).to.deep.include(builder.subject)
+        expect(diagnostic.actual).to.deep.include({
+            submissionId: builder.id,
+            stepIndex: 0,
+            commandId: fixture.resolve.id,
+            querySetId: fixture.querySet.id,
+            queryType: 'occlusion',
+            slotIndex: 2,
+            firstQuery: 2,
+            queryCount: 1,
+            requiredContentEpoch: 1,
+            simulatedContentEpoch: 0,
+            currentContentEpoch: 0,
+            simulatedSlotState: 'empty',
+            whenMissing: 'throw',
+        })
+        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 0, 0 ])
+        expect(fixture.querySet.slotStates).to.deep.equal([ 'empty', 'empty', 'empty', 'empty' ])
+        expect(fixture.destination.contentEpoch).to.equal(0)
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.resolveQueries).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
     })
 
     it('does not rebuild BindSet only because a resolved occlusion buffer contentEpoch changes', async() => {

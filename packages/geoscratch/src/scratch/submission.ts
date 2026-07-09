@@ -7,9 +7,10 @@ import {
 } from './diagnostics.js'
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
-import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, QuerySetSlotReadDescriptor, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
+import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
 import type { Resource, ResourceState } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
@@ -98,6 +99,13 @@ type ResourceSimulationState = {
 }
 
 type ReadinessSimulation = Map<string, ResourceSimulationState>
+
+type QuerySlotSimulationState = {
+    state: QuerySetSlotState
+    contentEpoch: number
+}
+
+type QuerySlotSimulation = Map<string, QuerySlotSimulationState>
 
 export interface SubmissionBuilder {
     runtime: ScratchRuntime
@@ -299,6 +307,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
 
     const diagnostics: ScratchDiagnostic[] = []
     const readiness: ReadinessSimulation = new Map()
+    const querySlots: QuerySlotSimulation = new Map()
 
     for (const [stepIndex, step] of builder.steps.entries()) {
         if (step.kind === 'upload') {
@@ -316,6 +325,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
 
         if (step.kind === 'resolve') {
             validateResolveStep(builder, step)
+            validateResolveReadiness(builder, step, stepIndex, querySlots, diagnostics)
             markSimulatedReady(readiness, step.command.destination)
             continue
         }
@@ -323,6 +333,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
         if (step.kind === 'compute') {
             validateComputeStep(builder, step)
             validateComputeReadiness(builder, step, stepIndex, readiness, diagnostics)
+            markSimulatedTimestampWrites(querySlots, step.passSpec.timestampWrites)
             continue
         }
 
@@ -331,6 +342,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
             diagnostics.push(...collectRenderPassResourceConflictDiagnostics(builder, step, stepIndex))
         }
         validateRenderReadiness(builder, step, stepIndex, readiness, diagnostics)
+        markSimulatedRenderQueryWrites(querySlots, step)
     }
 
     return createScratchDiagnosticReport(diagnostics)
@@ -412,6 +424,50 @@ function validateResolveStep(builder: SubmissionBuilder, step: ResolveStep) {
     command.assertRuntime(builder.runtime)
 }
 
+function validateResolveReadiness(
+    builder: SubmissionBuilder,
+    step: ResolveStep,
+    stepIndex: number,
+    querySlots: QuerySlotSimulation,
+    diagnostics: ScratchDiagnostic[]
+): void {
+
+    const command = step.command
+
+    for (const slot of command.source.slots) {
+        const simulated = simulatedQuerySlotState(querySlots, command.source.querySet, slot.index)
+
+        if (command.whenMissing === 'throw' && simulated.state !== 'ready') {
+            throwQuerySlotNotReadyDiagnostic(builder, stepIndex, command, slot, simulated)
+        }
+
+        if (builder.validation === 'off' || simulated.state !== 'ready') continue
+
+        if (slot.contentEpoch > simulated.contentEpoch) {
+            diagnostics.push(createQuerySlotEpochDiagnostic(
+                builder,
+                stepIndex,
+                command,
+                slot,
+                simulated,
+                'SCRATCH_SUBMISSION_READ_BEFORE_WRITE'
+            ))
+            continue
+        }
+
+        if (slot.contentEpoch < simulated.contentEpoch) {
+            diagnostics.push(createQuerySlotEpochDiagnostic(
+                builder,
+                stepIndex,
+                command,
+                slot,
+                simulated,
+                'SCRATCH_SUBMISSION_STALE_READ'
+            ))
+        }
+    }
+}
+
 function validateComputeReadiness(
     builder: SubmissionBuilder,
     step: ComputeStep,
@@ -448,6 +504,36 @@ function validateRenderReadiness(
     for (const attachment of step.passSpec.color) {
         if (attachment.target instanceof TextureResource) {
             markSimulatedReady(readiness, attachment.target)
+        }
+    }
+}
+
+function markSimulatedTimestampWrites(querySlots: QuerySlotSimulation, timestampWrites: ComputePassSpec['timestampWrites']): void {
+
+    if (timestampWrites === undefined) return
+
+    const indices = [ timestampWrites.begin, timestampWrites.end ].filter((value): value is number => value !== undefined)
+    for (const index of new Set(indices)) {
+        markSimulatedQuerySlotReady(querySlots, timestampWrites.querySet, index)
+    }
+}
+
+function markSimulatedRenderQueryWrites(querySlots: QuerySlotSimulation, step: RenderStep): void {
+
+    markSimulatedTimestampWrites(querySlots, step.passSpec.timestampWrites)
+
+    let activeCommand: BeginOcclusionQueryCommand | undefined
+    for (const command of step.commands) {
+        if (command.commandKind === 'begin-occlusion-query') {
+            activeCommand = command
+            continue
+        }
+
+        if (command.commandKind !== 'end-occlusion-query') continue
+
+        if (activeCommand !== undefined) {
+            markSimulatedQuerySlotReady(querySlots, activeCommand.querySet, activeCommand.index)
+            activeCommand = undefined
         }
     }
 }
@@ -516,6 +602,120 @@ function markSimulatedReady(readiness: ReadinessSimulation, resource: Resource):
     readiness.set(resource.id, {
         state: 'ready',
         contentEpoch: simulated.contentEpoch + 1,
+    })
+}
+
+function simulatedQuerySlotState(
+    querySlots: QuerySlotSimulation,
+    querySet: QuerySetResource,
+    index: number
+): QuerySlotSimulationState {
+
+    return querySlots.get(querySlotKey(querySet, index)) ?? {
+        state: querySet.slotStates[index] ?? 'empty',
+        contentEpoch: querySet.slotContentEpochs[index] ?? 0,
+    }
+}
+
+function markSimulatedQuerySlotReady(querySlots: QuerySlotSimulation, querySet: QuerySetResource, index: number): void {
+
+    const simulated = simulatedQuerySlotState(querySlots, querySet, index)
+    querySlots.set(querySlotKey(querySet, index), {
+        state: 'ready',
+        contentEpoch: simulated.contentEpoch + 1,
+    })
+}
+
+function querySlotKey(querySet: QuerySetResource, index: number): string {
+
+    return `${querySet.id}:${index}`
+}
+
+function throwQuerySlotNotReadyDiagnostic(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    command: ResolveQuerySetCommand,
+    slot: QuerySetSlotReadDescriptor,
+    simulated: QuerySlotSimulationState
+): never {
+
+    const querySet = command.source.querySet
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_QUERY_RESOLVE_UNWRITTEN_RANGE',
+        severity: 'error',
+        phase: 'query',
+        subject: command.subject,
+        related: [
+            querySet.subject,
+            builder.subject,
+        ],
+        message: 'ResolveQuerySetCommand source query slot is not ready.',
+        expected: { slotState: 'ready' },
+        actual: {
+            submissionId: builder.id,
+            stepIndex,
+            commandId: command.id,
+            commandKind: command.commandKind,
+            access: 'read',
+            role: 'source',
+            querySetId: querySet.id,
+            queryType: querySet.type,
+            slotIndex: slot.index,
+            firstQuery: command.firstQuery,
+            queryCount: command.queryCount,
+            requiredContentEpoch: slot.contentEpoch,
+            simulatedContentEpoch: simulated.contentEpoch,
+            currentContentEpoch: querySet.slotContentEpochs[slot.index] ?? 0,
+            simulatedSlotState: simulated.state,
+            whenMissing: command.whenMissing,
+        },
+    })
+}
+
+function createQuerySlotEpochDiagnostic(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    command: ResolveQuerySetCommand,
+    slot: QuerySetSlotReadDescriptor,
+    simulated: QuerySlotSimulationState,
+    code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE' | 'SCRATCH_SUBMISSION_STALE_READ'
+): ScratchDiagnostic {
+
+    const querySet = command.source.querySet
+    const isFutureRead = code === 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE'
+
+    return createScratchDiagnostic({
+        code,
+        severity: 'error',
+        phase: 'submission',
+        subject: command.subject,
+        related: [
+            querySet.subject,
+            builder.subject,
+        ],
+        message: isFutureRead
+            ? 'ResolveQuerySetCommand requires a query slot content epoch that has not been produced at its read point.'
+            : 'ResolveQuerySetCommand requires an older query slot content epoch than the one available at its read point.',
+        expected: { contentEpoch: slot.contentEpoch },
+        actual: {
+            submissionId: builder.id,
+            stepIndex,
+            commandId: command.id,
+            commandKind: command.commandKind,
+            access: 'read',
+            role: 'source',
+            querySetId: querySet.id,
+            queryType: querySet.type,
+            slotIndex: slot.index,
+            firstQuery: command.firstQuery,
+            queryCount: command.queryCount,
+            requiredContentEpoch: slot.contentEpoch,
+            simulatedContentEpoch: simulated.contentEpoch,
+            currentContentEpoch: querySet.slotContentEpochs[slot.index] ?? 0,
+            simulatedSlotState: simulated.state,
+            whenMissing: command.whenMissing,
+        },
     })
 }
 

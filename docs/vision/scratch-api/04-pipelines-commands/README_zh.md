@@ -159,15 +159,20 @@ Query command 暴露 WebGPU query 机制，但不发明平台并不提供的 pro
 ```ts
 const resolveTiming = scratch.command.resolveQuerySet({
     label: 'resolve timing',
-    querySet: timingQueries,
-    first: 0,
-    count: 2,
+    source: {
+        querySet: timingQueries,
+        slots: [
+            { index: 0, contentEpoch: 1 },
+            { index: 1, contentEpoch: 1 },
+        ],
+    },
     destination: timingBuffer,
     destinationOffset: 0,
+    whenMissing: 'throw',
 })
 ```
 
-`ResolveQuerySetCommand` 是 copy/resolve command。它的 source 是 indexed query range，destination 必须是带有 query-resolve usage，以及该 workflow 后续所需 copy/readback usage 的 buffer。后续 CPU 访问仍然使用 `ReadbackOperation`。
+`ResolveQuerySetCommand` 是 copy/resolve command。它的 source 是显式连续 indexed query slots，并声明每个 slot 需要的 content epoch；destination 必须是带有 query-resolve usage，以及该 workflow 后续所需 copy/readback usage 的 buffer。后续 CPU 访问仍然使用 `ReadbackOperation`。
 
 Occlusion query bracket 是 render-pass-only 的 command-like encoder action:
 

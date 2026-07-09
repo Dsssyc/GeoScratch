@@ -5,6 +5,7 @@ import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type QuerySetType = 'timestamp' | 'occlusion'
+export type QuerySetSlotState = 'empty' | 'ready'
 
 const QUERY_SET_TYPES = new Set<QuerySetType>([ 'timestamp', 'occlusion' ])
 
@@ -17,6 +18,7 @@ export type QuerySetResourceDescriptor = {
 export interface QuerySetResource {
     type: QuerySetType
     count: number
+    slotStates: QuerySetSlotState[]
     slotContentEpochs: number[]
     gpuQuerySet: GPUQuerySet
 }
@@ -35,6 +37,7 @@ export class QuerySetResource extends Resource {
 
         this.type = normalizedDescriptor.type
         this.count = normalizedDescriptor.count
+        this.slotStates = Array.from({ length: this.count }, () => 'empty')
         this.slotContentEpochs = Array.from({ length: this.count }, () => 0)
         this.gpuQuerySet = runtime.device.createQuerySet(normalizedDescriptor)
     }
@@ -70,6 +73,7 @@ export class QuerySetResource extends Resource {
     _advanceSlotContentEpoch(index: number): void {
 
         this.slotContentEpochs[index] = (this.slotContentEpochs[index] ?? 0) + 1
+        this.slotStates[index] = 'ready'
     }
 }
 

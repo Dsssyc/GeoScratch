@@ -79,6 +79,11 @@ function copySource(resource, contentEpoch = resource.contentEpoch) {
     return { resource, contentEpoch }
 }
 
+function querySlots(indices, contentEpoch) {
+
+    return indices.map(index => ({ index, contentEpoch }))
+}
+
 function createBuffer(runtime, label, usage = GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE) {
 
     return runtime.createBuffer({
@@ -700,6 +705,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             type: 'timestamp',
             count: 2,
         })
+        querySet._advanceSlotContentEpoch(0)
+        querySet._advanceSlotContentEpoch(1)
         const destination = createBuffer(
             runtime,
             'query destination',
@@ -707,9 +714,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         )
         const resolve = runtime.createResolveQuerySetCommand({
             label: 'resolve queries',
-            querySet,
-            queryCount: 2,
+            source: {
+                querySet,
+                slots: querySlots([ 0, 1 ], 1),
+            },
             destination,
+            whenMissing: 'throw',
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
             .resolve(resolve)
@@ -732,6 +742,9 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             },
         ])
         expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ destination.id ])
+        expect(submitted.resourceAccesses.map(access => access.resourceId)).to.not.include(querySet.id)
+        expect(querySet.slotContentEpochs).to.deep.equal([ 1, 1 ])
+        expect(querySet.slotStates).to.deep.equal([ 'ready', 'ready' ])
         expect(destination.state).to.equal('ready')
         expect(destination.isReady).to.equal(true)
 
