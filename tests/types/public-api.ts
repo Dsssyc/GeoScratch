@@ -349,7 +349,13 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         byteLength: 16,
         whenMissing: 'throw',
     })
-    const bufferCopyDescriptor: scr.BufferCopyCommandDescriptor = {
+    const texelCopyBufferLayout: scr.TexelCopyBufferLayout = {
+        offset: 0,
+        bytesPerRow: 256,
+        rowsPerImage: 2,
+    }
+    const compatTexelCopyBufferLayout: scratchCompat.TexelCopyBufferLayout = texelCopyBufferLayout
+    const bufferCopyDescriptor: scr.BufferToBufferCopyCommandDescriptor = {
         source: copySource,
         target: storageInput,
         byteLength: 16,
@@ -361,20 +367,48 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         byteLength: 16,
         whenMissing: 'throw',
     })
-    const textureCopyDescriptor: scr.TextureCopyCommandDescriptor = {
+    const textureCopyDescriptor: scr.TextureToTextureCopyCommandDescriptor = {
         label: 'typed scratch texture copy',
         source: textureCopySource,
         sourceOrigin: textureCopyOrigin,
+        sourceMipLevel: 0,
+        sourceAspect: 'all',
         target: scratchTextureCopyTarget,
         targetOrigin: { x: 0, y: 0 },
+        targetMipLevel: 0,
+        targetAspect: 'all',
         size: textureCopySize,
         whenMissing: 'throw',
     }
     const textureCopy: scr.CopyCommand = runtime.createCopyCommand(textureCopyDescriptor)
-    const compatTextureCopyDescriptor: scratchCompat.TextureCopyCommandDescriptor = textureCopyDescriptor
+    const compatTextureCopyDescriptor: scratchCompat.TextureToTextureCopyCommandDescriptor = textureCopyDescriptor
     const textureCopyAlias: scratchCompat.CopyCommand = runtime.copyCommand(compatTextureCopyDescriptor)
-    const copyKind: 'buffer-to-buffer' | 'texture-to-texture' = textureCopy.copyKind
-    const compatCopyKind: 'buffer-to-buffer' | 'texture-to-texture' = textureCopyAlias.copyKind
+    const bufferToTextureDescriptor: scr.BufferToTextureCopyCommandDescriptor = {
+        label: 'typed scratch buffer-to-texture copy',
+        source: copySource,
+        sourceLayout: texelCopyBufferLayout,
+        target: scratchTextureCopyTarget,
+        targetOrigin: textureCopyOrigin,
+        targetMipLevel: 0,
+        targetAspect: 'all',
+        size: textureCopySize,
+        whenMissing: 'throw',
+    }
+    const compatBufferToTextureDescriptor: scratchCompat.BufferToTextureCopyCommandDescriptor = bufferToTextureDescriptor
+    const textureToBufferDescriptor: scr.TextureToBufferCopyCommandDescriptor = {
+        label: 'typed scratch texture-to-buffer copy',
+        source: textureCopySource,
+        sourceOrigin: textureCopyOrigin,
+        sourceMipLevel: 0,
+        sourceAspect: 'all',
+        target: storageInput,
+        targetLayout: texelCopyBufferLayout,
+        size: textureCopySize,
+        whenMissing: 'throw',
+    }
+    const compatTextureToBufferDescriptor: scratchCompat.TextureToBufferCopyCommandDescriptor = textureToBufferDescriptor
+    const copyKind: 'buffer-to-buffer' | 'texture-to-texture' | 'buffer-to-texture' | 'texture-to-buffer' = textureCopy.copyKind
+    const compatCopyKind: 'buffer-to-buffer' | 'texture-to-texture' | 'buffer-to-texture' | 'texture-to-buffer' = textureCopyAlias.copyKind
     const querySet: scr.QuerySetResource = runtime.createQuerySet({
         label: 'typed timestamp queries',
         type: 'timestamp',
@@ -686,6 +720,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void textureCopy
     void compatTextureCopyDescriptor
     void textureCopyAlias
+    void texelCopyBufferLayout
+    void compatTexelCopyBufferLayout
+    void bufferToTextureDescriptor
+    void compatBufferToTextureDescriptor
+    void textureToBufferDescriptor
+    void compatTextureToBufferDescriptor
     void copyKind
     void compatCopyKind
     void querySet

@@ -988,6 +988,160 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         await submitted.done
     })
 
+    it('records buffer-to-texture copy source reads and target texture writes', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const source = runtime.createBuffer({
+            label: 'buffer texture ledger source',
+            size: 1024,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
+        })
+        const target = createTexture(
+            runtime,
+            'buffer texture ledger target',
+            GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const upload = runtime.createUploadCommand({
+            label: 'produce buffer texture ledger source',
+            target: source,
+            data: new Uint8Array(16),
+        })
+        const copy = runtime.createCopyCommand({
+            label: 'copy buffer texture ledger',
+            source: copySource(source, 1),
+            sourceLayout: { bytesPerRow: 256, rowsPerImage: 2 },
+            target,
+            size: { width: 2, height: 2 },
+            whenMissing: 'throw',
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .copy(copy)
+            .submit()
+
+        expect(submitted.diagnostics).to.deep.equal([])
+        expect(source.contentEpoch).to.equal(1)
+        expect(target.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            access: access.access,
+            resourceId: access.resourceId,
+            contentEpochBefore: access.contentEpochBefore,
+            contentEpochAfter: access.contentEpochAfter,
+        }))).to.deep.equal([
+            {
+                stepIndex: 0,
+                stepKind: 'upload',
+                commandKind: 'upload',
+                access: 'write',
+                resourceId: source.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                access: 'read',
+                resourceId: source.id,
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                access: 'write',
+                resourceId: target.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+        ])
+        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ source.id, target.id ])
+
+        await submitted.done
+    })
+
+    it('records texture-to-buffer copy source reads and target buffer writes', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const source = createTexture(
+            runtime,
+            'texture buffer ledger source',
+            GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const target = runtime.createBuffer({
+            label: 'texture buffer ledger target',
+            size: 1024,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
+        })
+        const upload = runtime.createTextureUploadCommand({
+            label: 'produce texture buffer ledger source',
+            target: source,
+            data: new Uint8Array(16),
+            layout: { bytesPerRow: 8, rowsPerImage: 2 },
+            size: { width: 2, height: 2 },
+        })
+        const copy = runtime.createCopyCommand({
+            label: 'copy texture buffer ledger',
+            source: copySource(source, 1),
+            target,
+            targetLayout: { bytesPerRow: 256, rowsPerImage: 2 },
+            size: { width: 2, height: 2 },
+            whenMissing: 'throw',
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .copy(copy)
+            .submit()
+
+        expect(submitted.diagnostics).to.deep.equal([])
+        expect(source.contentEpoch).to.equal(1)
+        expect(target.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            access: access.access,
+            resourceId: access.resourceId,
+            contentEpochBefore: access.contentEpochBefore,
+            contentEpochAfter: access.contentEpochAfter,
+        }))).to.deep.equal([
+            {
+                stepIndex: 0,
+                stepKind: 'upload',
+                commandKind: 'upload',
+                access: 'write',
+                resourceId: source.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                access: 'read',
+                resourceId: source.id,
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'copy',
+                commandKind: 'copy',
+                access: 'write',
+                resourceId: target.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+        ])
+        expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ source.id, target.id ])
+
+        await submitted.done
+    })
+
     it('allows same-submission render attachment writes to satisfy later texture copy sources', async() => {
 
         const { runtime } = await createRuntimeFixture()

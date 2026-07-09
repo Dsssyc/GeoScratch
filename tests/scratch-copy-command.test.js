@@ -120,6 +120,78 @@ async function createTextureCopyFixture() {
     return { ...fake, runtime, source, target, upload, copy }
 }
 
+async function createBufferToTextureCopyFixture() {
+
+    const fake = createFakeGpu()
+    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const source = runtime.createBuffer({
+        label: 'buffer texture copy source',
+        size: 1024,
+        usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
+    })
+    const target = runtime.createTexture({
+        label: 'buffer texture copy target',
+        size: { width: 4, height: 4 },
+        format: 'rgba8unorm',
+        usage: GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+    })
+    const upload = runtime.createUploadCommand({
+        label: 'upload buffer texture copy source',
+        target: source,
+        data: new Uint8Array(1024),
+    })
+    const copy = runtime.createCopyCommand({
+        label: 'copy buffer into texture',
+        source: copySource(source, 1),
+        sourceLayout: { offset: 256, bytesPerRow: 256, rowsPerImage: 4 },
+        target,
+        targetOrigin: [ 1, 1 ],
+        targetMipLevel: 0,
+        targetAspect: 'all',
+        size: { width: 2, height: 2 },
+        whenMissing: 'throw',
+    })
+
+    return { ...fake, runtime, source, target, upload, copy }
+}
+
+async function createTextureToBufferCopyFixture() {
+
+    const fake = createFakeGpu()
+    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const source = runtime.createTexture({
+        label: 'texture buffer copy source',
+        size: { width: 4, height: 4 },
+        format: 'rgba8unorm',
+        usage: GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+    })
+    const target = runtime.createBuffer({
+        label: 'texture buffer copy target',
+        size: 1024,
+        usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_COPY_SRC,
+    })
+    const upload = runtime.createTextureUploadCommand({
+        label: 'upload texture buffer copy source',
+        target: source,
+        data: new Uint8Array(4 * 4 * 4),
+        layout: { bytesPerRow: 16, rowsPerImage: 4 },
+        size: { width: 4, height: 4 },
+    })
+    const copy = runtime.createCopyCommand({
+        label: 'copy texture into buffer',
+        source: copySource(source, 1),
+        sourceOrigin: [ 1, 1 ],
+        sourceMipLevel: 0,
+        sourceAspect: 'all',
+        target,
+        targetLayout: { offset: 128, bytesPerRow: 256, rowsPerImage: 4 },
+        size: { width: 2, height: 2 },
+        whenMissing: 'throw',
+    })
+
+    return { ...fake, runtime, source, target, upload, copy }
+}
+
 async function expectScratchDiagnostic(action, expected) {
 
     try {
@@ -209,15 +281,111 @@ describe('scratch CopyCommand', () => {
                 source: {
                     texture: fixture.source.gpuTexture,
                     origin: { x: 1, y: 1, z: 0 },
+                    mipLevel: 0,
+                    aspect: 'all',
                 },
                 destination: {
                     texture: fixture.target.gpuTexture,
                     origin: { x: 2, y: 0, z: 0 },
+                    mipLevel: 0,
+                    aspect: 'all',
                 },
                 size: { width: 2, height: 2, depthOrArrayLayers: 1 },
             },
         ])
         expect(fixture.calls.queueSubmissions).to.have.length(1)
+        expect(fixture.source.contentEpoch).to.equal(1)
+        expect(fixture.target.contentEpoch).to.equal(1)
+
+        await submitted.done
+    })
+
+    it('copies buffer texel layouts into texture regions through an explicit submission copy step', async() => {
+
+        const fixture = await createBufferToTextureCopyFixture()
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+            .copy(fixture.copy)
+            .submit()
+
+        expect(fixture.copy).to.be.instanceOf(CopyCommand)
+        expect(fixture.copy.commandKind).to.equal('copy')
+        expect(fixture.copy.copyKind).to.equal('buffer-to-texture')
+        expect(fixture.copy.source).to.deep.equal({
+            resource: fixture.source,
+            contentEpoch: 1,
+        })
+        expect(fixture.copy.sourceLayout).to.deep.equal({ offset: 256, bytesPerRow: 256, rowsPerImage: 4 })
+        expect(fixture.copy.target).to.equal(fixture.target)
+        expect(fixture.copy.targetOrigin).to.deep.equal({ x: 1, y: 1, z: 0 })
+        expect(fixture.copy.targetMipLevel).to.equal(0)
+        expect(fixture.copy.targetAspect).to.equal('all')
+        expect(fixture.copy.size).to.deep.equal({ width: 2, height: 2, depthOrArrayLayers: 1 })
+
+        expect(fixture.calls.bufferTextureCopies).to.deep.equal([
+            {
+                source: {
+                    buffer: fixture.source.gpuBuffer,
+                    offset: 256,
+                    bytesPerRow: 256,
+                    rowsPerImage: 4,
+                },
+                destination: {
+                    texture: fixture.target.gpuTexture,
+                    origin: { x: 1, y: 1, z: 0 },
+                    mipLevel: 0,
+                    aspect: 'all',
+                },
+                size: { width: 2, height: 2, depthOrArrayLayers: 1 },
+            },
+        ])
+        expect(fixture.source.contentEpoch).to.equal(1)
+        expect(fixture.target.contentEpoch).to.equal(1)
+
+        await submitted.done
+    })
+
+    it('copies texture regions into buffer texel layouts through an explicit submission copy step', async() => {
+
+        const fixture = await createTextureToBufferCopyFixture()
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+            .copy(fixture.copy)
+            .submit()
+
+        expect(fixture.copy).to.be.instanceOf(CopyCommand)
+        expect(fixture.copy.commandKind).to.equal('copy')
+        expect(fixture.copy.copyKind).to.equal('texture-to-buffer')
+        expect(fixture.copy.source).to.deep.equal({
+            resource: fixture.source,
+            contentEpoch: 1,
+        })
+        expect(fixture.copy.sourceOrigin).to.deep.equal({ x: 1, y: 1, z: 0 })
+        expect(fixture.copy.sourceMipLevel).to.equal(0)
+        expect(fixture.copy.sourceAspect).to.equal('all')
+        expect(fixture.copy.target).to.equal(fixture.target)
+        expect(fixture.copy.targetLayout).to.deep.equal({ offset: 128, bytesPerRow: 256, rowsPerImage: 4 })
+        expect(fixture.copy.size).to.deep.equal({ width: 2, height: 2, depthOrArrayLayers: 1 })
+
+        expect(fixture.calls.textureBufferCopies).to.deep.equal([
+            {
+                source: {
+                    texture: fixture.source.gpuTexture,
+                    origin: { x: 1, y: 1, z: 0 },
+                    mipLevel: 0,
+                    aspect: 'all',
+                },
+                destination: {
+                    buffer: fixture.target.gpuBuffer,
+                    offset: 128,
+                    bytesPerRow: 256,
+                    rowsPerImage: 4,
+                },
+                size: { width: 2, height: 2, depthOrArrayLayers: 1 },
+            },
+        ])
         expect(fixture.source.contentEpoch).to.equal(1)
         expect(fixture.target.contentEpoch).to.equal(1)
 
@@ -260,6 +428,27 @@ describe('scratch CopyCommand', () => {
         expect(fixture.target.allocationVersion).to.equal(targetAllocationVersion)
 
         await submitted.done
+    })
+
+    it('advances only buffer-texture copy targets and preserves allocationVersion', async() => {
+
+        for (const createFixture of [ createBufferToTextureCopyFixture, createTextureToBufferCopyFixture ]) {
+            const fixture = await createFixture()
+            const sourceAllocationVersion = fixture.source.allocationVersion
+            const targetAllocationVersion = fixture.target.allocationVersion
+
+            const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+                .upload(fixture.upload)
+                .copy(fixture.copy)
+                .submit()
+
+            expect(fixture.source.contentEpoch).to.equal(1)
+            expect(fixture.target.contentEpoch).to.equal(1)
+            expect(fixture.source.allocationVersion).to.equal(sourceAllocationVersion)
+            expect(fixture.target.allocationVersion).to.equal(targetAllocationVersion)
+
+            await submitted.done
+        }
     })
 
     it('does not rebuild BindSet only because a copied-to buffer contentEpoch changes', async() => {
@@ -483,6 +672,61 @@ describe('scratch CopyCommand', () => {
             { source: copySource(fixture.source), target: fixture.target, targetOrigin: { x: 3, y: 3 }, size: { width: 2, height: 2 }, whenMissing: 'throw' },
         ]) {
             await expectScratchDiagnostic(() => fixture.runtime.createCopyCommand(descriptor), {
+                code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
+                severity: 'error',
+                phase: 'command',
+            })
+        }
+    })
+
+    it('rejects invalid buffer-texture copy usage, layout, mip, and aspect descriptors with structured diagnostics', async() => {
+
+        const bufferToTexture = await createBufferToTextureCopyFixture()
+        const textureToBuffer = await createTextureToBufferCopyFixture()
+        const nonCopyBufferSource = bufferToTexture.runtime.createBuffer({
+            size: 1024,
+            usage: GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const nonCopyTextureTarget = bufferToTexture.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const nonCopyTextureSource = textureToBuffer.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const nonCopyBufferTarget = textureToBuffer.runtime.createBuffer({
+            size: 1024,
+            usage: GPU_BUFFER_USAGE_COPY_SRC,
+        })
+
+        for (const { runtime, descriptor } of [
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(nonCopyBufferSource), sourceLayout: { bytesPerRow: 256 }, target: bufferToTexture.target, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 256 }, target: nonCopyTextureTarget, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(nonCopyTextureSource), target: textureToBuffer.target, targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), target: nonCopyBufferTarget, targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+        ]) {
+            await expectScratchDiagnostic(() => runtime.createCopyCommand(descriptor), {
+                code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        for (const { runtime, descriptor } of [
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 8 }, target: bufferToTexture.target, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { offset: -4, bytesPerRow: 256 }, target: bufferToTexture.target, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 256, rowsPerImage: 1 }, target: bufferToTexture.target, size: { width: 1, height: 2 }, whenMissing: 'throw' } },
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { offset: 900, bytesPerRow: 256, rowsPerImage: 4 }, target: bufferToTexture.target, size: { width: 2, height: 2 }, whenMissing: 'throw' } },
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 256 }, target: bufferToTexture.target, targetMipLevel: 1, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 256 }, target: bufferToTexture.target, targetAspect: 'depth-only', size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), sourceMipLevel: 1, target: textureToBuffer.target, targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), sourceAspect: 'stencil-only', target: textureToBuffer.target, targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), target: textureToBuffer.target, targetLayout: { bytesPerRow: 8 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+        ]) {
+            await expectScratchDiagnostic(() => runtime.createCopyCommand(descriptor), {
                 code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
                 severity: 'error',
                 phase: 'command',
