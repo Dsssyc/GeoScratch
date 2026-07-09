@@ -107,6 +107,8 @@ type QuerySlotSimulationState = {
 
 type QuerySlotSimulation = Map<string, QuerySlotSimulationState>
 
+type RenderAttachmentKind = 'color' | 'depth-stencil'
+
 export interface SubmissionBuilder {
     runtime: ScratchRuntime
     id: string
@@ -505,6 +507,10 @@ function validateRenderReadiness(
         if (attachment.target instanceof TextureResource) {
             markSimulatedReady(readiness, attachment.target)
         }
+    }
+
+    if (step.passSpec.depth !== undefined) {
+        markSimulatedReady(readiness, step.passSpec.depth.target)
     }
 }
 
@@ -929,6 +935,11 @@ function captureRenderAttachmentWrites(stepIndex: number, passSpec: RenderPassSp
         writtenTargets.add(target)
     }
 
+    if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target)) {
+        writes.push(captureResourceAccess(passSpec.depth.target, 'write', origin))
+        writtenTargets.add(passSpec.depth.target)
+    }
+
     return writes
 }
 
@@ -1107,7 +1118,7 @@ function collectRenderCommandResourceConflictDiagnostics(
     step: RenderStep,
     stepIndex: number,
     command: DrawCommand,
-    attachmentTargets: Set<TextureResource>,
+    attachmentTargets: Map<TextureResource, RenderAttachmentKind>,
     access: SubmissionResourceAccessKind,
     diagnostics: ScratchDiagnostic[]
 ): void {
@@ -1117,7 +1128,25 @@ function collectRenderCommandResourceConflictDiagnostics(
         : command.resources.write
 
     for (const resource of resources) {
-        if (!(resource instanceof TextureResource) || !attachmentTargets.has(resource)) continue
+        if (!(resource instanceof TextureResource)) continue
+
+        const attachmentKind = attachmentTargets.get(resource)
+        if (attachmentKind === undefined) continue
+
+        const actual = {
+            stepIndex,
+            passId: step.passSpec.id,
+            ...(attachmentKind === 'depth-stencil' ? {
+                commandKind: command.commandKind,
+                attachmentKind,
+            } : {}),
+            commandId: command.id,
+            access,
+            resourceId: resource.id,
+            resourceKind: resource.resourceKind,
+            contentEpoch: resource.contentEpoch,
+            allocationVersion: resource.allocationVersion,
+        }
 
         diagnostics.push(createScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
@@ -1129,31 +1158,33 @@ function collectRenderCommandResourceConflictDiagnostics(
                 resource.subject,
                 builder.subject,
             ],
-            message: 'DrawCommand resources must not include the current render pass color attachment target.',
-            expected: {
-                attachment: 'pass-level write only',
-                drawResources: 'must exclude current render pass color attachment targets',
-            },
-            actual: {
-                stepIndex,
-                passId: step.passSpec.id,
-                commandId: command.id,
-                access,
-                resourceId: resource.id,
-                resourceKind: resource.resourceKind,
-                contentEpoch: resource.contentEpoch,
-                allocationVersion: resource.allocationVersion,
-            },
+            message: attachmentKind === 'depth-stencil'
+                ? 'DrawCommand resources must not include the current render pass depth/stencil attachment target.'
+                : 'DrawCommand resources must not include the current render pass color attachment target.',
+            expected: attachmentKind === 'depth-stencil'
+                ? {
+                    attachment: 'pass-level write only',
+                    drawResources: 'must exclude current render pass depth/stencil attachment target',
+                }
+                : {
+                    attachment: 'pass-level write only',
+                    drawResources: 'must exclude current render pass color attachment targets',
+                },
+            actual,
         }))
     }
 }
 
-function collectRenderAttachmentTargets(passSpec: RenderPassSpec): Set<TextureResource> {
+function collectRenderAttachmentTargets(passSpec: RenderPassSpec): Map<TextureResource, RenderAttachmentKind> {
 
-    const attachmentTargets = new Set<TextureResource>()
+    const attachmentTargets = new Map<TextureResource, RenderAttachmentKind>()
     for (const attachment of passSpec.color) {
         const target = attachment.target
-        if (target instanceof TextureResource) attachmentTargets.add(target)
+        if (target instanceof TextureResource) attachmentTargets.set(target, 'color')
+    }
+
+    if (passSpec.depth !== undefined && !attachmentTargets.has(passSpec.depth.target)) {
+        attachmentTargets.set(passSpec.depth.target, 'depth-stencil')
     }
 
     return attachmentTargets
@@ -1181,6 +1212,53 @@ function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec)
                 actual: { format: actual },
             })
         }
+    }
+
+    validatePipelineDepthStencil(command, passSpec)
+}
+
+function validatePipelineDepthStencil(command: DrawCommand, passSpec: RenderPassSpec) {
+
+    const pipelineDepthStencil = command.pipeline.depthStencil
+    if (pipelineDepthStencil === undefined) return
+
+    const pipelineFormat = pipelineDepthStencil.format
+    const passFormat = passSpec.depth?.target.format
+
+    if (passFormat === undefined) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: command.pipeline.subject,
+            related: [
+                command.subject,
+                passSpec.subject,
+            ],
+            message: 'RenderPipeline depthStencil state requires a matching RenderPassSpec depth/stencil attachment.',
+            expected: { depthStencilAttachment: 'RenderPassSpec.depth with matching format' },
+            actual: {
+                pipelineDepthStencilFormat: pipelineFormat,
+                passDepthStencilFormat: passFormat,
+            },
+        })
+    }
+
+    if (pipelineFormat !== passFormat) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: command.pipeline.subject,
+            related: [
+                command.subject,
+                passSpec.subject,
+                passSpec.depth?.target.subject,
+            ].filter(isDefined),
+            message: 'RenderPipeline depthStencil format does not match RenderPassSpec depth/stencil attachment format.',
+            expected: { format: passFormat },
+            actual: { format: pipelineFormat },
+        })
     }
 }
 
@@ -1288,6 +1366,11 @@ function advanceRenderAttachmentEpochs(passSpec: RenderPassSpec) {
 
         target._advanceContentEpoch()
         writtenTargets.add(target)
+    }
+
+    if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target)) {
+        passSpec.depth.target._advanceContentEpoch()
+        writtenTargets.add(passSpec.depth.target)
     }
 }
 

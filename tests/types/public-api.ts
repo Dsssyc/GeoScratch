@@ -114,6 +114,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         format: 'rgba8unorm',
         usage: 0x2 | 0x4 | 0x10,
     })
+    const scratchDepthTexture: scr.TextureResource = runtime.createTexture({
+        label: 'typed scratch depth texture',
+        size: { width: 2, height: 2 },
+        format: 'depth24plus',
+        usage: 0x4 | 0x10,
+    })
     const scratchSampler: scr.SamplerResource = runtime.createSampler({
         label: 'typed scratch sampler',
         magFilter: 'nearest',
@@ -446,6 +452,28 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             clear: [ 0, 0, 0, 1 ],
         } ],
     })
+    const depthAttachment: scr.RenderPassDepthStencilAttachmentSpec = {
+        target: scratchDepthTexture,
+        depthLoad: 'clear',
+        depthStore: 'store',
+        depthClear: 1,
+    }
+    const compatDepthAttachment: scratchCompat.RenderPassDepthStencilAttachmentSpec = depthAttachment
+    const depthPassDescriptor: scr.RenderPassSpecDescriptor = {
+        color: [ {
+            target: scratchTexture,
+            load: 'clear',
+            store: 'store',
+        } ],
+        depth: depthAttachment,
+    }
+    const compatDepthPassDescriptor: scratchCompat.RenderPassSpecDescriptor = depthPassDescriptor
+    const depthPass: scr.RenderPassSpec = runtime.createRenderPass(depthPassDescriptor)
+    const depthPassTarget: scr.TextureResource | undefined = depthPass.depth?.target
+    const depthPassLoad: GPULoadOp | undefined = depthPass.depth?.depthLoad
+    const compatDepthPass: scratchCompat.RenderPassSpec = runtime.createRenderPass(compatDepthPassDescriptor)
+    const compatDepthPassTarget: scratchCompat.TextureResource | undefined = compatDepthPass.depth?.target
+    const compatDepthLoad: GPULoadOp | undefined = compatDepthAttachment.depthLoad
     const computeProgram: scr.Program = runtime.createProgram({
         modules: [
             '@group(1) @binding(0) var<storage, read> inputValues: array<f32>; @group(1) @binding(1) var<storage, read_write> outputValues: array<f32>; @compute @workgroup_size(4) fn csMain(@builtin(global_invocation_id) id: vec3u) { outputValues[id.x] = inputValues[id.x]; }',
@@ -596,6 +624,16 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void scratchTextureView
     void textureSet
     void textureTargetPass
+    void depthAttachment
+    void compatDepthAttachment
+    void depthPassDescriptor
+    void compatDepthPassDescriptor
+    void depthPass
+    void depthPassTarget
+    void depthPassLoad
+    void compatDepthPass
+    void compatDepthPassTarget
+    void compatDepthLoad
     void dynamicStorageLayout
     void dynamicStorageSet
     void compatDynamicUniformEntry

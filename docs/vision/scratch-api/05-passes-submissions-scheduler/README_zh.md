@@ -30,9 +30,9 @@ const scenePass = scratch.pass.render({
     ],
     depth: {
         target: depthTexture,
-        load: 'clear',
-        store: 'store',
-        clear: 1,
+        depthLoad: 'clear',
+        depthStore: 'store',
+        depthClear: 1,
     },
     occlusionQuerySet: visibilityQueries,
     timestampWrites: {

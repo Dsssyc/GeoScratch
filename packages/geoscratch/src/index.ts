@@ -54,7 +54,11 @@ export type {
     ReadbackRange,
     ReadbackRetentionPolicy,
     ReadbackState,
+    ComputePassSpecDescriptor,
     RenderCommand,
+    RenderPassColorAttachmentSpec,
+    RenderPassDepthStencilAttachmentSpec,
+    RenderPassSpecDescriptor,
     ResourceState,
     ResourceReadinessPolicy,
     ScratchDiagnostic,
@@ -96,6 +100,7 @@ export type {
     SubmissionResourceAccessKind,
     SubmissionStepKind,
     SubmissionValidationMode,
+    TimestampWritesSpec,
 } from './scratch/index.js'
 
 import getDevice from './gpu/context/device.js'

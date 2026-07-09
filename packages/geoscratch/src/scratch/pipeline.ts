@@ -41,6 +41,8 @@ export interface RenderPipeline {
     vertexBuffers: GPUVertexBufferLayout[]
     targets: GPUColorTargetState[]
     targetFormats: GPUTextureFormat[]
+    depthStencil?: GPUDepthStencilState
+    depthStencilFormat?: GPUTextureFormat
     shaderModule: GPUShaderModule
     pipelineLayout: GPUPipelineLayout
     gpuPipeline: GPURenderPipeline
@@ -80,6 +82,10 @@ export class RenderPipeline {
         this.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
         this.targets = normalizeTargets(this, descriptor.targets)
         this.targetFormats = this.targets.map(target => target.format)
+        if (descriptor.depthStencil !== undefined) {
+            this.depthStencil = { ...descriptor.depthStencil }
+            this.depthStencilFormat = descriptor.depthStencil.format
+        }
         this.isDisposed = false
 
         validateEntryPoints(this)
@@ -114,7 +120,7 @@ export class RenderPipeline {
             primitive: descriptor.primitive ?? { topology: 'triangle-list' },
         }
         if (this.label !== undefined) pipelineDescriptor.label = this.label
-        if (descriptor.depthStencil !== undefined) pipelineDescriptor.depthStencil = descriptor.depthStencil
+        if (this.depthStencil !== undefined) pipelineDescriptor.depthStencil = this.depthStencil
         if (descriptor.multisample !== undefined) pipelineDescriptor.multisample = descriptor.multisample
         this.gpuPipeline = runtime.device.createRenderPipeline(pipelineDescriptor)
     }

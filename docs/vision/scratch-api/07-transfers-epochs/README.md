@@ -287,8 +287,8 @@ const scenePass = scratch.pass.render({
     ],
     depth: {
         target: depth,
-        load: 'load',
-        store: 'store',
+        depthLoad: 'load',
+        depthStore: 'store',
     },
     occlusionQuerySet: visibilityQueries,
 })

@@ -80,6 +80,13 @@ export type {
     UploadCommandDescriptor,
 } from './command.js'
 export { ComputePassSpec, RenderPassSpec } from './pass.js'
+export type {
+    ComputePassSpecDescriptor,
+    RenderPassColorAttachmentSpec,
+    RenderPassDepthStencilAttachmentSpec,
+    RenderPassSpecDescriptor,
+    TimestampWritesSpec,
+} from './pass.js'
 export { ReadbackOperation } from './readback.js'
 export type {
     ReadbackOperationDescriptor,
