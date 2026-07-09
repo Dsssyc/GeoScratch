@@ -205,7 +205,14 @@ const values = await readParticles.result({ after: submitted }).toArray()
 
 ## Copy
 
-GPU-to-GPU copies are explicit commands:
+GPU-to-GPU copies are explicit commands. `CopyCommand` should expose the same native copy directions that WebGPU command encoders expose:
+
+- buffer to buffer
+- texture to texture
+- buffer to texture
+- texture to buffer
+
+CPU uploads and CPU readbacks are separate transfer concepts. `TextureUploadCommand` expresses CPU bytes written through the queue; `ReadbackOperation` expresses host materialization through staging and mapping. Neither replaces a GPU-side `CopyCommand`.
 
 ```ts
 const copyHistory = scratch.command.copy({
@@ -218,6 +225,52 @@ const copyHistory = scratch.command.copy({
     target: historyColor,
     targetOrigin: [ 0, 0 ],
     size: sceneRegion.size,
+    whenMissing: 'throw',
+})
+```
+
+Buffer-texture copies use a WebGPU texel buffer layout instead of CPU data:
+
+```ts
+const uploadPreparedPixels = scratch.command.copy({
+    label: 'copy prepared pixels into texture',
+    source: {
+        resource: preparedPixelBuffer,
+        contentEpoch: preparedPixelBuffer.contentEpoch,
+    },
+    sourceLayout: {
+        offset: 0,
+        bytesPerRow: 256,
+        rowsPerImage: 64,
+    },
+    target: albedoTexture,
+    targetOrigin: [0, 0],
+    targetMipLevel: 0,
+    targetAspect: 'all',
+    size: { width: 64, height: 64 },
+    whenMissing: 'throw',
+})
+```
+
+Texture-buffer copies are still GPU-side copies. CPU access only begins if a later `ReadbackOperation` maps or materializes the destination buffer:
+
+```ts
+const copyTileStats = scratch.command.copy({
+    label: 'copy texture tile into staging buffer',
+    source: {
+        resource: tileTexture,
+        contentEpoch: tileTexture.contentEpoch,
+    },
+    sourceOrigin: [0, 0],
+    sourceMipLevel: 0,
+    sourceAspect: 'all',
+    target: tileStagingBuffer,
+    targetLayout: {
+        offset: 0,
+        bytesPerRow: 256,
+        rowsPerImage: 32,
+    },
+    size: { width: 32, height: 32 },
     whenMissing: 'throw',
 })
 ```

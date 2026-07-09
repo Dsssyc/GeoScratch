@@ -205,7 +205,14 @@ const values = await readParticles.result({ after: submitted }).toArray()
 
 ## Copy
 
-GPU-to-GPU copy 是显式 command:
+GPU-to-GPU copy 是显式 command。`CopyCommand` 应表达 WebGPU command encoder 原生提供的同一组 copy 方向:
+
+- buffer 到 buffer
+- texture 到 texture
+- buffer 到 texture
+- texture 到 buffer
+
+CPU upload 与 CPU readback 是独立的 transfer 概念。`TextureUploadCommand` 表达通过 queue 写入 CPU bytes; `ReadbackOperation` 表达通过 staging 与 mapping 进行 host materialization。二者都不能替代 GPU-side `CopyCommand`。
 
 ```ts
 const copyHistory = scratch.command.copy({
@@ -218,6 +225,52 @@ const copyHistory = scratch.command.copy({
     target: historyColor,
     targetOrigin: [ 0, 0 ],
     size: sceneRegion.size,
+    whenMissing: 'throw',
+})
+```
+
+Buffer-texture copy 使用 WebGPU texel buffer layout，而不是 CPU data:
+
+```ts
+const uploadPreparedPixels = scratch.command.copy({
+    label: 'copy prepared pixels into texture',
+    source: {
+        resource: preparedPixelBuffer,
+        contentEpoch: preparedPixelBuffer.contentEpoch,
+    },
+    sourceLayout: {
+        offset: 0,
+        bytesPerRow: 256,
+        rowsPerImage: 64,
+    },
+    target: albedoTexture,
+    targetOrigin: [0, 0],
+    targetMipLevel: 0,
+    targetAspect: 'all',
+    size: { width: 64, height: 64 },
+    whenMissing: 'throw',
+})
+```
+
+Texture-buffer copy 仍然是 GPU-side copy。只有后续 `ReadbackOperation` map 或 materialize destination buffer 时，才进入 CPU 访问:
+
+```ts
+const copyTileStats = scratch.command.copy({
+    label: 'copy texture tile into staging buffer',
+    source: {
+        resource: tileTexture,
+        contentEpoch: tileTexture.contentEpoch,
+    },
+    sourceOrigin: [0, 0],
+    sourceMipLevel: 0,
+    sourceAspect: 'all',
+    target: tileStagingBuffer,
+    targetLayout: {
+        offset: 0,
+        bytesPerRow: 256,
+        rowsPerImage: 32,
+    },
+    size: { width: 32, height: 32 },
     whenMissing: 'throw',
 })
 ```

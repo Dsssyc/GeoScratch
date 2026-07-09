@@ -57,6 +57,8 @@ Target command families:
 - `BeginOcclusionQueryCommand` / `EndOcclusionQueryCommand` as render-pass-only query brackets
 - future explicit clear or attachment-resolve commands, if needed
 
+`CopyCommand` covers WebGPU-native GPU-side copy directions: buffer-to-buffer, texture-to-texture, buffer-to-texture, and texture-to-buffer. CPU upload and CPU readback remain explicit transfer/readback operations rather than substitutes for these command encoder copies.
+
 Every command should declare:
 
 - label
