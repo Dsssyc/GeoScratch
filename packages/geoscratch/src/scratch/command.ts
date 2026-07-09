@@ -5,7 +5,7 @@ import { isLayoutArtifact, isLayoutUploadView, layoutArtifactSubject } from './l
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import { QuerySetResource } from './query-set.js'
 import { TextureResource } from './texture.js'
-import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined } from './type-utils.js'
+import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { BindLayoutEntry, BindSet } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
@@ -48,8 +48,13 @@ export type NormalizedDrawVertexBufferBinding = Omit<DrawVertexBufferBinding, 's
     size: number | undefined
 }
 
+export type CommandResourceReadDescriptor = {
+    resource: Resource
+    contentEpoch: number
+}
+
 export type CommandResourceAccessDescriptor = {
-    read: Resource[]
+    read: CommandResourceReadDescriptor[]
     write: Resource[]
 }
 
@@ -314,7 +319,10 @@ export class DrawCommand {
         for (const binding of this.vertexBuffers) {
             binding.buffer.assertUsable()
         }
-        for (const resource of [ ...this.resources.read, ...this.resources.write ]) {
+        for (const resource of [
+            ...this.resources.read.map(read => read.resource),
+            ...this.resources.write,
+        ]) {
             resource.assertUsable()
         }
     }
@@ -725,7 +733,10 @@ export class DispatchCommand {
         for (const bindSet of this.bindSets) {
             bindSet.assertUsable()
         }
-        for (const resource of [ ...this.resources.read, ...this.resources.write ]) {
+        for (const resource of [
+            ...this.resources.read.map(read => read.resource),
+            ...this.resources.write,
+        ]) {
             resource.assertUsable()
         }
     }
@@ -1937,15 +1948,45 @@ function normalizeResourceAccess(command: DrawCommand | DispatchCommand, resourc
             phase: 'command',
             subject: command.subject,
             message: 'Command requires explicit read and write resource declarations.',
-            expected: { resources: { read: 'Resource[]', write: 'Resource[]' } },
+            expected: { resources: { read: 'CommandResourceReadDescriptor[]', write: 'Resource[]' } },
             actual: { resources },
         })
     }
 
     return {
-        read: normalizeResourceList(command, resources.read, 'read'),
+        read: normalizeResourceReadList(command, resources.read),
         write: normalizeResourceList(command, resources.write, 'write'),
     }
+}
+
+function normalizeResourceReadList(
+    command: DrawCommand | DispatchCommand,
+    resources: CommandResourceReadDescriptor[]
+): CommandResourceReadDescriptor[] {
+
+    return resources.map((descriptor) => {
+        if (isResourceLike(descriptor)) {
+            throwResourceReadDescriptorDiagnostic(command, descriptor, 'descriptor')
+        }
+
+        if (!isRecord(descriptor)) {
+            throwResourceReadDescriptorDiagnostic(command, descriptor, 'descriptor')
+        }
+
+        const resource = descriptor.resource
+        if (!isResourceLike(resource)) {
+            throwResourceReadDescriptorDiagnostic(command, descriptor, 'resource')
+        }
+
+        const contentEpoch = descriptor.contentEpoch
+        if (!Number.isInteger(contentEpoch) || contentEpoch < 0) {
+            throwResourceReadDescriptorDiagnostic(command, descriptor, 'contentEpoch')
+        }
+
+        resource.assertRuntime(command.runtime)
+
+        return { resource, contentEpoch }
+    })
 }
 
 function normalizeResourceList(command: DrawCommand | DispatchCommand, resources: Resource[], access: 'read' | 'write'): Resource[] {
@@ -1965,6 +2006,50 @@ function normalizeResourceList(command: DrawCommand | DispatchCommand, resources
 
         resource.assertRuntime(command.runtime)
         return resource
+    })
+}
+
+function isResourceLike(value: unknown): value is Resource {
+
+    return isRecord(value) && typeof value.assertRuntime === 'function'
+}
+
+function throwResourceReadDescriptorDiagnostic(
+    command: DrawCommand | DispatchCommand,
+    descriptor: unknown,
+    reason: 'descriptor' | 'resource' | 'contentEpoch'
+): never {
+
+    const descriptorRecord = isRecord(descriptor) ? descriptor : {}
+    const resource = descriptorRecord.resource
+    const actual: Record<string, unknown> = {
+        access: 'read',
+        reason,
+        descriptor: isResourceLike(descriptor) ? 'Resource' : describeValue(descriptor),
+    }
+
+    if (isResourceLike(resource)) {
+        actual.resourceId = resource.id
+        actual.resourceKind = resource.resourceKind
+    }
+    if ('contentEpoch' in descriptorRecord) actual.contentEpoch = descriptorRecord.contentEpoch
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [
+            diagnosticSubjectOf(resource),
+        ].filter(isDefined),
+        message: 'Command read resource declarations must contain resource and contentEpoch.',
+        expected: {
+            read: {
+                resource: 'Resource',
+                contentEpoch: 'non-negative integer',
+            },
+        },
+        actual,
     })
 }
 

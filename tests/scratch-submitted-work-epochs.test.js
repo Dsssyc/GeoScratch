@@ -69,6 +69,11 @@ function producerFacts(epoch) {
     return Object.fromEntries(Object.entries(facts).filter(([, value]) => value !== undefined))
 }
 
+function readResource(resource, contentEpoch = resource.contentEpoch) {
+
+    return { resource, contentEpoch }
+}
+
 function createBuffer(runtime, label, usage = GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE) {
 
     return runtime.createBuffer({
@@ -88,7 +93,7 @@ function createTexture(runtime, label, usage = GPU_TEXTURE_USAGE_COPY_DST | GPU_
     })
 }
 
-function createCompute(runtime, input, output) {
+function createCompute(runtime, input, output, readContentEpoch = input.contentEpoch) {
 
     const bindLayout = runtime.createBindLayout({
         group: 0,
@@ -133,7 +138,7 @@ function createCompute(runtime, input, output) {
         bindSets: [ bindSet ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ input ],
+            read: [ readResource(input, readContentEpoch) ],
             write: [ output ],
         },
         whenMissing: 'throw',
@@ -426,7 +431,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             target: staged,
             data: new Uint8Array(16),
         })
-        const compute = createCompute(runtime, input, output)
+        const compute = createCompute(runtime, input, output, 1)
         const builder = runtime.createSubmission({ validation: 'throw' })
             .upload(upload)
             .compute(compute.pass, [ compute.dispatch ])
@@ -449,12 +454,216 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         expect(calls.queueSubmissions).to.have.length(0)
     })
 
+    it('applies validation mode to dispatch read-before-write diagnostics', async() => {
+
+        for (const validation of [ 'throw', 'warn', 'off' ]) {
+            const { runtime, calls } = await createRuntimeFixture()
+            const input = createBuffer(runtime, `future compute input ${validation}`)
+            const output = createBuffer(runtime, `future compute output ${validation}`)
+            input._advanceContentEpoch()
+            const compute = createCompute(runtime, input, output, 2)
+            const builder = runtime.createSubmission({ validation })
+                .compute(compute.pass, [ compute.dispatch ])
+
+            if (validation === 'throw') {
+                const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+                    code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+
+                expect(diagnostic.subject).to.deep.equal(compute.dispatch.subject)
+                expect(diagnostic.related).to.deep.include(input.subject)
+                expect(diagnostic.related).to.deep.include(compute.pass.subject)
+                expect(diagnostic.related).to.deep.include(builder.subject)
+                expect(diagnostic.expected).to.deep.equal({ contentEpoch: 2 })
+                expect(diagnostic.actual).to.deep.include({
+                    stepIndex: 0,
+                    commandId: compute.dispatch.id,
+                    commandKind: 'dispatch',
+                    access: 'read',
+                    resourceId: input.id,
+                    resourceKind: 'BufferResource',
+                    resourceState: 'ready',
+                    simulatedContentEpoch: 1,
+                    currentContentEpoch: 1,
+                    whenMissing: 'throw',
+                })
+                expect(input.contentEpoch).to.equal(1)
+                expect(output.contentEpoch).to.equal(0)
+                expect(calls.commandEncoders).to.have.length(0)
+                expect(calls.computePasses).to.have.length(0)
+                expect(calls.dispatchCalls).to.have.length(0)
+                expect(calls.queueSubmissions).to.have.length(0)
+                continue
+            }
+
+            const submitted = builder.submit()
+
+            if (validation === 'warn') {
+                expect(submitted.diagnostics).to.have.length(1)
+                expect(submitted.diagnostics[0]).to.include({
+                    code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+                expect(submitted.diagnostics[0].expected).to.deep.equal({ contentEpoch: 2 })
+            } else {
+                expect(submitted.diagnostics).to.deep.equal([])
+            }
+            expect(input.contentEpoch).to.equal(1)
+            expect(output.contentEpoch).to.equal(1)
+            expect(calls.computePasses).to.have.length(1)
+            expect(calls.dispatchCalls).to.have.length(1)
+            expect(calls.queueSubmissions).to.have.length(1)
+
+            await submitted.done
+        }
+    })
+
+    it('applies validation mode to dispatch stale-read diagnostics without mutating on throw', async() => {
+
+        for (const validation of [ 'throw', 'warn', 'off' ]) {
+            const { runtime, calls } = await createRuntimeFixture()
+            const input = createBuffer(runtime, `stale compute input ${validation}`)
+            const output = createBuffer(runtime, `stale compute output ${validation}`)
+            input._advanceContentEpoch()
+            const upload = runtime.createUploadCommand({
+                label: 'refresh stale input',
+                target: input,
+                data: new Uint8Array(16),
+            })
+            const compute = createCompute(runtime, input, output, 1)
+            const builder = runtime.createSubmission({ validation })
+                .upload(upload)
+                .compute(compute.pass, [ compute.dispatch ])
+
+            if (validation === 'throw') {
+                const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+                    code: 'SCRATCH_SUBMISSION_STALE_READ',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+
+                expect(diagnostic.subject).to.deep.equal(compute.dispatch.subject)
+                expect(diagnostic.related).to.deep.include(input.subject)
+                expect(diagnostic.related).to.deep.include(compute.pass.subject)
+                expect(diagnostic.related).to.deep.include(builder.subject)
+                expect(diagnostic.expected).to.deep.equal({ contentEpoch: 1 })
+                expect(diagnostic.actual).to.deep.include({
+                    stepIndex: 1,
+                    commandId: compute.dispatch.id,
+                    commandKind: 'dispatch',
+                    access: 'read',
+                    resourceId: input.id,
+                    resourceKind: 'BufferResource',
+                    resourceState: 'ready',
+                    simulatedContentEpoch: 2,
+                    currentContentEpoch: 1,
+                    whenMissing: 'throw',
+                })
+                expect(input.contentEpoch).to.equal(1)
+                expect(output.contentEpoch).to.equal(0)
+                expect(input.allocationVersion).to.equal(1)
+                expect(output.allocationVersion).to.equal(1)
+                expect(calls.queueWrites).to.have.length(0)
+                expect(calls.commandEncoders).to.have.length(0)
+                expect(calls.computePasses).to.have.length(0)
+                expect(calls.dispatchCalls).to.have.length(0)
+                expect(calls.queueSubmissions).to.have.length(0)
+                continue
+            }
+
+            const submitted = builder.submit()
+
+            if (validation === 'warn') {
+                expect(submitted.diagnostics).to.have.length(1)
+                expect(submitted.diagnostics[0]).to.include({
+                    code: 'SCRATCH_SUBMISSION_STALE_READ',
+                    severity: 'error',
+                    phase: 'submission',
+                })
+                expect(submitted.diagnostics[0].expected).to.deep.equal({ contentEpoch: 1 })
+            } else {
+                expect(submitted.diagnostics).to.deep.equal([])
+            }
+            expect(input.contentEpoch).to.equal(2)
+            expect(output.contentEpoch).to.equal(1)
+            expect(calls.queueWrites).to.have.length(1)
+            expect(calls.computePasses).to.have.length(1)
+            expect(calls.dispatchCalls).to.have.length(1)
+            expect(calls.queueSubmissions).to.have.length(1)
+
+            await submitted.done
+        }
+    })
+
+    it('allows same-submission upload to satisfy a dispatch read requiring the produced epoch', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const input = createBuffer(runtime, 'same submission input')
+        const output = createBuffer(runtime, 'same submission output')
+        const uploadInput = runtime.createUploadCommand({
+            label: 'produce dispatch input',
+            target: input,
+            data: new Uint8Array(16),
+        })
+        const compute = createCompute(runtime, input, output, 1)
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .upload(uploadInput)
+            .compute(compute.pass, [ compute.dispatch ])
+            .submit()
+
+        expect(submitted.diagnostics).to.deep.equal([])
+        expect(input.contentEpoch).to.equal(1)
+        expect(output.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            access: access.access,
+            resourceId: access.resourceId,
+            contentEpochBefore: access.contentEpochBefore,
+            contentEpochAfter: access.contentEpochAfter,
+        }))).to.deep.equal([
+            {
+                stepIndex: 0,
+                stepKind: 'upload',
+                commandKind: 'upload',
+                access: 'write',
+                resourceId: input.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'compute',
+                commandKind: 'dispatch',
+                access: 'read',
+                resourceId: input.id,
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'compute',
+                commandKind: 'dispatch',
+                access: 'write',
+                resourceId: output.id,
+                contentEpochBefore: 0,
+                contentEpochAfter: 1,
+            },
+        ])
+
+        await submitted.done
+    })
+
     it('records compute dispatch declared reads and writes', async() => {
 
         const { runtime } = await createRuntimeFixture()
         const input = createBuffer(runtime, 'compute input')
         const output = createBuffer(runtime, 'compute output')
-        const compute = createCompute(runtime, input, output)
+        const compute = createCompute(runtime, input, output, 1)
         const uploadInput = runtime.createUploadCommand({
             label: 'upload compute input',
             target: input,
@@ -591,7 +800,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             data: new Uint8Array(16),
         })
         const render = createRender(runtime, target, {
-            read: [ input ],
+            read: [ readResource(input, 1) ],
             write: [ output ],
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -684,9 +893,9 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             target: copyTarget,
             byteLength: 16,
         })
-        const compute = createCompute(runtime, copyTarget, computeOutput)
+        const compute = createCompute(runtime, copyTarget, computeOutput, 1)
         const render = createRender(runtime, renderTarget, {
-            read: [ computeOutput ],
+            read: [ readResource(computeOutput, 1) ],
             write: [],
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })

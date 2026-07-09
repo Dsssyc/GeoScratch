@@ -143,6 +143,11 @@ async function expectScratchDiagnostic(action, expected) {
     }
 }
 
+function readResource(resource, contentEpoch = resource.contentEpoch) {
+
+    return { resource, contentEpoch }
+}
+
 describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
     it('creates persistent render pass specs without storing commands', async() => {
@@ -281,7 +286,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             pipeline: fixture.pipeline,
             count: { vertexCount: 3 },
             resources: {
-                read: [ emptyTexture ],
+                read: [ readResource(emptyTexture) ],
                 write: [],
             },
             whenMissing: 'throw',
@@ -316,6 +321,135 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(emptyTexture.state).to.equal('empty')
         expect(fixture.renderTarget.contentEpoch).to.equal(0)
         expect(fixture.renderTarget.state).to.equal('empty')
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.drawCalls).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('rejects draw reads requiring a future texture epoch before creating a command encoder', async() => {
+
+        const fixture = await createRenderTargetScene()
+        fixture.renderTarget._advanceContentEpoch()
+        const secondTarget = fixture.runtime.createTexture({
+            label: 'future epoch render target',
+            size: { width: 64, height: 64 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const secondPass = fixture.runtime.createRenderPass({
+            label: 'future epoch pass',
+            color: [
+                {
+                    target: secondTarget,
+                    load: 'clear',
+                    store: 'store',
+                    clear: [ 0, 0, 0, 1 ],
+                },
+            ],
+        })
+        const readFutureTexture = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { vertexCount: 3 },
+            resources: {
+                read: [ readResource(fixture.renderTarget, 2) ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(secondPass, [ readFutureTexture ])
+
+        const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+            code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+            severity: 'error',
+            phase: 'submission',
+        })
+
+        expect(diagnostic.subject).to.deep.equal(readFutureTexture.subject)
+        expect(diagnostic.related).to.deep.include(fixture.renderTarget.subject)
+        expect(diagnostic.related).to.deep.include(secondPass.subject)
+        expect(diagnostic.related).to.deep.include(builder.subject)
+        expect(diagnostic.expected).to.deep.equal({ contentEpoch: 2 })
+        expect(diagnostic.actual).to.deep.include({
+            stepIndex: 0,
+            commandId: readFutureTexture.id,
+            commandKind: 'draw',
+            access: 'read',
+            resourceId: fixture.renderTarget.id,
+            resourceKind: 'TextureResource',
+            resourceState: 'ready',
+            simulatedContentEpoch: 1,
+            currentContentEpoch: 1,
+            whenMissing: 'throw',
+        })
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+        expect(secondTarget.contentEpoch).to.equal(0)
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.drawCalls).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('rejects draw reads requiring an older texture epoch before creating a command encoder', async() => {
+
+        const fixture = await createRenderTargetScene()
+        fixture.renderTarget._advanceContentEpoch()
+        const secondTarget = fixture.runtime.createTexture({
+            label: 'stale epoch render target',
+            size: { width: 64, height: 64 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const secondPass = fixture.runtime.createRenderPass({
+            label: 'stale epoch pass',
+            color: [
+                {
+                    target: secondTarget,
+                    load: 'clear',
+                    store: 'store',
+                    clear: [ 0, 0, 0, 1 ],
+                },
+            ],
+        })
+        const readStaleTexture = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { vertexCount: 3 },
+            resources: {
+                read: [ readResource(fixture.renderTarget, 1) ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ fixture.draw ])
+            .render(secondPass, [ readStaleTexture ])
+
+        const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+            code: 'SCRATCH_SUBMISSION_STALE_READ',
+            severity: 'error',
+            phase: 'submission',
+        })
+
+        expect(diagnostic.subject).to.deep.equal(readStaleTexture.subject)
+        expect(diagnostic.related).to.deep.include(fixture.renderTarget.subject)
+        expect(diagnostic.related).to.deep.include(secondPass.subject)
+        expect(diagnostic.related).to.deep.include(builder.subject)
+        expect(diagnostic.expected).to.deep.equal({ contentEpoch: 1 })
+        expect(diagnostic.actual).to.deep.include({
+            stepIndex: 1,
+            commandId: readStaleTexture.id,
+            commandKind: 'draw',
+            access: 'read',
+            resourceId: fixture.renderTarget.id,
+            resourceKind: 'TextureResource',
+            resourceState: 'ready',
+            simulatedContentEpoch: 2,
+            currentContentEpoch: 1,
+            whenMissing: 'throw',
+        })
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+        expect(secondTarget.contentEpoch).to.equal(0)
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(0)
         expect(fixture.calls.drawCalls).to.have.length(0)
@@ -470,7 +604,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             pipeline: fixture.pipeline,
             count: { vertexCount: 3 },
             resources: {
-                read: [ fixture.renderTarget ],
+                read: [ readResource(fixture.renderTarget) ],
                 write: [],
             },
             whenMissing: 'throw',
@@ -533,7 +667,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             pipeline: fixture.pipeline,
             count: { vertexCount: 3 },
             resources: {
-                read: [ fixture.renderTarget ],
+                read: [ readResource(fixture.renderTarget) ],
                 write: [],
             },
             whenMissing: 'throw',
@@ -587,7 +721,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             pipeline: fixture.pipeline,
             count: { vertexCount: 3 },
             resources: {
-                read: [ fixture.renderTarget ],
+                read: [ readResource(fixture.renderTarget) ],
                 write: [],
             },
             whenMissing: 'throw',
@@ -692,7 +826,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             pipeline: fixture.pipeline,
             count: { vertexCount: 3 },
             resources: {
-                read: [ fixture.renderTarget ],
+                read: [ readResource(fixture.renderTarget, 1) ],
                 write: [],
             },
             whenMissing: 'throw',
@@ -785,7 +919,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             pipeline: fixture.pipeline,
             count: { vertexCount: 3 },
             resources: {
-                read: [ fixture.renderTarget ],
+                read: [ readResource(fixture.renderTarget) ],
                 write: [],
             },
             whenMissing: 'throw',

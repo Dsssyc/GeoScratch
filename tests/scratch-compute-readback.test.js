@@ -14,6 +14,11 @@ const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_BUFFER_USAGE_STORAGE = 0x80
 
+function readResource(resource, contentEpoch = resource.contentEpoch) {
+
+    return { resource, contentEpoch }
+}
+
 const doubleWgsl = `
 @group(0) @binding(0)
 var<storage, read> inputValues: array<f32>;
@@ -84,7 +89,7 @@ async function createComputeFixture() {
         bindSets: [ bindSet ],
         count: { workgroups: [ 1, 1, 1 ] },
         resources: {
-            read: [ input ],
+            read: [ readResource(input, 1) ],
             write: [ output ],
         },
         whenMissing: 'throw',
@@ -197,6 +202,9 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
 
         expect(fixture.pass).to.be.instanceOf(ComputePassSpec)
         expect(fixture.dispatch).to.be.instanceOf(DispatchCommand)
+        expect(fixture.dispatch.resources.read).to.deep.equal([
+            readResource(fixture.input, 1),
+        ])
         expect(fixture.output.contentEpoch).to.equal(1)
         expect(fixture.calls.computePasses[0].actions).to.deep.equal([
             { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },

@@ -113,21 +113,6 @@ async function main() {
         target: instanceSizeBuffer,
         data: instanceSize,
     })
-    const draw = runtime.createDrawCommand({
-        label: 'draw hello vertex buffer',
-        pipeline,
-        vertexBuffers: [
-            { slot: 0, buffer: vertexBuffer },
-            { slot: 1, buffer: instanceSizeBuffer },
-        ],
-        count: { vertexCount: 3, instanceCount: 1 },
-        resources: {
-            read: [ vertexBuffer, instanceSizeBuffer ],
-            write: [],
-        },
-        whenMissing: 'throw',
-    })
-
     let frame = 0
     let needsVertexUpload = true
 
@@ -135,6 +120,26 @@ async function main() {
 
         resizeSurface(surface, canvas)
         instanceSize[0] = 0.75 + 0.2 * Math.cos(frame++ * 0.04)
+
+        const expectedVertexEpoch = vertexBuffer.contentEpoch + (needsVertexUpload ? 1 : 0)
+        const expectedInstanceSizeEpoch = instanceSizeBuffer.contentEpoch + 1
+        const draw = runtime.createDrawCommand({
+            label: 'draw hello vertex buffer',
+            pipeline,
+            vertexBuffers: [
+                { slot: 0, buffer: vertexBuffer },
+                { slot: 1, buffer: instanceSizeBuffer },
+            ],
+            count: { vertexCount: 3, instanceCount: 1 },
+            resources: {
+                read: [
+                    { resource: vertexBuffer, contentEpoch: expectedVertexEpoch },
+                    { resource: instanceSizeBuffer, contentEpoch: expectedInstanceSizeEpoch },
+                ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
 
         const submission = runtime.createSubmission({ validation: 'throw' })
         if (needsVertexUpload) {

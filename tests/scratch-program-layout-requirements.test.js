@@ -54,6 +54,11 @@ async function createRuntimeFixture() {
     return { ...fake, runtime }
 }
 
+function readResource(resource, contentEpoch = resource.contentEpoch) {
+
+    return { resource, contentEpoch }
+}
+
 function createRequirement(codec, overrides = {}) {
 
     return {
@@ -439,7 +444,7 @@ describe('scratch Program buffer layout requirements', () => {
             bindSets: [ renderSet ],
             count: { vertexCount: 3 },
             resources: {
-                read: [ renderSet.bindings.get('particles').resource ],
+                read: [ readResource(renderSet.bindings.get('particles').resource) ],
                 write: [],
             },
             whenMissing: 'throw',
@@ -540,7 +545,7 @@ describe('scratch Program buffer layout requirements', () => {
                 bindSets: [ renderSet ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ renderSet.bindings.get('particles').resource ],
+                    read: [ readResource(renderSet.bindings.get('particles').resource) ],
                     write: [],
                 },
                 whenMissing: 'throw',
@@ -599,7 +604,7 @@ describe('scratch Program buffer layout requirements', () => {
                 bindSets: [ renderSet ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ renderSet.bindings.get('particles').resource ],
+                    read: [ readResource(renderSet.bindings.get('particles').resource) ],
                     write: [],
                 },
                 whenMissing: 'throw',

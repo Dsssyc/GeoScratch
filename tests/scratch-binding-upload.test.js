@@ -41,6 +41,11 @@ function createUniformData() {
     return new Float32Array([ 0.12, 0.72, 0.58, 1 ])
 }
 
+function readResource(resource, contentEpoch = resource.contentEpoch) {
+
+    return { resource, contentEpoch }
+}
+
 async function createUniformFixture(format = 'bgra8unorm') {
 
     const fake = createFakeGpu()
@@ -90,7 +95,7 @@ async function createUniformFixture(format = 'bgra8unorm') {
         bindSets: [ bindSet ],
         count: { vertexCount: 3 },
         resources: {
-            read: [ uniformBuffer ],
+            read: [ readResource(uniformBuffer, 1) ],
             write: [],
         },
         whenMissing: 'throw',
@@ -315,7 +320,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
                 bindSets: [ fixtureB.bindSet ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ fixtureA.uniformBuffer ],
+                    read: [ readResource(fixtureA.uniformBuffer, 1) ],
                     write: [],
                 },
                 whenMissing: 'throw',
@@ -352,7 +357,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
                 bindSets: [ fixtureA.bindSet ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ fixtureA.uniformBuffer ],
+                    read: [ readResource(fixtureA.uniformBuffer, 1) ],
                     write: [],
                 },
                 whenMissing: 'throw',
@@ -418,7 +423,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
                 bindSets: [ otherSet ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ otherBuffer ],
+                    read: [ readResource(otherBuffer) ],
                     write: [],
                 },
                 whenMissing: 'throw',

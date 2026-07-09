@@ -86,6 +86,11 @@ function expectDiagnostic(fn, include) {
     return caught.diagnostic
 }
 
+function readResource(resource, contentEpoch = resource.contentEpoch) {
+
+    return { resource, contentEpoch }
+}
+
 async function createRuntimeFixture() {
 
     const fake = createFakeGpu()
@@ -227,7 +232,7 @@ function createDrawCommand(fixture, overrides = {}) {
         bindSets: [ fixture.bindSet ],
         count: { vertexCount: 3 },
         resources: {
-            read: fixture.buffers,
+            read: fixture.buffers.map(buffer => readResource(buffer, 1)),
             write: [],
         },
         whenMissing: 'throw',
@@ -242,7 +247,7 @@ function createDispatchCommand(fixture, overrides = {}) {
         bindSets: [ fixture.bindSet ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ fixture.buffers[0] ],
+            read: [ readResource(fixture.buffers[0], 1) ],
             write: [ fixture.buffers[fixture.buffers.length - 1] ],
         },
         whenMissing: 'throw',

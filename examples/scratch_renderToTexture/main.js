@@ -204,21 +204,23 @@ async function main() {
         },
         whenMissing: 'throw',
     })
-    const sampleDraw = runtime.createDrawCommand({
-        label: 'draw render to texture sampled quad',
-        pipeline: samplePipeline,
-        bindSets: [ sampleBindSet ],
-        count: { vertexCount: 6 },
-        resources: {
-            read: [ offscreenTexture, sampler ],
-            write: [],
-        },
-        whenMissing: 'throw',
-    })
-
     function render() {
 
         resizeSurface(surface, canvas)
+
+        const sampleDraw = runtime.createDrawCommand({
+            label: 'draw render to texture sampled quad',
+            pipeline: samplePipeline,
+            bindSets: [ sampleBindSet ],
+            count: { vertexCount: 6 },
+            resources: {
+                read: [
+                    { resource: offscreenTexture, contentEpoch: offscreenTexture.contentEpoch + 1 },
+                ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
 
         const submitted = runtime.createSubmission({ validation: 'throw' })
             .render(offscreenPass, [ offscreenDraw ])

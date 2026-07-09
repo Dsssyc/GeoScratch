@@ -82,6 +82,22 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 0x4 | 0x80,
     })
+    const uniformRead: scr.CommandResourceReadDescriptor = {
+        resource: uniformBuffer,
+        contentEpoch: uniformBuffer.contentEpoch,
+    }
+    const vertexRead: scr.CommandResourceReadDescriptor = {
+        resource: vertexBuffer,
+        contentEpoch: vertexBuffer.contentEpoch,
+    }
+    const storageInputRead: scr.CommandResourceReadDescriptor = {
+        resource: storageInput,
+        contentEpoch: storageInput.contentEpoch,
+    }
+    const compatStorageInputRead: scratchCompat.CommandResourceReadDescriptor = {
+        resource: storageInput,
+        contentEpoch: storageInput.contentEpoch,
+    }
     const queryDestination: scr.BufferResource = runtime.createBuffer({
         label: 'typed scratch query destination',
         size: 256,
@@ -369,14 +385,18 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         ],
         count: { vertexCount: 3 },
         resources: {
-            read: [ uniformBuffer, vertexBuffer ],
+            read: [ uniformRead, vertexRead ],
             write: [],
         },
         whenMissing: 'throw',
     })
     const drawResources: scr.CommandResourceAccessDescriptor = draw.resources
+    const drawReadResource: scr.Resource = drawResources.read[0].resource
+    const drawReadContentEpoch: number = drawResources.read[0].contentEpoch
     const compatDraw: scratchCompat.DrawCommand = draw
     const compatDrawResources: scratchCompat.CommandResourceAccessDescriptor = compatDraw.resources
+    const compatDrawReadResource: scratchCompat.Resource = compatDrawResources.read[0].resource
+    const compatDrawReadContentEpoch: number = compatDrawResources.read[0].contentEpoch
     const passSpec: scr.RenderPassSpec = runtime.createRenderPass({
         color: [ {
             target: surface,
@@ -452,7 +472,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         bindSets: [ storageSet ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ storageInput ],
+            read: [ storageInputRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',
@@ -462,7 +482,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         bindSets: [ dynamicStorageSet ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ storageInput ],
+            read: [ storageInputRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',
@@ -475,7 +495,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         bindSets: [ dynamicStorageSet ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ storageInput ],
+            read: [ compatStorageInputRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',
@@ -523,6 +543,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void resourceState
     void resourceReady
     void compatResourceState
+    void uniformRead
+    void vertexRead
+    void storageInputRead
+    void compatStorageInputRead
     void scratchTextureView
     void textureSet
     void textureTargetPass
@@ -543,7 +567,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void endOcclusion
     void endOcclusionAlias
     void drawResources
+    void drawReadResource
+    void drawReadContentEpoch
     void compatDrawResources
+    void compatDrawReadResource
+    void compatDrawReadContentEpoch
     void resolveQueries
     void resolveAlias
     void error

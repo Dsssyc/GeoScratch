@@ -62,6 +62,7 @@ export type {
     BeginOcclusionQueryCommandDescriptor,
     CommandDynamicOffsets,
     CommandResourceAccessDescriptor,
+    CommandResourceReadDescriptor,
     CopyCommandDescriptor,
     DispatchCommandDescriptor,
     DrawCommandDescriptor,

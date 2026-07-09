@@ -10,6 +10,11 @@ import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 const GPU_BUFFER_USAGE_VERTEX = 0x20
 const GPU_BUFFER_USAGE_COPY_DST = 0x08
 
+function readResource(resource, contentEpoch = resource.contentEpoch) {
+
+    return { resource, contentEpoch }
+}
+
 function createProgram(runtime) {
 
     return runtime.createProgram({
@@ -234,7 +239,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             ],
             count: { vertexCount: 3, instanceCount: 1 },
             resources: {
-                read: [ vertexBuffer, instanceBuffer ],
+                read: [
+                    readResource(vertexBuffer),
+                    readResource(instanceBuffer),
+                ],
                 write: [],
             },
             whenMissing: 'throw',
@@ -258,7 +266,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             { slot: 1, buffer: instanceBuffer, offset: 0, size: 4 },
         ])
         expect(command.resources).to.deep.equal({
-            read: [ vertexBuffer, instanceBuffer ],
+            read: [
+                readResource(vertexBuffer),
+                readResource(instanceBuffer),
+            ],
             write: [],
         })
         expect(calls.drawCalls).to.deep.equal([
@@ -294,7 +305,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 phase: 'command',
             })
             expect(error.diagnostic.expected).to.deep.equal({
-                resources: { read: 'Resource[]', write: 'Resource[]' },
+                resources: { read: 'CommandResourceReadDescriptor[]', write: 'Resource[]' },
             })
             expect(error.diagnostic.actual).to.deep.equal({ resources: undefined })
         }
@@ -326,11 +337,123 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 phase: 'command',
             })
             expect(error.diagnostic.expected).to.deep.equal({
-                resources: { read: 'Resource[]', write: 'Resource[]' },
+                resources: { read: 'CommandResourceReadDescriptor[]', write: 'Resource[]' },
             })
             expect(error.diagnostic.actual).to.deep.equal({
                 resources: { read: 'positions', write: [] },
             })
+        }
+    })
+
+    it('rejects bare draw read resources with structured diagnostics', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const program = createProgram(runtime)
+        const pipeline = runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+        const buffer = runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_DST,
+        })
+
+        try {
+            runtime.createDrawCommand({
+                pipeline,
+                count: { vertexCount: 3 },
+                resources: {
+                    read: [ buffer ],
+                    write: [],
+                },
+                whenMissing: 'throw',
+            })
+            throw new Error('expected bare draw read resource validation to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+                severity: 'error',
+                phase: 'command',
+            })
+            expect(error.diagnostic.expected).to.deep.equal({
+                read: {
+                    resource: 'Resource',
+                    contentEpoch: 'non-negative integer',
+                },
+            })
+            expect(error.diagnostic.actual).to.deep.include({
+                access: 'read',
+                descriptor: 'Resource',
+            })
+        }
+    })
+
+    it('rejects incomplete or invalid draw read descriptors with structured diagnostics', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const program = createProgram(runtime)
+        const pipeline = runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+        const buffer = runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const cases = [
+            {
+                label: 'missing resource',
+                descriptor: { contentEpoch: 0 },
+                actual: { reason: 'resource', contentEpoch: 0 },
+            },
+            {
+                label: 'missing contentEpoch',
+                descriptor: { resource: buffer },
+                actual: { reason: 'contentEpoch', resourceId: buffer.id },
+            },
+            {
+                label: 'non-integer contentEpoch',
+                descriptor: { resource: buffer, contentEpoch: 0.5 },
+                actual: { reason: 'contentEpoch', resourceId: buffer.id, contentEpoch: 0.5 },
+            },
+            {
+                label: 'negative contentEpoch',
+                descriptor: { resource: buffer, contentEpoch: -1 },
+                actual: { reason: 'contentEpoch', resourceId: buffer.id, contentEpoch: -1 },
+            },
+        ]
+
+        for (const testCase of cases) {
+            try {
+                runtime.createDrawCommand({
+                    label: testCase.label,
+                    pipeline,
+                    count: { vertexCount: 3 },
+                    resources: {
+                        read: [ testCase.descriptor ],
+                        write: [],
+                    },
+                    whenMissing: 'throw',
+                })
+                throw new Error(`expected ${testCase.label} validation to fail`)
+            } catch (error) {
+                expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                expect(error.diagnostic).to.include({
+                    code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+                    severity: 'error',
+                    phase: 'command',
+                })
+                expect(error.diagnostic.expected).to.deep.equal({
+                    read: {
+                        resource: 'Resource',
+                        contentEpoch: 'non-negative integer',
+                    },
+                })
+                expect(error.diagnostic.actual).to.deep.include(testCase.actual)
+            }
         }
     })
 
@@ -353,7 +476,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 pipeline,
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ foreignBuffer ],
+                    read: [ readResource(foreignBuffer) ],
                     write: [],
                 },
                 whenMissing: 'throw',
@@ -392,7 +515,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 pipeline,
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ buffer ],
+                    read: [ readResource(buffer) ],
                     write: [],
                 },
                 whenMissing: 'throw',
@@ -438,7 +561,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ foreignBuffer ],
+                    read: [ readResource(foreignBuffer) ],
                     write: [],
                 },
                 whenMissing: 'throw',
@@ -488,7 +611,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ buffer ],
+                    read: [ readResource(buffer) ],
                     write: [],
                 },
                 whenMissing: 'throw',
@@ -534,7 +657,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ buffer ],
+                    read: [ readResource(buffer) ],
                     write: [],
                 },
                 whenMissing: 'throw',

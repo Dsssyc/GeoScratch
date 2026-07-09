@@ -147,7 +147,9 @@ async function main() {
         bindSets: [ bindSet ],
         count: { vertexCount: 6 },
         resources: {
-            read: [ texture, sampler ],
+            read: [
+                { resource: texture, contentEpoch: 1 },
+            ],
             write: [],
         },
         whenMissing: 'throw',

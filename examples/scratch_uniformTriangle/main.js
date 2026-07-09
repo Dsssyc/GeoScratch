@@ -102,7 +102,9 @@ async function main() {
         bindSets: [ bindSet ],
         count: { vertexCount: 3 },
         resources: {
-            read: [ uniformBuffer ],
+            read: [
+                { resource: uniformBuffer, contentEpoch: 1 },
+            ],
             write: [],
         },
         whenMissing: 'throw',

@@ -89,7 +89,9 @@ async function main() {
         bindSets: [ bindSet ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ input ],
+            read: [
+                { resource: input, contentEpoch: 1 },
+            ],
             write: [ output ],
         },
         whenMissing: 'throw',
