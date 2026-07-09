@@ -210,9 +210,15 @@ GPU-to-GPU copies are explicit commands:
 ```ts
 const copyHistory = scratch.command.copy({
     label: 'copy color to history',
-    source: sceneColor,
+    source: {
+        resource: sceneColor,
+        contentEpoch: sceneColor.contentEpoch,
+    },
+    sourceOrigin: sceneRegion.origin,
     target: historyColor,
-    region: sceneRegion,
+    targetOrigin: [ 0, 0 ],
+    size: sceneRegion.size,
+    whenMissing: 'throw',
 })
 ```
 

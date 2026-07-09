@@ -98,10 +98,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         resource: storageInput,
         contentEpoch: storageInput.contentEpoch,
     }
-    const copySource: scr.CopyCommandSourceDescriptor = {
+    const copySource: scr.BufferCopyCommandSourceDescriptor = {
         resource: storageOutput,
         contentEpoch: storageOutput.contentEpoch,
     }
+    const genericCopySource: scr.CopyCommandSourceDescriptor = copySource
     const compatCopySource: scratchCompat.CopyCommandSourceDescriptor = copySource
     const queryDestination: scr.BufferResource = runtime.createBuffer({
         label: 'typed scratch query destination',
@@ -112,8 +113,21 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         label: 'typed scratch texture',
         size: { width: 2, height: 2 },
         format: 'rgba8unorm',
-        usage: 0x2 | 0x4 | 0x10,
+        usage: 0x1 | 0x2 | 0x4 | 0x10,
     })
+    const scratchTextureCopyTarget: scr.TextureResource = runtime.createTexture({
+        label: 'typed scratch texture copy target',
+        size: { width: 2, height: 2 },
+        format: 'rgba8unorm',
+        usage: 0x2 | 0x4,
+    })
+    const textureCopySource: scr.TextureCopyCommandSourceDescriptor = {
+        resource: scratchTexture,
+        contentEpoch: scratchTexture.contentEpoch,
+    }
+    const textureCopyOrigin: scr.TextureCopyOrigin = [ 0, 0 ]
+    const textureCopySize: scr.TextureCopySize = { width: 2, height: 2 }
+    const compatTextureCopySource: scratchCompat.TextureCopyCommandSourceDescriptor = textureCopySource
     const scratchDepthTexture: scr.TextureResource = runtime.createTexture({
         label: 'typed scratch depth texture',
         size: { width: 2, height: 2 },
@@ -328,19 +342,39 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const copy: scr.CopyCommand = runtime.createCopyCommand({
         label: 'typed scratch copy',
-        source: copySource,
+        source: genericCopySource,
         sourceOffset: 0,
         target: storageInput,
         targetOffset: 0,
         byteLength: 16,
         whenMissing: 'throw',
     })
+    const bufferCopyDescriptor: scr.BufferCopyCommandDescriptor = {
+        source: copySource,
+        target: storageInput,
+        byteLength: 16,
+        whenMissing: 'throw',
+    }
     const copyAlias: scr.CopyCommand = runtime.copyCommand({
         source: compatCopySource,
         target: storageInput,
         byteLength: 16,
         whenMissing: 'throw',
     })
+    const textureCopyDescriptor: scr.TextureCopyCommandDescriptor = {
+        label: 'typed scratch texture copy',
+        source: textureCopySource,
+        sourceOrigin: textureCopyOrigin,
+        target: scratchTextureCopyTarget,
+        targetOrigin: { x: 0, y: 0 },
+        size: textureCopySize,
+        whenMissing: 'throw',
+    }
+    const textureCopy: scr.CopyCommand = runtime.createCopyCommand(textureCopyDescriptor)
+    const compatTextureCopyDescriptor: scratchCompat.TextureCopyCommandDescriptor = textureCopyDescriptor
+    const textureCopyAlias: scratchCompat.CopyCommand = runtime.copyCommand(compatTextureCopyDescriptor)
+    const copyKind: 'buffer-to-buffer' | 'texture-to-texture' = textureCopy.copyKind
+    const compatCopyKind: 'buffer-to-buffer' | 'texture-to-texture' = textureCopyAlias.copyKind
     const querySet: scr.QuerySetResource = runtime.createQuerySet({
         label: 'typed timestamp queries',
         type: 'timestamp',
@@ -620,7 +654,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void storageInputRead
     void compatStorageInputRead
     void copySource
+    void genericCopySource
     void compatCopySource
+    void textureCopySource
+    void textureCopyOrigin
+    void textureCopySize
+    void compatTextureCopySource
     void scratchTextureView
     void textureSet
     void textureTargetPass
@@ -641,7 +680,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void dynamicDispatch
     void compatDynamicDispatch
     void copy
+    void bufferCopyDescriptor
     void copyAlias
+    void textureCopyDescriptor
+    void textureCopy
+    void compatTextureCopyDescriptor
+    void textureCopyAlias
+    void copyKind
+    void compatCopyKind
     void querySet
     void querySetAlias
     void querySlotState
