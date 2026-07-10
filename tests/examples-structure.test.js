@@ -15,6 +15,7 @@ describe('examples structure', () => {
         'scratch_textureSampling',
         'scratch_renderToTexture',
         'indirectExecution',
+        'readinessPolicies',
         'm_demLayer',
         'm_flowLayer',
         'x_helloGAW',
@@ -29,6 +30,7 @@ describe('examples structure', () => {
         'scratch_textureSampling',
         'scratch_renderToTexture',
         'indirectExecution',
+        'readinessPolicies',
         'm_demLayer',
         'm_flowLayer',
         'x_helloGAW',
@@ -88,6 +90,7 @@ describe('examples structure', () => {
             [ 'scratch_textureSampling', 'Texture Sampling' ],
             [ 'scratch_renderToTexture', 'Render To Texture' ],
             [ 'indirectExecution', 'Indirect Execution' ],
+            [ 'readinessPolicies', 'Readiness Policies' ],
         ]
 
         for (const [ name, title ] of scratchBackedExamples) {
@@ -201,6 +204,18 @@ describe('examples structure', () => {
         expect(source).to.include('count: { indirect: dispatchArguments')
         expect(source).to.include('count: { indirect: drawArguments')
         expect(source).to.include('count: { indirect: indexedArguments')
+        expect(source).to.not.match(/readback|mapAsync|getMappedRange|toBytes|toArray/i)
+    })
+
+    it('demonstrates readiness policy execution without GPU readback', () => {
+        const source = read('examples', 'readinessPolicies', 'main.js')
+
+        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include("whenMissing: 'use-fallback'")
+        expect(source).to.include("whenMissing: 'skip-command'")
+        expect(source).to.include("whenMissing: 'skip-pass'")
+        expect(source).to.include('executionOutcomes')
+        expect(source).to.include("dataset.status = 'ready'")
         expect(source).to.not.match(/readback|mapAsync|getMappedRange|toBytes|toArray/i)
     })
 })

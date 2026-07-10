@@ -130,12 +130,12 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 - Modify: `examples/vite.config.js`
 - Modify: `tests/examples-structure.test.js`
 
-- [ ] Write a failing structure test requiring the neutral `readinessPolicies` example, public `geoscratch` imports, all three non-throw policy strings, `executionOutcomes` inspection, and no mapping/readback APIs.
-- [ ] Build a ready fallback DrawCommand and an empty primary DrawCommand so `use-fallback` renders a visible region and the outcome identifies both requested and executed ids.
-- [ ] Add an optional DrawCommand using `skip-command`; prove its requested id is absent from encoded ids and its visual region is absent.
-- [ ] Render known content into an offscreen target, then submit a second pass with `skip-pass` that would otherwise clear/replace it; composite the preserved target to the surface.
-- [ ] Set `canvas.dataset.status = 'ready'` only after checking the expected pass/command outcomes. Do not map or read GPU data.
-- [ ] Run structure tests and `npm run build`; commit with `git commit -m "Add readiness policy execution example"`.
+- [x] Write a failing structure test requiring the neutral `readinessPolicies` example, public `geoscratch` imports, all three non-throw policy strings, `executionOutcomes` inspection, and no mapping/readback APIs.
+- [x] Build a ready fallback DrawCommand and an empty primary DrawCommand so `use-fallback` renders a visible region and the outcome identifies both requested and executed ids.
+- [x] Add an optional DrawCommand using `skip-command`; prove its requested id is absent from encoded ids and its visual region is absent.
+- [x] Render known content into an offscreen target, then submit a second pass with `skip-pass` that would otherwise clear/replace it; composite the preserved target to the surface.
+- [x] Set `canvas.dataset.status = 'ready'` only after checking the expected pass/command outcomes. Do not map or read GPU data.
+- [x] Run structure tests and `npm run build`; commit with `git commit -m "Add readiness policy execution example"`.
 
 ## Task 7: ADR, Bilingual Vision, And Eight-Row Audit
 
