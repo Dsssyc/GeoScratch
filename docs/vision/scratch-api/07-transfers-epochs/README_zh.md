@@ -185,15 +185,19 @@ readback.dispose()
 
 `cancel()` 表示结果不再需要。`dispose()` 释放本地 operation 所有权; 若 operation 仍在飞行中，它等价于 cancel 加 user-facing detachment，同时 runtime 保留足够内部状态以便稍后释放 staging。dispose 后，`toArray()`、`toBytes()` 与 `map()` 都应以结构化 diagnostic reject。
 
-少数情况下，如果 copy 或 resolve 点必须放进 command graph 的特定位置，使用 `ReadbackCommand`:
+少数情况下，如果 staging copy 点必须放进 command graph 的特定位置，使用 `ReadbackCommand`:
 
 ```ts
-const readParticles = scratch.command.readback({
+const readParticles = runtime.readbackCommand({
     label: 'read particle positions',
-    source: particles.segment('positions'),
+    source: {
+        resource: particlePositions,
+        contentEpoch: particlePositions.contentEpoch + 1,
+    },
+    whenMissing: 'throw',
 })
 
-const submitted = scratch.submission()
+const submitted = runtime.submission()
     .compute(simulationPass, [simulate])
     .readback(readParticles)
     .submit()
@@ -201,7 +205,7 @@ const submitted = scratch.submission()
 const values = await readParticles.result({ after: submitted }).toArray()
 ```
 
-`ReadbackCommand` 是 ordered-staging 逃生口，不是默认 readback 路径，并且它最终仍产生显式 `ReadbackOperation`。
+buffer-only `ReadbackCommand` ordered-staging 路径现已实现。它验证显式 source epoch，记录 read-only submission ledger entry，并在声明的 step 把数据复制到 runtime-owned staging。`result({ after })` 返回与该次 submitted work 精确关联的 operation；materialization 只映射已有 staging buffer，不会再次提交 copy。它仍是逃生口，不是默认 readback 路径。直接 texture readback、mapped lease 与 staging budget policy 仍属于未来工作。
 
 ## Copy
 

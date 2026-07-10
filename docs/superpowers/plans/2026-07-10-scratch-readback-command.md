@@ -28,11 +28,11 @@
 - Modify: `packages/geoscratch/src/scratch/submission.ts`
 - Modify: `packages/geoscratch/src/scratch/readback.ts`
 
-- [ ] Write RED tests proving `ReadbackCommand` is public, both runtime factories return it, `.readback(command)` records the step, `result({ after })` returns staged bytes, repeated result lookup is referentially stable, and materialization does not increase the fake encoder copy count.
+- [x] Write RED tests proving `ReadbackCommand` is public, both runtime factories return it, `.readback(command)` records the step, `result({ after })` returns staged bytes, repeated result lookup is referentially stable, and materialization does not increase the fake encoder copy count.
 
-- [ ] Run `npm test -- --grep "ReadbackCommand"` and confirm failure is caused by the missing export/factories.
+- [x] Run `npm test -- --grep "ReadbackCommand"` and confirm failure is caused by the missing export/factories.
 
-- [ ] Add this public contract in `command.ts`:
+- [x] Add this public contract in `command.ts`:
 
 ```ts
 export type ReadbackCommandDescriptor = {
@@ -50,17 +50,17 @@ export type ReadbackCommandResultOptions = {
 }
 ```
 
-- [ ] Implement `ReadbackCommand` with `commandKind: 'readback'`, normalized `{ resource, contentEpoch }`, one normalized range, `assertRuntime`, `assertUsable`, `dispose`, internal submitted-result registration, and structured diagnostics for invalid descriptors or missing submitted results.
+- [x] Implement `ReadbackCommand` with `commandKind: 'readback'`, normalized `{ resource, contentEpoch }`, one normalized range, `assertRuntime`, `assertUsable`, `dispose`, internal submitted-result registration, and structured diagnostics for invalid descriptors or missing submitted results.
 
-- [ ] Add `ScratchRuntime.createReadbackCommand(...)`, `ScratchRuntime.readbackCommand(...)`, Scratch entrypoint exports, `SubmissionBuilder.readback(...)`, and `'readback'` in `SubmissionStepKind`.
+- [x] Add `ScratchRuntime.createReadbackCommand(...)`, `ScratchRuntime.readbackCommand(...)`, Scratch entrypoint exports, `SubmissionBuilder.readback(...)`, and `'readback'` in `SubmissionStepKind`.
 
-- [ ] During submission encoding, create one `MAP_READ | COPY_DST` staging buffer, encode one `copyBufferToBuffer`, record a source read access, and defer command-to-operation registration until `SubmittedWork` exists.
+- [x] During submission encoding, create one `MAP_READ | COPY_DST` staging buffer, encode one `copyBufferToBuffer`, record a source read access, and defer command-to-operation registration until `SubmittedWork` exists.
 
-- [ ] Add an internal scheduled `ReadbackOperation` construction path. It must begin with the submitted staging buffer, skip source epoch/allocation revalidation after staging has occurred, wait for `after.done`, map/copy bytes, and preserve existing consume/retain/cancel/dispose behavior.
+- [x] Add an internal scheduled `ReadbackOperation` construction path. It must begin with the submitted staging buffer, skip source epoch/allocation revalidation after staging has occurred, wait for `after.done`, map/copy bytes, and preserve existing consume/retain/cancel/dispose behavior.
 
-- [ ] Run `npm test -- --grep "ReadbackCommand|ReadbackOperation"` and confirm the core behavior is GREEN.
+- [x] Run `npm test -- --grep "ReadbackCommand|ReadbackOperation"` and confirm the core behavior is GREEN.
 
-- [ ] Run `npm run typecheck` and commit the verified phase with `git commit -m "Add Scratch ordered readback command"`.
+- [x] Run `npm run typecheck` and commit the verified phase with `git commit -m "Add Scratch ordered readback command"`.
 
 ## Phase 2: Submission Validation And Ledger Facts
 
@@ -69,15 +69,15 @@ export type ReadbackCommandResultOptions = {
 - Modify: `tests/scratch-submitted-work-epochs.test.js`
 - Modify: `packages/geoscratch/src/scratch/submission.ts`
 
-- [ ] Add RED tests for incompatible step values, wrong runtime, disposed commands, missing `COPY_SRC`, invalid ranges, empty sources, future/stale epochs, `warn` report behavior, `off` behavior, and same-submission producer epochs.
+- [x] Add RED tests for incompatible step values, wrong runtime, disposed commands, missing `COPY_SRC`, invalid ranges, empty sources, future/stale epochs, `warn` report behavior, `off` behavior, and same-submission producer epochs.
 
-- [ ] Run the focused tests and confirm each new validation group fails for the intended missing behavior.
+- [x] Run focused validation tests; confirm newly missing behavior fails before implementation and reused generic submission behavior remains aligned.
 
-- [ ] Validate `ReadbackCommand` ownership/usability as a hard structural check, then pass `[command.source]` through the existing readiness simulation. Do not mark its source ready because the step is read-only.
+- [x] Validate `ReadbackCommand` ownership/usability as a hard structural check, then pass `[command.source]` through the existing readiness simulation. Do not mark its source ready because the step is read-only.
 
-- [ ] Record exactly one `read` access whose origin has `stepKind: 'readback'`, `commandKind: 'readback'`, and the command id. Confirm readback alone creates no producer epoch; when an earlier same-submission write produces the source, preserve that producer epoch on the scheduled operation.
+- [x] Record exactly one `read` access whose origin has `stepKind: 'readback'`, `commandKind: 'readback'`, and the command id. Confirm readback alone creates no producer epoch; when an earlier same-submission write produces the source, preserve that producer epoch on the scheduled operation.
 
-- [ ] Run `npm test -- --grep "ReadbackCommand|SubmittedWork resource epoch ledger"` and `npm run typecheck`; commit with `git commit -m "Validate Scratch ordered readback submissions"`.
+- [x] Run `npm test -- --grep "ReadbackCommand|SubmittedWork resource epoch ledger"` and `npm run typecheck`; commit the verified validation and lifecycle phase.
 
 ## Phase 3: Lifecycle, Types, And Regression Coverage
 
@@ -87,13 +87,13 @@ export type ReadbackCommandResultOptions = {
 - Modify: `tests/types/public-api.ts`
 - Modify: `packages/geoscratch/src/scratch/readback.ts`
 
-- [ ] Add RED tests proving scheduled `consume-on-read`, scheduled `until-dispose`, cancellation/disposal, map failure, result lookup against unrelated work, and readability after the source advances after staging.
+- [x] Add RED tests proving scheduled `consume-on-read`, scheduled `until-dispose`, cancellation/disposal, map failure, result lookup against unrelated work, and readability after the source advances after staging.
 
-- [ ] Add type-contract uses for `ReadbackCommandDescriptor`, `ReadbackCommandResultOptions`, both factories, builder `.readback(...)`, `result({ after })`, and both package entrypoints.
+- [x] Add type-contract uses for `ReadbackCommandDescriptor`, `ReadbackCommandResultOptions`, both factories, builder `.readback(...)`, `result({ after })`, and both package entrypoints.
 
-- [ ] Run `npm test -- --grep "ReadbackCommand|ReadbackOperation retention"` and `npm run typecheck`; make only lifecycle/type changes required to turn the group GREEN.
+- [x] Run `npm test -- --grep "ReadbackCommand|ReadbackOperation retention"` and `npm run typecheck`; make only lifecycle/type changes required to turn the group GREEN.
 
-- [ ] Commit with `git commit -m "Cover Scratch ordered readback lifecycle"`.
+- [x] Commit the validation and lifecycle phase with `git commit -m "Validate Scratch ordered readback lifecycle"`.
 
 ## Phase 4: Decision Record And Vision Status
 
@@ -104,11 +104,11 @@ export type ReadbackCommandResultOptions = {
 - Modify: `docs/vision/scratch-api/07-transfers-epochs/README.md`
 - Modify: `docs/vision/scratch-api/07-transfers-epochs/README_zh.md`
 
-- [ ] Record that `ReadbackCommand` is only the exact-order staging escape hatch, normal `ReadbackOperation` remains default, scheduled materialization performs no second copy, reads use explicit epoch validation, readback writes no user epoch, and texture readback/budgets/leases remain future work.
+- [x] Record that `ReadbackCommand` is only the exact-order staging escape hatch, normal `ReadbackOperation` remains default, scheduled materialization performs no second copy, reads use explicit epoch validation, readback writes no user epoch, and texture readback/budgets/leases remain future work.
 
-- [ ] Update only implementation-status wording in both English/Chinese vision pairs and align examples with the actual public runtime factory shape.
+- [x] Update only implementation-status wording in both English/Chinese vision pairs and align examples with the actual public runtime factory shape.
 
-- [ ] Run `git diff --check`, inspect the bilingual diff for factual parity, and commit with `git commit -m "Document Scratch ordered readback staging"`.
+- [x] Run `git diff --check`, inspect the bilingual diff for factual parity, and commit with `git commit -m "Document Scratch ordered readback staging"`.
 
 ## Phase 5: Completion Audit And Integration
 

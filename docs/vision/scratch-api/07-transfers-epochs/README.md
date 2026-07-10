@@ -185,15 +185,19 @@ readback.dispose()
 
 `cancel()` means the result is no longer needed. `dispose()` releases local operation ownership; if the operation is still in flight, it behaves like cancel plus user-facing detachment while the runtime keeps enough internal state to release staging later. After disposal, `toArray()`, `toBytes()`, and `map()` reject with a structured diagnostic.
 
-For uncommon cases where the copy or resolve point must be placed inside the command graph, use `ReadbackCommand`:
+For uncommon cases where the staging copy point must be placed inside the command graph, use `ReadbackCommand`:
 
 ```ts
-const readParticles = scratch.command.readback({
+const readParticles = runtime.readbackCommand({
     label: 'read particle positions',
-    source: particles.segment('positions'),
+    source: {
+        resource: particlePositions,
+        contentEpoch: particlePositions.contentEpoch + 1,
+    },
+    whenMissing: 'throw',
 })
 
-const submitted = scratch.submission()
+const submitted = runtime.submission()
     .compute(simulationPass, [simulate])
     .readback(readParticles)
     .submit()
@@ -201,7 +205,7 @@ const submitted = scratch.submission()
 const values = await readParticles.result({ after: submitted }).toArray()
 ```
 
-`ReadbackCommand` is an ordered-staging escape hatch. It is not the default readback path, and it still produces an explicit `ReadbackOperation`.
+The buffer-only `ReadbackCommand` ordered-staging path is implemented. It validates the explicit source epoch, records a read-only submission ledger entry, and copies into runtime-owned staging at the declared step. `result({ after })` returns the operation associated with that exact submitted work; materialization maps the existing staging buffer and does not submit a second copy. This remains an escape hatch, not the default readback path. Direct texture readback, mapped leases, and staging-budget policy remain future work.
 
 ## Copy
 

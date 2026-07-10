@@ -59,6 +59,8 @@ Target command families:
 
 `CopyCommand` covers WebGPU-native GPU-side copy directions: buffer-to-buffer, texture-to-texture, buffer-to-texture, and texture-to-buffer. CPU upload and CPU readback remain explicit transfer/readback operations rather than substitutes for these command encoder copies.
 
+The first `ReadbackCommand` slice is implemented for buffer sources. It uses an explicit source `contentEpoch`, enters submission order through `SubmissionBuilder.readback(...)`, stages once at that position, and returns the associated `ReadbackOperation` through `result({ after })`. Direct texture readback, mapped leases, and staging-budget policy remain future work.
+
 Every command should declare:
 
 - label
