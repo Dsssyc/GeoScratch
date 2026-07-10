@@ -367,6 +367,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
     const diagnostics: ScratchDiagnostic[] = []
     const readiness: ReadinessSimulation = new Map()
     const querySlots: QuerySlotSimulation = new Map()
+    const readbackSteps = new Map<ReadbackCommand, number>()
 
     for (const [stepIndex, step] of builder.steps.entries()) {
         if (step.kind === 'upload') {
@@ -384,6 +385,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
 
         if (step.kind === 'readback') {
             validateReadbackStep(builder, step)
+            validateReadbackUniqueness(builder, step, stepIndex, readbackSteps)
             validateReadbackReadiness(builder, step, stepIndex, readiness, diagnostics)
             continue
         }
@@ -498,6 +500,36 @@ function validateReadbackReadiness(
 ): void {
 
     validateCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, undefined, 'source')
+}
+
+function validateReadbackUniqueness(
+    builder: SubmissionBuilder,
+    step: ReadbackStep,
+    stepIndex: number,
+    readbackSteps: Map<ReadbackCommand, number>
+): void {
+
+    const firstStepIndex = readbackSteps.get(step.command)
+    if (firstStepIndex === undefined) {
+        readbackSteps.set(step.command, stepIndex)
+        return
+    }
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_READBACK_COMMAND_DUPLICATE_IN_SUBMISSION',
+        severity: 'error',
+        phase: 'submission',
+        subject: step.command.subject,
+        related: [ builder.subject ],
+        message: 'ReadbackCommand may appear only once in a SubmissionBuilder.',
+        expected: { commandOccurrences: 1 },
+        actual: {
+            commandId: step.command.id,
+            firstStepIndex,
+            duplicateStepIndex: stepIndex,
+            commandOccurrences: 2,
+        },
+    })
 }
 
 function validateResolveStep(builder: SubmissionBuilder, step: ResolveStep) {

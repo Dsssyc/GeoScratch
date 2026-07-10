@@ -63,13 +63,20 @@ describe('scratch ReadbackCommand', () => {
         expect(runtime).to.respondTo('readbackCommand')
 
         const command = runtime.createReadbackCommand(descriptor)
-        const alias = runtime.readbackCommand(descriptor)
+        const alias = runtime.readbackCommand({
+            label: 'ordered readback alias',
+            source: descriptor.source,
+            sourceOffset: 4,
+            byteLength: 8,
+            whenMissing: 'throw',
+        })
 
         expect(command).to.be.instanceOf(scr.ReadbackCommand)
         expect(alias).to.be.instanceOf(scr.ReadbackCommand)
         expect(command.commandKind).to.equal('readback')
         expect(command.source).to.deep.equal(descriptor.source)
         expect(command.range).to.deep.equal({ offset: 4, byteLength: 8 })
+        expect(alias.range).to.deep.equal({ offset: 4, byteLength: 8 })
         expect(command.retain).to.equal('until-dispose')
         expect(command.whenMissing).to.equal('throw')
     })
@@ -102,6 +109,7 @@ describe('scratch ReadbackCommand', () => {
             .readback(command)
             .submit()
         const stagedCopyCount = fake.calls.copies.length
+        const stagedSubmissionCount = fake.calls.queueSubmissions.length
         const operation = command.result({ after: submitted })
 
         expect(command.result({ after: submitted })).to.equal(operation)
@@ -109,6 +117,7 @@ describe('scratch ReadbackCommand', () => {
         expect(operation.producerEpoch?.contentEpoch).to.equal(1)
         expect(Array.from(await operation.toArray(Uint32Array))).to.deep.equal([ 22, 33 ])
         expect(fake.calls.copies).to.have.length(stagedCopyCount)
+        expect(fake.calls.queueSubmissions).to.have.length(stagedSubmissionCount)
     })
 
     it('rejects invalid descriptors with structured diagnostics', async () => {
@@ -161,6 +170,17 @@ describe('scratch ReadbackCommand', () => {
 
         await expectScratchDiagnostic(() => runtime.createReadbackCommand({
             source: { resource: source, contentEpoch: 0 },
+            sourceOffset: 4,
+            range: { offset: 0, byteLength: 8 },
+            whenMissing: 'throw',
+        }), {
+            code: 'SCRATCH_READBACK_RANGE_INVALID',
+            severity: 'error',
+            phase: 'command',
+        })
+
+        await expectScratchDiagnostic(() => runtime.createReadbackCommand({
+            source: { resource: source, contentEpoch: 0 },
             retain: 'forever',
             whenMissing: 'throw',
         }), {
@@ -208,6 +228,32 @@ describe('scratch ReadbackCommand', () => {
 
         expect(diagnostic.subject).to.deep.equal(command.subject)
         expect(diagnostic.related).to.deep.include(unrelated.subject)
+    })
+
+    it('rejects duplicate use of one command in the same submission', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const source = runtime.createBuffer({ size: 16, usage: COPY_SRC })
+        source._advanceContentEpoch()
+        const command = runtime.createReadbackCommand({
+            source: { resource: source, contentEpoch: 1 },
+            whenMissing: 'throw',
+        })
+
+        const diagnostic = await expectScratchDiagnostic(
+            () => runtime.submission().readback(command).readback(command).submit(),
+            {
+                code: 'SCRATCH_READBACK_COMMAND_DUPLICATE_IN_SUBMISSION',
+                severity: 'error',
+                phase: 'submission',
+            }
+        )
+
+        expect(diagnostic.subject).to.deep.equal(command.subject)
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        expect(fake.calls.copies).to.have.length(0)
+        expect(fake.calls.queueSubmissions).to.have.length(0)
     })
 
     it('rejects incompatible, wrong-runtime, and disposed submission commands', async () => {
@@ -394,29 +440,38 @@ describe('scratch ReadbackCommand', () => {
         expect(operation.contentEpoch).to.equal(1)
     })
 
-    it('pins bytes and producer provenance to the readback step before later writes', async () => {
+    it('pins bytes and producer provenance to the readback step before later GPU writes', async () => {
 
         const fake = createFakeGpu()
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = runtime.createBuffer({ size: 8, usage: COPY_SRC | COPY_DST })
+        const laterSource = runtime.createBuffer({ size: 8, usage: COPY_SRC | COPY_DST })
         const firstUpload = runtime.createUploadCommand({
             label: 'first producer',
             target: source,
             data: new Uint32Array([ 10, 20 ]),
         })
-        const secondUpload = runtime.createUploadCommand({
-            label: 'later producer',
-            target: source,
+        const laterSourceUpload = runtime.createUploadCommand({
+            label: 'later source producer',
+            target: laterSource,
             data: new Uint32Array([ 30, 40 ]),
         })
         const command = runtime.createReadbackCommand({
             source: { resource: source, contentEpoch: 1 },
             whenMissing: 'throw',
         })
+        const laterCopy = runtime.createCopyCommand({
+            label: 'later GPU producer',
+            source: { resource: laterSource, contentEpoch: 1 },
+            target: source,
+            byteLength: 8,
+            whenMissing: 'throw',
+        })
         const submitted = runtime.submission()
             .upload(firstUpload)
+            .upload(laterSourceUpload)
             .readback(command)
-            .upload(secondUpload)
+            .copy(laterCopy)
             .submit()
         const operation = command.result({ after: submitted })
 
@@ -428,7 +483,17 @@ describe('scratch ReadbackCommand', () => {
             commandId: firstUpload.id,
         })
         expect(Array.from(await operation.toArray(Uint32Array))).to.deep.equal([ 10, 20 ])
-        expect(fake.calls.copies).to.have.length(1)
+        expect(fake.calls.copies).to.have.length(2)
+    })
+
+    it('keeps a staged result retrievable after the source is disposed', async () => {
+
+        const { source, command, submitted, operation } = await createSubmittedReadback()
+
+        source.dispose()
+
+        expect(command.result({ after: submitted })).to.equal(operation)
+        expect(Array.from(await operation.toArray(Uint32Array))).to.deep.equal([ 1, 2, 3, 4 ])
     })
 
     it('keeps scheduled consume-on-read semantics', async () => {
@@ -474,6 +539,37 @@ describe('scratch ReadbackCommand', () => {
             severity: 'error',
             phase: 'readback',
         })
+    })
+
+    it('preserves layout-aware views on the scheduled path', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const codec = scr.layoutCodec({
+            name: 'OrderedReadbackValue',
+            fields: [ { name: 'value', type: 'f32' } ],
+        }, {
+            usage: [ 'storage', 'readback' ],
+        })
+        const values = [ { value: 3 }, { value: 7 } ]
+        const uploadBytes = codec.pack(values)
+        const source = runtime.createBuffer({
+            size: uploadBytes.byteLength,
+            usage: COPY_SRC | COPY_DST,
+            layout: codec.artifact,
+            elementCount: values.length,
+        })
+        const upload = runtime.createUploadCommand({ target: source, data: uploadBytes })
+        const command = runtime.createReadbackCommand({
+            source: { resource: source, contentEpoch: 1 },
+            whenMissing: 'throw',
+        })
+        const submitted = runtime.submission().upload(upload).readback(command).submit()
+        const view = await command.result({ after: submitted }).toLayoutView()
+
+        expect(view.artifact).to.equal(codec.artifact)
+        expect(view.toArray()).to.deep.equal(values)
+        expect(fake.calls.copies).to.have.length(1)
     })
 
     it('releases scheduled staging when cancelled or disposed before mapping', async () => {

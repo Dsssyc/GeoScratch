@@ -1401,16 +1401,7 @@ export class ReadbackCommand {
 
     assertUsable() {
 
-        if (this.isDisposed) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_COMMAND_DISPOSED',
-                severity: 'error',
-                phase: 'command',
-                subject: this.subject,
-                message: 'Command has been disposed.',
-            })
-        }
-
+        this._assertNotDisposed()
         this.runtime.assertActive()
         this.source.resource.assertUsable()
     }
@@ -1438,7 +1429,8 @@ export class ReadbackCommand {
 
     result(options: ReadbackCommandResultOptions): ReadbackOperation {
 
-        this.assertUsable()
+        this._assertNotDisposed()
+        this.runtime.assertActive()
 
         const after = options?.after
         if (!after || after.runtime !== this.runtime || typeof after.done?.then !== 'function') {
@@ -1475,6 +1467,19 @@ export class ReadbackCommand {
         }
 
         return operation
+    }
+
+    private _assertNotDisposed(): void {
+
+        if (!this.isDisposed) return
+
+        throwScratchDiagnostic({
+            code: 'SCRATCH_COMMAND_DISPOSED',
+            severity: 'error',
+            phase: 'command',
+            subject: this.subject,
+            message: 'Command has been disposed.',
+        })
     }
 
     dispose(): void {

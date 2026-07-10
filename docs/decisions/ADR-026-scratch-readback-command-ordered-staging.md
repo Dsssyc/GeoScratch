@@ -12,7 +12,7 @@ Accepted
 
 `ReadbackOperation` is the normal Scratch GPU-to-CPU path. It captures a buffer source and lazily creates a runtime-owned staging copy when host materialization begins. That default keeps host synchronization explicit without requiring users to manage `MAP_READ` buffers.
 
-Lazy staging cannot express every ordering requirement. Some workloads need to capture bytes between two commands in one submission, before a later command overwrites the same source. Performing the copy when `toBytes()` or `toArray()` is called would read a different content epoch.
+Lazy staging cannot express every ordering requirement. Some workloads need to capture bytes between GPU command-encoder steps in one submission, before a later GPU command overwrites the same source. Performing the copy when `toBytes()` or `toArray()` is called would read a different content epoch.
 
 The Scratch API vision reserves `ReadbackCommand` for this uncommon case. It must insert staging at an exact `SubmissionBuilder` position while still returning a `ReadbackOperation` for host materialization and lifecycle management.
 
@@ -36,6 +36,8 @@ type ReadbackCommandDescriptor = {
 ```
 
 `ScratchRuntime.createReadbackCommand(...)` and `ScratchRuntime.readbackCommand(...)` create the command. `SubmissionBuilder.readback(command)` places it in submission order. `ReadbackCommand.result({ after: submitted })` returns the one `ReadbackOperation` created for that command and `SubmittedWork`; there is no implicit latest-submission lookup.
+
+One `ReadbackCommand` object may appear at most once in a single `SubmissionBuilder`. Repeating it would make `result({ after })` ambiguous because the result API intentionally has no implicit step selector. The same command may still be reused across distinct submissions, each addressed by its own `SubmittedWork`.
 
 Submission validation treats the command as a read-only step:
 
