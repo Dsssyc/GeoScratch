@@ -280,6 +280,59 @@ describe('scratch readiness policy execution', () => {
         expect(repeated.actual).to.deep.include({ reason: 'cycle' })
     })
 
+    it('rejects repeated command ids in a forged fallback chain', async() => {
+
+        const fixture = await createRenderFixture()
+        const first = {
+            id: 'forged-repeat',
+            commandKind: 'draw',
+            runtime: fixture.runtime,
+            isDisposed: false,
+            resources: { write: [] },
+            whenMissing: 'use-fallback',
+            subject: { kind: 'Command', id: 'forged-repeat', commandKind: 'draw' },
+        }
+        const second = {
+            id: 'forged-repeat',
+            commandKind: 'draw',
+            runtime: fixture.runtime,
+            isDisposed: false,
+            resources: { write: [] },
+            whenMissing: 'throw',
+            subject: { kind: 'Command', id: 'forged-repeat', commandKind: 'draw' },
+        }
+        first.fallback = second
+
+        const repeated = await expectDiagnostic(() => createDraw(fixture, {
+            whenMissing: 'use-fallback',
+            fallback: first,
+        }), 'SCRATCH_COMMAND_FALLBACK_INVALID')
+        expect(repeated.actual).to.deep.include({ reason: 'repeated-id' })
+    })
+
+    it('rejects an acyclic forged object that is not a command', async() => {
+
+        const fixture = await createRenderFixture()
+        const forged = {
+            id: 'forged-command',
+            commandKind: 'draw',
+            runtime: fixture.runtime,
+            isDisposed: false,
+            resources: { write: [] },
+            whenMissing: 'throw',
+            subject: { kind: 'Command', id: 'forged-command', commandKind: 'draw' },
+        }
+
+        const diagnostic = await expectDiagnostic(() => createDraw(fixture, {
+            whenMissing: 'use-fallback',
+            fallback: forged,
+        }), 'SCRATCH_COMMAND_FALLBACK_INVALID')
+        expect(diagnostic.actual).to.deep.include({
+            reason: 'command',
+            fallbackCommandId: 'forged-command',
+        })
+    })
+
     it('locks fallback references after command construction', async() => {
 
         const fixture = await createRenderFixture()
@@ -441,60 +494,62 @@ describe('scratch readiness policy execution', () => {
         expect(staleInput.contentEpoch).to.equal(1)
     })
 
-    it('keeps render attachment side effects when every draw uses skip-command', async() => {
+    it('keeps render attachment side effects when every draw uses skip-command in every validation mode', async() => {
 
-        const fixture = await createRenderFixture()
-        const target = fixture.runtime.createTexture({
-            size: { width: 4, height: 4 },
-            format: 'rgba8unorm',
-            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
-        })
-        const missing = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const pass = fixture.runtime.createRenderPass({
-            color: [ {
-                target,
-                load: 'clear',
-                store: 'store',
-                clear: [ 0, 0, 0, 1 ],
-            } ],
-        })
-        const skipped = createDraw(fixture, {
-            resources: {
-                read: [ { resource: missing, contentEpoch: 0 } ],
-                write: [],
-            },
-            whenMissing: 'skip-command',
-        })
-        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
-            .render(pass, [ skipped ])
-            .submit()
+        for (const validation of [ 'off', 'warn', 'throw' ]) {
+            const fixture = await createRenderFixture()
+            const target = fixture.runtime.createTexture({
+                size: { width: 4, height: 4 },
+                format: 'rgba8unorm',
+                usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+            })
+            const missing = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+            const pass = fixture.runtime.createRenderPass({
+                color: [ {
+                    target,
+                    load: 'clear',
+                    store: 'store',
+                    clear: [ 0, 0, 0, 1 ],
+                } ],
+            })
+            const skipped = createDraw(fixture, {
+                resources: {
+                    read: [ { resource: missing, contentEpoch: 0 } ],
+                    write: [],
+                },
+                whenMissing: 'skip-command',
+            })
+            const submitted = fixture.runtime.createSubmission({ validation })
+                .render(pass, [ skipped ])
+                .submit()
 
-        expect(fixture.calls.renderPasses).to.have.length(1)
-        expect(fixture.calls.drawCalls).to.have.length(0)
-        expect(target.state).to.equal('ready')
-        expect(target.contentEpoch).to.equal(1)
-        expect(submitted.resourceAccesses).to.have.length(1)
-        expect(submitted.resourceAccesses[0]).to.include({ resourceId: target.id, access: 'write' })
-        expect(submitted.producerEpochs).to.have.length(1)
-        expect(submitted.executionOutcomes).to.deep.include({
-            outcomeKind: 'pass',
-            stepIndex: 0,
-            stepKind: 'render',
-            passId: pass.id,
-            status: 'executed',
-            requestedCommandIds: [ skipped.id ],
-            encodedCommandIds: [],
-        })
-        expect(submitted.executionOutcomes).to.deep.include({
-            outcomeKind: 'command',
-            stepIndex: 0,
-            stepKind: 'render',
-            passId: pass.id,
-            requestedCommandId: skipped.id,
-            requestedCommandKind: 'draw',
-            status: 'skipped-command',
-            attempts: submitted.executionOutcomes[1].attempts,
-        })
+            expect(fixture.calls.renderPasses).to.have.length(1)
+            expect(fixture.calls.drawCalls).to.have.length(0)
+            expect(target.state).to.equal('ready')
+            expect(target.contentEpoch).to.equal(1)
+            expect(submitted.resourceAccesses).to.have.length(1)
+            expect(submitted.resourceAccesses[0]).to.include({ resourceId: target.id, access: 'write' })
+            expect(submitted.producerEpochs).to.have.length(1)
+            expect(submitted.executionOutcomes).to.deep.include({
+                outcomeKind: 'pass',
+                stepIndex: 0,
+                stepKind: 'render',
+                passId: pass.id,
+                status: 'executed',
+                requestedCommandIds: [ skipped.id ],
+                encodedCommandIds: [],
+            })
+            expect(submitted.executionOutcomes).to.deep.include({
+                outcomeKind: 'command',
+                stepIndex: 0,
+                stepKind: 'render',
+                passId: pass.id,
+                requestedCommandId: skipped.id,
+                requestedCommandKind: 'draw',
+                status: 'skipped-command',
+                attempts: submitted.executionOutcomes[1].attempts,
+            })
+        }
     })
 
     it('removes render attachments, timestamps, and occlusion writes for skip-pass', async() => {

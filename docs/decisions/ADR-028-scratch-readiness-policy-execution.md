@@ -36,7 +36,7 @@ type CommandReadinessDescriptor<FallbackCommand> =
     }
 ```
 
-Draw can fall back only to `DrawCommand`; Dispatch can fall back only to `DispatchCommand`. Runtime construction validates the same command kind, runtime ownership, non-disposed lifecycle, identical declared-write resource identity set, and an acyclic chain. The policy and fallback reference are immutable after construction. There is no bare `use-fallback`, legacy alias, implicit resource substitution, or bind-set mutation path.
+Draw can fall back only to an actual `DrawCommand`; Dispatch can fall back only to an actual `DispatchCommand`. Runtime construction validates the same command kind, runtime ownership, non-disposed lifecycle, identical declared-write resource identity set, and a finite acyclic chain with unique command IDs. Repeated declared-write resources normalize to one identity before contract comparison and epoch accounting. Submission rechecks a selected fallback's lifecycle because `dispose()` remains an explicit post-construction transition. The policy and fallback reference are immutable after construction. There is no bare `use-fallback`, legacy alias, implicit resource substitution, or bind-set mutation path.
 
 Fallback commands may use different pipelines, bindings, fixed-function buffers, counts, and declared reads. A selected fallback must still be compatible with the current pass. Native direct, indexed, and indirect encoding remains owned by the selected command; fallback resolution never interprets indirect argument bytes.
 
@@ -61,7 +61,7 @@ Each render/compute pass resolves against cloned resource-readiness state, query
 
 ### Observable execution ledger
 
-`SubmittedWork.executionOutcomes` is an immutable array of pass and command outcomes. Each render/compute pass has one pass outcome, and each requested Draw/Dispatch has one command outcome. Command attempts retain the policy and all missing-resource state/epoch facts. Outcomes distinguish requested IDs from encoded IDs and identify the final fallback when one executes.
+`SubmittedWork.executionOutcomes` is an immutable array of pass and command outcomes. Each render/compute pass has one pass outcome, and each requested Draw/Dispatch has one command outcome. Command attempts retain the policy and all missing-resource state/epoch facts. Outcomes distinguish requested IDs from encoded IDs and identify the final fallback when one executes. When resolution ends in a hard fallback failure, the structured diagnostic carries the same complete attempt snapshots even though no `SubmittedWork` exists.
 
 The ledger is authoritative for expected skip/fallback control flow. Normal absence is not converted into a warning or error. All outcome objects, attempts, missing facts, diagnostic subjects, nested ID arrays, and the top-level array are frozen. The `executionOutcomes` property is read-only at both the TypeScript and runtime object boundaries.
 

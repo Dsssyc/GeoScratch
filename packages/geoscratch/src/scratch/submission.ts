@@ -238,6 +238,7 @@ type MissingReadRequirement = {
 type CommandExecutionDiagnosticContext = {
     requestedCommand: ExecutableCommand
     attemptedCommands: readonly ExecutableCommand[]
+    attempts: readonly SubmissionCommandReadinessAttempt[]
 }
 
 type RenderAttachmentKind = 'color' | 'depth-stencil'
@@ -947,17 +948,48 @@ function resolveExecutableCommand<Command extends ExecutableCommand>(
     const attempts: SubmissionCommandReadinessAttempt[] = []
     const attemptedCommands: ExecutableCommand[] = []
     const visited = new Set<ExecutableCommand>()
+    const visitedIds = new Set<string>()
     let command: ExecutableCommand = requestedCommand
 
     while (true) {
         if (visited.has(command)) {
-            throwFallbackResolutionDiagnostic(builder, stepIndex, passSpec, requestedCommand, attemptedCommands, command)
+            throwFallbackResolutionDiagnostic(
+                builder,
+                stepIndex,
+                passSpec,
+                requestedCommand,
+                attemptedCommands,
+                attempts,
+                command,
+                'cycle'
+            )
+        }
+        if (visitedIds.has(command.id)) {
+            throwFallbackResolutionDiagnostic(
+                builder,
+                stepIndex,
+                passSpec,
+                requestedCommand,
+                attemptedCommands,
+                attempts,
+                command,
+                'repeated-id'
+            )
         }
         visited.add(command)
+        visitedIds.add(command.id)
         attemptedCommands.push(command)
 
         if (command !== requestedCommand) {
-            validateFallbackCommandForPass(builder, stepIndex, passSpec, requestedCommand, attemptedCommands, command)
+            validateFallbackCommandForPass(
+                builder,
+                stepIndex,
+                passSpec,
+                requestedCommand,
+                attemptedCommands,
+                attempts,
+                command
+            )
         }
 
         const missingRequirements = collectMissingReadRequirements(command.resources.read, readiness)
@@ -969,7 +1001,7 @@ function resolveExecutableCommand<Command extends ExecutableCommand>(
         })
 
         if (missingRequirements.length === 0) {
-            const context = { requestedCommand, attemptedCommands }
+            const context = { requestedCommand, attemptedCommands, attempts }
             validateCommandReadEpochs(
                 builder,
                 stepIndex,
@@ -1005,7 +1037,7 @@ function resolveExecutableCommand<Command extends ExecutableCommand>(
                 first.simulated,
                 passSpec,
                 undefined,
-                { requestedCommand, attemptedCommands }
+                { requestedCommand, attemptedCommands, attempts }
             )
         }
 
@@ -1038,7 +1070,16 @@ function resolveExecutableCommand<Command extends ExecutableCommand>(
 
         const fallback = command.fallback
         if (fallback === undefined) {
-            throwFallbackResolutionDiagnostic(builder, stepIndex, passSpec, requestedCommand, attemptedCommands, command)
+            throwFallbackResolutionDiagnostic(
+                builder,
+                stepIndex,
+                passSpec,
+                requestedCommand,
+                attemptedCommands,
+                attempts,
+                command,
+                'missing-fallback'
+            )
         }
         command = fallback
     }
@@ -1116,12 +1157,28 @@ function createMissingResourceFact(missing: MissingReadRequirement, role?: strin
     return fact
 }
 
+function snapshotReadinessAttempts(
+    attempts: readonly SubmissionCommandReadinessAttempt[]
+): SubmissionCommandReadinessAttempt[] {
+
+    return attempts.map(attempt => ({
+        commandId: attempt.commandId,
+        commandKind: attempt.commandKind,
+        policy: attempt.policy,
+        missing: attempt.missing.map(missing => ({
+            ...missing,
+            subject: { ...missing.subject },
+        })),
+    }))
+}
+
 function validateFallbackCommandForPass(
     builder: SubmissionBuilder,
     stepIndex: number,
     passSpec: RenderPassSpec | ComputePassSpec,
     requestedCommand: ExecutableCommand,
     attemptedCommands: readonly ExecutableCommand[],
+    attempts: readonly SubmissionCommandReadinessAttempt[],
     fallback: ExecutableCommand
 ): void {
 
@@ -1137,8 +1194,22 @@ function validateFallbackCommandForPass(
             passSpec,
             requestedCommand,
             attemptedCommands,
+            attempts,
             fallback,
             'invalid-fallback-command'
+        )
+    }
+
+    if (fallback.isDisposed) {
+        throwFallbackResolutionDiagnostic(
+            builder,
+            stepIndex,
+            passSpec,
+            requestedCommand,
+            attemptedCommands,
+            attempts,
+            fallback,
+            'disposed'
         )
     }
 
@@ -1162,6 +1233,7 @@ function validateFallbackCommandForPass(
             passSpec,
             requestedCommand,
             attemptedCommands,
+            attempts,
             fallback,
             'pass-kind'
         )
@@ -1176,6 +1248,7 @@ function validateFallbackCommandForPass(
             passSpec,
             requestedCommand,
             attemptedCommands,
+            attempts,
             fallback,
             error instanceof ScratchDiagnosticError ? error.diagnostic.code : 'pass-validation'
         )
@@ -1188,6 +1261,7 @@ function throwFallbackPassIncompatibleDiagnostic(
     passSpec: RenderPassSpec | ComputePassSpec,
     requestedCommand: ExecutableCommand,
     attemptedCommands: readonly ExecutableCommand[],
+    attempts: readonly SubmissionCommandReadinessAttempt[],
     fallback: unknown,
     reason: string
 ): never {
@@ -1219,6 +1293,7 @@ function throwFallbackPassIncompatibleDiagnostic(
             fallbackCommandId: fallbackRecord.id,
             fallbackCommandKind: fallbackRecord.commandKind,
             attemptedCommandIds: attemptedCommands.map(command => command.id),
+            attempts: snapshotReadinessAttempts(attempts),
             validation: builder.validation,
         },
     })
@@ -1230,7 +1305,9 @@ function throwFallbackResolutionDiagnostic(
     passSpec: RenderPassSpec | ComputePassSpec,
     requestedCommand: ExecutableCommand,
     attemptedCommands: readonly ExecutableCommand[],
-    fallback: ExecutableCommand
+    attempts: readonly SubmissionCommandReadinessAttempt[],
+    fallback: ExecutableCommand,
+    reason: 'cycle' | 'repeated-id' | 'missing-fallback' | 'disposed'
 ): never {
 
     throwScratchDiagnostic({
@@ -1244,14 +1321,16 @@ function throwFallbackResolutionDiagnostic(
             passSpec.subject,
             builder.subject,
         ],
-        message: 'Fallback resolution encountered a missing or repeated command.',
-        expected: { fallbackChain: 'finite acyclic command chain' },
+        message: 'Fallback resolution encountered an unusable, missing, or repeated command.',
+        expected: { fallbackChain: 'finite acyclic command chain with unique ids', disposed: false },
         actual: {
+            reason,
             stepIndex,
             passId: passSpec.id,
             requestedCommandId: requestedCommand.id,
             fallbackCommandId: fallback.id,
             attemptedCommandIds: attemptedCommands.map(command => command.id),
+            attempts: snapshotReadinessAttempts(attempts),
             validation: builder.validation,
         },
     })
@@ -1527,6 +1606,7 @@ function throwCommandResourceNotReadyDiagnostic(
             ...(context !== undefined ? {
                 requestedCommandId: context.requestedCommand.id,
                 attemptedCommandIds: context.attemptedCommands.map(attempted => attempted.id),
+                attempts: snapshotReadinessAttempts(context.attempts),
             } : {}),
             commandId: command.id,
             commandKind: command.commandKind,
@@ -1582,6 +1662,7 @@ function createCommandReadEpochDiagnostic(
             ...(context !== undefined ? {
                 requestedCommandId: context.requestedCommand.id,
                 attemptedCommandIds: context.attemptedCommands.map(attempted => attempted.id),
+                attempts: snapshotReadinessAttempts(context.attempts),
             } : {}),
             commandId: command.id,
             commandKind: command.commandKind,

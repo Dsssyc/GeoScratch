@@ -254,7 +254,7 @@ type CommandReadinessDescriptor<FallbackCommand> =
     }
 ```
 
-`DrawCommandDescriptor` uses `CommandReadinessDescriptor<DrawCommand>` and `DispatchCommandDescriptor` uses `CommandReadinessDescriptor<DispatchCommand>`. A fallback must have the same command kind, runtime, non-disposed lifecycle, and declared-write resource identity set. A finite fallback chain may change pipeline, bindings, fixed-function buffers, count, and declared reads. Policy and fallback references are immutable.
+`DrawCommandDescriptor` uses `CommandReadinessDescriptor<DrawCommand>` and `DispatchCommandDescriptor` uses `CommandReadinessDescriptor<DispatchCommand>`. A fallback must be an actual command with the same command kind, runtime, non-disposed lifecycle, and declared-write resource identity set. Repeated declared-write resources normalize to one identity. A finite fallback chain has unique command IDs and may change pipeline, bindings, fixed-function buffers, count, and declared reads. Policy and fallback references are immutable; submission rechecks lifecycle because `dispose()` remains possible after construction.
 
 At submission time:
 

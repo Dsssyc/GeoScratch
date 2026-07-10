@@ -2980,7 +2980,10 @@ function normalizeResourceReadList(
 
 function normalizeResourceList(command: DrawCommand | DispatchCommand, resources: readonly Resource[], access: 'read' | 'write'): Resource[] {
 
-    return resources.map((resource) => {
+    const normalized: Resource[] = []
+    const seen = new Set<Resource>()
+
+    for (const resource of resources) {
         if (!resource || typeof resource.assertRuntime !== 'function') {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
@@ -2994,8 +2997,12 @@ function normalizeResourceList(command: DrawCommand | DispatchCommand, resources
         }
 
         resource.assertRuntime(command.runtime)
-        return resource
-    })
+        if (seen.has(resource)) continue
+        seen.add(resource)
+        normalized.push(resource)
+    }
+
+    return normalized
 }
 
 function isResourceLike(value: unknown): value is Resource {
@@ -4686,6 +4693,8 @@ function validateFallbackChain(
 ): void {
 
     const visited = new Set<unknown>([ command ])
+    const visitedIds = new Set<string>([ command.id ])
+    const chain: (DrawCommand | DispatchCommand)[] = []
     let candidate: unknown = fallback
 
     while (candidate !== undefined) {
@@ -4699,6 +4708,24 @@ function validateFallbackChain(
         }
 
         const fallbackCommand = candidate as unknown as DrawCommand | DispatchCommand
+        const fallbackId = typeof fallbackCommand.id === 'string' ? fallbackCommand.id : undefined
+        if (fallbackId !== undefined) {
+            if (visitedIds.has(fallbackId)) {
+                throwFallbackDiagnostic(command, fallbackCommand, 'repeated-id')
+            }
+            visitedIds.add(fallbackId)
+        }
+        chain.push(fallbackCommand)
+        candidate = fallbackCommand.fallback
+    }
+
+    for (const fallbackCommand of chain) {
+        const isExpectedCommand = command.commandKind === 'draw'
+            ? fallbackCommand instanceof DrawCommand
+            : fallbackCommand instanceof DispatchCommand
+        if (!isExpectedCommand) {
+            throwFallbackDiagnostic(command, fallbackCommand, 'command')
+        }
         if (fallbackCommand.runtime !== command.runtime) {
             throwFallbackDiagnostic(command, fallbackCommand, 'runtime')
         }
@@ -4710,17 +4737,12 @@ function validateFallbackChain(
         }
 
         const next = fallbackCommand.fallback
-        if (next !== undefined && visited.has(next)) {
-            throwFallbackDiagnostic(command, next, 'cycle')
-        }
         if (fallbackCommand.whenMissing === 'use-fallback' && next === undefined) {
             throwFallbackDiagnostic(command, fallbackCommand, 'policy')
         }
         if (fallbackCommand.whenMissing !== 'use-fallback' && next !== undefined) {
             throwFallbackDiagnostic(command, fallbackCommand, 'policy')
         }
-
-        candidate = next
     }
 }
 
@@ -4764,7 +4786,7 @@ function throwReadinessContractDiagnostic(
 function throwFallbackDiagnostic(
     command: DrawCommand | DispatchCommand,
     fallback: unknown,
-    reason: 'commandKind' | 'runtime' | 'disposed' | 'writes' | 'cycle' | 'policy'
+    reason: 'command' | 'commandKind' | 'runtime' | 'disposed' | 'writes' | 'cycle' | 'repeated-id' | 'policy'
 ): never {
 
     const record = isRecord(fallback) ? fallback : {}
@@ -4793,6 +4815,7 @@ function throwFallbackDiagnostic(
         },
         actual: {
             reason,
+            fallbackCommandId: record.id,
             commandKind: record.commandKind,
             runtimeId: runtime?.id,
             disposed: record.isDisposed,

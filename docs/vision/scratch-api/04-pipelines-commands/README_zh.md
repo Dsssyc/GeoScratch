@@ -227,7 +227,7 @@ type CommandReadinessDescriptor<FallbackCommand> =
     }
 ```
 
-`DrawCommandDescriptor` 使用 `CommandReadinessDescriptor<DrawCommand>`，`DispatchCommandDescriptor` 使用 `CommandReadinessDescriptor<DispatchCommand>`。Fallback 必须具有相同 command kind、runtime、未 disposed lifecycle，以及相同 declared-write resource identity set。有限 fallback chain 可以改变 pipeline、bindings、fixed-function buffers、count 与 declared reads。Policy 与 fallback reference 均不可变。
+`DrawCommandDescriptor` 使用 `CommandReadinessDescriptor<DrawCommand>`，`DispatchCommandDescriptor` 使用 `CommandReadinessDescriptor<DispatchCommand>`。Fallback 必须是实际 command，并具有相同 command kind、runtime、未 disposed lifecycle，以及相同 declared-write resource identity set。重复 declared-write resource 会归一为一个 identity。有限 fallback chain 的 command ID 必须唯一，但可以改变 pipeline、bindings、fixed-function buffers、count 与 declared reads。Policy 与 fallback reference 均不可变；由于构造后仍可调用 `dispose()`，submission 会重新检查 lifecycle。
 
 在 submission 时:
 

@@ -295,9 +295,9 @@ type CommandDiagnosticCode =
     | 'SCRATCH_COMMAND_RESOURCE_NOT_READY'
 ```
 
-预期的 Draw/Dispatch `skip-command`、`skip-pass` 与成功 `use-fallback` 决策不是 diagnostics，而是不可变的 `SubmittedWork.executionOutcomes`。`SCRATCH_COMMAND_FALLBACK_INVALID` 只用于 missing/forbidden fallback shape、kind/runtime/lifecycle/write-set 不兼容，以及 repeated chain。最终选中的 fallback 无法进入当前 pass 时使用 `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`。
+预期的 Draw/Dispatch `skip-command`、`skip-pass` 与成功 `use-fallback` 决策不是 diagnostics，而是不可变的 `SubmittedWork.executionOutcomes`。`SCRATCH_COMMAND_FALLBACK_INVALID` 只用于 missing/forbidden fallback shape、伪造的非 command 节点、kind/runtime/lifecycle/write-set 不兼容，以及重复 object 或 command ID。最终选中的 fallback 无法进入当前 pass 时使用 `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`。
 
-Fallback readiness 或 dependency failure 以最终选中的 fallback 作为 `subject`。`related` 包含 requested command、attempted chain、pass、resource 与 submission。结构化 `actual` facts 包含 step/pass IDs、requested command ID、attempted command IDs、当前 command/resource state 与 epochs，以及 validation mode。
+Fallback readiness 或 dependency failure 以最终选中的 fallback 作为 `subject`。`related` 包含 requested command、attempted chain、pass、resource 与 submission。结构化 `actual` facts 包含 step/pass IDs、requested command ID、attempted command IDs、携带每个可用 missing-resource state/epoch fact 的完整 `attempts` 数组、当前 command/resource state 与 epochs，以及 validation mode。
 
 ### Submission
 

@@ -295,9 +295,9 @@ type CommandDiagnosticCode =
     | 'SCRATCH_COMMAND_RESOURCE_NOT_READY'
 ```
 
-Expected Draw/Dispatch `skip-command`, `skip-pass`, and successful `use-fallback` decisions are not diagnostics. They are immutable `SubmittedWork.executionOutcomes`. `SCRATCH_COMMAND_FALLBACK_INVALID` is reserved for missing/forbidden fallback shapes, kind/runtime/lifecycle/write-set incompatibility, and repeated chains. A selected fallback that cannot enter the current pass uses `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`.
+Expected Draw/Dispatch `skip-command`, `skip-pass`, and successful `use-fallback` decisions are not diagnostics. They are immutable `SubmittedWork.executionOutcomes`. `SCRATCH_COMMAND_FALLBACK_INVALID` is reserved for missing/forbidden fallback shapes, forged non-command nodes, kind/runtime/lifecycle/write-set incompatibility, and repeated objects or command IDs. A selected fallback that cannot enter the current pass uses `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`.
 
-Fallback readiness or dependency failures use the selected fallback as `subject`. `related` includes the requested command, attempted chain, pass, resource, and submission. Structured `actual` facts include step/pass IDs, requested command ID, attempted command IDs, current command/resource state and epochs, plus validation mode.
+Fallback readiness or dependency failures use the selected fallback as `subject`. `related` includes the requested command, attempted chain, pass, resource, and submission. Structured `actual` facts include step/pass IDs, requested command ID, attempted command IDs, a complete `attempts` array with every available missing-resource state/epoch fact, current command/resource state and epochs, plus validation mode.
 
 ### Submission
 

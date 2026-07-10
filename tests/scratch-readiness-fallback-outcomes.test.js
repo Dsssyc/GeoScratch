@@ -430,6 +430,62 @@ describe('scratch readiness fallback execution outcomes', () => {
             requiredContentEpoch: 5,
             validation: 'off',
         })
+        expect(diagnostic.actual.attempts.map(attempt => ({
+            commandId: attempt.commandId,
+            policy: attempt.policy,
+            missingIds: attempt.missing.map(missing => missing.resourceId),
+        }))).to.deep.equal([
+            { commandId: primary.id, policy: 'use-fallback', missingIds: [ primaryInput.id ] },
+            { commandId: fallback.id, policy: 'throw', missingIds: [ fallbackInput.id ] },
+        ])
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(output.state).to.equal('empty')
+    })
+
+    it('reports a fallback disposed after construction through the fallback contract', async() => {
+
+        const fixture = await createComputeFixture()
+        const primaryInput = createBuffer(fixture, 'primary input')
+        const output = createBuffer(fixture, 'output')
+        const fallback = createDispatch(fixture, {
+            resources: { read: [], write: [ output ] },
+        })
+        const primary = createDispatch(fixture, {
+            resources: {
+                read: [ { resource: primaryInput, contentEpoch: 0 } ],
+                write: [ output ],
+            },
+            whenMissing: 'use-fallback',
+            fallback,
+        })
+        fallback.dispose()
+        const builder = fixture.runtime.createSubmission({ validation: 'warn' })
+            .compute(fixture.pass, [ primary ])
+
+        const diagnostic = await expectDiagnostic(
+            () => builder.submit(),
+            'SCRATCH_COMMAND_FALLBACK_INVALID'
+        )
+
+        expect(diagnostic.subject).to.deep.equal(fallback.subject)
+        expect(diagnostic.related).to.deep.include(primary.subject)
+        expect(diagnostic.related).to.deep.include(fixture.pass.subject)
+        expect(diagnostic.related).to.deep.include(builder.subject)
+        expect(diagnostic.actual).to.deep.include({
+            reason: 'disposed',
+            stepIndex: 0,
+            passId: fixture.pass.id,
+            requestedCommandId: primary.id,
+            fallbackCommandId: fallback.id,
+            attemptedCommandIds: [ primary.id, fallback.id ],
+            validation: 'warn',
+        })
+        expect(diagnostic.actual.attempts).to.have.length(1)
+        expect(diagnostic.actual.attempts[0].missing[0]).to.deep.include({
+            resourceId: primaryInput.id,
+            requiredContentEpoch: 0,
+            simulatedState: 'empty',
+        })
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(output.state).to.equal('empty')
     })
@@ -565,7 +621,50 @@ describe('scratch readiness fallback execution outcomes', () => {
             attemptedCommandIds: [ primary.id, fallback.id ],
             validation: 'throw',
         })
+        expect(diagnostic.actual.attempts).to.have.length(1)
+        expect(diagnostic.actual.attempts[0]).to.deep.include({
+            commandId: primary.id,
+            commandKind: 'draw',
+            policy: 'use-fallback',
+        })
+        expect(diagnostic.actual.attempts[0].missing[0]).to.deep.include({
+            resourceId: missing.id,
+            requiredContentEpoch: 0,
+            simulatedState: 'empty',
+        })
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(0)
+        })
     })
-})
+
+    it('records duplicate declared writes once when a fallback executes', async() => {
+
+        const fixture = await createComputeFixture()
+        const missing = createBuffer(fixture, 'missing primary input')
+        const output = createBuffer(fixture, 'fallback output')
+        const fallback = createDispatch(fixture, {
+            resources: { read: [], write: [ output, output ] },
+        })
+        const primary = createDispatch(fixture, {
+            resources: {
+                read: [ { resource: missing, contentEpoch: 0 } ],
+                write: [ output ],
+            },
+            whenMissing: 'use-fallback',
+            fallback,
+        })
+        const submitted = fixture.runtime.createSubmission({ validation: 'off' })
+            .compute(fixture.pass, [ primary ])
+            .submit()
+
+        expect(fallback.resources.write).to.deep.equal([ output ])
+        expect(submitted.resourceAccesses).to.have.length(1)
+        expect(submitted.resourceAccesses[0]).to.include({
+            commandId: fallback.id,
+            resourceId: output.id,
+            access: 'write',
+        })
+        expect(submitted.producerEpochs).to.have.length(1)
+        expect(submitted.producerEpochs[0].producedBy.commandId).to.equal(fallback.id)
+        expect(output.contentEpoch).to.equal(1)
+    })
