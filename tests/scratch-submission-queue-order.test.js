@@ -701,6 +701,58 @@ describe('scratch submission queue order', () => {
         expect(timelineTypes(fixture.calls)).to.deep.equal([ 'submit' ])
     })
 
+    it('restores resource and query state when timeline preparation fails before replay', async() => {
+
+        const fixture = await createOrderingFixture()
+        const querySet = fixture.runtime.createQuerySet({
+            label: 'preparation rollback query set',
+            type: 'timestamp',
+            count: 2,
+        })
+        const pass = fixture.runtime.createComputePass({
+            label: 'preparation rollback pass',
+            timestampWrites: {
+                querySet,
+                begin: 0,
+                end: 1,
+            },
+        })
+        const createCommandEncoder = fixture.device.createCommandEncoder.bind(fixture.device)
+        let failCopyEncoding = true
+        fixture.device.createCommandEncoder = (descriptor) => {
+            const encoder = createCommandEncoder(descriptor)
+            const copyBufferToBuffer = encoder.copyBufferToBuffer.bind(encoder)
+            encoder.copyBufferToBuffer = (...args) => {
+                if (failCopyEncoding) throw new Error('injected copy encoding failure')
+                copyBufferToBuffer(...args)
+            }
+            return encoder
+        }
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .compute(pass, [])
+            .copy(fixture.firstCopy)
+
+        expect(() => builder.submit()).to.throw('injected copy encoding failure')
+
+        expect(querySet.slotStates).to.deep.equal([ 'empty', 'empty' ])
+        expect(querySet.slotContentEpochs).to.deep.equal([ 0, 0 ])
+        expect(fixture.firstCopyTarget.state).to.equal('empty')
+        expect(fixture.firstCopyTarget.contentEpoch).to.equal(0)
+        expect(timelineTypes(fixture.calls)).to.deep.equal([])
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+        expect(builder.isSubmitted).to.equal(false)
+
+        failCopyEncoding = false
+        const submitted = builder.submit()
+
+        expect(querySet.slotStates).to.deep.equal([ 'ready', 'ready' ])
+        expect(querySet.slotContentEpochs).to.deep.equal([ 1, 1 ])
+        expect(fixture.firstCopyTarget.contentEpoch).to.equal(1)
+        expect(timelineTypes(fixture.calls)).to.deep.equal([ 'submit' ])
+
+        await submitted.done
+    })
+
     it('preserves physical order in warn and off validation modes', async() => {
 
         for (const validation of [ 'warn', 'off' ]) {

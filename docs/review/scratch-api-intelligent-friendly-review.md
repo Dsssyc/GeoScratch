@@ -26,6 +26,7 @@ Coverage check for this pass:
 - Aggregate `SubmittedWork.commandBuffers` and `done` behavior for segmented, upload-only, and effect-free work: covered by the focused queue-order suite.
 - Real WebGPU proof (`upload 0 -> +1 -> upload 10 -> +1 -> readback === 11`): covered by `examples/submissionOrder/` and browser verification.
 - Architectural contract and future queue-side extension boundary: covered by ADR-029, `05-passes-submissions-scheduler`, and `07-transfers-epochs`.
+- Final cross-representation and failure audit: covered by `docs/review/scratch-submission-queue-order-audit.md`.
 
 ### Readback Version Semantics
 
