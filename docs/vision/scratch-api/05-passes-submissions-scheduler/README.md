@@ -101,6 +101,37 @@ Submission responsibilities:
 - submit command buffers
 - return `SubmittedWork`
 
+## Physical Queue Timeline
+
+`SubmissionBuilder.steps` defines one total order across encoder-backed work and queue-side uploads. Recording commands into an encoder is not the same as enqueuing them: `GPUQueue.writeBuffer(...)` and `GPUQueue.writeTexture(...)` enter the queue when called, while copy, readback staging, resolve, compute, and render work enter the queue only when a finished command buffer is submitted.
+
+Submission lowering therefore uses three phases:
+
+1. Resolve readiness, fallback, dependency validation, ownership, lifecycle, and pass compatibility before creating an encoder or touching `GPUQueue`.
+2. Prepare a complete internal discriminated queue-action timeline. Record logical resource accesses and epoch effects in declared step order while encoding command-buffer segments, but do not call queue write or submit methods yet.
+3. Replay the prepared timeline in exact order, then register `queue.onSubmittedWorkDone()` after the final action.
+
+The internal action families are command buffer, buffer upload, and texture upload. They are explicit variants, not arbitrary callbacks and not a public scheduler API.
+
+A command-buffer segment is a maximal contiguous sequence of executed encoder-backed steps. A queue-side upload ends the preceding segment and separates it from the next one:
+
+```text
+copy + compute -> buffer upload -> texture upload -> render + readback
+```
+
+lowers to:
+
+```text
+submit(copy + compute)
+writeBuffer
+writeTexture
+submit(render + readback)
+```
+
+Consecutive uploads do not create empty command buffers. Skipped commands, skipped passes, and effect-free empty passes do not create segments. Encoder-only work with no upload boundary remains one encoder, one command buffer, and one `queue.submit(...)`.
+
+`SubmittedWork.commandBuffers` contains every real segment in physical queue order. Upload-only work has an empty command-buffer array but still registers completion after the final queue write. Effect-free work creates no encoder or queue action and uses an already-resolved `done` promise. See ADR-029.
+
 ## Resolved Readiness Execution
 
 `submit()` completes readiness resolution before creating a WebGPU command encoder. The resolved plan contains the validation report, resolved render/compute steps, final simulated resource/query state, and execution-outcome drafts. Encoding consumes only those resolved steps; it does not revisit the original builder command lists or decide a policy again.

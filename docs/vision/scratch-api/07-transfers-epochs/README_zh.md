@@ -18,7 +18,7 @@
 - 带 surface 输出 -> 使用 presentation-submission-scoped surface texture view 的 presentation submission
 - 不带 surface -> compute 或 offscreen submission
 
-`.submit()` 返回 `SubmittedWork`，这是带 `done` promise 的可 inspect 句柄，底层是 `queue.onSubmittedWorkDone`。完成等待与数据传输是两件事: await `submitted.done` 只说明已提交 GPU 工作完成了，不会自动把数据搬到 CPU，也不会自动从 CPU 搬到 GPU。
+`.submit()` 返回 `SubmittedWork`，这是带 `done` promise 的可 inspect 句柄; 当 submission 确实入队了物理 queue action 时，底层使用 `queue.onSubmittedWorkDone`。effect-free work 使用已 resolve 的 promise，因此不会等待无关 queue work。完成等待与数据传输是两件事: await `submitted.done` 只说明已提交 GPU 工作完成了，不会自动把数据搬到 CPU，也不会自动从 CPU 搬到 GPU。
 
 ```ts
 const submitted = scratch.submission()  // no surface -> compute submission
@@ -85,6 +85,28 @@ scratch.submission()
 核心层没有 `positions.write(...)` 方法。未来可以在核心之上添加 convenience helper，但它必须降低为显式 upload operation，并暴露 target、range、readiness 和 epoch effects。
 
 Upload 会推进目标写入范围的 `contentEpoch`，并记录 producing submission。如果 upload 分配路径需要替换物理 GPU 对象，则还会推进 `allocationVersion`。
+
+### Queue-Side Upload 顺序
+
+Buffer 与 texture upload 是有序 submission action，不是 submission 之外的 preparation。queue write 必须相对 copy、ordered readback staging、resolve、compute 与 render work 出现在其声明的 `SubmissionBuilder` 位置。
+
+Queue write 不能记录进同一个 `GPUCommandEncoder`。因此 submission lowering 会准备显式内部 queue timeline，并且只在 upload boundary 分割 encoder-backed work:
+
+```text
+GPU work A -> upload B -> GPU work C
+```
+
+变成:
+
+```text
+queue.submit(commandBufferA)
+queue.writeBuffer/writeTexture(B)
+queue.submit(commandBufferC)
+```
+
+完整 timeline 会在 replay 任一 queue action 前准备完毕。逻辑 upload commitment 在 preparation 时只推进一次 target `contentEpoch`; 物理 replay 只执行 queue write。直接执行 upload command 仍然是一次 queue write 加一次 epoch advance。
+
+upload-only submission 按顺序执行 writes，不暴露伪造 command buffer，并在最后一次 write 后注册 `done`。连续 uploads 不创建空 queue submission。见 ADR-029。
 
 ## Readback
 
@@ -206,6 +228,8 @@ const values = await readParticles.result({ after: submitted }).toArray()
 ```
 
 buffer-only `ReadbackCommand` ordered-staging 路径现已实现。它验证显式 source epoch，记录 read-only submission ledger entry，并在声明的 step 把数据复制到 runtime-owned staging。`result({ after })` 返回与该次 submitted work 精确关联的 operation；materialization 只映射已有 staging buffer，不会再次提交 copy。它仍是逃生口，不是默认 readback 路径。直接 texture readback、mapped lease 与 staging budget policy 仍属于未来工作。
+
+Queue timeline segmentation 会跨 queue-side upload 保留该声明 staging point。upload 前的 readback 会先 submit staging-copy segment，再执行 queue write; readback 前的 upload 会先执行 queue write，再 submit staging-copy segment。由 upload 分隔的多个 ordered readback 各自保留不同 staging buffer、captured epoch 与 producer provenance，同时共享一个 aggregate `SubmittedWork` completion handle。
 
 ## Copy
 

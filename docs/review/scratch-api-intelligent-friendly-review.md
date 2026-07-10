@@ -9,6 +9,23 @@ Accepted vision still lives under `docs/vision/scratch-api/`. This review file i
 
 ## Recently Resolved
 
+### Physical Queue Timeline Ordering
+
+Resolved in ADR-029 and the submission/transfer vision docs: `SubmissionBuilder.steps` now defines one physical queue order across queue-side buffer/texture uploads and encoder-backed copy, ordered readback staging, query resolve, compute, and render work. The discovered implementation gap was that immediate queue writes were enqueued before one final command-buffer submission even when an upload appeared later in the builder sequence.
+
+Submission now resolves and validates first, prepares an internal discriminated queue-action timeline second, and replays it third. Queue uploads split only maximal contiguous encoder segments. The model rejects arbitrary queue callbacks, preserves one command buffer when there is no upload boundary, creates no fake command buffer for upload-only work, and uses already-resolved completion for effect-free work.
+
+Coverage check for this pass:
+
+- Buffer and texture upload leading, trailing, interleaved, consecutive, and alternating order: covered by `tests/scratch-submission-queue-order.test.js`.
+- Segment coalescing and omission for skipped/effect-free passes: covered by `tests/scratch-submission-queue-order.test.js` and the existing readiness suite.
+- Validation-before-queue-side-effect behavior in `throw`, `warn`, and `off` modes: covered by the focused queue-order suite and existing structured diagnostic tests.
+- Resource access, producer epoch, allocation version, and exactly-once upload epoch semantics: covered by the focused queue-order and submitted-work ledger suites.
+- Ordered readback bytes, staging identity, epoch separation, and producer provenance across upload boundaries: covered by the focused queue-order and readback suites.
+- Aggregate `SubmittedWork.commandBuffers` and `done` behavior for segmented, upload-only, and effect-free work: covered by the focused queue-order suite.
+- Real WebGPU proof (`upload 0 -> +1 -> upload 10 -> +1 -> readback === 11`): covered by `examples/submissionOrder/` and browser verification.
+- Architectural contract and future queue-side extension boundary: covered by ADR-029, `05-passes-submissions-scheduler`, and `07-transfers-epochs`.
+
 ### Readback Version Semantics
 
 Resolved in `docs/vision/scratch-api/07-transfers-epochs/`: resource identity, physical allocation changes, and content changes are now separate concepts. `allocationVersion` covers physical GPU object replacement and binding invalidation. `contentEpoch` covers bytes/texels produced by upload, copy, render, compute, clear, resolve, or mip generation. Readback now creates an explicit `ReadbackOperation`; `toArray()` / `toBytes()` live on that operation, not on `Resource`.

@@ -18,7 +18,7 @@ This replaces the earlier resource-as-readback-handle model. It resolves the asy
 - with a surface output -> a presentation submission using a presentation-submission-scoped surface texture view
 - with no surface -> a compute or offscreen submission
 
-`.submit()` returns `SubmittedWork`, an inspectable handle with a `done` promise backed by `queue.onSubmittedWorkDone`. Completion is separate from data transfer: awaiting `submitted.done` tells you submitted GPU work finished; it does not automatically move data to or from the CPU.
+`.submit()` returns `SubmittedWork`, an inspectable handle with a `done` promise backed by `queue.onSubmittedWorkDone` when the submission enqueues physical queue actions. Effect-free work uses an already-resolved promise so it does not wait on unrelated queue work. Completion is separate from data transfer: awaiting `submitted.done` tells you submitted GPU work finished; it does not automatically move data to or from the CPU.
 
 ```ts
 const submitted = scratch.submission()  // no surface -> compute submission
@@ -85,6 +85,28 @@ scratch.submission()
 There is no core `positions.write(...)` method. A convenience helper may be added above the core later, but it must lower to an explicit upload operation with inspectable target, range, readiness, and epoch effects.
 
 An upload advances the target's `contentEpoch` for the written range and records the producing submission. If upload allocation requires replacing the physical GPU object, it also advances `allocationVersion`.
+
+### Queue-Side Upload Ordering
+
+Buffer and texture uploads are ordered submission actions, not preparation outside the submission. A queue write must physically appear at its declared `SubmissionBuilder` position relative to copy, ordered readback staging, resolve, compute, and render work.
+
+Queue writes cannot be recorded into the same `GPUCommandEncoder`. Submission lowering therefore prepares an explicit internal queue timeline and splits encoder-backed work only at upload boundaries:
+
+```text
+GPU work A -> upload B -> GPU work C
+```
+
+becomes:
+
+```text
+queue.submit(commandBufferA)
+queue.writeBuffer/writeTexture(B)
+queue.submit(commandBufferC)
+```
+
+The complete timeline is prepared before any queue action is replayed. Logical upload commitment advances the target `contentEpoch` exactly once during preparation; physical replay performs only the queue write. Direct upload command execution remains one queue write plus one epoch advance.
+
+Upload-only submissions execute their writes in order, expose no fake command buffer, and register `done` after the final write. Consecutive uploads do not create empty queue submissions. See ADR-029.
 
 ## Readback
 
@@ -206,6 +228,8 @@ const values = await readParticles.result({ after: submitted }).toArray()
 ```
 
 The buffer-only `ReadbackCommand` ordered-staging path is implemented. It validates the explicit source epoch, records a read-only submission ledger entry, and copies into runtime-owned staging at the declared step. `result({ after })` returns the operation associated with that exact submitted work; materialization maps the existing staging buffer and does not submit a second copy. This remains an escape hatch, not the default readback path. Direct texture readback, mapped leases, and staging-budget policy remain future work.
+
+Queue timeline segmentation preserves that declared staging point across queue-side uploads. A readback before an upload submits its staging-copy segment before the queue write; an upload before a readback performs the queue write before submitting the staging-copy segment. Multiple ordered readbacks separated by an upload keep distinct staging buffers, captured epochs, and producer provenance while sharing one aggregate `SubmittedWork` completion handle.
 
 ## Copy
 
