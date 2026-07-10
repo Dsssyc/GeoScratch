@@ -1,13 +1,15 @@
 import { UUID } from '../core/utils/uuid.js'
+import { registerReadbackCommandResult } from './command.js'
 import {
     ScratchDiagnosticError,
     createScratchDiagnostic,
     createScratchDiagnosticReport,
     throwScratchDiagnostic,
 } from './diagnostics.js'
+import { createScheduledReadbackOperation } from './readback.js'
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
-import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, QuerySetSlotReadDescriptor, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
@@ -16,7 +18,7 @@ import type { ScratchRuntime } from './runtime.js'
 
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 
-export type SubmissionStepKind = 'upload' | 'copy' | 'resolve' | 'compute' | 'render'
+export type SubmissionStepKind = 'upload' | 'copy' | 'readback' | 'resolve' | 'compute' | 'render'
 
 export type SubmissionResourceAccessKind = 'read' | 'write'
 
@@ -84,14 +86,24 @@ type CopyStep = {
     command: CopyCommand
 }
 
+type ReadbackStep = {
+    kind: 'readback'
+    command: ReadbackCommand
+}
+
 type ResolveStep = {
     kind: 'resolve'
     command: ResolveQuerySetCommand
 }
 
-type SubmissionStep = RenderStep | ComputeStep | UploadStep | CopyStep | ResolveStep
+type SubmissionStep = RenderStep | ComputeStep | UploadStep | CopyStep | ReadbackStep | ResolveStep
 
-type ReadCommand = CopyCommand | DispatchCommand | DrawCommand
+type ReadCommand = CopyCommand | DispatchCommand | DrawCommand | ReadbackCommand
+
+type PendingReadback = {
+    command: ReadbackCommand
+    stagingBuffer: GPUBuffer
+}
 
 type ResourceSimulationState = {
     state: ResourceState
@@ -172,6 +184,16 @@ export class SubmissionBuilder {
         return this
     }
 
+    readback(command: ReadbackCommand) {
+
+        this.steps.push({
+            kind: 'readback',
+            command,
+        })
+
+        return this
+    }
+
     resolve(command: ResolveQuerySetCommand) {
 
         this.steps.push({
@@ -202,6 +224,7 @@ export class SubmissionBuilder {
         const submittedId = `scratch-submitted-${UUID()}`
         const commandBuffers: GPUCommandBuffer[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
+        const pendingReadbacks: PendingReadback[] = []
         const encoder = this.runtime.device.createCommandEncoder({
             label: submittedId,
         })
@@ -223,6 +246,19 @@ export class SubmissionBuilder {
                     captureResourceAccess(step.command.target, 'write', origin),
                 ]
                 step.command.encode(encoder)
+                completeResourceAccesses(resourceAccesses, accesses)
+                continue
+            }
+
+            if (step.kind === 'readback') {
+                const origin = commandAccessOrigin(stepIndex, 'readback', step.command)
+                const accesses = [
+                    captureResourceAccess(step.command.source.resource, 'read', origin),
+                ]
+                pendingReadbacks.push({
+                    command: step.command,
+                    stagingBuffer: step.command.encode(encoder),
+                })
                 completeResourceAccesses(resourceAccesses, accesses)
                 continue
             }
@@ -287,13 +323,26 @@ export class SubmissionBuilder {
         this.runtime.queue.submit(commandBuffers)
         this.isSubmitted = true
 
-        return new SubmittedWork(this.runtime, {
+        const submitted = new SubmittedWork(this.runtime, {
             id: submittedId,
             commandBuffers,
             report: validationReport,
             resourceAccesses,
             done: createDonePromise(this.runtime.queue),
         })
+        for (const pending of pendingReadbacks) {
+            const operation = createScheduledReadbackOperation(this.runtime, {
+                ...(pending.command.label !== undefined ? { label: pending.command.label } : {}),
+                source: pending.command.source.resource,
+                after: submitted,
+                range: pending.command.range,
+                retain: pending.command.retain,
+                stagingBuffer: pending.stagingBuffer,
+            })
+            registerReadbackCommandResult(pending.command, submitted, operation)
+        }
+
+        return submitted
     }
 
     get subject() {
@@ -322,6 +371,12 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
             validateCopyStep(builder, step)
             validateCopyReadiness(builder, step, stepIndex, readiness, diagnostics)
             markSimulatedReady(readiness, step.command.target)
+            continue
+        }
+
+        if (step.kind === 'readback') {
+            validateReadbackStep(builder, step)
+            validateReadbackReadiness(builder, step, stepIndex, readiness, diagnostics)
             continue
         }
 
@@ -399,6 +454,36 @@ function validateCopyStep(builder: SubmissionBuilder, step: CopyStep) {
 function validateCopyReadiness(
     builder: SubmissionBuilder,
     step: CopyStep,
+    stepIndex: number,
+    readiness: ReadinessSimulation,
+    diagnostics: ScratchDiagnostic[]
+): void {
+
+    validateCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, undefined, 'source')
+}
+
+function validateReadbackStep(builder: SubmissionBuilder, step: ReadbackStep) {
+
+    const command = step.command
+
+    if (!command || typeof command.assertRuntime !== 'function' || command.commandKind !== 'readback') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'submission',
+            subject: builder.subject,
+            message: 'Submission readback step requires a ReadbackCommand.',
+            expected: { command: 'ReadbackCommand' },
+            actual: { command: command === undefined || command === null ? String(command) : typeof command },
+        })
+    }
+
+    command.assertRuntime(builder.runtime)
+}
+
+function validateReadbackReadiness(
+    builder: SubmissionBuilder,
+    step: ReadbackStep,
     stepIndex: number,
     readiness: ReadinessSimulation,
     diagnostics: ScratchDiagnostic[]

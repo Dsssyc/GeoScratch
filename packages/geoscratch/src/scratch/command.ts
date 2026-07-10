@@ -12,10 +12,13 @@ import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { ComputePipeline, RenderPipeline } from './pipeline.js'
 import type { LayoutArtifact, LayoutUploadView } from './layout-codec.js'
 import type { ProgramBufferLayoutRequirement } from './program.js'
+import type { ReadbackOperation, ReadbackRange, ReadbackRetentionPolicy } from './readback.js'
 import type { Resource } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
+import type { SubmittedWork } from './submission.js'
 
 const GPU_BUFFER_USAGE_VERTEX = getGlobalConstant('GPUBufferUsage', 'VERTEX', 0x20)
+const GPU_BUFFER_USAGE_MAP_READ = getGlobalConstant('GPUBufferUsage', 'MAP_READ', 0x1)
 const GPU_BUFFER_USAGE_COPY_SRC = getGlobalConstant('GPUBufferUsage', 'COPY_SRC', 0x4)
 const GPU_BUFFER_USAGE_COPY_DST = getGlobalConstant('GPUBufferUsage', 'COPY_DST', 0x8)
 const GPU_BUFFER_USAGE_QUERY_RESOLVE = getGlobalConstant('GPUBufferUsage', 'QUERY_RESOLVE', 0x200)
@@ -186,6 +189,20 @@ export type CopyCommandDescriptor =
     | TextureToTextureCopyCommandDescriptor
     | BufferToTextureCopyCommandDescriptor
     | TextureToBufferCopyCommandDescriptor
+
+export type ReadbackCommandDescriptor = {
+    label?: string
+    source: BufferCopyCommandSourceDescriptor
+    sourceOffset?: number
+    byteLength?: number
+    range?: ReadbackRange
+    retain?: ReadbackRetentionPolicy
+    whenMissing: 'throw'
+}
+
+export type ReadbackCommandResultOptions = {
+    after: SubmittedWork
+}
 
 export type ResolveQuerySetCommandDescriptor = {
     label?: string
@@ -1311,6 +1328,135 @@ export class CopyCommand {
 
         this.isDisposed = true
     }
+}
+
+export interface ReadbackCommand {
+    runtime: ScratchRuntime
+    id: string
+    label?: string
+    commandKind: 'readback'
+    source: BufferCopyCommandSourceDescriptor
+    range: {
+        offset: number
+        byteLength: number
+    }
+    retain: ReadbackRetentionPolicy
+    whenMissing: 'throw'
+    isDisposed: boolean
+    result(options: ReadbackCommandResultOptions): ReadbackOperation
+}
+
+const readbackCommandResults = new WeakMap<ReadbackCommand, Map<SubmittedWork, ReadbackOperation>>()
+
+export class ReadbackCommand {
+
+    constructor(runtime: ScratchRuntime, descriptor: ReadbackCommandDescriptor) {
+
+        runtime.assertActive()
+
+        const offset = descriptor.range?.offset ?? descriptor.sourceOffset ?? 0
+        const byteLength = descriptor.range?.byteLength ?? descriptor.byteLength ?? descriptor.source.resource.size - offset
+
+        this.runtime = runtime
+        this.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) this.label = descriptor.label
+        this.commandKind = 'readback'
+        this.source = descriptor.source
+        this.range = { offset, byteLength }
+        this.retain = descriptor.retain ?? 'consume-on-read'
+        this.whenMissing = descriptor.whenMissing
+        this.isDisposed = false
+        readbackCommandResults.set(this, new Map())
+    }
+
+    get subject(): DiagnosticSubject {
+
+        const subject: DiagnosticSubject = {
+            kind: 'Command',
+            id: this.id,
+            commandKind: 'readback',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    assertRuntime(runtime: ScratchRuntime) {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'Command belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable() {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DISPOSED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Command has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+        this.source.resource.assertUsable()
+    }
+
+    encode(commandEncoder: GPUCommandEncoder): GPUBuffer {
+
+        this.assertUsable()
+
+        const stagingDescriptor: GPUBufferDescriptor = {
+            size: this.range.byteLength,
+            usage: GPU_BUFFER_USAGE_MAP_READ | GPU_BUFFER_USAGE_COPY_DST,
+        }
+        if (this.label !== undefined) stagingDescriptor.label = `${this.label} staging`
+        const stagingBuffer = this.runtime.device.createBuffer(stagingDescriptor)
+        commandEncoder.copyBufferToBuffer(
+            this.source.resource.gpuBuffer,
+            this.range.offset,
+            stagingBuffer,
+            0,
+            this.range.byteLength
+        )
+
+        return stagingBuffer
+    }
+
+    result(options: ReadbackCommandResultOptions): ReadbackOperation {
+
+        return readbackCommandResults.get(this)?.get(options.after)!
+    }
+
+    dispose(): void {
+
+        this.isDisposed = true
+    }
+}
+
+export function registerReadbackCommandResult(
+    command: ReadbackCommand,
+    after: SubmittedWork,
+    operation: ReadbackOperation
+): void {
+
+    readbackCommandResults.get(command)?.set(after, operation)
 }
 
 export interface ResolveQuerySetCommand {

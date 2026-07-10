@@ -41,6 +41,11 @@ export type ReadbackOperationDescriptor = {
     retain?: ReadbackRetentionPolicy
 }
 
+export type ScheduledReadbackOperationDescriptor = ReadbackOperationDescriptor & {
+    after: SubmittedWork
+    stagingBuffer: GPUBuffer
+}
+
 export type TypedArrayConstructor<T extends ArrayBufferView = ArrayBufferView> = {
     readonly BYTES_PER_ELEMENT: number
     readonly name: string
@@ -198,6 +203,7 @@ export class ReadbackOperation {
         }
 
         try {
+            const isScheduled = scheduledReadbackOperations.has(this)
             this._assertBeforeMaterialization()
 
             if (this.after?.done) {
@@ -205,40 +211,43 @@ export class ReadbackOperation {
             }
 
             this._assertBeforeMaterialization()
-            this.state = 'scheduled'
-            const device = this.runtime.device
-            const queue = this.runtime.queue
-            const stagingDescriptor: GPUBufferDescriptor = {
-                size: this.range.byteLength,
-                usage: BUFFER_USAGE_MAP_READ | BUFFER_USAGE_COPY_DST,
-            }
-            const stagingLabel = labelWithSuffix(this.label, 'staging')
-            if (stagingLabel !== undefined) stagingDescriptor.label = stagingLabel
-            this.stagingBuffer = device.createBuffer(stagingDescriptor)
+            if (!isScheduled) {
+                this.state = 'scheduled'
+                const device = this.runtime.device
+                const queue = this.runtime.queue
+                const stagingDescriptor: GPUBufferDescriptor = {
+                    size: this.range.byteLength,
+                    usage: BUFFER_USAGE_MAP_READ | BUFFER_USAGE_COPY_DST,
+                }
+                const stagingLabel = labelWithSuffix(this.label, 'staging')
+                if (stagingLabel !== undefined) stagingDescriptor.label = stagingLabel
+                this.stagingBuffer = device.createBuffer(stagingDescriptor)
 
-            const encoderDescriptor: GPUCommandEncoderDescriptor = {}
-            const encoderLabel = labelWithSuffix(this.label, 'copy')
-            if (encoderLabel !== undefined) encoderDescriptor.label = encoderLabel
-            const encoder = device.createCommandEncoder(encoderDescriptor)
-            encoder.copyBufferToBuffer(
-                this.source.gpuBuffer,
-                this.range.offset,
-                this.stagingBuffer,
-                0,
-                this.range.byteLength
-            )
+                const encoderDescriptor: GPUCommandEncoderDescriptor = {}
+                const encoderLabel = labelWithSuffix(this.label, 'copy')
+                if (encoderLabel !== undefined) encoderDescriptor.label = encoderLabel
+                const encoder = device.createCommandEncoder(encoderDescriptor)
+                encoder.copyBufferToBuffer(
+                    this.source.gpuBuffer,
+                    this.range.offset,
+                    this.stagingBuffer,
+                    0,
+                    this.range.byteLength
+                )
 
-            this.state = 'submitted'
-            queue.submit([ encoder.finish() ])
-            if (typeof queue.onSubmittedWorkDone === 'function') {
-                await queue.onSubmittedWorkDone()
+                this.state = 'submitted'
+                queue.submit([ encoder.finish() ])
+                if (typeof queue.onSubmittedWorkDone === 'function') {
+                    await queue.onSubmittedWorkDone()
+                }
             }
 
             this._assertReadableLifecycle()
             this.state = 'mapping'
-            await this.stagingBuffer.mapAsync(MAP_MODE_READ, 0, this.range.byteLength)
+            const stagingBuffer = this.stagingBuffer!
+            await stagingBuffer.mapAsync(MAP_MODE_READ, 0, this.range.byteLength)
             this._assertReadableLifecycle()
-            const mapped = this.stagingBuffer.getMappedRange(0, this.range.byteLength)
+            const mapped = stagingBuffer.getMappedRange(0, this.range.byteLength)
             const bytes = new Uint8Array(mapped.slice(0))
 
             this._releaseStagingBuffer(true)
@@ -335,6 +344,7 @@ export class ReadbackOperation {
     _assertBeforeMaterialization() {
 
         this._assertReadableLifecycle()
+        if (scheduledReadbackOperations.has(this)) return
         this.source.assertUsable()
         assertReadbackSourceCurrent(this)
     }
@@ -363,6 +373,22 @@ export class ReadbackOperation {
             } catch {}
         }
     }
+}
+
+const scheduledReadbackOperations = new WeakSet<ReadbackOperation>()
+
+export function createScheduledReadbackOperation(
+    runtime: ScratchRuntime,
+    descriptor: ScheduledReadbackOperationDescriptor
+): ReadbackOperation {
+
+    const { stagingBuffer, ...operationDescriptor } = descriptor
+    const operation = new ReadbackOperation(runtime, operationDescriptor)
+    operation.stagingBuffer = stagingBuffer
+    operation.state = 'submitted'
+    scheduledReadbackOperations.add(operation)
+
+    return operation
 }
 
 function findSourceProducerEpoch(after: SubmittedWork | undefined, source: BufferResource): SubmittedResourceEpoch | undefined {
