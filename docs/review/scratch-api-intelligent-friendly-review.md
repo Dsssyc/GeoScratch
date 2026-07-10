@@ -89,6 +89,21 @@ Coverage check for this pass:
 - Program/layout codec diagnostics using structured subjects: covered by `08-programs-codecs` and `09-diagnostics-validation`.
 - Repair suggestions are advisory and must not create hidden auto-repair behavior: covered by `06-design-review` and `09-diagnostics-validation`.
 
+### Readiness Absence As Observable Control Flow
+
+Resolved in `docs/vision/scratch-api/02-resources/`, `04-pipelines-commands/`, and `05-passes-submissions-scheduler/`: expected missing Draw/Dispatch inputs now execute the declared `skip-command`, `skip-pass`, or `use-fallback` control flow instead of bypassing a diagnostic while encoding the original command. Submission resolves one immutable execution decision before encoder creation, and `SubmittedWork.executionOutcomes` records requested commands, attempted fallback chains, missing resource facts, and actual encoded commands.
+
+Expected streaming absence is not a warning/error. Diagnostics remain reserved for invalid fallback contracts, hard readiness policy failures, pass incompatibility, ownership/lifecycle faults, and dependency epoch findings for the final selected command.
+
+Coverage check for this pass:
+
+- Draw/Dispatch discriminated readiness descriptor and immutable same-kind fallback: covered by `04-pipelines-commands` and ADR-028.
+- One pre-encoder resolved plan and no second encoding-time decision path: covered by `05-passes-submissions-scheduler` and ADR-028.
+- Transactional pass rollback across commands, attachments, timestamps, occlusion slots, and optional findings: covered by `05-passes-submissions-scheduler` and ADR-028.
+- Immutable command/pass execution outcomes with requested/encoded IDs and missing facts: covered by `05-passes-submissions-scheduler` and `09-diagnostics-validation`.
+- Execution/resource/producer ledger consistency: covered by the eight-row audit in `docs/review/scratch-readiness-policy-execution-audit.md`.
+- Copy, Readback, and Resolve remain `throw`-only rather than inheriting undefined skip semantics: covered by `04-pipelines-commands` and ADR-028.
+
 ## Current Review Items
 
 None. The current intelligent-friendly scratch API review queue is complete. Add new items here when a later pass finds a sharper design risk.

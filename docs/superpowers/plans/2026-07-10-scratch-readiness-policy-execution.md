@@ -152,11 +152,11 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 - Modify: `docs/vision/scratch-api/09-diagnostics-validation/README_zh.md`
 - Modify: `docs/review/scratch-api-intelligent-friendly-review.md`
 
-- [ ] Record the descriptor union, same-kind fallback, write-set equivalence, resolved-plan boundary, transactional pass semantics, outcome ledger, validation-mode separation, and deferred command families in ADR-028.
-- [ ] Update paired vision files with identical implementation-status facts and add `SCRATCH_COMMAND_FALLBACK_INVALID` to the diagnostic model.
-- [ ] Persist an eight-row Draw/Dispatch x policy audit; every row must point to public types, resolution source, native encoding, readiness/epoch behavior, outcomes, diagnostics, tests, and docs.
-- [ ] Update the intelligent-friendly review to record that expected streaming absence is observable control flow rather than a warning/error.
-- [ ] Run bilingual diff review, `git diff --check`, focused tests, and typecheck; commit with `git commit -m "Document Scratch readiness policy execution"`.
+- [x] Record the descriptor union, same-kind fallback, write-set equivalence, resolved-plan boundary, transactional pass semantics, outcome ledger, validation-mode separation, and deferred command families in ADR-028.
+- [x] Update paired vision files with identical implementation-status facts and add `SCRATCH_COMMAND_FALLBACK_INVALID` to the diagnostic model.
+- [x] Persist an eight-row Draw/Dispatch x policy audit; every row points to public types, resolution source, native encoding, readiness/epoch behavior, outcomes, diagnostics, tests, and docs.
+- [x] Update the intelligent-friendly review to record that expected streaming absence is observable control flow rather than a warning/error.
+- [x] Run bilingual diff review, `git diff --check`, focused tests, and typecheck; commit with `git commit -m "Document Scratch readiness policy execution"`.
 
 ## Task 8: Browser Verification, Strict Review, Completion Audit, And Integration
 

@@ -84,7 +84,7 @@ await submitted.done
 概念拆分:
 
 - `SubmissionBuilder` 负责记录并校验当前 pass-command 序列。
-- `SubmittedWork` 由 `.submit()` 返回，持有 submitted-work id、`done` promise、producer epochs、diagnostics，以及 readback operations 使用的链接信息。
+- `SubmittedWork` 由 `.submit()` 返回，持有 submitted-work id、`done` promise、execution outcomes、resource accesses、producer epochs、diagnostics，以及 readback operations 使用的链接信息。
 
 `SubmittedWork` 不应是 thenable。等待使用 `await submitted.done`，而不是 `await submitted`。这样 submitted-work object 仍然可 inspect，并与 `ReadbackOperation` 保持一致: object 本身不是 promise。
 
@@ -95,11 +95,28 @@ Submission 职责:
 - 校验 pass 与 command compatibility
 - 校验 resource read/write order
 - prepare 显式 transfer operations
-- 解析 command readiness policies
+- 把 command readiness policies 解析成唯一 pre-encoder execution plan
 - 跳过 empty passes
-- 记录 GPU commands
+- 只记录该 plan 最终选中的 commands
 - 提交 command buffers
 - 返回 `SubmittedWork`
+
+## Resolved Readiness Execution
+
+`submit()` 会在创建 WebGPU command encoder 前完成 readiness resolution。Resolved plan 包含 validation report、resolved render/compute steps、最终模拟 resource/query state，以及 execution-outcome drafts。Encoding 只消费这些 resolved steps; 不会重新访问原始 builder command lists，也不会再次决定 policy。
+
+Draw/Dispatch resolution 在精确 command position 发生:
+
+- missing `throw` command 在所有 validation mode 下都会于 encoder 或 resource side effect 前失败;
+- missing `skip-command` request 被省略，不产生 read、write、ready-state 或 producer fact;
+- missing `skip-pass` request 会移除整个 pass;
+- missing `use-fallback` request 会解析同 kind fallback chain，只有最终选中的 command 才参与 dependency validation 与 encoding。
+
+每个 pass 都基于克隆的 readiness state、query-slot state 和 pass-local dependency findings 解析。被跳过的 pass 会丢弃所有 clone，包括较早 command writes、render attachment load/clear/store、color/depth epochs、timestamp writes、occlusion query writes 与 optional findings。即使 draw 被逐个跳过，只要 attachment operation 仍存在，render pass 就继续执行。没有 selected command 且无 side effect 的 compute pass 记为 `skipped-empty`，不会开始 native pass。
+
+`SubmittedWork.executionOutcomes` 是不可变的控制流 ledger。每个 render/compute step 先记录 pass summary，再按原始 request 顺序记录 Draw/Dispatch command outcomes。Pass 的 `requestedCommandIds` 保留原始 pass command sequence; `encodedCommandIds` 保留实际 sequence，包括选中的 fallback。每次 command attempt 都记录 policy 与完整 missing-resource state/epoch facts。所有 outcomes、attempts、missing facts、subjects、nested arrays 与 top-level array 均被冻结。
+
+正常 skip/fallback 结果不是 diagnostics。`resourceAccesses` 与 `producerEpochs` 只在编码 resolved command 和已执行 pass effect 时捕获，因此不会包含 skipped-primary 或 skipped-pass ghost。
 
 ## Presentation 是 Submission 的一种模式
 
@@ -146,10 +163,10 @@ Validation findings 应使用 `09-diagnostics-validation` 中的共享 `ScratchD
 
 Dependency validation 与 resource readiness policy 是两件事。
 
-- Validation 检查 submission 顺序与 ownership 是否自洽。
-- `whenMissing` 检查所需资源未 ready 时如何处理。
+- Validation 检查最终选中的 submission 顺序、required epochs 与 ownership 是否自洽。
+- `whenMissing` 控制所需 resource 在该位置没有可读内容时如何处理。
 
-即使启用了 validation，command 仍需要显式 readiness policy。
+`SubmissionValidationMode` 控制 optional dependency finding 的 disposition，而不改变 readiness control flow。`off` 仍然解析 skip/fallback 并保留 execution outcomes。Draw 与 Dispatch 实现全部四种 policy; Copy、Readback 与 Resolve 仍然只支持 `throw`。
 
 ## 未来上层编排
 

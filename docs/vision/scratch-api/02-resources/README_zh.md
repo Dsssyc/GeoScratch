@@ -202,6 +202,10 @@ type ResourceReadinessPolicy =
 
 该策略必须在使用点显式声明。
 
+当前已实现的 Draw/Dispatch 路径会在 command 所处的精确 submission 位置根据 resource state 解析该策略。`skip-command` 不应用任何 command read/write fact，`skip-pass` 会事务化丢弃所有 command 与 pass-level effect，`use-fallback` 会解析同 kind command，但不修改任一 command 或 resource。只有最终选中的 command 才能推进 content epoch 或创建 producer fact。
+
+预期的数据缺失通过 `SubmittedWork.executionOutcomes` 可观察，不是 warning/error。Required-epoch 的 stale/future diagnostics 与此分离，只对已选中的 command 生效。当前实现的 state 仍是 `empty | ready | disposed`; 本轮 readiness execution 不引入额外 streaming lifecycle state。`CopyCommand`、`ReadbackCommand` 与 `ResolveQuerySetCommand` 仍然只支持 `throw`。
+
 ## 非目标
 
 - 不在 resource 中编码 tile、LoD、terrain、flow 或 projection policy。

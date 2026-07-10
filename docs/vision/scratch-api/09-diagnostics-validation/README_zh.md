@@ -290,9 +290,14 @@ type CommandDiagnosticCode =
     | 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID'
     | 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID'
     | 'SCRATCH_COMMAND_READINESS_POLICY_MISSING'
+    | 'SCRATCH_COMMAND_FALLBACK_INVALID'
     | 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE'
     | 'SCRATCH_COMMAND_RESOURCE_NOT_READY'
 ```
+
+预期的 Draw/Dispatch `skip-command`、`skip-pass` 与成功 `use-fallback` 决策不是 diagnostics，而是不可变的 `SubmittedWork.executionOutcomes`。`SCRATCH_COMMAND_FALLBACK_INVALID` 只用于 missing/forbidden fallback shape、kind/runtime/lifecycle/write-set 不兼容，以及 repeated chain。最终选中的 fallback 无法进入当前 pass 时使用 `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`。
+
+Fallback readiness 或 dependency failure 以最终选中的 fallback 作为 `subject`。`related` 包含 requested command、attempted chain、pass、resource 与 submission。结构化 `actual` facts 包含 step/pass IDs、requested command ID、attempted command IDs、当前 command/resource state 与 epochs，以及 validation mode。
 
 ### Submission
 
@@ -306,9 +311,10 @@ type SubmissionDiagnosticCode =
     | 'SCRATCH_SUBMISSION_WRITE_AFTER_READ_UNDECLARED'
     | 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE'
     | 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE'
-    | 'SCRATCH_SUBMISSION_EMPTY_SKIPPED'
     | 'SCRATCH_SUBMISSION_WORK_ALREADY_SUBMITTED'
 ```
+
+`skipped-empty` 是 execution outcome，不是 diagnostic code。Validation mode 只控制 optional dependency findings; 它不会关闭 readiness resolution，也不会删除 execution-outcome facts。
 
 ### Query 与 Readback
 

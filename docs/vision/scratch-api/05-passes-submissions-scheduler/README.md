@@ -84,7 +84,7 @@ await submitted.done
 Conceptual split:
 
 - `SubmissionBuilder` records and validates the current pass-command sequence.
-- `SubmittedWork` is returned by `.submit()`. It owns the submitted-work id, `done` promise, producer epochs, diagnostics, and links used by readback operations.
+- `SubmittedWork` is returned by `.submit()`. It owns the submitted-work id, `done` promise, execution outcomes, resource accesses, producer epochs, diagnostics, and links used by readback operations.
 
 `SubmittedWork` should not be thenable. Waiting uses `await submitted.done`, not `await submitted`. This keeps the submitted-work object inspectable and consistent with `ReadbackOperation`, where the object is not itself a promise.
 
@@ -95,11 +95,28 @@ Submission responsibilities:
 - validate pass and command compatibility
 - validate resource read/write order
 - prepare explicit transfer operations
-- resolve command readiness policies
+- resolve command readiness policies into one pre-encoder execution plan
 - skip empty passes
-- record GPU commands
+- record only the commands selected by that plan
 - submit command buffers
 - return `SubmittedWork`
+
+## Resolved Readiness Execution
+
+`submit()` completes readiness resolution before creating a WebGPU command encoder. The resolved plan contains the validation report, resolved render/compute steps, final simulated resource/query state, and execution-outcome drafts. Encoding consumes only those resolved steps; it does not revisit the original builder command lists or decide a policy again.
+
+Draw/Dispatch resolution occurs at the exact command position:
+
+- a missing `throw` command fails before encoder or resource side effects in every validation mode;
+- a missing `skip-command` request is omitted and produces no read, write, ready-state, or producer fact;
+- a missing `skip-pass` request removes the complete pass;
+- a missing `use-fallback` request resolves a same-kind fallback chain, and only the final selected command participates in dependency validation and encoding.
+
+Each pass resolves against cloned readiness state, query-slot state, and pass-local dependency findings. A skipped pass discards all clones, including earlier command writes, render attachment load/clear/store, color/depth epochs, timestamp writes, occlusion query writes, and optional findings. A render pass whose draws are individually skipped still executes when attachment operations remain. An effect-free compute pass with no selected commands is `skipped-empty` and does not begin a native pass.
+
+`SubmittedWork.executionOutcomes` is the immutable control-flow ledger. For each render/compute step, a pass summary is followed by Draw/Dispatch command outcomes in original request order. Pass `requestedCommandIds` retain the original pass command sequence; `encodedCommandIds` retain the actual sequence, including a selected fallback. Each command attempt records its policy and complete missing-resource state/epoch facts. All outcomes, attempts, missing facts, subjects, nested arrays, and the top-level array are frozen.
+
+Normal skip/fallback results are not diagnostics. `resourceAccesses` and `producerEpochs` are captured only while encoding resolved commands and executed pass effects, so they cannot contain skipped-primary or skipped-pass ghosts.
 
 ## Presentation Is A Submission Mode
 
@@ -146,10 +163,10 @@ Validation findings should use the shared `ScratchDiagnostic` envelope from `09-
 
 Dependency validation and resource readiness policy are separate.
 
-- Validation checks whether the submission order and ownership are coherent.
-- `whenMissing` checks what to do if a required resource is not ready.
+- Validation checks whether the selected submission order, required epochs, and ownership are coherent.
+- `whenMissing` controls what to do if a required resource has no readable content at that position.
 
-Commands still need explicit readiness policy even when validation is enabled.
+`SubmissionValidationMode` controls optional dependency-finding disposition, not readiness control flow. `off` still resolves skip/fallback and preserves execution outcomes. Draw and Dispatch implement all four policies; Copy, Readback, and Resolve remain `throw`-only.
 
 ## Future Upper Orchestration
 

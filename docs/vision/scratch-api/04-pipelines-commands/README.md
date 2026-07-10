@@ -76,7 +76,7 @@ Every command should declare:
 
 Commands that write resource contents advance `contentEpoch`. Commands that replace physical GPU objects advance `allocationVersion`. The two effects are separate so a compute write does not accidentally imply bind group invalidation.
 
-Draw and dispatch execution contracts are normalized and locked at construction. Their pipeline, bind/index/vertex state, count, dynamic offsets, resource declarations, and readiness policy cannot drift between validation and encoding; referenced bind sets expose the same immutable normalized binding table. `dispose()` remains the explicit mutable lifecycle transition, exposed through a read-only `isDisposed` state rather than a writable flag.
+Draw and dispatch execution contracts are normalized and locked at construction. Their pipeline, bind/index/vertex state, count, dynamic offsets, resource declarations, readiness policy, and fallback reference cannot drift between validation and encoding; referenced bind sets expose the same immutable normalized binding table. `dispose()` remains the explicit mutable lifecycle transition, exposed through a read-only `isDisposed` state rather than a writable flag.
 
 Pipeline and command validation findings should use the shared `ScratchDiagnostic` envelope from `09-diagnostics-validation`. `Command` diagnostics should identify the command as `subject` and put related resources, pass specs, pipelines, or bind sets in `related` instead of prose.
 
@@ -234,7 +234,7 @@ Future `SubmissionContext` work should expose runtime state, submission diagnost
 
 ## Readiness Policy
 
-Every command must explicitly declare what happens when required resources are not ready:
+Draw and Dispatch implement all four readiness policies through a discriminated descriptor:
 
 ```ts
 type ResourceReadinessPolicy =
@@ -242,9 +242,30 @@ type ResourceReadinessPolicy =
     | 'skip-command'
     | 'skip-pass'
     | 'use-fallback'
+
+type CommandReadinessDescriptor<FallbackCommand> =
+    | {
+        whenMissing: 'throw' | 'skip-command' | 'skip-pass'
+        fallback?: never
+    }
+    | {
+        whenMissing: 'use-fallback'
+        fallback: FallbackCommand
+    }
 ```
 
-This avoids conflating streaming data absence with wiring bugs.
+`DrawCommandDescriptor` uses `CommandReadinessDescriptor<DrawCommand>` and `DispatchCommandDescriptor` uses `CommandReadinessDescriptor<DispatchCommand>`. A fallback must have the same command kind, runtime, non-disposed lifecycle, and declared-write resource identity set. A finite fallback chain may change pipeline, bindings, fixed-function buffers, count, and declared reads. Policy and fallback references are immutable.
+
+At submission time:
+
+- `throw` hard-fails an unready read before encoder creation in every validation mode;
+- `skip-command` omits only that command and applies no declared read/write facts;
+- `skip-pass` transactionally omits the complete render/compute pass, including attachments and query writes;
+- `use-fallback` records the primary attempt and resolves the fallback at the same command position.
+
+Only the final selected command reaches its existing native encoder method. This includes indexed and indirect fallbacks; Scratch does not inspect indirect argument bytes during selection. Expected skip/fallback decisions are recorded in `SubmittedWork.executionOutcomes`, not diagnostics. Invalid contracts and hard runtime failures continue to use `ScratchDiagnostic`.
+
+This complete policy surface currently belongs only to Draw and Dispatch. Copy, ordered Readback, and query Resolve descriptors remain `whenMissing: 'throw'` only.
 
 ## Non-Goals
 

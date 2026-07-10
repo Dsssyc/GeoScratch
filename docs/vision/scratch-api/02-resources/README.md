@@ -202,6 +202,10 @@ type ResourceReadinessPolicy =
 
 This policy must be explicitly declared at the usage point.
 
+The implemented Draw/Dispatch path resolves this policy from the resource state at the command's exact submission position. `skip-command` applies no command read/write fact, `skip-pass` transactionally discards every command and pass-level effect, and `use-fallback` resolves a same-kind command without mutating either command or resource. Only selected commands can advance content epochs or create producer facts.
+
+Expected absence is observable through `SubmittedWork.executionOutcomes`; it is not a warning/error. Required-epoch stale/future diagnostics are separate and apply only after a command is selected. The current implementation state remains `empty | ready | disposed`; this readiness execution does not introduce additional streaming lifecycle states. `CopyCommand`, `ReadbackCommand`, and `ResolveQuerySetCommand` remain `throw`-only.
+
 ## Non-Goals
 
 - Do not encode tile, LoD, terrain, flow, or projection policy in resources.
