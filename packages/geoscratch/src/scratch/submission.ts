@@ -1172,6 +1172,26 @@ function snapshotReadinessAttempts(
     }))
 }
 
+function readinessAttemptSubjects(
+    attempts: readonly SubmissionCommandReadinessAttempt[]
+): DiagnosticSubject[] {
+
+    const subjects: DiagnosticSubject[] = []
+    const seen = new Set<string>()
+
+    for (const attempt of attempts) {
+        for (const missing of attempt.missing) {
+            const subject = missing.subject
+            const key = `${subject.kind}\u0000${subject.id ?? ''}\u0000${subject.label ?? ''}`
+            if (seen.has(key)) continue
+            seen.add(key)
+            subjects.push(subject)
+        }
+    }
+
+    return subjects
+}
+
 function validateFallbackCommandForPass(
     builder: SubmissionBuilder,
     stepIndex: number,
@@ -1276,6 +1296,7 @@ function throwFallbackPassIncompatibleDiagnostic(
         related: [
             requestedCommand.subject,
             ...attemptedCommands.map(command => command.subject),
+            ...readinessAttemptSubjects(attempts),
             passSpec.subject,
             builder.subject,
         ],
@@ -1318,6 +1339,7 @@ function throwFallbackResolutionDiagnostic(
         related: [
             requestedCommand.subject,
             ...attemptedCommands.map(command => command.subject),
+            ...readinessAttemptSubjects(attempts),
             passSpec.subject,
             builder.subject,
         ],
@@ -1595,6 +1617,7 @@ function throwCommandResourceNotReadyDiagnostic(
         related: [
             resource.subject,
             ...(context?.attemptedCommands.map(attempted => attempted.subject) ?? []),
+            ...(context !== undefined ? readinessAttemptSubjects(context.attempts) : []),
             passSpec?.subject,
             builder.subject,
         ].filter(isDefined),
@@ -1649,6 +1672,7 @@ function createCommandReadEpochDiagnostic(
         related: [
             resource.subject,
             ...(context?.attemptedCommands.map(attempted => attempted.subject) ?? []),
+            ...(context !== undefined ? readinessAttemptSubjects(context.attempts) : []),
             passSpec?.subject,
             builder.subject,
         ].filter(isDefined),
@@ -2115,6 +2139,22 @@ function collectRenderAttachmentTargets(passSpec: RenderPassSpec): Map<TextureRe
 function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec) {
 
     const targetFormats = command.pipeline.targetFormats
+    if (targetFormats.length !== passSpec.color.length) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: command.pipeline.subject,
+            related: [
+                command.subject,
+                passSpec.subject,
+            ],
+            message: 'RenderPipeline color target count does not match RenderPassSpec attachment count.',
+            expected: { targetCount: passSpec.color.length },
+            actual: { targetCount: targetFormats.length },
+        })
+    }
+
     for (let index = 0; index < passSpec.color.length; index++) {
         const expected = passSpec.color[index]?.format
         const actual = targetFormats[index]

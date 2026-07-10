@@ -162,16 +162,22 @@ describe('scratch readiness policy execution', () => {
 
         const missing = await expectDiagnostic(() => createDraw(fixture, {
             whenMissing: 'use-fallback',
-        }), 'SCRATCH_COMMAND_READINESS_POLICY_MISSING')
-        expect(missing.actual).to.deep.include({ whenMissing: 'use-fallback' })
+        }), 'SCRATCH_COMMAND_FALLBACK_INVALID')
+        expect(missing.actual).to.deep.include({
+            reason: 'missing-fallback',
+            whenMissing: 'use-fallback',
+        })
         expect(missing.subject).to.deep.include({ kind: 'Command', commandKind: 'draw' })
         expect(missing.expected).to.deep.include({ whenMissing: 'use-fallback', fallback: 'DrawCommand' })
 
         const forbidden = await expectDiagnostic(() => createDraw(fixture, {
             whenMissing: 'skip-command',
             fallback,
-        }), 'SCRATCH_COMMAND_READINESS_POLICY_MISSING')
-        expect(forbidden.actual).to.deep.include({ whenMissing: 'skip-command' })
+        }), 'SCRATCH_COMMAND_FALLBACK_INVALID')
+        expect(forbidden.actual).to.deep.include({
+            reason: 'forbidden-fallback',
+            whenMissing: 'skip-command',
+        })
         expect(forbidden.related).to.deep.include(fallback.subject)
     })
 

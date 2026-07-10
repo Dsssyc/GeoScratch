@@ -236,7 +236,7 @@ type CommandReadinessDescriptor<FallbackCommand> =
 - `skip-pass` 会事务化省略整个 render/compute pass，包括 attachments 与 query writes;
 - `use-fallback` 记录 primary attempt，并在同一 command position 解析 fallback。
 
-只有最终选中的 command 会进入其既有原生 encoder method。Indexed 与 indirect fallback 也遵守这一点; Scratch 在选择时不会检查 indirect argument bytes。预期的 skip/fallback 决策记录在 `SubmittedWork.executionOutcomes` 中，而不是 diagnostics。非法 contract 与 hard runtime failure 继续使用 `ScratchDiagnostic`。
+只有最终选中的 command 会进入其既有原生 encoder method。选中的 Draw fallback 必须先与 pass 的准确 color target 数量/格式及 depth/stencil state 匹配。Indexed 与 indirect fallback 也遵守这一点; Scratch 在选择时不会检查 indirect argument bytes。预期的 skip/fallback 决策记录在 `SubmittedWork.executionOutcomes` 中，而不是 diagnostics。非法 contract 与 hard runtime failure 继续使用 `ScratchDiagnostic`。
 
 当前只有 Draw 与 Dispatch 拥有这套完整 policy surface。Copy、ordered Readback 与 query Resolve descriptor 仍然只接受 `whenMissing: 'throw'`。
 

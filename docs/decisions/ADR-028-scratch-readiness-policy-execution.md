@@ -38,7 +38,7 @@ type CommandReadinessDescriptor<FallbackCommand> =
 
 Draw can fall back only to an actual `DrawCommand`; Dispatch can fall back only to an actual `DispatchCommand`. Runtime construction validates the same command kind, runtime ownership, non-disposed lifecycle, identical declared-write resource identity set, and a finite acyclic chain with unique command IDs. Repeated declared-write resources normalize to one identity before contract comparison and epoch accounting. Submission rechecks a selected fallback's lifecycle because `dispose()` remains an explicit post-construction transition. The policy and fallback reference are immutable after construction. There is no bare `use-fallback`, legacy alias, implicit resource substitution, or bind-set mutation path.
 
-Fallback commands may use different pipelines, bindings, fixed-function buffers, counts, and declared reads. A selected fallback must still be compatible with the current pass. Native direct, indexed, and indirect encoding remains owned by the selected command; fallback resolution never interprets indirect argument bytes.
+Fallback commands may use different pipelines, bindings, fixed-function buffers, counts, and declared reads. A selected fallback must still be compatible with the current pass, including exact color target count/formats and depth/stencil state. Native direct, indexed, and indirect encoding remains owned by the selected command; fallback resolution never interprets indirect argument bytes.
 
 ### One resolved submission plan
 

@@ -263,7 +263,7 @@ At submission time:
 - `skip-pass` transactionally omits the complete render/compute pass, including attachments and query writes;
 - `use-fallback` records the primary attempt and resolves the fallback at the same command position.
 
-Only the final selected command reaches its existing native encoder method. This includes indexed and indirect fallbacks; Scratch does not inspect indirect argument bytes during selection. Expected skip/fallback decisions are recorded in `SubmittedWork.executionOutcomes`, not diagnostics. Invalid contracts and hard runtime failures continue to use `ScratchDiagnostic`.
+Only the final selected command reaches its existing native encoder method. A selected Draw fallback must first match the pass's exact color target count/formats and depth/stencil state. This includes indexed and indirect fallbacks; Scratch does not inspect indirect argument bytes during selection. Expected skip/fallback decisions are recorded in `SubmittedWork.executionOutcomes`, not diagnostics. Invalid contracts and hard runtime failures continue to use `ScratchDiagnostic`.
 
 This complete policy surface currently belongs only to Draw and Dispatch. Copy, ordered Readback, and query Resolve descriptors remain `whenMissing: 'throw'` only.
 

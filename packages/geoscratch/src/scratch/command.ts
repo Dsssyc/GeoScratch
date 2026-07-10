@@ -4766,7 +4766,7 @@ function throwReadinessContractDiagnostic(
 ): never {
 
     throwScratchDiagnostic({
-        code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
+        code: 'SCRATCH_COMMAND_FALLBACK_INVALID',
         severity: 'error',
         phase: 'command',
         subject: command.subject,

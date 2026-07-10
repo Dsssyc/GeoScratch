@@ -417,6 +417,7 @@ describe('scratch readiness fallback execution outcomes', () => {
 
         expect(diagnostic.subject).to.deep.equal(fallback.subject)
         expect(diagnostic.related).to.deep.include(primary.subject)
+        expect(diagnostic.related).to.deep.include(primaryInput.subject)
         expect(diagnostic.related).to.deep.include(fallbackInput.subject)
         expect(diagnostic.related).to.deep.include(fixture.pass.subject)
         expect(diagnostic.related).to.deep.include(builder.subject)
@@ -469,6 +470,7 @@ describe('scratch readiness fallback execution outcomes', () => {
 
         expect(diagnostic.subject).to.deep.equal(fallback.subject)
         expect(diagnostic.related).to.deep.include(primary.subject)
+        expect(diagnostic.related).to.deep.include(primaryInput.subject)
         expect(diagnostic.related).to.deep.include(fixture.pass.subject)
         expect(diagnostic.related).to.deep.include(builder.subject)
         expect(diagnostic.actual).to.deep.include({
@@ -611,6 +613,7 @@ describe('scratch readiness fallback execution outcomes', () => {
 
         expect(diagnostic.subject).to.deep.equal(fallback.subject)
         expect(diagnostic.related).to.deep.include(primary.subject)
+        expect(diagnostic.related).to.deep.include(missing.subject)
         expect(diagnostic.related).to.deep.include(fixture.pass.subject)
         expect(diagnostic.related).to.deep.include(builder.subject)
         expect(diagnostic.actual).to.deep.include({
@@ -634,7 +637,52 @@ describe('scratch readiness fallback execution outcomes', () => {
         })
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(0)
+    })
+
+    it('rejects a selected fallback whose color target count differs from the pass', async() => {
+
+        const fixture = await createRenderFixture()
+        const missing = createBuffer(fixture, 'primary input')
+        const incompatiblePipeline = fixture.runtime.createRenderPipeline({
+            program: fixture.program,
+            targets: [
+                { format: 'rgba8unorm' },
+                { format: 'rgba8unorm' },
+            ],
         })
+        const fallback = createDraw(fixture, {
+            pipeline: incompatiblePipeline,
+        })
+        const primary = createDraw(fixture, {
+            resources: {
+                read: [ { resource: missing, contentEpoch: 0 } ],
+                write: [],
+            },
+            whenMissing: 'use-fallback',
+            fallback,
+        })
+        const builder = fixture.runtime.createSubmission({ validation: 'off' })
+            .render(fixture.pass, [ primary ])
+
+        const diagnostic = await expectDiagnostic(
+            () => builder.submit(),
+            'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE'
+        )
+
+        expect(diagnostic.subject).to.deep.equal(fallback.subject)
+        expect(diagnostic.related).to.deep.include(missing.subject)
+        expect(diagnostic.actual).to.deep.include({
+            reason: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
+            stepIndex: 0,
+            passId: fixture.pass.id,
+            requestedCommandId: primary.id,
+            fallbackCommandId: fallback.id,
+            attemptedCommandIds: [ primary.id, fallback.id ],
+            validation: 'off',
+        })
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.drawCalls).to.have.length(0)
     })
 
     it('records duplicate declared writes once when a fallback executes', async() => {
@@ -668,3 +716,4 @@ describe('scratch readiness fallback execution outcomes', () => {
         expect(submitted.producerEpochs[0].producedBy.commandId).to.equal(fallback.id)
         expect(output.contentEpoch).to.equal(1)
     })
+})

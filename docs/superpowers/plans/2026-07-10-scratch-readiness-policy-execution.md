@@ -66,7 +66,7 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 - Modify: `tests/scratch-readiness-policy-execution.test.js`
 - Modify: `packages/geoscratch/src/scratch/command.ts`
 
-- [x] Write RED runtime tests for missing fallback, forbidden fallback on non-fallback policies, wrong command kind, wrong runtime, disposed fallback, declared-write identity mismatch, repeated/self reference, and a forged cycle. Assert `SCRATCH_COMMAND_READINESS_POLICY_MISSING` or `SCRATCH_COMMAND_FALLBACK_INVALID` with structured `expected`, `actual`, `subject`, and `related` facts.
+- [x] Write RED runtime tests for missing fallback, forbidden fallback on non-fallback policies, wrong command kind, wrong runtime, disposed fallback, declared-write identity mismatch, repeated/self reference, and a forged cycle. Assert `SCRATCH_COMMAND_FALLBACK_INVALID` for fallback shape/contract failures; reserve `SCRATCH_COMMAND_READINESS_POLICY_MISSING` for a missing or invalid policy itself. Require structured `expected`, `actual`, `subject`, and `related` facts.
 - [x] Normalize readiness policy and fallback once during command construction. Validate fallback kind/runtime/lifecycle and compare declared write resources as identity sets, not mutable array order.
 - [x] Walk the immutable fallback chain with a visited-command set; reject any repeated id before submission resolution.
 - [x] Lock the fallback property with the rest of the command contract and add post-construction mutation tests.
