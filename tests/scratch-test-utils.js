@@ -17,6 +17,7 @@ export function createFakeGpu() {
         queueTextureWrites: [],
         queueSubmissions: [],
         queueTimeline: [],
+        submittedWorkDoneRegistrations: [],
         renderPasses: [],
         computePasses: [],
         drawCalls: [],
@@ -78,6 +79,9 @@ export function createFakeGpu() {
         },
         onSubmittedWorkDone() {
             this.submittedWorkDoneCalls++
+            calls.submittedWorkDoneRegistrations.push({
+                queueTimelineLength: calls.queueTimeline.length,
+            })
             return Promise.resolve('queue done')
         },
     }
