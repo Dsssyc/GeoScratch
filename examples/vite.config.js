@@ -13,6 +13,7 @@ const examplePages = {
   scratchHelloTriangle: path.resolve(examplesRoot, 'scratch_helloTriangle/index.html'),
   scratchUniformTriangle: path.resolve(examplesRoot, 'scratch_uniformTriangle/index.html'),
   scratchComputeReadback: path.resolve(examplesRoot, 'scratch_computeReadback/index.html'),
+  submissionOrder: path.resolve(examplesRoot, 'submissionOrder/index.html'),
   scratchHelloVertexBuffer: path.resolve(examplesRoot, 'scratch_helloVertexBuffer/index.html'),
   scratchTextureSampling: path.resolve(examplesRoot, 'scratch_textureSampling/index.html'),
   scratchRenderToTexture: path.resolve(examplesRoot, 'scratch_renderToTexture/index.html'),

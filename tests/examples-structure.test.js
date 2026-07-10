@@ -11,6 +11,7 @@ describe('examples structure', () => {
         'scratch_helloTriangle',
         'scratch_uniformTriangle',
         'scratch_computeReadback',
+        'submissionOrder',
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
         'scratch_renderToTexture',
@@ -26,6 +27,7 @@ describe('examples structure', () => {
         'scratch_helloTriangle',
         'scratch_uniformTriangle',
         'scratch_computeReadback',
+        'submissionOrder',
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
         'scratch_renderToTexture',
@@ -86,6 +88,7 @@ describe('examples structure', () => {
             [ 'scratch_helloTriangle', 'Hello Triangle' ],
             [ 'scratch_uniformTriangle', 'Uniform Triangle' ],
             [ 'scratch_computeReadback', 'Compute Readback' ],
+            [ 'submissionOrder', 'Submission Order' ],
             [ 'scratch_helloVertexBuffer', 'Hello Vertex Buffer' ],
             [ 'scratch_textureSampling', 'Texture Sampling' ],
             [ 'scratch_renderToTexture', 'Render To Texture' ],
@@ -217,5 +220,22 @@ describe('examples structure', () => {
         expect(source).to.include('executionOutcomes')
         expect(source).to.include("dataset.status = 'ready'")
         expect(source).to.not.match(/readback|mapAsync|getMappedRange|toBytes|toArray/i)
+    })
+
+    it('provides a deterministic ordered submission proof', () => {
+        const html = read('examples', 'submissionOrder', 'index.html')
+        const source = read('examples', 'submissionOrder', 'main.js')
+
+        expect(html).to.include('<title>Submission Order | GeoScratch Examples</title>')
+        expect(html).to.include('id="GPUFrame"')
+        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include('.upload(uploadZero)')
+        expect(source).to.include('.compute(pass, [ incrementZero ])')
+        expect(source).to.include('.upload(uploadTen)')
+        expect(source).to.include('.compute(pass, [ incrementTen ])')
+        expect(source).to.include('.readback(readback)')
+        expect(source).to.include('result === 11')
+        expect(source).to.include("dataset.status = passed ? 'passed' : 'failed'")
+        expect(source).to.include('dataset.result = String(result)')
     })
 })
