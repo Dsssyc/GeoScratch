@@ -72,6 +72,16 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 24,
         usage: 0x20 | 0x8,
     })
+    const indexBuffer: scr.BufferResource = runtime.createBuffer({
+        label: 'typed scratch index buffer',
+        size: 8,
+        usage: 0x10 | 0x8,
+    })
+    const indirectBuffer: scr.BufferResource = runtime.createBuffer({
+        label: 'typed scratch indirect buffer',
+        size: 32,
+        usage: 0x100 | 0x80,
+    })
     const storageInput: scr.BufferResource = runtime.createBuffer({
         label: 'typed scratch storage input',
         size: 16,
@@ -89,6 +99,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const vertexRead: scr.CommandResourceReadDescriptor = {
         resource: vertexBuffer,
         contentEpoch: vertexBuffer.contentEpoch,
+    }
+    const indexRead: scr.CommandResourceReadDescriptor = {
+        resource: indexBuffer,
+        contentEpoch: indexBuffer.contentEpoch,
+    }
+    const indirectRead: scr.CommandResourceReadDescriptor = {
+        resource: indirectBuffer,
+        contentEpoch: indirectBuffer.contentEpoch,
     }
     const storageInputRead: scr.CommandResourceReadDescriptor = {
         resource: storageInput,
@@ -489,10 +507,67 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         },
         whenMissing: 'throw',
     })
+    const staticIndexedCount: scr.StaticIndexedDrawCount = { indexCount: 3 }
+    const indirectCount: scr.IndirectCommandCount = { indirect: indirectBuffer, offset: 0 }
+    const drawCount: scr.DrawCount = staticIndexedCount
+    const dispatchCount: scr.DispatchCount = indirectCount
+    const indexBinding: scr.DrawIndexBufferBinding = {
+        buffer: indexBuffer,
+        format: 'uint16',
+        offset: 0,
+        size: 6,
+    }
+    const indexedDraw: scr.DrawCommand = runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        indexBuffer: indexBinding,
+        count: drawCount,
+        resources: {
+            read: [ uniformRead, indexRead ],
+            write: [],
+        },
+        whenMissing: 'throw',
+    })
+    const indirectDraw: scr.DrawCommand = runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        count: indirectCount,
+        resources: {
+            read: [ uniformRead, indirectRead ],
+            write: [],
+        },
+        whenMissing: 'throw',
+    })
+    const indexedIndirectDraw: scr.DrawCommand = runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        indexBuffer: indexBinding,
+        count: indirectCount,
+        resources: {
+            read: [ uniformRead, indexRead, indirectRead ],
+            write: [],
+        },
+        whenMissing: 'throw',
+    })
+    // @ts-expect-error indexed counts require an index buffer
+    runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        count: staticIndexedCount,
+        resources: { read: [ indexRead ], write: [] },
+        whenMissing: 'throw',
+    })
+    runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        indexBuffer: indexBinding,
+        // @ts-expect-error static non-indexed counts forbid an index buffer
+        count: { vertexCount: 3 },
+        resources: { read: [ indexRead ], write: [] },
+        whenMissing: 'throw',
+    })
     const drawResources: scr.CommandResourceAccessDescriptor = draw.resources
     const drawReadResource: scr.Resource = drawResources.read[0].resource
     const drawReadContentEpoch: number = drawResources.read[0].contentEpoch
     const compatDraw: scratchCompat.DrawCommand = draw
+    const compatIndexedDraw: scratchCompat.DrawCommand = indexedDraw
+    const compatIndirectDraw: scratchCompat.DrawCommand = indirectDraw
+    const compatIndexedIndirectDraw: scratchCompat.DrawCommand = indexedIndirectDraw
     const compatDrawResources: scratchCompat.CommandResourceAccessDescriptor = compatDraw.resources
     const compatDrawReadResource: scratchCompat.Resource = compatDrawResources.read[0].resource
     const compatDrawReadContentEpoch: number = compatDrawResources.read[0].contentEpoch
@@ -596,6 +671,16 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         count: { workgroups: [ 1 ] },
         resources: {
             read: [ storageInputRead ],
+            write: [ storageOutput ],
+        },
+        whenMissing: 'throw',
+    })
+    const indirectDispatch: scr.DispatchCommand = runtime.createDispatchCommand({
+        pipeline: computePipeline,
+        bindSets: [ storageSet ],
+        count: dispatchCount,
+        resources: {
+            read: [ storageInputRead, indirectRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',

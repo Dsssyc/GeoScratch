@@ -18,12 +18,16 @@ import type { ScratchRuntime } from './runtime.js'
 import type { SubmittedWork } from './submission.js'
 
 const GPU_BUFFER_USAGE_VERTEX = getGlobalConstant('GPUBufferUsage', 'VERTEX', 0x20)
+const GPU_BUFFER_USAGE_INDEX = getGlobalConstant('GPUBufferUsage', 'INDEX', 0x10)
 const GPU_BUFFER_USAGE_MAP_READ = getGlobalConstant('GPUBufferUsage', 'MAP_READ', 0x1)
 const GPU_BUFFER_USAGE_COPY_SRC = getGlobalConstant('GPUBufferUsage', 'COPY_SRC', 0x4)
 const GPU_BUFFER_USAGE_COPY_DST = getGlobalConstant('GPUBufferUsage', 'COPY_DST', 0x8)
 const GPU_BUFFER_USAGE_QUERY_RESOLVE = getGlobalConstant('GPUBufferUsage', 'QUERY_RESOLVE', 0x200)
 const GPU_TEXTURE_USAGE_COPY_SRC = getGlobalConstant('GPUTextureUsage', 'COPY_SRC', 0x1)
 const GPU_TEXTURE_USAGE_COPY_DST = getGlobalConstant('GPUTextureUsage', 'COPY_DST', 0x2)
+const GPU_SIZE_32_MAX = 0xffff_ffff
+const GPU_SIGNED_OFFSET_32_MIN = -0x8000_0000
+const GPU_SIGNED_OFFSET_32_MAX = 0x7fff_ffff
 
 export type ResourceReadinessPolicy =
     | 'throw'
@@ -38,6 +42,24 @@ export type StaticDrawCount = {
     firstInstance?: number
 }
 
+export type StaticIndexedDrawCount = {
+    indexCount: number
+    instanceCount?: number
+    firstIndex?: number
+    baseVertex?: number
+    firstInstance?: number
+}
+
+export type IndirectCommandCount = {
+    indirect: BufferResource
+    offset?: number
+}
+
+export type DrawCount =
+    | StaticDrawCount
+    | StaticIndexedDrawCount
+    | IndirectCommandCount
+
 export type DrawVertexBufferBinding = {
     slot: number
     buffer: BufferResource
@@ -45,9 +67,21 @@ export type DrawVertexBufferBinding = {
     size?: number
 }
 
+export type DrawIndexBufferBinding = {
+    buffer: BufferResource
+    format: GPUIndexFormat
+    offset?: number
+    size?: number
+}
+
 export type CommandDynamicOffsets = Record<number, number[]>
 
 export type NormalizedDrawVertexBufferBinding = Omit<DrawVertexBufferBinding, 'size'> & {
+    offset: number
+    size: number | undefined
+}
+
+export type NormalizedDrawIndexBufferBinding = Omit<DrawIndexBufferBinding, 'offset' | 'size'> & {
     offset: number
     size: number | undefined
 }
@@ -86,16 +120,29 @@ export type CommandResourceAccessDescriptor = {
     write: Resource[]
 }
 
-export type DrawCommandDescriptor = {
+type DrawCommandDescriptorBase = {
     label?: string
     pipeline: RenderPipeline
     bindSets?: BindSet[]
     dynamicOffsets?: CommandDynamicOffsets
     vertexBuffers?: DrawVertexBufferBinding[]
-    count: StaticDrawCount
     resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
 }
+
+export type NonIndexedDrawCommandDescriptor = DrawCommandDescriptorBase & {
+    indexBuffer?: never
+    count: StaticDrawCount | IndirectCommandCount
+}
+
+export type IndexedDrawCommandDescriptor = DrawCommandDescriptorBase & {
+    indexBuffer: DrawIndexBufferBinding
+    count: StaticIndexedDrawCount | IndirectCommandCount
+}
+
+export type DrawCommandDescriptor =
+    | NonIndexedDrawCommandDescriptor
+    | IndexedDrawCommandDescriptor
 
 export type BeginOcclusionQueryCommandDescriptor = {
     label?: string
@@ -244,17 +291,21 @@ export type StaticDispatchCount = {
     workgroups: [number] | [number, number] | [number, number, number]
 }
 
+export type DispatchCount = StaticDispatchCount | IndirectCommandCount
+
 export type DispatchCommandDescriptor = {
     label?: string
     pipeline: ComputePipeline
     bindSets?: BindSet[]
     dynamicOffsets?: CommandDynamicOffsets
-    count: StaticDispatchCount
+    count: DispatchCount
     resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
 }
 
-type DrawCountOptionalKey = Exclude<keyof StaticDrawCount, 'vertexCount'>
+type StaticDrawCountOptionalKey = Exclude<keyof StaticDrawCount, 'vertexCount'>
+
+type StaticIndexedDrawCountOptionalKey = Exclude<keyof StaticIndexedDrawCount, 'indexCount'>
 
 type OcclusionQueryCommandDiagnosticInput = {
     runtime?: ScratchRuntime
@@ -359,7 +410,8 @@ export interface DrawCommand {
     bindSets: BindSet[]
     dynamicOffsets: Map<number, number[]>
     vertexBuffers: NormalizedDrawVertexBufferBinding[]
-    count: StaticDrawCount
+    indexBuffer?: NormalizedDrawIndexBufferBinding
+    count: DrawCount
     resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
     isDisposed: boolean
@@ -394,7 +446,9 @@ export class DrawCommand {
         this.bindSets = normalizeBindSets(this, descriptor.bindSets)
         this.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
         this.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
-        this.count = normalizeDrawCount(this, descriptor.count)
+        const indexBuffer = normalizeIndexBuffer(this, descriptor.indexBuffer)
+        if (indexBuffer !== undefined) this.indexBuffer = indexBuffer
+        this.count = normalizeDrawCount(this, descriptor.count, indexBuffer)
         this.resources = normalizeResourceAccess(this, descriptor.resources)
         this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
@@ -455,6 +509,7 @@ export class DrawCommand {
         for (const binding of this.vertexBuffers) {
             binding.buffer.assertUsable()
         }
+        this.indexBuffer?.buffer.assertUsable()
         for (const resource of [
             ...this.resources.read.map(read => read.resource),
             ...this.resources.write,
@@ -495,12 +550,32 @@ export class DrawCommand {
         for (const binding of this.vertexBuffers) {
             passEncoder.setVertexBuffer(binding.slot, binding.buffer.gpuBuffer, binding.offset, binding.size)
         }
-        passEncoder.draw(
-            this.count.vertexCount,
-            this.count.instanceCount ?? 1,
-            this.count.firstVertex ?? 0,
-            this.count.firstInstance ?? 0
-        )
+        if (this.indexBuffer !== undefined) {
+            passEncoder.setIndexBuffer(
+                this.indexBuffer.buffer.gpuBuffer,
+                this.indexBuffer.format,
+                this.indexBuffer.offset,
+                this.indexBuffer.size
+            )
+        }
+        if ('indexCount' in this.count) {
+            passEncoder.drawIndexed(
+                this.count.indexCount,
+                this.count.instanceCount ?? 1,
+                this.count.firstIndex ?? 0,
+                this.count.baseVertex ?? 0,
+                this.count.firstInstance ?? 0
+            )
+        } else if ('vertexCount' in this.count) {
+            passEncoder.draw(
+                this.count.vertexCount,
+                this.count.instanceCount ?? 1,
+                this.count.firstVertex ?? 0,
+                this.count.firstInstance ?? 0
+            )
+        } else {
+            throwIndirectBufferDiagnostic(this, this.count, 'unsupported')
+        }
         for (const resource of this.resources.write) {
             resource._advanceContentEpoch()
         }
@@ -777,7 +852,7 @@ export interface DispatchCommand {
     pipeline: ComputePipeline
     bindSets: BindSet[]
     dynamicOffsets: Map<number, number[]>
-    count: { workgroups: [number, number, number] }
+    count: { workgroups: [number, number, number] } | IndirectCommandCount
     resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
     isDisposed: boolean
@@ -906,11 +981,15 @@ export class DispatchCommand {
         for (const bindSet of this.bindSets) {
             setBindGroupWithDynamicOffsets(this, passEncoder, bindSet)
         }
-        passEncoder.dispatchWorkgroups(
-            this.count.workgroups[0],
-            this.count.workgroups[1],
-            this.count.workgroups[2]
-        )
+        if ('indirect' in this.count) {
+            throwIndirectBufferDiagnostic(this, this.count, 'unsupported')
+        } else {
+            passEncoder.dispatchWorkgroups(
+                this.count.workgroups[0],
+                this.count.workgroups[1],
+                this.count.workgroups[2]
+            )
+        }
         for (const resource of this.resources.write) {
             resource._advanceContentEpoch()
         }
@@ -2477,9 +2556,90 @@ function normalizeVertexBuffers(
     })
 }
 
-function normalizeDispatchCount(command: DispatchCommand, count: StaticDispatchCount): { workgroups: [number, number, number] } {
+function normalizeIndexBuffer(
+    command: DrawCommand,
+    binding: DrawIndexBufferBinding | undefined
+): NormalizedDrawIndexBufferBinding | undefined {
 
-    if (!count || typeof count !== 'object' || !Array.isArray(count.workgroups)) {
+    if (binding === undefined) return undefined
+
+    if (!isRecord(binding)) {
+        throwIndexBufferDiagnostic(command, binding, {
+            expected: { indexBuffer: 'DrawIndexBufferBinding' },
+            actual: { indexBuffer: describeValue(binding) },
+        })
+    }
+
+    const buffer = binding.buffer
+    if (!(buffer instanceof BufferResource)) {
+        throwIndexBufferDiagnostic(command, binding, {
+            expected: { buffer: 'BufferResource' },
+            actual: { buffer: describeValue(buffer) },
+        })
+    }
+
+    buffer.assertRuntime(command.runtime)
+
+    const format = binding.format
+    if (format !== 'uint16' && format !== 'uint32') {
+        throwIndexBufferDiagnostic(command, binding, {
+            expected: { format: [ 'uint16', 'uint32' ] },
+            actual: { format },
+            related: [ buffer.subject ],
+        })
+    }
+
+    const elementByteLength = format === 'uint16' ? 2 : 4
+    const offset = binding.offset ?? 0
+    if (!Number.isInteger(offset) || offset < 0 || offset % elementByteLength !== 0) {
+        throwIndexBufferDiagnostic(command, binding, {
+            expected: { offset: `non-negative integer aligned to ${elementByteLength} bytes` },
+            actual: { offset, format },
+            related: [ buffer.subject ],
+        })
+    }
+
+    const size = binding.size
+    const effectiveSize = size ?? buffer.size - offset
+    if (!Number.isInteger(effectiveSize) || effectiveSize <= 0 || effectiveSize % elementByteLength !== 0) {
+        throwIndexBufferDiagnostic(command, binding, {
+            expected: { size: `positive integer aligned to ${elementByteLength} bytes` },
+            actual: { size, effectiveSize, format },
+            related: [ buffer.subject ],
+        })
+    }
+
+    if (offset > buffer.size || offset + effectiveSize > buffer.size) {
+        throwIndexBufferDiagnostic(command, binding, {
+            expected: { range: 'within BufferResource size' },
+            actual: { offset, size, effectiveSize, bufferSize: buffer.size },
+            related: [ buffer.subject ],
+        })
+    }
+
+    if ((buffer.usage & GPU_BUFFER_USAGE_INDEX) === 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+            severity: 'error',
+            phase: 'resource',
+            subject: buffer.subject,
+            related: [ command.subject, command.pipeline.subject ],
+            message: 'DrawCommand index buffer binding requires GPUBufferUsage.INDEX.',
+            expected: { usage: 'GPUBufferUsage.INDEX' },
+            actual: { usage: buffer.usage },
+        })
+    }
+
+    return { buffer, format, offset, size }
+}
+
+function normalizeDispatchCount(command: DispatchCommand, count: DispatchCount): { workgroups: [number, number, number] } | IndirectCommandCount {
+
+    if (isRecord(count) && 'indirect' in count) {
+        return count as IndirectCommandCount
+    }
+
+    if (!count || typeof count !== 'object' || !('workgroups' in count) || !Array.isArray(count.workgroups)) {
         throwDispatchCountDiagnostic(command, count)
     }
 
@@ -2493,15 +2653,19 @@ function normalizeDispatchCount(command: DispatchCommand, count: StaticDispatchC
         count.workgroups[2] ?? 1,
     ]
 
+    const maxWorkgroupsPerDimension = command.runtime.deviceLimits.maxComputeWorkgroupsPerDimension
     for (const value of workgroups) {
-        if (!Number.isInteger(value) || value <= 0) {
+        if (!isGpuSize32(value) || value > maxWorkgroupsPerDimension) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_COUNT_INVALID',
                 severity: 'error',
                 phase: 'command',
                 subject: command.subject,
-                message: 'DispatchCommand workgroup counts must be positive integers.',
-                expected: { workgroups: 'positive integer tuple' },
+                message: 'DispatchCommand workgroup counts must be unsigned 32-bit integers within the device limit.',
+                expected: {
+                    workgroups: 'unsigned 32-bit integer tuple',
+                    maxComputeWorkgroupsPerDimension: maxWorkgroupsPerDimension,
+                },
                 actual: { workgroups: count.workgroups },
             })
         }
@@ -2624,33 +2788,98 @@ function throwResourceReadDescriptorDiagnostic(
     })
 }
 
-function normalizeDrawCount(command: DrawCommand, count: StaticDrawCount): StaticDrawCount {
+function normalizeDrawCount(
+    command: DrawCommand,
+    count: DrawCount,
+    indexBuffer: NormalizedDrawIndexBufferBinding | undefined
+): DrawCount {
 
-    if (!count || typeof count !== 'object') {
+    if (!isRecord(count)) {
         throwCountDiagnostic(command, count)
     }
 
-    if (!isPositiveFinite(count.vertexCount)) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_COMMAND_COUNT_INVALID',
-            severity: 'error',
-            phase: 'command',
-            subject: command.subject,
-            message: 'DrawCommand vertexCount must be a positive finite number.',
-            expected: { vertexCount: 'positive finite number' },
-            actual: { vertexCount: count.vertexCount },
-        })
-    }
+    if ('indirect' in count) return count as IndirectCommandCount
 
-    for (const key of [ 'instanceCount', 'firstVertex', 'firstInstance' ] satisfies DrawCountOptionalKey[]) {
-        if (count[key] !== undefined && !isNonNegativeFinite(count[key])) {
+    if ('indexCount' in count) {
+        if (indexBuffer === undefined) {
+            throwIndexBufferDiagnostic(command, undefined, {
+                expected: { indexBuffer: 'required for indexed draw count' },
+                actual: { indexBuffer: undefined, count },
+            })
+        }
+
+        if (!isGpuSize32(count.indexCount)) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_COUNT_INVALID',
                 severity: 'error',
                 phase: 'command',
                 subject: command.subject,
-                message: `DrawCommand ${key} must be a non-negative finite number.`,
-                expected: { [key]: 'non-negative finite number' },
+                message: 'DrawCommand indexCount must be an unsigned 32-bit integer.',
+                expected: { indexCount: 'unsigned 32-bit integer' },
+                actual: { indexCount: count.indexCount },
+            })
+        }
+
+        for (const key of [ 'instanceCount', 'firstIndex', 'firstInstance' ] satisfies StaticIndexedDrawCountOptionalKey[]) {
+            if (count[key] !== undefined && !isGpuSize32(count[key])) {
+                throwScratchDiagnostic({
+                    code: 'SCRATCH_COMMAND_COUNT_INVALID',
+                    severity: 'error',
+                    phase: 'command',
+                    subject: command.subject,
+                    message: `DrawCommand ${key} must be an unsigned 32-bit integer.`,
+                    expected: { [key]: 'unsigned 32-bit integer' },
+                    actual: { [key]: count[key] },
+                })
+            }
+        }
+
+        if (count.baseVertex !== undefined && !isGpuSignedOffset32(count.baseVertex)) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_COUNT_INVALID',
+                severity: 'error',
+                phase: 'command',
+                subject: command.subject,
+                message: 'DrawCommand baseVertex must be a signed 32-bit integer.',
+                expected: { baseVertex: 'signed 32-bit integer' },
+                actual: { baseVertex: count.baseVertex },
+            })
+        }
+
+        return { ...count } as StaticIndexedDrawCount
+    }
+
+    if (indexBuffer !== undefined) {
+        throwIndexBufferDiagnostic(command, indexBuffer, {
+            expected: { indexBuffer: 'omitted for non-indexed static draw count' },
+            actual: { indexBuffer: indexBuffer.buffer.id, count },
+            related: [ indexBuffer.buffer.subject ],
+        })
+    }
+
+    if (!('vertexCount' in count)) throwCountDiagnostic(command, count)
+
+    if (!isGpuSize32(count.vertexCount)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_COMMAND_COUNT_INVALID',
+            severity: 'error',
+            phase: 'command',
+            subject: command.subject,
+            message: 'DrawCommand vertexCount must be an unsigned 32-bit integer.',
+            expected: { vertexCount: 'unsigned 32-bit integer' },
+            actual: { vertexCount: count.vertexCount },
+        })
+    }
+
+    for (const key of [ 'instanceCount', 'firstVertex', 'firstInstance' ] satisfies StaticDrawCountOptionalKey[]) {
+        if (count[key] !== undefined && !isGpuSize32(count[key])) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_COUNT_INVALID',
+                severity: 'error',
+                phase: 'command',
+                subject: command.subject,
+                message: `DrawCommand ${key} must be an unsigned 32-bit integer.`,
+                expected: { [key]: 'unsigned 32-bit integer' },
                 actual: { [key]: count[key] },
             })
         }
@@ -4073,6 +4302,44 @@ function throwVertexBufferDiagnostic(
     })
 }
 
+function throwIndexBufferDiagnostic(
+    command: DrawCommand,
+    binding: unknown,
+    { expected, actual, related = [] }: VertexBufferDiagnosticDetails
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [
+            command.pipeline?.subject,
+            ...related,
+        ].filter(Boolean),
+        message: 'DrawCommand index buffer binding is invalid.',
+        expected,
+        actual: { binding: describeValue(binding), ...actual as Record<string, unknown> },
+    })
+}
+
+function throwIndirectBufferDiagnostic(
+    command: DrawCommand | DispatchCommand,
+    count: unknown,
+    reason: string
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        message: 'Command indirect buffer is invalid.',
+        expected: { indirect: 'BufferResource with GPUBufferUsage.INDIRECT' },
+        actual: { count, reason },
+    })
+}
+
 function throwDispatchCountDiagnostic(command: DispatchCommand, count: unknown): never {
 
     throwScratchDiagnostic({
@@ -4086,12 +4353,14 @@ function throwDispatchCountDiagnostic(command: DispatchCommand, count: unknown):
     })
 }
 
-function isPositiveFinite(value: unknown): value is number {
+function isGpuSize32(value: unknown): value is number {
 
-    return typeof value === 'number' && Number.isFinite(value) && value > 0
+    return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= GPU_SIZE_32_MAX
 }
 
-function isNonNegativeFinite(value: unknown): value is number {
+function isGpuSignedOffset32(value: unknown): value is number {
 
-    return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    return Number.isInteger(value) &&
+        (value as number) >= GPU_SIGNED_OFFSET_32_MIN &&
+        (value as number) <= GPU_SIGNED_OFFSET_32_MAX
 }

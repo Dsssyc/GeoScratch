@@ -69,6 +69,7 @@ export function createFakeGpu() {
         features: new Set([ 'timestamp-query' ]),
         limits: {
             maxColorAttachments: 8,
+            maxComputeWorkgroupsPerDimension: 65_535,
             minUniformBufferOffsetAlignment: 256,
             minStorageBufferOffsetAlignment: 256,
         },
@@ -204,6 +205,7 @@ export function createFakeGpu() {
         features: new Set([ 'timestamp-query' ]),
         limits: {
             maxColorAttachments: 8,
+            maxComputeWorkgroupsPerDimension: 65_535,
             minUniformBufferOffsetAlignment: 256,
             minStorageBufferOffsetAlignment: 256,
         },
@@ -366,6 +368,9 @@ function createFakeRenderPassEncoder(calls, descriptor) {
         setVertexBuffer(slot, buffer, offset, size) {
             this.actions.push({ type: 'setVertexBuffer', slot, buffer, offset, size })
         },
+        setIndexBuffer(buffer, indexFormat, offset, size) {
+            this.actions.push({ type: 'setIndexBuffer', buffer, indexFormat, offset, size })
+        },
         draw(vertexCount, instanceCount, firstVertex, firstInstance) {
             const call = {
                 vertexCount,
@@ -374,6 +379,17 @@ function createFakeRenderPassEncoder(calls, descriptor) {
                 firstInstance,
             }
             this.actions.push({ type: 'draw', call })
+            calls.drawCalls.push(call)
+        },
+        drawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance) {
+            const call = {
+                indexCount,
+                instanceCount,
+                firstIndex,
+                baseVertex,
+                firstInstance,
+            }
+            this.actions.push({ type: 'drawIndexed', call })
             calls.drawCalls.push(call)
         },
         beginOcclusionQuery(queryIndex) {

@@ -689,7 +689,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         try {
             runtime.createDrawCommand({
                 pipeline,
-                count: { vertexCount: 0 },
+                count: { vertexCount: 0.5 },
                 resources: {
                     read: [],
                     write: [],
@@ -705,7 +705,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 phase: 'command',
             })
             expect(error.diagnostic.expected).to.deep.equal({
-                vertexCount: 'positive finite number',
+                vertexCount: 'unsigned 32-bit integer',
             })
         }
     })
