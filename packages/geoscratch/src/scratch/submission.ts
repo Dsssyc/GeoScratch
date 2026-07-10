@@ -585,7 +585,13 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
 
         const resolvedStep: RenderStep = { ...step, commands: resolution.commands }
         if (builder.validation !== 'off') {
-            passDiagnostics.push(...collectRenderPassResourceConflictDiagnostics(builder, resolvedStep, stepIndex))
+            passDiagnostics.push(...collectRenderPassResourceConflictDiagnostics(
+                builder,
+                step,
+                resolvedStep,
+                stepIndex,
+                resolution.commandOutcomes
+            ))
         }
         markSimulatedRenderQueryWrites(passQuerySlots, resolvedStep)
         readiness = passReadiness
@@ -980,6 +986,14 @@ function resolveExecutableCommand<Command extends ExecutableCommand>(
         visitedIds.add(command.id)
         attemptedCommands.push(command)
 
+        const missingRequirements = collectMissingReadRequirements(command.resources.read, readiness)
+        attempts.push({
+            commandId: command.id,
+            commandKind: command.commandKind,
+            policy: command.whenMissing,
+            missing: missingRequirements.map(missing => createMissingResourceFact(missing)),
+        })
+
         if (command !== requestedCommand) {
             validateFallbackCommandForPass(
                 builder,
@@ -991,14 +1005,6 @@ function resolveExecutableCommand<Command extends ExecutableCommand>(
                 command
             )
         }
-
-        const missingRequirements = collectMissingReadRequirements(command.resources.read, readiness)
-        attempts.push({
-            commandId: command.id,
-            commandKind: command.commandKind,
-            policy: command.whenMissing,
-            missing: missingRequirements.map(missing => createMissingResourceFact(missing)),
-        })
 
         if (missingRequirements.length === 0) {
             const context = { requestedCommand, attemptedCommands, attempts }
@@ -1192,6 +1198,23 @@ function readinessAttemptSubjects(
     return subjects
 }
 
+function readinessAttemptCommandSubjects(
+    requestedCommand: DrawCommand,
+    attempts: readonly SubmissionCommandReadinessAttempt[]
+): DiagnosticSubject[] {
+
+    const attemptedIds = new Set(attempts.map(attempt => attempt.commandId))
+    const subjects: DiagnosticSubject[] = []
+    let command: DrawCommand | undefined = requestedCommand
+
+    while (command !== undefined && attemptedIds.has(command.id)) {
+        subjects.push(command.subject)
+        command = command.fallback
+    }
+
+    return subjects
+}
+
 function validateFallbackCommandForPass(
     builder: SubmissionBuilder,
     stepIndex: number,
@@ -1233,7 +1256,24 @@ function validateFallbackCommandForPass(
         )
     }
 
-    fallback.assertRuntime(builder.runtime)
+    try {
+        fallback.assertRuntime(builder.runtime)
+    } catch (error) {
+        if (error instanceof ScratchDiagnosticError) {
+            throwFallbackResolutionDiagnostic(
+                builder,
+                stepIndex,
+                passSpec,
+                requestedCommand,
+                attemptedCommands,
+                attempts,
+                fallback,
+                error.diagnostic.code,
+                error.diagnostic
+            )
+        }
+        throw error
+    }
 
     try {
         if (fallback.commandKind === 'draw' && passSpec.passKind === 'render') {
@@ -1328,7 +1368,8 @@ function throwFallbackResolutionDiagnostic(
     attemptedCommands: readonly ExecutableCommand[],
     attempts: readonly SubmissionCommandReadinessAttempt[],
     fallback: ExecutableCommand,
-    reason: 'cycle' | 'repeated-id' | 'missing-fallback' | 'disposed'
+    reason: string,
+    cause?: ScratchDiagnostic
 ): never {
 
     throwScratchDiagnostic({
@@ -1340,6 +1381,7 @@ function throwFallbackResolutionDiagnostic(
             requestedCommand.subject,
             ...attemptedCommands.map(command => command.subject),
             ...readinessAttemptSubjects(attempts),
+            ...(cause !== undefined ? [ cause.subject, ...(cause.related ?? []) ] : []),
             passSpec.subject,
             builder.subject,
         ],
@@ -1353,6 +1395,16 @@ function throwFallbackResolutionDiagnostic(
             fallbackCommandId: fallback.id,
             attemptedCommandIds: attemptedCommands.map(command => command.id),
             attempts: snapshotReadinessAttempts(attempts),
+            ...(cause !== undefined ? {
+                cause: {
+                    code: cause.code,
+                    severity: cause.severity,
+                    phase: cause.phase,
+                    subject: cause.subject,
+                    expected: cause.expected,
+                    actual: cause.actual,
+                },
+            } : {}),
             validation: builder.validation,
         },
     })
@@ -2043,17 +2095,56 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
     }
 }
 
-function collectRenderPassResourceConflictDiagnostics(builder: SubmissionBuilder, step: RenderStep, stepIndex: number): ScratchDiagnostic[] {
+function collectRenderPassResourceConflictDiagnostics(
+    builder: SubmissionBuilder,
+    requestedStep: RenderStep,
+    resolvedStep: RenderStep,
+    stepIndex: number,
+    commandOutcomes: readonly SubmissionCommandExecutionOutcome[]
+): ScratchDiagnostic[] {
 
     const diagnostics: ScratchDiagnostic[] = []
-    const attachmentTargets = collectRenderAttachmentTargets(step.passSpec)
+    const attachmentTargets = collectRenderAttachmentTargets(resolvedStep.passSpec)
     if (attachmentTargets.size === 0) return diagnostics
 
-    for (const command of step.commands) {
+    const requestedCommands = new Map<string, DrawCommand>()
+    for (const command of requestedStep.commands) {
+        if (command.commandKind === 'draw') requestedCommands.set(command.id, command)
+    }
+    const executedOutcomes = commandOutcomes.filter(outcome => outcome.executedCommandId !== undefined)
+    let executedOutcomeIndex = 0
+
+    for (const command of resolvedStep.commands) {
         if (command.commandKind !== 'draw') continue
 
-        collectRenderCommandResourceConflictDiagnostics(builder, step, stepIndex, command, attachmentTargets, 'read', diagnostics)
-        collectRenderCommandResourceConflictDiagnostics(builder, step, stepIndex, command, attachmentTargets, 'write', diagnostics)
+        const candidateOutcome = executedOutcomes[executedOutcomeIndex++]
+        const outcome = candidateOutcome?.executedCommandId === command.id ? candidateOutcome : undefined
+        const requestedCommand = outcome === undefined
+            ? undefined
+            : requestedCommands.get(outcome.requestedCommandId)
+
+        collectRenderCommandResourceConflictDiagnostics(
+            builder,
+            resolvedStep,
+            stepIndex,
+            command,
+            attachmentTargets,
+            'read',
+            diagnostics,
+            outcome,
+            requestedCommand
+        )
+        collectRenderCommandResourceConflictDiagnostics(
+            builder,
+            resolvedStep,
+            stepIndex,
+            command,
+            attachmentTargets,
+            'write',
+            diagnostics,
+            outcome,
+            requestedCommand
+        )
     }
 
     return diagnostics
@@ -2066,7 +2157,9 @@ function collectRenderCommandResourceConflictDiagnostics(
     command: DrawCommand,
     attachmentTargets: Map<TextureResource, RenderAttachmentKind>,
     access: SubmissionResourceAccessKind,
-    diagnostics: ScratchDiagnostic[]
+    diagnostics: ScratchDiagnostic[],
+    outcome?: SubmissionCommandExecutionOutcome,
+    requestedCommand?: DrawCommand
 ): void {
 
     const resources = access === 'read'
@@ -2092,7 +2185,16 @@ function collectRenderCommandResourceConflictDiagnostics(
             resourceKind: resource.resourceKind,
             contentEpoch: resource.contentEpoch,
             allocationVersion: resource.allocationVersion,
+            ...(outcome !== undefined ? {
+                requestedCommandId: outcome.requestedCommandId,
+                attemptedCommandIds: outcome.attempts.map(attempt => attempt.commandId),
+                attempts: snapshotReadinessAttempts(outcome.attempts),
+            } : {}),
         }
+
+        const commandSubjects = outcome !== undefined && requestedCommand !== undefined
+            ? readinessAttemptCommandSubjects(requestedCommand, outcome.attempts)
+            : [ command.subject ]
 
         diagnostics.push(createScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
@@ -2100,6 +2202,8 @@ function collectRenderCommandResourceConflictDiagnostics(
             phase: 'submission',
             subject: command.subject,
             related: [
+                ...commandSubjects,
+                ...(outcome !== undefined ? readinessAttemptSubjects(outcome.attempts) : []),
                 step.passSpec.subject,
                 resource.subject,
                 builder.subject,

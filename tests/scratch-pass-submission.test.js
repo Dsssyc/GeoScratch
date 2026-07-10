@@ -635,7 +635,15 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             expect(error.diagnostic.actual).to.deep.equal({
                 stepIndex: 0,
                 passId: fixture.pass.id,
+                requestedCommandId: conflictingDraw.id,
                 commandId: conflictingDraw.id,
+                attemptedCommandIds: [ conflictingDraw.id ],
+                attempts: [ {
+                    commandId: conflictingDraw.id,
+                    commandKind: 'draw',
+                    policy: 'throw',
+                    missing: [],
+                } ],
                 access: 'read',
                 resourceId: fixture.renderTarget.id,
                 resourceKind: 'TextureResource',

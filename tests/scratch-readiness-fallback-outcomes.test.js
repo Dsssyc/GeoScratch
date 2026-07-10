@@ -482,12 +482,79 @@ describe('scratch readiness fallback execution outcomes', () => {
             attemptedCommandIds: [ primary.id, fallback.id ],
             validation: 'warn',
         })
-        expect(diagnostic.actual.attempts).to.have.length(1)
+        expect(diagnostic.actual.attempts).to.have.length(2)
         expect(diagnostic.actual.attempts[0].missing[0]).to.deep.include({
             resourceId: primaryInput.id,
             requiredContentEpoch: 0,
             simulatedState: 'empty',
         })
+        expect(diagnostic.actual.attempts[1]).to.deep.include({
+            commandId: fallback.id,
+            commandKind: 'dispatch',
+            policy: 'throw',
+            missing: [],
+        })
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(output.state).to.equal('empty')
+    })
+
+    it('enriches a selected fallback dependency disposal diagnostic', async() => {
+
+        const fixture = await createComputeFixture()
+        const primaryInput = createBuffer(fixture, 'primary input')
+        const fallbackInput = createBuffer(fixture, 'fallback input')
+        const output = createBuffer(fixture, 'output')
+        const fallback = createDispatch(fixture, {
+            resources: {
+                read: [ { resource: fallbackInput, contentEpoch: 0 } ],
+                write: [ output ],
+            },
+        })
+        const primary = createDispatch(fixture, {
+            resources: {
+                read: [ { resource: primaryInput, contentEpoch: 0 } ],
+                write: [ output ],
+            },
+            whenMissing: 'use-fallback',
+            fallback,
+        })
+        fallbackInput.dispose()
+        const builder = fixture.runtime.createSubmission({ validation: 'off' })
+            .compute(fixture.pass, [ primary ])
+
+        const diagnostic = await expectDiagnostic(
+            () => builder.submit(),
+            'SCRATCH_COMMAND_FALLBACK_INVALID'
+        )
+
+        expect(diagnostic.subject).to.deep.equal(fallback.subject)
+        expect(diagnostic.related).to.deep.include(primary.subject)
+        expect(diagnostic.related).to.deep.include(primaryInput.subject)
+        expect(diagnostic.related).to.deep.include(fallbackInput.subject)
+        expect(diagnostic.related).to.deep.include(fixture.pass.subject)
+        expect(diagnostic.related).to.deep.include(builder.subject)
+        expect(diagnostic.actual).to.deep.include({
+            reason: 'SCRATCH_RESOURCE_DISPOSED',
+            stepIndex: 0,
+            passId: fixture.pass.id,
+            requestedCommandId: primary.id,
+            fallbackCommandId: fallback.id,
+            attemptedCommandIds: [ primary.id, fallback.id ],
+            validation: 'off',
+        })
+        expect(diagnostic.actual.cause).to.deep.include({
+            code: 'SCRATCH_RESOURCE_DISPOSED',
+            phase: 'resource',
+            subject: fallbackInput.subject,
+        })
+        expect(diagnostic.actual.attempts.map(attempt => ({
+            commandId: attempt.commandId,
+            missingIds: attempt.missing.map(missing => missing.resourceId),
+            missingStates: attempt.missing.map(missing => missing.simulatedState),
+        }))).to.deep.equal([
+            { commandId: primary.id, missingIds: [ primaryInput.id ], missingStates: [ 'empty' ] },
+            { commandId: fallback.id, missingIds: [ fallbackInput.id ], missingStates: [ 'disposed' ] },
+        ])
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(output.state).to.equal('empty')
     })
@@ -624,7 +691,7 @@ describe('scratch readiness fallback execution outcomes', () => {
             attemptedCommandIds: [ primary.id, fallback.id ],
             validation: 'throw',
         })
-        expect(diagnostic.actual.attempts).to.have.length(1)
+        expect(diagnostic.actual.attempts).to.have.length(2)
         expect(diagnostic.actual.attempts[0]).to.deep.include({
             commandId: primary.id,
             commandKind: 'draw',
@@ -634,6 +701,12 @@ describe('scratch readiness fallback execution outcomes', () => {
             resourceId: missing.id,
             requiredContentEpoch: 0,
             simulatedState: 'empty',
+        })
+        expect(diagnostic.actual.attempts[1]).to.deep.include({
+            commandId: fallback.id,
+            commandKind: 'draw',
+            policy: 'throw',
+            missing: [],
         })
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(0)
@@ -680,6 +753,68 @@ describe('scratch readiness fallback execution outcomes', () => {
             attemptedCommandIds: [ primary.id, fallback.id ],
             validation: 'off',
         })
+        expect(diagnostic.actual.attempts).to.have.length(2)
+        expect(diagnostic.actual.attempts[1]).to.deep.include({
+            commandId: fallback.id,
+            commandKind: 'draw',
+            policy: 'throw',
+            missing: [],
+        })
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.drawCalls).to.have.length(0)
+    })
+
+    it('keeps the requested fallback chain on render resource conflicts', async() => {
+
+        const fixture = await createRenderFixture()
+        const primaryInput = createBuffer(fixture, 'primary input')
+        fixture.target._advanceContentEpoch()
+        const fallback = createDraw(fixture, {
+            resources: {
+                read: [ { resource: fixture.target, contentEpoch: 1 } ],
+                write: [],
+            },
+        })
+        const primary = createDraw(fixture, {
+            resources: {
+                read: [ { resource: primaryInput, contentEpoch: 0 } ],
+                write: [],
+            },
+            whenMissing: 'use-fallback',
+            fallback,
+        })
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ primary ])
+
+        const diagnostic = await expectDiagnostic(
+            () => builder.submit(),
+            'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT'
+        )
+
+        expect(diagnostic.subject).to.deep.equal(fallback.subject)
+        expect(diagnostic.related).to.deep.include(primary.subject)
+        expect(diagnostic.related).to.deep.include(fallback.subject)
+        expect(diagnostic.related).to.deep.include(primaryInput.subject)
+        expect(diagnostic.related).to.deep.include(fixture.target.subject)
+        expect(diagnostic.related).to.deep.include(fixture.pass.subject)
+        expect(diagnostic.related).to.deep.include(builder.subject)
+        expect(diagnostic.actual).to.deep.include({
+            stepIndex: 0,
+            passId: fixture.pass.id,
+            requestedCommandId: primary.id,
+            commandId: fallback.id,
+            attemptedCommandIds: [ primary.id, fallback.id ],
+            access: 'read',
+            resourceId: fixture.target.id,
+        })
+        expect(diagnostic.actual.attempts.map(attempt => ({
+            commandId: attempt.commandId,
+            missingIds: attempt.missing.map(missing => missing.resourceId),
+        }))).to.deep.equal([
+            { commandId: primary.id, missingIds: [ primaryInput.id ] },
+            { commandId: fallback.id, missingIds: [] },
+        ])
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(0)
         expect(fixture.calls.drawCalls).to.have.length(0)
