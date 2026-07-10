@@ -87,12 +87,12 @@
 - Modify: `packages/geoscratch/src/scratch/command.ts`
 - Modify: `packages/geoscratch/src/scratch/submission.ts`
 
-- [ ] Write RED constructor tests proving every vertex, index, and indirect buffer needs one matching `resources.read` descriptor and reports `SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE` with a machine-readable role.
-- [ ] Write RED submission tests for empty, future, stale, same-submission-produced, and already-ready indirect/index reads under throw/warn/off validation.
-- [ ] Validate explicit fixed-function reads after resource normalization; do not infer or capture a live epoch.
-- [ ] Reuse the existing readiness simulation and resource-access recording so indirect/index reads remain ordinary declared reads.
-- [ ] Prove those reads do not advance content epochs or create producer epochs, while earlier GPU writes remain producer facts.
-- [ ] Run focused ledger tests, draw/compute regressions, and typecheck; commit with `git commit -m "Validate Scratch indirect resource epochs"`.
+- [x] Write RED constructor tests proving every vertex, index, and indirect buffer needs one matching `resources.read` descriptor and reports `SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE` with a machine-readable role.
+- [x] Write RED submission tests for empty, future, stale, same-submission-produced, and already-ready indirect/index reads under throw/warn/off validation.
+- [x] Validate explicit fixed-function reads after resource normalization; do not infer or capture a live epoch.
+- [x] Reuse the existing readiness simulation and resource-access recording so indirect/index reads remain ordinary declared reads.
+- [x] Prove those reads do not advance content epochs or create producer epochs, while earlier GPU writes remain producer facts.
+- [x] Run focused ledger tests, draw/compute regressions, and typecheck; commit with `git commit -m "Validate Scratch indirect resource epochs"`.
 
 ## Task 5: Real GPU Indirect Execution Example
 

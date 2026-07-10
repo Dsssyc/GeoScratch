@@ -465,6 +465,7 @@ export class DrawCommand {
         if (indexBuffer !== undefined) this.indexBuffer = indexBuffer
         this.count = normalizeDrawCount(this, descriptor.count, indexBuffer)
         this.resources = normalizeResourceAccess(this, descriptor.resources)
+        validateDrawFixedFunctionReads(this)
         this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
 
@@ -906,6 +907,7 @@ export class DispatchCommand {
         this.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
         this.count = normalizeDispatchCount(this, descriptor.count)
         this.resources = normalizeResourceAccess(this, descriptor.resources)
+        validateDispatchFixedFunctionReads(this)
         this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
 
@@ -2711,6 +2713,60 @@ function normalizeResourceAccess(command: DrawCommand | DispatchCommand, resourc
         read: normalizeResourceReadList(command, resources.read),
         write: normalizeResourceList(command, resources.write, 'write'),
     }
+}
+
+function validateDrawFixedFunctionReads(command: DrawCommand): void {
+
+    for (const binding of command.vertexBuffers) {
+        assertDeclaredCommandRead(command, binding.buffer, 'vertex-buffer', { slot: binding.slot })
+    }
+
+    if (command.indexBuffer !== undefined) {
+        assertDeclaredCommandRead(command, command.indexBuffer.buffer, 'index-buffer')
+    }
+
+    if ('indirect' in command.count) {
+        assertDeclaredCommandRead(command, command.count.indirect, 'indirect-buffer')
+    }
+}
+
+function validateDispatchFixedFunctionReads(command: DispatchCommand): void {
+
+    if ('indirect' in command.count) {
+        assertDeclaredCommandRead(command, command.count.indirect, 'indirect-buffer')
+    }
+}
+
+function assertDeclaredCommandRead(
+    command: DrawCommand | DispatchCommand,
+    resource: BufferResource,
+    role: 'vertex-buffer' | 'index-buffer' | 'indirect-buffer',
+    details: Record<string, unknown> = {}
+): void {
+
+    if (command.resources.read.some(read => read.resource === resource)) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [ resource.subject, command.pipeline.subject ],
+        message: 'Command fixed-function buffers require explicit resource read declarations.',
+        expected: {
+            read: {
+                role,
+                resourceId: resource.id,
+                contentEpoch: 'non-negative integer',
+            },
+        },
+        actual: {
+            role,
+            resourceId: resource.id,
+            declaredReadResourceIds: command.resources.read.map(read => read.resource.id),
+            ...details,
+        },
+    })
 }
 
 function normalizeResourceReadList(

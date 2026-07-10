@@ -11,6 +11,7 @@ const GPU_BUFFER_USAGE_COPY_DST = 0x08
 const GPU_BUFFER_USAGE_INDEX = 0x10
 const GPU_BUFFER_USAGE_STORAGE = 0x80
 const GPU_BUFFER_USAGE_INDIRECT = 0x100
+const GPU_BUFFER_USAGE_VERTEX = 0x20
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
 function readResource(resource, contentEpoch = resource.contentEpoch) {
@@ -47,7 +48,7 @@ async function createRenderFixture() {
         } ],
     })
 
-    return { ...fake, runtime, pipeline, pass }
+    return { ...fake, runtime, program, pipeline, pass }
 }
 
 async function createComputeFixture() {
@@ -501,5 +502,240 @@ describe('scratch native indexed and indirect execution', () => {
             resources: { read: [ readResource(disposed) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_RESOURCE_DISPOSED')
+    })
+
+    it('requires explicit epoch reads for every fixed-function buffer role', async() => {
+
+        const render = await createRenderFixture()
+        const vertexPipeline = render.runtime.createRenderPipeline({
+            program: render.program,
+            vertexBuffers: [ {
+                arrayStride: 8,
+                attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x2' } ],
+            } ],
+            targets: [ { format: 'rgba8unorm' } ],
+        })
+        const vertex = render.runtime.createBuffer({ size: 24, usage: GPU_BUFFER_USAGE_VERTEX })
+        const index = render.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        const indirect = render.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
+
+        const cases = [
+            {
+                role: 'vertex-buffer',
+                descriptor: {
+                    pipeline: vertexPipeline,
+                    vertexBuffers: [ { slot: 0, buffer: vertex } ],
+                    count: { vertexCount: 3 },
+                    resources: { read: [], write: [] },
+                    whenMissing: 'throw',
+                },
+            },
+            {
+                role: 'index-buffer',
+                descriptor: {
+                    pipeline: render.pipeline,
+                    indexBuffer: { buffer: index, format: 'uint16' },
+                    count: { indexCount: 3 },
+                    resources: { read: [], write: [] },
+                    whenMissing: 'throw',
+                },
+            },
+            {
+                role: 'indirect-buffer',
+                descriptor: {
+                    pipeline: render.pipeline,
+                    count: { indirect },
+                    resources: { read: [], write: [] },
+                    whenMissing: 'throw',
+                },
+            },
+        ]
+
+        for (const testCase of cases) {
+            const diagnostic = await expectDiagnostic(
+                () => render.runtime.createDrawCommand(testCase.descriptor),
+                'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE'
+            )
+            expect(diagnostic.phase).to.equal('command')
+            expect(diagnostic.actual).to.deep.include({ role: testCase.role })
+        }
+
+        const compute = await createComputeFixture()
+        const dispatchArguments = compute.runtime.createBuffer({ size: 12, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const diagnostic = await expectDiagnostic(() => compute.runtime.createDispatchCommand({
+            pipeline: compute.pipeline,
+            count: { indirect: dispatchArguments },
+            resources: { read: [], write: [] },
+            whenMissing: 'throw',
+        }), 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE')
+        expect(diagnostic.actual).to.deep.include({ role: 'indirect-buffer' })
+    })
+
+    it('uses same-submission GPU-produced indirect epochs and records read-only ledger facts', async() => {
+
+        const fixture = await createRenderFixture()
+        const computeProgram = fixture.runtime.createProgram({
+            modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+            entryPoints: { compute: 'csMain' },
+        })
+        const computePipeline = fixture.runtime.createComputePipeline({
+            program: computeProgram,
+            compute: 'csMain',
+        })
+        const computePass = fixture.runtime.createComputePass()
+        const drawArguments = fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
+        })
+        const indexedArguments = fixture.runtime.createBuffer({
+            size: 20,
+            usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
+        })
+        const dispatchArguments = fixture.runtime.createBuffer({
+            size: 12,
+            usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
+        })
+        const indexBuffer = fixture.runtime.createBuffer({
+            size: 8,
+            usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const uploadIndices = fixture.runtime.createUploadCommand({
+            target: indexBuffer,
+            data: new Uint16Array([ 0, 1, 2 ]),
+        })
+        const produceArguments = fixture.runtime.createDispatchCommand({
+            pipeline: computePipeline,
+            count: { workgroups: [ 1 ] },
+            resources: {
+                read: [],
+                write: [ drawArguments, indexedArguments, dispatchArguments ],
+            },
+            whenMissing: 'throw',
+        })
+        const consumeDispatch = fixture.runtime.createDispatchCommand({
+            pipeline: computePipeline,
+            count: { indirect: dispatchArguments },
+            resources: { read: [ readResource(dispatchArguments, 1) ], write: [] },
+            whenMissing: 'throw',
+        })
+        const consumeDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { indirect: drawArguments },
+            resources: { read: [ readResource(drawArguments, 1) ], write: [] },
+            whenMissing: 'throw',
+        })
+        const consumeIndexedDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            indexBuffer: { buffer: indexBuffer, format: 'uint16', size: 6 },
+            count: { indirect: indexedArguments },
+            resources: {
+                read: [
+                    readResource(indexBuffer, 1),
+                    readResource(indexedArguments, 1),
+                ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(uploadIndices)
+            .compute(computePass, [ produceArguments ])
+            .compute(computePass, [ consumeDispatch ])
+            .render(fixture.pass, [ consumeDraw, consumeIndexedDraw ])
+            .submit()
+
+        const indirectReads = submitted.resourceAccesses.filter(access =>
+            access.access === 'read' &&
+            [ drawArguments.id, indexedArguments.id, dispatchArguments.id ].includes(access.resourceId)
+        )
+        expect(indirectReads.map(access => ({
+            resourceId: access.resourceId,
+            before: access.contentEpochBefore,
+            after: access.contentEpochAfter,
+            stepKind: access.stepKind,
+        }))).to.deep.equal([
+            { resourceId: dispatchArguments.id, before: 1, after: 1, stepKind: 'compute' },
+            { resourceId: drawArguments.id, before: 1, after: 1, stepKind: 'render' },
+            { resourceId: indexedArguments.id, before: 1, after: 1, stepKind: 'render' },
+        ])
+        expect(submitted.producerEpochs.filter(epoch =>
+            [ drawArguments.id, indexedArguments.id, dispatchArguments.id ].includes(epoch.resourceId)
+        )).to.have.length(3)
+        expect(fixture.calls.maps).to.deep.equal([])
+    })
+
+    it('applies existing readiness and epoch disposition to index and indirect reads', async() => {
+
+        const fixture = await createRenderFixture()
+        const emptyIndirect = fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_INDIRECT,
+        })
+        const emptyDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { indirect: emptyIndirect },
+            resources: { read: [ readResource(emptyIndirect) ], write: [] },
+            whenMissing: 'throw',
+        })
+        await expectDiagnostic(() => fixture.runtime.createSubmission({ validation: 'off' })
+            .render(fixture.pass, [ emptyDraw ])
+            .submit(), 'SCRATCH_COMMAND_RESOURCE_NOT_READY')
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+
+        const emptyIndex = fixture.runtime.createBuffer({
+            size: 8,
+            usage: GPU_BUFFER_USAGE_INDEX,
+        })
+        const emptyIndexedDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            indexBuffer: { buffer: emptyIndex, format: 'uint16' },
+            count: { indexCount: 3 },
+            resources: { read: [ readResource(emptyIndex) ], write: [] },
+            whenMissing: 'throw',
+        })
+        await expectDiagnostic(() => fixture.runtime.createSubmission({ validation: 'warn' })
+            .render(fixture.pass, [ emptyIndexedDraw ])
+            .submit(), 'SCRATCH_COMMAND_RESOURCE_NOT_READY')
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+
+        const readyIndirect = fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.runtime.createUploadCommand({
+                target: readyIndirect,
+                data: new Uint32Array([ 3, 1, 0, 0 ]),
+            }))
+            .submit()
+
+        const futureDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { indirect: readyIndirect },
+            resources: { read: [ readResource(readyIndirect, 2) ], write: [] },
+            whenMissing: 'throw',
+        })
+        await expectDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ futureDraw ])
+            .submit(), 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE')
+
+        const staleDraw = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { indirect: readyIndirect },
+            resources: { read: [ readResource(readyIndirect, 0) ], write: [] },
+            whenMissing: 'throw',
+        })
+        const warned = fixture.runtime.createSubmission({ validation: 'warn' })
+            .render(fixture.pass, [ staleDraw ])
+            .submit()
+        expect(warned.report.diagnostics.map(diagnostic => diagnostic.code)).to.include(
+            'SCRATCH_SUBMISSION_STALE_READ'
+        )
+
+        const unvalidated = fixture.runtime.createSubmission({ validation: 'off' })
+            .render(fixture.pass, [ staleDraw ])
+            .submit()
+        expect(unvalidated.report.diagnostics).to.deep.equal([])
     })
 })
