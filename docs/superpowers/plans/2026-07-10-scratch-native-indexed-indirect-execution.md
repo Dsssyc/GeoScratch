@@ -121,10 +121,10 @@
 - Modify: `docs/vision/scratch-api/09-diagnostics-validation/README.md`
 - Modify: `docs/vision/scratch-api/09-diagnostics-validation/README_zh.md`
 
-- [ ] Record index/count pairing, exact native lowering, fixed-function read epochs, zero-count semantics, no-CPU rule, and dynamic-resolver deferral in ADR-027.
-- [ ] Update both language versions with identical implementation-status facts and add `SCRATCH_COMMAND_INDEX_BUFFER_INVALID`.
-- [ ] Persist a six-row parity matrix for `draw`, `drawIndexed`, `drawIndirect`, `drawIndexedIndirect`, `dispatchWorkgroups`, and `dispatchWorkgroupsIndirect`; every row must point to public type, source lowering, validation, ledger behavior, tests, and docs.
-- [ ] Run bilingual diff review, `git diff --check`, focused tests, and typecheck; commit with `git commit -m "Document Scratch native indirect execution"`.
+- [x] Record index/count pairing, exact native lowering, fixed-function read epochs, zero-count semantics, no-CPU rule, and dynamic-resolver deferral in ADR-027.
+- [x] Update both language versions with identical implementation-status facts and add `SCRATCH_COMMAND_INDEX_BUFFER_INVALID`.
+- [x] Persist a six-row parity matrix for `draw`, `drawIndexed`, `drawIndirect`, `drawIndexedIndirect`, `dispatchWorkgroups`, and `dispatchWorkgroupsIndirect`; every row must point to public type, source lowering, validation, ledger behavior, tests, and docs.
+- [x] Run bilingual diff review, `git diff --check`, focused tests, and typecheck; commit with `git commit -m "Document Scratch native indirect execution"`.
 
 ## Task 7: Browser Verification, Review, Completion Audit, And Integration
 

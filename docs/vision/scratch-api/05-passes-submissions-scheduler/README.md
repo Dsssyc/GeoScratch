@@ -128,6 +128,8 @@ Examples of checks:
 - dispatch workgroup count exceeds `maxComputeWorkgroupsPerDimension`
 - bound storage buffer range exceeds device storage-binding limits
 
+Native indexed and indirect commands use the same declared-read validation path as shader resources. Vertex, index, and indirect buffers must have explicit required content epochs. A prior upload or GPU command in the same submission may produce that epoch; the later fixed-function read is recorded in `SubmittedWork.resourceAccesses` without advancing the resource epoch. Indirect argument contents remain GPU data and are not copied to the CPU for scheduler validation.
+
 Validation modes:
 
 ```ts

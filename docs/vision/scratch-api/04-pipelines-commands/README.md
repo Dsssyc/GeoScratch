@@ -61,6 +61,8 @@ Target command families:
 
 The first `ReadbackCommand` slice is implemented for buffer sources. It uses an explicit source `contentEpoch`, enters submission order through `SubmissionBuilder.readback(...)`, stages once at that position, and returns the associated `ReadbackOperation` through `result({ after })`. Direct texture readback, mapped leases, and staging-budget policy remain future work.
 
+Native indexed and indirect execution is implemented. Scratch lowers static vertex draws, static indexed draws, indirect vertex draws, indirect indexed draws, static dispatches, and indirect dispatches directly to the corresponding WebGPU encoder methods. CPU-dynamic resolver closures remain future work pending a concrete `SubmissionContext` and tracked dynamic-value contract.
+
 Every command should declare:
 
 - label
@@ -80,15 +82,16 @@ Query commands write indexed `QuerySetResource` slots. Resolving a query set wri
 
 ## DrawCommand
 
-Draw count should support static values, dynamic resolvers, and indirect buffers.
+The implemented native count contract supports static vertex values, static indexed values, and indirect buffers:
 
 ```ts
 type DrawCount =
     | { vertexCount: number, instanceCount?: number, firstVertex?: number, firstInstance?: number }
     | { indexCount: number, instanceCount?: number, firstIndex?: number, baseVertex?: number, firstInstance?: number }
     | { indirect: BufferResource, offset?: number }
-    | ((context: SubmissionContext) => DrawCount)
 ```
+
+An indexed static count requires `indexBuffer`; a static vertex count forbids it. An indirect count selects `drawIndirect` without `indexBuffer` and `drawIndexedIndirect` with it. Direct count values use WebGPU integer domains and allow zero-count no-ops.
 
 Static values are the default path:
 
@@ -124,14 +127,16 @@ const drawTriangle = scratch.command.draw({
     ],
     count: { vertexCount: 3 },
     resources: {
-        read: [],
+        read: [
+            { resource: vertexBuffer, contentEpoch: vertexBuffer.contentEpoch },
+        ],
         write: [surfaceColor],
     },
     whenMissing: 'throw',
 })
 ```
 
-Dynamic resolvers are optional for scene-dependent counts:
+CPU-dynamic resolvers remain a future option for scene-dependent counts; the following is target syntax, not current public API:
 
 ```ts
 const drawTerrain = scratch.command.draw({
@@ -152,18 +157,19 @@ const drawTerrain = scratch.command.draw({
 })
 ```
 
-Indirect counts are the preferred GPU-driven path when compute produces draw arguments.
+Indirect counts are the implemented, preferred GPU-driven path when compute produces draw arguments. The indirect and optional index buffers must also appear in `resources.read` with their required content epochs. Scratch validates usage, alignment, range, ownership, disposal, readiness, and epochs without inspecting argument bytes on the CPU.
 
 ## DispatchCommand
 
-Dispatch count follows the same model:
+The implemented dispatch count follows the same native model:
 
 ```ts
 type DispatchCount =
     | { workgroups: [number, number?, number?] }
     | { indirect: BufferResource, offset?: number }
-    | ((context: SubmissionContext) => DispatchCount)
 ```
+
+Static workgroup dimensions allow zero and are checked against `maxComputeWorkgroupsPerDimension`. Indirect dispatch validates a 12-byte GPU argument range and remains GPU-side.
 
 Example:
 
@@ -217,12 +223,12 @@ They require the active render pass to own the same `occlusionQuerySet`, cannot 
 Draw and dispatch counts span three cases; choose by what the count actually depends on:
 
 - Static, known at record time → use the literal form (`{ vertexCount: 3 }`, `{ workgroups: [64, 64, 1] }`). Do not wrap a constant in a closure.
-- CPU-dynamic — known only after CPU-side work such as culling → a resolver closure is legitimate, or a count read from a tracked handle (see `02-resources`, dynamic values). Prefer the handle when the value already lives in one.
+- CPU-dynamic — known only after CPU-side work such as culling → a future resolver closure or tracked handle is legitimate (see `02-resources`, dynamic values). Prefer the handle when the value already lives in one.
 - GPU-dynamic — produced on the GPU (e.g. compute writes draw or dispatch arguments) → prefer `indirect`. It needs no readback, is fully declarative, and is visible to validation.
 
 Verifiability ladder, prefer the top: indirect buffer > tracked handle > closure.
 
-`SubmissionContext` is the context of the current submission. It exposes runtime state, submission diagnostics, tracked dynamic values, and producer epochs without implying a presentation surface exists.
+Future `SubmissionContext` work should expose runtime state, submission diagnostics, tracked dynamic values, and producer epochs without implying a presentation surface exists. It is not part of the implemented native count slice.
 
 ## Readiness Policy
 
