@@ -95,12 +95,12 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 - Modify: `tests/scratch-query-set.test.js`
 - Modify: `packages/geoscratch/src/scratch/submission.ts`
 
-- [ ] Write RED compute tests where an earlier dispatch appears to write and a later dispatch selects `skip-pass`; prove the earlier simulated write is rolled back and no compute pass begins.
-- [ ] Write RED render tests proving a skipped pass does not clear/store color/depth attachments, advance attachment epochs, emit timestamp writes, or advance occlusion query slots.
-- [ ] Clone readiness and query-slot simulation at each render/compute pass boundary. Resolve the complete pass against the clones and commit them only when the pass executes.
-- [ ] If any command resolves `skip-pass`, discard every resolved command and every cloned side effect for the pass.
-- [ ] Preserve pass-side effects when individual commands use `skip-command`; record a compute pass with no commands and no pass side effects as `skipped-empty`.
-- [ ] Run focused pass/query/epoch tests and typecheck; commit with `git commit -m "Make Scratch skip-pass transactional"`.
+- [x] Write RED compute tests where an earlier dispatch appears to write and a later dispatch selects `skip-pass`; prove the earlier simulated write is rolled back and no compute pass begins.
+- [x] Write RED render tests proving a skipped pass does not clear/store color/depth attachments, advance attachment epochs, emit timestamp writes, or advance occlusion query slots.
+- [x] Clone readiness and query-slot simulation at each render/compute pass boundary. Resolve the complete pass against the clones and commit them only when the pass executes.
+- [x] If any command resolves `skip-pass`, discard every resolved command, optional dependency diagnostic, and every cloned side effect for the pass.
+- [x] Preserve pass-side effects when individual commands use `skip-command`; keep compute passes with no selected commands and no encoder side effects out of the encoder so Task 5 can record them as `skipped-empty`.
+- [x] Run focused pass/query/epoch tests and typecheck; commit with `git commit -m "Make Scratch skip-pass transactional"`.
 
 ## Task 5: Fallback Resolution And Execution Outcome Ledger
 

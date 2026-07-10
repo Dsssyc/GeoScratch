@@ -6,6 +6,8 @@ import {
 import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_STORAGE = 0x80
+const GPU_BUFFER_USAGE_QUERY_RESOLVE = 0x200
+const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
 async function createRenderFixture() {
 
@@ -40,6 +42,81 @@ async function createComputeFixture() {
     })
 
     return { ...fake, runtime, pipeline }
+}
+
+async function createRenderSkipPassFixture() {
+
+    const fixture = await createRenderFixture()
+    const colorTarget = fixture.runtime.createTexture({
+        label: 'skipped color target',
+        size: { width: 4, height: 4 },
+        format: 'rgba8unorm',
+        usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+    })
+    const depthTarget = fixture.runtime.createTexture({
+        label: 'skipped depth target',
+        size: { width: 4, height: 4 },
+        format: 'depth24plus',
+        usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+    })
+    const timestampQuerySet = fixture.runtime.createQuerySet({
+        label: 'skipped timestamps',
+        type: 'timestamp',
+        count: 2,
+    })
+    const occlusionQuerySet = fixture.runtime.createQuerySet({
+        label: 'skipped occlusion',
+        type: 'occlusion',
+        count: 2,
+    })
+    const pass = fixture.runtime.createRenderPass({
+        label: 'transactional skipped render pass',
+        color: [ {
+            target: colorTarget,
+            load: 'clear',
+            store: 'store',
+            clear: [ 0.1, 0.2, 0.3, 1 ],
+        } ],
+        depth: {
+            target: depthTarget,
+            depthLoad: 'clear',
+            depthStore: 'store',
+            depthClear: 1,
+        },
+        timestampWrites: {
+            querySet: timestampQuerySet,
+            begin: 0,
+            end: 1,
+        },
+        occlusionQuerySet,
+    })
+    const missing = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+    const draw = createDraw(fixture)
+    const trigger = createDraw(fixture, {
+        resources: {
+            read: [ { resource: missing, contentEpoch: 0 } ],
+            write: [],
+        },
+        whenMissing: 'skip-pass',
+    })
+    const begin = fixture.runtime.createBeginOcclusionQueryCommand({
+        querySet: occlusionQuerySet,
+        index: 1,
+    })
+    const end = fixture.runtime.createEndOcclusionQueryCommand()
+
+    return {
+        ...fixture,
+        colorTarget,
+        depthTarget,
+        timestampQuerySet,
+        occlusionQuerySet,
+        pass,
+        missing,
+        draw,
+        trigger,
+        commands: [ begin, draw, end, trigger ],
+    }
 }
 
 function createDraw(fixture, descriptor = {}) {
@@ -295,5 +372,198 @@ describe('scratch readiness policy execution', () => {
         expect(intermediate.contentEpoch).to.equal(0)
         expect(output.state).to.equal('empty')
         expect(output.contentEpoch).to.equal(0)
+    })
+
+    it('rolls back an entire compute pass when a later command selects skip-pass', async() => {
+
+        const fixture = await createComputeFixture()
+        const missing = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const staleInput = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const staged = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const discarded = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const downstream = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        staleInput._advanceContentEpoch()
+        const earlierProducer = createDispatch(fixture, {
+            resources: {
+                read: [ { resource: staleInput, contentEpoch: 0 } ],
+                write: [ staged ],
+            },
+        })
+        const trigger = createDispatch(fixture, {
+            resources: {
+                read: [ { resource: missing, contentEpoch: 0 } ],
+                write: [ discarded ],
+            },
+            whenMissing: 'skip-pass',
+        })
+        const downstreamConsumer = createDispatch(fixture, {
+            resources: {
+                read: [ { resource: staged, contentEpoch: 1 } ],
+                write: [ downstream ],
+            },
+            whenMissing: 'skip-command',
+        })
+        const skippedPass = fixture.runtime.createComputePass()
+        const downstreamPass = fixture.runtime.createComputePass()
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .compute(skippedPass, [ earlierProducer, trigger ])
+            .compute(downstreamPass, [ downstreamConsumer ])
+            .submit()
+
+        expect(fixture.calls.computePasses).to.have.length(0)
+        expect(fixture.calls.dispatchCalls).to.have.length(0)
+        expect(submitted.resourceAccesses).to.deep.equal([])
+        expect(submitted.producerEpochs).to.deep.equal([])
+        expect(submitted.diagnostics).to.deep.equal([])
+        for (const resource of [ missing, staged, discarded, downstream ]) {
+            expect(resource.state).to.equal('empty')
+            expect(resource.contentEpoch).to.equal(0)
+        }
+        expect(staleInput.state).to.equal('ready')
+        expect(staleInput.contentEpoch).to.equal(1)
+    })
+
+    it('keeps render attachment side effects when every draw uses skip-command', async() => {
+
+        const fixture = await createRenderFixture()
+        const target = fixture.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const missing = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const pass = fixture.runtime.createRenderPass({
+            color: [ {
+                target,
+                load: 'clear',
+                store: 'store',
+                clear: [ 0, 0, 0, 1 ],
+            } ],
+        })
+        const skipped = createDraw(fixture, {
+            resources: {
+                read: [ { resource: missing, contentEpoch: 0 } ],
+                write: [],
+            },
+            whenMissing: 'skip-command',
+        })
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [ skipped ])
+            .submit()
+
+        expect(fixture.calls.renderPasses).to.have.length(1)
+        expect(fixture.calls.drawCalls).to.have.length(0)
+        expect(target.state).to.equal('ready')
+        expect(target.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses).to.have.length(1)
+        expect(submitted.resourceAccesses[0]).to.include({ resourceId: target.id, access: 'write' })
+        expect(submitted.producerEpochs).to.have.length(1)
+    })
+
+    it('removes render attachments, timestamps, and occlusion writes for skip-pass', async() => {
+
+        const fixture = await createRenderSkipPassFixture()
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, fixture.commands)
+            .submit()
+
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.drawCalls).to.have.length(0)
+        expect(fixture.calls.occlusionQueries).to.have.length(0)
+        expect(submitted.resourceAccesses).to.deep.equal([])
+        expect(submitted.producerEpochs).to.deep.equal([])
+        expect(fixture.colorTarget.state).to.equal('empty')
+        expect(fixture.colorTarget.contentEpoch).to.equal(0)
+        expect(fixture.depthTarget.state).to.equal('empty')
+        expect(fixture.depthTarget.contentEpoch).to.equal(0)
+        expect(fixture.timestampQuerySet.slotStates).to.deep.equal([ 'empty', 'empty' ])
+        expect(fixture.timestampQuerySet.slotContentEpochs).to.deep.equal([ 0, 0 ])
+        expect(fixture.occlusionQuerySet.slotStates).to.deep.equal([ 'empty', 'empty' ])
+        expect(fixture.occlusionQuerySet.slotContentEpochs).to.deep.equal([ 0, 0 ])
+    })
+
+    it('does not expose skipped render query writes to later resolve steps', async() => {
+
+        for (const queryKind of [ 'timestamp', 'occlusion' ]) {
+            const fixture = await createRenderSkipPassFixture()
+            const querySet = queryKind === 'timestamp'
+                ? fixture.timestampQuerySet
+                : fixture.occlusionQuerySet
+            const index = queryKind === 'timestamp' ? 0 : 1
+            const destination = fixture.runtime.createBuffer({
+                size: 16,
+                usage: GPU_BUFFER_USAGE_QUERY_RESOLVE,
+            })
+            const resolve = fixture.runtime.createResolveQuerySetCommand({
+                source: {
+                    querySet,
+                    slots: [ { index, contentEpoch: 1 } ],
+                },
+                destination,
+                whenMissing: 'throw',
+            })
+            const builder = fixture.runtime.createSubmission({ validation: 'off' })
+                .render(fixture.pass, fixture.commands)
+                .resolve(resolve)
+
+            const diagnostic = await expectDiagnostic(
+                () => builder.submit(),
+                'SCRATCH_QUERY_RESOLVE_UNWRITTEN_RANGE'
+            )
+
+            expect(diagnostic.subject).to.deep.equal(resolve.subject)
+            expect(diagnostic.actual).to.deep.include({
+                querySetId: querySet.id,
+                slotIndex: index,
+                simulatedSlotState: 'empty',
+            })
+            expect(fixture.calls.commandEncoders).to.have.length(0)
+            expect(fixture.calls.renderPasses).to.have.length(0)
+            expect(fixture.calls.resolveQueries).to.have.length(0)
+            expect(destination.state).to.equal('empty')
+        }
+    })
+
+    it('does not expose skipped render attachment writes to later draws', async() => {
+
+        const fixture = await createRenderSkipPassFixture()
+        const downstreamTarget = fixture.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const downstreamPass = fixture.runtime.createRenderPass({
+            color: [ {
+                target: downstreamTarget,
+                load: 'clear',
+                store: 'store',
+                clear: [ 0, 0, 0, 1 ],
+            } ],
+        })
+        const consumer = createDraw(fixture, {
+            resources: {
+                read: [ { resource: fixture.colorTarget, contentEpoch: 1 } ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+        const builder = fixture.runtime.createSubmission({ validation: 'off' })
+            .render(fixture.pass, fixture.commands)
+            .render(downstreamPass, [ consumer ])
+
+        const diagnostic = await expectDiagnostic(
+            () => builder.submit(),
+            'SCRATCH_COMMAND_RESOURCE_NOT_READY'
+        )
+
+        expect(diagnostic.subject).to.deep.equal(consumer.subject)
+        expect(diagnostic.actual).to.deep.include({
+            resourceId: fixture.colorTarget.id,
+            resourceState: 'empty',
+            simulatedContentEpoch: 0,
+        })
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(downstreamTarget.state).to.equal('empty')
     })
 })

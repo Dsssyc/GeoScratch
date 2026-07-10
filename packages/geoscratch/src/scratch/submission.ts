@@ -98,9 +98,25 @@ type ResolveStep = {
 
 type SubmissionStep = RenderStep | ComputeStep | UploadStep | CopyStep | ReadbackStep | ResolveStep
 
+type ResolvedPassDisposition =
+    | { disposition: 'execute', triggerCommandId?: never }
+    | { disposition: 'skip-pass', triggerCommandId: string }
+
+type ResolvedRenderStep = RenderStep & ResolvedPassDisposition
+
+type ResolvedComputeStep = ComputeStep & ResolvedPassDisposition
+
+type ResolvedSubmissionStep =
+    | ResolvedRenderStep
+    | ResolvedComputeStep
+    | UploadStep
+    | CopyStep
+    | ReadbackStep
+    | ResolveStep
+
 type ResolvedSubmissionPlan = {
     report: ScratchDiagnosticReport
-    steps: SubmissionStep[]
+    steps: ResolvedSubmissionStep[]
     readiness: ReadinessSimulation
     querySlots: QuerySlotSimulation
 }
@@ -128,6 +144,12 @@ type QuerySlotSimulationState = {
 }
 
 type QuerySlotSimulation = Map<string, QuerySlotSimulationState>
+
+type CommandReadinessResolution = 'execute' | 'skip-command' | 'skip-pass'
+
+type ResolvedPassCommands<Command> =
+    | { disposition: 'execute', commands: Command[] }
+    | { disposition: 'skip-pass', commands: Command[], triggerCommandId: string }
 
 type RenderAttachmentKind = 'color' | 'depth-stencil'
 
@@ -284,6 +306,7 @@ export class SubmissionBuilder {
             }
 
             if (step.kind === 'compute') {
+                if (step.disposition === 'skip-pass') continue
                 if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
                 const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
@@ -302,6 +325,7 @@ export class SubmissionBuilder {
                 continue
             }
 
+            if (step.disposition === 'skip-pass') continue
             if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
             const colorWrites = captureRenderAttachmentWrites(stepIndex, step.passSpec)
@@ -376,9 +400,9 @@ export class SubmissionBuilder {
 function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSubmissionPlan {
 
     const diagnostics: ScratchDiagnostic[] = []
-    const steps: SubmissionStep[] = []
-    const readiness: ReadinessSimulation = new Map()
-    const querySlots: QuerySlotSimulation = new Map()
+    const steps: ResolvedSubmissionStep[] = []
+    let readiness: ReadinessSimulation = new Map()
+    let querySlots: QuerySlotSimulation = new Map()
     const readbackSteps = new Map<ReadbackCommand, number>()
 
     for (const [stepIndex, step] of builder.steps.entries()) {
@@ -415,20 +439,54 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
 
         if (step.kind === 'compute') {
             validateComputeStep(builder, step)
-            const commands = resolveComputeReadiness(builder, step, stepIndex, readiness, diagnostics)
-            markSimulatedTimestampWrites(querySlots, step.passSpec.timestampWrites)
-            steps.push({ ...step, commands })
+            const passReadiness = new Map(readiness)
+            const passQuerySlots = new Map(querySlots)
+            const passDiagnostics: ScratchDiagnostic[] = []
+            const resolution = resolveComputeReadiness(
+                builder,
+                step,
+                stepIndex,
+                passReadiness,
+                passDiagnostics
+            )
+            if (resolution.disposition === 'skip-pass') {
+                steps.push({ ...step, ...resolution })
+                continue
+            }
+
+            markSimulatedTimestampWrites(passQuerySlots, step.passSpec.timestampWrites)
+            readiness = passReadiness
+            querySlots = passQuerySlots
+            diagnostics.push(...passDiagnostics)
+            steps.push({ ...step, ...resolution })
             continue
         }
 
         validateRenderStep(builder, step)
-        const commands = resolveRenderReadiness(builder, step, stepIndex, readiness, diagnostics)
-        const resolvedStep = { ...step, commands }
-        if (builder.validation !== 'off') {
-            diagnostics.push(...collectRenderPassResourceConflictDiagnostics(builder, resolvedStep, stepIndex))
+        const passReadiness = new Map(readiness)
+        const passQuerySlots = new Map(querySlots)
+        const passDiagnostics: ScratchDiagnostic[] = []
+        const resolution = resolveRenderReadiness(
+            builder,
+            step,
+            stepIndex,
+            passReadiness,
+            passDiagnostics
+        )
+        if (resolution.disposition === 'skip-pass') {
+            steps.push({ ...step, ...resolution })
+            continue
         }
-        markSimulatedRenderQueryWrites(querySlots, resolvedStep)
-        steps.push(resolvedStep)
+
+        const resolvedStep: RenderStep = { ...step, commands: resolution.commands }
+        if (builder.validation !== 'off') {
+            passDiagnostics.push(...collectRenderPassResourceConflictDiagnostics(builder, resolvedStep, stepIndex))
+        }
+        markSimulatedRenderQueryWrites(passQuerySlots, resolvedStep)
+        readiness = passReadiness
+        querySlots = passQuerySlots
+        diagnostics.push(...passDiagnostics)
+        steps.push({ ...resolvedStep, disposition: 'execute' })
     }
 
     return {
@@ -625,11 +683,11 @@ function resolveComputeReadiness(
     stepIndex: number,
     readiness: ReadinessSimulation,
     diagnostics: ScratchDiagnostic[]
-): DispatchCommand[] {
+): ResolvedPassCommands<DispatchCommand> {
 
     const commands: DispatchCommand[] = []
     for (const command of step.commands) {
-        const shouldExecute = resolveCommandReadiness(
+        const resolution = resolveCommandReadiness(
             builder,
             stepIndex,
             command,
@@ -638,7 +696,14 @@ function resolveComputeReadiness(
             diagnostics,
             step.passSpec
         )
-        if (!shouldExecute) continue
+        if (resolution === 'skip-command') continue
+        if (resolution === 'skip-pass') {
+            return {
+                disposition: 'skip-pass',
+                commands: [],
+                triggerCommandId: command.id,
+            }
+        }
 
         commands.push(command)
         if (command._producesDeclaredWrites) {
@@ -648,7 +713,7 @@ function resolveComputeReadiness(
         }
     }
 
-    return commands
+    return { disposition: 'execute', commands }
 }
 
 function resolveRenderReadiness(
@@ -657,7 +722,7 @@ function resolveRenderReadiness(
     stepIndex: number,
     readiness: ReadinessSimulation,
     diagnostics: ScratchDiagnostic[]
-): RenderCommand[] {
+): ResolvedPassCommands<RenderCommand> {
 
     const commands: RenderCommand[] = []
     for (const command of step.commands) {
@@ -666,7 +731,7 @@ function resolveRenderReadiness(
             continue
         }
 
-        const shouldExecute = resolveCommandReadiness(
+        const resolution = resolveCommandReadiness(
             builder,
             stepIndex,
             command,
@@ -675,7 +740,14 @@ function resolveRenderReadiness(
             diagnostics,
             step.passSpec
         )
-        if (!shouldExecute) continue
+        if (resolution === 'skip-command') continue
+        if (resolution === 'skip-pass') {
+            return {
+                disposition: 'skip-pass',
+                commands: [],
+                triggerCommandId: command.id,
+            }
+        }
 
         commands.push(command)
         if (command._producesDeclaredWrites) {
@@ -695,7 +767,7 @@ function resolveRenderReadiness(
         markSimulatedReady(readiness, step.passSpec.depth.target)
     }
 
-    return commands
+    return { disposition: 'execute', commands }
 }
 
 function markSimulatedTimestampWrites(querySlots: QuerySlotSimulation, timestampWrites: ComputePassSpec['timestampWrites']): void {
@@ -737,7 +809,7 @@ function resolveCommandReadiness(
     diagnostics: ScratchDiagnostic[],
     passSpec?: RenderPassSpec | ComputePassSpec,
     role?: string
-): boolean {
+): CommandReadinessResolution {
 
     const missing = readRequirements
         .map(readRequirement => ({
@@ -759,7 +831,8 @@ function resolveCommandReadiness(
                 role
             )
         }
-        if (command.whenMissing === 'skip-command') return false
+        if (command.whenMissing === 'skip-command') return 'skip-command'
+        if (command.whenMissing === 'skip-pass') return 'skip-pass'
     }
 
     for (const readRequirement of readRequirements) {
@@ -796,7 +869,7 @@ function resolveCommandReadiness(
         }
     }
 
-    return true
+    return 'execute'
 }
 
 function simulatedResourceState(readiness: ReadinessSimulation, resource: Resource): ResourceSimulationState {

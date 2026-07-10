@@ -172,7 +172,7 @@ export class RenderPassSpec {
 
     hasEncoderSideEffects(): boolean {
 
-        return this.timestampWrites !== undefined
+        return this.color.length > 0 || this.depth !== undefined || this.timestampWrites !== undefined
     }
 
     advanceTimestampWriteEpochs(): void {
