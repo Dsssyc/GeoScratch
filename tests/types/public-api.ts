@@ -648,6 +648,25 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatAccessKind: scratchCompat.SubmissionResourceAccessKind | undefined = compatResourceAccesses[0]?.access
     const compatStepKind: scratchCompat.SubmissionStepKind | undefined = compatProducerEpochs[0]?.producedBy.stepKind
     const compatBuilder: scratchCompat.SubmissionBuilder = runtime.createSubmission(compatSubmissionOptions)
+    const readbackCommandDescriptor: scr.ReadbackCommandDescriptor = {
+        label: 'typed ordered readback',
+        source: { resource: storageOutput, contentEpoch: storageOutput.contentEpoch },
+        range: { offset: 0, byteLength: 16 },
+        retain: 'until-dispose',
+        whenMissing: 'throw',
+    }
+    const compatReadbackCommandDescriptor: scratchCompat.ReadbackCommandDescriptor = readbackCommandDescriptor
+    const readbackCommand: scr.ReadbackCommand = runtime.createReadbackCommand(readbackCommandDescriptor)
+    const readbackCommandAlias: scratchCompat.ReadbackCommand = runtime.readbackCommand(compatReadbackCommandDescriptor)
+    const orderedSubmitted: scr.SubmittedWork = runtime.submission()
+        .readback(readbackCommand)
+        .readback(readbackCommandAlias)
+        .submit()
+    const readbackCommandResultOptions: scr.ReadbackCommandResultOptions = { after: orderedSubmitted }
+    const compatReadbackCommandResultOptions: scratchCompat.ReadbackCommandResultOptions = readbackCommandResultOptions
+    const orderedReadback: scr.ReadbackOperation = readbackCommand.result(readbackCommandResultOptions)
+    const compatOrderedReadback: scratchCompat.ReadbackOperation = readbackCommandAlias.result(compatReadbackCommandResultOptions)
+    const readbackStepKind: scr.SubmissionStepKind = 'readback'
     const readbackRetention: scr.ReadbackRetentionPolicy = 'until-dispose'
     const compatReadbackRetention: scratchCompat.ReadbackRetentionPolicy = 'consume-on-read'
     const readbackDescriptor: scr.ReadbackOperationDescriptor = {
@@ -762,6 +781,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void compatProducerEpochs
     void compatAccessKind
     void compatStepKind
+    void readbackCommandDescriptor
+    void compatReadbackCommandDescriptor
+    void orderedSubmitted
+    void orderedReadback
+    void compatOrderedReadback
+    void readbackStepKind
     void readbackRetention
     void compatReadbackRetention
     void readbackDescriptor

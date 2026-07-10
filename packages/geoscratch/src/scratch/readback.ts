@@ -44,6 +44,9 @@ export type ReadbackOperationDescriptor = {
 export type ScheduledReadbackOperationDescriptor = ReadbackOperationDescriptor & {
     after: SubmittedWork
     stagingBuffer: GPUBuffer
+    contentEpoch: number
+    allocationVersion: number
+    producerEpoch?: SubmittedResourceEpoch
 }
 
 export type TypedArrayConstructor<T extends ArrayBufferView = ArrayBufferView> = {
@@ -382,9 +385,22 @@ export function createScheduledReadbackOperation(
     descriptor: ScheduledReadbackOperationDescriptor
 ): ReadbackOperation {
 
-    const { stagingBuffer, ...operationDescriptor } = descriptor
+    const {
+        stagingBuffer,
+        contentEpoch,
+        allocationVersion,
+        producerEpoch,
+        ...operationDescriptor
+    } = descriptor
     const operation = new ReadbackOperation(runtime, operationDescriptor)
     operation.stagingBuffer = stagingBuffer
+    operation.contentEpoch = contentEpoch
+    operation.allocationVersion = allocationVersion
+    if (producerEpoch === undefined) {
+        delete operation.producerEpoch
+    } else {
+        operation.producerEpoch = producerEpoch
+    }
     operation.state = 'submitted'
     scheduledReadbackOperations.add(operation)
 

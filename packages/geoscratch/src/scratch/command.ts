@@ -1346,27 +1346,24 @@ export interface ReadbackCommand {
     result(options: ReadbackCommandResultOptions): ReadbackOperation
 }
 
-const readbackCommandResults = new WeakMap<ReadbackCommand, Map<SubmittedWork, ReadbackOperation>>()
+const readbackCommandResults = new WeakMap<ReadbackCommand, WeakMap<SubmittedWork, ReadbackOperation>>()
 
 export class ReadbackCommand {
 
-    constructor(runtime: ScratchRuntime, descriptor: ReadbackCommandDescriptor) {
+    constructor(runtime: ScratchRuntime, descriptor: ReadbackCommandDescriptor = {} as ReadbackCommandDescriptor) {
 
         runtime.assertActive()
 
-        const offset = descriptor.range?.offset ?? descriptor.sourceOffset ?? 0
-        const byteLength = descriptor.range?.byteLength ?? descriptor.byteLength ?? descriptor.source.resource.size - offset
-
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
+        if (isRecord(descriptor) && typeof descriptor.label === 'string') this.label = descriptor.label
         this.commandKind = 'readback'
-        this.source = descriptor.source
-        this.range = { offset, byteLength }
-        this.retain = descriptor.retain ?? 'consume-on-read'
-        this.whenMissing = descriptor.whenMissing
+        this.source = normalizeReadbackCommandSource(this, isRecord(descriptor) ? descriptor.source : undefined)
+        this.range = normalizeReadbackCommandRange(this, descriptor)
+        this.retain = normalizeReadbackCommandRetention(this, isRecord(descriptor) ? descriptor.retain : undefined)
+        this.whenMissing = normalizeReadbackCommandReadinessPolicy(this, isRecord(descriptor) ? descriptor.whenMissing : undefined)
         this.isDisposed = false
-        readbackCommandResults.set(this, new Map())
+        readbackCommandResults.set(this, new WeakMap())
     }
 
     get subject(): DiagnosticSubject {
@@ -1441,7 +1438,43 @@ export class ReadbackCommand {
 
     result(options: ReadbackCommandResultOptions): ReadbackOperation {
 
-        return readbackCommandResults.get(this)?.get(options.after)!
+        this.assertUsable()
+
+        const after = options?.after
+        if (!after || after.runtime !== this.runtime || typeof after.done?.then !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_READBACK_COMMAND_AFTER_INVALID',
+                severity: 'error',
+                phase: 'readback',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    after?.subject,
+                ].filter((subject): subject is DiagnosticSubject => subject !== undefined),
+                message: 'ReadbackCommand result requires SubmittedWork from the same ScratchRuntime.',
+                expected: { after: 'SubmittedWork from the command runtime' },
+                actual: {
+                    after: describeValue(after),
+                    runtimeId: after?.runtime?.id,
+                },
+            })
+        }
+
+        const operation = readbackCommandResults.get(this)?.get(after)
+        if (operation === undefined) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_READBACK_COMMAND_RESULT_UNAVAILABLE',
+                severity: 'error',
+                phase: 'readback',
+                subject: this.subject,
+                related: [ after.subject ],
+                message: 'SubmittedWork did not include this ReadbackCommand.',
+                expected: { commandId: this.id, submissionContainsCommand: true },
+                actual: { commandId: this.id, submissionId: after.id, submissionContainsCommand: false },
+            })
+        }
+
+        return operation
     }
 
     dispose(): void {
@@ -1457,6 +1490,148 @@ export function registerReadbackCommandResult(
 ): void {
 
     readbackCommandResults.get(command)?.set(after, operation)
+}
+
+function normalizeReadbackCommandSource(command: ReadbackCommand, source: unknown): BufferCopyCommandSourceDescriptor {
+
+    if (!isRecord(source)) {
+        throwReadbackCommandSourceDiagnostic(command, source)
+    }
+
+    const resource = source.resource
+    const contentEpoch = source.contentEpoch
+    if (
+        !(resource instanceof BufferResource) ||
+        typeof contentEpoch !== 'number' ||
+        !Number.isInteger(contentEpoch) ||
+        contentEpoch < 0
+    ) {
+        throwReadbackCommandSourceDiagnostic(command, source)
+    }
+
+    resource.assertRuntime(command.runtime)
+    if ((resource.usage & GPU_BUFFER_USAGE_COPY_SRC) === 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+            severity: 'error',
+            phase: 'command',
+            subject: command.subject,
+            related: [ resource.subject, command.runtime.subject ],
+            message: 'ReadbackCommand source requires GPUBufferUsage.COPY_SRC.',
+            expected: { usage: 'GPUBufferUsage.COPY_SRC' },
+            actual: { usage: resource.usage },
+        })
+    }
+
+    return { resource, contentEpoch }
+}
+
+function throwReadbackCommandSourceDiagnostic(command: ReadbackCommand, source: unknown): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_READBACK_SOURCE_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [ command.runtime.subject ],
+        message: 'ReadbackCommand requires an explicit BufferResource source content epoch.',
+        expected: { source: { resource: 'BufferResource', contentEpoch: 'non-negative integer' } },
+        actual: { source: describeValue(source) },
+    })
+}
+
+function normalizeReadbackCommandRange(
+    command: ReadbackCommand,
+    descriptor: ReadbackCommandDescriptor
+): { offset: number, byteLength: number } {
+
+    const range = isRecord(descriptor) ? descriptor.range : undefined
+    if (range !== undefined && !isRecord(range)) {
+        throwReadbackCommandRangeDiagnostic(command, descriptor)
+    }
+
+    const rangeOffset = isRecord(range) ? range.offset : undefined
+    const rangeByteLength = isRecord(range) ? range.byteLength : undefined
+    const sourceOffset = isRecord(descriptor) ? descriptor.sourceOffset : undefined
+    const descriptorByteLength = isRecord(descriptor) ? descriptor.byteLength : undefined
+
+    if (
+        (rangeOffset !== undefined && sourceOffset !== undefined && rangeOffset !== sourceOffset) ||
+        (rangeByteLength !== undefined && descriptorByteLength !== undefined && rangeByteLength !== descriptorByteLength)
+    ) {
+        throwReadbackCommandRangeDiagnostic(command, descriptor)
+    }
+
+    const offset = rangeOffset ?? sourceOffset ?? 0
+    const defaultByteLength = typeof offset === 'number'
+        ? command.source.resource.size - offset
+        : Number.NaN
+    const byteLength = rangeByteLength ?? descriptorByteLength ?? defaultByteLength
+    if (
+        typeof offset !== 'number' ||
+        typeof byteLength !== 'number' ||
+        !Number.isInteger(offset) ||
+        !Number.isInteger(byteLength) ||
+        offset < 0 ||
+        byteLength <= 0 ||
+        offset + byteLength > command.source.resource.size
+    ) {
+        throwReadbackCommandRangeDiagnostic(command, descriptor)
+    }
+
+    return { offset, byteLength }
+}
+
+function throwReadbackCommandRangeDiagnostic(command: ReadbackCommand, descriptor: ReadbackCommandDescriptor): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_READBACK_RANGE_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [ command.source.resource.subject ],
+        message: 'ReadbackCommand range must fit inside the source buffer.',
+        expected: { offset: 'non-negative integer', byteLength: 'positive byte length within source' },
+        actual: {
+            sourceOffset: isRecord(descriptor) ? descriptor.sourceOffset : undefined,
+            byteLength: isRecord(descriptor) ? descriptor.byteLength : undefined,
+            range: isRecord(descriptor) ? descriptor.range : undefined,
+            sourceSize: command.source.resource.size,
+        },
+    })
+}
+
+function normalizeReadbackCommandRetention(command: ReadbackCommand, retain: unknown): ReadbackRetentionPolicy {
+
+    if (retain === undefined) return 'consume-on-read'
+    if (retain === 'consume-on-read' || retain === 'until-dispose') return retain
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_READBACK_RETAIN_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [ command.source.resource.subject ],
+        message: 'ReadbackCommand retain must be consume-on-read or until-dispose.',
+        expected: { retain: [ 'consume-on-read', 'until-dispose' ] },
+        actual: { retain },
+    })
+}
+
+function normalizeReadbackCommandReadinessPolicy(command: ReadbackCommand, whenMissing: unknown): 'throw' {
+
+    if (whenMissing === 'throw') return whenMissing
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [ command.source.resource.subject ],
+        message: 'ReadbackCommand requires an explicit throw readiness policy.',
+        expected: { whenMissing: [ 'throw' ] },
+        actual: { whenMissing },
+    })
 }
 
 export interface ResolveQuerySetCommand {

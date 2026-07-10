@@ -103,6 +103,9 @@ type ReadCommand = CopyCommand | DispatchCommand | DrawCommand | ReadbackCommand
 type PendingReadback = {
     command: ReadbackCommand
     stagingBuffer: GPUBuffer
+    stepIndex: number
+    contentEpoch: number
+    allocationVersion: number
 }
 
 type ResourceSimulationState = {
@@ -252,14 +255,15 @@ export class SubmissionBuilder {
 
             if (step.kind === 'readback') {
                 const origin = commandAccessOrigin(stepIndex, 'readback', step.command)
-                const accesses = [
-                    captureResourceAccess(step.command.source.resource, 'read', origin),
-                ]
+                const readAccess = captureResourceAccess(step.command.source.resource, 'read', origin)
                 pendingReadbacks.push({
                     command: step.command,
                     stagingBuffer: step.command.encode(encoder),
+                    stepIndex,
+                    contentEpoch: readAccess.contentEpochBefore,
+                    allocationVersion: step.command.source.resource.allocationVersion,
                 })
-                completeResourceAccesses(resourceAccesses, accesses)
+                completeResourceAccesses(resourceAccesses, [ readAccess ])
                 continue
             }
 
@@ -331,13 +335,17 @@ export class SubmissionBuilder {
             done: createDonePromise(this.runtime.queue),
         })
         for (const pending of pendingReadbacks) {
+            const producerEpoch = findReadbackProducerEpoch(submitted, pending)
             const operation = createScheduledReadbackOperation(this.runtime, {
                 ...(pending.command.label !== undefined ? { label: pending.command.label } : {}),
+                ...(producerEpoch !== undefined ? { producerEpoch } : {}),
                 source: pending.command.source.resource,
                 after: submitted,
                 range: pending.command.range,
                 retain: pending.command.retain,
                 stagingBuffer: pending.stagingBuffer,
+                contentEpoch: pending.contentEpoch,
+                allocationVersion: pending.allocationVersion,
             })
             registerReadbackCommandResult(pending.command, submitted, operation)
         }
@@ -1054,6 +1062,26 @@ function createProducerEpoch(access: SubmissionResourceAccess): SubmittedResourc
     if (access.label !== undefined) producerEpoch.label = access.label
 
     return producerEpoch
+}
+
+function findReadbackProducerEpoch(
+    submitted: SubmittedWork,
+    pending: PendingReadback
+): SubmittedResourceEpoch | undefined {
+
+    for (let index = submitted.producerEpochs.length - 1; index >= 0; index--) {
+        const producerEpoch = submitted.producerEpochs[index]
+        if (
+            producerEpoch.resourceId === pending.command.source.resource.id &&
+            producerEpoch.contentEpoch === pending.contentEpoch &&
+            producerEpoch.allocationVersion === pending.allocationVersion &&
+            producerEpoch.producedBy.stepIndex < pending.stepIndex
+        ) {
+            return producerEpoch
+        }
+    }
+
+    return undefined
 }
 
 function accessOriginFromAccess(access: SubmissionResourceAccess): SubmissionAccessOrigin {
