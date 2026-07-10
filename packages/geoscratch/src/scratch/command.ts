@@ -42,6 +42,16 @@ export type ResourceReadinessPolicy =
     | 'skip-pass'
     | 'use-fallback'
 
+export type CommandReadinessDescriptor<FallbackCommand> =
+    | {
+        whenMissing: 'throw' | 'skip-command' | 'skip-pass'
+        fallback?: never
+    }
+    | {
+        whenMissing: 'use-fallback'
+        fallback: FallbackCommand
+    }
+
 export type StaticDrawCount = {
     vertexCount: number
     instanceCount?: number
@@ -154,15 +164,14 @@ type DrawCommandDescriptorBase = {
     dynamicOffsets?: CommandDynamicOffsets
     vertexBuffers?: DrawVertexBufferBinding[]
     resources: CommandResourceAccessDescriptor
-    whenMissing: ResourceReadinessPolicy
 }
 
-export type NonIndexedDrawCommandDescriptor = DrawCommandDescriptorBase & {
+export type NonIndexedDrawCommandDescriptor = DrawCommandDescriptorBase & CommandReadinessDescriptor<DrawCommand> & {
     indexBuffer?: never
     count: StrictStaticDrawCount | StrictIndirectDrawCount
 }
 
-export type IndexedDrawCommandDescriptor = DrawCommandDescriptorBase & {
+export type IndexedDrawCommandDescriptor = DrawCommandDescriptorBase & CommandReadinessDescriptor<DrawCommand> & {
     indexBuffer: DrawIndexBufferBinding
     count: StrictStaticIndexedDrawCount | StrictIndirectDrawCount
 }
@@ -328,15 +337,16 @@ type StrictIndirectDispatchCount = IndirectCommandCount & {
     workgroups?: never
 }
 
-export type DispatchCommandDescriptor = {
+type DispatchCommandDescriptorBase = {
     label?: string
     pipeline: ComputePipeline
     bindSets?: BindSet[]
     dynamicOffsets?: CommandDynamicOffsets
     count: StrictStaticDispatchCount | StrictIndirectDispatchCount
     resources: CommandResourceAccessDescriptor
-    whenMissing: ResourceReadinessPolicy
 }
+
+export type DispatchCommandDescriptor = DispatchCommandDescriptorBase & CommandReadinessDescriptor<DispatchCommand>
 
 type StaticDrawCountOptionalKey = Exclude<keyof StaticDrawCount, 'vertexCount'>
 
@@ -455,6 +465,7 @@ export interface DrawCommand {
     readonly count: Readonly<StaticDrawCount> | Readonly<StaticIndexedDrawCount> | Readonly<NormalizedIndirectCommandCount>
     readonly resources: CommandResourceAccessDescriptor
     readonly whenMissing: ResourceReadinessPolicy
+    readonly fallback?: DrawCommand
 }
 
 export class DrawCommand {
@@ -500,6 +511,7 @@ export class DrawCommand {
         mutable.resources = normalizeResourceAccess(this, descriptor.resources)
         validateDrawFixedFunctionReads(this)
         mutable.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
+        if (descriptor.fallback !== undefined) mutable.fallback = descriptor.fallback
         validateProgramLayoutRequirementsForCommand(this)
         lockDrawCommandContract(this)
     }
@@ -918,6 +930,7 @@ export interface DispatchCommand {
     readonly count: Readonly<{ workgroups: readonly [number, number, number] }> | Readonly<NormalizedIndirectCommandCount>
     readonly resources: CommandResourceAccessDescriptor
     readonly whenMissing: ResourceReadinessPolicy
+    readonly fallback?: DispatchCommand
 }
 
 export class DispatchCommand {
@@ -957,6 +970,7 @@ export class DispatchCommand {
         mutable.resources = normalizeResourceAccess(this, descriptor.resources)
         validateDispatchFixedFunctionReads(this)
         mutable.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
+        if (descriptor.fallback !== undefined) mutable.fallback = descriptor.fallback
         validateProgramLayoutRequirementsForCommand(this)
         lockDispatchCommandContract(this)
     }
@@ -1115,6 +1129,7 @@ function lockDrawCommandContract(command: DrawCommand): void {
         'count',
         'resources',
         'whenMissing',
+        'fallback',
     ])
     Object.preventExtensions(command)
 }
@@ -1135,6 +1150,7 @@ function lockDispatchCommandContract(command: DispatchCommand): void {
         'count',
         'resources',
         'whenMissing',
+        'fallback',
     ])
     Object.preventExtensions(command)
 }

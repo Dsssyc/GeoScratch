@@ -509,6 +509,40 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         },
         whenMissing: 'throw',
     })
+    const drawReadiness: scr.CommandReadinessDescriptor<scr.DrawCommand> = {
+        whenMissing: 'use-fallback',
+        fallback: draw,
+    }
+    const compatDrawReadiness: scratchCompat.CommandReadinessDescriptor<scratchCompat.DrawCommand> = drawReadiness
+    const fallbackDraw: scr.DrawCommand = runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        bindSets: [ bindSet ],
+        vertexBuffers: [
+            { slot: 0, buffer: vertexBuffer, offset: 0, size: 24 },
+        ],
+        count: { vertexCount: 3 },
+        resources: {
+            read: [ uniformRead, vertexRead ],
+            write: [],
+        },
+        whenMissing: 'use-fallback',
+        fallback: draw,
+    })
+    // @ts-expect-error use-fallback requires a fallback command
+    runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        count: { vertexCount: 3 },
+        resources: { read: [], write: [] },
+        whenMissing: 'use-fallback',
+    })
+    // @ts-expect-error non-fallback policies forbid fallback commands
+    runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        count: { vertexCount: 3 },
+        resources: { read: [], write: [] },
+        whenMissing: 'skip-command',
+        fallback: draw,
+    })
     const staticIndexedCount: scr.StaticIndexedDrawCount = { indexCount: 3 }
     const indirectCount: scr.IndirectCommandCount = { indirect: indirectBuffer, offset: 0 }
     const drawCount: scr.DrawCount = staticIndexedCount
@@ -712,6 +746,53 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             write: [ storageOutput ],
         },
         whenMissing: 'throw',
+    })
+    const dispatchReadiness: scr.CommandReadinessDescriptor<scr.DispatchCommand> = {
+        whenMissing: 'use-fallback',
+        fallback: dispatch,
+    }
+    const compatDispatchReadiness: scratchCompat.CommandReadinessDescriptor<scratchCompat.DispatchCommand> = dispatchReadiness
+    const fallbackDispatch: scr.DispatchCommand = runtime.createDispatchCommand({
+        pipeline: computePipeline,
+        bindSets: [ storageSet ],
+        count: { workgroups: [ 1 ] },
+        resources: {
+            read: [ storageInputRead ],
+            write: [ storageOutput ],
+        },
+        whenMissing: 'use-fallback',
+        fallback: dispatch,
+    })
+    // @ts-expect-error use-fallback requires a fallback command
+    runtime.createDispatchCommand({
+        pipeline: computePipeline,
+        count: { workgroups: [ 1 ] },
+        resources: { read: [], write: [] },
+        whenMissing: 'use-fallback',
+    })
+    // @ts-expect-error non-fallback policies forbid fallback commands
+    runtime.createDispatchCommand({
+        pipeline: computePipeline,
+        count: { workgroups: [ 1 ] },
+        resources: { read: [], write: [] },
+        whenMissing: 'skip-pass',
+        fallback: dispatch,
+    })
+    runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        count: { vertexCount: 3 },
+        resources: { read: [], write: [] },
+        whenMissing: 'use-fallback',
+        // @ts-expect-error DrawCommand fallback must also be a DrawCommand
+        fallback: dispatch,
+    })
+    runtime.createDispatchCommand({
+        pipeline: computePipeline,
+        count: { workgroups: [ 1 ] },
+        resources: { read: [], write: [] },
+        whenMissing: 'use-fallback',
+        // @ts-expect-error DispatchCommand fallback must also be a DispatchCommand
+        fallback: draw,
     })
     const indirectDispatch: scr.DispatchCommand = runtime.createDispatchCommand({
         pipeline: computePipeline,

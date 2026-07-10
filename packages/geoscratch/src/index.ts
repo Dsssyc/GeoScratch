@@ -44,6 +44,7 @@ export type {
     BufferToBufferCopyCommandDescriptor,
     BufferToTextureCopyCommandDescriptor,
     CommandDynamicOffsets,
+    CommandReadinessDescriptor,
     CommandResourceAccessDescriptor,
     CommandResourceReadDescriptor,
     CopyCommandDescriptor,

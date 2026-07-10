@@ -46,8 +46,8 @@
 - Modify: `packages/geoscratch/src/scratch/index.ts`
 - Modify: `packages/geoscratch/src/index.ts`
 
-- [ ] Add `@ts-expect-error` cases for bare `use-fallback`, fallback supplied with `throw`/`skip-command`/`skip-pass`, Draw fallback to Dispatch, and Dispatch fallback to Draw. Run `npm run typecheck`; confirm RED because current descriptors have no typed fallback pairing.
-- [ ] Define and export the exact discriminated contract:
+- [x] Add `@ts-expect-error` cases for bare `use-fallback`, fallback supplied with `throw`/`skip-command`/`skip-pass`, Draw fallback to Dispatch, and Dispatch fallback to Draw. Run `npm run typecheck`; confirm RED because current descriptors have no typed fallback pairing.
+- [x] Define and export the exact discriminated contract:
 
 ```ts
 export type CommandReadinessDescriptor<FallbackCommand> =
@@ -55,10 +55,10 @@ export type CommandReadinessDescriptor<FallbackCommand> =
     | { whenMissing: 'use-fallback', fallback: FallbackCommand }
 ```
 
-- [ ] Remove `whenMissing` from shared Draw/Dispatch descriptor bases and intersect each legal execution descriptor with `CommandReadinessDescriptor<DrawCommand>` or `CommandReadinessDescriptor<DispatchCommand>`.
-- [ ] Expose immutable normalized `fallback?: DrawCommand` / `fallback?: DispatchCommand` fields on commands without adding a legacy descriptor or alias.
-- [ ] Add positive public type cases for all four policies and both command kinds; export the generic descriptor from `geoscratch` and `geoscratch/scratch`.
-- [ ] Run `npm run typecheck` and focused constructor tests; commit with `git commit -m "Add Scratch readiness policy contracts"`.
+- [x] Remove `whenMissing` from shared Draw/Dispatch descriptor bases and intersect each legal execution descriptor with `CommandReadinessDescriptor<DrawCommand>` or `CommandReadinessDescriptor<DispatchCommand>`.
+- [x] Expose immutable normalized `fallback?: DrawCommand` / `fallback?: DispatchCommand` fields on commands without adding a legacy descriptor or alias.
+- [x] Add positive public type cases for all four policies and both command kinds; export the generic descriptor from `geoscratch` and `geoscratch/scratch`.
+- [x] Run `npm run typecheck` and focused constructor tests; commit with `git commit -m "Add Scratch readiness policy contracts"`.
 
 ## Task 2: Runtime Fallback Contract Validation
 
@@ -166,4 +166,3 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 - [ ] Review the complete branch against every Goal requirement. Perform fresh-context adversarial review, fix all valid findings, rerun affected checks, and re-review before claiming completion.
 - [ ] Confirm the eight-row audit, public exports, documentation status, execution/resource/producer ledger consistency, and exact branch history.
 - [ ] Use `finishing-a-development-branch`, fast-forward merge into `dev-feature`, rerun tests on the merged result, remove the worktree, delete the feature branch, and confirm only local `main` and `dev-feature` remain.
-
