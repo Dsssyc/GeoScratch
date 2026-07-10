@@ -112,12 +112,12 @@ export type ReadbackCommandResultOptions = {
 
 ## Phase 5: Completion Audit And Integration
 
-- [ ] Run `npm run typecheck`.
-- [ ] Run `npm test -- --grep "ReadbackCommand|ReadbackOperation|SubmittedWork resource epoch ledger"`.
-- [ ] Run `npm test`.
-- [ ] Run `npm run build`.
-- [ ] Run `git diff --check`.
-- [ ] Run `find packages/geoscratch/src/scratch \\( -name '*.js' -o -name '*.d.ts' \\) -print` and require empty output.
-- [ ] Run `rg -n "\\b[Mm]aterial\\b|material-like" packages/geoscratch/src/scratch` and require empty output.
-- [ ] Re-read the source Goal and map every acceptance item to current source, focused tests, typecheck/build output, static gates, and documentation evidence.
-- [ ] Use `finishing-a-development-branch` before integrating the verified branch into `dev-feature`.
+- [x] Run `npm run typecheck`.
+- [x] Run `npm test -- --grep "ReadbackCommand|ReadbackOperation|SubmittedWork resource epoch ledger"`.
+- [x] Run `npm test`.
+- [x] Run `npm run build`.
+- [x] Run `git diff --check`.
+- [x] Run `find packages/geoscratch/src/scratch \\( -name '*.js' -o -name '*.d.ts' \\) -print` and require empty output.
+- [x] Run `rg -n "\\b[Mm]aterial\\b|material-like" packages/geoscratch/src/scratch` and require empty output.
+- [x] Re-read the source Goal and map every acceptance item to current source, focused tests, typecheck/build output, static gates, and documentation evidence.
+- [x] Use `finishing-a-development-branch` before integrating the verified branch into `dev-feature`.
