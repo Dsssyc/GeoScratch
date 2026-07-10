@@ -160,8 +160,8 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 
 ## Task 8: Browser Verification, Strict Review, Completion Audit, And Integration
 
-- [ ] Start the Vite dev server and load `readinessPolicies` in WebGPU-capable Chromium.
-- [ ] Verify `data-status=ready`, no console/page errors, a nonblank screenshot, expected fallback pixels, absent skipped-command region, and preserved skip-pass content.
+- [x] Start the Vite dev server and load `readinessPolicies` in WebGPU-capable Chromium.
+- [x] Verify `data-status=ready`, no console/page errors, a nonblank screenshot, expected fallback pixels, absent skipped-command region, and preserved skip-pass content.
 - [ ] Run `npm run typecheck`, focused policy tests, `npm test`, `npm run build`, `git diff --check`, source-only scans, no-readback scan, and no-material scan.
 - [ ] Review the complete branch against every Goal requirement. Perform fresh-context adversarial review, fix all valid findings, rerun affected checks, and re-review before claiming completion.
 - [ ] Confirm the eight-row audit, public exports, documentation status, execution/resource/producer ledger consistency, and exact branch history.
