@@ -510,8 +510,9 @@ export class DrawCommand {
         this.#producesDeclaredWrites = drawCountProducesDeclaredWrites(mutable.count)
         mutable.resources = normalizeResourceAccess(this, descriptor.resources)
         validateDrawFixedFunctionReads(this)
-        mutable.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
-        if (descriptor.fallback !== undefined) mutable.fallback = descriptor.fallback
+        const readiness = normalizeReadinessContract(this, descriptor.whenMissing, descriptor.fallback)
+        mutable.whenMissing = readiness.whenMissing
+        if (readiness.fallback !== undefined) mutable.fallback = readiness.fallback
         validateProgramLayoutRequirementsForCommand(this)
         lockDrawCommandContract(this)
     }
@@ -969,8 +970,9 @@ export class DispatchCommand {
         this.#producesDeclaredWrites = dispatchCountProducesDeclaredWrites(mutable.count)
         mutable.resources = normalizeResourceAccess(this, descriptor.resources)
         validateDispatchFixedFunctionReads(this)
-        mutable.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
-        if (descriptor.fallback !== undefined) mutable.fallback = descriptor.fallback
+        const readiness = normalizeReadinessContract(this, descriptor.whenMissing, descriptor.fallback)
+        mutable.whenMissing = readiness.whenMissing
+        if (readiness.fallback !== undefined) mutable.fallback = readiness.fallback
         validateProgramLayoutRequirementsForCommand(this)
         lockDispatchCommandContract(this)
     }
@@ -4635,11 +4637,35 @@ function throwTextureUploadDiagnostic({
     })
 }
 
-function normalizeReadinessPolicy(command: DrawCommand | DispatchCommand, whenMissing: ResourceReadinessPolicy): ResourceReadinessPolicy {
+function normalizeReadinessContract<Command extends DrawCommand | DispatchCommand>(
+    command: Command,
+    whenMissing: ResourceReadinessPolicy,
+    fallback: Command | undefined
+): { whenMissing: ResourceReadinessPolicy, fallback?: Command } {
 
-    const allowed = new Set([ 'throw', 'skip-command', 'skip-pass', 'use-fallback' ])
+    const policy = normalizeReadinessPolicy(command, whenMissing)
 
-    if (!allowed.has(whenMissing)) {
+    if (policy === 'use-fallback') {
+        if (fallback === undefined) {
+            throwReadinessContractDiagnostic(command, policy, fallback, 'missing-fallback')
+        }
+
+        validateFallbackChain(command, fallback)
+        return { whenMissing: policy, fallback }
+    }
+
+    if (fallback !== undefined) {
+        throwReadinessContractDiagnostic(command, policy, fallback, 'forbidden-fallback')
+    }
+
+    return { whenMissing: policy }
+}
+
+function normalizeReadinessPolicy(command: DrawCommand | DispatchCommand, whenMissing: unknown): ResourceReadinessPolicy {
+
+    const allowed = new Set<ResourceReadinessPolicy>([ 'throw', 'skip-command', 'skip-pass', 'use-fallback' ])
+
+    if (typeof whenMissing !== 'string' || !allowed.has(whenMissing as ResourceReadinessPolicy)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
             severity: 'error',
@@ -4651,7 +4677,129 @@ function normalizeReadinessPolicy(command: DrawCommand | DispatchCommand, whenMi
         })
     }
 
-    return whenMissing
+    return whenMissing as ResourceReadinessPolicy
+}
+
+function validateFallbackChain(
+    command: DrawCommand | DispatchCommand,
+    fallback: DrawCommand | DispatchCommand
+): void {
+
+    const visited = new Set<unknown>([ command ])
+    let candidate: unknown = fallback
+
+    while (candidate !== undefined) {
+        if (visited.has(candidate)) {
+            throwFallbackDiagnostic(command, candidate, 'cycle')
+        }
+        visited.add(candidate)
+
+        if (!isRecord(candidate) || candidate.commandKind !== command.commandKind) {
+            throwFallbackDiagnostic(command, candidate, 'commandKind')
+        }
+
+        const fallbackCommand = candidate as unknown as DrawCommand | DispatchCommand
+        if (fallbackCommand.runtime !== command.runtime) {
+            throwFallbackDiagnostic(command, fallbackCommand, 'runtime')
+        }
+        if (fallbackCommand.isDisposed) {
+            throwFallbackDiagnostic(command, fallbackCommand, 'disposed')
+        }
+        if (!hasSameWriteResourceSet(command, fallbackCommand)) {
+            throwFallbackDiagnostic(command, fallbackCommand, 'writes')
+        }
+
+        const next = fallbackCommand.fallback
+        if (next !== undefined && visited.has(next)) {
+            throwFallbackDiagnostic(command, next, 'cycle')
+        }
+        if (fallbackCommand.whenMissing === 'use-fallback' && next === undefined) {
+            throwFallbackDiagnostic(command, fallbackCommand, 'policy')
+        }
+        if (fallbackCommand.whenMissing !== 'use-fallback' && next !== undefined) {
+            throwFallbackDiagnostic(command, fallbackCommand, 'policy')
+        }
+
+        candidate = next
+    }
+}
+
+function hasSameWriteResourceSet(
+    command: DrawCommand | DispatchCommand,
+    fallback: DrawCommand | DispatchCommand
+): boolean {
+
+    if (!fallback.resources || !Array.isArray(fallback.resources.write)) return false
+
+    const expected = new Set(command.resources.write)
+    const actual = new Set(fallback.resources.write)
+    return expected.size === actual.size && [ ...expected ].every(resource => actual.has(resource))
+}
+
+function throwReadinessContractDiagnostic(
+    command: DrawCommand | DispatchCommand,
+    whenMissing: ResourceReadinessPolicy,
+    fallback: unknown,
+    reason: 'missing-fallback' | 'forbidden-fallback'
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [ diagnosticSubjectOf(fallback) ].filter(isDefined),
+        message: 'Command readiness policy and fallback descriptor do not form a valid contract.',
+        expected: whenMissing === 'use-fallback'
+            ? { whenMissing: 'use-fallback', fallback: command.commandKind === 'draw' ? 'DrawCommand' : 'DispatchCommand' }
+            : { whenMissing, fallback: 'absent' },
+        actual: {
+            reason,
+            whenMissing,
+            fallback: fallback === undefined ? 'undefined' : describeValue(fallback),
+        },
+    })
+}
+
+function throwFallbackDiagnostic(
+    command: DrawCommand | DispatchCommand,
+    fallback: unknown,
+    reason: 'commandKind' | 'runtime' | 'disposed' | 'writes' | 'cycle' | 'policy'
+): never {
+
+    const record = isRecord(fallback) ? fallback : {}
+    const resources = isRecord(record.resources) && Array.isArray(record.resources.write)
+        ? record.resources.write
+        : []
+    const runtime = isRecord(record.runtime) ? record.runtime : undefined
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_FALLBACK_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [
+            diagnosticSubjectOf(fallback),
+            ...command.resources.write.map(resource => resource.subject),
+            ...resources.map(resource => diagnosticSubjectOf(resource)).filter(isDefined),
+        ].filter(isDefined),
+        message: 'Command fallback must be an acyclic, usable command with the same kind, runtime, and declared writes.',
+        expected: {
+            commandKind: command.commandKind,
+            runtimeId: command.runtime.id,
+            disposed: false,
+            writeResourceIds: command.resources.write.map(resource => resource.id),
+            fallbackChain: 'acyclic readiness contracts',
+        },
+        actual: {
+            reason,
+            commandKind: record.commandKind,
+            runtimeId: runtime?.id,
+            disposed: record.isDisposed,
+            whenMissing: record.whenMissing,
+            writeResourceIds: resources.map(resource => isRecord(resource) ? resource.id : undefined),
+        },
+    })
 }
 
 function throwCountDiagnostic(command: DrawCommand, count: unknown): never {

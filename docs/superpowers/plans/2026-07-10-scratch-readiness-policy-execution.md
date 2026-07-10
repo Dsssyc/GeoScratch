@@ -66,11 +66,11 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 - Modify: `tests/scratch-readiness-policy-execution.test.js`
 - Modify: `packages/geoscratch/src/scratch/command.ts`
 
-- [ ] Write RED runtime tests for missing fallback, forbidden fallback on non-fallback policies, wrong command kind, wrong runtime, disposed fallback, declared-write identity mismatch, repeated/self reference, and a forged cycle. Assert `SCRATCH_COMMAND_READINESS_POLICY_MISSING` or `SCRATCH_COMMAND_FALLBACK_INVALID` with structured `expected`, `actual`, `subject`, and `related` facts.
-- [ ] Normalize readiness policy and fallback once during command construction. Validate fallback kind/runtime/lifecycle and compare declared write resources as identity sets, not mutable array order.
-- [ ] Walk the immutable fallback chain with a visited-command set; reject any repeated id before submission resolution.
-- [ ] Lock the fallback property with the rest of the command contract and add post-construction mutation tests.
-- [ ] Verify existing static/indexed/indirect Draw/Dispatch tests remain green; commit with `git commit -m "Validate Scratch fallback command contracts"`.
+- [x] Write RED runtime tests for missing fallback, forbidden fallback on non-fallback policies, wrong command kind, wrong runtime, disposed fallback, declared-write identity mismatch, repeated/self reference, and a forged cycle. Assert `SCRATCH_COMMAND_READINESS_POLICY_MISSING` or `SCRATCH_COMMAND_FALLBACK_INVALID` with structured `expected`, `actual`, `subject`, and `related` facts.
+- [x] Normalize readiness policy and fallback once during command construction. Validate fallback kind/runtime/lifecycle and compare declared write resources as identity sets, not mutable array order.
+- [x] Walk the immutable fallback chain with a visited-command set; reject any repeated id before submission resolution.
+- [x] Lock the fallback property with the rest of the command contract and add post-construction mutation tests.
+- [x] Verify existing static/indexed/indirect Draw/Dispatch tests remain green; commit with `git commit -m "Validate Scratch fallback command contracts"`.
 
 ## Task 3: Resolved Submission Plan And `skip-command`
 
