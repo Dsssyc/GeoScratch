@@ -746,6 +746,105 @@ describe('scratch native indexed and indirect execution', () => {
         expect(fixture.calls.maps).to.deep.equal([])
     })
 
+    it('keeps selected indirect fallbacks on the native WebGPU path', async() => {
+
+        const fixture = await createComputeFixture()
+        const missingPrimaryInput = fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_STORAGE,
+        })
+        const argumentsBuffer = fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const output = fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_STORAGE,
+        })
+        const upload = fixture.runtime.createUploadCommand({
+            target: argumentsBuffer,
+            data: new Uint32Array([ 9, 4, 5, 6 ]),
+        })
+        const fallback = fixture.runtime.createDispatchCommand({
+            pipeline: fixture.pipeline,
+            count: { indirect: argumentsBuffer, offset: 4 },
+            resources: { read: [ readResource(argumentsBuffer, 1) ], write: [ output ] },
+            whenMissing: 'throw',
+        })
+        const primary = fixture.runtime.createDispatchCommand({
+            pipeline: fixture.pipeline,
+            count: { workgroups: [ 1 ] },
+            resources: { read: [ readResource(missingPrimaryInput) ], write: [ output ] },
+            whenMissing: 'use-fallback',
+            fallback,
+        })
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .compute(fixture.pass, [ primary ])
+            .submit()
+
+        expect(fixture.calls.computePasses[0].actions).to.deep.equal([
+            { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
+            { type: 'dispatchWorkgroupsIndirect', buffer: argumentsBuffer.gpuBuffer, offset: 4 },
+            { type: 'end' },
+        ])
+        expect(fixture.calls.maps).to.deep.equal([])
+        expect(submitted.resourceAccesses.filter(access => access.stepKind === 'compute')).to.deep.include({
+            stepIndex: 1,
+            stepKind: 'compute',
+            commandKind: 'dispatch',
+            commandId: fallback.id,
+            passId: fixture.pass.id,
+            resourceId: argumentsBuffer.id,
+            resourceKind: 'BufferResource',
+            subject: argumentsBuffer.subject,
+            access: 'read',
+            contentEpochBefore: 1,
+            contentEpochAfter: 1,
+            allocationVersion: 1,
+        })
+        expect(submitted.executionOutcomes[0]).to.deep.include({
+            outcomeKind: 'pass',
+            requestedCommandIds: [ primary.id ],
+            encodedCommandIds: [ fallback.id ],
+        })
+        expect(submitted.executionOutcomes[1]).to.deep.include({
+            outcomeKind: 'command',
+            requestedCommandId: primary.id,
+            status: 'fallback-executed',
+            executedCommandId: fallback.id,
+        })
+        expect(output.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses).to.deep.include({
+            stepIndex: 1,
+            stepKind: 'compute',
+            commandKind: 'dispatch',
+            commandId: fallback.id,
+            passId: fixture.pass.id,
+            resourceId: output.id,
+            resourceKind: 'BufferResource',
+            subject: output.subject,
+            access: 'write',
+            contentEpochBefore: 0,
+            contentEpochAfter: 1,
+            allocationVersion: 1,
+        })
+        expect(submitted.producerEpochs).to.deep.include({
+            resourceId: output.id,
+            resourceKind: 'BufferResource',
+            subject: output.subject,
+            contentEpoch: 1,
+            allocationVersion: 1,
+            producedBy: {
+                stepIndex: 1,
+                stepKind: 'compute',
+                commandKind: 'dispatch',
+                commandId: fallback.id,
+                passId: fixture.pass.id,
+            },
+        })
+    })
+
     it('validates native indirect buffers, offsets, ranges, runtimes, and disposal', async() => {
 
         const render = await createRenderFixture()

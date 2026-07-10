@@ -5,6 +5,7 @@ export {
     throwScratchDiagnostic,
 } from './diagnostics.js'
 export type {
+    DiagnosticSubject,
     ScratchDiagnostic,
     ScratchDiagnosticReport,
 } from './diagnostics.js'
@@ -116,6 +117,11 @@ export type {
     RenderCommand,
     SubmittedResourceEpoch,
     SubmissionBuilderOptions,
+    SubmissionCommandExecutionOutcome,
+    SubmissionCommandReadinessAttempt,
+    SubmissionExecutionOutcome,
+    SubmissionMissingResource,
+    SubmissionPassExecutionOutcome,
     SubmissionResourceAccess,
     SubmissionResourceAccessKind,
     SubmissionStepKind,

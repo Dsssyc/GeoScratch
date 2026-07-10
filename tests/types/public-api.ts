@@ -844,6 +844,53 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
     const resourceAccesses: readonly scr.SubmissionResourceAccess[] = submitted.resourceAccesses
     const producerEpochs: readonly scr.SubmittedResourceEpoch[] = submitted.producerEpochs
+    const diagnosticSubject: scr.DiagnosticSubject = storageInput.subject
+    const missingResource: scr.SubmissionMissingResource = {
+        resourceId: storageInput.id,
+        resourceKind: storageInput.resourceKind,
+        subject: diagnosticSubject,
+        requiredContentEpoch: storageInput.contentEpoch,
+        simulatedState: storageInput.state,
+        simulatedContentEpoch: storageInput.contentEpoch,
+        allocationVersion: storageInput.allocationVersion,
+    }
+    const readinessAttempt: scr.SubmissionCommandReadinessAttempt = {
+        commandId: dispatch.id,
+        commandKind: 'dispatch',
+        policy: dispatch.whenMissing,
+        missing: [ missingResource ],
+    }
+    const commandExecutionOutcome: scr.SubmissionCommandExecutionOutcome = {
+        outcomeKind: 'command',
+        stepIndex: 0,
+        stepKind: 'compute',
+        passId: computePass.id,
+        requestedCommandId: dispatch.id,
+        requestedCommandKind: 'dispatch',
+        status: 'executed',
+        executedCommandId: dispatch.id,
+        attempts: [ readinessAttempt ],
+    }
+    const passExecutionOutcome: scr.SubmissionPassExecutionOutcome = {
+        outcomeKind: 'pass',
+        stepIndex: 0,
+        stepKind: 'compute',
+        passId: computePass.id,
+        status: 'executed',
+        requestedCommandIds: [ dispatch.id ],
+        encodedCommandIds: [ dispatch.id ],
+    }
+    const executionOutcome: scr.SubmissionExecutionOutcome = commandExecutionOutcome
+    const executionOutcomes: readonly scr.SubmissionExecutionOutcome[] = submitted.executionOutcomes
+    const compatDiagnosticSubject: scratchCompat.DiagnosticSubject = diagnosticSubject
+    const compatMissingResource: scratchCompat.SubmissionMissingResource = missingResource
+    const compatReadinessAttempt: scratchCompat.SubmissionCommandReadinessAttempt = readinessAttempt
+    const compatCommandExecutionOutcome: scratchCompat.SubmissionCommandExecutionOutcome = commandExecutionOutcome
+    const compatPassExecutionOutcome: scratchCompat.SubmissionPassExecutionOutcome = passExecutionOutcome
+    const compatExecutionOutcome: scratchCompat.SubmissionExecutionOutcome = executionOutcome
+    const compatExecutionOutcomes: readonly scratchCompat.SubmissionExecutionOutcome[] = submitted.executionOutcomes
+    // @ts-expect-error execution outcomes are immutable after submission
+    submitted.executionOutcomes = []
     const accessKind: scr.SubmissionResourceAccessKind | undefined = resourceAccesses[0]?.access
     const stepKind: scr.SubmissionStepKind | undefined = resourceAccesses[0]?.stepKind
     const producedStepKind: scr.SubmissionStepKind | undefined = producerEpochs[0]?.producedBy.stepKind
@@ -978,6 +1025,17 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void submitted
     void resourceAccesses
     void producerEpochs
+    void missingResource
+    void readinessAttempt
+    void passExecutionOutcome
+    void executionOutcomes
+    void compatDiagnosticSubject
+    void compatMissingResource
+    void compatReadinessAttempt
+    void compatCommandExecutionOutcome
+    void compatPassExecutionOutcome
+    void compatExecutionOutcome
+    void compatExecutionOutcomes
     void accessKind
     void stepKind
     void producedStepKind

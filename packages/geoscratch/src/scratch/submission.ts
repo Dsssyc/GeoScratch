@@ -9,7 +9,7 @@ import {
 import { createScheduledReadbackOperation } from './readback.js'
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
-import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
@@ -50,6 +50,59 @@ export type SubmittedResourceEpoch = {
     allocationVersion: number
     producedBy: SubmissionAccessOrigin
 }
+
+export type SubmissionMissingResource = {
+    resourceId: string
+    resourceKind: string
+    label?: string
+    subject: DiagnosticSubject
+    role?: string
+    requiredContentEpoch: number
+    simulatedState: ResourceState
+    simulatedContentEpoch: number
+    allocationVersion: number
+}
+
+export type SubmissionCommandReadinessAttempt = {
+    commandId: string
+    commandKind: 'draw' | 'dispatch'
+    policy: ResourceReadinessPolicy
+    missing: readonly SubmissionMissingResource[]
+}
+
+export type SubmissionCommandExecutionOutcome = {
+    outcomeKind: 'command'
+    stepIndex: number
+    stepKind: 'render' | 'compute'
+    passId: string
+    requestedCommandId: string
+    requestedCommandKind: 'draw' | 'dispatch'
+    status:
+        | 'executed'
+        | 'fallback-executed'
+        | 'skipped-command'
+        | 'skipped-pass'
+    executedCommandId?: string
+    attempts: readonly SubmissionCommandReadinessAttempt[]
+}
+
+export type SubmissionPassExecutionOutcome = {
+    outcomeKind: 'pass'
+    stepIndex: number
+    stepKind: 'render' | 'compute'
+    passId: string
+    status:
+        | 'executed'
+        | 'skipped-pass'
+        | 'skipped-empty'
+    triggerCommandId?: string
+    requestedCommandIds: readonly string[]
+    encodedCommandIds: readonly string[]
+}
+
+export type SubmissionExecutionOutcome =
+    | SubmissionCommandExecutionOutcome
+    | SubmissionPassExecutionOutcome
 
 type PendingSubmissionResourceAccess = {
     origin: SubmissionAccessOrigin
@@ -119,9 +172,12 @@ type ResolvedSubmissionPlan = {
     steps: ResolvedSubmissionStep[]
     readiness: ReadinessSimulation
     querySlots: QuerySlotSimulation
+    executionOutcomes: SubmissionExecutionOutcome[]
 }
 
 type ReadCommand = CopyCommand | DispatchCommand | DrawCommand | ReadbackCommand
+
+type ExecutableCommand = DrawCommand | DispatchCommand
 
 type PendingReadback = {
     command: ReadbackCommand
@@ -145,11 +201,44 @@ type QuerySlotSimulationState = {
 
 type QuerySlotSimulation = Map<string, QuerySlotSimulationState>
 
-type CommandReadinessResolution = 'execute' | 'skip-command' | 'skip-pass'
-
 type ResolvedPassCommands<Command> =
-    | { disposition: 'execute', commands: Command[] }
-    | { disposition: 'skip-pass', commands: Command[], triggerCommandId: string }
+    | {
+        disposition: 'execute'
+        commands: Command[]
+        commandOutcomes: SubmissionCommandExecutionOutcome[]
+    }
+    | {
+        disposition: 'skip-pass'
+        commands: Command[]
+        commandOutcomes: SubmissionCommandExecutionOutcome[]
+        triggerCommandId: string
+    }
+
+type ResolvedExecutableCommand<Command extends ExecutableCommand> =
+    | {
+        disposition: 'execute'
+        command: Command
+        outcome: SubmissionCommandExecutionOutcome
+    }
+    | {
+        disposition: 'skip-command'
+        outcome: SubmissionCommandExecutionOutcome
+    }
+    | {
+        disposition: 'skip-pass'
+        triggerCommandId: string
+        outcome: SubmissionCommandExecutionOutcome
+    }
+
+type MissingReadRequirement = {
+    readRequirement: CommandResourceReadDescriptor
+    simulated: ResourceSimulationState
+}
+
+type CommandExecutionDiagnosticContext = {
+    requestedCommand: ExecutableCommand
+    attemptedCommands: readonly ExecutableCommand[]
+}
 
 type RenderAttachmentKind = 'color' | 'depth-stencil'
 
@@ -367,6 +456,7 @@ export class SubmissionBuilder {
             commandBuffers,
             report: resolvedPlan.report,
             resourceAccesses,
+            executionOutcomes: resolvedPlan.executionOutcomes,
             done: createDonePromise(this.runtime.queue),
         })
         for (const pending of pendingReadbacks) {
@@ -401,6 +491,7 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
 
     const diagnostics: ScratchDiagnostic[] = []
     const steps: ResolvedSubmissionStep[] = []
+    const executionOutcomes: SubmissionExecutionOutcome[] = []
     let readiness: ReadinessSimulation = new Map()
     let querySlots: QuerySlotSimulation = new Map()
     const readbackSteps = new Map<ReadbackCommand, number>()
@@ -450,7 +541,13 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
                 passDiagnostics
             )
             if (resolution.disposition === 'skip-pass') {
-                steps.push({ ...step, ...resolution })
+                appendPassExecutionOutcomes(executionOutcomes, stepIndex, step, resolution)
+                steps.push({
+                    ...step,
+                    commands: [],
+                    disposition: 'skip-pass',
+                    triggerCommandId: resolution.triggerCommandId,
+                })
                 continue
             }
 
@@ -458,7 +555,8 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
             readiness = passReadiness
             querySlots = passQuerySlots
             diagnostics.push(...passDiagnostics)
-            steps.push({ ...step, ...resolution })
+            appendPassExecutionOutcomes(executionOutcomes, stepIndex, step, resolution)
+            steps.push({ ...step, commands: resolution.commands, disposition: 'execute' })
             continue
         }
 
@@ -474,7 +572,13 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
             passDiagnostics
         )
         if (resolution.disposition === 'skip-pass') {
-            steps.push({ ...step, ...resolution })
+            appendPassExecutionOutcomes(executionOutcomes, stepIndex, step, resolution)
+            steps.push({
+                ...step,
+                commands: [],
+                disposition: 'skip-pass',
+                triggerCommandId: resolution.triggerCommandId,
+            })
             continue
         }
 
@@ -486,6 +590,7 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
         readiness = passReadiness
         querySlots = passQuerySlots
         diagnostics.push(...passDiagnostics)
+        appendPassExecutionOutcomes(executionOutcomes, stepIndex, step, resolution)
         steps.push({ ...resolvedStep, disposition: 'execute' })
     }
 
@@ -494,6 +599,7 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
         steps,
         readiness,
         querySlots,
+        executionOutcomes,
     }
 }
 
@@ -551,7 +657,7 @@ function validateCopyReadiness(
     diagnostics: ScratchDiagnostic[]
 ): void {
 
-    resolveCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, undefined, 'source')
+    validateThrowOnlyCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, 'source')
 }
 
 function validateReadbackStep(builder: SubmissionBuilder, step: ReadbackStep) {
@@ -581,7 +687,7 @@ function validateReadbackReadiness(
     diagnostics: ScratchDiagnostic[]
 ): void {
 
-    resolveCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, undefined, 'source')
+    validateThrowOnlyCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, 'source')
 }
 
 function validateReadbackUniqueness(
@@ -686,34 +792,40 @@ function resolveComputeReadiness(
 ): ResolvedPassCommands<DispatchCommand> {
 
     const commands: DispatchCommand[] = []
-    for (const command of step.commands) {
-        const resolution = resolveCommandReadiness(
+    const commandOutcomes: SubmissionCommandExecutionOutcome[] = []
+    for (const [commandIndex, command] of step.commands.entries()) {
+        const resolution = resolveExecutableCommand(
             builder,
             stepIndex,
             command,
-            command.resources.read,
             readiness,
             diagnostics,
             step.passSpec
         )
-        if (resolution === 'skip-command') continue
-        if (resolution === 'skip-pass') {
+        commandOutcomes.push(resolution.outcome)
+        if (resolution.disposition === 'skip-command') continue
+        if (resolution.disposition === 'skip-pass') {
+            markCommandOutcomesSkippedPass(commandOutcomes)
+            for (const remaining of step.commands.slice(commandIndex + 1)) {
+                commandOutcomes.push(createUnattemptedSkippedPassOutcome(stepIndex, step.passSpec, remaining))
+            }
             return {
                 disposition: 'skip-pass',
                 commands: [],
-                triggerCommandId: command.id,
+                commandOutcomes,
+                triggerCommandId: resolution.triggerCommandId,
             }
         }
 
-        commands.push(command)
-        if (command._producesDeclaredWrites) {
-            for (const resource of command.resources.write) {
+        commands.push(resolution.command)
+        if (resolution.command._producesDeclaredWrites) {
+            for (const resource of resolution.command.resources.write) {
                 markSimulatedReady(readiness, resource)
             }
         }
     }
 
-    return { disposition: 'execute', commands }
+    return { disposition: 'execute', commands, commandOutcomes }
 }
 
 function resolveRenderReadiness(
@@ -725,33 +837,40 @@ function resolveRenderReadiness(
 ): ResolvedPassCommands<RenderCommand> {
 
     const commands: RenderCommand[] = []
-    for (const command of step.commands) {
+    const commandOutcomes: SubmissionCommandExecutionOutcome[] = []
+    for (const [commandIndex, command] of step.commands.entries()) {
         if (command.commandKind !== 'draw') {
             commands.push(command)
             continue
         }
 
-        const resolution = resolveCommandReadiness(
+        const resolution = resolveExecutableCommand(
             builder,
             stepIndex,
             command,
-            command.resources.read,
             readiness,
             diagnostics,
             step.passSpec
         )
-        if (resolution === 'skip-command') continue
-        if (resolution === 'skip-pass') {
+        commandOutcomes.push(resolution.outcome)
+        if (resolution.disposition === 'skip-command') continue
+        if (resolution.disposition === 'skip-pass') {
+            markCommandOutcomesSkippedPass(commandOutcomes)
+            for (const remaining of step.commands.slice(commandIndex + 1)) {
+                if (remaining.commandKind !== 'draw') continue
+                commandOutcomes.push(createUnattemptedSkippedPassOutcome(stepIndex, step.passSpec, remaining))
+            }
             return {
                 disposition: 'skip-pass',
                 commands: [],
-                triggerCommandId: command.id,
+                commandOutcomes,
+                triggerCommandId: resolution.triggerCommandId,
             }
         }
 
-        commands.push(command)
-        if (command._producesDeclaredWrites) {
-            for (const resource of command.resources.write) {
+        commands.push(resolution.command)
+        if (resolution.command._producesDeclaredWrites) {
+            for (const resource of resolution.command.resources.write) {
                 markSimulatedReady(readiness, resource)
             }
         }
@@ -767,7 +886,375 @@ function resolveRenderReadiness(
         markSimulatedReady(readiness, step.passSpec.depth.target)
     }
 
-    return { disposition: 'execute', commands }
+    return { disposition: 'execute', commands, commandOutcomes }
+}
+
+function appendPassExecutionOutcomes(
+    outcomes: SubmissionExecutionOutcome[],
+    stepIndex: number,
+    step: RenderStep | ComputeStep,
+    resolution: ResolvedPassCommands<RenderCommand> | ResolvedPassCommands<DispatchCommand>
+): void {
+
+    outcomes.push(
+        createPassExecutionOutcome(stepIndex, step, resolution),
+        ...resolution.commandOutcomes
+    )
+}
+
+function createPassExecutionOutcome(
+    stepIndex: number,
+    step: RenderStep | ComputeStep,
+    resolution: ResolvedPassCommands<RenderCommand> | ResolvedPassCommands<DispatchCommand>
+): SubmissionPassExecutionOutcome {
+
+    const stepKind = step.kind
+    const requestedCommandIds = step.commands.map(command => command.id)
+    if (resolution.disposition === 'skip-pass') {
+        return {
+            outcomeKind: 'pass',
+            stepIndex,
+            stepKind,
+            passId: step.passSpec.id,
+            status: 'skipped-pass',
+            triggerCommandId: resolution.triggerCommandId,
+            requestedCommandIds,
+            encodedCommandIds: [],
+        }
+    }
+
+    const hasEncoderWork = resolution.commands.length > 0 || step.passSpec.hasEncoderSideEffects()
+    return {
+        outcomeKind: 'pass',
+        stepIndex,
+        stepKind,
+        passId: step.passSpec.id,
+        status: hasEncoderWork ? 'executed' : 'skipped-empty',
+        requestedCommandIds,
+        encodedCommandIds: hasEncoderWork ? resolution.commands.map(command => command.id) : [],
+    }
+}
+
+function resolveExecutableCommand<Command extends ExecutableCommand>(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    requestedCommand: Command,
+    readiness: ReadinessSimulation,
+    diagnostics: ScratchDiagnostic[],
+    passSpec: RenderPassSpec | ComputePassSpec
+): ResolvedExecutableCommand<Command> {
+
+    const attempts: SubmissionCommandReadinessAttempt[] = []
+    const attemptedCommands: ExecutableCommand[] = []
+    const visited = new Set<ExecutableCommand>()
+    let command: ExecutableCommand = requestedCommand
+
+    while (true) {
+        if (visited.has(command)) {
+            throwFallbackResolutionDiagnostic(builder, stepIndex, passSpec, requestedCommand, attemptedCommands, command)
+        }
+        visited.add(command)
+        attemptedCommands.push(command)
+
+        if (command !== requestedCommand) {
+            validateFallbackCommandForPass(builder, stepIndex, passSpec, requestedCommand, attemptedCommands, command)
+        }
+
+        const missingRequirements = collectMissingReadRequirements(command.resources.read, readiness)
+        attempts.push({
+            commandId: command.id,
+            commandKind: command.commandKind,
+            policy: command.whenMissing,
+            missing: missingRequirements.map(missing => createMissingResourceFact(missing)),
+        })
+
+        if (missingRequirements.length === 0) {
+            const context = { requestedCommand, attemptedCommands }
+            validateCommandReadEpochs(
+                builder,
+                stepIndex,
+                command,
+                command.resources.read,
+                readiness,
+                diagnostics,
+                passSpec,
+                undefined,
+                context
+            )
+            return {
+                disposition: 'execute',
+                command: command as Command,
+                outcome: createCommandExecutionOutcome(
+                    stepIndex,
+                    passSpec,
+                    requestedCommand,
+                    command === requestedCommand ? 'executed' : 'fallback-executed',
+                    attempts,
+                    command.id
+                ),
+            }
+        }
+
+        if (command.whenMissing === 'throw') {
+            const first = missingRequirements[0]!
+            throwCommandResourceNotReadyDiagnostic(
+                builder,
+                stepIndex,
+                command,
+                first.readRequirement,
+                first.simulated,
+                passSpec,
+                undefined,
+                { requestedCommand, attemptedCommands }
+            )
+        }
+
+        if (command.whenMissing === 'skip-command') {
+            return {
+                disposition: 'skip-command',
+                outcome: createCommandExecutionOutcome(
+                    stepIndex,
+                    passSpec,
+                    requestedCommand,
+                    'skipped-command',
+                    attempts
+                ),
+            }
+        }
+
+        if (command.whenMissing === 'skip-pass') {
+            return {
+                disposition: 'skip-pass',
+                triggerCommandId: command.id,
+                outcome: createCommandExecutionOutcome(
+                    stepIndex,
+                    passSpec,
+                    requestedCommand,
+                    'skipped-pass',
+                    attempts
+                ),
+            }
+        }
+
+        const fallback = command.fallback
+        if (fallback === undefined) {
+            throwFallbackResolutionDiagnostic(builder, stepIndex, passSpec, requestedCommand, attemptedCommands, command)
+        }
+        command = fallback
+    }
+}
+
+function createCommandExecutionOutcome(
+    stepIndex: number,
+    passSpec: RenderPassSpec | ComputePassSpec,
+    requestedCommand: ExecutableCommand,
+    status: SubmissionCommandExecutionOutcome['status'],
+    attempts: SubmissionCommandReadinessAttempt[],
+    executedCommandId?: string
+): SubmissionCommandExecutionOutcome {
+
+    const outcome: SubmissionCommandExecutionOutcome = {
+        outcomeKind: 'command',
+        stepIndex,
+        stepKind: passSpec.passKind,
+        passId: passSpec.id,
+        requestedCommandId: requestedCommand.id,
+        requestedCommandKind: requestedCommand.commandKind,
+        status,
+        attempts,
+    }
+    if (executedCommandId !== undefined) outcome.executedCommandId = executedCommandId
+
+    return outcome
+}
+
+function createUnattemptedSkippedPassOutcome(
+    stepIndex: number,
+    passSpec: RenderPassSpec | ComputePassSpec,
+    requestedCommand: ExecutableCommand
+): SubmissionCommandExecutionOutcome {
+
+    return createCommandExecutionOutcome(stepIndex, passSpec, requestedCommand, 'skipped-pass', [])
+}
+
+function markCommandOutcomesSkippedPass(outcomes: SubmissionCommandExecutionOutcome[]): void {
+
+    for (const outcome of outcomes) {
+        outcome.status = 'skipped-pass'
+        delete outcome.executedCommandId
+    }
+}
+
+function collectMissingReadRequirements(
+    readRequirements: readonly CommandResourceReadDescriptor[],
+    readiness: ReadinessSimulation
+): MissingReadRequirement[] {
+
+    return readRequirements
+        .map(readRequirement => ({
+            readRequirement,
+            simulated: simulatedResourceState(readiness, readRequirement.resource),
+        }))
+        .filter(({ simulated }) => simulated.state !== 'ready')
+}
+
+function createMissingResourceFact(missing: MissingReadRequirement, role?: string): SubmissionMissingResource {
+
+    const resource = missing.readRequirement.resource
+    const fact: SubmissionMissingResource = {
+        resourceId: resource.id,
+        resourceKind: resource.resourceKind,
+        subject: resource.subject,
+        requiredContentEpoch: missing.readRequirement.contentEpoch,
+        simulatedState: missing.simulated.state,
+        simulatedContentEpoch: missing.simulated.contentEpoch,
+        allocationVersion: resource.allocationVersion,
+    }
+    if (resource.label !== undefined) fact.label = resource.label
+    if (role !== undefined) fact.role = role
+
+    return fact
+}
+
+function validateFallbackCommandForPass(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    passSpec: RenderPassSpec | ComputePassSpec,
+    requestedCommand: ExecutableCommand,
+    attemptedCommands: readonly ExecutableCommand[],
+    fallback: ExecutableCommand
+): void {
+
+    if (
+        !isRecord(fallback) ||
+        typeof fallback.assertRuntime !== 'function' ||
+        typeof fallback.validateForPass !== 'function' ||
+        typeof fallback.encode !== 'function'
+    ) {
+        throwFallbackPassIncompatibleDiagnostic(
+            builder,
+            stepIndex,
+            passSpec,
+            requestedCommand,
+            attemptedCommands,
+            fallback,
+            'invalid-fallback-command'
+        )
+    }
+
+    fallback.assertRuntime(builder.runtime)
+
+    try {
+        if (fallback.commandKind === 'draw' && passSpec.passKind === 'render') {
+            fallback.validateForPass(passSpec)
+            validatePipelineTargets(fallback, passSpec)
+            return
+        }
+
+        if (fallback.commandKind === 'dispatch' && passSpec.passKind === 'compute') {
+            fallback.validateForPass(passSpec)
+            return
+        }
+
+        throwFallbackPassIncompatibleDiagnostic(
+            builder,
+            stepIndex,
+            passSpec,
+            requestedCommand,
+            attemptedCommands,
+            fallback,
+            'pass-kind'
+        )
+    } catch (error) {
+        if (error instanceof ScratchDiagnosticError && error.diagnostic.code === 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE') {
+            throw error
+        }
+
+        throwFallbackPassIncompatibleDiagnostic(
+            builder,
+            stepIndex,
+            passSpec,
+            requestedCommand,
+            attemptedCommands,
+            fallback,
+            error instanceof ScratchDiagnosticError ? error.diagnostic.code : 'pass-validation'
+        )
+    }
+}
+
+function throwFallbackPassIncompatibleDiagnostic(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    passSpec: RenderPassSpec | ComputePassSpec,
+    requestedCommand: ExecutableCommand,
+    attemptedCommands: readonly ExecutableCommand[],
+    fallback: unknown,
+    reason: string
+): never {
+
+    const fallbackRecord = isRecord(fallback) ? fallback : {}
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+        severity: 'error',
+        phase: 'submission',
+        subject: diagnosticSubjectOf(fallback) ?? requestedCommand.subject,
+        related: [
+            requestedCommand.subject,
+            ...attemptedCommands.map(command => command.subject),
+            passSpec.subject,
+            builder.subject,
+        ],
+        message: 'Selected fallback command is incompatible with the current submission pass.',
+        expected: {
+            commandKind: requestedCommand.commandKind,
+            passKind: passSpec.passKind,
+            pipeline: 'compatible with the current pass attachments and state',
+        },
+        actual: {
+            reason,
+            stepIndex,
+            passId: passSpec.id,
+            requestedCommandId: requestedCommand.id,
+            fallbackCommandId: fallbackRecord.id,
+            fallbackCommandKind: fallbackRecord.commandKind,
+            attemptedCommandIds: attemptedCommands.map(command => command.id),
+            validation: builder.validation,
+        },
+    })
+}
+
+function throwFallbackResolutionDiagnostic(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    passSpec: RenderPassSpec | ComputePassSpec,
+    requestedCommand: ExecutableCommand,
+    attemptedCommands: readonly ExecutableCommand[],
+    fallback: ExecutableCommand
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_FALLBACK_INVALID',
+        severity: 'error',
+        phase: 'submission',
+        subject: fallback.subject,
+        related: [
+            requestedCommand.subject,
+            ...attemptedCommands.map(command => command.subject),
+            passSpec.subject,
+            builder.subject,
+        ],
+        message: 'Fallback resolution encountered a missing or repeated command.',
+        expected: { fallbackChain: 'finite acyclic command chain' },
+        actual: {
+            stepIndex,
+            passId: passSpec.id,
+            requestedCommandId: requestedCommand.id,
+            fallbackCommandId: fallback.id,
+            attemptedCommandIds: attemptedCommands.map(command => command.id),
+            validation: builder.validation,
+        },
+    })
 }
 
 function markSimulatedTimestampWrites(querySlots: QuerySlotSimulation, timestampWrites: ComputePassSpec['timestampWrites']): void {
@@ -800,7 +1287,35 @@ function markSimulatedRenderQueryWrites(querySlots: QuerySlotSimulation, step: R
     }
 }
 
-function resolveCommandReadiness(
+function validateThrowOnlyCommandReadiness(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    command: CopyCommand | ReadbackCommand,
+    readRequirements: readonly CommandResourceReadDescriptor[],
+    readiness: ReadinessSimulation,
+    diagnostics: ScratchDiagnostic[],
+    role?: string
+): void {
+
+    const missing = collectMissingReadRequirements(readRequirements, readiness)
+
+    if (missing.length > 0) {
+        const first = missing[0]!
+        throwCommandResourceNotReadyDiagnostic(
+            builder,
+            stepIndex,
+            command,
+            first.readRequirement,
+            first.simulated,
+            undefined,
+            role
+        )
+    }
+
+    validateCommandReadEpochs(builder, stepIndex, command, readRequirements, readiness, diagnostics, undefined, role)
+}
+
+function validateCommandReadEpochs(
     builder: SubmissionBuilder,
     stepIndex: number,
     command: ReadCommand,
@@ -808,32 +1323,9 @@ function resolveCommandReadiness(
     readiness: ReadinessSimulation,
     diagnostics: ScratchDiagnostic[],
     passSpec?: RenderPassSpec | ComputePassSpec,
-    role?: string
-): CommandReadinessResolution {
-
-    const missing = readRequirements
-        .map(readRequirement => ({
-            readRequirement,
-            simulated: simulatedResourceState(readiness, readRequirement.resource),
-        }))
-        .filter(({ simulated }) => simulated.state !== 'ready')
-
-    if (missing.length > 0) {
-        const first = missing[0]!
-        if (command.whenMissing === 'throw') {
-            throwCommandResourceNotReadyDiagnostic(
-                builder,
-                stepIndex,
-                command,
-                first.readRequirement,
-                first.simulated,
-                passSpec,
-                role
-            )
-        }
-        if (command.whenMissing === 'skip-command') return 'skip-command'
-        if (command.whenMissing === 'skip-pass') return 'skip-pass'
-    }
+    role?: string,
+    context?: CommandExecutionDiagnosticContext
+): void {
 
     for (const readRequirement of readRequirements) {
         const resource = readRequirement.resource
@@ -850,7 +1342,8 @@ function resolveCommandReadiness(
                 simulated,
                 passSpec,
                 role,
-                'SCRATCH_SUBMISSION_READ_BEFORE_WRITE'
+                'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+                context
             ))
             continue
         }
@@ -864,12 +1357,11 @@ function resolveCommandReadiness(
                 simulated,
                 passSpec,
                 role,
-                'SCRATCH_SUBMISSION_STALE_READ'
+                'SCRATCH_SUBMISSION_STALE_READ',
+                context
             ))
         }
     }
-
-    return 'execute'
 }
 
 function simulatedResourceState(readiness: ReadinessSimulation, resource: Resource): ResourceSimulationState {
@@ -1010,7 +1502,8 @@ function throwCommandResourceNotReadyDiagnostic(
     readRequirement: CommandResourceReadDescriptor,
     simulated: ResourceSimulationState,
     passSpec?: RenderPassSpec | ComputePassSpec,
-    role?: string
+    role?: string,
+    context?: CommandExecutionDiagnosticContext
 ): never {
 
     const resource = readRequirement.resource
@@ -1022,6 +1515,7 @@ function throwCommandResourceNotReadyDiagnostic(
         subject: command.subject,
         related: [
             resource.subject,
+            ...(context?.attemptedCommands.map(attempted => attempted.subject) ?? []),
             passSpec?.subject,
             builder.subject,
         ].filter(isDefined),
@@ -1029,6 +1523,11 @@ function throwCommandResourceNotReadyDiagnostic(
         expected: { resourceState: 'ready' },
         actual: {
             stepIndex,
+            ...(passSpec !== undefined ? { passId: passSpec.id } : {}),
+            ...(context !== undefined ? {
+                requestedCommandId: context.requestedCommand.id,
+                attemptedCommandIds: context.attemptedCommands.map(attempted => attempted.id),
+            } : {}),
             commandId: command.id,
             commandKind: command.commandKind,
             access: 'read',
@@ -1042,6 +1541,7 @@ function throwCommandResourceNotReadyDiagnostic(
             currentContentEpoch: resource.contentEpoch,
             allocationVersion: resource.allocationVersion,
             whenMissing: command.whenMissing,
+            validation: builder.validation,
         },
     })
 }
@@ -1054,7 +1554,8 @@ function createCommandReadEpochDiagnostic(
     simulated: ResourceSimulationState,
     passSpec: RenderPassSpec | ComputePassSpec | undefined,
     role: string | undefined,
-    code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE' | 'SCRATCH_SUBMISSION_STALE_READ'
+    code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE' | 'SCRATCH_SUBMISSION_STALE_READ',
+    context?: CommandExecutionDiagnosticContext
 ): ScratchDiagnostic {
 
     const resource = readRequirement.resource
@@ -1067,6 +1568,7 @@ function createCommandReadEpochDiagnostic(
         subject: command.subject,
         related: [
             resource.subject,
+            ...(context?.attemptedCommands.map(attempted => attempted.subject) ?? []),
             passSpec?.subject,
             builder.subject,
         ].filter(isDefined),
@@ -1076,6 +1578,11 @@ function createCommandReadEpochDiagnostic(
         expected: { contentEpoch: readRequirement.contentEpoch },
         actual: {
             stepIndex,
+            ...(passSpec !== undefined ? { passId: passSpec.id } : {}),
+            ...(context !== undefined ? {
+                requestedCommandId: context.requestedCommand.id,
+                attemptedCommandIds: context.attemptedCommands.map(attempted => attempted.id),
+            } : {}),
             commandId: command.id,
             commandKind: command.commandKind,
             access: 'read',
@@ -1088,6 +1595,7 @@ function createCommandReadEpochDiagnostic(
             currentContentEpoch: resource.contentEpoch,
             allocationVersion: resource.allocationVersion,
             whenMissing: command.whenMissing,
+            validation: builder.validation,
         },
     })
 }
@@ -1101,6 +1609,7 @@ export class SubmittedWork {
     diagnostics: ScratchDiagnostic[]
     resourceAccesses: readonly SubmissionResourceAccess[]
     producerEpochs: readonly SubmittedResourceEpoch[]
+    readonly executionOutcomes: readonly SubmissionExecutionOutcome[]
     done: Promise<unknown>
 
     constructor(runtime: ScratchRuntime, options: {
@@ -1108,6 +1617,7 @@ export class SubmittedWork {
         commandBuffers?: GPUCommandBuffer[]
         report?: ScratchDiagnosticReport
         resourceAccesses?: SubmissionResourceAccess[]
+        executionOutcomes?: SubmissionExecutionOutcome[]
         done?: Promise<unknown>
     } = {}) {
 
@@ -1118,6 +1628,13 @@ export class SubmittedWork {
         this.diagnostics = this.report.diagnostics
         this.resourceAccesses = freezeResourceAccesses(options.resourceAccesses ?? [])
         this.producerEpochs = freezeProducerEpochs(createProducerEpochs(this.resourceAccesses))
+        this.executionOutcomes = freezeExecutionOutcomes(options.executionOutcomes ?? [])
+        Object.defineProperty(this, 'executionOutcomes', {
+            value: this.executionOutcomes,
+            enumerable: true,
+            configurable: false,
+            writable: false,
+        })
         this.done = options.done ?? Promise.resolve()
     }
 
@@ -1297,6 +1814,32 @@ function freezeProducerEpochs(producerEpochs: SubmittedResourceEpoch[]): readonl
         subject: freezeDiagnosticSubject(producerEpoch.subject),
         producedBy: Object.freeze({ ...producerEpoch.producedBy }) as SubmissionAccessOrigin,
     } as SubmittedResourceEpoch)))
+}
+
+function freezeExecutionOutcomes(outcomes: SubmissionExecutionOutcome[]): readonly SubmissionExecutionOutcome[] {
+
+    return Object.freeze(outcomes.map((outcome) => {
+        if (outcome.outcomeKind === 'pass') {
+            return Object.freeze({
+                ...outcome,
+                requestedCommandIds: Object.freeze([ ...outcome.requestedCommandIds ]),
+                encodedCommandIds: Object.freeze([ ...outcome.encodedCommandIds ]),
+            } as SubmissionPassExecutionOutcome)
+        }
+
+        const attempts = outcome.attempts.map((attempt) => Object.freeze({
+            ...attempt,
+            missing: Object.freeze(attempt.missing.map((missing) => Object.freeze({
+                ...missing,
+                subject: freezeDiagnosticSubject(missing.subject),
+            } as SubmissionMissingResource))),
+        } as SubmissionCommandReadinessAttempt))
+
+        return Object.freeze({
+            ...outcome,
+            attempts: Object.freeze(attempts),
+        } as SubmissionCommandExecutionOutcome)
+    }))
 }
 
 function freezeDiagnosticSubject(subject: DiagnosticSubject): DiagnosticSubject {

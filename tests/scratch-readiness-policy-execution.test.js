@@ -325,6 +325,13 @@ describe('scratch readiness policy execution', () => {
             expect(submitted.resourceAccesses).to.deep.equal([])
             expect(submitted.producerEpochs).to.deep.equal([])
             expect(submitted.diagnostics).to.deep.equal([])
+            expect(submitted.executionOutcomes.map(outcome => ({
+                outcomeKind: outcome.outcomeKind,
+                status: outcome.status,
+            }))).to.deep.equal([
+                { outcomeKind: 'pass', status: 'skipped-empty' },
+                { outcomeKind: 'command', status: 'skipped-command' },
+            ])
             expect(input.state).to.equal('empty')
             expect(input.contentEpoch).to.equal(0)
             expect(output.state).to.equal('empty')
@@ -415,6 +422,17 @@ describe('scratch readiness policy execution', () => {
         expect(submitted.resourceAccesses).to.deep.equal([])
         expect(submitted.producerEpochs).to.deep.equal([])
         expect(submitted.diagnostics).to.deep.equal([])
+        expect(submitted.executionOutcomes.map(outcome => ({
+            outcomeKind: outcome.outcomeKind,
+            stepIndex: outcome.stepIndex,
+            status: outcome.status,
+        }))).to.deep.equal([
+            { outcomeKind: 'pass', stepIndex: 0, status: 'skipped-pass' },
+            { outcomeKind: 'command', stepIndex: 0, status: 'skipped-pass' },
+            { outcomeKind: 'command', stepIndex: 0, status: 'skipped-pass' },
+            { outcomeKind: 'pass', stepIndex: 1, status: 'skipped-empty' },
+            { outcomeKind: 'command', stepIndex: 1, status: 'skipped-command' },
+        ])
         for (const resource of [ missing, staged, discarded, downstream ]) {
             expect(resource.state).to.equal('empty')
             expect(resource.contentEpoch).to.equal(0)
@@ -458,6 +476,25 @@ describe('scratch readiness policy execution', () => {
         expect(submitted.resourceAccesses).to.have.length(1)
         expect(submitted.resourceAccesses[0]).to.include({ resourceId: target.id, access: 'write' })
         expect(submitted.producerEpochs).to.have.length(1)
+        expect(submitted.executionOutcomes).to.deep.include({
+            outcomeKind: 'pass',
+            stepIndex: 0,
+            stepKind: 'render',
+            passId: pass.id,
+            status: 'executed',
+            requestedCommandIds: [ skipped.id ],
+            encodedCommandIds: [],
+        })
+        expect(submitted.executionOutcomes).to.deep.include({
+            outcomeKind: 'command',
+            stepIndex: 0,
+            stepKind: 'render',
+            passId: pass.id,
+            requestedCommandId: skipped.id,
+            requestedCommandKind: 'draw',
+            status: 'skipped-command',
+            attempts: submitted.executionOutcomes[1].attempts,
+        })
     })
 
     it('removes render attachments, timestamps, and occlusion writes for skip-pass', async() => {
@@ -472,6 +509,20 @@ describe('scratch readiness policy execution', () => {
         expect(fixture.calls.occlusionQueries).to.have.length(0)
         expect(submitted.resourceAccesses).to.deep.equal([])
         expect(submitted.producerEpochs).to.deep.equal([])
+        expect(submitted.executionOutcomes[0]).to.deep.include({
+            outcomeKind: 'pass',
+            status: 'skipped-pass',
+            triggerCommandId: fixture.trigger.id,
+            requestedCommandIds: fixture.commands.map(command => command.id),
+            encodedCommandIds: [],
+        })
+        expect(submitted.executionOutcomes.slice(1).map(outcome => ({
+            requestedCommandId: outcome.requestedCommandId,
+            status: outcome.status,
+        }))).to.deep.equal([
+            { requestedCommandId: fixture.draw.id, status: 'skipped-pass' },
+            { requestedCommandId: fixture.trigger.id, status: 'skipped-pass' },
+        ])
         expect(fixture.colorTarget.state).to.equal('empty')
         expect(fixture.colorTarget.contentEpoch).to.equal(0)
         expect(fixture.depthTarget.state).to.equal('empty')

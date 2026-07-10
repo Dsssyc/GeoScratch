@@ -113,13 +113,13 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 - Modify: `packages/geoscratch/src/scratch/index.ts`
 - Modify: `packages/geoscratch/src/index.ts`
 
-- [ ] Write RED tests for primary-to-fallback execution, multi-level fallback, fallback-to-skip-command, fallback-to-skip-pass, fallback-to-throw, and fallback dependency diagnostics. Assert that only the final selected command reaches the fake encoder.
-- [ ] Add RED coverage for a native indirect fallback to prove fallback selection never inspects GPU argument bytes and preserves the existing WebGPU lowering.
-- [ ] Define and export `SubmissionMissingResource`, `SubmissionCommandReadinessAttempt`, `SubmissionCommandExecutionOutcome`, `SubmissionPassExecutionOutcome`, and `SubmissionExecutionOutcome` exactly as required by the Goal.
-- [ ] Add `readonly executionOutcomes` to `SubmittedWork`. Record one pass outcome per render/compute step and one command outcome per requested Draw/Dispatch, including stable attempted and executed command ids.
-- [ ] Freeze every outcome, attempt, missing-resource fact, nested id array, and the top-level array.
-- [ ] Ensure resource accesses and producer epochs are captured only from resolved commands; add cross-ledger tests that reject skipped-write and primary-write ghosts.
-- [ ] Run focused outcome/native/epoch tests, `npm run typecheck`, and existing submission regressions; commit with `git commit -m "Record Scratch readiness execution outcomes"`.
+- [x] Write RED tests for primary-to-fallback execution, multi-level fallback, fallback-to-skip-command, fallback-to-skip-pass, fallback-to-throw, and fallback dependency diagnostics. Assert that only the final selected command reaches the fake encoder.
+- [x] Add RED coverage for a native indirect fallback to prove fallback selection never inspects GPU argument bytes and preserves the existing WebGPU lowering, including conservative declared-write production.
+- [x] Define and export `SubmissionMissingResource`, `SubmissionCommandReadinessAttempt`, `SubmissionCommandExecutionOutcome`, `SubmissionPassExecutionOutcome`, and `SubmissionExecutionOutcome` exactly as required by the Goal.
+- [x] Add `readonly executionOutcomes` to `SubmittedWork`. Record one pass outcome per render/compute step and one command outcome per requested Draw/Dispatch, including stable attempted and executed command ids.
+- [x] Freeze every outcome, attempt, missing-resource fact, nested id array, and the top-level array.
+- [x] Ensure resource accesses and producer epochs are captured only from resolved commands; add cross-ledger tests that reject skipped-write and primary-write ghosts.
+- [x] Run focused outcome/native/epoch tests, `npm run typecheck`, and existing submission regressions; commit with `git commit -m "Record Scratch readiness execution outcomes"`.
 
 ## Task 6: Real Browser Readiness Policy Example
 
