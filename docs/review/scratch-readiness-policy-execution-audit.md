@@ -26,12 +26,16 @@ Decision: `docs/decisions/ADR-028-scratch-readiness-policy-execution.md`
 
 ## Browser Verification Evidence
 
-Verified at feature commit `3c269a6` in WebGPU-capable Chromium against `http://127.0.0.1:5173/readinessPolicies/`. Desktop and mobile reloads reached `canvas[data-status="ready"]` without adding warning/error entries. A final clean browser session independently reached `ready` with an empty warning/error log array.
+Verified at feature commit `8e5b37f` in WebGPU-capable Chromium against `http://127.0.0.1:5173/readinessPolicies/`. Desktop and mobile reloads reached `canvas[data-status="ready"]`, each with an empty browser warning/error log array.
 
-- Desktop viewport and canvas: `1280 x 720`. Tolerance-based screenshot classification found `99.3685%` fallback green in the left sample, `100%` background in the skipped-command center sample, and `46.5006%` cyan plus `46.4803%` orange in the preserved checker sample. Red and magenta ratios were `0`.
+- Desktop viewport/CSS canvas: `1280 x 720`; backing canvas: `2560 x 1440`. Tolerance-based screenshot classification found `99.7867%` fallback green in the left sample, `100%` background in the skipped-command center sample, and `46.1126%` cyan plus `45.9960%` orange in the preserved checker sample. Red and magenta ratios were `0`.
 - Mobile viewport and canvas: `390 x 844`. Classification found `97.9064%` fallback green, `100%` skipped-command background, and `41.7316%` cyan plus `41.6918%` orange in the preserved checker sample. Red and magenta ratios were `0`.
-- Desktop screenshot: [`assets/readiness-policies-desktop.png`](assets/readiness-policies-desktop.png), SHA-256 `1ecedd1dfaf151d52b0dd6f8d62edbae45603c0b7a2e7fe6162a4ff34d478e3d`.
+- Desktop screenshot: [`assets/readiness-policies-desktop.png`](assets/readiness-policies-desktop.png), SHA-256 `124b8d67583069800c1ae80df413d826a20f1a049b906a7e992afe1769d475fa`.
 - Mobile screenshot: [`assets/readiness-policies-mobile.png`](assets/readiness-policies-mobile.png), SHA-256 `ce63beb014ddbd228b33e4c1c8cd456f31c7c8bb05d916b0200302810fb70083`.
+
+## Adversarial Review Evidence
+
+Four fresh-context issues-only review rounds were reconciled against source and tests. Valid findings covered duplicate declared-write epochs, post-construction lifecycle changes, incomplete hard-failure attempt facts, inaccurate test/browser evidence, color-target count compatibility, fallback diagnostic code boundaries, missing resource subjects, selected fallback dependency causes, and resolved resource-conflict provenance. Every valid finding received a focused regression before implementation and a full regression run afterward. The final narrow re-review of `8e5b37f` reported no actionable findings; its residual full-suite/typecheck/browser gaps were executed independently by the main verification flow.
 
 ## Scope Check
 
