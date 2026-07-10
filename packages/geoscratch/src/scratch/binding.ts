@@ -4,6 +4,7 @@ import { throwScratchDiagnostic } from './diagnostics.js'
 import { SamplerResource } from './sampler.js'
 import { TextureResource } from './texture.js'
 import { describeValue, getGlobalConstant } from './type-utils.js'
+import { readonlyMapSnapshot } from './readonly-map.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
@@ -91,8 +92,8 @@ export type BindSetOptions = {
 }
 
 type NormalizedBindSetBinding = {
-    entry: BindLayoutEntry
-    resource: BufferResource | TextureResource | SamplerResource
+    readonly entry: BindLayoutEntry
+    readonly resource: BufferResource | TextureResource | SamplerResource
 }
 
 export interface BindLayout {
@@ -194,7 +195,7 @@ export interface BindSet {
     id: string
     label?: string
     layout: BindLayout
-    bindings: Map<string, NormalizedBindSetBinding>
+    readonly bindings: ReadonlyMap<string, NormalizedBindSetBinding>
     gpuBindGroup?: GPUBindGroup
     boundAllocationVersions: Map<string, number>
     isDisposed: boolean
@@ -223,7 +224,13 @@ export class BindSet {
         this.runtime = runtime
         this.id = `scratch-bind-set-${UUID()}`
         this.layout = layout
-        this.bindings = normalizeBindings(this, bindings)
+        const normalizedBindings = lockNormalizedBindings(normalizeBindings(this, bindings))
+        Object.defineProperty(this, 'bindings', {
+            value: normalizedBindings,
+            enumerable: true,
+            configurable: false,
+            writable: false,
+        })
         this.isDisposed = false
         if (options.label !== undefined) this.label = options.label
         this.boundAllocationVersions = new Map()
@@ -325,6 +332,14 @@ export class BindSet {
 
         this.isDisposed = true
     }
+}
+
+function lockNormalizedBindings(
+    bindings: Map<string, NormalizedBindSetBinding>
+): ReadonlyMap<string, NormalizedBindSetBinding> {
+
+    for (const binding of bindings.values()) Object.freeze(binding)
+    return readonlyMapSnapshot(bindings)
 }
 
 function normalizeGroup(layout: BindLayout, group: number) {

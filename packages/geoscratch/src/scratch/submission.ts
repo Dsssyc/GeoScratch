@@ -282,9 +282,10 @@ export class SubmissionBuilder {
                 const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
                 for (const command of step.commands) {
                     const origin = commandAccessOrigin(stepIndex, 'compute', command, step.passSpec)
+                    const declaredWrites = command._producesDeclaredWrites ? command.resources.write : []
                     const accesses = [
                         ...command.resources.read.map(read => captureResourceAccess(read.resource, 'read', origin)),
-                        ...command.resources.write.map(resource => captureResourceAccess(resource, 'write', origin)),
+                        ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
                     ]
                     command.encode(passEncoder)
                     completeResourceAccesses(resourceAccesses, accesses)
@@ -301,10 +302,13 @@ export class SubmissionBuilder {
             let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
             for (const command of step.commands) {
                 const origin = commandAccessOrigin(stepIndex, 'render', command, step.passSpec)
+                const declaredWrites = command.commandKind === 'draw' && command._producesDeclaredWrites
+                    ? command.resources.write
+                    : []
                 const accesses = command.commandKind === 'draw'
                     ? [
                         ...command.resources.read.map(read => captureResourceAccess(read.resource, 'read', origin)),
-                        ...command.resources.write.map(resource => captureResourceAccess(resource, 'write', origin)),
+                        ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
                     ]
                     : []
                 command.encode(passEncoder)
@@ -605,8 +609,10 @@ function validateComputeReadiness(
 
     for (const command of step.commands) {
         validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, diagnostics, step.passSpec)
-        for (const resource of command.resources.write) {
-            markSimulatedReady(readiness, resource)
+        if (command._producesDeclaredWrites) {
+            for (const resource of command.resources.write) {
+                markSimulatedReady(readiness, resource)
+            }
         }
     }
 }
@@ -623,8 +629,10 @@ function validateRenderReadiness(
         if (command.commandKind !== 'draw') continue
 
         validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, diagnostics, step.passSpec)
-        for (const resource of command.resources.write) {
-            markSimulatedReady(readiness, resource)
+        if (command._producesDeclaredWrites) {
+            for (const resource of command.resources.write) {
+                markSimulatedReady(readiness, resource)
+            }
         }
     }
 
@@ -673,7 +681,7 @@ function validateCommandReadiness(
     builder: SubmissionBuilder,
     stepIndex: number,
     command: ReadCommand,
-    readRequirements: CommandResourceReadDescriptor[],
+    readRequirements: readonly CommandResourceReadDescriptor[],
     readiness: ReadinessSimulation,
     diagnostics: ScratchDiagnostic[],
     passSpec?: RenderPassSpec | ComputePassSpec,

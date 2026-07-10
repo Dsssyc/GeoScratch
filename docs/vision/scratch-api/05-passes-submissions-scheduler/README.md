@@ -130,6 +130,8 @@ Examples of checks:
 
 Native indexed and indirect commands use the same declared-read validation path as shader resources. Vertex, index, and indirect buffers must have explicit required content epochs. A prior upload or GPU command in the same submission may produce that epoch; the later fixed-function read is recorded in `SubmittedWork.resourceAccesses` without advancing the resource epoch. Indirect argument contents remain GPU data and are not copied to the CPU for scheduler validation.
 
+Submission simulation and encoding share the command's potential-write decision. A direct draw or dispatch whose static count is known to execute no invocations does not mark declared outputs ready and does not create write or producer ledger entries. Indirect counts remain opaque, so their declared writes are conservatively treated as potential producers without host inspection.
+
 Validation modes:
 
 ```ts

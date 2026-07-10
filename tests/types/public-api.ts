@@ -281,6 +281,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         inputValues: storageInput,
         outputValues: storageOutput,
     })
+    // @ts-expect-error normalized BindSet bindings are immutable
+    storageSet.bindings.clear()
     const dynamicStorageLayout: scr.BindLayout = runtime.createBindLayout({
         label: 'typed dynamic storage layout',
         group: 3,
@@ -517,6 +519,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         offset: 0,
         size: 6,
     }
+    const compatStaticIndexedCount: scratchCompat.StaticIndexedDrawCount = staticIndexedCount
+    const compatIndirectCount: scratchCompat.IndirectCommandCount = indirectCount
+    const compatDrawCount: scratchCompat.DrawCount = drawCount
+    const compatDispatchCount: scratchCompat.DispatchCount = dispatchCount
+    const compatIndexBinding: scratchCompat.DrawIndexBufferBinding = indexBinding
     const indexedDraw: scr.DrawCommand = runtime.createDrawCommand({
         pipeline: scratchPipeline,
         indexBuffer: indexBinding,
@@ -553,14 +560,38 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         resources: { read: [ indexRead ], write: [] },
         whenMissing: 'throw',
     })
+    // @ts-expect-error static non-indexed counts forbid an index buffer
     runtime.createDrawCommand({
         pipeline: scratchPipeline,
         indexBuffer: indexBinding,
-        // @ts-expect-error static non-indexed counts forbid an index buffer
         count: { vertexCount: 3 },
         resources: { read: [ indexRead ], write: [] },
         whenMissing: 'throw',
     })
+    runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        // @ts-expect-error direct and indirect draw count fields are mutually exclusive
+        count: { vertexCount: 3, indirect: indirectBuffer },
+        resources: { read: [ indirectRead ], write: [] },
+        whenMissing: 'throw',
+    })
+    runtime.createDrawCommand({
+        pipeline: scratchPipeline,
+        // @ts-expect-error vertex and indexed count fields are mutually exclusive
+        count: { vertexCount: 3, indexCount: 3 },
+        resources: { read: [], write: [] },
+        whenMissing: 'throw',
+    })
+    // @ts-expect-error command count is immutable after construction
+    draw.count = { vertexCount: 6 }
+    // @ts-expect-error command resource declarations are immutable after construction
+    draw.resources = { read: [], write: [] }
+    // @ts-expect-error normalized command read declarations are immutable
+    draw.resources.read.push(indirectRead)
+    // @ts-expect-error normalized index bindings are immutable
+    indexedDraw.indexBuffer!.buffer = indexBuffer
+    // @ts-expect-error command disposal state is read-only
+    draw.isDisposed = false
     const drawResources: scr.CommandResourceAccessDescriptor = draw.resources
     const drawReadResource: scr.Resource = drawResources.read[0].resource
     const drawReadContentEpoch: number = drawResources.read[0].contentEpoch
@@ -660,6 +691,13 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const computePipeline: scr.ScratchComputePipeline = runtime.createComputePipeline({
         program: computeProgram,
         bindLayouts: [ storageLayout ],
+    })
+    runtime.createDispatchCommand({
+        pipeline: computePipeline,
+        // @ts-expect-error direct and indirect dispatch count fields are mutually exclusive
+        count: { workgroups: [ 1 ], indirect: indirectBuffer },
+        resources: { read: [ indirectRead ], write: [] },
+        whenMissing: 'throw',
     })
     const dynamicComputePipeline: scr.ScratchComputePipeline = runtime.createComputePipeline({
         program: computeProgram,

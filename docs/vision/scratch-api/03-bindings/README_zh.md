@@ -64,6 +64,8 @@ const terrainSet = scratch.bindSet(terrainLayout, {
 - 当绑定资源 allocation version 变化时惰性重建 bind group
 - 向 command validation 暴露已绑定资源的 readiness
 
+完成 `BindSet` 构造后，normalized binding table 及其中的 entries 不可变。Command 因而会针对同一份 slot-to-resource mapping 完成 validation 与 encoding。Resource 本身仍保留显式的 content、allocation 与 lifecycle transition; allocation 变化继续通过 `allocationVersion` 使 cached bind group 失效。
+
 `BindSet` 不会仅因已绑定 resource 的 `contentEpoch` 改变而重建。内容变化影响 dependency validation 与 readback，不代表 physical binding target 变化。
 
 `BindSet` 不是 material parameter object。它只为显式 `BindLayout` 提供具体资源; 它不拥有 shader source、生成 accessor module、pipeline state、render style、object assignment、draw count 或 dispatch count。command 才是 pipeline 与 bind sets 为一次可执行动作相遇的位置。

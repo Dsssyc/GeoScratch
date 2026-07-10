@@ -45,7 +45,7 @@
 - [x] Add runtime RED tests that import the new public count/index types through their observable factories and request static indexed plus all indirect forms.
 - [x] Add `@ts-expect-error` cases for indexed count without `indexBuffer` and non-indexed static count with `indexBuffer`; run `npm run typecheck` and confirm the directives are not yet satisfied by the missing union.
 - [x] Define `StaticIndexedDrawCount`, `IndirectCommandCount`, `DrawCount`, `DispatchCount`, `DrawIndexBufferBinding`, and normalized index-binding types.
-- [x] Make `DrawCommandDescriptor` a union whose indexed branch requires `indexBuffer`, while its non-indexed branch forbids it; keep indirect mode selected by index-buffer presence.
+- [x] Make `DrawCommandDescriptor` a mutually exclusive union whose indexed branch requires `indexBuffer`, whose non-indexed branch forbids it, and whose count variants reject mixed direct/indirect fields; keep indirect mode selected by index-buffer presence.
 - [x] Export all public types from both `geoscratch` and `geoscratch/scratch`.
 - [x] Run `npm run typecheck` and focused tests; commit with `git commit -m "Add Scratch indexed indirect command contracts"`.
 
@@ -60,7 +60,7 @@
 - [x] Write RED tests for `setIndexBuffer` followed by `drawIndexed`, both index formats, normalized ranges, illegal pairings at runtime, and `SCRATCH_COMMAND_INDEX_BUFFER_INVALID`.
 - [x] Add RED tests proving zero vertex/index/instance counts and zero direct dispatch dimensions are legal, while fractional/out-of-u32 values and out-of-i32 `baseVertex` fail with `SCRATCH_COMMAND_COUNT_INVALID`.
 - [x] Add `setIndexBuffer` and `drawIndexed` recording to the fake render encoder.
-- [x] Normalize index bindings, validate `INDEX` usage, element alignment, positive aligned size, in-buffer range, runtime, and disposal.
+- [x] Normalize index bindings, validate `INDEX` usage, format-aligned offsets, non-negative native size ranges (including zero), static indexed count range, strip-topology format compatibility, runtime, and disposal.
 - [x] Normalize static draw arguments as u32 values except signed-i32 `baseVertex`; preserve WebGPU zero-count no-op behavior.
 - [x] Validate direct dispatch counts as u32 values not exceeding `runtime.deviceLimits.maxComputeWorkgroupsPerDimension`.
 - [x] Run focused tests, existing draw/compute tests, and `npm run typecheck`; commit with `git commit -m "Add Scratch static indexed draws"`.
@@ -91,7 +91,7 @@
 - [x] Write RED submission tests for empty, future, stale, same-submission-produced, and already-ready indirect/index reads under throw/warn/off validation.
 - [x] Validate explicit fixed-function reads after resource normalization; do not infer or capture a live epoch.
 - [x] Reuse the existing readiness simulation and resource-access recording so indirect/index reads remain ordinary declared reads.
-- [x] Prove those reads do not advance content epochs or create producer epochs, while earlier GPU writes remain producer facts.
+- [x] Prove those reads do not advance content epochs or create producer epochs, known static zero-count no-ops do not fabricate writes, and earlier or opaque indirect GPU writes remain producer facts.
 - [x] Run focused ledger tests, draw/compute regressions, and typecheck; commit with `git commit -m "Validate Scratch indirect resource epochs"`.
 
 ## Task 5: Real GPU Indirect Execution Example
@@ -128,8 +128,8 @@
 
 ## Task 7: Browser Verification, Review, Completion Audit, And Integration
 
-- [ ] Start the Vite dev server and open `indirectExecution` in a WebGPU-capable Chromium instance.
-- [ ] Verify no console/page errors, a nonblank canvas by screenshot plus pixel inspection, and both indexed/non-indexed output regions visible.
-- [ ] Run `npm run typecheck`, focused tests, `npm test`, `npm run build`, `git diff --check`, source-only scans, no-readback scan, and no-material scan.
-- [ ] Review the entire branch against the pasted Goal requirement by requirement; fix findings, rerun affected checks, and re-review.
+- [x] Start the Vite dev server and open `indirectExecution` in a WebGPU-capable Chromium instance.
+- [x] Verify no console/page errors, a nonblank canvas by screenshot plus pixel inspection, and both indexed/non-indexed output regions visible.
+- [x] Run `npm run typecheck`, focused tests, `npm test`, `npm run build`, `git diff --check`, source-only scans, no-readback scan, and no-material scan.
+- [x] Review the entire branch against the pasted Goal requirement by requirement; fix findings, rerun affected checks, and re-review.
 - [ ] Use `finishing-a-development-branch`, merge the verified branch into `dev-feature`, remove the worktree, delete the feature branch, and confirm only local `main` and `dev-feature` remain.

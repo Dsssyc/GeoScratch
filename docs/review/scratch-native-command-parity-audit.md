@@ -12,17 +12,18 @@ This audit compares Scratch's implemented draw/dispatch command surface one-to-o
 
 | WebGPU method | Scratch contract | Native lowering | Validation and ledger | Automated evidence | Documentation |
 | --- | --- | --- | --- | --- | --- |
-| `draw` | `StaticDrawCount` without `indexBuffer` | `DrawCommand.encode` calls `passEncoder.draw` | u32 direct arguments; vertex buffers require explicit epoch reads | existing `scratch-pipeline-command.test.js`; zero-count coverage in `scratch-native-indirect-execution.test.js` | vision `04`; ADR-015 and ADR-027 |
-| `drawIndexed` | `StaticIndexedDrawCount` plus `DrawIndexBufferBinding` | `setIndexBuffer` then `drawIndexed` | INDEX usage, format/alignment/range/runtime/disposal; index read in ledger | static indexed, uint16/uint32, pairing, diagnostic, and ledger tests | vision `04` and `09`; ADR-027 |
+| `draw` | `StaticDrawCount` without `indexBuffer` | `DrawCommand.encode` calls `passEncoder.draw` | render pipeline and all declared vertex slots required; u32 direct arguments; vertex buffers require explicit epoch reads; known zero no-op produces no write epoch | existing `scratch-pipeline-command.test.js`; pipeline/slot, zero-count, immutability, and producer-ledger coverage in `scratch-native-indirect-execution.test.js` | vision `04`; ADR-015 and ADR-027 |
+| `drawIndexed` | `StaticIndexedDrawCount` plus `DrawIndexBufferBinding` | `setIndexBuffer` then `drawIndexed` | render pipeline and all declared vertex slots required; INDEX usage, format-aligned offset, native size/range, static count fit, strip format, runtime/disposal; index read in ledger | static indexed, uint16/uint32, zero/odd-size range, count-range, strip, pairing, diagnostic, immutability, and ledger tests | vision `04` and `09`; ADR-027 |
 | `drawIndirect` | `IndirectCommandCount` without `indexBuffer` | `passEncoder.drawIndirect` | INDIRECT usage, 4-byte offset, 16-byte range; required read epoch | native lowering, invalid-buffer, same-submission producer, and ledger tests | vision `04` and `05`; ADR-027 |
 | `drawIndexedIndirect` | `IndirectCommandCount` plus `DrawIndexBufferBinding` | `setIndexBuffer` then `drawIndexedIndirect` | combined index/indirect validation; 20-byte argument range; both reads in ledger | native lowering, range, same-submission producer, and real-browser example | vision `04`, `05`, and `09`; ADR-027 |
-| `dispatchWorkgroups` | `StaticDispatchCount` | `DispatchCommand.encode` calls `dispatchWorkgroups` | u32 dimensions, zero allowed, device limit enforced | existing compute tests plus zero/limit tests | vision `04` and `05`; ADR-027 |
+| `dispatchWorkgroups` | `StaticDispatchCount` | `DispatchCommand.encode` calls `dispatchWorkgroups` | u32 dimensions, zero allowed without fabricated writes, device limit enforced | existing compute tests plus zero/limit/producer-ledger tests | vision `04` and `05`; ADR-027 |
 | `dispatchWorkgroupsIndirect` | `IndirectCommandCount` | `passEncoder.dispatchWorkgroupsIndirect` | INDIRECT usage, 4-byte offset, 12-byte range; required read epoch | native lowering, invalid-buffer, same-submission producer, ledger, and real-browser example | vision `04` and `05`; ADR-027 |
 
 ## Cross-Cutting Facts
 
 - Public types are exported from both `geoscratch` and `geoscratch/scratch`.
-- Type-contract tests reject indexed count without an index buffer and static vertex count with an index buffer.
+- Type-contract tests reject indexed count without an index buffer, static vertex count with an index buffer, and mixed direct/indirect count fields.
+- Normalized command execution fields, resource declarations, dynamic offsets, lifecycle state, and referenced bind-set tables are locked after construction, with runtime and type-contract mutation tests.
 - Fixed-function buffers are not inferred into the epoch model. Vertex, index, and indirect buffers require explicit `{ resource, contentEpoch }` declarations.
 - Reads preserve `contentEpoch`; only declared writes create producer epochs.
 - Indirect argument bytes are never mapped, read back, or decoded on the CPU.

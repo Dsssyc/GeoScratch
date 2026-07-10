@@ -64,6 +64,8 @@ Responsibilities:
 - lazily rebuild bind groups when bound resource allocation versions change
 - expose readiness of bound resources to command validation
 
+The normalized binding table and its entries are immutable after `BindSet` construction. Commands therefore validate and encode against the same slot-to-resource mapping. The resources themselves retain their explicit content, allocation, and lifecycle transitions; allocation changes continue to invalidate the cached bind group through `allocationVersion`.
+
 `BindSet` does not rebuild merely because a bound resource's `contentEpoch` changes. Content changes affect dependency validation and readback, not the physical binding target.
 
 `BindSet` is not a material parameter object. It supplies concrete resources for an explicit `BindLayout`; it does not own shader source, generated accessor modules, pipeline state, render style, object assignment, draw counts, or dispatch counts. A command is the place where a pipeline and bind sets meet for one executable action.

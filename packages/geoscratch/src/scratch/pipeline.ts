@@ -41,6 +41,7 @@ export interface RenderPipeline {
     vertexBuffers: GPUVertexBufferLayout[]
     targets: GPUColorTargetState[]
     targetFormats: GPUTextureFormat[]
+    readonly primitive: Readonly<GPUPrimitiveState>
     depthStencil?: GPUDepthStencilState
     depthStencilFormat?: GPUTextureFormat
     shaderModule: GPUShaderModule
@@ -82,6 +83,16 @@ export class RenderPipeline {
         this.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
         this.targets = normalizeTargets(this, descriptor.targets)
         this.targetFormats = this.targets.map(target => target.format)
+        const primitive = Object.freeze({
+            topology: 'triangle-list',
+            ...descriptor.primitive,
+        })
+        Object.defineProperty(this, 'primitive', {
+            value: primitive,
+            enumerable: true,
+            configurable: false,
+            writable: false,
+        })
         if (descriptor.depthStencil !== undefined) {
             this.depthStencil = { ...descriptor.depthStencil }
             this.depthStencilFormat = descriptor.depthStencil.format
@@ -117,7 +128,7 @@ export class RenderPipeline {
                 entryPoint: this.fragmentEntryPoint,
                 targets: this.targets,
             },
-            primitive: descriptor.primitive ?? { topology: 'triangle-list' },
+            primitive: this.primitive,
         }
         if (this.label !== undefined) pipelineDescriptor.label = this.label
         if (this.depthStencil !== undefined) pipelineDescriptor.depthStencil = this.depthStencil

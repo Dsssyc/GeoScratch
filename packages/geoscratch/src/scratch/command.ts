@@ -4,6 +4,7 @@ import { throwScratchDiagnostic } from './diagnostics.js'
 import { isLayoutArtifact, isLayoutUploadView, layoutArtifactSubject } from './layout-codec.js'
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import { QuerySetResource } from './query-set.js'
+import { readonlyMapSnapshot } from './readonly-map.js'
 import { TextureResource } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { BindLayoutEntry, BindSet } from './binding.js'
@@ -32,6 +33,8 @@ const GPU_SIGNED_OFFSET_32_MAX = 0x7fff_ffff
 const DRAW_INDIRECT_BYTE_LENGTH = 16
 const DRAW_INDEXED_INDIRECT_BYTE_LENGTH = 20
 const DISPATCH_INDIRECT_BYTE_LENGTH = 12
+
+type Mutable<T> = { -readonly [Key in keyof T]: T[Key] }
 
 export type ResourceReadinessPolicy =
     | 'throw'
@@ -69,6 +72,21 @@ export type DrawCount =
     | StaticIndexedDrawCount
     | IndirectCommandCount
 
+type StrictStaticDrawCount = StaticDrawCount & {
+    indexCount?: never
+    indirect?: never
+}
+
+type StrictStaticIndexedDrawCount = StaticIndexedDrawCount & {
+    vertexCount?: never
+    indirect?: never
+}
+
+type StrictIndirectDrawCount = IndirectCommandCount & {
+    vertexCount?: never
+    indexCount?: never
+}
+
 export type DrawVertexBufferBinding = {
     slot: number
     buffer: BufferResource
@@ -96,8 +114,8 @@ export type NormalizedDrawIndexBufferBinding = Omit<DrawIndexBufferBinding, 'off
 }
 
 export type CommandResourceReadDescriptor = {
-    resource: Resource
-    contentEpoch: number
+    readonly resource: Resource
+    readonly contentEpoch: number
 }
 
 export type BufferCopyCommandSourceDescriptor = {
@@ -125,8 +143,8 @@ export type ResolveQuerySetSourceDescriptor = {
 }
 
 export type CommandResourceAccessDescriptor = {
-    read: CommandResourceReadDescriptor[]
-    write: Resource[]
+    readonly read: readonly CommandResourceReadDescriptor[]
+    readonly write: readonly Resource[]
 }
 
 type DrawCommandDescriptorBase = {
@@ -141,12 +159,12 @@ type DrawCommandDescriptorBase = {
 
 export type NonIndexedDrawCommandDescriptor = DrawCommandDescriptorBase & {
     indexBuffer?: never
-    count: StaticDrawCount | IndirectCommandCount
+    count: StrictStaticDrawCount | StrictIndirectDrawCount
 }
 
 export type IndexedDrawCommandDescriptor = DrawCommandDescriptorBase & {
     indexBuffer: DrawIndexBufferBinding
-    count: StaticIndexedDrawCount | IndirectCommandCount
+    count: StrictStaticIndexedDrawCount | StrictIndirectDrawCount
 }
 
 export type DrawCommandDescriptor =
@@ -302,12 +320,20 @@ export type StaticDispatchCount = {
 
 export type DispatchCount = StaticDispatchCount | IndirectCommandCount
 
+type StrictStaticDispatchCount = StaticDispatchCount & {
+    indirect?: never
+}
+
+type StrictIndirectDispatchCount = IndirectCommandCount & {
+    workgroups?: never
+}
+
 export type DispatchCommandDescriptor = {
     label?: string
     pipeline: ComputePipeline
     bindSets?: BindSet[]
     dynamicOffsets?: CommandDynamicOffsets
-    count: DispatchCount
+    count: StrictStaticDispatchCount | StrictIndirectDispatchCount
     resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
 }
@@ -417,29 +443,31 @@ type NormalizedUploadSource = {
 }
 
 export interface DrawCommand {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    commandKind: 'draw'
-    pipeline: RenderPipeline
-    bindSets: BindSet[]
-    dynamicOffsets: Map<number, number[]>
-    vertexBuffers: NormalizedDrawVertexBufferBinding[]
-    indexBuffer?: NormalizedDrawIndexBufferBinding
-    count: StaticDrawCount | StaticIndexedDrawCount | NormalizedIndirectCommandCount
-    resources: CommandResourceAccessDescriptor
-    whenMissing: ResourceReadinessPolicy
-    isDisposed: boolean
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'draw'
+    readonly pipeline: RenderPipeline
+    readonly bindSets: readonly BindSet[]
+    readonly dynamicOffsets: ReadonlyMap<number, readonly number[]>
+    readonly vertexBuffers: readonly Readonly<NormalizedDrawVertexBufferBinding>[]
+    readonly indexBuffer?: Readonly<NormalizedDrawIndexBufferBinding>
+    readonly count: Readonly<StaticDrawCount> | Readonly<StaticIndexedDrawCount> | Readonly<NormalizedIndirectCommandCount>
+    readonly resources: CommandResourceAccessDescriptor
+    readonly whenMissing: ResourceReadinessPolicy
 }
 
 export class DrawCommand {
+
+    readonly #producesDeclaredWrites: boolean
+    #isDisposed = false
 
     constructor(runtime: ScratchRuntime, descriptor: DrawCommandDescriptor = {} as DrawCommandDescriptor) {
 
         runtime.assertActive()
 
         const pipeline = descriptor.pipeline
-        if (!pipeline || typeof pipeline.assertRuntime !== 'function') {
+        if (!pipeline || typeof pipeline.assertRuntime !== 'function' || pipeline.pipelineKind !== 'render') {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
                 severity: 'error',
@@ -447,29 +475,33 @@ export class DrawCommand {
                 subject: { kind: 'Command', commandKind: 'draw' },
                 message: 'DrawCommand requires a render pipeline.',
                 expected: { pipeline: 'RenderPipeline' },
-                actual: { pipeline: pipeline === undefined || pipeline === null ? String(pipeline) : typeof pipeline },
+                actual: {
+                    pipeline: pipeline === undefined || pipeline === null ? String(pipeline) : typeof pipeline,
+                    pipelineKind: pipeline?.pipelineKind,
+                },
             })
         }
 
         pipeline.assertRuntime(runtime)
 
-        this.runtime = runtime
-        this.id = `scratch-command-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.commandKind = 'draw'
-        this.pipeline = pipeline
-        this.bindSets = normalizeBindSets(this, descriptor.bindSets)
-        this.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
-        this.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
+        const mutable = this as Mutable<DrawCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) mutable.label = descriptor.label
+        mutable.commandKind = 'draw'
+        mutable.pipeline = pipeline
+        mutable.bindSets = normalizeBindSets(this, descriptor.bindSets)
+        mutable.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
+        mutable.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
         const indexBuffer = normalizeIndexBuffer(this, descriptor.indexBuffer)
-        if (indexBuffer !== undefined) this.indexBuffer = indexBuffer
-        this.count = normalizeDrawCount(this, descriptor.count, indexBuffer)
-        this.resources = normalizeResourceAccess(this, descriptor.resources)
+        if (indexBuffer !== undefined) mutable.indexBuffer = indexBuffer
+        mutable.count = normalizeDrawCount(this, descriptor.count, indexBuffer)
+        this.#producesDeclaredWrites = drawCountProducesDeclaredWrites(mutable.count)
+        mutable.resources = normalizeResourceAccess(this, descriptor.resources)
         validateDrawFixedFunctionReads(this)
-        this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
-        this.isDisposed = false
-
+        mutable.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
         validateProgramLayoutRequirementsForCommand(this)
+        lockDrawCommandContract(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -482,6 +514,16 @@ export class DrawCommand {
         if (this.label !== undefined) subject.label = this.label
 
         return subject
+    }
+
+    get _producesDeclaredWrites(): boolean {
+
+        return this.#producesDeclaredWrites
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
     }
 
     assertRuntime(runtime: ScratchRuntime) {
@@ -595,14 +637,16 @@ export class DrawCommand {
         } else {
             passEncoder.drawIndexedIndirect(this.count.indirect.gpuBuffer, this.count.offset)
         }
-        for (const resource of this.resources.write) {
-            resource._advanceContentEpoch()
+        if (this._producesDeclaredWrites) {
+            for (const resource of this.resources.write) {
+                resource._advanceContentEpoch()
+            }
         }
     }
 
     dispose(): void {
 
-        this.isDisposed = true
+        this.#isDisposed = true
     }
 }
 
@@ -864,20 +908,22 @@ export class EndOcclusionQueryCommand {
 }
 
 export interface DispatchCommand {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    commandKind: 'dispatch'
-    pipeline: ComputePipeline
-    bindSets: BindSet[]
-    dynamicOffsets: Map<number, number[]>
-    count: { workgroups: [number, number, number] } | NormalizedIndirectCommandCount
-    resources: CommandResourceAccessDescriptor
-    whenMissing: ResourceReadinessPolicy
-    isDisposed: boolean
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'dispatch'
+    readonly pipeline: ComputePipeline
+    readonly bindSets: readonly BindSet[]
+    readonly dynamicOffsets: ReadonlyMap<number, readonly number[]>
+    readonly count: Readonly<{ workgroups: readonly [number, number, number] }> | Readonly<NormalizedIndirectCommandCount>
+    readonly resources: CommandResourceAccessDescriptor
+    readonly whenMissing: ResourceReadinessPolicy
 }
 
 export class DispatchCommand {
+
+    readonly #producesDeclaredWrites: boolean
+    #isDisposed = false
 
     constructor(runtime: ScratchRuntime, descriptor: DispatchCommandDescriptor = {} as DispatchCommandDescriptor) {
 
@@ -898,20 +944,21 @@ export class DispatchCommand {
 
         pipeline.assertRuntime(runtime)
 
-        this.runtime = runtime
-        this.id = `scratch-command-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.commandKind = 'dispatch'
-        this.pipeline = pipeline
-        this.bindSets = normalizeBindSets(this, descriptor.bindSets)
-        this.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
-        this.count = normalizeDispatchCount(this, descriptor.count)
-        this.resources = normalizeResourceAccess(this, descriptor.resources)
+        const mutable = this as Mutable<DispatchCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) mutable.label = descriptor.label
+        mutable.commandKind = 'dispatch'
+        mutable.pipeline = pipeline
+        mutable.bindSets = normalizeBindSets(this, descriptor.bindSets)
+        mutable.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
+        mutable.count = normalizeDispatchCount(this, descriptor.count)
+        this.#producesDeclaredWrites = dispatchCountProducesDeclaredWrites(mutable.count)
+        mutable.resources = normalizeResourceAccess(this, descriptor.resources)
         validateDispatchFixedFunctionReads(this)
-        this.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
-        this.isDisposed = false
-
+        mutable.whenMissing = normalizeReadinessPolicy(this, descriptor.whenMissing)
         validateProgramLayoutRequirementsForCommand(this)
+        lockDispatchCommandContract(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -924,6 +971,16 @@ export class DispatchCommand {
         if (this.label !== undefined) subject.label = this.label
 
         return subject
+    }
+
+    get _producesDeclaredWrites(): boolean {
+
+        return this.#producesDeclaredWrites
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
     }
 
     assertRuntime(runtime: ScratchRuntime) {
@@ -1011,14 +1068,97 @@ export class DispatchCommand {
                 this.count.workgroups[2]
             )
         }
-        for (const resource of this.resources.write) {
-            resource._advanceContentEpoch()
+        if (this._producesDeclaredWrites) {
+            for (const resource of this.resources.write) {
+                resource._advanceContentEpoch()
+            }
         }
     }
 
     dispose(): void {
 
-        this.isDisposed = true
+        this.#isDisposed = true
+    }
+}
+
+function drawCountProducesDeclaredWrites(count: DrawCommand['count']): boolean {
+
+    if ('indirect' in count) return true
+    const instanceCount = count.instanceCount ?? 1
+    if ('indexCount' in count) return count.indexCount > 0 && instanceCount > 0
+    return count.vertexCount > 0 && instanceCount > 0
+}
+
+function dispatchCountProducesDeclaredWrites(count: DispatchCommand['count']): boolean {
+
+    if ('indirect' in count) return true
+    return count.workgroups.every(value => value > 0)
+}
+
+function lockDrawCommandContract(command: DrawCommand): void {
+
+    Object.freeze(command.bindSets)
+    for (const binding of command.vertexBuffers) Object.freeze(binding)
+    Object.freeze(command.vertexBuffers)
+    if (command.indexBuffer !== undefined) Object.freeze(command.indexBuffer)
+    Object.freeze(command.count)
+    lockCommandResources(command.resources)
+    lockCommandProperties(command, [
+        'runtime',
+        'id',
+        'commandKind',
+        'pipeline',
+        'bindSets',
+        'dynamicOffsets',
+        'vertexBuffers',
+        'indexBuffer',
+        'count',
+        'resources',
+        'whenMissing',
+    ])
+    Object.preventExtensions(command)
+}
+
+function lockDispatchCommandContract(command: DispatchCommand): void {
+
+    Object.freeze(command.bindSets)
+    if ('workgroups' in command.count) Object.freeze(command.count.workgroups)
+    Object.freeze(command.count)
+    lockCommandResources(command.resources)
+    lockCommandProperties(command, [
+        'runtime',
+        'id',
+        'commandKind',
+        'pipeline',
+        'bindSets',
+        'dynamicOffsets',
+        'count',
+        'resources',
+        'whenMissing',
+    ])
+    Object.preventExtensions(command)
+}
+
+function lockCommandResources(resources: CommandResourceAccessDescriptor): void {
+
+    for (const read of resources.read) Object.freeze(read)
+    Object.freeze(resources.read)
+    Object.freeze(resources.write)
+    Object.freeze(resources)
+}
+
+function lockCommandProperties(command: object, properties: string[]): void {
+
+    const record = command as Record<string, unknown>
+    for (const property of properties) {
+        const descriptor = Object.getOwnPropertyDescriptor(command, property)
+        if (descriptor === undefined) continue
+        Object.defineProperty(command, property, {
+            value: record[property],
+            enumerable: descriptor.enumerable ?? false,
+            configurable: false,
+            writable: false,
+        })
     }
 }
 
@@ -2129,7 +2269,7 @@ type DynamicBufferBindLayoutEntry = BindLayoutEntry & {
 function normalizeDynamicOffsets(
     command: DynamicOffsetCommand,
     dynamicOffsets: CommandDynamicOffsets | undefined
-): Map<number, number[]> {
+): ReadonlyMap<number, readonly number[]> {
 
     const suppliedOffsets = normalizeDynamicOffsetRecord(command, dynamicOffsets)
     const bindSetGroups = command.bindSets.map(bindSet => bindSet.layout.group)
@@ -2191,7 +2331,8 @@ function normalizeDynamicOffsets(
         normalized.set(group, normalizedOffsets)
     }
 
-    return normalized
+    for (const offsets of normalized.values()) Object.freeze(offsets)
+    return readonlyMapSnapshot(normalized)
 }
 
 function normalizeDynamicOffsetRecord(
@@ -2486,7 +2627,7 @@ function normalizeVertexBuffers(
     }
 
     const slots = new Set<number>()
-    return vertexBuffers.map((binding: DrawVertexBufferBinding) => {
+    const normalized = vertexBuffers.map((binding: DrawVertexBufferBinding) => {
         if (!binding || typeof binding !== 'object') {
             throwVertexBufferDiagnostic(command, {
                 expected: { binding: 'DrawVertexBufferBinding' },
@@ -2575,6 +2716,19 @@ function normalizeVertexBuffers(
 
         return normalized
     })
+
+    const requiredSlots = command.pipeline.vertexBuffers.map((_, slot) => slot)
+    const boundSlots = normalized.map(binding => binding.slot)
+    const missingSlots = requiredSlots.filter(slot => !slots.has(slot))
+    if (missingSlots.length > 0) {
+        throwVertexBufferDiagnostic(command, {
+            expected: { vertexBuffers: 'binding for every RenderPipeline vertex buffer slot' },
+            actual: { requiredSlots, boundSlots, missingSlots },
+            related: [ command.pipeline.subject ],
+        })
+    }
+
+    return normalized
 }
 
 function normalizeIndexBuffer(
@@ -2610,6 +2764,8 @@ function normalizeIndexBuffer(
         })
     }
 
+    validateIndexFormatForPipeline(command, format, buffer)
+
     const elementByteLength = format === 'uint16' ? 2 : 4
     const offset = binding.offset ?? 0
     if (!Number.isInteger(offset) || offset < 0 || offset % elementByteLength !== 0) {
@@ -2622,9 +2778,9 @@ function normalizeIndexBuffer(
 
     const size = binding.size
     const effectiveSize = size ?? buffer.size - offset
-    if (!Number.isInteger(effectiveSize) || effectiveSize <= 0 || effectiveSize % elementByteLength !== 0) {
+    if (!Number.isInteger(effectiveSize) || effectiveSize < 0) {
         throwIndexBufferDiagnostic(command, binding, {
-            expected: { size: `positive integer aligned to ${elementByteLength} bytes` },
+            expected: { size: 'non-negative integer byte range' },
             actual: { size, effectiveSize, format },
             related: [ buffer.subject ],
         })
@@ -2656,6 +2812,10 @@ function normalizeIndexBuffer(
 
 function normalizeDispatchCount(command: DispatchCommand, count: DispatchCount): { workgroups: [number, number, number] } | NormalizedIndirectCommandCount {
 
+    if (isRecord(count) && 'indirect' in count && 'workgroups' in count) {
+        throwDispatchCountDiagnostic(command, count)
+    }
+
     if (isRecord(count) && 'indirect' in count) {
         return normalizeIndirectCommandCount(command, count, DISPATCH_INDIRECT_BYTE_LENGTH, 'dispatch')
     }
@@ -2682,6 +2842,7 @@ function normalizeDispatchCount(command: DispatchCommand, count: DispatchCount):
                 severity: 'error',
                 phase: 'command',
                 subject: command.subject,
+                related: [ command.pipeline.subject ],
                 message: 'DispatchCommand workgroup counts must be unsigned 32-bit integers within the device limit.',
                 expected: {
                     workgroups: 'unsigned 32-bit integer tuple',
@@ -2771,7 +2932,7 @@ function assertDeclaredCommandRead(
 
 function normalizeResourceReadList(
     command: DrawCommand | DispatchCommand,
-    resources: CommandResourceReadDescriptor[]
+    resources: readonly CommandResourceReadDescriptor[]
 ): CommandResourceReadDescriptor[] {
 
     return resources.map((descriptor) => {
@@ -2799,7 +2960,7 @@ function normalizeResourceReadList(
     })
 }
 
-function normalizeResourceList(command: DrawCommand | DispatchCommand, resources: Resource[], access: 'read' | 'write'): Resource[] {
+function normalizeResourceList(command: DrawCommand | DispatchCommand, resources: readonly Resource[], access: 'read' | 'write'): Resource[] {
 
     return resources.map((resource) => {
         if (!resource || typeof resource.assertRuntime !== 'function') {
@@ -2873,6 +3034,9 @@ function normalizeDrawCount(
         throwCountDiagnostic(command, count)
     }
 
+    const variantCount = Number('indirect' in count) + Number('indexCount' in count) + Number('vertexCount' in count)
+    if (variantCount !== 1) throwCountDiagnostic(command, count)
+
     if ('indirect' in count) {
         return normalizeIndirectCommandCount(
             command,
@@ -2896,6 +3060,7 @@ function normalizeDrawCount(
                 severity: 'error',
                 phase: 'command',
                 subject: command.subject,
+                related: [ command.pipeline.subject ],
                 message: 'DrawCommand indexCount must be an unsigned 32-bit integer.',
                 expected: { indexCount: 'unsigned 32-bit integer' },
                 actual: { indexCount: count.indexCount },
@@ -2909,6 +3074,7 @@ function normalizeDrawCount(
                     severity: 'error',
                     phase: 'command',
                     subject: command.subject,
+                    related: [ command.pipeline.subject ],
                     message: `DrawCommand ${key} must be an unsigned 32-bit integer.`,
                     expected: { [key]: 'unsigned 32-bit integer' },
                     actual: { [key]: count[key] },
@@ -2922,13 +3088,16 @@ function normalizeDrawCount(
                 severity: 'error',
                 phase: 'command',
                 subject: command.subject,
+                related: [ command.pipeline.subject ],
                 message: 'DrawCommand baseVertex must be a signed 32-bit integer.',
                 expected: { baseVertex: 'signed 32-bit integer' },
                 actual: { baseVertex: count.baseVertex },
             })
         }
 
-        return { ...count } as StaticIndexedDrawCount
+        const normalizedCount = { ...count } as StaticIndexedDrawCount
+        validateStaticIndexedDrawRange(command, normalizedCount, indexBuffer)
+        return normalizedCount
     }
 
     if (indexBuffer !== undefined) {
@@ -2947,6 +3116,7 @@ function normalizeDrawCount(
             severity: 'error',
             phase: 'command',
             subject: command.subject,
+            related: [ command.pipeline.subject ],
             message: 'DrawCommand vertexCount must be an unsigned 32-bit integer.',
             expected: { vertexCount: 'unsigned 32-bit integer' },
             actual: { vertexCount: count.vertexCount },
@@ -2960,6 +3130,7 @@ function normalizeDrawCount(
                 severity: 'error',
                 phase: 'command',
                 subject: command.subject,
+                related: [ command.pipeline.subject ],
                 message: `DrawCommand ${key} must be an unsigned 32-bit integer.`,
                 expected: { [key]: 'unsigned 32-bit integer' },
                 actual: { [key]: count[key] },
@@ -2968,6 +3139,58 @@ function normalizeDrawCount(
     }
 
     return { ...count }
+}
+
+function validateStaticIndexedDrawRange(
+    command: DrawCommand,
+    count: StaticIndexedDrawCount,
+    indexBuffer: NormalizedDrawIndexBufferBinding
+): void {
+
+    const elementByteLength = indexBuffer.format === 'uint16' ? 2 : 4
+    const bindingSize = indexBuffer.size ?? indexBuffer.buffer.size - indexBuffer.offset
+    const availableIndexCount = Math.floor(bindingSize / elementByteLength)
+    const firstIndex = count.firstIndex ?? 0
+
+    if (firstIndex + count.indexCount <= availableIndexCount) return
+
+    throwIndexBufferDiagnostic(command, indexBuffer, {
+        expected: {
+            indexedRange: 'firstIndex + indexCount within complete indices in the bound range',
+        },
+        actual: {
+            firstIndex,
+            indexCount: count.indexCount,
+            availableIndexCount,
+            bindingSize,
+            format: indexBuffer.format,
+            offset: indexBuffer.offset,
+        },
+        related: [ indexBuffer.buffer.subject ],
+    })
+}
+
+function validateIndexFormatForPipeline(
+    command: DrawCommand,
+    format: GPUIndexFormat,
+    buffer: BufferResource
+): void {
+
+    const topology = command.pipeline.primitive.topology ?? 'triangle-list'
+    if (topology !== 'line-strip' && topology !== 'triangle-strip') return
+
+    const stripIndexFormat = command.pipeline.primitive.stripIndexFormat
+    if (stripIndexFormat === format) return
+
+    throwIndexBufferDiagnostic(command, { buffer, format }, {
+        expected: { indexFormat: stripIndexFormat ?? 'pipeline stripIndexFormat' },
+        actual: {
+            indexFormat: format,
+            topology,
+            stripIndexFormat,
+        },
+        related: [ buffer.subject, command.pipeline.subject ],
+    })
 }
 
 function normalizeIndirectCommandCount(
@@ -4422,8 +4645,15 @@ function throwCountDiagnostic(command: DrawCommand, count: unknown): never {
         severity: 'error',
         phase: 'command',
         subject: command.subject,
-        message: 'DrawCommand requires a static draw count for this slice.',
-        expected: { count: '{ vertexCount: number }' },
+        related: [ command.pipeline.subject ],
+        message: 'DrawCommand count must select static vertex, static indexed, or indirect execution.',
+        expected: {
+            count: [
+                '{ vertexCount: GPUSize32, ... }',
+                '{ indexCount: GPUSize32, ... } with indexBuffer',
+                '{ indirect: BufferResource, offset?: GPUSize64 }',
+            ],
+        },
         actual: { count },
     })
 }
@@ -4493,8 +4723,14 @@ function throwDispatchCountDiagnostic(command: DispatchCommand, count: unknown):
         severity: 'error',
         phase: 'command',
         subject: command.subject,
-        message: 'DispatchCommand requires a static workgroup count for this slice.',
-        expected: { count: '{ workgroups: [number, number?, number?] }' },
+        related: [ command.pipeline.subject ],
+        message: 'DispatchCommand count must select static or indirect execution.',
+        expected: {
+            count: [
+                '{ workgroups: [GPUSize32, GPUSize32?, GPUSize32?] }',
+                '{ indirect: BufferResource, offset?: GPUSize64 }',
+            ],
+        },
         actual: { count },
     })
 }
