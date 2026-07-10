@@ -165,4 +165,4 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 - [x] Run `npm run typecheck`, focused policy tests, `npm test`, `npm run build`, `git diff --check`, source-only scans, no-readback scan, and no-material scan.
 - [x] Review the complete branch against every Goal requirement. Perform fresh-context adversarial review, fix all valid findings, rerun affected checks, and re-review before claiming completion.
 - [x] Confirm the eight-row audit, public exports, documentation status, execution/resource/producer ledger consistency, and exact branch history.
-- [ ] Use `finishing-a-development-branch`, fast-forward merge into `dev-feature`, rerun tests on the merged result, remove the worktree, delete the feature branch, and confirm only local `main` and `dev-feature` remain.
+- [x] Use `finishing-a-development-branch`, fast-forward merge into `dev-feature`, rerun tests on the merged result, remove the worktree, delete the feature branch, and confirm only local `main` and `dev-feature` remain.
