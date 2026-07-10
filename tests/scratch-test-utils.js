@@ -16,6 +16,7 @@ export function createFakeGpu() {
         queueWrites: [],
         queueTextureWrites: [],
         queueSubmissions: [],
+        queueTimeline: [],
         renderPasses: [],
         computePasses: [],
         drawCalls: [],
@@ -32,6 +33,11 @@ export function createFakeGpu() {
     const queue = {
         submittedWorkDoneCalls: 0,
         writeBuffer(buffer, offset, data, dataOffset, size) {
+            calls.queueTimeline.push({
+                type: 'write-buffer',
+                buffer,
+                offset,
+            })
             calls.queueWrites.push({
                 buffer,
                 offset,
@@ -43,6 +49,10 @@ export function createFakeGpu() {
             buffer.data.set(source, offset)
         },
         writeTexture(destination, data, layout, size) {
+            calls.queueTimeline.push({
+                type: 'write-texture',
+                destination,
+            })
             calls.queueTextureWrites.push({
                 destination,
                 data,
@@ -57,7 +67,14 @@ export function createFakeGpu() {
             })
         },
         submit(commandBuffers) {
+            calls.queueTimeline.push({
+                type: 'submit',
+                commandBuffers,
+            })
             calls.queueSubmissions.push(commandBuffers)
+            for (const commandBuffer of commandBuffers) {
+                executeFakeCommandBuffer(commandBuffer)
+            }
         },
         onSubmittedWorkDone() {
             this.submittedWorkDoneCalls++
@@ -286,6 +303,8 @@ fn fsMain() -> @location(0) vec4f {
 
 function createFakeCommandEncoder(calls, descriptor) {
 
+    const commands = []
+
     return {
         descriptor,
         beginRenderPass(renderPassDescriptor) {
@@ -299,15 +318,15 @@ function createFakeCommandEncoder(calls, descriptor) {
             return passEncoder
         },
         copyBufferToBuffer(source, sourceOffset, destination, destinationOffset, size) {
-            const sourceBytes = source.data.subarray(sourceOffset, sourceOffset + size)
-            destination.data.set(sourceBytes, destinationOffset)
-            calls.copies.push({
+            const call = {
                 source,
                 sourceOffset,
                 destination,
                 destinationOffset,
                 size,
-            })
+            }
+            calls.copies.push(call)
+            commands.push({ type: 'copy-buffer-to-buffer', ...call })
         },
         copyTextureToTexture(source, destination, size) {
             calls.textureCopies.push({
@@ -331,24 +350,52 @@ function createFakeCommandEncoder(calls, descriptor) {
             })
         },
         resolveQuerySet(querySet, firstQuery, queryCount, destination, destinationOffset) {
-            const view = new DataView(destination.data.buffer)
-            for (let index = 0; index < queryCount; index++) {
-                view.setBigUint64(destinationOffset + index * 8, querySet.values[firstQuery + index], true)
-            }
-            calls.resolveQueries.push({
+            const call = {
                 querySet,
                 firstQuery,
                 queryCount,
                 destination,
                 destinationOffset,
-            })
+            }
+            calls.resolveQueries.push(call)
+            commands.push({ type: 'resolve-query-set', ...call })
         },
         finish() {
-            return {
+            const commandBuffer = {
                 type: 'commandBuffer',
                 descriptor,
             }
+            Object.defineProperty(commandBuffer, 'commands', {
+                value: [ ...commands ],
+                enumerable: false,
+            })
+            return commandBuffer
         },
+    }
+}
+
+function executeFakeCommandBuffer(commandBuffer) {
+
+    for (const command of commandBuffer.commands ?? []) {
+        if (command.type === 'copy-buffer-to-buffer') {
+            const sourceBytes = command.source.data.slice(
+                command.sourceOffset,
+                command.sourceOffset + command.size
+            )
+            command.destination.data.set(sourceBytes, command.destinationOffset)
+            continue
+        }
+
+        if (command.type === 'resolve-query-set') {
+            const view = new DataView(command.destination.data.buffer)
+            for (let index = 0; index < command.queryCount; index++) {
+                view.setBigUint64(
+                    command.destinationOffset + index * 8,
+                    command.querySet.values[command.firstQuery + index],
+                    true
+                )
+            }
+        }
     }
 }
 

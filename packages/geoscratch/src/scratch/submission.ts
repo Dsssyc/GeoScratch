@@ -187,6 +187,25 @@ type PendingReadback = {
     allocationVersion: number
 }
 
+type PreparedQueueAction =
+    | {
+        kind: 'command-buffer'
+        commandBuffer: GPUCommandBuffer
+    }
+    | {
+        kind: 'buffer-upload'
+        command: UploadCommand
+    }
+    | {
+        kind: 'texture-upload'
+        command: TextureUploadCommand
+    }
+
+function isTextureUploadCommand(command: UploadCommand | TextureUploadCommand): command is TextureUploadCommand {
+
+    return 'uploadKind' in command && command.uploadKind === 'texture'
+}
+
 type ResourceSimulationState = {
     state: ResourceState
     contentEpoch: number
@@ -345,23 +364,52 @@ export class SubmissionBuilder {
 
         const submittedId = `scratch-submitted-${UUID()}`
         const commandBuffers: GPUCommandBuffer[] = []
+        const queueTimeline: PreparedQueueAction[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
         const pendingReadbacks: PendingReadback[] = []
-        const encoder = this.runtime.device.createCommandEncoder({
-            label: submittedId,
-        })
+        let encoder: GPUCommandEncoder | undefined
+        let encoderSegmentIndex = 0
+
+        const getEncoder = () => {
+
+            if (encoder === undefined) {
+                encoder = this.runtime.device.createCommandEncoder({
+                    label: encoderSegmentIndex === 0
+                        ? submittedId
+                        : `${submittedId}:segment-${encoderSegmentIndex}`,
+                })
+                encoderSegmentIndex++
+            }
+
+            return encoder
+        }
+
+        const finishEncoderSegment = () => {
+
+            if (encoder === undefined) return
+
+            const commandBuffer = encoder.finish()
+            commandBuffers.push(commandBuffer)
+            queueTimeline.push({ kind: 'command-buffer', commandBuffer })
+            encoder = undefined
+        }
 
         for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
             if (step.kind === 'upload') {
+                finishEncoderSegment()
                 const writes = [
                     captureResourceAccess(step.command.target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
                 ]
-                step.command.execute(this.runtime.queue)
+                step.command._commitLogicalWrite()
                 completeResourceAccesses(resourceAccesses, writes)
+                queueTimeline.push(isTextureUploadCommand(step.command)
+                    ? { kind: 'texture-upload', command: step.command }
+                    : { kind: 'buffer-upload', command: step.command })
                 continue
             }
 
             if (step.kind === 'copy') {
+                const encoder = getEncoder()
                 const origin = commandAccessOrigin(stepIndex, 'copy', step.command)
                 const accesses = [
                     captureResourceAccess(step.command.source.resource, 'read', origin),
@@ -373,6 +421,7 @@ export class SubmissionBuilder {
             }
 
             if (step.kind === 'readback') {
+                const encoder = getEncoder()
                 const origin = commandAccessOrigin(stepIndex, 'readback', step.command)
                 const readAccess = captureResourceAccess(step.command.source.resource, 'read', origin)
                 pendingReadbacks.push({
@@ -387,6 +436,7 @@ export class SubmissionBuilder {
             }
 
             if (step.kind === 'resolve') {
+                const encoder = getEncoder()
                 const writes = [
                     captureResourceAccess(step.command.destination, 'write', commandAccessOrigin(stepIndex, 'resolve', step.command)),
                 ]
@@ -399,6 +449,7 @@ export class SubmissionBuilder {
                 if (step.disposition === 'skip-pass') continue
                 if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
+                const encoder = getEncoder()
                 const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
                 for (const command of step.commands) {
                     const origin = commandAccessOrigin(stepIndex, 'compute', command, step.passSpec)
@@ -418,6 +469,7 @@ export class SubmissionBuilder {
             if (step.disposition === 'skip-pass') continue
             if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
+            const encoder = getEncoder()
             const colorWrites = captureRenderAttachmentWrites(stepIndex, step.passSpec)
             const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
             let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
@@ -447,9 +499,15 @@ export class SubmissionBuilder {
             completeResourceAccesses(resourceAccesses, colorWrites)
         }
 
-        const commandBuffer = encoder.finish()
-        commandBuffers.push(commandBuffer)
-        this.runtime.queue.submit(commandBuffers)
+        finishEncoderSegment()
+        for (const action of queueTimeline) {
+            if (action.kind === 'command-buffer') {
+                this.runtime.queue.submit([ action.commandBuffer ])
+                continue
+            }
+
+            action.command._writeToQueue(this.runtime.queue)
+        }
         this.isSubmitted = true
 
         const submitted = new SubmittedWork(this.runtime, {
@@ -458,7 +516,9 @@ export class SubmissionBuilder {
             report: resolvedPlan.report,
             resourceAccesses,
             executionOutcomes: resolvedPlan.executionOutcomes,
-            done: createDonePromise(this.runtime.queue),
+            done: queueTimeline.length === 0
+                ? Promise.resolve()
+                : createDonePromise(this.runtime.queue),
         })
         for (const pending of pendingReadbacks) {
             const producerEpoch = findReadbackProducerEpoch(submitted, pending)

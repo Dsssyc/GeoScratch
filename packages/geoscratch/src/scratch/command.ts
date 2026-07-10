@@ -1192,6 +1192,8 @@ export interface UploadCommand {
     dataOffset: number
     byteLength: number
     isDisposed: boolean
+    _writeToQueue(queue: GPUQueue): void
+    _commitLogicalWrite(): void
 }
 
 export class UploadCommand {
@@ -1282,6 +1284,12 @@ export class UploadCommand {
 
     execute(queue: GPUQueue) {
 
+        this._writeToQueue(queue)
+        this._commitLogicalWrite()
+    }
+
+    _writeToQueue(queue: GPUQueue) {
+
         this.assertUsable()
 
         if (!queue || typeof queue.writeBuffer !== 'function') {
@@ -1302,6 +1310,10 @@ export class UploadCommand {
             this.offset,
             createUploadSource(this.data, this.dataOffset, this.byteLength)
         )
+    }
+
+    _commitLogicalWrite() {
+
         this.target._advanceContentEpoch()
     }
 
@@ -2054,6 +2066,8 @@ export interface TextureUploadCommand {
     size: { width: number, height: number, depthOrArrayLayers: number }
     mipLevel: number
     isDisposed: boolean
+    _writeToQueue(queue: GPUQueue): void
+    _commitLogicalWrite(): void
 }
 
 export class TextureUploadCommand {
@@ -2157,6 +2171,12 @@ export class TextureUploadCommand {
 
     execute(queue: GPUQueue) {
 
+        this._writeToQueue(queue)
+        this._commitLogicalWrite()
+    }
+
+    _writeToQueue(queue: GPUQueue) {
+
         this.assertUsable()
 
         if (!queue || typeof queue.writeTexture !== 'function') {
@@ -2182,6 +2202,10 @@ export class TextureUploadCommand {
             this.layout,
             this.size
         )
+    }
+
+    _commitLogicalWrite() {
+
         this.target._advanceContentEpoch()
     }
 

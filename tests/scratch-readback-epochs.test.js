@@ -148,6 +148,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         })
         const copyCount = calls.copies.length
         const queueSubmissionCount = calls.queueSubmissions.length
+        const queueWriteCount = calls.queueWrites.length
         submitUpload(runtime, source, [ 5, 6, 7, 8 ])
 
         const diagnostic = await expectDiagnostic(() => readback.toBytes(), {
@@ -160,7 +161,8 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         expect(diagnostic.expected).to.deep.equal({ contentEpoch: 1 })
         expect(diagnostic.actual).to.deep.include({ contentEpoch: 2 })
         expect(calls.copies).to.have.length(copyCount)
-        expect(calls.queueSubmissions).to.have.length(queueSubmissionCount + 1)
+        expect(calls.queueWrites).to.have.length(queueWriteCount + 1)
+        expect(calls.queueSubmissions).to.have.length(queueSubmissionCount)
     })
 
     it('rejects stale allocation versions before staging copy', async() => {
