@@ -132,4 +132,4 @@
 - [x] Verify no console/page errors, a nonblank canvas by screenshot plus pixel inspection, and both indexed/non-indexed output regions visible.
 - [x] Run `npm run typecheck`, focused tests, `npm test`, `npm run build`, `git diff --check`, source-only scans, no-readback scan, and no-material scan.
 - [x] Review the entire branch against the pasted Goal requirement by requirement; fix findings, rerun affected checks, and re-review.
-- [ ] Use `finishing-a-development-branch`, merge the verified branch into `dev-feature`, remove the worktree, delete the feature branch, and confirm only local `main` and `dev-feature` remain.
+- [x] Use `finishing-a-development-branch`, merge the verified branch into `dev-feature`, remove the worktree, delete the feature branch, and confirm only local `main` and `dev-feature` remain.
