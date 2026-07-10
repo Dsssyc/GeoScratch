@@ -14,6 +14,7 @@ describe('examples structure', () => {
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
         'scratch_renderToTexture',
+        'indirectExecution',
         'm_demLayer',
         'm_flowLayer',
         'x_helloGAW',
@@ -27,6 +28,7 @@ describe('examples structure', () => {
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
         'scratch_renderToTexture',
+        'indirectExecution',
         'm_demLayer',
         'm_flowLayer',
         'x_helloGAW',
@@ -85,6 +87,7 @@ describe('examples structure', () => {
             [ 'scratch_helloVertexBuffer', 'Hello Vertex Buffer' ],
             [ 'scratch_textureSampling', 'Texture Sampling' ],
             [ 'scratch_renderToTexture', 'Render To Texture' ],
+            [ 'indirectExecution', 'Indirect Execution' ],
         ]
 
         for (const [ name, title ] of scratchBackedExamples) {
@@ -190,5 +193,14 @@ describe('examples structure', () => {
 
         expect(css).to.include('.example-link[hidden]')
         expect(css).to.include('display: none')
+    })
+
+    it('keeps indirect execution GPU-side without readback or mapping', () => {
+        const source = read('examples', 'indirectExecution', 'main.js')
+
+        expect(source).to.include('count: { indirect: dispatchArguments')
+        expect(source).to.include('count: { indirect: drawArguments')
+        expect(source).to.include('count: { indirect: indexedArguments')
+        expect(source).to.not.match(/readback|mapAsync|getMappedRange|toBytes|toArray/i)
     })
 })

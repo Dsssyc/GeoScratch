@@ -103,11 +103,11 @@
 - Modify: `examples/vite.config.js`
 - Modify: `tests/examples-structure.test.js`
 
-- [ ] Write a failing structure test requiring a neutral `indirectExecution` entry and prohibiting readback/map APIs in its source.
-- [ ] Build one compute pipeline that is launched through `dispatchWorkgroupsIndirect` and writes non-indexed plus indexed draw argument buffers as storage/indirect resources.
-- [ ] Render both argument buffers in the same Scratch submission through `drawIndirect` and `drawIndexedIndirect`; include a real `INDEX` buffer for the indexed path.
-- [ ] Expose the example in the browser with a neutral title and no `scratch` flag in its path or visible name.
-- [ ] Run example structure tests and `npm run build`; commit with `git commit -m "Add native indirect execution example"`.
+- [x] Write a failing structure test requiring a neutral `indirectExecution` entry and prohibiting readback/map APIs in its source.
+- [x] Build one compute pipeline that is launched through `dispatchWorkgroupsIndirect` and writes non-indexed plus indexed draw argument buffers as storage/indirect resources.
+- [x] Render both argument buffers in the same Scratch submission through `drawIndirect` and `drawIndexedIndirect`; include a real `INDEX` buffer for the indexed path.
+- [x] Expose the example in the browser with a neutral title and no `scratch` flag in its path or visible name.
+- [x] Run example structure tests and `npm run build`; commit with `git commit -m "Add native indirect execution example"`.
 
 ## Task 6: ADR, Bilingual Vision, And Native Parity Audit
 
