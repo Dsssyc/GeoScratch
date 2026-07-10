@@ -72,12 +72,12 @@
 - Modify: `tests/scratch-test-utils.js`
 - Modify: `packages/geoscratch/src/scratch/command.ts`
 
-- [ ] Write RED tests for `drawIndirect`, `drawIndexedIndirect`, and `dispatchWorkgroupsIndirect`, including exact encoder parameters and ordering after pipeline/bind/index setup.
-- [ ] Write RED diagnostics tests for non-buffer values, wrong runtime, disposed buffers, missing `INDIRECT` usage, offsets not divisible by four, and 16/20/12-byte range overflows.
-- [ ] Add native indirect call recording to fake render/compute encoders without interpreting argument bytes.
-- [ ] Normalize indirect counts once with operation-specific required byte length and lower directly to the native encoder method.
-- [ ] Ensure `assertUsable()` covers optional index and indirect buffers and disposal never mutates user resources.
-- [ ] Run focused tests and typecheck; commit with `git commit -m "Add Scratch native indirect execution"`.
+- [x] Write RED tests for `drawIndirect`, `drawIndexedIndirect`, and `dispatchWorkgroupsIndirect`, including exact encoder parameters and ordering after pipeline/bind/index setup.
+- [x] Write RED diagnostics tests for non-buffer values, wrong runtime, disposed buffers, missing `INDIRECT` usage, offsets not divisible by four, and 16/20/12-byte range overflows.
+- [x] Add native indirect call recording to fake render/compute encoders without interpreting argument bytes.
+- [x] Normalize indirect counts once with operation-specific required byte length and lower directly to the native encoder method.
+- [x] Ensure `assertUsable()` covers optional index and indirect buffers and disposal never mutates user resources.
+- [x] Run focused tests and typecheck; commit with `git commit -m "Add Scratch native indirect execution"`.
 
 ## Task 4: Explicit Read Contract, Epoch Validation, And Ledger
 

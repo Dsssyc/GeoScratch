@@ -392,6 +392,16 @@ function createFakeRenderPassEncoder(calls, descriptor) {
             this.actions.push({ type: 'drawIndexed', call })
             calls.drawCalls.push(call)
         },
+        drawIndirect(buffer, offset) {
+            const action = { type: 'drawIndirect', buffer, offset }
+            this.actions.push(action)
+            calls.drawCalls.push(action)
+        },
+        drawIndexedIndirect(buffer, offset) {
+            const action = { type: 'drawIndexedIndirect', buffer, offset }
+            this.actions.push(action)
+            calls.drawCalls.push(action)
+        },
         beginOcclusionQuery(queryIndex) {
             const call = { type: 'begin', queryIndex }
             this.actions.push({ type: 'beginOcclusionQuery', queryIndex })
@@ -425,6 +435,11 @@ function createFakeComputePassEncoder(calls, descriptor) {
             const call = { x, y, z }
             this.actions.push({ type: 'dispatchWorkgroups', call })
             calls.dispatchCalls.push(call)
+        },
+        dispatchWorkgroupsIndirect(buffer, offset) {
+            const action = { type: 'dispatchWorkgroupsIndirect', buffer, offset }
+            this.actions.push(action)
+            calls.dispatchCalls.push(action)
         },
         end() {
             this.actions.push({ type: 'end' })

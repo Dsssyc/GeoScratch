@@ -19,6 +19,7 @@ import type { SubmittedWork } from './submission.js'
 
 const GPU_BUFFER_USAGE_VERTEX = getGlobalConstant('GPUBufferUsage', 'VERTEX', 0x20)
 const GPU_BUFFER_USAGE_INDEX = getGlobalConstant('GPUBufferUsage', 'INDEX', 0x10)
+const GPU_BUFFER_USAGE_INDIRECT = getGlobalConstant('GPUBufferUsage', 'INDIRECT', 0x100)
 const GPU_BUFFER_USAGE_MAP_READ = getGlobalConstant('GPUBufferUsage', 'MAP_READ', 0x1)
 const GPU_BUFFER_USAGE_COPY_SRC = getGlobalConstant('GPUBufferUsage', 'COPY_SRC', 0x4)
 const GPU_BUFFER_USAGE_COPY_DST = getGlobalConstant('GPUBufferUsage', 'COPY_DST', 0x8)
@@ -28,6 +29,9 @@ const GPU_TEXTURE_USAGE_COPY_DST = getGlobalConstant('GPUTextureUsage', 'COPY_DS
 const GPU_SIZE_32_MAX = 0xffff_ffff
 const GPU_SIGNED_OFFSET_32_MIN = -0x8000_0000
 const GPU_SIGNED_OFFSET_32_MAX = 0x7fff_ffff
+const DRAW_INDIRECT_BYTE_LENGTH = 16
+const DRAW_INDEXED_INDIRECT_BYTE_LENGTH = 20
+const DISPATCH_INDIRECT_BYTE_LENGTH = 12
 
 export type ResourceReadinessPolicy =
     | 'throw'
@@ -53,6 +57,11 @@ export type StaticIndexedDrawCount = {
 export type IndirectCommandCount = {
     indirect: BufferResource
     offset?: number
+}
+
+type NormalizedIndirectCommandCount = {
+    indirect: BufferResource
+    offset: number
 }
 
 export type DrawCount =
@@ -307,6 +316,12 @@ type StaticDrawCountOptionalKey = Exclude<keyof StaticDrawCount, 'vertexCount'>
 
 type StaticIndexedDrawCountOptionalKey = Exclude<keyof StaticIndexedDrawCount, 'indexCount'>
 
+type IndirectBufferDiagnosticDetails = {
+    expected: unknown
+    actual: Record<string, unknown>
+    related?: DiagnosticSubject[]
+}
+
 type OcclusionQueryCommandDiagnosticInput = {
     runtime?: ScratchRuntime
     querySet?: unknown
@@ -411,7 +426,7 @@ export interface DrawCommand {
     dynamicOffsets: Map<number, number[]>
     vertexBuffers: NormalizedDrawVertexBufferBinding[]
     indexBuffer?: NormalizedDrawIndexBufferBinding
-    count: DrawCount
+    count: StaticDrawCount | StaticIndexedDrawCount | NormalizedIndirectCommandCount
     resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
     isDisposed: boolean
@@ -510,6 +525,7 @@ export class DrawCommand {
             binding.buffer.assertUsable()
         }
         this.indexBuffer?.buffer.assertUsable()
+        if ('indirect' in this.count) this.count.indirect.assertUsable()
         for (const resource of [
             ...this.resources.read.map(read => read.resource),
             ...this.resources.write,
@@ -573,8 +589,10 @@ export class DrawCommand {
                 this.count.firstVertex ?? 0,
                 this.count.firstInstance ?? 0
             )
+        } else if (this.indexBuffer === undefined) {
+            passEncoder.drawIndirect(this.count.indirect.gpuBuffer, this.count.offset)
         } else {
-            throwIndirectBufferDiagnostic(this, this.count, 'unsupported')
+            passEncoder.drawIndexedIndirect(this.count.indirect.gpuBuffer, this.count.offset)
         }
         for (const resource of this.resources.write) {
             resource._advanceContentEpoch()
@@ -852,7 +870,7 @@ export interface DispatchCommand {
     pipeline: ComputePipeline
     bindSets: BindSet[]
     dynamicOffsets: Map<number, number[]>
-    count: { workgroups: [number, number, number] } | IndirectCommandCount
+    count: { workgroups: [number, number, number] } | NormalizedIndirectCommandCount
     resources: CommandResourceAccessDescriptor
     whenMissing: ResourceReadinessPolicy
     isDisposed: boolean
@@ -944,6 +962,7 @@ export class DispatchCommand {
         for (const bindSet of this.bindSets) {
             bindSet.assertUsable()
         }
+        if ('indirect' in this.count) this.count.indirect.assertUsable()
         for (const resource of [
             ...this.resources.read.map(read => read.resource),
             ...this.resources.write,
@@ -982,7 +1001,7 @@ export class DispatchCommand {
             setBindGroupWithDynamicOffsets(this, passEncoder, bindSet)
         }
         if ('indirect' in this.count) {
-            throwIndirectBufferDiagnostic(this, this.count, 'unsupported')
+            passEncoder.dispatchWorkgroupsIndirect(this.count.indirect.gpuBuffer, this.count.offset)
         } else {
             passEncoder.dispatchWorkgroups(
                 this.count.workgroups[0],
@@ -2633,10 +2652,10 @@ function normalizeIndexBuffer(
     return { buffer, format, offset, size }
 }
 
-function normalizeDispatchCount(command: DispatchCommand, count: DispatchCount): { workgroups: [number, number, number] } | IndirectCommandCount {
+function normalizeDispatchCount(command: DispatchCommand, count: DispatchCount): { workgroups: [number, number, number] } | NormalizedIndirectCommandCount {
 
     if (isRecord(count) && 'indirect' in count) {
-        return count as IndirectCommandCount
+        return normalizeIndirectCommandCount(command, count, DISPATCH_INDIRECT_BYTE_LENGTH, 'dispatch')
     }
 
     if (!count || typeof count !== 'object' || !('workgroups' in count) || !Array.isArray(count.workgroups)) {
@@ -2792,13 +2811,20 @@ function normalizeDrawCount(
     command: DrawCommand,
     count: DrawCount,
     indexBuffer: NormalizedDrawIndexBufferBinding | undefined
-): DrawCount {
+): StaticDrawCount | StaticIndexedDrawCount | NormalizedIndirectCommandCount {
 
     if (!isRecord(count)) {
         throwCountDiagnostic(command, count)
     }
 
-    if ('indirect' in count) return count as IndirectCommandCount
+    if ('indirect' in count) {
+        return normalizeIndirectCommandCount(
+            command,
+            count,
+            indexBuffer === undefined ? DRAW_INDIRECT_BYTE_LENGTH : DRAW_INDEXED_INDIRECT_BYTE_LENGTH,
+            indexBuffer === undefined ? 'draw' : 'draw-indexed'
+        )
+    }
 
     if ('indexCount' in count) {
         if (indexBuffer === undefined) {
@@ -2886,6 +2912,70 @@ function normalizeDrawCount(
     }
 
     return { ...count }
+}
+
+function normalizeIndirectCommandCount(
+    command: DrawCommand | DispatchCommand,
+    count: Record<string, unknown>,
+    requiredByteLength: number,
+    operation: 'draw' | 'draw-indexed' | 'dispatch'
+): NormalizedIndirectCommandCount {
+
+    const buffer = count.indirect
+    if (!(buffer instanceof BufferResource)) {
+        throwIndirectBufferDiagnostic(command, {
+            expected: { indirect: 'BufferResource' },
+            actual: {
+                operation,
+                indirect: describeValue(buffer),
+                requiredByteLength,
+            },
+        })
+    }
+
+    buffer.assertRuntime(command.runtime)
+
+    const offset = count.offset ?? 0
+    if (!Number.isInteger(offset) || (offset as number) < 0 || (offset as number) % 4 !== 0) {
+        throwIndirectBufferDiagnostic(command, {
+            expected: { offset: 'non-negative integer aligned to 4 bytes' },
+            actual: {
+                operation,
+                offset,
+                bufferSize: buffer.size,
+                requiredByteLength,
+            },
+            related: [ buffer.subject ],
+        })
+    }
+
+    if ((offset as number) + requiredByteLength > buffer.size) {
+        throwIndirectBufferDiagnostic(command, {
+            expected: { range: `${requiredByteLength} bytes within BufferResource size` },
+            actual: {
+                operation,
+                offset,
+                bufferSize: buffer.size,
+                requiredByteLength,
+            },
+            related: [ buffer.subject ],
+        })
+    }
+
+    if ((buffer.usage & GPU_BUFFER_USAGE_INDIRECT) === 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+            severity: 'error',
+            phase: 'resource',
+            subject: buffer.subject,
+            related: [ command.subject, command.pipeline.subject ],
+            message: 'Indirect command count requires GPUBufferUsage.INDIRECT.',
+            expected: { usage: 'GPUBufferUsage.INDIRECT' },
+            actual: { usage: buffer.usage, operation },
+        })
+    }
+
+    return { indirect: buffer, offset: offset as number }
 }
 
 function normalizeUploadSource(runtime: ScratchRuntime, descriptor: UploadCommandDescriptor): NormalizedUploadSource {
@@ -4325,8 +4415,7 @@ function throwIndexBufferDiagnostic(
 
 function throwIndirectBufferDiagnostic(
     command: DrawCommand | DispatchCommand,
-    count: unknown,
-    reason: string
+    { expected, actual, related = [] }: IndirectBufferDiagnosticDetails
 ): never {
 
     throwScratchDiagnostic({
@@ -4334,9 +4423,10 @@ function throwIndirectBufferDiagnostic(
         severity: 'error',
         phase: 'command',
         subject: command.subject,
+        related: [ command.pipeline?.subject, ...related ].filter(Boolean),
         message: 'Command indirect buffer is invalid.',
-        expected: { indirect: 'BufferResource with GPUBufferUsage.INDIRECT' },
-        actual: { count, reason },
+        expected,
+        actual,
     })
 }
 

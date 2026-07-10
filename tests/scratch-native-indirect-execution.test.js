@@ -10,6 +10,7 @@ import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 const GPU_BUFFER_USAGE_COPY_DST = 0x08
 const GPU_BUFFER_USAGE_INDEX = 0x10
 const GPU_BUFFER_USAGE_STORAGE = 0x80
+const GPU_BUFFER_USAGE_INDIRECT = 0x100
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
 function readResource(resource, contentEpoch = resource.contentEpoch) {
@@ -336,6 +337,167 @@ describe('scratch native indexed and indirect execution', () => {
             pipeline: fixture.pipeline,
             indexBuffer: { buffer: disposed, format: 'uint16' },
             count: { indexCount: 3 },
+            resources: { read: [ readResource(disposed) ], write: [] },
+            whenMissing: 'throw',
+        }), 'SCRATCH_RESOURCE_DISPOSED')
+    })
+
+    it('encodes non-indexed and indexed draws through native indirect methods', async() => {
+
+        const fixture = await createRenderFixture()
+        const drawArguments = fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const indexedArguments = fixture.runtime.createBuffer({
+            size: 24,
+            usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const indexBuffer = fixture.runtime.createBuffer({
+            size: 8,
+            usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const uploadDrawArguments = fixture.runtime.createUploadCommand({
+            target: drawArguments,
+            data: new Uint32Array([ 3, 1, 0, 0 ]),
+        })
+        const uploadIndexedArguments = fixture.runtime.createUploadCommand({
+            target: indexedArguments,
+            data: new Uint32Array([ 0, 3, 1, 0, 0, 0 ]),
+        })
+        const uploadIndices = fixture.runtime.createUploadCommand({
+            target: indexBuffer,
+            data: new Uint16Array([ 0, 1, 2 ]),
+        })
+        const drawIndirect = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { indirect: drawArguments },
+            resources: { read: [ readResource(drawArguments, 1) ], write: [] },
+            whenMissing: 'throw',
+        })
+        const drawIndexedIndirect = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            indexBuffer: { buffer: indexBuffer, format: 'uint16', size: 6 },
+            count: { indirect: indexedArguments, offset: 4 },
+            resources: {
+                read: [
+                    readResource(indexBuffer, 1),
+                    readResource(indexedArguments, 1),
+                ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+
+        fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(uploadDrawArguments)
+            .upload(uploadIndexedArguments)
+            .upload(uploadIndices)
+            .render(fixture.pass, [ drawIndirect, drawIndexedIndirect ])
+            .submit()
+
+        expect(fixture.calls.renderPasses[0].actions).to.deep.equal([
+            { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
+            { type: 'drawIndirect', buffer: drawArguments.gpuBuffer, offset: 0 },
+            { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
+            {
+                type: 'setIndexBuffer',
+                buffer: indexBuffer.gpuBuffer,
+                indexFormat: 'uint16',
+                offset: 0,
+                size: 6,
+            },
+            { type: 'drawIndexedIndirect', buffer: indexedArguments.gpuBuffer, offset: 4 },
+            { type: 'end' },
+        ])
+    })
+
+    it('encodes dispatchWorkgroupsIndirect without inspecting argument bytes', async() => {
+
+        const fixture = await createComputeFixture()
+        const argumentsBuffer = fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const upload = fixture.runtime.createUploadCommand({
+            target: argumentsBuffer,
+            data: new Uint32Array([ 99, 1, 2, 3 ]),
+        })
+        const dispatch = fixture.runtime.createDispatchCommand({
+            pipeline: fixture.pipeline,
+            count: { indirect: argumentsBuffer, offset: 4 },
+            resources: { read: [ readResource(argumentsBuffer, 1) ], write: [] },
+            whenMissing: 'throw',
+        })
+
+        fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .compute(fixture.pass, [ dispatch ])
+            .submit()
+
+        expect(fixture.calls.computePasses[0].actions).to.deep.equal([
+            { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
+            { type: 'dispatchWorkgroupsIndirect', buffer: argumentsBuffer.gpuBuffer, offset: 4 },
+            { type: 'end' },
+        ])
+        expect(fixture.calls.maps).to.deep.equal([])
+    })
+
+    it('validates native indirect buffers, offsets, ranges, runtimes, and disposal', async() => {
+
+        const render = await createRenderFixture()
+        const compute = await createComputeFixture()
+        const noUsage = render.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_STORAGE })
+        const tooSmallDraw = render.runtime.createBuffer({ size: 15, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const tooSmallIndexed = render.runtime.createBuffer({ size: 19, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const misaligned = render.runtime.createBuffer({ size: 32, usage: GPU_BUFFER_USAGE_INDIRECT })
+
+        const drawCases = [
+            { count: { indirect: 'buffer' }, code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID' },
+            { count: { indirect: noUsage }, code: 'SCRATCH_RESOURCE_USAGE_MISSING' },
+            { count: { indirect: tooSmallDraw }, code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID' },
+            { count: { indirect: misaligned, offset: 2 }, code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID' },
+        ]
+        for (const testCase of drawCases) {
+            await expectDiagnostic(() => render.runtime.createDrawCommand({
+                pipeline: render.pipeline,
+                count: testCase.count,
+                resources: { read: [], write: [] },
+                whenMissing: 'throw',
+            }), testCase.code)
+        }
+
+        const indexBuffer = render.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        await expectDiagnostic(() => render.runtime.createDrawCommand({
+            pipeline: render.pipeline,
+            indexBuffer: { buffer: indexBuffer, format: 'uint16' },
+            count: { indirect: tooSmallIndexed },
+            resources: { read: [ readResource(indexBuffer), readResource(tooSmallIndexed) ], write: [] },
+            whenMissing: 'throw',
+        }), 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID')
+
+        const tooSmallDispatch = compute.runtime.createBuffer({ size: 11, usage: GPU_BUFFER_USAGE_INDIRECT })
+        await expectDiagnostic(() => compute.runtime.createDispatchCommand({
+            pipeline: compute.pipeline,
+            count: { indirect: tooSmallDispatch },
+            resources: { read: [ readResource(tooSmallDispatch) ], write: [] },
+            whenMissing: 'throw',
+        }), 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID')
+
+        const foreignRuntime = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const foreign = foreignRuntime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_INDIRECT })
+        await expectDiagnostic(() => render.runtime.createDrawCommand({
+            pipeline: render.pipeline,
+            count: { indirect: foreign },
+            resources: { read: [ readResource(foreign) ], write: [] },
+            whenMissing: 'throw',
+        }), 'SCRATCH_RESOURCE_WRONG_RUNTIME')
+
+        const disposed = render.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_INDIRECT })
+        disposed.dispose()
+        await expectDiagnostic(() => render.runtime.createDrawCommand({
+            pipeline: render.pipeline,
+            count: { indirect: disposed },
             resources: { read: [ readResource(disposed) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_RESOURCE_DISPOSED')
