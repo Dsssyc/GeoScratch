@@ -104,7 +104,9 @@ queue.writeBuffer/writeTexture(B)
 queue.submit(commandBufferC)
 ```
 
-The complete timeline is prepared before any queue action is replayed. Logical upload commitment advances the target `contentEpoch` exactly once during preparation; physical replay performs only the queue write. Direct upload command execution remains one queue write plus one epoch advance.
+The complete timeline is prepared before any queue action is replayed. Preparation revalidates live upload data and queue capabilities, simulates logical effects against temporary content-state snapshots, captures the resulting ledger facts, and restores live state. Replay performs the queue write first and commits the corresponding upload `contentEpoch` exactly once only after that call succeeds. Direct upload command execution remains one validation, one queue write, and one epoch advance.
+
+Replay is non-retryable once it begins. If an unexpected synchronous queue call fails after earlier actions were enqueued, only those successful earlier actions keep their logical effects; the failed and later actions do not. This prevents both fabricated epochs and duplicate retries.
 
 Upload-only submissions execute their writes in order, expose no fake command buffer, and register `done` after the final write. Consecutive uploads do not create empty queue submissions. See ADR-029.
 

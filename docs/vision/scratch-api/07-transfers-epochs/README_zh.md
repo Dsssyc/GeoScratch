@@ -104,7 +104,9 @@ queue.writeBuffer/writeTexture(B)
 queue.submit(commandBufferC)
 ```
 
-完整 timeline 会在 replay 任一 queue action 前准备完毕。逻辑 upload commitment 在 preparation 时只推进一次 target `contentEpoch`; 物理 replay 只执行 queue write。直接执行 upload command 仍然是一次 queue write 加一次 epoch advance。
+完整 timeline 会在 replay 任一 queue action 前准备完毕。Preparation 会重新校验 live upload data 与 queue capability，基于临时 content-state snapshot 模拟逻辑 effects，捕获相应 ledger facts，再恢复 live state。Replay 先执行 queue write，只在该调用成功后把对应 upload `contentEpoch` 精确提交一次。直接执行 upload command 仍然是一次 validation、一次 queue write 加一次 epoch advance。
+
+replay 一旦开始就不可重试。如果意外同步 queue call 在先前 actions 已入队后失败，只有那些成功的先前 actions 保留逻辑 effects; failed 与 later actions 都不提交。这同时避免伪造 epoch 与重复 retry。
 
 upload-only submission 按顺序执行 writes，不暴露伪造 command buffer，并在最后一次 write 后注册 `done`。连续 uploads 不创建空 queue submission。见 ADR-029。
 

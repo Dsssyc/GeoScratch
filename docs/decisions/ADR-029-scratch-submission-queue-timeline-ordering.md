@@ -46,15 +46,15 @@ type PreparedQueueAction =
     | { kind: 'texture-upload', command: TextureUploadCommand }
 ```
 
-This representation is internal. It is inspectable and can gain another explicit variant later, but it is not a public task-executor or callback API.
+Each prepared variant also retains the resource/query content effects that become live after that action is successfully enqueued. This representation is internal. It is inspectable and can gain another explicit variant later, but it is not a public task-executor or callback API.
 
 ### Three processing phases
 
 `SubmissionBuilder.submit()` has three ordered phases:
 
 1. Resolve readiness, fallback behavior, dependency validation, ownership, lifecycle, and pass compatibility before creating an encoder or touching `GPUQueue`.
-2. Prepare the complete physical queue timeline. Encode command-buffer segments and record logical resource access and epoch effects in declared step order without calling queue write or submit methods.
-3. Replay the prepared actions in exact order. A command-buffer action calls `queue.submit([commandBuffer])`; an upload action performs its corresponding queue write.
+2. Prepare the complete physical queue timeline. Encode command-buffer segments and simulate logical resource access and epoch effects against temporary content-state snapshots in declared step order without calling queue write or submit methods. Restore the live resource and query-slot state before replay.
+3. Replay the prepared actions in exact order. A command-buffer action calls `queue.submit([commandBuffer])`; an upload action performs its corresponding queue write. Commit that action's prepared logical effects only after its physical queue call succeeds.
 
 `queue.onSubmittedWorkDone()` is registered only after the final prepared action has been enqueued.
 
@@ -72,7 +72,11 @@ A buffer or texture upload terminates a preceding segment and separates it from 
 
 ### Epoch and upload behavior
 
-Upload normalization and validation remain command construction and submission-validation responsibilities. Timeline preparation commits the upload's logical write once; timeline replay performs the physical queue write without advancing the target epoch a second time. Direct `UploadCommand.execute(queue)` and `TextureUploadCommand.execute(queue)` still perform one physical write and one logical epoch advance.
+Upload normalization remains a command-construction responsibility. Submission revalidates upload data and required queue methods for every resolved upload before encoder creation, so expected structured failures occur before the first queue action.
+
+Timeline preparation temporarily simulates each logical write to produce exact readiness and ledger facts, captures the resulting per-action effects, and then restores live content state. Timeline replay performs the physical queue call first and commits the matching effect exactly once only after that call succeeds. Direct `UploadCommand.execute(queue)` and `TextureUploadCommand.execute(queue)` still perform one validation, one physical write, and one logical epoch advance.
+
+The builder becomes submitted before replay starts. An unexpected synchronous queue failure therefore cannot retry and duplicate earlier actions. Logical effects remain committed only for actions whose queue calls returned successfully; the failed action and all later actions remain uncommitted.
 
 Segmentation does not change resource access order, allocation versions, readiness decisions, execution outcomes, or query-slot behavior.
 

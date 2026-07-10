@@ -1192,8 +1192,6 @@ export interface UploadCommand {
     dataOffset: number
     byteLength: number
     isDisposed: boolean
-    _writeToQueue(queue: GPUQueue): void
-    _commitLogicalWrite(): void
 }
 
 export class UploadCommand {
@@ -1284,37 +1282,9 @@ export class UploadCommand {
 
     execute(queue: GPUQueue) {
 
-        this._writeToQueue(queue)
-        this._commitLogicalWrite()
-    }
-
-    _writeToQueue(queue: GPUQueue) {
-
-        this.assertUsable()
-
-        if (!queue || typeof queue.writeBuffer !== 'function') {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
-                severity: 'error',
-                phase: 'runtime',
-                subject: this.runtime.subject,
-                related: [ this.subject ],
-                message: 'ScratchRuntime queue cannot write GPU buffers.',
-                expected: { queue: 'GPUQueue with writeBuffer()' },
-                actual: { writeBuffer: typeof queue?.writeBuffer },
-            })
-        }
-
-        queue.writeBuffer(
-            this.target.gpuBuffer,
-            this.offset,
-            createUploadSource(this.data, this.dataOffset, this.byteLength)
-        )
-    }
-
-    _commitLogicalWrite() {
-
-        this.target._advanceContentEpoch()
+        validateUploadCommandQueueAction(this, queue)
+        writeUploadCommandQueueAction(this, queue)
+        commitUploadCommandLogicalWrite(this)
     }
 
     dispose(): void {
@@ -2066,8 +2036,6 @@ export interface TextureUploadCommand {
     size: { width: number, height: number, depthOrArrayLayers: number }
     mipLevel: number
     isDisposed: boolean
-    _writeToQueue(queue: GPUQueue): void
-    _commitLogicalWrite(): void
 }
 
 export class TextureUploadCommand {
@@ -2171,48 +2139,94 @@ export class TextureUploadCommand {
 
     execute(queue: GPUQueue) {
 
-        this._writeToQueue(queue)
-        this._commitLogicalWrite()
-    }
-
-    _writeToQueue(queue: GPUQueue) {
-
-        this.assertUsable()
-
-        if (!queue || typeof queue.writeTexture !== 'function') {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
-                severity: 'error',
-                phase: 'runtime',
-                subject: this.runtime.subject,
-                related: [ this.subject ],
-                message: 'ScratchRuntime queue cannot write GPU textures.',
-                expected: { queue: 'GPUQueue with writeTexture()' },
-                actual: { writeTexture: typeof queue?.writeTexture },
-            })
-        }
-
-        queue.writeTexture(
-            {
-                texture: this.target.gpuTexture,
-                mipLevel: this.mipLevel,
-                origin: this.origin,
-            },
-            this.data,
-            this.layout,
-            this.size
-        )
-    }
-
-    _commitLogicalWrite() {
-
-        this.target._advanceContentEpoch()
+        validateUploadCommandQueueAction(this, queue)
+        writeUploadCommandQueueAction(this, queue)
+        commitUploadCommandLogicalWrite(this)
     }
 
     dispose(): void {
 
         this.isDisposed = true
     }
+}
+
+export function validateUploadCommandQueueAction(
+    command: UploadCommand | TextureUploadCommand,
+    queue: GPUQueue
+): void {
+
+    command.assertUsable()
+
+    if (isTextureUploadQueueCommand(command)) {
+        if (!queue || typeof queue.writeTexture !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                severity: 'error',
+                phase: 'runtime',
+                subject: command.runtime.subject,
+                related: [ command.subject ],
+                message: 'ScratchRuntime queue cannot write GPU textures.',
+                expected: { queue: 'GPUQueue with writeTexture()' },
+                actual: { writeTexture: typeof queue?.writeTexture },
+            })
+        }
+
+        validateTextureUploadRange(command)
+        return
+    }
+
+    if (!queue || typeof queue.writeBuffer !== 'function') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+            severity: 'error',
+            phase: 'runtime',
+            subject: command.runtime.subject,
+            related: [ command.subject ],
+            message: 'ScratchRuntime queue cannot write GPU buffers.',
+            expected: { queue: 'GPUQueue with writeBuffer()' },
+            actual: { writeBuffer: typeof queue?.writeBuffer },
+        })
+    }
+
+    validateUploadRange(command)
+}
+
+export function writeUploadCommandQueueAction(
+    command: UploadCommand | TextureUploadCommand,
+    queue: GPUQueue
+): void {
+
+    if (isTextureUploadQueueCommand(command)) {
+        queue.writeTexture(
+            {
+                texture: command.target.gpuTexture,
+                mipLevel: command.mipLevel,
+                origin: command.origin,
+            },
+            command.data,
+            command.layout,
+            command.size
+        )
+        return
+    }
+
+    queue.writeBuffer(
+        command.target.gpuBuffer,
+        command.offset,
+        createUploadSource(command.data, command.dataOffset, command.byteLength)
+    )
+}
+
+export function commitUploadCommandLogicalWrite(command: UploadCommand | TextureUploadCommand): void {
+
+    command.target._advanceContentEpoch()
+}
+
+function isTextureUploadQueueCommand(
+    command: UploadCommand | TextureUploadCommand
+): command is TextureUploadCommand {
+
+    return 'uploadKind' in command && command.uploadKind === 'texture'
 }
 
 function normalizeOcclusionQueryIndex(runtime: ScratchRuntime, querySet: QuerySetResource, index: number): number {

@@ -5,7 +5,9 @@ import { createFakeGpu } from './scratch-test-utils.js'
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_BUFFER_USAGE_STORAGE = 0x80
+const GPU_BUFFER_USAGE_QUERY_RESOLVE = 0x200
 const GPU_TEXTURE_USAGE_COPY_DST = 0x2
+const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
 function timelineTypes(calls) {
 
@@ -99,6 +101,61 @@ function createSkippedCompute(runtime, whenMissing) {
     })
 
     return { command, pass, missing, output }
+}
+
+function createFallbackCompute(runtime) {
+
+    const missing = runtime.createBuffer({
+        label: 'fallback missing input',
+        size: 16,
+        usage: GPU_BUFFER_USAGE_STORAGE,
+    })
+    const ready = runtime.createBuffer({
+        label: 'fallback ready input',
+        size: 16,
+        usage: GPU_BUFFER_USAGE_STORAGE,
+    })
+    const output = runtime.createBuffer({
+        label: 'fallback output',
+        size: 16,
+        usage: GPU_BUFFER_USAGE_STORAGE,
+    })
+    ready._advanceContentEpoch()
+    const program = runtime.createProgram({
+        modules: [
+            `
+                @compute @workgroup_size(1)
+                fn csMain() {
+                }
+            `,
+        ],
+        entryPoints: { compute: 'csMain' },
+    })
+    const pipeline = runtime.createComputePipeline({ program, bindLayouts: [] })
+    const fallback = runtime.createDispatchCommand({
+        label: 'selected fallback dispatch',
+        pipeline,
+        count: { workgroups: [ 1 ] },
+        resources: {
+            read: [ { resource: ready, contentEpoch: 1 } ],
+            write: [ output ],
+        },
+        whenMissing: 'throw',
+    })
+    const primary = runtime.createDispatchCommand({
+        label: 'missing primary dispatch',
+        pipeline,
+        count: { workgroups: [ 1 ] },
+        resources: {
+            read: [ { resource: missing, contentEpoch: 1 } ],
+            write: [ output ],
+        },
+        whenMissing: 'use-fallback',
+        fallback,
+    })
+    const pass = runtime.createComputePass({ label: 'fallback compute pass' })
+
+    return { primary, fallback, pass, output }
 }
 
 async function createOrderingFixture() {
@@ -363,6 +420,135 @@ describe('scratch submission queue order', () => {
         await submitted.done
     })
 
+    it('segments effectful render passes at an upload boundary', async() => {
+
+        const fixture = await createOrderingFixture()
+        const target = fixture.runtime.createTexture({
+            label: 'queue order render target',
+            size: { width: 2, height: 2 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const pass = fixture.runtime.createRenderPass({
+            label: 'queue order render pass',
+            color: [ {
+                target,
+                load: 'clear',
+                store: 'store',
+                clear: [ 0, 0, 0, 1 ],
+            } ],
+        })
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [])
+            .upload(fixture.upload)
+            .render(pass, [])
+            .submit()
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([
+            'submit',
+            'write-buffer',
+            'submit',
+        ])
+        expect(fixture.calls.renderPasses).to.have.length(2)
+        expect(submitted.commandBuffers).to.have.length(2)
+        expect(target.contentEpoch).to.equal(2)
+        expect(target.allocationVersion).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            stepKind: access.stepKind,
+            passId: access.passId,
+            resourceId: access.resourceId,
+            allocationVersion: access.allocationVersion,
+        })).filter(access => access.resourceId === target.id)).to.deep.equal([
+            { stepIndex: 0, stepKind: 'render', passId: pass.id, resourceId: target.id, allocationVersion: 1 },
+            { stepIndex: 2, stepKind: 'render', passId: pass.id, resourceId: target.id, allocationVersion: 1 },
+        ])
+
+        await submitted.done
+    })
+
+    it('segments query resolves at an upload boundary', async() => {
+
+        const fixture = await createOrderingFixture()
+        const querySet = fixture.runtime.createQuerySet({
+            label: 'queue order query set',
+            type: 'timestamp',
+            count: 1,
+        })
+        querySet._advanceSlotContentEpoch(0)
+        const destination = fixture.runtime.createBuffer({
+            label: 'queue order resolve destination',
+            size: 8,
+            usage: GPU_BUFFER_USAGE_QUERY_RESOLVE,
+        })
+        const resolve = fixture.runtime.createResolveQuerySetCommand({
+            label: 'queue order resolve',
+            source: {
+                querySet,
+                slots: [ { index: 0, contentEpoch: 1 } ],
+            },
+            destination,
+            whenMissing: 'throw',
+        })
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .resolve(resolve)
+            .upload(fixture.upload)
+            .resolve(resolve)
+            .submit()
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([
+            'submit',
+            'write-buffer',
+            'submit',
+        ])
+        expect(fixture.calls.resolveQueries).to.have.length(2)
+        expect(submitted.commandBuffers).to.have.length(2)
+        expect(destination.contentEpoch).to.equal(2)
+        expect(destination.allocationVersion).to.equal(1)
+
+        await submitted.done
+    })
+
+    it('encodes only the selected fallback after an upload boundary', async() => {
+
+        const fixture = await createOrderingFixture()
+        const compute = createFallbackCompute(fixture.runtime)
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .copy(fixture.firstCopy)
+            .upload(fixture.upload)
+            .compute(compute.pass, [ compute.primary ])
+            .copy(fixture.secondCopy)
+            .submit()
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([
+            'submit',
+            'write-buffer',
+            'submit',
+        ])
+        expect(fixture.calls.computePasses).to.have.length(1)
+        expect(fixture.calls.dispatchCalls).to.have.length(1)
+        expect(submitted.commandBuffers).to.have.length(2)
+        expect(submitted.executionOutcomes.map(outcome => outcome.status)).to.deep.equal([
+            'executed',
+            'fallback-executed',
+        ])
+        const fallbackWrite = submitted.resourceAccesses.find(access => (
+            access.resourceId === compute.output.id && access.access === 'write'
+        ))
+        expect(fallbackWrite).to.include({
+            stepIndex: 2,
+            stepKind: 'compute',
+            commandKind: 'dispatch',
+            commandId: compute.fallback.id,
+            passId: compute.pass.id,
+            contentEpochBefore: 0,
+            contentEpochAfter: 1,
+            allocationVersion: 1,
+        })
+
+        await submitted.done
+    })
+
     it('does not create a segment for a skipped command', async() => {
 
         const fixture = await createOrderingFixture()
@@ -455,6 +641,66 @@ describe('scratch submission queue order', () => {
         expect(fixture.secondCopyTarget.contentEpoch).to.equal(0)
     })
 
+    it('validates every upload queue capability before an earlier segment can be submitted', async() => {
+
+        const fixture = await createOrderingFixture()
+        fixture.queue.writeTexture = undefined
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .copy(fixture.firstCopy)
+            .upload(fixture.textureUpload)
+
+        expectScratchDiagnostic(() => builder.submit(), 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE')
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([])
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.firstCopyTarget.contentEpoch).to.equal(0)
+        expect(fixture.textureTarget.contentEpoch).to.equal(0)
+        expect(builder.isSubmitted).to.equal(false)
+    })
+
+    it('rejects detached upload data before changing logical or physical state', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const target = runtime.createBuffer({
+            label: 'detached upload target',
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const data = new ArrayBuffer(16)
+        const upload = runtime.createUploadCommand({ target, data })
+        structuredClone(data, { transfer: [ data ] })
+
+        expectScratchDiagnostic(() => runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .submit(), 'SCRATCH_COMMAND_UPLOAD_RANGE_INVALID')
+
+        expect(target.contentEpoch).to.equal(0)
+        expect(target.state).to.equal('empty')
+        expect(timelineTypes(fake.calls)).to.deep.equal([])
+        expect(fake.calls.commandEncoders).to.have.length(0)
+    })
+
+    it('commits only successful actions and forbids retry after an unexpected replay failure', async() => {
+
+        const fixture = await createOrderingFixture()
+        fixture.queue.writeTexture = () => {
+            throw new Error('injected texture write failure')
+        }
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .copy(fixture.firstCopy)
+            .upload(fixture.textureUpload)
+
+        expect(() => builder.submit()).to.throw('injected texture write failure')
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([ 'submit' ])
+        expect(fixture.firstCopyTarget.contentEpoch).to.equal(1)
+        expect(fixture.textureTarget.contentEpoch).to.equal(0)
+        expect(builder.isSubmitted).to.equal(true)
+        expectScratchDiagnostic(() => builder.submit(), 'SCRATCH_SUBMISSION_WORK_ALREADY_SUBMITTED')
+        expect(timelineTypes(fixture.calls)).to.deep.equal([ 'submit' ])
+    })
+
     it('preserves physical order in warn and off validation modes', async() => {
 
         for (const validation of [ 'warn', 'off' ]) {
@@ -502,26 +748,32 @@ describe('scratch submission queue order', () => {
         expect(submitted.resourceAccesses.map(access => ({
             stepIndex: access.stepIndex,
             stepKind: access.stepKind,
+            commandKind: access.commandKind,
+            commandId: access.commandId,
             resourceId: access.resourceId,
             access: access.access,
             contentEpochBefore: access.contentEpochBefore,
             contentEpochAfter: access.contentEpochAfter,
+            allocationVersion: access.allocationVersion,
         }))).to.deep.equal([
-            { stepIndex: 0, stepKind: 'copy', resourceId: fixture.copySource.id, access: 'read', contentEpochBefore: 1, contentEpochAfter: 1 },
-            { stepIndex: 0, stepKind: 'copy', resourceId: fixture.firstCopyTarget.id, access: 'write', contentEpochBefore: 0, contentEpochAfter: 1 },
-            { stepIndex: 1, stepKind: 'upload', resourceId: fixture.uploadTarget.id, access: 'write', contentEpochBefore: 0, contentEpochAfter: 1 },
-            { stepIndex: 2, stepKind: 'copy', resourceId: fixture.copySource.id, access: 'read', contentEpochBefore: 1, contentEpochAfter: 1 },
-            { stepIndex: 2, stepKind: 'copy', resourceId: fixture.secondCopyTarget.id, access: 'write', contentEpochBefore: 0, contentEpochAfter: 1 },
+            { stepIndex: 0, stepKind: 'copy', commandKind: 'copy', commandId: fixture.firstCopy.id, resourceId: fixture.copySource.id, access: 'read', contentEpochBefore: 1, contentEpochAfter: 1, allocationVersion: 1 },
+            { stepIndex: 0, stepKind: 'copy', commandKind: 'copy', commandId: fixture.firstCopy.id, resourceId: fixture.firstCopyTarget.id, access: 'write', contentEpochBefore: 0, contentEpochAfter: 1, allocationVersion: 1 },
+            { stepIndex: 1, stepKind: 'upload', commandKind: 'upload', commandId: fixture.upload.id, resourceId: fixture.uploadTarget.id, access: 'write', contentEpochBefore: 0, contentEpochAfter: 1, allocationVersion: 1 },
+            { stepIndex: 2, stepKind: 'copy', commandKind: 'copy', commandId: fixture.secondCopy.id, resourceId: fixture.copySource.id, access: 'read', contentEpochBefore: 1, contentEpochAfter: 1, allocationVersion: 1 },
+            { stepIndex: 2, stepKind: 'copy', commandKind: 'copy', commandId: fixture.secondCopy.id, resourceId: fixture.secondCopyTarget.id, access: 'write', contentEpochBefore: 0, contentEpochAfter: 1, allocationVersion: 1 },
         ])
         expect(submitted.producerEpochs.map(epoch => ({
             resourceId: epoch.resourceId,
             contentEpoch: epoch.contentEpoch,
+            allocationVersion: epoch.allocationVersion,
             stepIndex: epoch.producedBy.stepIndex,
             stepKind: epoch.producedBy.stepKind,
+            commandKind: epoch.producedBy.commandKind,
+            commandId: epoch.producedBy.commandId,
         }))).to.deep.equal([
-            { resourceId: fixture.firstCopyTarget.id, contentEpoch: 1, stepIndex: 0, stepKind: 'copy' },
-            { resourceId: fixture.uploadTarget.id, contentEpoch: 1, stepIndex: 1, stepKind: 'upload' },
-            { resourceId: fixture.secondCopyTarget.id, contentEpoch: 1, stepIndex: 2, stepKind: 'copy' },
+            { resourceId: fixture.firstCopyTarget.id, contentEpoch: 1, allocationVersion: 1, stepIndex: 0, stepKind: 'copy', commandKind: 'copy', commandId: fixture.firstCopy.id },
+            { resourceId: fixture.uploadTarget.id, contentEpoch: 1, allocationVersion: 1, stepIndex: 1, stepKind: 'upload', commandKind: 'upload', commandId: fixture.upload.id },
+            { resourceId: fixture.secondCopyTarget.id, contentEpoch: 1, allocationVersion: 1, stepIndex: 2, stepKind: 'copy', commandKind: 'copy', commandId: fixture.secondCopy.id },
         ])
         expect(fixture.uploadTarget.contentEpoch).to.equal(1)
 

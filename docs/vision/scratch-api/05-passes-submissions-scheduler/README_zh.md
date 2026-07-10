@@ -108,8 +108,8 @@ Submission 职责:
 因此 submission lowering 分三阶段:
 
 1. 在创建 encoder 或接触 `GPUQueue` 前，完成 readiness、fallback、dependency validation、ownership、lifecycle 与 pass compatibility 解析。
-2. 准备完整的内部 discriminated queue-action timeline。按声明 step 顺序记录逻辑 resource access 与 epoch effect，并编码 command-buffer segments，但此时不调用 queue write 或 submit method。
-3. 按准确顺序 replay 已准备 timeline，并在最后一个 action 入队后注册 `queue.onSubmittedWorkDone()`。
+2. 准备完整的内部 discriminated queue-action timeline。基于临时 content-state snapshot，按声明 step 顺序模拟逻辑 resource access 与 epoch effect，并编码 command-buffer segments，但此时不调用 queue write 或 submit method。replay 前恢复 live content state。
+3. 按准确顺序 replay 已准备 timeline，只在对应 queue call 成功后提交该 action 的逻辑 effects，并在最后一个 action 入队后注册 `queue.onSubmittedWorkDone()`。
 
 内部 action family 是 command buffer、buffer upload 与 texture upload。它们是显式 variant，不是任意 callback，也不是 public scheduler API。
 
@@ -131,6 +131,8 @@ submit(render + readback)
 连续 upload 不创建空 command buffer。skipped command、skipped pass 与 effect-free empty pass 不创建 segment。没有 upload boundary 的 encoder-only work 仍保持一个 encoder、一个 command buffer 和一次 `queue.submit(...)`。
 
 `SubmittedWork.commandBuffers` 按物理 queue 顺序包含每个真实 segment。upload-only work 的 command-buffer array 为空，但仍在最后一次 queue write 后注册 completion。effect-free work 不创建 encoder 或 queue action，并使用已 resolve 的 `done` promise。见 ADR-029。
+
+每个 resolved upload 都会在 encoder 创建前重新校验 live data range 与所需 queue method。replay 一旦开始，builder 就不可重试: 意外的同步 queue failure 不能重复先前 action，且只有成功入队的 action 才提交其 prepared logical effects。
 
 ## Resolved Readiness Execution
 

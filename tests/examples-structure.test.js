@@ -79,7 +79,8 @@ describe('examples structure', () => {
         expect(html).to.include('<h1 id="stage-title">Hello Triangle</h1>')
         expect(html).to.include('href="./scratch_helloTriangle/main.js"')
         expect(html).to.include('href="./scratch_helloTriangle/"')
-        expect(html).to.include('src="./scratch_helloTriangle/"')
+        expect(html).to.include('src="about:blank"')
+        expect(html).to.include('selectExample(currentLinkFromUrl(), false)')
     })
 
     it('uses stable demo names for Scratch-backed browser entries', () => {

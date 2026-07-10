@@ -108,8 +108,8 @@ Submission responsibilities:
 Submission lowering therefore uses three phases:
 
 1. Resolve readiness, fallback, dependency validation, ownership, lifecycle, and pass compatibility before creating an encoder or touching `GPUQueue`.
-2. Prepare a complete internal discriminated queue-action timeline. Record logical resource accesses and epoch effects in declared step order while encoding command-buffer segments, but do not call queue write or submit methods yet.
-3. Replay the prepared timeline in exact order, then register `queue.onSubmittedWorkDone()` after the final action.
+2. Prepare a complete internal discriminated queue-action timeline. Simulate logical resource accesses and epoch effects against temporary content-state snapshots in declared step order while encoding command-buffer segments, but do not call queue write or submit methods yet. Restore live content state before replay.
+3. Replay the prepared timeline in exact order and commit each action's logical effects only after its queue call succeeds, then register `queue.onSubmittedWorkDone()` after the final action.
 
 The internal action families are command buffer, buffer upload, and texture upload. They are explicit variants, not arbitrary callbacks and not a public scheduler API.
 
@@ -131,6 +131,8 @@ submit(render + readback)
 Consecutive uploads do not create empty command buffers. Skipped commands, skipped passes, and effect-free empty passes do not create segments. Encoder-only work with no upload boundary remains one encoder, one command buffer, and one `queue.submit(...)`.
 
 `SubmittedWork.commandBuffers` contains every real segment in physical queue order. Upload-only work has an empty command-buffer array but still registers completion after the final queue write. Effect-free work creates no encoder or queue action and uses an already-resolved `done` promise. See ADR-029.
+
+Every resolved upload revalidates its live data range and required queue method before encoder creation. Once replay begins, the builder is non-retryable: an unexpected synchronous queue failure cannot duplicate earlier actions, and only successfully enqueued actions commit their prepared logical effects.
 
 ## Resolved Readiness Execution
 

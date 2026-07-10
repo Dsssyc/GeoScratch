@@ -1,5 +1,10 @@
 import { UUID } from '../core/utils/uuid.js'
-import { registerReadbackCommandResult } from './command.js'
+import {
+    commitUploadCommandLogicalWrite,
+    registerReadbackCommandResult,
+    validateUploadCommandQueueAction,
+    writeUploadCommandQueueAction,
+} from './command.js'
 import {
     ScratchDiagnosticError,
     createScratchDiagnostic,
@@ -187,19 +192,49 @@ type PendingReadback = {
     allocationVersion: number
 }
 
+type PreparedResourceContentEffect = {
+    kind: 'resource-content'
+    resource: Resource
+    state: ResourceState
+    contentEpoch: number
+}
+
+type PreparedQuerySlotContentEffect = {
+    kind: 'query-slot-content'
+    querySet: QuerySetResource
+    index: number
+    state: QuerySetSlotState
+    contentEpoch: number
+}
+
+type PreparedQueueEffect = PreparedResourceContentEffect | PreparedQuerySlotContentEffect
+
 type PreparedQueueAction =
     | {
         kind: 'command-buffer'
         commandBuffer: GPUCommandBuffer
+        effects: PreparedQueueEffect[]
     }
     | {
         kind: 'buffer-upload'
         command: UploadCommand
+        effects: PreparedQueueEffect[]
     }
     | {
         kind: 'texture-upload'
         command: TextureUploadCommand
+        effects: PreparedQueueEffect[]
     }
+
+type ResourceContentSnapshot = {
+    state: ResourceState
+    contentEpoch: number
+}
+
+type QuerySlotContentSnapshot = {
+    state: QuerySetSlotState
+    contentEpoch: number
+}
 
 function isTextureUploadCommand(command: UploadCommand | TextureUploadCommand): command is TextureUploadCommand {
 
@@ -361,14 +396,49 @@ export class SubmissionBuilder {
 
         const resolvedPlan = resolveSubmissionBeforeEncoding(this)
         applySubmissionValidationDisposition(this, resolvedPlan.report)
+        for (const step of resolvedPlan.steps) {
+            if (step.kind === 'upload') {
+                validateUploadCommandQueueAction(step.command, this.runtime.queue)
+            }
+        }
 
         const submittedId = `scratch-submitted-${UUID()}`
         const commandBuffers: GPUCommandBuffer[] = []
         const queueTimeline: PreparedQueueAction[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
         const pendingReadbacks: PendingReadback[] = []
+        const resourceSnapshots = new Map<Resource, ResourceContentSnapshot>()
+        const querySlotSnapshots = new Map<QuerySetResource, Map<number, QuerySlotContentSnapshot>>()
         let encoder: GPUCommandEncoder | undefined
         let encoderSegmentIndex = 0
+        let segmentResources = new Set<Resource>()
+        let segmentQuerySlots = new Map<QuerySetResource, Set<number>>()
+
+        const trackSegmentResourceWrite = (resource: Resource) => {
+
+            captureResourceContentSnapshot(resourceSnapshots, resource)
+            segmentResources.add(resource)
+        }
+
+        const trackSegmentQuerySlotWrite = (querySet: QuerySetResource, index: number) => {
+
+            captureQuerySlotContentSnapshot(querySlotSnapshots, querySet, index)
+            let indices = segmentQuerySlots.get(querySet)
+            if (indices === undefined) {
+                indices = new Set()
+                segmentQuerySlots.set(querySet, indices)
+            }
+            indices.add(index)
+        }
+
+        const trackTimestampWrites = (passSpec: RenderPassSpec | ComputePassSpec) => {
+
+            if (passSpec.timestampWrites === undefined) return
+
+            const { querySet, begin, end } = passSpec.timestampWrites
+            if (begin !== undefined) trackSegmentQuerySlotWrite(querySet, begin)
+            if (end !== undefined) trackSegmentQuerySlotWrite(querySet, end)
+        }
 
         const getEncoder = () => {
 
@@ -390,125 +460,151 @@ export class SubmissionBuilder {
 
             const commandBuffer = encoder.finish()
             commandBuffers.push(commandBuffer)
-            queueTimeline.push({ kind: 'command-buffer', commandBuffer })
+            queueTimeline.push({
+                kind: 'command-buffer',
+                commandBuffer,
+                effects: createPreparedQueueEffects(segmentResources, segmentQuerySlots),
+            })
             encoder = undefined
+            segmentResources = new Set()
+            segmentQuerySlots = new Map()
         }
 
-        for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
-            if (step.kind === 'upload') {
-                finishEncoderSegment()
-                const writes = [
-                    captureResourceAccess(step.command.target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
-                ]
-                step.command._commitLogicalWrite()
-                completeResourceAccesses(resourceAccesses, writes)
-                queueTimeline.push(isTextureUploadCommand(step.command)
-                    ? { kind: 'texture-upload', command: step.command }
-                    : { kind: 'buffer-upload', command: step.command })
-                continue
-            }
+        try {
+            for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
+                if (step.kind === 'upload') {
+                    finishEncoderSegment()
+                    const writes = [
+                        captureResourceAccess(step.command.target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
+                    ]
+                    captureResourceContentSnapshot(resourceSnapshots, step.command.target)
+                    commitUploadCommandLogicalWrite(step.command)
+                    completeResourceAccesses(resourceAccesses, writes)
+                    const effects = [ createPreparedResourceContentEffect(step.command.target) ]
+                    queueTimeline.push(isTextureUploadCommand(step.command)
+                        ? { kind: 'texture-upload', command: step.command, effects }
+                        : { kind: 'buffer-upload', command: step.command, effects })
+                    continue
+                }
 
-            if (step.kind === 'copy') {
-                const encoder = getEncoder()
-                const origin = commandAccessOrigin(stepIndex, 'copy', step.command)
-                const accesses = [
-                    captureResourceAccess(step.command.source.resource, 'read', origin),
-                    captureResourceAccess(step.command.target, 'write', origin),
-                ]
-                step.command.encode(encoder)
-                completeResourceAccesses(resourceAccesses, accesses)
-                continue
-            }
+                if (step.kind === 'copy') {
+                    const encoder = getEncoder()
+                    trackSegmentResourceWrite(step.command.target)
+                    const origin = commandAccessOrigin(stepIndex, 'copy', step.command)
+                    const accesses = [
+                        captureResourceAccess(step.command.source.resource, 'read', origin),
+                        captureResourceAccess(step.command.target, 'write', origin),
+                    ]
+                    step.command.encode(encoder)
+                    completeResourceAccesses(resourceAccesses, accesses)
+                    continue
+                }
 
-            if (step.kind === 'readback') {
-                const encoder = getEncoder()
-                const origin = commandAccessOrigin(stepIndex, 'readback', step.command)
-                const readAccess = captureResourceAccess(step.command.source.resource, 'read', origin)
-                pendingReadbacks.push({
-                    command: step.command,
-                    stagingBuffer: step.command.encode(encoder),
-                    stepIndex,
-                    contentEpoch: readAccess.contentEpochBefore,
-                    allocationVersion: step.command.source.resource.allocationVersion,
-                })
-                completeResourceAccesses(resourceAccesses, [ readAccess ])
-                continue
-            }
+                if (step.kind === 'readback') {
+                    const encoder = getEncoder()
+                    const origin = commandAccessOrigin(stepIndex, 'readback', step.command)
+                    const readAccess = captureResourceAccess(step.command.source.resource, 'read', origin)
+                    pendingReadbacks.push({
+                        command: step.command,
+                        stagingBuffer: step.command.encode(encoder),
+                        stepIndex,
+                        contentEpoch: readAccess.contentEpochBefore,
+                        allocationVersion: step.command.source.resource.allocationVersion,
+                    })
+                    completeResourceAccesses(resourceAccesses, [ readAccess ])
+                    continue
+                }
 
-            if (step.kind === 'resolve') {
-                const encoder = getEncoder()
-                const writes = [
-                    captureResourceAccess(step.command.destination, 'write', commandAccessOrigin(stepIndex, 'resolve', step.command)),
-                ]
-                step.command.encode(encoder)
-                completeResourceAccesses(resourceAccesses, writes)
-                continue
-            }
+                if (step.kind === 'resolve') {
+                    const encoder = getEncoder()
+                    trackSegmentResourceWrite(step.command.destination)
+                    const writes = [
+                        captureResourceAccess(step.command.destination, 'write', commandAccessOrigin(stepIndex, 'resolve', step.command)),
+                    ]
+                    step.command.encode(encoder)
+                    completeResourceAccesses(resourceAccesses, writes)
+                    continue
+                }
 
-            if (step.kind === 'compute') {
+                if (step.kind === 'compute') {
+                    if (step.disposition === 'skip-pass') continue
+                    if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
+
+                    const encoder = getEncoder()
+                    const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
+                    for (const command of step.commands) {
+                        const origin = commandAccessOrigin(stepIndex, 'compute', command, step.passSpec)
+                        const declaredWrites = command._producesDeclaredWrites ? command.resources.write : []
+                        for (const resource of declaredWrites) trackSegmentResourceWrite(resource)
+                        const accesses = [
+                            ...command.resources.read.map(read => captureResourceAccess(read.resource, 'read', origin)),
+                            ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
+                        ]
+                        command.encode(passEncoder)
+                        completeResourceAccesses(resourceAccesses, accesses)
+                    }
+                    passEncoder.end()
+                    trackTimestampWrites(step.passSpec)
+                    step.passSpec.advanceTimestampWriteEpochs()
+                    continue
+                }
+
                 if (step.disposition === 'skip-pass') continue
                 if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
                 const encoder = getEncoder()
-                const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
+                const colorWrites = captureRenderAttachmentWrites(stepIndex, step.passSpec)
+                const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
+                let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
                 for (const command of step.commands) {
-                    const origin = commandAccessOrigin(stepIndex, 'compute', command, step.passSpec)
-                    const declaredWrites = command._producesDeclaredWrites ? command.resources.write : []
-                    const accesses = [
-                        ...command.resources.read.map(read => captureResourceAccess(read.resource, 'read', origin)),
-                        ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
-                    ]
+                    const origin = commandAccessOrigin(stepIndex, 'render', command, step.passSpec)
+                    const declaredWrites = command.commandKind === 'draw' && command._producesDeclaredWrites
+                        ? command.resources.write
+                        : []
+                    for (const resource of declaredWrites) trackSegmentResourceWrite(resource)
+                    const accesses = command.commandKind === 'draw'
+                        ? [
+                            ...command.resources.read.map(read => captureResourceAccess(read.resource, 'read', origin)),
+                            ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
+                        ]
+                        : []
                     command.encode(passEncoder)
+                    if (command.commandKind === 'begin-occlusion-query') {
+                        activeOcclusionQueryCommand = command
+                    } else if (command.commandKind === 'end-occlusion-query') {
+                        if (activeOcclusionQueryCommand !== undefined) {
+                            trackSegmentQuerySlotWrite(
+                                activeOcclusionQueryCommand.querySet,
+                                activeOcclusionQueryCommand.index
+                            )
+                        }
+                        activeOcclusionQueryCommand?.querySet._advanceSlotContentEpoch(activeOcclusionQueryCommand.index)
+                        activeOcclusionQueryCommand = undefined
+                    }
                     completeResourceAccesses(resourceAccesses, accesses)
                 }
                 passEncoder.end()
+                trackTimestampWrites(step.passSpec)
                 step.passSpec.advanceTimestampWriteEpochs()
-                continue
+                for (const write of colorWrites) trackSegmentResourceWrite(write.resource)
+                advanceRenderAttachmentEpochs(step.passSpec)
+                completeResourceAccesses(resourceAccesses, colorWrites)
             }
 
-            if (step.disposition === 'skip-pass') continue
-            if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
-
-            const encoder = getEncoder()
-            const colorWrites = captureRenderAttachmentWrites(stepIndex, step.passSpec)
-            const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
-            let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
-            for (const command of step.commands) {
-                const origin = commandAccessOrigin(stepIndex, 'render', command, step.passSpec)
-                const declaredWrites = command.commandKind === 'draw' && command._producesDeclaredWrites
-                    ? command.resources.write
-                    : []
-                const accesses = command.commandKind === 'draw'
-                    ? [
-                        ...command.resources.read.map(read => captureResourceAccess(read.resource, 'read', origin)),
-                        ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
-                    ]
-                    : []
-                command.encode(passEncoder)
-                if (command.commandKind === 'begin-occlusion-query') {
-                    activeOcclusionQueryCommand = command
-                } else if (command.commandKind === 'end-occlusion-query') {
-                    activeOcclusionQueryCommand?.querySet._advanceSlotContentEpoch(activeOcclusionQueryCommand.index)
-                    activeOcclusionQueryCommand = undefined
-                }
-                completeResourceAccesses(resourceAccesses, accesses)
-            }
-            passEncoder.end()
-            step.passSpec.advanceTimestampWriteEpochs()
-            advanceRenderAttachmentEpochs(step.passSpec)
-            completeResourceAccesses(resourceAccesses, colorWrites)
+            finishEncoderSegment()
+        } finally {
+            restorePreparedContentState(resourceSnapshots, querySlotSnapshots)
         }
-
-        finishEncoderSegment()
+        this.isSubmitted = true
         for (const action of queueTimeline) {
             if (action.kind === 'command-buffer') {
                 this.runtime.queue.submit([ action.commandBuffer ])
-                continue
+            } else {
+                writeUploadCommandQueueAction(action.command, this.runtime.queue)
             }
 
-            action.command._writeToQueue(this.runtime.queue)
+            applyPreparedQueueEffects(action.effects)
         }
-        this.isSubmitted = true
 
         const submitted = new SubmittedWork(this.runtime, {
             id: submittedId,
@@ -2497,6 +2593,103 @@ function advanceRenderAttachmentEpochs(passSpec: RenderPassSpec) {
     if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target)) {
         passSpec.depth.target._advanceContentEpoch()
         writtenTargets.add(passSpec.depth.target)
+    }
+}
+
+function captureResourceContentSnapshot(
+    snapshots: Map<Resource, ResourceContentSnapshot>,
+    resource: Resource
+): void {
+
+    if (snapshots.has(resource)) return
+
+    snapshots.set(resource, {
+        state: resource.state,
+        contentEpoch: resource.contentEpoch,
+    })
+}
+
+function captureQuerySlotContentSnapshot(
+    snapshots: Map<QuerySetResource, Map<number, QuerySlotContentSnapshot>>,
+    querySet: QuerySetResource,
+    index: number
+): void {
+
+    let slots = snapshots.get(querySet)
+    if (slots === undefined) {
+        slots = new Map()
+        snapshots.set(querySet, slots)
+    }
+    if (slots.has(index)) return
+
+    slots.set(index, {
+        state: querySet.slotStates[index],
+        contentEpoch: querySet.slotContentEpochs[index],
+    })
+}
+
+function createPreparedResourceContentEffect(resource: Resource): PreparedResourceContentEffect {
+
+    return {
+        kind: 'resource-content',
+        resource,
+        state: resource.state,
+        contentEpoch: resource.contentEpoch,
+    }
+}
+
+function createPreparedQueueEffects(
+    resources: ReadonlySet<Resource>,
+    querySlots: ReadonlyMap<QuerySetResource, ReadonlySet<number>>
+): PreparedQueueEffect[] {
+
+    const effects: PreparedQueueEffect[] = []
+    for (const resource of resources) {
+        effects.push(createPreparedResourceContentEffect(resource))
+    }
+    for (const [querySet, indices] of querySlots) {
+        for (const index of indices) {
+            effects.push({
+                kind: 'query-slot-content',
+                querySet,
+                index,
+                state: querySet.slotStates[index],
+                contentEpoch: querySet.slotContentEpochs[index],
+            })
+        }
+    }
+
+    return effects
+}
+
+function restorePreparedContentState(
+    resourceSnapshots: ReadonlyMap<Resource, ResourceContentSnapshot>,
+    querySlotSnapshots: ReadonlyMap<QuerySetResource, ReadonlyMap<number, QuerySlotContentSnapshot>>
+): void {
+
+    for (const [resource, snapshot] of resourceSnapshots) {
+        resource.state = snapshot.state
+        resource.contentEpoch = snapshot.contentEpoch
+    }
+    for (const [querySet, slots] of querySlotSnapshots) {
+        for (const [index, snapshot] of slots) {
+            querySet.slotStates[index] = snapshot.state
+            querySet.slotContentEpochs[index] = snapshot.contentEpoch
+        }
+    }
+}
+
+function applyPreparedQueueEffects(effects: readonly PreparedQueueEffect[]): void {
+
+    for (const effect of effects) {
+        if (effect.kind === 'resource-content') {
+            effect.resource.state = effect.state
+            effect.resource.contentEpoch = effect.contentEpoch
+            continue
+        }
+
+        effect.querySet.slotStates[effect.index] = effect.state
+        effect.querySet.slotContentEpochs[effect.index] = effect.contentEpoch
     }
 }
 

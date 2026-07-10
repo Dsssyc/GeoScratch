@@ -840,6 +840,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatValidationMode: scratchCompat.SubmissionValidationMode = 'off'
     const submissionOptions: scr.SubmissionBuilderOptions = { validation: validationMode }
     const compatSubmissionOptions: scratchCompat.SubmissionBuilderOptions = { validation: compatValidationMode }
+    // @ts-expect-error queue replay is package-internal submission lowering
+    upload._writeToQueue(runtime.queue)
+    // @ts-expect-error logical upload commitment is package-internal submission lowering
+    upload._commitLogicalWrite()
+    // @ts-expect-error texture queue replay is package-internal submission lowering
+    textureUpload._writeToQueue(runtime.queue)
+    // @ts-expect-error texture logical commitment is package-internal submission lowering
+    textureUpload._commitLogicalWrite()
     const builder: scr.SubmissionBuilder = runtime.createSubmission(submissionOptions)
     const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
     const resourceAccesses: readonly scr.SubmissionResourceAccess[] = submitted.resourceAccesses

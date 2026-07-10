@@ -20,6 +20,7 @@ Coverage check for this pass:
 - Buffer and texture upload leading, trailing, interleaved, consecutive, and alternating order: covered by `tests/scratch-submission-queue-order.test.js`.
 - Segment coalescing and omission for skipped/effect-free passes: covered by `tests/scratch-submission-queue-order.test.js` and the existing readiness suite.
 - Validation-before-queue-side-effect behavior in `throw`, `warn`, and `off` modes: covered by the focused queue-order suite and existing structured diagnostic tests.
+- Upload live-data/queue preflight, package-internal lowering, and non-retryable partial replay with per-action effect commitment: covered by focused runtime and public type tests.
 - Resource access, producer epoch, allocation version, and exactly-once upload epoch semantics: covered by the focused queue-order and submitted-work ledger suites.
 - Ordered readback bytes, staging identity, epoch separation, and producer provenance across upload boundaries: covered by the focused queue-order and readback suites.
 - Aggregate `SubmittedWork.commandBuffers` and `done` behavior for segmented, upload-only, and effect-free work: covered by the focused queue-order suite.
