@@ -98,6 +98,13 @@ type ResolveStep = {
 
 type SubmissionStep = RenderStep | ComputeStep | UploadStep | CopyStep | ReadbackStep | ResolveStep
 
+type ResolvedSubmissionPlan = {
+    report: ScratchDiagnosticReport
+    steps: SubmissionStep[]
+    readiness: ReadinessSimulation
+    querySlots: QuerySlotSimulation
+}
+
 type ReadCommand = CopyCommand | DispatchCommand | DrawCommand | ReadbackCommand
 
 type PendingReadback = {
@@ -221,8 +228,8 @@ export class SubmissionBuilder {
             })
         }
 
-        const validationReport = validateSubmissionBeforeEncoding(this)
-        applySubmissionValidationDisposition(this, validationReport)
+        const resolvedPlan = resolveSubmissionBeforeEncoding(this)
+        applySubmissionValidationDisposition(this, resolvedPlan.report)
 
         const submittedId = `scratch-submitted-${UUID()}`
         const commandBuffers: GPUCommandBuffer[] = []
@@ -232,7 +239,7 @@ export class SubmissionBuilder {
             label: submittedId,
         })
 
-        for (const [stepIndex, step] of this.steps.entries()) {
+        for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
             if (step.kind === 'upload') {
                 const writes = [
                     captureResourceAccess(step.command.target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
@@ -334,7 +341,7 @@ export class SubmissionBuilder {
         const submitted = new SubmittedWork(this.runtime, {
             id: submittedId,
             commandBuffers,
-            report: validationReport,
+            report: resolvedPlan.report,
             resourceAccesses,
             done: createDonePromise(this.runtime.queue),
         })
@@ -366,9 +373,10 @@ export class SubmissionBuilder {
     }
 }
 
-function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDiagnosticReport {
+function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSubmissionPlan {
 
     const diagnostics: ScratchDiagnostic[] = []
+    const steps: SubmissionStep[] = []
     const readiness: ReadinessSimulation = new Map()
     const querySlots: QuerySlotSimulation = new Map()
     const readbackSteps = new Map<ReadbackCommand, number>()
@@ -377,6 +385,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
         if (step.kind === 'upload') {
             validateUploadStep(builder, step)
             markSimulatedReady(readiness, step.command.target)
+            steps.push(step)
             continue
         }
 
@@ -384,6 +393,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
             validateCopyStep(builder, step)
             validateCopyReadiness(builder, step, stepIndex, readiness, diagnostics)
             markSimulatedReady(readiness, step.command.target)
+            steps.push(step)
             continue
         }
 
@@ -391,6 +401,7 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
             validateReadbackStep(builder, step)
             validateReadbackUniqueness(builder, step, stepIndex, readbackSteps)
             validateReadbackReadiness(builder, step, stepIndex, readiness, diagnostics)
+            steps.push(step)
             continue
         }
 
@@ -398,25 +409,34 @@ function validateSubmissionBeforeEncoding(builder: SubmissionBuilder): ScratchDi
             validateResolveStep(builder, step)
             validateResolveReadiness(builder, step, stepIndex, querySlots, diagnostics)
             markSimulatedReady(readiness, step.command.destination)
+            steps.push(step)
             continue
         }
 
         if (step.kind === 'compute') {
             validateComputeStep(builder, step)
-            validateComputeReadiness(builder, step, stepIndex, readiness, diagnostics)
+            const commands = resolveComputeReadiness(builder, step, stepIndex, readiness, diagnostics)
             markSimulatedTimestampWrites(querySlots, step.passSpec.timestampWrites)
+            steps.push({ ...step, commands })
             continue
         }
 
         validateRenderStep(builder, step)
+        const commands = resolveRenderReadiness(builder, step, stepIndex, readiness, diagnostics)
+        const resolvedStep = { ...step, commands }
         if (builder.validation !== 'off') {
-            diagnostics.push(...collectRenderPassResourceConflictDiagnostics(builder, step, stepIndex))
+            diagnostics.push(...collectRenderPassResourceConflictDiagnostics(builder, resolvedStep, stepIndex))
         }
-        validateRenderReadiness(builder, step, stepIndex, readiness, diagnostics)
-        markSimulatedRenderQueryWrites(querySlots, step)
+        markSimulatedRenderQueryWrites(querySlots, resolvedStep)
+        steps.push(resolvedStep)
     }
 
-    return createScratchDiagnosticReport(diagnostics)
+    return {
+        report: createScratchDiagnosticReport(diagnostics),
+        steps,
+        readiness,
+        querySlots,
+    }
 }
 
 function applySubmissionValidationDisposition(builder: SubmissionBuilder, report: ScratchDiagnosticReport): void {
@@ -473,7 +493,7 @@ function validateCopyReadiness(
     diagnostics: ScratchDiagnostic[]
 ): void {
 
-    validateCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, undefined, 'source')
+    resolveCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, undefined, 'source')
 }
 
 function validateReadbackStep(builder: SubmissionBuilder, step: ReadbackStep) {
@@ -503,7 +523,7 @@ function validateReadbackReadiness(
     diagnostics: ScratchDiagnostic[]
 ): void {
 
-    validateCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, undefined, 'source')
+    resolveCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, undefined, 'source')
 }
 
 function validateReadbackUniqueness(
@@ -599,36 +619,65 @@ function validateResolveReadiness(
     }
 }
 
-function validateComputeReadiness(
+function resolveComputeReadiness(
     builder: SubmissionBuilder,
     step: ComputeStep,
     stepIndex: number,
     readiness: ReadinessSimulation,
     diagnostics: ScratchDiagnostic[]
-): void {
+): DispatchCommand[] {
 
+    const commands: DispatchCommand[] = []
     for (const command of step.commands) {
-        validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, diagnostics, step.passSpec)
+        const shouldExecute = resolveCommandReadiness(
+            builder,
+            stepIndex,
+            command,
+            command.resources.read,
+            readiness,
+            diagnostics,
+            step.passSpec
+        )
+        if (!shouldExecute) continue
+
+        commands.push(command)
         if (command._producesDeclaredWrites) {
             for (const resource of command.resources.write) {
                 markSimulatedReady(readiness, resource)
             }
         }
     }
+
+    return commands
 }
 
-function validateRenderReadiness(
+function resolveRenderReadiness(
     builder: SubmissionBuilder,
     step: RenderStep,
     stepIndex: number,
     readiness: ReadinessSimulation,
     diagnostics: ScratchDiagnostic[]
-): void {
+): RenderCommand[] {
 
+    const commands: RenderCommand[] = []
     for (const command of step.commands) {
-        if (command.commandKind !== 'draw') continue
+        if (command.commandKind !== 'draw') {
+            commands.push(command)
+            continue
+        }
 
-        validateCommandReadiness(builder, stepIndex, command, command.resources.read, readiness, diagnostics, step.passSpec)
+        const shouldExecute = resolveCommandReadiness(
+            builder,
+            stepIndex,
+            command,
+            command.resources.read,
+            readiness,
+            diagnostics,
+            step.passSpec
+        )
+        if (!shouldExecute) continue
+
+        commands.push(command)
         if (command._producesDeclaredWrites) {
             for (const resource of command.resources.write) {
                 markSimulatedReady(readiness, resource)
@@ -645,6 +694,8 @@ function validateRenderReadiness(
     if (step.passSpec.depth !== undefined) {
         markSimulatedReady(readiness, step.passSpec.depth.target)
     }
+
+    return commands
 }
 
 function markSimulatedTimestampWrites(querySlots: QuerySlotSimulation, timestampWrites: ComputePassSpec['timestampWrites']): void {
@@ -677,7 +728,7 @@ function markSimulatedRenderQueryWrites(querySlots: QuerySlotSimulation, step: R
     }
 }
 
-function validateCommandReadiness(
+function resolveCommandReadiness(
     builder: SubmissionBuilder,
     stepIndex: number,
     command: ReadCommand,
@@ -686,15 +737,34 @@ function validateCommandReadiness(
     diagnostics: ScratchDiagnostic[],
     passSpec?: RenderPassSpec | ComputePassSpec,
     role?: string
-): void {
+): boolean {
+
+    const missing = readRequirements
+        .map(readRequirement => ({
+            readRequirement,
+            simulated: simulatedResourceState(readiness, readRequirement.resource),
+        }))
+        .filter(({ simulated }) => simulated.state !== 'ready')
+
+    if (missing.length > 0) {
+        const first = missing[0]!
+        if (command.whenMissing === 'throw') {
+            throwCommandResourceNotReadyDiagnostic(
+                builder,
+                stepIndex,
+                command,
+                first.readRequirement,
+                first.simulated,
+                passSpec,
+                role
+            )
+        }
+        if (command.whenMissing === 'skip-command') return false
+    }
 
     for (const readRequirement of readRequirements) {
         const resource = readRequirement.resource
         const simulated = simulatedResourceState(readiness, resource)
-
-        if (command.whenMissing === 'throw' && simulated.state !== 'ready') {
-            throwCommandResourceNotReadyDiagnostic(builder, stepIndex, command, readRequirement, simulated, passSpec, role)
-        }
 
         if (builder.validation === 'off' || simulated.state !== 'ready') continue
 
@@ -725,6 +795,8 @@ function validateCommandReadiness(
             ))
         }
     }
+
+    return true
 }
 
 function simulatedResourceState(readiness: ReadinessSimulation, resource: Resource): ResourceSimulationState {

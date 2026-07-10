@@ -216,4 +216,84 @@ describe('scratch readiness policy execution', () => {
         expect(() => { command.fallback = undefined }).to.throw(TypeError)
         expect(command.fallback).to.equal(fallback)
     })
+
+    it('omits skip-command GPU and resource facts in every validation mode', async() => {
+
+        for (const validation of [ 'off', 'warn', 'throw' ]) {
+            const fixture = await createComputeFixture()
+            const input = fixture.runtime.createBuffer({
+                label: `empty input ${validation}`,
+                size: 16,
+                usage: GPU_BUFFER_USAGE_STORAGE,
+            })
+            const output = fixture.runtime.createBuffer({
+                label: `skipped output ${validation}`,
+                size: 16,
+                usage: GPU_BUFFER_USAGE_STORAGE,
+            })
+            const command = createDispatch(fixture, {
+                resources: {
+                    read: [ { resource: input, contentEpoch: 7 } ],
+                    write: [ output ],
+                },
+                whenMissing: 'skip-command',
+            })
+            const pass = fixture.runtime.createComputePass()
+            const submitted = fixture.runtime.createSubmission({ validation })
+                .compute(pass, [ command ])
+                .submit()
+
+            expect(fixture.calls.computePasses).to.have.length(0)
+            expect(fixture.calls.dispatchCalls).to.have.length(0)
+            expect(submitted.resourceAccesses).to.deep.equal([])
+            expect(submitted.producerEpochs).to.deep.equal([])
+            expect(submitted.diagnostics).to.deep.equal([])
+            expect(input.state).to.equal('empty')
+            expect(input.contentEpoch).to.equal(0)
+            expect(output.state).to.equal('empty')
+            expect(output.contentEpoch).to.equal(0)
+        }
+    })
+
+    it('leaves skipped producer output empty for downstream policy resolution', async() => {
+
+        const fixture = await createComputeFixture()
+        const input = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const intermediate = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const output = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const skippedProducer = createDispatch(fixture, {
+            resources: {
+                read: [ { resource: input, contentEpoch: 0 } ],
+                write: [ intermediate ],
+            },
+            whenMissing: 'skip-command',
+        })
+        const strictConsumer = createDispatch(fixture, {
+            resources: {
+                read: [ { resource: intermediate, contentEpoch: 0 } ],
+                write: [ output ],
+            },
+            whenMissing: 'throw',
+        })
+        const pass = fixture.runtime.createComputePass()
+
+        const diagnostic = await expectDiagnostic(() => fixture.runtime.createSubmission({ validation: 'off' })
+            .compute(pass, [ skippedProducer, strictConsumer ])
+            .submit(), 'SCRATCH_COMMAND_RESOURCE_NOT_READY')
+
+        expect(diagnostic.subject).to.deep.equal(strictConsumer.subject)
+        expect(diagnostic.actual).to.deep.include({
+            commandId: strictConsumer.id,
+            resourceId: intermediate.id,
+            resourceState: 'empty',
+            whenMissing: 'throw',
+        })
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.computePasses).to.have.length(0)
+        expect(fixture.calls.dispatchCalls).to.have.length(0)
+        expect(intermediate.state).to.equal('empty')
+        expect(intermediate.contentEpoch).to.equal(0)
+        expect(output.state).to.equal('empty')
+        expect(output.contentEpoch).to.equal(0)
+    })
 })

@@ -79,12 +79,12 @@ export type CommandReadinessDescriptor<FallbackCommand> =
 - Modify: `tests/scratch-submitted-work-epochs.test.js`
 - Modify: `packages/geoscratch/src/scratch/submission.ts`
 
-- [ ] Write RED tests proving an empty read under `skip-command` emits no native command, read access, write access, content epoch, producer epoch, or simulated-ready fact in `off`, `warn`, and `throw` validation modes.
-- [ ] Add a RED downstream test where a command skipped as a producer leaves its output empty and causes the next command's own policy to resolve from that real state.
-- [ ] Replace `validateSubmissionBeforeEncoding()` with a preflight result containing `report`, resolved steps, simulated states, and mutable outcome drafts. The resolved command list must be the only list used by encoding.
-- [ ] Resolve each Draw/Dispatch against all missing read requirements at its exact submission position. Keep `throw` as a hard pre-encoder diagnostic; for `skip-command`, omit the command and do not mark writes.
-- [ ] Apply optional stale/future epoch validation only to commands selected for execution.
-- [ ] Run focused readiness and epoch tests plus `npm run typecheck`; commit with `git commit -m "Resolve Scratch skip-command execution"`.
+- [x] Write RED tests proving an empty read under `skip-command` emits no native command, read access, write access, content epoch, producer epoch, or simulated-ready fact in `off`, `warn`, and `throw` validation modes.
+- [x] Add a RED downstream test where a command skipped as a producer leaves its output empty and causes the next command's own policy to resolve from that real state.
+- [x] Replace `validateSubmissionBeforeEncoding()` with a preflight result containing `report`, resolved steps, and simulated states. The resolved command list must be the only list used by encoding; Task 5 adds exact mutable outcome drafts at this same boundary after pass and fallback statuses exist.
+- [x] Resolve each Draw/Dispatch against all missing read requirements at its exact submission position. Keep `throw` as a hard pre-encoder diagnostic; for `skip-command`, omit the command and do not mark writes.
+- [x] Apply optional stale/future epoch validation only to commands selected for execution.
+- [x] Run focused readiness and epoch tests plus `npm run typecheck`; commit with `git commit -m "Resolve Scratch skip-command execution"`.
 
 ## Task 4: Transactional `skip-pass`
 
