@@ -109,10 +109,9 @@ describe('ScratchRuntime', () => {
 
         expect(runtime.isDisposed).to.equal(true)
         expect(device.destroyCalled).to.equal(true)
-        expect(() => runtime.createBuffer({ size: 4, usage: 1 })).to.throw(ScratchDiagnosticError)
 
         try {
-            runtime.createBuffer({ size: 4, usage: 1 })
+            await runtime.createBuffer({ size: 4, usage: 1 })
         } catch (error) {
             expect(error.diagnostic).to.include({
                 code: 'SCRATCH_RUNTIME_DISPOSED',

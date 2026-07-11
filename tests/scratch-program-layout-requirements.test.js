@@ -117,9 +117,9 @@ function createBindLayout(runtime, overrides = {}) {
     })
 }
 
-function createLayoutBuffer(runtime, codec) {
+async function createLayoutBuffer(runtime, codec) {
 
-    return runtime.createBuffer({
+    return await runtime.createBuffer({
         label: 'particles',
         size: codec.artifact.stride * 2,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
@@ -128,9 +128,9 @@ function createLayoutBuffer(runtime, codec) {
     })
 }
 
-function createRawBuffer(runtime, size = 32) {
+async function createRawBuffer(runtime, size = 32) {
 
-    return runtime.createBuffer({
+    return await runtime.createBuffer({
         label: 'raw bytes',
         size,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
@@ -433,10 +433,10 @@ describe('scratch Program buffer layout requirements', () => {
             bindLayouts: [ computeLayout ],
         })
         const renderSet = runtime.createBindSet(renderLayout, {
-            particles: createLayoutBuffer(runtime, renderCodec),
+            particles: await createLayoutBuffer(runtime, renderCodec),
         })
         const computeSet = runtime.createBindSet(computeLayout, {
-            particles: createLayoutBuffer(runtime, computeCodec),
+            particles: await createLayoutBuffer(runtime, computeCodec),
         })
 
         const draw = runtime.createDrawCommand({
@@ -533,10 +533,10 @@ describe('scratch Program buffer layout requirements', () => {
             bindLayouts: [ computeLayout ],
         })
         const renderSet = runtime.createBindSet(renderLayout, {
-            particles: createRawBuffer(runtime),
+            particles: await createRawBuffer(runtime),
         })
         const computeSet = runtime.createBindSet(computeLayout, {
-            particles: createRawBuffer(runtime),
+            particles: await createRawBuffer(runtime),
         })
 
         const drawDiagnostic = expectProgramLayoutDiagnostic(() => {
@@ -592,10 +592,10 @@ describe('scratch Program buffer layout requirements', () => {
             bindLayouts: [ computeLayout ],
         })
         const renderSet = runtime.createBindSet(renderLayout, {
-            particles: createLayoutBuffer(runtime, otherCodec),
+            particles: await createLayoutBuffer(runtime, otherCodec),
         })
         const computeSet = runtime.createBindSet(computeLayout, {
-            particles: createLayoutBuffer(runtime, otherCodec),
+            particles: await createLayoutBuffer(runtime, otherCodec),
         })
 
         const drawDiagnostic = expectProgramLayoutDiagnostic(() => {

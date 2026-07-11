@@ -1,6 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BindLayout, BindSet } from './binding.js'
-import { BufferResource } from './buffer.js'
+import { BufferResource, createBufferResource } from './buffer.js'
 import { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
@@ -15,7 +15,7 @@ import {
 import { SamplerResource } from './sampler.js'
 import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
-import { TextureResource } from './texture.js'
+import { createTextureResource, TextureResource } from './texture.js'
 import type { BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './binding.js'
 import type { BufferResourceDescriptor } from './buffer.js'
 import type { BeginOcclusionQueryCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
@@ -229,24 +229,24 @@ export class ScratchRuntime {
         return this.createSurface(canvas, options)
     }
 
-    createBuffer(descriptor: BufferResourceDescriptor) {
+    async createBuffer(descriptor: BufferResourceDescriptor): Promise<BufferResource> {
 
         this.assertActive()
-        return new BufferResource(this, descriptor)
+        return createBufferResource(this, descriptor)
     }
 
-    buffer(descriptor: BufferResourceDescriptor) {
+    buffer(descriptor: BufferResourceDescriptor): Promise<BufferResource> {
 
         return this.createBuffer(descriptor)
     }
 
-    createTexture(descriptor: TextureResourceDescriptor) {
+    async createTexture(descriptor: TextureResourceDescriptor): Promise<TextureResource> {
 
         this.assertActive()
-        return new TextureResource(this, descriptor)
+        return createTextureResource(this, descriptor)
     }
 
-    texture(descriptor: TextureResourceDescriptor) {
+    texture(descriptor: TextureResourceDescriptor): Promise<TextureResource> {
 
         return this.createTexture(descriptor)
     }

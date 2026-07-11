@@ -21,9 +21,9 @@ async function createRuntimeFixture() {
     return { ...fake, runtime }
 }
 
-function createReadableBuffer(runtime, label = 'readback source') {
+async function createReadableBuffer(runtime, label = 'readback source') {
 
-    return runtime.createBuffer({
+    return await runtime.createBuffer({
         label,
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
@@ -80,7 +80,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
     it('captures producer epochs from after submissions that write the source', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'produced source')
+        const source = await createReadableBuffer(runtime, 'produced source')
         const submitted = submitUpload(runtime, source)
         const readback = runtime.createReadback({
             label: 'read produced source',
@@ -100,8 +100,8 @@ describe('scratch ReadbackOperation epoch provenance', () => {
     it('keeps after as a completion fence when it does not produce the source', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'unproduced source')
-        const fenceTarget = createReadableBuffer(runtime, 'fence target')
+        const source = await createReadableBuffer(runtime, 'unproduced source')
+        const fenceTarget = await createReadableBuffer(runtime, 'fence target')
         source.gpuBuffer.data.set(new Uint8Array([ 1, 2, 3, 4 ]))
         const submitted = submitUpload(runtime, fenceTarget)
         const readback = runtime.createReadback({
@@ -119,7 +119,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
     it('rejects readback creation when after points to an older source content epoch', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'stale creation source')
+        const source = await createReadableBuffer(runtime, 'stale creation source')
         const first = submitUpload(runtime, source, [ 1, 2, 3, 4 ])
         submitUpload(runtime, source, [ 5, 6, 7, 8 ])
 
@@ -141,7 +141,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
     it('rejects readback consumption when the source advances after creation', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'stale consume source')
+        const source = await createReadableBuffer(runtime, 'stale consume source')
         const submitted = submitUpload(runtime, source, [ 1, 2, 3, 4 ])
         const readback = runtime.createReadback({
             source,
@@ -170,7 +170,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
     it('rejects stale allocation versions before staging copy', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'stale allocation source')
+        const source = await createReadableBuffer(runtime, 'stale allocation source')
         const submitted = submitUpload(runtime, source)
         const readback = runtime.createReadback({
             source,
@@ -198,13 +198,13 @@ describe('scratch ReadbackOperation epoch provenance', () => {
     it('keeps copied buffer provenance independent from later texture replacement', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const texture = runtime.createTexture({
+        const texture = await runtime.createTexture({
             label: 'readback upstream texture',
             size: { width: 2, height: 2 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST,
         })
-        const source = runtime.createBuffer({
+        const source = await runtime.createBuffer({
             label: 'texture copy readback buffer',
             size: 512,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -246,7 +246,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
     it('rejects readback creation when after points to an older source allocation version', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'stale allocation creation source')
+        const source = await createReadableBuffer(runtime, 'stale allocation creation source')
         const submitted = submitUpload(runtime, source)
 
         replaceResourceAllocationForTest(source)
@@ -275,7 +275,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
             { position: [ 5, 6, 7 ], mass: 8 },
         ]
         const uploadView = codec.uploadView(values)
-        const source = runtime.createBuffer({
+        const source = await runtime.createBuffer({
             label: 'layout producer source',
             size: uploadView.byteLength,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,

@@ -8,7 +8,13 @@ export type ResourceOptions = {
     label?: string
     resourceKind?: string
     descriptor?: object
+    identity?: ScratchResourceIdentity
 }
+
+export type ScratchResourceIdentity = Readonly<{
+    token: symbol
+    id: string
+}>
 
 export type ResourceState = 'empty' | 'ready' | 'disposed'
 
@@ -19,6 +25,15 @@ type ResourceMutators = {
 }
 
 const resourceMutators = new WeakMap<Resource, ResourceMutators>()
+const resourceIdentityToken = Symbol('ScratchResourceIdentity')
+
+export function createScratchResourceIdentity(): ScratchResourceIdentity {
+
+    return Object.freeze({
+        token: resourceIdentityToken,
+        id: `scratch-resource-${UUID()}`,
+    })
+}
 
 function mutatorsFor(resource: Resource): ResourceMutators {
 
@@ -75,7 +90,9 @@ export class Resource {
         runtime.assertActive()
 
         this.#runtime = runtime
-        this.#id = `scratch-resource-${UUID()}`
+        this.#id = options.identity?.token === resourceIdentityToken
+            ? options.identity.id
+            : `scratch-resource-${UUID()}`
         this.#label = options.label
         this.#resourceKind = options.resourceKind ?? 'Resource'
         this.#descriptor = options.descriptor ?? {}

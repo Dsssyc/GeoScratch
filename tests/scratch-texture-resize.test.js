@@ -21,7 +21,7 @@ async function createFixture(descriptor = {}) {
     })
     Object.assign(fake.adapter.limits, fake.device.limits)
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const texture = runtime.createTexture({
+    const texture = await runtime.createTexture({
         label: 'resizable texture',
         size: { width: 8, height: 8 },
         format: 'rgba8unorm',
@@ -64,6 +64,21 @@ function expectDiagnostic(action, code) {
 
     try {
         action()
+        throw new Error(`expected ${code}`)
+    } catch (error) {
+        expect(error).to.be.instanceOf(ScratchDiagnosticError)
+        expect(error.diagnostic).to.include({
+            code,
+            severity: 'error',
+        })
+        return error
+    }
+}
+
+async function expectAsyncDiagnostic(action, code) {
+
+    try {
+        await action()
         throw new Error(`expected ${code}`)
     } catch (error) {
         expect(error).to.be.instanceOf(ScratchDiagnosticError)
@@ -343,7 +358,7 @@ describe('scratch texture resize', () => {
         ]
 
         for (const descriptor of invalidDescriptors) {
-            expectDiagnostic(() => fixture.runtime.createTexture({
+            await expectAsyncDiagnostic(async () => await fixture.runtime.createTexture({
                 size: [ 8, 8 ],
                 format: 'rgba8unorm',
                 ...descriptor,
@@ -571,12 +586,12 @@ describe('scratch texture resize', () => {
     it('keeps TextureResource as the public runtime result', async() => {
 
         const fixture = await createFixture()
-        const tupleTexture = fixture.runtime.texture({
+        const tupleTexture = await fixture.runtime.texture({
             size: [ 1 ],
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
         })
-        const objectTexture = fixture.runtime.texture({
+        const objectTexture = await fixture.runtime.texture({
             size: { width: 1 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
@@ -592,7 +607,7 @@ describe('scratch texture resize', () => {
         expect(tupleTexture.size).to.deep.equal(objectTexture.size)
 
         for (const size of [ [], [ 1, 2, 3, 4 ] ]) {
-            expectDiagnostic(() => fixture.runtime.createTexture({
+            await expectAsyncDiagnostic(async () => await fixture.runtime.createTexture({
                 size,
                 format: 'rgba8unorm',
                 usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,

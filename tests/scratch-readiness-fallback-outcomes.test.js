@@ -41,7 +41,7 @@ async function createRenderFixture() {
         program,
         targets: [ { format: 'rgba8unorm' } ],
     })
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         size: { width: 4, height: 4 },
         format: 'rgba8unorm',
         usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
@@ -58,9 +58,9 @@ async function createRenderFixture() {
     return { ...fake, runtime, program, pipeline, target, pass }
 }
 
-function createBuffer(fixture, label) {
+async function createBuffer(fixture, label) {
 
-    return fixture.runtime.createBuffer({
+    return await fixture.runtime.createBuffer({
         label,
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
@@ -116,7 +116,7 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('records a ready primary as directly executed', async() => {
 
         const fixture = await createComputeFixture()
-        const output = createBuffer(fixture, 'direct output')
+        const output = await createBuffer(fixture, 'direct output')
         const command = createDispatch(fixture, {
             resources: { read: [], write: [ output ] },
         })
@@ -151,7 +151,7 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('selects a ready draw fallback for the render encoder', async() => {
 
         const fixture = await createRenderFixture()
-        const missing = createBuffer(fixture, 'missing draw input')
+        const missing = await createBuffer(fixture, 'missing draw input')
         const fallback = createDraw(fixture)
         const primary = createDraw(fixture, {
             resources: {
@@ -186,9 +186,9 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('executes only the final command in a multi-level fallback chain', async() => {
 
         const fixture = await createComputeFixture()
-        const primaryInput = createBuffer(fixture, 'missing primary input')
-        const secondaryInput = createBuffer(fixture, 'missing secondary input')
-        const output = createBuffer(fixture, 'fallback output')
+        const primaryInput = await createBuffer(fixture, 'missing primary input')
+        const secondaryInput = await createBuffer(fixture, 'missing secondary input')
+        const output = await createBuffer(fixture, 'fallback output')
         const leaf = createDispatch(fixture, {
             label: 'ready leaf',
             resources: { read: [], write: [ output ] },
@@ -284,9 +284,9 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('records fallback-to-skip-command without GPU or resource facts', async() => {
 
         const fixture = await createComputeFixture()
-        const primaryInput = createBuffer(fixture, 'primary input')
-        const fallbackInput = createBuffer(fixture, 'fallback input')
-        const output = createBuffer(fixture, 'skipped output')
+        const primaryInput = await createBuffer(fixture, 'primary input')
+        const fallbackInput = await createBuffer(fixture, 'fallback input')
+        const output = await createBuffer(fixture, 'skipped output')
         const fallback = createDispatch(fixture, {
             resources: {
                 read: [ { resource: fallbackInput, contentEpoch: 0 } ],
@@ -332,11 +332,11 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('turns every command outcome into skipped-pass when a fallback triggers it', async() => {
 
         const fixture = await createComputeFixture()
-        const primaryInput = createBuffer(fixture, 'primary input')
-        const fallbackInput = createBuffer(fixture, 'fallback input')
-        const earlierOutput = createBuffer(fixture, 'rolled back earlier output')
-        const fallbackOutput = createBuffer(fixture, 'rolled back fallback output')
-        const trailingOutput = createBuffer(fixture, 'unattempted trailing output')
+        const primaryInput = await createBuffer(fixture, 'primary input')
+        const fallbackInput = await createBuffer(fixture, 'fallback input')
+        const earlierOutput = await createBuffer(fixture, 'rolled back earlier output')
+        const fallbackOutput = await createBuffer(fixture, 'rolled back fallback output')
+        const trailingOutput = await createBuffer(fixture, 'unattempted trailing output')
         const earlier = createDispatch(fixture, {
             resources: { read: [], write: [ earlierOutput ] },
         })
@@ -393,9 +393,9 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('keeps fallback-to-throw hard and reports the attempted chain', async() => {
 
         const fixture = await createComputeFixture()
-        const primaryInput = createBuffer(fixture, 'primary input')
-        const fallbackInput = createBuffer(fixture, 'fallback input')
-        const output = createBuffer(fixture, 'output')
+        const primaryInput = await createBuffer(fixture, 'primary input')
+        const fallbackInput = await createBuffer(fixture, 'fallback input')
+        const output = await createBuffer(fixture, 'output')
         const fallback = createDispatch(fixture, {
             resources: {
                 read: [ { resource: fallbackInput, contentEpoch: 5 } ],
@@ -450,8 +450,8 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('reports a fallback disposed after construction through the fallback contract', async() => {
 
         const fixture = await createComputeFixture()
-        const primaryInput = createBuffer(fixture, 'primary input')
-        const output = createBuffer(fixture, 'output')
+        const primaryInput = await createBuffer(fixture, 'primary input')
+        const output = await createBuffer(fixture, 'output')
         const fallback = createDispatch(fixture, {
             resources: { read: [], write: [ output ] },
         })
@@ -505,9 +505,9 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('enriches a selected fallback dependency disposal diagnostic', async() => {
 
         const fixture = await createComputeFixture()
-        const primaryInput = createBuffer(fixture, 'primary input')
-        const fallbackInput = createBuffer(fixture, 'fallback input')
-        const output = createBuffer(fixture, 'output')
+        const primaryInput = await createBuffer(fixture, 'primary input')
+        const fallbackInput = await createBuffer(fixture, 'fallback input')
+        const output = await createBuffer(fixture, 'output')
         const fallback = createDispatch(fixture, {
             resources: {
                 read: [ { resource: fallbackInput, contentEpoch: 0 } ],
@@ -570,9 +570,9 @@ describe('scratch readiness fallback execution outcomes', () => {
             { code: 'SCRATCH_SUBMISSION_STALE_READ', availableEpoch: 2, requiredEpoch: 1 },
         ]) {
             const fixture = await createComputeFixture()
-            const primaryInput = createBuffer(fixture, 'primary input')
-            const fallbackInput = createBuffer(fixture, 'ready fallback input')
-            const output = createBuffer(fixture, 'output')
+            const primaryInput = await createBuffer(fixture, 'primary input')
+            const fallbackInput = await createBuffer(fixture, 'ready fallback input')
+            const output = await createBuffer(fixture, 'output')
             for (let epoch = 0; epoch < testCase.availableEpoch; epoch++) {
                 advanceResourceContentEpochForTest(fallbackInput)
             }
@@ -615,9 +615,9 @@ describe('scratch readiness fallback execution outcomes', () => {
 
         for (const validation of [ 'warn', 'off' ]) {
             const fixture = await createComputeFixture()
-            const primaryInput = createBuffer(fixture, 'primary input')
-            const fallbackInput = createBuffer(fixture, 'stale fallback input')
-            const output = createBuffer(fixture, 'output')
+            const primaryInput = await createBuffer(fixture, 'primary input')
+            const fallbackInput = await createBuffer(fixture, 'stale fallback input')
+            const output = await createBuffer(fixture, 'output')
             advanceResourceContentEpochForTest(fallbackInput)
             advanceResourceContentEpochForTest(fallbackInput)
             const fallback = createDispatch(fixture, {
@@ -658,7 +658,7 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('wraps a selected fallback that is incompatible with the render pass', async() => {
 
         const fixture = await createRenderFixture()
-        const missing = createBuffer(fixture, 'primary input')
+        const missing = await createBuffer(fixture, 'primary input')
         const incompatiblePipeline = fixture.runtime.createRenderPipeline({
             program: fixture.program,
             targets: [ { format: 'bgra8unorm' } ],
@@ -719,7 +719,7 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('rejects a selected fallback whose color target count differs from the pass', async() => {
 
         const fixture = await createRenderFixture()
-        const missing = createBuffer(fixture, 'primary input')
+        const missing = await createBuffer(fixture, 'primary input')
         const incompatiblePipeline = fixture.runtime.createRenderPipeline({
             program: fixture.program,
             targets: [
@@ -772,7 +772,7 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('keeps the requested fallback chain on render resource conflicts', async() => {
 
         const fixture = await createRenderFixture()
-        const primaryInput = createBuffer(fixture, 'primary input')
+        const primaryInput = await createBuffer(fixture, 'primary input')
         advanceResourceContentEpochForTest(fixture.target)
         const fallback = createDraw(fixture, {
             resources: {
@@ -827,8 +827,8 @@ describe('scratch readiness fallback execution outcomes', () => {
     it('records duplicate declared writes once when a fallback executes', async() => {
 
         const fixture = await createComputeFixture()
-        const missing = createBuffer(fixture, 'missing primary input')
-        const output = createBuffer(fixture, 'fallback output')
+        const missing = await createBuffer(fixture, 'missing primary input')
+        const output = await createBuffer(fixture, 'fallback output')
         const fallback = createDispatch(fixture, {
             resources: { read: [], write: [ output, output ] },
         })

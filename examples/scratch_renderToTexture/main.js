@@ -93,7 +93,7 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4f {
 }
 `
 
-main().catch((error) => {
+await main().catch((error) => {
     console.error(error)
 })
 
@@ -107,7 +107,7 @@ async function main() {
         format: 'preferred',
         alphaMode: 'opaque',
     })
-    const offscreenTexture = runtime.createTexture({
+    const offscreenTexture = await runtime.createTexture({
         label: 'render to texture offscreen color',
         size: offscreenSize,
         format: offscreenFormat,

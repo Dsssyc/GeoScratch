@@ -220,12 +220,12 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             ],
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const vertexBuffer = runtime.createBuffer({
+        const vertexBuffer = await runtime.createBuffer({
             label: 'vertex attributes',
             size: 60,
             usage: GPU_BUFFER_USAGE_VERTEX | GPU_BUFFER_USAGE_COPY_DST,
         })
-        const instanceBuffer = runtime.createBuffer({
+        const instanceBuffer = await runtime.createBuffer({
             label: 'instance attributes',
             size: 4,
             usage: GPU_BUFFER_USAGE_VERTEX | GPU_BUFFER_USAGE_COPY_DST,
@@ -354,7 +354,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -399,7 +399,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -466,7 +466,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const foreignBuffer = runtimeB.createBuffer({
+        const foreignBuffer = await runtimeB.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -503,7 +503,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -548,7 +548,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             ],
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const foreignBuffer = runtimeB.createBuffer({
+        const foreignBuffer = await runtimeB.createBuffer({
             size: 24,
             usage: GPU_BUFFER_USAGE_VERTEX,
         })
@@ -596,7 +596,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             ],
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             size: 24,
             usage: GPU_BUFFER_USAGE_VERTEX,
         })
@@ -644,7 +644,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             ],
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             size: 24,
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })

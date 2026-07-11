@@ -54,7 +54,7 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4f {
 }
 `
 
-main().catch((error) => {
+await main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error)
     document.body.dataset.status = 'failed'
     document.body.dataset.actualBytes = 'error'
@@ -80,7 +80,7 @@ async function main() {
     const sourceContext = sourceCanvas.getContext('2d', { alpha: false, colorSpace: 'srgb' })
     if (!sourceContext) throw new Error('2D canvas is unavailable')
 
-    const uploadedTexture = runtime.createTexture({
+    const uploadedTexture = await runtime.createTexture({
         label: 'external image uploaded texture',
         size: copySize,
         format: 'rgba8unorm',
@@ -102,7 +102,7 @@ async function main() {
 
     drawFinalSourcePattern(sourceContext)
 
-    const readbackBuffer = runtime.createBuffer({
+    const readbackBuffer = await runtime.createBuffer({
         label: 'external image padded readback buffer',
         size: readbackByteLength,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,

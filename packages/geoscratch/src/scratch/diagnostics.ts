@@ -1,3 +1,5 @@
+import type { ScratchGpuIncidentReport } from './gpu-operation.js'
+
 export type DiagnosticSeverity = 'info' | 'warn' | 'error'
 
 export type DiagnosticPhase =
@@ -72,6 +74,10 @@ export type ScratchDiagnosticReport = {
     warningCount: number
 }
 
+export type ScratchDiagnosticErrorOptions = ErrorOptions & {
+    incident?: ScratchGpuIncidentReport
+}
+
 export function createScratchDiagnostic(input: ScratchDiagnosticInput): ScratchDiagnostic {
 
     const diagnostic: ScratchDiagnostic = {
@@ -118,11 +124,12 @@ export class ScratchDiagnosticError extends Error {
 
     diagnostic: ScratchDiagnostic
     report: ScratchDiagnosticReport
+    incident?: ScratchGpuIncidentReport
 
     constructor(
         diagnostic: ScratchDiagnostic,
         report = createScratchDiagnosticReport([ diagnostic ]),
-        options?: ErrorOptions
+        options?: ScratchDiagnosticErrorOptions
     ) {
 
         super(diagnostic.message, options)
@@ -130,10 +137,14 @@ export class ScratchDiagnosticError extends Error {
         this.name = 'ScratchDiagnosticError'
         this.diagnostic = diagnostic
         this.report = report
+        if (options?.incident !== undefined) this.incident = options.incident
     }
 }
 
-export function throwScratchDiagnostic(input: ScratchDiagnosticInput, options?: ErrorOptions): never {
+export function throwScratchDiagnostic(
+    input: ScratchDiagnosticInput,
+    options?: ScratchDiagnosticErrorOptions
+): never {
 
     const diagnostic = createScratchDiagnostic(input)
     throw new ScratchDiagnosticError(diagnostic, createScratchDiagnosticReport([ diagnostic ]), options)

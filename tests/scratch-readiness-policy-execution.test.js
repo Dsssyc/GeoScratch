@@ -51,13 +51,13 @@ async function createComputeFixture() {
 async function createRenderSkipPassFixture() {
 
     const fixture = await createRenderFixture()
-    const colorTarget = fixture.runtime.createTexture({
+    const colorTarget = await fixture.runtime.createTexture({
         label: 'skipped color target',
         size: { width: 4, height: 4 },
         format: 'rgba8unorm',
         usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
     })
-    const depthTarget = fixture.runtime.createTexture({
+    const depthTarget = await fixture.runtime.createTexture({
         label: 'skipped depth target',
         size: { width: 4, height: 4 },
         format: 'depth24plus',
@@ -94,7 +94,7 @@ async function createRenderSkipPassFixture() {
         },
         occlusionQuerySet,
     })
-    const missing = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+    const missing = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
     const draw = createDraw(fixture)
     const trigger = createDraw(fixture, {
         resources: {
@@ -214,8 +214,8 @@ describe('scratch readiness policy execution', () => {
     it('compares fallback writes as identity sets rather than array order', async() => {
 
         const fixture = await createRenderFixture()
-        const first = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const second = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const first = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const second = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
         const fallback = createDraw(fixture, {
             resources: { read: [], write: [ second, first ] },
         })
@@ -231,8 +231,8 @@ describe('scratch readiness policy execution', () => {
     it('rejects fallback write-set mismatches and self references', async() => {
 
         const fixture = await createRenderFixture()
-        const primaryWrite = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const fallbackWrite = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const primaryWrite = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const fallbackWrite = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
         const mismatched = createDraw(fixture, {
             resources: { read: [], write: [ fallbackWrite ] },
         })
@@ -361,12 +361,12 @@ describe('scratch readiness policy execution', () => {
 
         for (const validation of [ 'off', 'warn', 'throw' ]) {
             const fixture = await createComputeFixture()
-            const input = fixture.runtime.createBuffer({
+            const input = await fixture.runtime.createBuffer({
                 label: `empty input ${validation}`,
                 size: 16,
                 usage: GPU_BUFFER_USAGE_STORAGE,
             })
-            const output = fixture.runtime.createBuffer({
+            const output = await fixture.runtime.createBuffer({
                 label: `skipped output ${validation}`,
                 size: 16,
                 usage: GPU_BUFFER_USAGE_STORAGE,
@@ -405,9 +405,9 @@ describe('scratch readiness policy execution', () => {
     it('leaves skipped producer output empty for downstream policy resolution', async() => {
 
         const fixture = await createComputeFixture()
-        const input = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const intermediate = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const output = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const input = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const intermediate = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const output = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
         const skippedProducer = createDispatch(fixture, {
             resources: {
                 read: [ { resource: input, contentEpoch: 0 } ],
@@ -447,11 +447,11 @@ describe('scratch readiness policy execution', () => {
     it('rolls back an entire compute pass when a later command selects skip-pass', async() => {
 
         const fixture = await createComputeFixture()
-        const missing = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const staleInput = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const staged = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const discarded = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const downstream = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const missing = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const staleInput = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const staged = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const discarded = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const downstream = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
         advanceResourceContentEpochForTest(staleInput)
         const earlierProducer = createDispatch(fixture, {
             resources: {
@@ -508,12 +508,12 @@ describe('scratch readiness policy execution', () => {
 
         for (const validation of [ 'off', 'warn', 'throw' ]) {
             const fixture = await createRenderFixture()
-            const target = fixture.runtime.createTexture({
+            const target = await fixture.runtime.createTexture({
                 size: { width: 4, height: 4 },
                 format: 'rgba8unorm',
                 usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
             })
-            const missing = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+            const missing = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
             const pass = fixture.runtime.createRenderPass({
                 color: [ {
                     target,
@@ -606,7 +606,7 @@ describe('scratch readiness policy execution', () => {
                 ? fixture.timestampQuerySet
                 : fixture.occlusionQuerySet
             const index = queryKind === 'timestamp' ? 0 : 1
-            const destination = fixture.runtime.createBuffer({
+            const destination = await fixture.runtime.createBuffer({
                 size: 16,
                 usage: GPU_BUFFER_USAGE_QUERY_RESOLVE,
             })
@@ -643,7 +643,7 @@ describe('scratch readiness policy execution', () => {
     it('does not expose skipped render attachment writes to later draws', async() => {
 
         const fixture = await createRenderSkipPassFixture()
-        const downstreamTarget = fixture.runtime.createTexture({
+        const downstreamTarget = await fixture.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,

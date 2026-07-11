@@ -34,7 +34,7 @@ async function createRenderFixture() {
         program,
         targets: [ { format: 'rgba8unorm' } ],
     })
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         size: { width: 4, height: 4 },
         format: 'rgba8unorm',
         usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
@@ -85,7 +85,7 @@ describe('scratch native indexed and indirect execution', () => {
     it('encodes a static indexed draw through setIndexBuffer and drawIndexed', async() => {
 
         const fixture = await createRenderFixture()
-        const indexBuffer = fixture.runtime.createBuffer({
+        const indexBuffer = await fixture.runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -147,7 +147,7 @@ describe('scratch native indexed and indirect execution', () => {
     it('accepts uint32 index bindings with four-byte aligned ranges', async() => {
 
         const fixture = await createRenderFixture()
-        const indexBuffer = fixture.runtime.createBuffer({
+        const indexBuffer = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -180,15 +180,15 @@ describe('scratch native indexed and indirect execution', () => {
     it('accepts zero-count direct draw and dispatch commands as no-ops', async() => {
 
         const render = await createRenderFixture()
-        const drawOutput = render.runtime.createBuffer({ size: 4, usage: GPU_BUFFER_USAGE_STORAGE })
-        const indexedOutput = render.runtime.createBuffer({ size: 4, usage: GPU_BUFFER_USAGE_STORAGE })
+        const drawOutput = await render.runtime.createBuffer({ size: 4, usage: GPU_BUFFER_USAGE_STORAGE })
+        const indexedOutput = await render.runtime.createBuffer({ size: 4, usage: GPU_BUFFER_USAGE_STORAGE })
         const draw = render.runtime.createDrawCommand({
             pipeline: render.pipeline,
             count: { vertexCount: 0, instanceCount: 0 },
             resources: { read: [], write: [ drawOutput ] },
             whenMissing: 'throw',
         })
-        const indexBuffer = render.runtime.createBuffer({
+        const indexBuffer = await render.runtime.createBuffer({
             size: 4,
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -239,7 +239,7 @@ describe('scratch native indexed and indirect execution', () => {
         )).to.equal(false)
 
         const compute = await createComputeFixture()
-        const dispatchOutput = compute.runtime.createBuffer({ size: 4, usage: GPU_BUFFER_USAGE_STORAGE })
+        const dispatchOutput = await compute.runtime.createBuffer({ size: 4, usage: GPU_BUFFER_USAGE_STORAGE })
         const dispatch = compute.runtime.createDispatchCommand({
             pipeline: compute.pipeline,
             count: { workgroups: [ 0, 1, 1 ] },
@@ -285,7 +285,7 @@ describe('scratch native indexed and indirect execution', () => {
             expect(diagnostic.actual).to.be.an('object')
         }
 
-        const indexBuffer = render.runtime.createBuffer({
+        const indexBuffer = await render.runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_INDEX,
         })
@@ -349,7 +349,7 @@ describe('scratch native indexed and indirect execution', () => {
     it('rejects mixed count variants instead of selecting a precedence path', async() => {
 
         const render = await createRenderFixture()
-        const indirect = render.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const indirect = await render.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
         const mixedDrawCounts = [
             { vertexCount: 3, indirect },
             { vertexCount: 3, indexCount: 3 },
@@ -365,7 +365,7 @@ describe('scratch native indexed and indirect execution', () => {
         }
 
         const compute = await createComputeFixture()
-        const dispatchIndirect = compute.runtime.createBuffer({ size: 12, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const dispatchIndirect = await compute.runtime.createBuffer({ size: 12, usage: GPU_BUFFER_USAGE_INDIRECT })
         await expectDiagnostic(() => compute.runtime.createDispatchCommand({
             pipeline: compute.pipeline,
             count: { workgroups: [ 1 ], indirect: dispatchIndirect },
@@ -377,11 +377,11 @@ describe('scratch native indexed and indirect execution', () => {
     it('rejects invalid static index bindings and count pairings', async() => {
 
         const fixture = await createRenderFixture()
-        const valid = fixture.runtime.createBuffer({
+        const valid = await fixture.runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_INDEX,
         })
-        const missingUsage = fixture.runtime.createBuffer({
+        const missingUsage = await fixture.runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_STORAGE,
         })
@@ -452,7 +452,7 @@ describe('scratch native indexed and indirect execution', () => {
         }), 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID')
 
         const foreignRuntime = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
-        const foreign = foreignRuntime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        const foreign = await foreignRuntime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
         await expectDiagnostic(() => fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
             indexBuffer: { buffer: foreign, format: 'uint16' },
@@ -461,7 +461,7 @@ describe('scratch native indexed and indirect execution', () => {
             whenMissing: 'throw',
         }), 'SCRATCH_RESOURCE_WRONG_RUNTIME')
 
-        const disposed = fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        const disposed = await fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
         disposed.dispose()
         await expectDiagnostic(() => fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
@@ -483,7 +483,7 @@ describe('scratch native indexed and indirect execution', () => {
             },
             targets: [ { format: 'rgba8unorm' } ],
         })
-        const indexBuffer = fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        const indexBuffer = await fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
         const diagnostic = await expectDiagnostic(() => fixture.runtime.createDrawCommand({
             pipeline: stripPipeline,
             indexBuffer: { buffer: indexBuffer, format: 'uint32' },
@@ -509,8 +509,8 @@ describe('scratch native indexed and indirect execution', () => {
             } ],
             targets: [ { format: 'rgba8unorm' } ],
         })
-        const indexBuffer = fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
-        const indirect = fixture.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const indexBuffer = await fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        const indirect = await fixture.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
         const descriptors = [
             {
                 pipeline: vertexPipeline,
@@ -577,9 +577,9 @@ describe('scratch native indexed and indirect execution', () => {
     it('locks validated execution contracts against post-construction mutation', async() => {
 
         const fixture = await createRenderFixture()
-        const indirect = fixture.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
-        const indexBuffer = fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
-        const boundBuffer = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
+        const indirect = await fixture.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const indexBuffer = await fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        const boundBuffer = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
         const bindLayout = fixture.runtime.createBindLayout({
             group: 0,
             entries: [ {
@@ -648,15 +648,15 @@ describe('scratch native indexed and indirect execution', () => {
     it('encodes non-indexed and indexed draws through native indirect methods', async() => {
 
         const fixture = await createRenderFixture()
-        const drawArguments = fixture.runtime.createBuffer({
+        const drawArguments = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
         })
-        const indexedArguments = fixture.runtime.createBuffer({
+        const indexedArguments = await fixture.runtime.createBuffer({
             size: 24,
             usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
         })
-        const indexBuffer = fixture.runtime.createBuffer({
+        const indexBuffer = await fixture.runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -718,7 +718,7 @@ describe('scratch native indexed and indirect execution', () => {
     it('encodes dispatchWorkgroupsIndirect without inspecting argument bytes', async() => {
 
         const fixture = await createComputeFixture()
-        const argumentsBuffer = fixture.runtime.createBuffer({
+        const argumentsBuffer = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -749,15 +749,15 @@ describe('scratch native indexed and indirect execution', () => {
     it('keeps selected indirect fallbacks on the native WebGPU path', async() => {
 
         const fixture = await createComputeFixture()
-        const missingPrimaryInput = fixture.runtime.createBuffer({
+        const missingPrimaryInput = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_STORAGE,
         })
-        const argumentsBuffer = fixture.runtime.createBuffer({
+        const argumentsBuffer = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
         })
-        const output = fixture.runtime.createBuffer({
+        const output = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_STORAGE,
         })
@@ -849,10 +849,10 @@ describe('scratch native indexed and indirect execution', () => {
 
         const render = await createRenderFixture()
         const compute = await createComputeFixture()
-        const noUsage = render.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_STORAGE })
-        const tooSmallDraw = render.runtime.createBuffer({ size: 15, usage: GPU_BUFFER_USAGE_INDIRECT })
-        const tooSmallIndexed = render.runtime.createBuffer({ size: 19, usage: GPU_BUFFER_USAGE_INDIRECT })
-        const misaligned = render.runtime.createBuffer({ size: 32, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const noUsage = await render.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_STORAGE })
+        const tooSmallDraw = await render.runtime.createBuffer({ size: 15, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const tooSmallIndexed = await render.runtime.createBuffer({ size: 19, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const misaligned = await render.runtime.createBuffer({ size: 32, usage: GPU_BUFFER_USAGE_INDIRECT })
 
         const drawCases = [
             { count: { indirect: 'buffer' }, code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID' },
@@ -869,7 +869,7 @@ describe('scratch native indexed and indirect execution', () => {
             }), testCase.code)
         }
 
-        const indexBuffer = render.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        const indexBuffer = await render.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
         await expectDiagnostic(() => render.runtime.createDrawCommand({
             pipeline: render.pipeline,
             indexBuffer: { buffer: indexBuffer, format: 'uint16' },
@@ -878,7 +878,7 @@ describe('scratch native indexed and indirect execution', () => {
             whenMissing: 'throw',
         }), 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID')
 
-        const tooSmallDispatch = compute.runtime.createBuffer({ size: 11, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const tooSmallDispatch = await compute.runtime.createBuffer({ size: 11, usage: GPU_BUFFER_USAGE_INDIRECT })
         await expectDiagnostic(() => compute.runtime.createDispatchCommand({
             pipeline: compute.pipeline,
             count: { indirect: tooSmallDispatch },
@@ -887,7 +887,7 @@ describe('scratch native indexed and indirect execution', () => {
         }), 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID')
 
         const foreignRuntime = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
-        const foreign = foreignRuntime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const foreign = await foreignRuntime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_INDIRECT })
         await expectDiagnostic(() => render.runtime.createDrawCommand({
             pipeline: render.pipeline,
             count: { indirect: foreign },
@@ -895,7 +895,7 @@ describe('scratch native indexed and indirect execution', () => {
             whenMissing: 'throw',
         }), 'SCRATCH_RESOURCE_WRONG_RUNTIME')
 
-        const disposed = render.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const disposed = await render.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_INDIRECT })
         disposed.dispose()
         await expectDiagnostic(() => render.runtime.createDrawCommand({
             pipeline: render.pipeline,
@@ -916,9 +916,9 @@ describe('scratch native indexed and indirect execution', () => {
             } ],
             targets: [ { format: 'rgba8unorm' } ],
         })
-        const vertex = render.runtime.createBuffer({ size: 24, usage: GPU_BUFFER_USAGE_VERTEX })
-        const index = render.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
-        const indirect = render.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const vertex = await render.runtime.createBuffer({ size: 24, usage: GPU_BUFFER_USAGE_VERTEX })
+        const index = await render.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        const indirect = await render.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
 
         const cases = [
             {
@@ -962,7 +962,7 @@ describe('scratch native indexed and indirect execution', () => {
         }
 
         const compute = await createComputeFixture()
-        const dispatchArguments = compute.runtime.createBuffer({ size: 12, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const dispatchArguments = await compute.runtime.createBuffer({ size: 12, usage: GPU_BUFFER_USAGE_INDIRECT })
         const diagnostic = await expectDiagnostic(() => compute.runtime.createDispatchCommand({
             pipeline: compute.pipeline,
             count: { indirect: dispatchArguments },
@@ -984,19 +984,19 @@ describe('scratch native indexed and indirect execution', () => {
             compute: 'csMain',
         })
         const computePass = fixture.runtime.createComputePass()
-        const drawArguments = fixture.runtime.createBuffer({
+        const drawArguments = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
         })
-        const indexedArguments = fixture.runtime.createBuffer({
+        const indexedArguments = await fixture.runtime.createBuffer({
             size: 20,
             usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
         })
-        const dispatchArguments = fixture.runtime.createBuffer({
+        const dispatchArguments = await fixture.runtime.createBuffer({
             size: 12,
             usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
         })
-        const indexBuffer = fixture.runtime.createBuffer({
+        const indexBuffer = await fixture.runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -1076,7 +1076,7 @@ describe('scratch native indexed and indirect execution', () => {
     it('applies existing readiness and epoch disposition to index and indirect reads', async() => {
 
         const fixture = await createRenderFixture()
-        const emptyIndirect = fixture.runtime.createBuffer({
+        const emptyIndirect = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_INDIRECT,
         })
@@ -1091,7 +1091,7 @@ describe('scratch native indexed and indirect execution', () => {
             .submit(), 'SCRATCH_COMMAND_RESOURCE_NOT_READY')
         expect(fixture.calls.commandEncoders).to.have.length(0)
 
-        const emptyIndex = fixture.runtime.createBuffer({
+        const emptyIndex = await fixture.runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_INDEX,
         })
@@ -1107,7 +1107,7 @@ describe('scratch native indexed and indirect execution', () => {
             .submit(), 'SCRATCH_COMMAND_RESOURCE_NOT_READY')
         expect(fixture.calls.commandEncoders).to.have.length(0)
 
-        const readyIndirect = fixture.runtime.createBuffer({
+        const readyIndirect = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
         })

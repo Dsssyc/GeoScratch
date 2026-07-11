@@ -22,9 +22,9 @@ async function createRuntimeFixture() {
     return { ...fake, runtime }
 }
 
-function createReadableBuffer(runtime, label = 'retention source', byteLength = 16) {
+async function createReadableBuffer(runtime, label = 'retention source', byteLength = 16) {
 
-    return runtime.createBuffer({
+    return await runtime.createBuffer({
         label,
         size: byteLength,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
@@ -55,10 +55,10 @@ function createParticleCodec() {
     })
 }
 
-function createLayoutBuffer(runtime, codec, values) {
+async function createLayoutBuffer(runtime, codec, values) {
 
     const bytes = codec.pack(values)
-    const buffer = runtime.createBuffer({
+    const buffer = await runtime.createBuffer({
         label: 'retained layout source',
         size: bytes.byteLength,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
@@ -102,7 +102,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('defaults to consume-on-read and rejects a second read with structured operation facts', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'default consume source', 4)
+        const source = await createReadableBuffer(runtime, 'default consume source', 4)
         setBytes(source, [ 1, 2, 3, 4 ])
         const readback = runtime.createReadback({
             source,
@@ -132,7 +132,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('retains bytes until dispose and reuses one staging copy for repeated byte reads', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'retained byte source', 4)
+        const source = await createReadableBuffer(runtime, 'retained byte source', 4)
         setBytes(source, [ 4, 3, 2, 1 ])
         const readback = runtime.createReadback({
             source,
@@ -176,7 +176,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('returns fresh typed array copies from retained bytes', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'retained float source', 16)
+        const source = await createReadableBuffer(runtime, 'retained float source', 16)
         setFloats(source, [ 1, 2, 3, 4 ])
         const readback = runtime.createReadback({
             source,
@@ -202,7 +202,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
             { position: [ 1, 2, 3 ], mass: 4 },
             { position: [ 5, 6, 7 ], mass: 8 },
         ]
-        const { buffer, bytes } = createLayoutBuffer(runtime, codec, values)
+        const { buffer, bytes } = await createLayoutBuffer(runtime, codec, values)
         const readback = runtime.createReadback({
             source: buffer,
             retain: 'until-dispose',
@@ -223,7 +223,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('keeps retained results readable after source content epoch advances post-materialization', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'retained epoch source', 4)
+        const source = await createReadableBuffer(runtime, 'retained epoch source', 4)
         setBytes(source, [ 1, 2, 3, 4 ])
         const readback = runtime.createReadback({
             source,
@@ -245,7 +245,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('rejects source content epoch drift before retained materialization without staging', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'pre materialization stale source', 4)
+        const source = await createReadableBuffer(runtime, 'pre materialization stale source', 4)
         const readback = runtime.createReadback({
             source,
             range: { offset: 0, byteLength: 4 },
@@ -273,7 +273,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('rejects source allocation drift before retained materialization without staging', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'pre materialization allocation source', 4)
+        const source = await createReadableBuffer(runtime, 'pre materialization allocation source', 4)
         const readback = runtime.createReadback({
             source,
             range: { offset: 0, byteLength: 4 },
@@ -301,7 +301,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('cancel before first materialization rejects later reads without staging work', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'cancel pending source', 4)
+        const source = await createReadableBuffer(runtime, 'cancel pending source', 4)
         const readback = runtime.createReadback({
             source,
             range: { offset: 0, byteLength: 4 },
@@ -332,7 +332,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('cancel after retained materialization clears retained bytes and rejects later reads', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'cancel ready source', 4)
+        const source = await createReadableBuffer(runtime, 'cancel ready source', 4)
         setBytes(source, [ 1, 1, 1, 1 ])
         const readback = runtime.createReadback({
             source,
@@ -356,7 +356,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('dispose after retained materialization clears retained bytes and rejects later reads', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'dispose ready source', 4)
+        const source = await createReadableBuffer(runtime, 'dispose ready source', 4)
         setBytes(source, [ 2, 2, 2, 2 ])
         const readback = runtime.createReadback({
             source,
@@ -380,7 +380,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('map failure marks the operation failed and clears retained and staging state', async() => {
 
         const { runtime, device } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'failed retained source', 4)
+        const source = await createReadableBuffer(runtime, 'failed retained source', 4)
         setBytes(source, [ 7, 7, 7, 7 ])
         const readback = runtime.createReadback({
             source,
@@ -418,7 +418,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
     it('rejects invalid retain policies with structured diagnostics', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createReadableBuffer(runtime, 'invalid retain source', 4)
+        const source = await createReadableBuffer(runtime, 'invalid retain source', 4)
 
         const diagnostic = await expectScratchDiagnostic(() => runtime.createReadback({
             source,

@@ -89,7 +89,7 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4f {
 }
 `
 
-main().catch((error) => {
+await main().catch((error) => {
     canvas.dataset.status = 'error'
     console.error(error)
 })
@@ -108,13 +108,13 @@ async function main() {
     })
     resizeSurface(surface, canvas)
 
-    const offscreenTexture = runtime.createTexture({
+    const offscreenTexture = await runtime.createTexture({
         label: 'preserved offscreen content',
         size: { width: 320, height: 320 },
         format: 'rgba8unorm',
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
-    const missingResource = runtime.createBuffer({
+    const missingResource = await runtime.createBuffer({
         label: 'intentionally empty readiness input',
         size: 16,
         usage: GPUBufferUsage.UNIFORM,

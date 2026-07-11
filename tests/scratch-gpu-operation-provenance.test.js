@@ -8,6 +8,9 @@ import {
     diagnosticsControllerFor,
 } from '../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
 import { ScratchRuntime } from '../packages/geoscratch/dist/scratch/runtime.js'
+import { BufferResource } from '../packages/geoscratch/dist/scratch/buffer.js'
+import { TextureResource } from '../packages/geoscratch/dist/scratch/texture.js'
+import { ScratchDiagnosticError } from '../packages/geoscratch/dist/scratch/diagnostics.js'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 describe('scratch GPU operation provenance facts', () => {
@@ -206,7 +209,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu, label: 'facts runtime' })
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             label: 'facts buffer',
             size: 64,
             usage: 1,
@@ -414,6 +417,214 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     })
 })
 
+describe('ScratchRuntime fallible initial GPU allocation', () => {
+
+    it('pops both scopes before awaiting and registers a buffer only after acknowledgement', async () => {
+
+        const { gpu, calls, errors } = createFakeGpu({ deferErrorScopePops: true })
+        const runtime = await ScratchRuntime.create({ gpu })
+
+        const creation = runtime.createBuffer({
+            label: 'vertices',
+            size: 64,
+            usage: 1,
+        })
+
+        expect(creation).to.be.an.instanceOf(Promise)
+        expect(calls.buffers).to.have.length(1)
+        expect(calls.errorScopes.map(call => `${call.action}:${call.filter}`)).to.deep.equal([
+            'push:out-of-memory',
+            'push:validation',
+            'pop:validation',
+            'pop:out-of-memory',
+        ])
+        expect(errors.scopeDepth).to.equal(0)
+        expect(runtime._resources.size).to.equal(0)
+        expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(1)
+
+        errors.settlePop(1)
+        await settleMicrotasks()
+        expect(runtime._resources.size).to.equal(0)
+        errors.settlePop(0)
+
+        const buffer = await creation
+        expect(buffer).to.be.an.instanceOf(BufferResource)
+        expect(runtime._resources.size).to.equal(1)
+        expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
+        expect(calls.buffers[0].descriptor.label).to.equal(`vertices [scratch:${buffer.id}]`)
+        expect(runtime.diagnostics.operations()).to.have.length(1)
+        expect(runtime.diagnostics.operations()[0]).to.deep.include({
+            kind: 'buffer-allocation',
+            status: 'succeeded',
+            resourceId: buffer.id,
+            allocationVersion: 1,
+            contentEpoch: 0,
+            logicalFootprintBytes: 64,
+        })
+    })
+
+    it('attributes validation failure exactly and never registers the failed candidate', async () => {
+
+        const { gpu, calls, errors } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const nativeError = Object.assign(new Error('invalid native descriptor'), {
+            name: 'GPUValidationError',
+        })
+        errors.failNext('createBuffer', 'validation', nativeError)
+
+        const error = await rejectedDiagnostic(runtime.createBuffer({ size: 64, usage: 1 }))
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED')
+        expect(error.cause).to.equal(nativeError)
+        expect(error.incident).to.deep.include({
+            nativeErrorCategory: 'validation',
+            attribution: 'exact-operation',
+        })
+        expect(error.incident.operationId).to.equal(error.diagnostic.subject.id)
+        expect(calls.buffers).to.have.length(1)
+        expect(calls.buffers[0].destroyed).to.equal(true)
+        expect(runtime._resources.size).to.equal(0)
+        expect(runtime.diagnostics.snapshot().pressure.currentScratchLogicalFootprintBytes).to.equal(0)
+        expect(runtime.diagnostics.operations()[0]).to.deep.include({
+            status: 'failed',
+            nativeErrorCategory: 'validation',
+        })
+    })
+
+    it('attributes OOM to the trigger operation while preserving contributor caveats', async () => {
+
+        const { gpu, calls, errors } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const resident = await Promise.resolve(runtime.createBuffer({ size: 32, usage: 1 }))
+        const nativeError = Object.assign(new Error('out of memory'), {
+            name: 'GPUOutOfMemoryError',
+        })
+        errors.failNext('createTexture', 'out-of-memory', nativeError)
+
+        const error = await rejectedDiagnostic(runtime.createTexture(textureDescriptor('oom texture')))
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_TEXTURE_ALLOCATION_OUT_OF_MEMORY')
+        expect(error.incident.nativeErrorCategory).to.equal('out-of-memory')
+        expect(error.incident.pressure).to.deep.include({
+            triggerLogicalFootprintBytes: 64,
+            currentScratchLogicalFootprintBytes: 32,
+        })
+        expect(error.incident.pressure.largestContributors[0].resourceId).to.equal(resident.id)
+        expect(error.incident.pressure).not.to.have.property('rootCause')
+        expect(error.incident.pressure.caveats).to.include(
+            'The triggering operation is not necessarily the sole OOM cause.'
+        )
+        expect(calls.textures[0].destroyed).to.equal(true)
+        expect(runtime._resources.size).to.equal(1)
+    })
+
+    it('balances scopes after a synchronous native throw and reports the native category', async () => {
+
+        const { gpu, calls, errors } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const nativeError = new TypeError('native createBuffer threw')
+        errors.throwNext('createBuffer', nativeError)
+
+        const error = await rejectedDiagnostic(runtime.createBuffer({ size: 4, usage: 1 }))
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_BUFFER_ALLOCATION_NATIVE_FAILED')
+        expect(error.cause).to.equal(nativeError)
+        expect(error.incident.nativeErrorCategory).to.equal('native-exception')
+        expect(calls.errorScopes.map(call => call.action)).to.deep.equal([
+            'push', 'push', 'pop', 'pop',
+        ])
+        expect(errors.scopeDepth).to.equal(0)
+        expect(calls.buffers).to.have.length(0)
+        expect(runtime._resources.size).to.equal(0)
+    })
+
+    it('handles a scope-pop failure structurally after issuing both pops', async () => {
+
+        const { gpu, calls, errors } = createFakeGpu({ deferErrorScopePops: true })
+        const runtime = await ScratchRuntime.create({ gpu })
+        const creation = runtime.createTexture(textureDescriptor('scope failure'))
+
+        errors.rejectPop(0, new Error('validation pop rejected'))
+        errors.settlePop(1)
+        const error = await rejectedDiagnostic(creation)
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_GPU_ERROR_SCOPE_FAILED')
+        expect(error.incident.nativeErrorCategory).to.equal('scope-failure')
+        expect(calls.textures[0].destroyed).to.equal(true)
+        expect(runtime._resources.size).to.equal(0)
+        expect(errors.scopeDepth).to.equal(0)
+    })
+
+    it('isolates concurrent allocations and preserves an application outer scope', async () => {
+
+        const { gpu, device, errors } = createFakeGpu({ deferErrorScopePops: true })
+        const runtime = await ScratchRuntime.create({ gpu })
+        const nativeError = Object.assign(new Error('first invalid'), { name: 'GPUValidationError' })
+
+        device.pushErrorScope('validation')
+        errors.failNext('createBuffer', 'validation', nativeError)
+        const first = runtime.createBuffer({ size: 4, usage: 1 })
+        const second = runtime.createBuffer({ size: 8, usage: 1 })
+        expect(errors.scopeDepth).to.equal(1)
+
+        errors.settlePop(3)
+        errors.settlePop(1)
+        errors.settlePop(2)
+        errors.settlePop(0)
+
+        const firstError = await rejectedDiagnostic(first)
+        const secondBuffer = await second
+        expect(firstError.diagnostic.code).to.equal('SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED')
+        expect(secondBuffer.size).to.equal(8)
+        const outerScope = device.popErrorScope()
+        errors.settlePop(4)
+        expect(await outerScope).to.equal(null)
+        expect(errors.scopeDepth).to.equal(0)
+    })
+
+    it('rejects device loss and runtime disposal while scopes settle without exposing candidates', async () => {
+
+        const lostFake = createFakeGpu({ deferErrorScopePops: true })
+        const lostRuntime = await ScratchRuntime.create({ gpu: lostFake.gpu })
+        const lostCreation = lostRuntime.createTexture(textureDescriptor('lost candidate'))
+        lostFake.errors.loseDevice({ reason: 'unknown', message: 'device vanished' })
+        const lostError = await rejectedDiagnostic(lostCreation)
+
+        expect(lostError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
+        expect(lostError.incident.kind).to.equal('device-loss')
+        expect(lostError.incident.attribution).to.equal('temporal-correlation')
+        expect(lostFake.calls.textures[0].destroyed).to.equal(true)
+        expect(lostRuntime._resources.size).to.equal(0)
+        lostFake.errors.settlePop(0)
+        lostFake.errors.settlePop(1)
+
+        const disposedFake = createFakeGpu({ deferErrorScopePops: true })
+        const disposedRuntime = await ScratchRuntime.create({ gpu: disposedFake.gpu })
+        const disposedCreation = disposedRuntime.createBuffer({ size: 4, usage: 1 })
+        disposedRuntime.dispose()
+        const disposedError = await rejectedDiagnostic(disposedCreation)
+
+        expect(disposedError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
+        expect(disposedFake.calls.buffers[0].destroyed).to.equal(true)
+        expect(disposedRuntime._resources.size).to.equal(0)
+        disposedFake.errors.settlePop(0)
+        disposedFake.errors.settlePop(1)
+    })
+
+    it('removes every synchronous public allocation bypass', async () => {
+
+        const { gpu, calls } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+
+        expect(BufferResource).not.to.have.property('create')
+        expect(TextureResource).not.to.have.property('create')
+        expect(() => new BufferResource(runtime, { size: 4, usage: 1 })).to.throw()
+        expect(() => new TextureResource(runtime, textureDescriptor('direct'))).to.throw()
+        expect(calls.buffers).to.have.length(0)
+        expect(calls.textures).to.have.length(0)
+    })
+})
+
 function operationInput(index) {
 
     return {
@@ -439,4 +650,25 @@ async function settleMicrotasks() {
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
+}
+
+async function rejectedDiagnostic(promise) {
+
+    try {
+        await promise
+    } catch (error) {
+        expect(error).to.be.an.instanceOf(ScratchDiagnosticError)
+        return error
+    }
+    throw new Error('Expected a ScratchDiagnosticError rejection.')
+}
+
+function textureDescriptor(label) {
+
+    return {
+        label,
+        size: { width: 4, height: 4 },
+        format: 'rgba8unorm',
+        usage: 1,
+    }
 }

@@ -29,7 +29,7 @@ async function createQueryFixture() {
         type: 'timestamp',
         count: 4,
     })
-    const destination = runtime.createBuffer({
+    const destination = await runtime.createBuffer({
         label: 'query resolve destination',
         size: 512,
         usage: GPU_BUFFER_USAGE_QUERY_RESOLVE | GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_UNIFORM,
@@ -82,7 +82,7 @@ async function createRenderTimestampFixture() {
         type: 'timestamp',
         count: 2,
     })
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         label: 'render target',
         size: { width: 2, height: 2 },
         format: 'rgba8unorm',
@@ -406,7 +406,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                     type: 'timestamp',
                     count: 1,
                 })
-                const destination = runtime.createBuffer({
+                const destination = await runtime.createBuffer({
                     label: `${scenario} timing destination ${validation}`,
                     size: 512,
                     usage: GPU_BUFFER_USAGE_QUERY_RESOLVE | GPU_BUFFER_USAGE_COPY_SRC,
@@ -596,7 +596,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
 
         const fixtureA = await createQueryFixture()
         const fixtureB = await createQueryFixture()
-        const nonResolveDestination = fixtureA.runtime.createBuffer({
+        const nonResolveDestination = await fixtureA.runtime.createBuffer({
             size: 512,
             usage: GPU_BUFFER_USAGE_COPY_SRC,
         })

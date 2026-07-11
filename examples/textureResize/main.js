@@ -57,7 +57,7 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4f {
 
 document.body.dataset.status = 'pending'
 
-main().catch((error) => {
+await main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error)
     document.body.dataset.status = 'failed'
     document.body.dataset.error = message
@@ -76,7 +76,7 @@ async function main() {
         alphaMode: 'opaque',
         size: initialSurfaceSize,
     })
-    const texture = runtime.createTexture({
+    const texture = await runtime.createTexture({
         label: 'texture resize offscreen color',
         size: surface.size,
         format: 'rgba8unorm',
@@ -189,7 +189,7 @@ async function main() {
     const replacementTexture = texture.gpuTexture
     const replacementView = texture.createView()
     const readbackByteLength = paddedBytesPerRow * surface.size.height
-    const readbackBuffer = runtime.createBuffer({
+    const readbackBuffer = await runtime.createBuffer({
         label: 'texture resize padded readback buffer',
         size: readbackByteLength,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,

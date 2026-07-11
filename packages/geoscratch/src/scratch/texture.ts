@@ -1,7 +1,22 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { replaceResourceAllocation, Resource } from './resource.js'
+import {
+    createScratchNativeLabel,
+    destroyNativeCandidate,
+    issueScopedNativeAllocation,
+    throwScopedAllocationFailure,
+} from './native-allocation.js'
+import {
+    createScratchResourceIdentity,
+    replaceResourceAllocation,
+    Resource,
+} from './resource.js'
+import {
+    diagnosticsControllerFor,
+    logicalTextureDescriptorFootprint,
+} from './runtime-diagnostics.js'
 import { getGlobalConstant, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchResourceIdentity } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
 const GPU_TEXTURE_USAGE_STORAGE_BINDING = getGlobalConstant('GPUTextureUsage', 'STORAGE_BINDING', 0x8)
@@ -16,6 +31,12 @@ const TEXTURE_BINDING_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([
     'cube-array',
     '3d',
 ])
+const textureResourceToken = Symbol('TextureResource')
+const TEXTURE_ALLOCATION_CODES = Object.freeze({
+    validation: 'SCRATCH_TEXTURE_ALLOCATION_VALIDATION_FAILED',
+    outOfMemory: 'SCRATCH_TEXTURE_ALLOCATION_OUT_OF_MEMORY',
+    nativeException: 'SCRATCH_TEXTURE_ALLOCATION_NATIVE_FAILED',
+})
 
 export type TextureResourceSize =
     | Readonly<{
@@ -61,29 +82,32 @@ export class TextureResource extends Resource {
     #physicalDescriptor: NormalizedTextureDescriptor
     #viewCache: Map<string, GPUTextureView>
 
-    constructor(runtime: ScratchRuntime, descriptor: TextureResourceDescriptor) {
+    private constructor(
+        token: symbol,
+        runtime: ScratchRuntime,
+        descriptor: NormalizedTextureDescriptor,
+        identity: ScratchResourceIdentity,
+        gpuTexture: GPUTexture
+    ) {
 
         if (new.target !== TextureResource) {
             throw new TypeError('TextureResource does not support subclass construction.')
         }
-
-        const normalizedDescriptor = normalizeTextureDescriptor(runtime, descriptor)
+        if (token !== textureResourceToken) {
+            throw new TypeError('TextureResource must be created by ScratchRuntime.createTexture().')
+        }
 
         super(runtime, {
             resourceKind: 'TextureResource',
-            descriptor: normalizedDescriptor,
-            ...(normalizedDescriptor.label !== undefined ? { label: normalizedDescriptor.label } : {}),
+            descriptor,
+            identity,
+            ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
         })
 
-        this.#physicalDescriptor = normalizedDescriptor
-        this.#gpuTexture = runtime.device.createTexture(normalizedDescriptor)
+        this.#physicalDescriptor = descriptor
+        this.#gpuTexture = gpuTexture
         this.#viewCache = new Map()
         Object.preventExtensions(this)
-    }
-
-    static create(runtime: ScratchRuntime, descriptor: TextureResourceDescriptor): TextureResource {
-
-        return new TextureResource(runtime, descriptor)
     }
 
     get gpuTexture(): GPUTexture {
@@ -153,7 +177,10 @@ export class TextureResource extends Resource {
 
         let nextTexture: GPUTexture
         try {
-            nextTexture = this.runtime.device.createTexture(nextDescriptor)
+            nextTexture = this.runtime.device.createTexture({
+                ...nextDescriptor,
+                label: createScratchNativeLabel(this.label, this.id),
+            })
         } catch (cause) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED',
@@ -212,6 +239,103 @@ export class TextureResource extends Resource {
 }
 
 Object.freeze(TextureResource.prototype)
+
+export async function createTextureResource(
+    runtime: ScratchRuntime,
+    descriptor: TextureResourceDescriptor
+): Promise<TextureResource> {
+
+    runtime.assertActive()
+    const normalizedDescriptor = normalizeTextureDescriptor(runtime, descriptor)
+    const identity = createScratchResourceIdentity()
+    const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, identity.id)
+    const nativeDescriptor: GPUTextureDescriptor = {
+        ...normalizedDescriptor,
+        label: nativeLabel,
+    }
+    const footprint = logicalTextureDescriptorFootprint(
+        normalizedDescriptor as unknown as Record<string, unknown>
+    )
+    const controller = diagnosticsControllerFor(runtime)
+    const operation = controller.beginOperation({
+        kind: 'texture-allocation',
+        resourceId: identity.id,
+        resourceKind: 'TextureResource',
+        allocationVersion: 1,
+        contentEpoch: 0,
+        logicalFootprintBytes: footprint.bytes,
+        descriptorSummary: textureDescriptorSummary(normalizedDescriptor),
+        fullDescriptor: { ...normalizedDescriptor },
+        nativeLabel,
+    })
+    const outcome = await issueScopedNativeAllocation(
+        runtime,
+        () => runtime.device.createTexture(nativeDescriptor)
+    )
+
+    if (!outcome.ok) {
+        return throwScopedAllocationFailure(
+            runtime,
+            operation,
+            outcome,
+            TEXTURE_ALLOCATION_CODES,
+            'Texture allocation'
+        )
+    }
+
+    let resource: TextureResource
+    try {
+        resource = constructTextureResource(
+            runtime,
+            normalizedDescriptor,
+            identity,
+            outcome.candidate
+        )
+    } catch (cause) {
+        destroyNativeCandidate(outcome.candidate)
+        return throwScopedAllocationFailure(
+            runtime,
+            operation,
+            { ok: false, kind: 'native-exception', cause },
+            TEXTURE_ALLOCATION_CODES,
+            'Texture allocation'
+        )
+    }
+
+    controller.completeOperation(operation, { status: 'succeeded' })
+    return resource
+}
+
+function constructTextureResource(
+    runtime: ScratchRuntime,
+    descriptor: NormalizedTextureDescriptor,
+    identity: ScratchResourceIdentity,
+    gpuTexture: GPUTexture
+): TextureResource {
+
+    const Constructor = TextureResource as unknown as new (
+        token: symbol,
+        runtime: ScratchRuntime,
+        descriptor: NormalizedTextureDescriptor,
+        identity: ScratchResourceIdentity,
+        gpuTexture: GPUTexture
+    ) => TextureResource
+    return new Constructor(textureResourceToken, runtime, descriptor, identity, gpuTexture)
+}
+
+function textureDescriptorSummary(descriptor: NormalizedTextureDescriptor): Record<string, unknown> {
+
+    return {
+        width: descriptor.size.width,
+        height: descriptor.size.height,
+        depthOrArrayLayers: descriptor.size.depthOrArrayLayers,
+        mipLevelCount: descriptor.mipLevelCount,
+        sampleCount: descriptor.sampleCount,
+        dimension: descriptor.dimension,
+        format: descriptor.format,
+        usage: descriptor.usage,
+    }
+}
 
 function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: unknown): NormalizedTextureDescriptor {
 

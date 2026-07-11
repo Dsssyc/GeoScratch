@@ -60,7 +60,7 @@ async function createUniformFixture(format = 'bgra8unorm') {
         format,
         size: { width: 64, height: 64 },
     })
-    const uniformBuffer = runtime.createBuffer({
+    const uniformBuffer = await runtime.createBuffer({
         label: 'triangle uniforms',
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_UNIFORM,
@@ -414,7 +414,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
                 },
             ],
         })
-        const otherBuffer = fixture.runtime.createBuffer({
+        const otherBuffer = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_UNIFORM,
         })

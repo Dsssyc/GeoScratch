@@ -23,7 +23,7 @@ async function createFixture(options = {}) {
     const fake = createFakeGpu()
     for (const feature of options.features ?? []) fake.device.features.add(feature)
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         label: options.label ?? 'external upload target',
         size: options.targetSize ?? { width: 8, height: 8, depthOrArrayLayers: 2 },
         format: options.format ?? 'rgba8unorm',
@@ -62,13 +62,27 @@ function expectDiagnostic(action, code, reason) {
     return caught
 }
 
+async function expectAsyncDiagnostic(action, code) {
+
+    let caught
+    try {
+        await action()
+    } catch (error) {
+        caught = error
+    }
+
+    expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+    expect(caught.diagnostic).to.include({ code, severity: 'error' })
+    return caught
+}
+
 describe('scratch external image upload', () => {
 
     it('exports the command from both public entrypoints and normalizes native defaults', async() => {
 
         const fixture = await createFixture()
         const command = createCommand(fixture, { label: 'upload current canvas' })
-        const buffer = fixture.runtime.createBuffer({
+        const buffer = await fixture.runtime.createBuffer({
             size: 4,
             usage: 0x8,
         })
@@ -466,7 +480,7 @@ describe('scratch external image upload', () => {
         }
 
         const dimensionFixture = await createFixture()
-        expectDiagnostic(() => dimensionFixture.runtime.createTexture({
+        await expectAsyncDiagnostic(async () => await dimensionFixture.runtime.createTexture({
             size: [ 8, 8 ],
             dimension: '3d',
             format: 'rgba8unorm',

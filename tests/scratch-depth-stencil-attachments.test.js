@@ -18,13 +18,13 @@ async function createDepthFixture(depthFormat = 'depth24plus') {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const colorTarget = runtime.createTexture({
+    const colorTarget = await runtime.createTexture({
         label: 'scene color',
         size: { width: 64, height: 64 },
         format: 'rgba8unorm',
         usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
     })
-    const depthTarget = runtime.createTexture({
+    const depthTarget = await runtime.createTexture({
         label: 'scene depth',
         size: { width: 64, height: 64 },
         format: depthFormat,
@@ -104,9 +104,9 @@ function createColorOnlyPass(runtime, colorTarget, label = 'color only pass') {
     })
 }
 
-function createColorTarget(runtime, label = 'secondary color') {
+async function createColorTarget(runtime, label = 'secondary color') {
 
-    return runtime.createTexture({
+    return await runtime.createTexture({
         label,
         size: { width: 64, height: 64 },
         format: 'rgba8unorm',
@@ -232,7 +232,7 @@ describe('scratch depth/stencil render attachments', () => {
     it('rejects mismatched current attachment sample counts before encoder creation', async() => {
 
         const fixture = await createDepthFixture()
-        const multisampledDepth = fixture.runtime.createTexture({
+        const multisampledDepth = await fixture.runtime.createTexture({
             label: 'multisampled scene depth',
             size: { width: 64, height: 64 },
             format: 'depth24plus',
@@ -338,7 +338,7 @@ describe('scratch depth/stencil render attachments', () => {
             phase: 'resource',
         })
 
-        const sampledOnlyDepth = fixtureB.runtime.createTexture({
+        const sampledOnlyDepth = await fixtureB.runtime.createTexture({
             size: { width: 16, height: 16 },
             format: 'depth24plus',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
@@ -352,7 +352,7 @@ describe('scratch depth/stencil render attachments', () => {
             phase: 'resource',
         })
 
-        const colorTexture = fixtureB.runtime.createTexture({
+        const colorTexture = await fixtureB.runtime.createTexture({
             size: { width: 16, height: 16 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
@@ -581,7 +581,7 @@ describe('scratch depth/stencil render attachments', () => {
     it('allows later render steps to read depth textures produced by earlier render steps', async() => {
 
         const fixture = await createDepthFixture()
-        const secondColor = createColorTarget(fixture.runtime)
+        const secondColor = await createColorTarget(fixture.runtime)
         const secondPass = createColorOnlyPass(fixture.runtime, secondColor, 'sample depth pass')
         const sampleDepth = fixture.runtime.createDrawCommand({
             pipeline: fixture.colorOnlyPipeline,
@@ -631,7 +631,7 @@ describe('scratch depth/stencil render attachments', () => {
             },
             whenMissing: 'throw',
         })
-        const futurePass = createColorOnlyPass(futureFixture.runtime, createColorTarget(futureFixture.runtime, 'future color'), 'future read pass')
+        const futurePass = createColorOnlyPass(futureFixture.runtime, await createColorTarget(futureFixture.runtime, 'future color'), 'future read pass')
         const futureDiagnostic = await expectScratchDiagnostic(() => futureFixture.runtime.createSubmission({ validation: 'throw' })
             .render(futurePass, [ futureRead ])
             .submit(), {
@@ -656,7 +656,7 @@ describe('scratch depth/stencil render attachments', () => {
             },
             whenMissing: 'throw',
         })
-        const stalePass = createColorOnlyPass(staleFixture.runtime, createColorTarget(staleFixture.runtime, 'stale color'), 'stale read pass')
+        const stalePass = createColorOnlyPass(staleFixture.runtime, await createColorTarget(staleFixture.runtime, 'stale color'), 'stale read pass')
         const staleDiagnostic = await expectScratchDiagnostic(() => staleFixture.runtime.createSubmission({ validation: 'throw' })
             .render(staleFixture.pass, [ staleFixture.draw ])
             .render(stalePass, [ staleRead ])

@@ -15,7 +15,7 @@ fn csMain() {
 
 renderResult('...', 'pending')
 
-main().catch((error) => {
+await main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error)
     document.body.dataset.status = 'failed'
     document.body.dataset.result = 'error'
@@ -29,7 +29,7 @@ async function main() {
     const runtime = await ScratchRuntime.create({
         label: 'submission order runtime',
     })
-    const value = runtime.createBuffer({
+    const value = await runtime.createBuffer({
         label: 'submission order value',
         size: 4,
         usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,

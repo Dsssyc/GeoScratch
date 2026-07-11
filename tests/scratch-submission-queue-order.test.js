@@ -32,9 +32,9 @@ function expectScratchDiagnostic(action, code) {
     }
 }
 
-function createTextureUpload(runtime, label) {
+async function createTextureUpload(runtime, label) {
 
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         label: `${label} target`,
         size: { width: 1, height: 1 },
         format: 'rgba8unorm',
@@ -54,9 +54,9 @@ function createTextureUpload(runtime, label) {
     return { target, command }
 }
 
-function createBufferUpload(runtime, label, data = new Uint8Array(16)) {
+async function createBufferUpload(runtime, label, data = new Uint8Array(16)) {
 
-    const target = runtime.createBuffer({
+    const target = await runtime.createBuffer({
         label: `${label} target`,
         size: data.byteLength,
         usage: GPU_BUFFER_USAGE_COPY_DST,
@@ -66,10 +66,10 @@ function createBufferUpload(runtime, label, data = new Uint8Array(16)) {
     return { target, command }
 }
 
-function createExternalImageUpload(runtime, label, options = {}) {
+async function createExternalImageUpload(runtime, label, options = {}) {
 
     const source = options.source ?? createFakeExternalImageSource('ImageData')
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         label: `${label} target`,
         size: options.targetSize ?? { width: 4, height: 4 },
         format: 'rgba8unorm',
@@ -89,9 +89,9 @@ function createExternalImageUpload(runtime, label, options = {}) {
     return { source, target, command }
 }
 
-function createComputeWork(runtime) {
+async function createComputeWork(runtime) {
 
-    const output = runtime.createBuffer({
+    const output = await runtime.createBuffer({
         label: 'external upload compute output',
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
@@ -112,9 +112,9 @@ function createComputeWork(runtime) {
     return { output, command, pass }
 }
 
-function createRenderWork(runtime) {
+async function createRenderWork(runtime) {
 
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         label: 'external upload render target',
         size: { width: 2, height: 2 },
         format: 'rgba8unorm',
@@ -133,14 +133,14 @@ function createRenderWork(runtime) {
     return { target, pass }
 }
 
-function createSkippedCompute(runtime, whenMissing) {
+async function createSkippedCompute(runtime, whenMissing) {
 
-    const missing = runtime.createBuffer({
+    const missing = await runtime.createBuffer({
         label: `${whenMissing} missing input`,
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
     })
-    const output = runtime.createBuffer({
+    const output = await runtime.createBuffer({
         label: `${whenMissing} output`,
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
@@ -176,19 +176,19 @@ function createSkippedCompute(runtime, whenMissing) {
     return { command, pass, missing, output }
 }
 
-function createFallbackCompute(runtime) {
+async function createFallbackCompute(runtime) {
 
-    const missing = runtime.createBuffer({
+    const missing = await runtime.createBuffer({
         label: 'fallback missing input',
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
     })
-    const ready = runtime.createBuffer({
+    const ready = await runtime.createBuffer({
         label: 'fallback ready input',
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
     })
-    const output = runtime.createBuffer({
+    const output = await runtime.createBuffer({
         label: 'fallback output',
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
@@ -235,22 +235,22 @@ async function createOrderingFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const copySource = runtime.createBuffer({
+    const copySource = await runtime.createBuffer({
         label: 'queue order copy source',
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
     })
-    const firstCopyTarget = runtime.createBuffer({
+    const firstCopyTarget = await runtime.createBuffer({
         label: 'queue order first copy target',
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_DST,
     })
-    const secondCopyTarget = runtime.createBuffer({
+    const secondCopyTarget = await runtime.createBuffer({
         label: 'queue order second copy target',
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_DST,
     })
-    const uploadTarget = runtime.createBuffer({
+    const uploadTarget = await runtime.createBuffer({
         label: 'queue order upload target',
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_DST,
@@ -277,7 +277,7 @@ async function createOrderingFixture() {
         target: uploadTarget,
         data: new Uint8Array(16),
     })
-    const texture = createTextureUpload(runtime, 'queue order texture upload')
+    const texture = await createTextureUpload(runtime, 'queue order texture upload')
 
     return {
         ...fake,
@@ -419,8 +419,8 @@ describe('scratch submission queue order', () => {
     it('keeps alternating buffer and texture uploads ordered without fake command buffers', async() => {
 
         const fixture = await createOrderingFixture()
-        const secondBuffer = createBufferUpload(fixture.runtime, 'second buffer upload')
-        const secondTexture = createTextureUpload(fixture.runtime, 'second texture upload')
+        const secondBuffer = await createBufferUpload(fixture.runtime, 'second buffer upload')
+        const secondTexture = await createTextureUpload(fixture.runtime, 'second texture upload')
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.upload)
             .upload(fixture.textureUpload)
@@ -455,7 +455,7 @@ describe('scratch submission queue order', () => {
 
         for (const placement of [ 'leading', 'trailing', 'interleaved' ]) {
             const fixture = await createOrderingFixture()
-            const external = createExternalImageUpload(fixture.runtime, `${placement} external image upload`)
+            const external = await createExternalImageUpload(fixture.runtime, `${placement} external image upload`)
             const builder = fixture.runtime.createSubmission({ validation: 'throw' })
 
             if (placement === 'leading') {
@@ -481,8 +481,8 @@ describe('scratch submission queue order', () => {
     it('orders all three upload kinds without creating empty command buffers', async() => {
 
         const fixture = await createOrderingFixture()
-        const firstExternal = createExternalImageUpload(fixture.runtime, 'first external image upload')
-        const secondExternal = createExternalImageUpload(fixture.runtime, 'second external image upload')
+        const firstExternal = await createExternalImageUpload(fixture.runtime, 'first external image upload')
+        const secondExternal = await createExternalImageUpload(fixture.runtime, 'second external image upload')
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.upload)
             .upload(firstExternal.command)
@@ -515,14 +515,14 @@ describe('scratch submission queue order', () => {
     it('preserves external upload order relative to copy, readback, compute, and render work', async() => {
 
         const fixture = await createOrderingFixture()
-        const firstExternal = createExternalImageUpload(fixture.runtime, 'external before copy and readback')
-        const secondExternal = createExternalImageUpload(fixture.runtime, 'external before compute and render')
+        const firstExternal = await createExternalImageUpload(fixture.runtime, 'external before copy and readback')
+        const secondExternal = await createExternalImageUpload(fixture.runtime, 'external before compute and render')
         const readback = fixture.runtime.createReadbackCommand({
             source: { resource: fixture.copySource, contentEpoch: 1 },
             whenMissing: 'throw',
         })
-        const compute = createComputeWork(fixture.runtime)
-        const render = createRenderWork(fixture.runtime)
+        const compute = await createComputeWork(fixture.runtime)
+        const render = await createRenderWork(fixture.runtime)
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(firstExternal.command)
             .copy(fixture.firstCopy)
@@ -558,7 +558,7 @@ describe('scratch submission queue order', () => {
     it('records exactly one external upload target write and producer epoch', async() => {
 
         const fixture = await createOrderingFixture()
-        const external = createExternalImageUpload(fixture.runtime, 'ledger external image upload')
+        const external = await createExternalImageUpload(fixture.runtime, 'ledger external image upload')
         const allocationVersion = external.target.allocationVersion
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(external.command)
@@ -597,7 +597,7 @@ describe('scratch submission queue order', () => {
     it('keeps zero-area external uploads ordered but absent from epochs and ledgers', async() => {
 
         const fixture = await createOrderingFixture()
-        const external = createExternalImageUpload(fixture.runtime, 'zero-area external image upload', {
+        const external = await createExternalImageUpload(fixture.runtime, 'zero-area external image upload', {
             size: { width: 0, height: 2 },
         })
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
@@ -621,10 +621,10 @@ describe('scratch submission queue order', () => {
     it('does not let a zero-area external upload satisfy a later resource epoch dependency', async() => {
 
         const fixture = await createOrderingFixture()
-        const external = createExternalImageUpload(fixture.runtime, 'zero-area dependency upload', {
+        const external = await createExternalImageUpload(fixture.runtime, 'zero-area dependency upload', {
             size: { width: 0, height: 1 },
         })
-        const target = fixture.runtime.createTexture({
+        const target = await fixture.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_DST,
@@ -649,8 +649,8 @@ describe('scratch submission queue order', () => {
     it('lets a non-empty external upload produce a texture epoch for a later GPU copy', async() => {
 
         const fixture = await createOrderingFixture()
-        const external = createExternalImageUpload(fixture.runtime, 'external producer upload')
-        const target = fixture.runtime.createTexture({
+        const external = await createExternalImageUpload(fixture.runtime, 'external producer upload')
+        const target = await fixture.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_DST,
@@ -686,8 +686,8 @@ describe('scratch submission queue order', () => {
     it('preflights every external upload before the first physical queue action', async() => {
 
         const fixture = await createOrderingFixture()
-        const first = createExternalImageUpload(fixture.runtime, 'valid external preflight')
-        const second = createExternalImageUpload(fixture.runtime, 'invalid external preflight')
+        const first = await createExternalImageUpload(fixture.runtime, 'valid external preflight')
+        const second = await createExternalImageUpload(fixture.runtime, 'invalid external preflight')
         second.source.width = 1
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .copy(fixture.firstCopy)
@@ -707,9 +707,9 @@ describe('scratch submission queue order', () => {
     it('stops external upload replay after a native failure and remains non-retryable', async() => {
 
         const fixture = await createOrderingFixture()
-        const first = createExternalImageUpload(fixture.runtime, 'successful external action')
-        const failed = createExternalImageUpload(fixture.runtime, 'failed external action')
-        const later = createExternalImageUpload(fixture.runtime, 'unreplayed external action')
+        const first = await createExternalImageUpload(fixture.runtime, 'successful external action')
+        const failed = await createExternalImageUpload(fixture.runtime, 'failed external action')
+        const later = await createExternalImageUpload(fixture.runtime, 'unreplayed external action')
         const nativeCopy = fixture.queue.copyExternalImageToTexture.bind(fixture.queue)
         const cause = new DOMException('injected source failure', 'SecurityError')
         let nativeCalls = 0
@@ -748,7 +748,7 @@ describe('scratch submission queue order', () => {
     it('commits no effects when the first external image queue action fails', async() => {
 
         const fixture = await createOrderingFixture()
-        const failed = createExternalImageUpload(fixture.runtime, 'first failed external action')
+        const failed = await createExternalImageUpload(fixture.runtime, 'first failed external action')
         const cause = new DOMException('first action failed', 'SecurityError')
         let nativeCalls = 0
         fixture.queue.copyExternalImageToTexture = () => {
@@ -790,7 +790,7 @@ describe('scratch submission queue order', () => {
             source: { resource: fixture.copySource, contentEpoch: 1 },
             whenMissing: 'throw',
         })
-        const failed = createExternalImageUpload(fixture.runtime, 'external failure between readbacks')
+        const failed = await createExternalImageUpload(fixture.runtime, 'external failure between readbacks')
         const cause = new DOMException('injected source failure', 'SecurityError')
         fixture.queue.copyExternalImageToTexture = () => {
             throw cause
@@ -863,7 +863,7 @@ describe('scratch submission queue order', () => {
     it('segments effectful render passes at an upload boundary', async() => {
 
         const fixture = await createOrderingFixture()
-        const target = fixture.runtime.createTexture({
+        const target = await fixture.runtime.createTexture({
             label: 'queue order render target',
             size: { width: 2, height: 2 },
             format: 'rgba8unorm',
@@ -916,7 +916,7 @@ describe('scratch submission queue order', () => {
             count: 1,
         })
         querySet._advanceSlotContentEpoch(0)
-        const destination = fixture.runtime.createBuffer({
+        const destination = await fixture.runtime.createBuffer({
             label: 'queue order resolve destination',
             size: 8,
             usage: GPU_BUFFER_USAGE_QUERY_RESOLVE,
@@ -952,7 +952,7 @@ describe('scratch submission queue order', () => {
     it('encodes only the selected fallback after an upload boundary', async() => {
 
         const fixture = await createOrderingFixture()
-        const compute = createFallbackCompute(fixture.runtime)
+        const compute = await createFallbackCompute(fixture.runtime)
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .copy(fixture.firstCopy)
             .upload(fixture.upload)
@@ -992,7 +992,7 @@ describe('scratch submission queue order', () => {
     it('does not create a segment for a skipped command', async() => {
 
         const fixture = await createOrderingFixture()
-        const skipped = createSkippedCompute(fixture.runtime, 'skip-command')
+        const skipped = await createSkippedCompute(fixture.runtime, 'skip-command')
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.upload)
             .compute(skipped.pass, [ skipped.command ])
@@ -1017,7 +1017,7 @@ describe('scratch submission queue order', () => {
     it('does not create a segment for a skipped pass', async() => {
 
         const fixture = await createOrderingFixture()
-        const skipped = createSkippedCompute(fixture.runtime, 'skip-pass')
+        const skipped = await createSkippedCompute(fixture.runtime, 'skip-pass')
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.upload)
             .compute(skipped.pass, [ skipped.command ])
@@ -1102,7 +1102,7 @@ describe('scratch submission queue order', () => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-        const target = runtime.createBuffer({
+        const target = await runtime.createBuffer({
             label: 'detached upload target',
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,
@@ -1276,7 +1276,7 @@ describe('scratch submission queue order', () => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-        const source = runtime.createBuffer({
+        const source = await runtime.createBuffer({
             label: 'readback before upload source',
             size: 8,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -1314,7 +1314,7 @@ describe('scratch submission queue order', () => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-        const source = runtime.createBuffer({
+        const source = await runtime.createBuffer({
             label: 'upload before readback source',
             size: 8,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -1346,7 +1346,7 @@ describe('scratch submission queue order', () => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-        const source = runtime.createBuffer({
+        const source = await runtime.createBuffer({
             label: 'two epoch readback source',
             size: 8,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,

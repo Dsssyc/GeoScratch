@@ -18,7 +18,7 @@ fn csMain(@builtin(global_invocation_id) id: vec3u) {
 }
 `
 
-main().catch((error) => {
+await main().catch((error) => {
     result.textContent = `GPU result: ${error.message}`
     console.error(error)
 })
@@ -28,12 +28,12 @@ async function main() {
     const runtime = await ScratchRuntime.create({
         label: 'scratch compute readback runtime',
     })
-    const input = runtime.createBuffer({
+    const input = await runtime.createBuffer({
         label: 'scratch compute readback input',
         size: 16,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
     })
-    const output = runtime.createBuffer({
+    const output = await runtime.createBuffer({
         label: 'scratch compute readback output',
         size: 16,
         usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.STORAGE,

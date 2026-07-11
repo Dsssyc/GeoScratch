@@ -61,7 +61,7 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4f {
 }
 `
 
-main().catch((error) => {
+await main().catch((error) => {
     canvas.dataset.status = 'error'
     console.error(error)
 })
@@ -74,22 +74,22 @@ async function main() {
         format: 'preferred',
         alphaMode: 'opaque',
     })
-    const dispatchArguments = runtime.createBuffer({
+    const dispatchArguments = await runtime.createBuffer({
         label: 'dispatch arguments',
         size: 12,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_INDIRECT,
     })
-    const drawArguments = runtime.createBuffer({
+    const drawArguments = await runtime.createBuffer({
         label: 'draw arguments',
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
     })
-    const indexedArguments = runtime.createBuffer({
+    const indexedArguments = await runtime.createBuffer({
         label: 'indexed draw arguments',
         size: 20,
         usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
     })
-    const indexBuffer = runtime.createBuffer({
+    const indexBuffer = await runtime.createBuffer({
         label: 'triangle indices',
         size: 8,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_INDEX,

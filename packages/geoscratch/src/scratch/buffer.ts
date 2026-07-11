@@ -1,9 +1,17 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { isLayoutArtifact, layoutArtifactSubject } from './layout-codec.js'
-import { Resource } from './resource.js'
+import {
+    createScratchNativeLabel,
+    destroyNativeCandidate,
+    issueScopedNativeAllocation,
+    throwScopedAllocationFailure,
+} from './native-allocation.js'
+import { createScratchResourceIdentity, Resource } from './resource.js'
+import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { LayoutArtifact } from './layout-codec.js'
+import type { ScratchResourceIdentity } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type BufferResourceDescriptor = GPUBufferDescriptor & {
@@ -15,38 +23,53 @@ type NormalizedBufferResourceDescriptor = BufferResourceDescriptor & {
     layoutByteLength?: number
 }
 
-export interface BufferResource {
-    gpuBuffer: GPUBuffer
-    size: number
-    usage: GPUBufferUsageFlags
-    layout?: LayoutArtifact
-    elementCount?: number
-    layoutByteLength?: number
-}
+const bufferResourceToken = Symbol('BufferResource')
+const BUFFER_ALLOCATION_CODES = Object.freeze({
+    validation: 'SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED',
+    outOfMemory: 'SCRATCH_BUFFER_ALLOCATION_OUT_OF_MEMORY',
+    nativeException: 'SCRATCH_BUFFER_ALLOCATION_NATIVE_FAILED',
+})
 
 export class BufferResource extends Resource {
 
-    constructor(runtime: ScratchRuntime, descriptor: BufferResourceDescriptor) {
+    #gpuBuffer: GPUBuffer
+    readonly size: number
+    readonly usage: GPUBufferUsageFlags
+    readonly layout?: LayoutArtifact
+    readonly elementCount?: number
+    readonly layoutByteLength?: number
 
-        const normalizedDescriptor = normalizeBufferDescriptor(runtime, descriptor)
+    private constructor(
+        token: symbol,
+        runtime: ScratchRuntime,
+        descriptor: NormalizedBufferResourceDescriptor,
+        identity: ScratchResourceIdentity,
+        gpuBuffer: GPUBuffer
+    ) {
+
+        if (token !== bufferResourceToken || new.target !== BufferResource) {
+            throw new TypeError('BufferResource must be created by ScratchRuntime.createBuffer().')
+        }
 
         super(runtime, {
             resourceKind: 'BufferResource',
-            descriptor: normalizedDescriptor,
-            ...(normalizedDescriptor.label !== undefined ? { label: normalizedDescriptor.label } : {}),
+            descriptor,
+            identity,
+            ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
         })
 
-        this.size = normalizedDescriptor.size
-        this.usage = normalizedDescriptor.usage
-        if (normalizedDescriptor.layout !== undefined) this.layout = normalizedDescriptor.layout
-        if (normalizedDescriptor.elementCount !== undefined) this.elementCount = normalizedDescriptor.elementCount
-        if (normalizedDescriptor.layoutByteLength !== undefined) this.layoutByteLength = normalizedDescriptor.layoutByteLength
-        this.gpuBuffer = runtime.device.createBuffer(createGpuBufferDescriptor(normalizedDescriptor))
+        this.size = descriptor.size
+        this.usage = descriptor.usage
+        if (descriptor.layout !== undefined) this.layout = descriptor.layout
+        if (descriptor.elementCount !== undefined) this.elementCount = descriptor.elementCount
+        if (descriptor.layoutByteLength !== undefined) this.layoutByteLength = descriptor.layoutByteLength
+        this.#gpuBuffer = gpuBuffer
+        Object.preventExtensions(this)
     }
 
-    static create(runtime: ScratchRuntime, descriptor: BufferResourceDescriptor): BufferResource {
+    get gpuBuffer(): GPUBuffer {
 
-        return new BufferResource(runtime, descriptor)
+        return this.#gpuBuffer
     }
 
     dispose(): void {
@@ -65,6 +88,84 @@ export class BufferResource extends Resource {
         if (this.layout === undefined) return undefined
         return layoutArtifactSubject(this.layout)
     }
+}
+
+export async function createBufferResource(
+    runtime: ScratchRuntime,
+    descriptor: BufferResourceDescriptor
+): Promise<BufferResource> {
+
+    runtime.assertActive()
+    const normalizedDescriptor = normalizeBufferDescriptor(runtime, descriptor)
+    const identity = createScratchResourceIdentity()
+    const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, identity.id)
+    const nativeDescriptor = createGpuBufferDescriptor(normalizedDescriptor, nativeLabel)
+    const controller = diagnosticsControllerFor(runtime)
+    const operation = controller.beginOperation({
+        kind: 'buffer-allocation',
+        resourceId: identity.id,
+        resourceKind: 'BufferResource',
+        allocationVersion: 1,
+        contentEpoch: 0,
+        logicalFootprintBytes: normalizedDescriptor.size,
+        descriptorSummary: {
+            size: normalizedDescriptor.size,
+            usage: normalizedDescriptor.usage,
+            ...(normalizedDescriptor.mappedAtCreation !== undefined
+                ? { mappedAtCreation: normalizedDescriptor.mappedAtCreation }
+                : {}),
+        },
+        fullDescriptor: { ...normalizedDescriptor },
+        nativeLabel,
+    })
+    const outcome = await issueScopedNativeAllocation(
+        runtime,
+        () => runtime.device.createBuffer(nativeDescriptor)
+    )
+
+    if (!outcome.ok) {
+        return throwScopedAllocationFailure(
+            runtime,
+            operation,
+            outcome,
+            BUFFER_ALLOCATION_CODES,
+            'Buffer allocation'
+        )
+    }
+
+    let resource: BufferResource
+    try {
+        resource = constructBufferResource(runtime, normalizedDescriptor, identity, outcome.candidate)
+    } catch (cause) {
+        destroyNativeCandidate(outcome.candidate)
+        return throwScopedAllocationFailure(
+            runtime,
+            operation,
+            { ok: false, kind: 'native-exception', cause },
+            BUFFER_ALLOCATION_CODES,
+            'Buffer allocation'
+        )
+    }
+
+    controller.completeOperation(operation, { status: 'succeeded' })
+    return resource
+}
+
+function constructBufferResource(
+    runtime: ScratchRuntime,
+    descriptor: NormalizedBufferResourceDescriptor,
+    identity: ScratchResourceIdentity,
+    gpuBuffer: GPUBuffer
+): BufferResource {
+
+    const Constructor = BufferResource as unknown as new (
+        token: symbol,
+        runtime: ScratchRuntime,
+        descriptor: NormalizedBufferResourceDescriptor,
+        identity: ScratchResourceIdentity,
+        gpuBuffer: GPUBuffer
+    ) => BufferResource
+    return new Constructor(bufferResourceToken, runtime, descriptor, identity, gpuBuffer)
 }
 
 function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown): NormalizedBufferResourceDescriptor {
@@ -217,14 +318,17 @@ function normalizeBufferElementCount(
     return normalized
 }
 
-function createGpuBufferDescriptor(descriptor: NormalizedBufferResourceDescriptor): GPUBufferDescriptor {
+function createGpuBufferDescriptor(
+    descriptor: NormalizedBufferResourceDescriptor,
+    nativeLabel = descriptor.label
+): GPUBufferDescriptor {
 
     const gpuDescriptor: GPUBufferDescriptor = {
         size: descriptor.size,
         usage: descriptor.usage,
     }
 
-    if (descriptor.label !== undefined) gpuDescriptor.label = descriptor.label
+    if (nativeLabel !== undefined) gpuDescriptor.label = nativeLabel
     if (descriptor.mappedAtCreation !== undefined) gpuDescriptor.mappedAtCreation = descriptor.mappedAtCreation
 
     return gpuDescriptor

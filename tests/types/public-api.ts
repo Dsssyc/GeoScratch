@@ -88,7 +88,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: { width: 2, height: 2 },
     })
 
-    const buffer: scr.BufferResource = runtime.createBuffer({
+    const buffer: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch buffer',
         size: 16,
         usage: 1,
@@ -96,32 +96,32 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const resourceState: scr.ResourceState = buffer.state
     const resourceReady: boolean = buffer.isReady
     const compatResourceState: scratchCompat.ResourceState = resourceState
-    const uniformBuffer: scr.BufferResource = runtime.createBuffer({
+    const uniformBuffer: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch uniform buffer',
         size: 16,
         usage: 0x8 | 0x40,
     })
-    const vertexBuffer: scr.BufferResource = runtime.createBuffer({
+    const vertexBuffer: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch vertex buffer',
         size: 24,
         usage: 0x20 | 0x8,
     })
-    const indexBuffer: scr.BufferResource = runtime.createBuffer({
+    const indexBuffer: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch index buffer',
         size: 8,
         usage: 0x10 | 0x8,
     })
-    const indirectBuffer: scr.BufferResource = runtime.createBuffer({
+    const indirectBuffer: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch indirect buffer',
         size: 32,
         usage: 0x100 | 0x80,
     })
-    const storageInput: scr.BufferResource = runtime.createBuffer({
+    const storageInput: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch storage input',
         size: 16,
         usage: 0x8 | 0x80,
     })
-    const storageOutput: scr.BufferResource = runtime.createBuffer({
+    const storageOutput: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch storage output',
         size: 16,
         usage: 0x4 | 0x80,
@@ -156,7 +156,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     }
     const genericCopySource: scr.CopyCommandSourceDescriptor = copySource
     const compatCopySource: scratchCompat.CopyCommandSourceDescriptor = copySource
-    const queryDestination: scr.BufferResource = runtime.createBuffer({
+    const queryDestination: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch query destination',
         size: 256,
         usage: 0x4 | 0x200,
@@ -164,7 +164,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const objectTextureSize: scr.TextureResourceSize = { width: 2, height: 2 }
     const tupleTextureSize: scr.TextureResourceSize = [ 2, 2, 1 ]
     const compatTextureSize: scratchCompat.TextureResourceSize = tupleTextureSize
-    const scratchTexture: scr.TextureResource = runtime.createTexture({
+    const scratchTexture: scr.TextureResource = await runtime.createTexture({
         label: 'typed scratch texture',
         size: objectTextureSize,
         format: 'rgba8unorm',
@@ -172,7 +172,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         viewFormats: [ 'rgba8unorm-srgb' ],
         textureBindingViewDimension: '2d',
     })
-    const scratchTextureCopyTarget: scr.TextureResource = runtime.createTexture({
+    const scratchTextureCopyTarget: scr.TextureResource = await runtime.createTexture({
         label: 'typed scratch texture copy target',
         size: { width: 2, height: 2 },
         format: 'rgba8unorm',
@@ -185,7 +185,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const textureCopyOrigin: scr.TextureCopyOrigin = [ 0, 0 ]
     const textureCopySize: scr.TextureCopySize = { width: 2, height: 2 }
     const compatTextureCopySource: scratchCompat.TextureCopyCommandSourceDescriptor = textureCopySource
-    const scratchDepthTexture: scr.TextureResource = runtime.createTexture({
+    const scratchDepthTexture: scr.TextureResource = await runtime.createTexture({
         label: 'typed scratch depth texture',
         size: { width: 2, height: 2 },
         format: 'depth24plus',
@@ -307,7 +307,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const usageCompatibility: scr.LayoutUsageCompatibility = codec.artifact.usageCompatibility
     const readbackCount: number = typedReadback.count
     const readbackObject: Record<string, unknown> = typedReadback.toObject()
-    const layoutBuffer: scr.BufferResource = runtime.createBuffer({
+    const layoutBuffer: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch layout buffer',
         size: codec.artifact.stride * 2,
         usage: 0x8 | 0x80,

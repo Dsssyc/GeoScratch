@@ -99,9 +99,9 @@ async function createRuntimeFixture() {
     return { ...fake, runtime }
 }
 
-function createBufferForEntry(runtime, entry, index = 0) {
+async function createBufferForEntry(runtime, entry, index = 0) {
 
-    return runtime.createBuffer({
+    return await runtime.createBuffer({
         label: `${entry.name} buffer`,
         size: 2048,
         usage: GPU_BUFFER_USAGE_COPY_DST |
@@ -109,15 +109,16 @@ function createBufferForEntry(runtime, entry, index = 0) {
     })
 }
 
-function createBufferBindings(runtime, entries) {
+async function createBufferBindings(runtime, entries) {
 
     const bindings = {}
-    const buffers = []
+    const buffers = await Promise.all(entries.map((entry, index) =>
+        createBufferForEntry(runtime, entry, index)
+    ))
 
     entries.forEach((entry, index) => {
-        const buffer = createBufferForEntry(runtime, entry, index)
+        const buffer = buffers[index]
         bindings[entry.name] = buffer
-        buffers.push(buffer)
     })
 
     return { bindings, buffers }
@@ -146,7 +147,7 @@ async function createRenderFixture(entries = [ dynamicUniformEntry() ]) {
         group: 0,
         entries,
     })
-    const { bindings, buffers } = createBufferBindings(fixture.runtime, entries)
+    const { bindings, buffers } = await createBufferBindings(fixture.runtime, entries)
     const bindSet = fixture.runtime.createBindSet(bindLayout, bindings, {
         label: 'dynamic render bind set',
     })
@@ -194,7 +195,7 @@ async function createComputeFixture(entries = [ dynamicReadStorageEntry(), dynam
         group: 1,
         entries,
     })
-    const { bindings, buffers } = createBufferBindings(fixture.runtime, entries)
+    const { bindings, buffers } = await createBufferBindings(fixture.runtime, entries)
     const bindSet = fixture.runtime.createBindSet(bindLayout, bindings, {
         label: 'dynamic compute bind set',
     })

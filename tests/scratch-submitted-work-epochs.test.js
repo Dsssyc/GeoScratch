@@ -89,18 +89,18 @@ function querySlots(indices, contentEpoch) {
     return indices.map(index => ({ index, contentEpoch }))
 }
 
-function createBuffer(runtime, label, usage = GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE) {
+async function createBuffer(runtime, label, usage = GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE) {
 
-    return runtime.createBuffer({
+    return await runtime.createBuffer({
         label,
         size: 16,
         usage,
     })
 }
 
-function createTexture(runtime, label, usage = GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT) {
+async function createTexture(runtime, label, usage = GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT) {
 
-    return runtime.createTexture({
+    return await runtime.createTexture({
         label,
         size: { width: 2, height: 2 },
         format: 'rgba8unorm',
@@ -206,7 +206,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records upload target writes and producer epochs', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const target = createBuffer(runtime, 'upload target')
+        const target = await createBuffer(runtime, 'upload target')
         const upload = runtime.createUploadCommand({
             label: 'upload bytes',
             target,
@@ -257,7 +257,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records texture upload target writes and producer epochs', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const target = createTexture(runtime, 'texture upload target')
+        const target = await createTexture(runtime, 'texture upload target')
         const upload = runtime.createTextureUploadCommand({
             label: 'upload texture bytes',
             target,
@@ -296,8 +296,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records copy source reads and target writes in order', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createBuffer(runtime, 'copy source')
-        const target = createBuffer(runtime, 'copy target')
+        const source = await createBuffer(runtime, 'copy source')
+        const target = await createBuffer(runtime, 'copy target')
         advanceResourceContentEpochForTest(source)
         const copy = runtime.createCopyCommand({
             label: 'copy bytes',
@@ -350,12 +350,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records texture copy source reads and target writes in order', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createTexture(
+        const source = await createTexture(
             runtime,
             'texture copy source',
             GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
         )
-        const target = createTexture(
+        const target = await createTexture(
             runtime,
             'texture copy target',
             GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
@@ -413,8 +413,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const { runtime, calls } = await createRuntimeFixture()
-            const source = createBuffer(runtime, `empty copy source ${validation}`)
-            const target = createBuffer(runtime, `empty copy target ${validation}`)
+            const source = await createBuffer(runtime, `empty copy source ${validation}`)
+            const target = await createBuffer(runtime, `empty copy target ${validation}`)
             const copy = runtime.createCopyCommand({
                 label: `copy empty source ${validation}`,
                 source: copySource(source, 0),
@@ -465,12 +465,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const { runtime, calls } = await createRuntimeFixture()
-            const source = createTexture(
+            const source = await createTexture(
                 runtime,
                 `empty texture copy source ${validation}`,
                 GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
             )
-            const target = createTexture(
+            const target = await createTexture(
                 runtime,
                 `empty texture copy target ${validation}`,
                 GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
@@ -525,8 +525,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const { runtime, calls } = await createRuntimeFixture()
-            const source = createBuffer(runtime, `future copy source ${validation}`)
-            const target = createBuffer(runtime, `future copy target ${validation}`)
+            const source = await createBuffer(runtime, `future copy source ${validation}`)
+            const target = await createBuffer(runtime, `future copy target ${validation}`)
             advanceResourceContentEpochForTest(source)
             const copy = runtime.createCopyCommand({
                 label: `copy future source ${validation}`,
@@ -599,8 +599,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const { runtime, calls } = await createRuntimeFixture()
-            const source = createBuffer(runtime, `stale copy source ${validation}`)
-            const target = createBuffer(runtime, `stale copy target ${validation}`)
+            const source = await createBuffer(runtime, `stale copy source ${validation}`)
+            const target = await createBuffer(runtime, `stale copy target ${validation}`)
             advanceResourceContentEpochForTest(source)
             const upload = runtime.createUploadCommand({
                 label: `refresh copy source ${validation}`,
@@ -682,12 +682,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const { runtime, calls } = await createRuntimeFixture()
-            const source = createTexture(
+            const source = await createTexture(
                 runtime,
                 `future texture copy source ${validation}`,
                 GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
             )
-            const target = createTexture(
+            const target = await createTexture(
                 runtime,
                 `future texture copy target ${validation}`,
                 GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
@@ -764,12 +764,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const { runtime, calls } = await createRuntimeFixture()
-            const source = createTexture(
+            const source = await createTexture(
                 runtime,
                 `stale texture copy source ${validation}`,
                 GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
             )
-            const target = createTexture(
+            const target = await createTexture(
                 runtime,
                 `stale texture copy target ${validation}`,
                 GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
@@ -853,8 +853,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('allows same-submission upload to satisfy a copy source requiring the produced epoch', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createBuffer(runtime, 'same submission copy source')
-        const target = createBuffer(runtime, 'same submission copy target')
+        const source = await createBuffer(runtime, 'same submission copy source')
+        const target = await createBuffer(runtime, 'same submission copy target')
         const upload = runtime.createUploadCommand({
             label: 'produce copy source',
             target: source,
@@ -919,12 +919,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('allows same-submission texture upload to satisfy a texture copy source requiring the produced epoch', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createTexture(
+        const source = await createTexture(
             runtime,
             'same submission texture copy source',
             GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
         )
-        const target = createTexture(
+        const target = await createTexture(
             runtime,
             'same submission texture copy target',
             GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
@@ -995,12 +995,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records buffer-to-texture copy source reads and target texture writes', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = runtime.createBuffer({
+        const source = await runtime.createBuffer({
             label: 'buffer texture ledger source',
             size: 1024,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
         })
-        const target = createTexture(
+        const target = await createTexture(
             runtime,
             'buffer texture ledger target',
             GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
@@ -1071,12 +1071,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records texture-to-buffer copy source reads and target buffer writes', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createTexture(
+        const source = await createTexture(
             runtime,
             'texture buffer ledger source',
             GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
         )
-        const target = runtime.createBuffer({
+        const target = await runtime.createBuffer({
             label: 'texture buffer ledger target',
             size: 1024,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
@@ -1149,12 +1149,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('allows same-submission render attachment writes to satisfy later texture copy sources', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createTexture(
+        const source = await createTexture(
             runtime,
             'rendered texture copy source',
             GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
         )
-        const target = createTexture(
+        const target = await createTexture(
             runtime,
             'rendered texture copy target',
             GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
@@ -1194,17 +1194,17 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('allows same-submission texture copy targets to satisfy later draw reads', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const source = createTexture(
+        const source = await createTexture(
             runtime,
             'draw texture copy source',
             GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING
         )
-        const copied = createTexture(
+        const copied = await createTexture(
             runtime,
             'draw texture copy target',
             GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
         )
-        const renderTarget = createTexture(runtime, 'draw after texture copy render target')
+        const renderTarget = await createTexture(runtime, 'draw after texture copy render target')
         advanceResourceContentEpochForTest(source)
         const copy = runtime.createCopyCommand({
             label: 'copy before draw read',
@@ -1244,9 +1244,9 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('allows a same-submission copy target to satisfy a later copy source required epoch', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const firstSource = createBuffer(runtime, 'copy chain source')
-        const firstTarget = createBuffer(runtime, 'copy chain middle')
-        const secondTarget = createBuffer(runtime, 'copy chain target')
+        const firstSource = await createBuffer(runtime, 'copy chain source')
+        const firstTarget = await createBuffer(runtime, 'copy chain middle')
+        const secondTarget = await createBuffer(runtime, 'copy chain target')
         advanceResourceContentEpochForTest(firstSource)
         const firstCopy = runtime.createCopyCommand({
             label: 'first copy in chain',
@@ -1291,7 +1291,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('does not let a same-command copy target write satisfy its own source required epoch', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             label: 'self copy buffer',
             size: 32,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -1331,7 +1331,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         })
         querySet._advanceSlotContentEpoch(0)
         querySet._advanceSlotContentEpoch(1)
-        const destination = createBuffer(
+        const destination = await createBuffer(
             runtime,
             'query destination',
             GPU_BUFFER_USAGE_QUERY_RESOLVE | GPU_BUFFER_USAGE_COPY_SRC
@@ -1379,8 +1379,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const { runtime, calls } = await createRuntimeFixture()
-            const input = createBuffer(runtime, `empty compute input ${validation}`)
-            const output = createBuffer(runtime, `empty compute output ${validation}`)
+            const input = await createBuffer(runtime, `empty compute input ${validation}`)
+            const output = await createBuffer(runtime, `empty compute output ${validation}`)
             const compute = createCompute(runtime, input, output)
             const builder = runtime.createSubmission({ validation })
                 .compute(compute.pass, [ compute.dispatch ])
@@ -1422,9 +1422,9 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('does not mutate real resource readiness when a simulated producer precedes a failing read', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
-        const staged = createBuffer(runtime, 'simulated upload target')
-        const input = createBuffer(runtime, 'failing compute input')
-        const output = createBuffer(runtime, 'failing compute output')
+        const staged = await createBuffer(runtime, 'simulated upload target')
+        const input = await createBuffer(runtime, 'failing compute input')
+        const output = await createBuffer(runtime, 'failing compute output')
         const upload = runtime.createUploadCommand({
             label: 'simulated upload',
             target: staged,
@@ -1457,8 +1457,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const { runtime, calls } = await createRuntimeFixture()
-            const input = createBuffer(runtime, `future compute input ${validation}`)
-            const output = createBuffer(runtime, `future compute output ${validation}`)
+            const input = await createBuffer(runtime, `future compute input ${validation}`)
+            const output = await createBuffer(runtime, `future compute output ${validation}`)
             advanceResourceContentEpochForTest(input)
             const compute = createCompute(runtime, input, output, 2)
             const builder = runtime.createSubmission({ validation })
@@ -1524,8 +1524,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const { runtime, calls } = await createRuntimeFixture()
-            const input = createBuffer(runtime, `stale compute input ${validation}`)
-            const output = createBuffer(runtime, `stale compute output ${validation}`)
+            const input = await createBuffer(runtime, `stale compute input ${validation}`)
+            const output = await createBuffer(runtime, `stale compute output ${validation}`)
             advanceResourceContentEpochForTest(input)
             const upload = runtime.createUploadCommand({
                 label: 'refresh stale input',
@@ -1600,8 +1600,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('allows same-submission upload to satisfy a dispatch read requiring the produced epoch', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const input = createBuffer(runtime, 'same submission input')
-        const output = createBuffer(runtime, 'same submission output')
+        const input = await createBuffer(runtime, 'same submission input')
+        const output = await createBuffer(runtime, 'same submission output')
         const uploadInput = runtime.createUploadCommand({
             label: 'produce dispatch input',
             target: input,
@@ -1660,8 +1660,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records compute dispatch declared reads and writes', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const input = createBuffer(runtime, 'compute input')
-        const output = createBuffer(runtime, 'compute output')
+        const input = await createBuffer(runtime, 'compute input')
+        const output = await createBuffer(runtime, 'compute output')
         const compute = createCompute(runtime, input, output, 1)
         const uploadInput = runtime.createUploadCommand({
             label: 'upload compute input',
@@ -1761,7 +1761,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records render texture attachment writes', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const target = createTexture(runtime, 'render target')
+        const target = await createTexture(runtime, 'render target')
         const render = createRender(runtime, target)
         const submitted = runtime.createSubmission({ validation: 'throw' })
             .render(render.pass, [ render.draw ])
@@ -1790,9 +1790,9 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records render draw declared reads and writes before pass attachment writes', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const input = createBuffer(runtime, 'draw input')
-        const output = createBuffer(runtime, 'draw output')
-        const target = createTexture(runtime, 'draw render target')
+        const input = await createBuffer(runtime, 'draw input')
+        const output = await createBuffer(runtime, 'draw output')
+        const target = await createTexture(runtime, 'draw render target')
         const uploadInput = runtime.createUploadCommand({
             label: 'upload draw input',
             target: input,
@@ -1879,10 +1879,10 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('preserves deterministic step order for mixed submissions', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const uploadTarget = createBuffer(runtime, 'ordered upload target')
-        const copyTarget = createBuffer(runtime, 'ordered copy target')
-        const computeOutput = createBuffer(runtime, 'ordered compute output')
-        const renderTarget = createTexture(runtime, 'ordered render target')
+        const uploadTarget = await createBuffer(runtime, 'ordered upload target')
+        const copyTarget = await createBuffer(runtime, 'ordered copy target')
+        const computeOutput = await createBuffer(runtime, 'ordered compute output')
+        const renderTarget = await createTexture(runtime, 'ordered render target')
         const upload = runtime.createUploadCommand({
             target: uploadTarget,
             data: new Uint8Array(16),
@@ -1927,7 +1927,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('keeps content epochs separate from allocation versions', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const target = createBuffer(runtime, 'stable allocation target')
+        const target = await createBuffer(runtime, 'stable allocation target')
         const upload = runtime.createUploadCommand({
             target,
             data: new Uint8Array(16),
@@ -1950,7 +1950,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records replacement allocation facts without rewriting historical work', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const texture = createTexture(
+        const texture = await createTexture(
             runtime,
             'historical resized texture',
             GPU_TEXTURE_USAGE_COPY_SRC |
@@ -1974,7 +1974,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         expect(texture.allocationVersion).to.equal(2)
         expect(texture.state).to.equal('empty')
 
-        const readbackBuffer = runtime.createBuffer({
+        const readbackBuffer = await runtime.createBuffer({
             label: 'resized texture copy destination',
             size: 512,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -2047,7 +2047,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('keeps submitted reports compatible with the existing empty report behavior', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const target = createBuffer(runtime, 'reported target')
+        const target = await createBuffer(runtime, 'reported target')
         const upload = runtime.createUploadCommand({
             target,
             data: new Uint8Array(16),
@@ -2070,7 +2070,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('does not expose mutable ledger storage', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const target = createBuffer(runtime, 'immutable target')
+        const target = await createBuffer(runtime, 'immutable target')
         const upload = runtime.createUploadCommand({
             target,
             data: new Uint8Array(16),

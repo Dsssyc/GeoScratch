@@ -39,12 +39,12 @@ async function createCopyFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const source = runtime.createBuffer({
+    const source = await runtime.createBuffer({
         label: 'copy source',
         size: 32,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
     })
-    const target = runtime.createBuffer({
+    const target = await runtime.createBuffer({
         label: 'copy target',
         size: 32,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_UNIFORM,
@@ -89,13 +89,13 @@ async function createTextureCopyFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const source = runtime.createTexture({
+    const source = await runtime.createTexture({
         label: 'texture copy source',
         size: { width: 4, height: 4 },
         format: 'rgba8unorm',
         usage: GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
     })
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         label: 'texture copy target',
         size: { width: 4, height: 4 },
         format: 'rgba8unorm',
@@ -125,12 +125,12 @@ async function createBufferToTextureCopyFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const source = runtime.createBuffer({
+    const source = await runtime.createBuffer({
         label: 'buffer texture copy source',
         size: 1024,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
     })
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         label: 'buffer texture copy target',
         size: { width: 4, height: 4 },
         format: 'rgba8unorm',
@@ -160,13 +160,13 @@ async function createTextureToBufferCopyFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const source = runtime.createTexture({
+    const source = await runtime.createTexture({
         label: 'texture buffer copy source',
         size: { width: 4, height: 4 },
         format: 'rgba8unorm',
         usage: GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
     })
-    const target = runtime.createBuffer({
+    const target = await runtime.createBuffer({
         label: 'texture buffer copy target',
         size: 1024,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_COPY_SRC,
@@ -697,7 +697,7 @@ describe('scratch CopyCommand', () => {
             phase: 'resource',
         })
 
-        const replacementSource = fixtureA.runtime.createBuffer({
+        const replacementSource = await fixtureA.runtime.createBuffer({
             size: 32,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
         })
@@ -718,11 +718,11 @@ describe('scratch CopyCommand', () => {
     it('rejects buffers missing copy usages with structured diagnostics', async() => {
 
         const fixture = await createCopyFixture()
-        const nonCopySource = fixture.runtime.createBuffer({
+        const nonCopySource = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })
-        const nonCopyTarget = fixture.runtime.createBuffer({
+        const nonCopyTarget = await fixture.runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_SRC,
         })
@@ -753,22 +753,22 @@ describe('scratch CopyCommand', () => {
     it('rejects invalid texture copy descriptors with structured diagnostics', async() => {
 
         const fixture = await createTextureCopyFixture()
-        const nonCopySource = fixture.runtime.createTexture({
+        const nonCopySource = await fixture.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
         })
-        const nonCopyTarget = fixture.runtime.createTexture({
+        const nonCopyTarget = await fixture.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
         })
-        const mismatchedFormatTarget = fixture.runtime.createTexture({
+        const mismatchedFormatTarget = await fixture.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8uint',
             usage: GPU_TEXTURE_USAGE_COPY_DST,
         })
-        const multisampledTarget = fixture.runtime.createTexture({
+        const multisampledTarget = await fixture.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
@@ -808,21 +808,21 @@ describe('scratch CopyCommand', () => {
 
         const bufferToTexture = await createBufferToTextureCopyFixture()
         const textureToBuffer = await createTextureToBufferCopyFixture()
-        const nonCopyBufferSource = bufferToTexture.runtime.createBuffer({
+        const nonCopyBufferSource = await bufferToTexture.runtime.createBuffer({
             size: 1024,
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })
-        const nonCopyTextureTarget = bufferToTexture.runtime.createTexture({
+        const nonCopyTextureTarget = await bufferToTexture.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
         })
-        const nonCopyTextureSource = textureToBuffer.runtime.createTexture({
+        const nonCopyTextureSource = await textureToBuffer.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
         })
-        const nonCopyBufferTarget = textureToBuffer.runtime.createBuffer({
+        const nonCopyBufferTarget = await textureToBuffer.runtime.createBuffer({
             size: 1024,
             usage: GPU_BUFFER_USAGE_COPY_SRC,
         })
@@ -862,7 +862,7 @@ describe('scratch CopyCommand', () => {
     it('rejects invalid copy ranges and overlapping same-buffer copies', async() => {
 
         const fixture = await createCopyFixture()
-        const sameBuffer = fixture.runtime.createBuffer({
+        const sameBuffer = await fixture.runtime.createBuffer({
             size: 32,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
         })

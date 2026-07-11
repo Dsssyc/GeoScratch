@@ -29,7 +29,7 @@ fn fsMain() -> @location(0) vec4f {
 }
 `
 
-main().catch((error) => {
+await main().catch((error) => {
     console.error(error)
 })
 
@@ -43,7 +43,7 @@ async function main() {
         format: 'preferred',
         alphaMode: 'opaque',
     })
-    const uniformBuffer = runtime.createBuffer({
+    const uniformBuffer = await runtime.createBuffer({
         label: 'scratch uniform triangle color',
         size: 16,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,

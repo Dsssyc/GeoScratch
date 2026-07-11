@@ -54,7 +54,7 @@ const checkerboard = new Uint8Array([
     244, 204, 74, 255,
 ])
 
-main().catch((error) => {
+await main().catch((error) => {
     console.error(error)
 })
 
@@ -68,7 +68,7 @@ async function main() {
         format: 'preferred',
         alphaMode: 'opaque',
     })
-    const texture = runtime.createTexture({
+    const texture = await runtime.createTexture({
         label: 'texture sampling checkerboard',
         size: { width: 2, height: 2 },
         format: 'rgba8unorm',

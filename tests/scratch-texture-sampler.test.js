@@ -28,7 +28,7 @@ async function createTextureFixture({ features = [] } = {}) {
     const fake = createFakeGpu()
     for (const feature of features) fake.device.features.add(feature)
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const texture = runtime.createTexture({
+    const texture = await runtime.createTexture({
         label: 'checker texture',
         size: { width: 2, height: 2 },
         format: 'rgba8unorm',
@@ -109,7 +109,10 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             sampleCount: 1,
             viewFormats: [],
         })
-        expect(fixture.calls.textures[0].descriptor).to.deep.equal(fixture.texture.descriptor)
+        expect(fixture.calls.textures[0].descriptor).to.deep.equal({
+            ...fixture.texture.descriptor,
+            label: `checker texture [scratch:${fixture.texture.id}]`,
+        })
 
         const firstView = fixture.texture.createView()
         const secondView = fixture.texture.createView()
@@ -241,7 +244,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-        const texture = runtime.createTexture({
+        const texture = await runtime.createTexture({
             size: [ 2, 2 ],
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
@@ -275,7 +278,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const fake = createFakeGpu()
         fake.device.features.add('core-features-and-limits')
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-        const texture = runtime.createTexture({
+        const texture = await runtime.createTexture({
             size: [ 2, 2, 6 ],
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
@@ -645,7 +648,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             })
         }
 
-        const unbindableTexture = fixtureA.runtime.createTexture({
+        const unbindableTexture = await fixtureA.runtime.createTexture({
             size: { width: 2, height: 2 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_DST,
@@ -699,7 +702,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             }
         }
 
-        const readOnlyTexture = fixture.runtime.createTexture({
+        const readOnlyTexture = await fixture.runtime.createTexture({
             size: { width: 2, height: 2 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,

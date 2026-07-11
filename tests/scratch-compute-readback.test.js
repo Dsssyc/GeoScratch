@@ -36,12 +36,12 @@ async function createComputeFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const input = runtime.createBuffer({
+    const input = await runtime.createBuffer({
         label: 'compute input',
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
     })
-    const output = runtime.createBuffer({
+    const output = await runtime.createBuffer({
         label: 'compute output',
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,

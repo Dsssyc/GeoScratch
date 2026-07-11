@@ -55,20 +55,34 @@ function expectDiagnostic(fn, include) {
     return caught.diagnostic
 }
 
+async function expectAsyncDiagnostic(action, include) {
+
+    let caught
+    try {
+        await action()
+    } catch (error) {
+        caught = error
+    }
+
+    expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+    expect(caught.diagnostic).to.include(include)
+    return caught.diagnostic
+}
+
 describe('scratch BufferResource layout artifacts', () => {
 
     it('stores optional LayoutArtifact metadata while raw buffers stay valid', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
         const codec = createParticleCodec()
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             label: 'particles',
             size: codec.artifact.stride * 2,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
             layout: codec.artifact,
             elementCount: 2,
         })
-        const rawBuffer = runtime.createBuffer({
+        const rawBuffer = await runtime.createBuffer({
             label: 'raw bytes',
             size: 32,
             usage: GPU_BUFFER_USAGE_COPY_DST,
@@ -88,7 +102,7 @@ describe('scratch BufferResource layout artifacts', () => {
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
         })
         expect(calls.buffers[0].descriptor).to.deep.equal({
-            label: 'particles',
+            label: `particles [scratch:${buffer.id}]`,
             size: codec.artifact.stride * 2,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
         })
@@ -102,8 +116,8 @@ describe('scratch BufferResource layout artifacts', () => {
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
 
-        const invalidArtifact = expectDiagnostic(() => {
-            runtime.createBuffer({
+        const invalidArtifact = await expectAsyncDiagnostic(async () => {
+            await runtime.createBuffer({
                 size: codec.artifact.stride,
                 usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
                 layout: {
@@ -119,8 +133,8 @@ describe('scratch BufferResource layout artifacts', () => {
         expect(invalidArtifact.expected).to.deep.equal({ layout: 'LayoutArtifact' })
         expect(invalidArtifact.actual).to.deep.equal({ layout: 'object' })
 
-        const invalidCount = expectDiagnostic(() => {
-            runtime.createBuffer({
+        const invalidCount = await expectAsyncDiagnostic(async () => {
+            await runtime.createBuffer({
                 size: codec.artifact.stride,
                 usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
                 layout: codec.artifact,
@@ -139,8 +153,8 @@ describe('scratch BufferResource layout artifacts', () => {
         expect(invalidCount.expected).to.deep.equal({ elementCount: 'positive integer' })
         expect(invalidCount.actual).to.deep.equal({ elementCount: 0 })
 
-        const tooSmall = expectDiagnostic(() => {
-            runtime.createBuffer({
+        const tooSmall = await expectAsyncDiagnostic(async () => {
+            await runtime.createBuffer({
                 size: codec.artifact.stride - 1,
                 usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
                 layout: codec.artifact,
@@ -165,7 +179,7 @@ describe('scratch BufferResource layout artifacts', () => {
         const { runtime, queue, calls } = await createRuntimeFixture()
         const codec = createParticleCodec()
         const uploadView = codec.uploadView(createParticleValues())
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             label: 'particles',
             size: codec.artifact.stride,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
@@ -216,7 +230,7 @@ describe('scratch BufferResource layout artifacts', () => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             label: 'single particle in a larger allocation',
             size: codec.artifact.stride * 2,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
@@ -254,7 +268,7 @@ describe('scratch BufferResource layout artifacts', () => {
             createParticleValues(10),
         ]
         const bytes = codec.pack(values)
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             label: 'readback particles',
             size: bytes.byteLength,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,

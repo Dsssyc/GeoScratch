@@ -38,7 +38,7 @@ const vertices = new Float32Array([
 ])
 const instanceSize = new Float32Array([ 1 ])
 
-main().catch((error) => {
+await main().catch((error) => {
     console.error(error)
 })
 
@@ -52,12 +52,12 @@ async function main() {
         format: 'preferred',
         alphaMode: 'opaque',
     })
-    const vertexBuffer = runtime.createBuffer({
+    const vertexBuffer = await runtime.createBuffer({
         label: 'hello vertex attributes',
         size: vertices.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     })
-    const instanceSizeBuffer = runtime.createBuffer({
+    const instanceSizeBuffer = await runtime.createBuffer({
         label: 'hello vertex instance size',
         size: instanceSize.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,

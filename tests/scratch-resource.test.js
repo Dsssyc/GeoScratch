@@ -15,11 +15,21 @@ function createFakeGpu() {
 
     const buffers = []
     const textures = []
+    const errorScopes = []
     const device = {
         features: new Set(),
         limits: {},
         queue: {},
         lost: new Promise(() => {}),
+        pushErrorScope(filter) {
+            errorScopes.push({ filter, error: null })
+        },
+        popErrorScope() {
+            const scope = errorScopes.pop()
+            return scope === undefined
+                ? Promise.reject(new Error('No fake error scope is open.'))
+                : Promise.resolve(scope.error)
+        },
         createBuffer(descriptor) {
             const buffer = {
                 descriptor,
@@ -135,7 +145,7 @@ describe('scratch resources', () => {
         const { gpu, buffers } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
 
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             label: 'positions',
             size: 64,
             usage: 1,
@@ -173,12 +183,12 @@ describe('scratch resources', () => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
-        const buffer = runtime.createBuffer({
+        const buffer = await runtime.createBuffer({
             label: 'readiness buffer',
             size: 64,
             usage: 1,
         })
-        const texture = runtime.createTexture({
+        const texture = await runtime.createTexture({
             label: 'readiness texture',
             size: { width: 2, height: 2 },
             format: 'rgba8unorm',

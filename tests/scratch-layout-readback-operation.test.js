@@ -42,11 +42,11 @@ async function createRuntimeFixture() {
     return { ...fake, runtime }
 }
 
-function createLayoutBackedBuffer(runtime, codec, values, options = {}) {
+async function createLayoutBackedBuffer(runtime, codec, values, options = {}) {
 
     const bytes = codec.pack(values)
     const size = options.size ?? bytes.byteLength
-    const buffer = runtime.createBuffer({
+    const buffer = await runtime.createBuffer({
         label: options.label ?? 'layout readback buffer',
         size,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
@@ -84,7 +84,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
             createParticleValues(0),
             createParticleValues(10),
         ]
-        const { buffer } = createLayoutBackedBuffer(runtime, codec, values)
+        const { buffer } = await createLayoutBackedBuffer(runtime, codec, values)
 
         const readback = runtime.createReadback({
             label: 'read layout buffer',
@@ -101,7 +101,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
     it('keeps raw source buffers layout-free', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const raw = runtime.createBuffer({
+        const raw = await runtime.createBuffer({
             label: 'raw readback buffer',
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
@@ -123,7 +123,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
             createParticleValues(0),
             createParticleValues(10),
         ]
-        const { buffer, bytes } = createLayoutBackedBuffer(runtime, codec, values)
+        const { buffer, bytes } = await createLayoutBackedBuffer(runtime, codec, values)
 
         const readback = runtime.createReadback({
             source: buffer,
@@ -159,7 +159,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
             createParticleValues(0),
             createParticleValues(10),
         ]
-        const { buffer } = createLayoutBackedBuffer(runtime, codec, values)
+        const { buffer } = await createLayoutBackedBuffer(runtime, codec, values)
 
         const byteReadback = runtime.createReadback({ source: buffer })
         const viewReadback = runtime.createReadback({ source: buffer })
@@ -174,7 +174,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
         const values = [ createParticleValues(0) ]
-        const { buffer } = createLayoutBackedBuffer(runtime, codec, values)
+        const { buffer } = await createLayoutBackedBuffer(runtime, codec, values)
 
         const layoutReadback = runtime.createReadback({ source: buffer })
         await layoutReadback.toLayoutView()
@@ -213,7 +213,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
     it('rejects layout views on raw buffers with structured diagnostics', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const raw = runtime.createBuffer({
+        const raw = await runtime.createBuffer({
             label: 'raw output',
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
@@ -246,7 +246,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
             createParticleValues(10),
         ]
         const byteLength = codec.artifact.stride + 1
-        const { buffer } = createLayoutBackedBuffer(runtime, codec, values)
+        const { buffer } = await createLayoutBackedBuffer(runtime, codec, values)
         const readback = runtime.createReadback({
             source: buffer,
             range: { offset: 0, byteLength },
@@ -275,7 +275,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
             createParticleValues(0),
             createParticleValues(10),
         ]
-        const { bytes } = createLayoutBackedBuffer(runtime, codec, values)
+        const { bytes } = await createLayoutBackedBuffer(runtime, codec, values)
         const view = codec.createReadbackView(bytes)
 
         expect(view.artifact).to.equal(codec.artifact)
@@ -286,7 +286,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
     it('does not add source-level JavaScript, declarations, or buffer readback helpers', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const raw = runtime.createBuffer({
+        const raw = await runtime.createBuffer({
             label: 'raw output',
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,

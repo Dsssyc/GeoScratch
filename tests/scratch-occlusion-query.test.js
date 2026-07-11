@@ -30,12 +30,12 @@ async function createOcclusionFixture() {
         type: 'occlusion',
         count: 4,
     })
-    const destination = runtime.createBuffer({
+    const destination = await runtime.createBuffer({
         label: 'visibility resolve destination',
         size: 512,
         usage: GPU_BUFFER_USAGE_QUERY_RESOLVE | GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_UNIFORM,
     })
-    const target = runtime.createTexture({
+    const target = await runtime.createTexture({
         label: 'visibility render target',
         size: { width: 4, height: 4 },
         format: 'rgba8unorm',

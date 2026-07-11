@@ -67,7 +67,7 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
     const fake = createFakeGpu()
     for (const feature of features) fake.device.features.add(feature)
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const renderTarget = runtime.createTexture({
+    const renderTarget = await runtime.createTexture({
         label: 'offscreen color target',
         size: { width: 64, height: 64 },
         format,
@@ -380,7 +380,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('rejects draw reads of an empty TextureResource before creating a command encoder', async() => {
 
         const fixture = await createRenderTargetScene()
-        const emptyTexture = fixture.runtime.createTexture({
+        const emptyTexture = await fixture.runtime.createTexture({
             label: 'empty sampled texture',
             size: { width: 64, height: 64 },
             format: 'rgba8unorm',
@@ -435,7 +435,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         const fixture = await createRenderTargetScene()
         advanceResourceContentEpochForTest(fixture.renderTarget)
-        const secondTarget = fixture.runtime.createTexture({
+        const secondTarget = await fixture.runtime.createTexture({
             label: 'replacement readiness target',
             size: { width: 64, height: 64 },
             format: 'rgba8unorm',
@@ -488,7 +488,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         const fixture = await createRenderTargetScene()
         advanceResourceContentEpochForTest(fixture.renderTarget)
-        const secondTarget = fixture.runtime.createTexture({
+        const secondTarget = await fixture.runtime.createTexture({
             label: 'future epoch render target',
             size: { width: 64, height: 64 },
             format: 'rgba8unorm',
@@ -552,7 +552,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         const fixture = await createRenderTargetScene()
         advanceResourceContentEpochForTest(fixture.renderTarget)
-        const secondTarget = fixture.runtime.createTexture({
+        const secondTarget = await fixture.runtime.createTexture({
             label: 'stale epoch render target',
             size: { width: 64, height: 64 },
             format: 'rgba8unorm',
@@ -726,7 +726,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             })
         }
 
-        const textureOnlyForSampling = fixtureB.runtime.createTexture({
+        const textureOnlyForSampling = await fixtureB.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
@@ -970,7 +970,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('allows a draw to read a texture written by an earlier render step while rendering elsewhere', async() => {
 
         const fixture = await createRenderTargetScene()
-        const secondTarget = fixture.runtime.createTexture({
+        const secondTarget = await fixture.runtime.createTexture({
             label: 'second render target',
             size: { width: 64, height: 64 },
             format: 'rgba8unorm',
@@ -1063,7 +1063,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             .submit()
         await firstSubmitted.done
 
-        const secondTarget = fixture.runtime.createTexture({
+        const secondTarget = await fixture.runtime.createTexture({
             label: 'later render target',
             size: { width: 64, height: 64 },
             format: 'rgba8unorm',

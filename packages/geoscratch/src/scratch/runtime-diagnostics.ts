@@ -351,6 +351,9 @@ export class ScratchRuntimeDiagnosticsController {
     }
     #uncapturedErrorListener: ((event: GPUUncapturedErrorEvent) => void) | undefined
     #isDisposed = false
+    #resolveDisposed!: () => void
+    #deviceLossIncident: ScratchGpuIncidentReport | undefined
+    readonly whenDisposed: Promise<void>
 
     constructor(
         owner: RuntimeDiagnosticsOwner,
@@ -361,6 +364,9 @@ export class ScratchRuntimeDiagnosticsController {
         this.#owner = owner
         this.#device = device
         this.#options = normalizeDiagnosticsOptions(owner, options)
+        this.whenDisposed = new Promise(resolve => {
+            this.#resolveDisposed = resolve
+        })
         this.#facade = createDiagnosticsFacade(this)
         this.#installUncapturedErrorListener()
     }
@@ -576,13 +582,14 @@ export class ScratchRuntimeDiagnosticsController {
     recordDeviceLoss(info: GPUDeviceLostInfo): ScratchGpuIncidentReport | undefined {
 
         if (this.#isDisposed) return undefined
+        if (this.#deviceLossIncident !== undefined) return this.#deviceLossIncident
 
         this.#aggregates = {
             ...this.#aggregates,
             deviceLosses: this.#aggregates.deviceLosses + 1,
         }
         const hasTemporalEvidence = this.#pendingOperations.size > 0 || this.#operations.length > 0
-        return this.recordIncident({
+        this.#deviceLossIncident = this.recordIncident({
             kind: 'device-loss',
             diagnosticCode: this.#pendingOperations.size > 0
                 ? 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION'
@@ -591,6 +598,7 @@ export class ScratchRuntimeDiagnosticsController {
             attribution: hasTemporalEvidence ? 'temporal-correlation' : 'unknown',
             nativeError: serializeNativeGpuError(info),
         })
+        return this.#deviceLossIncident
     }
 
     capture(options: ScratchDiagnosticCaptureOptions): ScratchDiagnosticCapture {
@@ -653,6 +661,7 @@ export class ScratchRuntimeDiagnosticsController {
 
         if (this.#isDisposed) return
         this.#isDisposed = true
+        this.#resolveDisposed()
         if (this.#uncapturedErrorListener !== undefined && typeof this.#device.removeEventListener === 'function') {
             this.#device.removeEventListener('uncapturederror', this.#uncapturedErrorListener)
         }
@@ -1200,10 +1209,12 @@ function logicalResourceFootprint(resource: Resource): { bytes: number, known: b
             : { bytes: 0, known: false }
     }
     if (resource.resourceKind !== 'TextureResource') return { bytes: 0, known: false }
-    return logicalTextureFootprint(descriptor)
+    return logicalTextureDescriptorFootprint(descriptor)
 }
 
-function logicalTextureFootprint(descriptor: Record<string, unknown>): { bytes: number, known: boolean } {
+export function logicalTextureDescriptorFootprint(
+    descriptor: Record<string, unknown>
+): { bytes: number, known: boolean } {
 
     const size = descriptor.size as Record<string, unknown> | undefined
     const width = size?.width
