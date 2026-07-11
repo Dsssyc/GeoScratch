@@ -401,6 +401,11 @@ describe('scratch texture resize', () => {
         const oldView = fixture.texture.createView()
         const oldBindGroup = bindSet.getBindGroup()
 
+        fixture.texture.resize({ width: 8, height: 8, depthOrArrayLayers: 1 })
+
+        expect(bindSet.getBindGroup()).to.equal(oldBindGroup)
+        expect(fixture.calls.bindGroups).to.have.length(1)
+
         fixture.texture.resize([ 16, 8 ])
 
         const newView = fixture.texture.createView()
@@ -415,12 +420,32 @@ describe('scratch texture resize', () => {
     it('keeps TextureResource as the public runtime result', async() => {
 
         const fixture = await createFixture()
-
-        expect(fixture.texture).to.be.instanceOf(TextureResource)
-        expect(fixture.runtime.texture({
+        const tupleTexture = fixture.runtime.texture({
             size: [ 1 ],
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
-        })).to.be.instanceOf(TextureResource)
+        })
+        const objectTexture = fixture.runtime.texture({
+            size: { width: 1 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+
+        expect(fixture.texture).to.be.instanceOf(TextureResource)
+        expect(tupleTexture).to.be.instanceOf(TextureResource)
+        expect(objectTexture).to.be.instanceOf(TextureResource)
+        expect(tupleTexture.size).to.deep.equal(objectTexture.size)
+
+        tupleTexture.resize({ width: 2 })
+        objectTexture.resize([ 2 ])
+        expect(tupleTexture.size).to.deep.equal(objectTexture.size)
+
+        for (const size of [ [], [ 1, 2, 3, 4 ] ]) {
+            expectDiagnostic(() => fixture.runtime.createTexture({
+                size,
+                format: 'rgba8unorm',
+                usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+            }), 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
+        }
     })
 })

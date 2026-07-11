@@ -863,6 +863,7 @@ function validateCopyStep(builder: SubmissionBuilder, step: CopyStep) {
     }
 
     command.assertRuntime(builder.runtime)
+    command.validateCurrentRange()
 }
 
 function validateCopyReadiness(

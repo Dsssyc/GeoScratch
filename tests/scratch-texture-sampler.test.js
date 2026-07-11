@@ -8,7 +8,7 @@ import {
     TextureResource,
     TextureUploadCommand,
 } from 'geoscratch'
-import { createFakeGpu } from './scratch-test-utils.js'
+import { createFakeCanvas, createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
@@ -222,6 +222,206 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             height: 2,
             depthOrArrayLayers: 1,
         })
+
+        await submitted.done
+    })
+
+    it('targets the allocation current when a queued texture upload is submitted', async() => {
+
+        const fixture = await createTextureFixture()
+        const upload = fixture.upload
+        const previousTexture = fixture.texture.gpuTexture
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+
+        fixture.texture.resize([ 4, 4 ])
+        const replacementTexture = fixture.texture.gpuTexture
+        const submitted = builder.submit()
+
+        expect(fixture.upload).to.equal(upload)
+        expect(replacementTexture).to.not.equal(previousTexture)
+        expect(previousTexture.destroyed).to.equal(true)
+        expect(fixture.calls.queueTextureWrites).to.have.length(1)
+        expect(fixture.calls.queueTextureWrites[0].destination.texture).to.equal(replacementTexture)
+        expect(fixture.texture.allocationVersion).to.equal(2)
+        expect(fixture.texture.contentEpoch).to.equal(1)
+        expect(fixture.texture.state).to.equal('ready')
+        expect(submitted.resourceAccesses[0]).to.include({
+            resourceId: fixture.texture.id,
+            contentEpochBefore: 0,
+            contentEpochAfter: 1,
+            allocationVersion: 2,
+        })
+
+        await submitted.done
+    })
+
+    it('rejects an upload range invalidated by shrink before queue effects', async() => {
+
+        const fixture = await createTextureFixture()
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+
+        fixture.texture.resize([ 1, 1 ])
+
+        try {
+            builder.submit()
+            throw new Error('expected resized texture upload range to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_COMMAND_TEXTURE_UPLOAD_INVALID',
+                severity: 'error',
+                phase: 'command',
+            })
+            expect(error.diagnostic.actual).to.deep.include({ reason: 'range' })
+        }
+
+        expect(fixture.texture.contentEpoch).to.equal(0)
+        expect(fixture.texture.state).to.equal('empty')
+        expect(fixture.calls.queueTextureWrites).to.have.length(0)
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('rebuilds the texture bind group used by a persistent draw command', async() => {
+
+        const fixture = await createTextureFixture()
+        const canvas = createFakeCanvas()
+        const surface = fixture.runtime.createSurface(canvas.canvas, {
+            format: 'bgra8unorm',
+            size: { width: 8, height: 8 },
+        })
+        const program = fixture.runtime.createProgram({
+            modules: [
+                `
+                    @group(0) @binding(0) var colorTexture: texture_2d<f32>;
+                    @group(0) @binding(1) var colorSampler: sampler;
+
+                    @vertex
+                    fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+                        var positions = array<vec2f, 3>(
+                            vec2f(0.0, 0.8),
+                            vec2f(-0.8, -0.8),
+                            vec2f(0.8, -0.8)
+                        );
+                        return vec4f(positions[vertexIndex], 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fsMain() -> @location(0) vec4f {
+                        return textureSampleLevel(colorTexture, colorSampler, vec2f(0.5), 0.0);
+                    }
+                `,
+            ],
+            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        })
+        const pipeline = fixture.runtime.createRenderPipeline({
+            program,
+            bindLayouts: [ fixture.bindLayout ],
+            targets: [ { format: surface.format } ],
+        })
+        const draw = fixture.runtime.createDrawCommand({
+            pipeline,
+            bindSets: [ fixture.bindSet ],
+            count: { vertexCount: 3 },
+            resources: {
+                read: [ { resource: fixture.texture, contentEpoch: 1 } ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+        const pass = fixture.runtime.createRenderPass({
+            color: [
+                {
+                    target: surface,
+                    load: 'clear',
+                    store: 'store',
+                    clear: [ 0, 0, 0, 1 ],
+                },
+            ],
+        })
+        const previousBindGroup = fixture.bindSet.getBindGroup()
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+            .render(pass, [ draw ])
+
+        fixture.texture.resize([ 4, 4 ])
+        const replacementTexture = fixture.texture.gpuTexture
+        const submitted = builder.submit()
+        const bindGroupAction = fixture.calls.renderPasses[0].actions
+            .find(action => action.type === 'setBindGroup')
+
+        expect(bindGroupAction.bindGroup).to.not.equal(previousBindGroup)
+        expect(bindGroupAction.bindGroup.descriptor.entries[0].resource.texture)
+            .to.equal(replacementTexture)
+        expect(fixture.bindSet.getBindGroup()).to.equal(bindGroupAction.bindGroup)
+        expect(fixture.calls.bindGroups).to.have.length(2)
+
+        await submitted.done
+    })
+
+    it('rebuilds the texture bind group used by a persistent dispatch command', async() => {
+
+        const fixture = await createTextureFixture()
+        const bindLayout = fixture.runtime.createBindLayout({
+            group: 0,
+            entries: [
+                {
+                    binding: 0,
+                    name: 'colorTexture',
+                    type: 'texture',
+                    visibility: [ 'compute' ],
+                },
+            ],
+        })
+        const bindSet = fixture.runtime.createBindSet(bindLayout, {
+            colorTexture: fixture.texture,
+        })
+        const program = fixture.runtime.createProgram({
+            modules: [
+                `
+                    @group(0) @binding(0) var colorTexture: texture_2d<f32>;
+
+                    @compute @workgroup_size(1)
+                    fn csMain() {
+                        _ = textureLoad(colorTexture, vec2i(0, 0), 0);
+                    }
+                `,
+            ],
+            entryPoints: { compute: 'csMain' },
+        })
+        const pipeline = fixture.runtime.createComputePipeline({
+            program,
+            bindLayouts: [ bindLayout ],
+        })
+        const dispatch = fixture.runtime.createDispatchCommand({
+            pipeline,
+            bindSets: [ bindSet ],
+            count: { workgroups: [ 1 ] },
+            resources: {
+                read: [ { resource: fixture.texture, contentEpoch: 1 } ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+        const pass = fixture.runtime.createComputePass()
+        const previousBindGroup = bindSet.getBindGroup()
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+            .compute(pass, [ dispatch ])
+
+        fixture.texture.resize([ 4, 4 ])
+        const replacementTexture = fixture.texture.gpuTexture
+        const submitted = builder.submit()
+        const bindGroupAction = fixture.calls.computePasses[0].actions
+            .find(action => action.type === 'setBindGroup')
+
+        expect(bindGroupAction.bindGroup).to.not.equal(previousBindGroup)
+        expect(bindGroupAction.bindGroup.descriptor.entries[0].resource.texture)
+            .to.equal(replacementTexture)
+        expect(bindSet.getBindGroup()).to.equal(bindGroupAction.bindGroup)
+        expect(fixture.calls.bindGroups).to.have.length(2)
 
         await submitted.done
     })

@@ -393,6 +393,130 @@ describe('scratch CopyCommand', () => {
         await submitted.done
     })
 
+    it('uses current texture allocations for every texture copy direction', async() => {
+
+        const textureCopy = await createTextureCopyFixture()
+        const textureCopyBuilder = textureCopy.runtime.createSubmission({ validation: 'throw' })
+            .upload(textureCopy.upload)
+            .copy(textureCopy.copy)
+        const previousTextureSource = textureCopy.source.gpuTexture
+        const previousTextureTarget = textureCopy.target.gpuTexture
+        textureCopy.source.resize([ 8, 8 ])
+        textureCopy.target.resize([ 8, 8 ])
+        const textureCopySubmitted = textureCopyBuilder.submit()
+
+        expect(previousTextureSource.destroyed).to.equal(true)
+        expect(previousTextureTarget.destroyed).to.equal(true)
+        expect(textureCopy.calls.queueTextureWrites[0].destination.texture)
+            .to.equal(textureCopy.source.gpuTexture)
+        expect(textureCopy.calls.textureCopies[0].source.texture)
+            .to.equal(textureCopy.source.gpuTexture)
+        expect(textureCopy.calls.textureCopies[0].destination.texture)
+            .to.equal(textureCopy.target.gpuTexture)
+        expect(textureCopySubmitted.resourceAccesses
+            .filter(access => access.resourceKind === 'TextureResource')
+            .every(access => access.allocationVersion === 2)).to.equal(true)
+
+        const bufferToTexture = await createBufferToTextureCopyFixture()
+        const bufferToTextureBuilder = bufferToTexture.runtime
+            .createSubmission({ validation: 'throw' })
+            .upload(bufferToTexture.upload)
+            .copy(bufferToTexture.copy)
+        const previousBufferTarget = bufferToTexture.target.gpuTexture
+        bufferToTexture.target.resize([ 8, 8 ])
+        const bufferToTextureSubmitted = bufferToTextureBuilder.submit()
+
+        expect(previousBufferTarget.destroyed).to.equal(true)
+        expect(bufferToTexture.calls.bufferTextureCopies[0].destination.texture)
+            .to.equal(bufferToTexture.target.gpuTexture)
+        expect(bufferToTextureSubmitted.resourceAccesses
+            .find(access => access.resourceId === bufferToTexture.target.id))
+            .to.include({ allocationVersion: 2 })
+
+        const textureToBuffer = await createTextureToBufferCopyFixture()
+        const textureToBufferBuilder = textureToBuffer.runtime
+            .createSubmission({ validation: 'throw' })
+            .upload(textureToBuffer.upload)
+            .copy(textureToBuffer.copy)
+        const previousBufferSource = textureToBuffer.source.gpuTexture
+        textureToBuffer.source.resize([ 8, 8 ])
+        const textureToBufferSubmitted = textureToBufferBuilder.submit()
+
+        expect(previousBufferSource.destroyed).to.equal(true)
+        expect(textureToBuffer.calls.queueTextureWrites[0].destination.texture)
+            .to.equal(textureToBuffer.source.gpuTexture)
+        expect(textureToBuffer.calls.textureBufferCopies[0].source.texture)
+            .to.equal(textureToBuffer.source.gpuTexture)
+        expect(textureToBufferSubmitted.resourceAccesses
+            .find(access => access.resourceId === textureToBuffer.source.id))
+            .to.include({ allocationVersion: 2 })
+
+        await Promise.all([
+            textureCopySubmitted.done,
+            bufferToTextureSubmitted.done,
+            textureToBufferSubmitted.done,
+        ])
+    })
+
+    it('revalidates shrink-invalidated copy ranges before encoder or queue effects', async() => {
+
+        const textureCopy = await createTextureCopyFixture()
+        const textureCopyBuilder = textureCopy.runtime.createSubmission({ validation: 'throw' })
+            .upload(textureCopy.upload)
+            .copy(textureCopy.copy)
+        textureCopy.target.resize([ 2, 2 ])
+
+        await expectScratchDiagnostic(() => textureCopyBuilder.submit(), {
+            code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
+            severity: 'error',
+            phase: 'command',
+        })
+        expect(textureCopy.calls.queueTextureWrites).to.have.length(0)
+        expect(textureCopy.calls.commandEncoders).to.have.length(0)
+        expect(textureCopy.calls.textureCopies).to.have.length(0)
+        expect(textureCopy.calls.queueSubmissions).to.have.length(0)
+
+        const bufferToTexture = await createBufferToTextureCopyFixture()
+        const bufferToTextureBuilder = bufferToTexture.runtime
+            .createSubmission({ validation: 'throw' })
+            .upload(bufferToTexture.upload)
+            .copy(bufferToTexture.copy)
+        bufferToTexture.target.resize([ 2, 2 ])
+
+        await expectScratchDiagnostic(() => bufferToTextureBuilder.submit(), {
+            code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
+            severity: 'error',
+            phase: 'command',
+        })
+        expect(bufferToTexture.calls.queueWrites).to.have.length(0)
+        expect(bufferToTexture.calls.commandEncoders).to.have.length(0)
+        expect(bufferToTexture.calls.bufferTextureCopies).to.have.length(0)
+        expect(bufferToTexture.calls.queueSubmissions).to.have.length(0)
+
+        const textureToBuffer = await createTextureToBufferCopyFixture()
+        textureToBuffer.source.resize([ 2, 2 ])
+        const replacementUpload = textureToBuffer.runtime.createTextureUploadCommand({
+            target: textureToBuffer.source,
+            data: new Uint8Array(16),
+            layout: { bytesPerRow: 8, rowsPerImage: 2 },
+            size: { width: 2, height: 2 },
+        })
+        const textureToBufferBuilder = textureToBuffer.runtime
+            .createSubmission({ validation: 'throw' })
+            .upload(replacementUpload)
+            .copy(textureToBuffer.copy)
+
+        await expectScratchDiagnostic(() => textureToBufferBuilder.submit(), {
+            code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
+            severity: 'error',
+            phase: 'command',
+        })
+        expect(textureToBuffer.calls.queueTextureWrites).to.have.length(0)
+        expect(textureToBuffer.calls.commandEncoders).to.have.length(0)
+        expect(textureToBuffer.calls.textureBufferCopies).to.have.length(0)
+        expect(textureToBuffer.calls.queueSubmissions).to.have.length(0)
+    })
+
     it('advances only the copy target contentEpoch and preserves allocationVersion', async() => {
 
         const fixture = await createCopyFixture()

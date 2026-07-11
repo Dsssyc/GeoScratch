@@ -1583,9 +1583,24 @@ export class CopyCommand {
         this.target.assertUsable()
     }
 
-    encode(commandEncoder: GPUCommandEncoder) {
+    validateCurrentRange(): void {
 
         this.assertUsable()
+
+        if (this.copyKind === 'buffer-to-buffer') {
+            validateBufferCopyRange(this)
+        } else if (this.copyKind === 'texture-to-texture') {
+            validateTextureCopyRange(this)
+        } else if (this.copyKind === 'buffer-to-texture') {
+            validateBufferToTextureCopyRange(this)
+        } else {
+            validateTextureToBufferCopyRange(this)
+        }
+    }
+
+    encode(commandEncoder: GPUCommandEncoder) {
+
+        this.validateCurrentRange()
 
         if (this.copyKind === 'buffer-to-buffer') {
             if (!commandEncoder || typeof commandEncoder.copyBufferToBuffer !== 'function') {
@@ -4865,6 +4880,38 @@ function normalizeTextureUploadLayout(
 }
 
 function validateTextureUploadRange(command: TextureUploadCommand) {
+
+    if (command.mipLevel >= command.target.mipLevelCount) {
+        throwTextureUploadDiagnostic({
+            runtime: command.runtime,
+            target: command.target,
+            data: command.data,
+            layout: command.layout,
+            origin: command.origin,
+            size: command.size,
+            mipLevel: command.mipLevel,
+            reason: 'mipLevel',
+        })
+    }
+
+    const targetExtent = textureMipExtent(command.target, command.mipLevel)
+    if (
+        command.target.sampleCount !== 1 ||
+        command.origin.x + command.size.width > targetExtent.width ||
+        command.origin.y + command.size.height > targetExtent.height ||
+        command.origin.z + command.size.depthOrArrayLayers > targetExtent.depthOrArrayLayers
+    ) {
+        throwTextureUploadDiagnostic({
+            runtime: command.runtime,
+            target: command.target,
+            data: command.data,
+            layout: command.layout,
+            origin: command.origin,
+            size: command.size,
+            mipLevel: command.mipLevel,
+            reason: command.target.sampleCount !== 1 ? 'sampleCount' : 'range',
+        })
+    }
 
     const dataByteLength = getDataByteLength(command.data)
     if (dataByteLength === undefined) {

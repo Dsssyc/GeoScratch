@@ -10,6 +10,8 @@ import { createFakeGpu } from './scratch-test-utils.js'
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_BUFFER_USAGE_STORAGE = 0x80
+const GPU_TEXTURE_USAGE_COPY_SRC = 0x1
+const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 
 async function createRuntimeFixture() {
 
@@ -191,6 +193,54 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         expect(diagnostic.actual).to.deep.include({ allocationVersion: 2 })
         expect(calls.copies).to.have.length(copyCount)
         expect(calls.queueSubmissions).to.have.length(queueSubmissionCount)
+    })
+
+    it('keeps copied buffer provenance independent from later texture replacement', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const texture = runtime.createTexture({
+            label: 'readback upstream texture',
+            size: { width: 2, height: 2 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_COPY_DST,
+        })
+        const source = runtime.createBuffer({
+            label: 'texture copy readback buffer',
+            size: 512,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const upload = runtime.createTextureUploadCommand({
+            target: texture,
+            data: new Uint8Array(16),
+            layout: { bytesPerRow: 8, rowsPerImage: 2 },
+            size: { width: 2, height: 2 },
+        })
+        const copy = runtime.createCopyCommand({
+            source: { resource: texture, contentEpoch: 1 },
+            target: source,
+            targetLayout: { offset: 0, bytesPerRow: 256, rowsPerImage: 2 },
+            size: { width: 2, height: 2 },
+            whenMissing: 'throw',
+        })
+        const submitted = runtime.createSubmission({ validation: 'throw' })
+            .upload(upload)
+            .copy(copy)
+            .submit()
+        const readback = runtime.createReadback({
+            source,
+            after: submitted,
+            range: { offset: 0, byteLength: 16 },
+        })
+
+        texture.resize([ 4, 4 ])
+        const bytes = await readback.toBytes()
+
+        expect(bytes).to.have.length(16)
+        expect(readback.source).to.equal(source)
+        expect(readback.allocationVersion).to.equal(1)
+        expect(readback.contentEpoch).to.equal(1)
+        expect(texture.allocationVersion).to.equal(2)
+        expect(texture.state).to.equal('empty')
     })
 
     it('rejects readback creation when after points to an older source allocation version', async() => {

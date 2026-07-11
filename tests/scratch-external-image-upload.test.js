@@ -193,6 +193,59 @@ describe('scratch external image upload', () => {
         expect(fixture.target.allocationVersion).to.equal(allocationVersion)
     })
 
+    it('targets the replacement allocation when submitted after resize', async() => {
+
+        const fixture = await createFixture()
+        const command = createCommand(fixture)
+        const previousTexture = fixture.target.gpuTexture
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(command)
+
+        fixture.target.resize([ 16, 8, 2 ])
+        const replacementTexture = fixture.target.gpuTexture
+        const submitted = builder.submit()
+
+        expect(replacementTexture).to.not.equal(previousTexture)
+        expect(previousTexture.destroyed).to.equal(true)
+        expect(fixture.calls.queueExternalImageCopies).to.have.length(1)
+        expect(fixture.calls.queueExternalImageCopies[0].destination.texture)
+            .to.equal(replacementTexture)
+        expect(fixture.target.allocationVersion).to.equal(2)
+        expect(fixture.target.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses[0]).to.include({
+            resourceId: fixture.target.id,
+            contentEpochBefore: 0,
+            contentEpochAfter: 1,
+            allocationVersion: 2,
+        })
+
+        await submitted.done
+    })
+
+    it('revalidates a shrink-invalidated target range before any queue effect', async() => {
+
+        const fixture = await createFixture()
+        const command = createCommand(fixture, {
+            origin: { x: 6, y: 0, z: 0 },
+            size: { width: 2, height: 2 },
+        })
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(command)
+
+        fixture.target.resize([ 7, 8, 2 ])
+
+        expectDiagnostic(
+            () => builder.submit(),
+            'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
+            'target-range'
+        )
+        expect(fixture.target.contentEpoch).to.equal(0)
+        expect(fixture.target.state).to.equal('empty')
+        expect(fixture.calls.queueExternalImageCopies).to.have.length(0)
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
     it('allows deferred source readiness and revalidates live dimensions', async() => {
 
         const source = createFakeExternalImageSource('HTMLImageElement', { width: 0, height: 0 })

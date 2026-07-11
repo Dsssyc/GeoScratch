@@ -1943,6 +1943,103 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         await submitted.done
     })
 
+    it('records replacement allocation facts without rewriting historical work', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const texture = createTexture(
+            runtime,
+            'historical resized texture',
+            GPU_TEXTURE_USAGE_COPY_SRC |
+                GPU_TEXTURE_USAGE_COPY_DST |
+                GPU_TEXTURE_USAGE_TEXTURE_BINDING
+        )
+        const initialUpload = runtime.createTextureUploadCommand({
+            target: texture,
+            data: new Uint8Array(16),
+            layout: { bytesPerRow: 8, rowsPerImage: 2 },
+            size: { width: 2, height: 2 },
+        })
+        const initialWork = runtime.createSubmission({ validation: 'throw' })
+            .upload(initialUpload)
+            .submit()
+        const initialAccessFacts = initialWork.resourceAccesses.map(accessFacts)
+        const initialProducerFacts = initialWork.producerEpochs.map(producerFacts)
+
+        texture.resize([ 4, 2 ])
+        expect(texture.contentEpoch).to.equal(1)
+        expect(texture.allocationVersion).to.equal(2)
+        expect(texture.state).to.equal('empty')
+
+        const readbackBuffer = runtime.createBuffer({
+            label: 'resized texture copy destination',
+            size: 512,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const replacementUpload = runtime.createTextureUploadCommand({
+            target: texture,
+            data: new Uint8Array(32),
+            layout: { bytesPerRow: 16, rowsPerImage: 2 },
+            size: { width: 4, height: 2 },
+        })
+        const copy = runtime.createCopyCommand({
+            source: copySource(texture, 2),
+            target: readbackBuffer,
+            targetLayout: { offset: 0, bytesPerRow: 256, rowsPerImage: 2 },
+            size: { width: 4, height: 2 },
+            whenMissing: 'throw',
+        })
+        const replacementWork = runtime.createSubmission({ validation: 'throw' })
+            .upload(replacementUpload)
+            .copy(copy)
+            .submit()
+
+        expect(initialWork.resourceAccesses.map(accessFacts)).to.deep.equal(initialAccessFacts)
+        expect(initialWork.producerEpochs.map(producerFacts)).to.deep.equal(initialProducerFacts)
+        expect(initialWork.resourceAccesses[0]).to.include({
+            resourceId: texture.id,
+            contentEpochBefore: 0,
+            contentEpochAfter: 1,
+            allocationVersion: 1,
+        })
+        expect(initialWork.producerEpochs[0]).to.include({
+            resourceId: texture.id,
+            contentEpoch: 1,
+            allocationVersion: 1,
+        })
+
+        const replacementTextureAccesses = replacementWork.resourceAccesses
+            .filter(access => access.resourceId === texture.id)
+        expect(replacementTextureAccesses.map(access => ({
+            access: access.access,
+            contentEpochBefore: access.contentEpochBefore,
+            contentEpochAfter: access.contentEpochAfter,
+            allocationVersion: access.allocationVersion,
+        }))).to.deep.equal([
+            {
+                access: 'write',
+                contentEpochBefore: 1,
+                contentEpochAfter: 2,
+                allocationVersion: 2,
+            },
+            {
+                access: 'read',
+                contentEpochBefore: 2,
+                contentEpochAfter: 2,
+                allocationVersion: 2,
+            },
+        ])
+        expect(replacementWork.producerEpochs
+            .find(epoch => epoch.resourceId === texture.id)).to.include({
+                contentEpoch: 2,
+                allocationVersion: 2,
+            })
+        expect(texture.contentEpoch).to.equal(2)
+        expect(texture.allocationVersion).to.equal(2)
+        expect(texture.state).to.equal('ready')
+
+        await Promise.all([ initialWork.done, replacementWork.done ])
+    })
+
     it('keeps submitted reports compatible with the existing empty report behavior', async() => {
 
         const { runtime } = await createRuntimeFixture()

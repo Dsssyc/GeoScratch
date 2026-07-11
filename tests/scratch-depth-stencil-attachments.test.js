@@ -155,6 +155,46 @@ describe('scratch depth/stencil render attachments', () => {
         await submitted.done
     })
 
+    it('reuses persistent color and depth attachments against replacement allocations', async() => {
+
+        const fixture = await createDepthFixture()
+        const pass = fixture.pass
+        const draw = fixture.draw
+        const previousColorTexture = fixture.colorTarget.gpuTexture
+        const previousDepthTexture = fixture.depthTarget.gpuTexture
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [ draw ])
+
+        fixture.colorTarget.resize([ 32, 32 ])
+        fixture.depthTarget.resize([ 32, 32 ])
+        const replacementColorTexture = fixture.colorTarget.gpuTexture
+        const replacementDepthTexture = fixture.depthTarget.gpuTexture
+        const submitted = builder.submit()
+
+        expect(fixture.pass).to.equal(pass)
+        expect(fixture.draw).to.equal(draw)
+        expect(previousColorTexture.destroyed).to.equal(true)
+        expect(previousDepthTexture.destroyed).to.equal(true)
+        expect(fixture.calls.textureViews).to.have.length(2)
+        expect(fixture.calls.textureViews[0].texture).to.equal(replacementColorTexture)
+        expect(fixture.calls.textureViews[1].texture).to.equal(replacementDepthTexture)
+        expect(fixture.calls.renderPasses[0].descriptor.colorAttachments[0].view)
+            .to.equal(fixture.calls.textureViews[0])
+        expect(fixture.calls.renderPasses[0].descriptor.depthStencilAttachment.view)
+            .to.equal(fixture.calls.textureViews[1])
+        expect(fixture.colorTarget.allocationVersion).to.equal(2)
+        expect(fixture.depthTarget.allocationVersion).to.equal(2)
+        expect(submitted.resourceAccesses.map(access => ({
+            resourceId: access.resourceId,
+            allocationVersion: access.allocationVersion,
+        }))).to.deep.equal([
+            { resourceId: fixture.colorTarget.id, allocationVersion: 2 },
+            { resourceId: fixture.depthTarget.id, allocationVersion: 2 },
+        ])
+
+        await submitted.done
+    })
+
     it('lowers stencil fields for stencil-capable depth/stencil formats', async() => {
 
         const fixture = await createDepthFixture('depth24plus-stencil8')

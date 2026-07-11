@@ -231,6 +231,40 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         await submitted.done
     })
 
+    it('reuses a persistent color pass and draw against the allocation current at submit time', async() => {
+
+        const fixture = await createRenderTargetScene()
+        const pass = fixture.pass
+        const draw = fixture.draw
+        const previousTexture = fixture.renderTarget.gpuTexture
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [ draw ])
+
+        fixture.renderTarget.resize([ 32, 16 ])
+        const replacementTexture = fixture.renderTarget.gpuTexture
+        const submitted = builder.submit()
+
+        expect(fixture.pass).to.equal(pass)
+        expect(fixture.draw).to.equal(draw)
+        expect(replacementTexture).to.not.equal(previousTexture)
+        expect(previousTexture.destroyed).to.equal(true)
+        expect(fixture.calls.textureViews).to.have.length(1)
+        expect(fixture.calls.textureViews[0].texture).to.equal(replacementTexture)
+        expect(fixture.calls.renderPasses[0].descriptor.colorAttachments[0].view)
+            .to.equal(fixture.calls.textureViews[0])
+        expect(fixture.renderTarget.allocationVersion).to.equal(2)
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses[0]).to.include({
+            resourceId: fixture.renderTarget.id,
+            access: 'write',
+            contentEpochBefore: 0,
+            contentEpochAfter: 1,
+            allocationVersion: 2,
+        })
+
+        await submitted.done
+    })
+
     it('advances TextureResource contentEpoch after render attachment writes', async() => {
 
         const fixture = await createRenderTargetScene()
@@ -324,6 +358,59 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(0)
         expect(fixture.calls.drawCalls).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('treats preserved epochs as unavailable content after allocation replacement', async() => {
+
+        const fixture = await createRenderTargetScene()
+        fixture.renderTarget._advanceContentEpoch()
+        const secondTarget = fixture.runtime.createTexture({
+            label: 'replacement readiness target',
+            size: { width: 64, height: 64 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const secondPass = fixture.runtime.createRenderPass({
+            color: [
+                {
+                    target: secondTarget,
+                    load: 'clear',
+                    store: 'store',
+                },
+            ],
+        })
+        const readBeforeReplacement = fixture.runtime.createDrawCommand({
+            pipeline: fixture.pipeline,
+            count: { vertexCount: 3 },
+            resources: {
+                read: [ readResource(fixture.renderTarget, 1) ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(secondPass, [ readBeforeReplacement ])
+
+        fixture.renderTarget.resize([ 32, 32 ])
+
+        const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
+            code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
+            severity: 'error',
+            phase: 'command',
+        })
+
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+        expect(fixture.renderTarget.allocationVersion).to.equal(2)
+        expect(fixture.renderTarget.state).to.equal('empty')
+        expect(diagnostic.actual).to.deep.include({
+            resourceId: fixture.renderTarget.id,
+            resourceState: 'empty',
+            contentEpoch: 1,
+            allocationVersion: 2,
+        })
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
         expect(fixture.calls.queueSubmissions).to.have.length(0)
     })
 
