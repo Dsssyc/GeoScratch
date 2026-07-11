@@ -3,7 +3,11 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
 } from 'geoscratch'
-import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeGpu,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_STORAGE = 0x80
 const GPU_BUFFER_USAGE_QUERY_RESOLVE = 0x200
@@ -448,7 +452,7 @@ describe('scratch readiness policy execution', () => {
         const staged = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
         const discarded = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
         const downstream = fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        staleInput._advanceContentEpoch()
+        advanceResourceContentEpochForTest(staleInput)
         const earlierProducer = createDispatch(fixture, {
             resources: {
                 read: [ { resource: staleInput, contentEpoch: 0 } ],

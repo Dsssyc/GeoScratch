@@ -39,6 +39,10 @@ async function createFixture(descriptor = {}) {
 function captureTextureFacts(texture) {
 
     return {
+        runtime: texture.runtime,
+        id: texture.id,
+        label: texture.label,
+        resourceKind: texture.resourceKind,
         gpuTexture: texture.gpuTexture,
         descriptor: texture.descriptor,
         size: texture.size,
@@ -398,7 +402,15 @@ describe('scratch texture resize', () => {
         const facts = captureTextureFacts(fixture.texture)
 
         for (const [ key, value ] of [
+            [ 'runtime', {} ],
+            [ 'id', 'forged-resource-id' ],
+            [ 'label', 'forged label' ],
+            [ 'resourceKind', 'ForgedResource' ],
             [ 'descriptor', {} ],
+            [ 'isDisposed', true ],
+            [ 'state', 'ready' ],
+            [ 'allocationVersion', 99 ],
+            [ 'contentEpoch', 99 ],
             [ 'gpuTexture', {} ],
             [ 'size', { width: 99, height: 99, depthOrArrayLayers: 1 } ],
             [ 'width', 99 ],
@@ -421,8 +433,19 @@ describe('scratch texture resize', () => {
     it('does not expose an alternate allocation transition on the resource object', async() => {
 
         const fixture = await createFixture()
+        const facts = captureTextureFacts(fixture.texture)
 
         expect(fixture.texture._replaceAllocation).to.equal(undefined)
+        expect(fixture.texture._advanceContentEpoch).to.equal(undefined)
+        expect(fixture.texture._gpuTexture).to.equal(undefined)
+        expect(fixture.texture._physicalDescriptor).to.equal(undefined)
+        expect(fixture.texture._viewCache).to.equal(undefined)
+
+        fixture.texture._gpuTexture = {}
+        fixture.texture._physicalDescriptor = {}
+        fixture.texture._viewCache = new Map()
+
+        expectTextureFacts(fixture.texture, facts)
     })
 
     it('invalidates cached views and lazily rebuilds one bind group', async() => {

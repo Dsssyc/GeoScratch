@@ -54,6 +54,8 @@ Every resource should expose or internally track:
 
 `allocationVersion` is what `BindSet`, view caches, render attachments, and command caches compare before reuse. A content write must not force a bind group rebuild unless it also changes the physical binding target.
 
+Resource identity, lifecycle, readiness, `allocationVersion`, and `contentEpoch` are read-only public facts backed by ECMAScript-private slots. Package consumers cannot rewrite provenance through fields, an upcast to `Resource`, an object-level transition method, or either public package entrypoint. Internal command and submission modules commit transitions through non-entrypoint module functions.
+
 `contentEpoch` changes when bytes or texels change:
 
 - `UploadCommand`

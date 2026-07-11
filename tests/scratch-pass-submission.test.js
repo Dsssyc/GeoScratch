@@ -8,7 +8,12 @@ import {
     SubmittedWork,
     TextureResource,
 } from 'geoscratch'
-import { createFakeCanvas, createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeCanvas,
+    createFakeGpu,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
@@ -364,7 +369,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('treats preserved epochs as unavailable content after allocation replacement', async() => {
 
         const fixture = await createRenderTargetScene()
-        fixture.renderTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(fixture.renderTarget)
         const secondTarget = fixture.runtime.createTexture({
             label: 'replacement readiness target',
             size: { width: 64, height: 64 },
@@ -417,7 +422,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('rejects draw reads requiring a future texture epoch before creating a command encoder', async() => {
 
         const fixture = await createRenderTargetScene()
-        fixture.renderTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(fixture.renderTarget)
         const secondTarget = fixture.runtime.createTexture({
             label: 'future epoch render target',
             size: { width: 64, height: 64 },
@@ -481,7 +486,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('rejects draw reads requiring an older texture epoch before creating a command encoder', async() => {
 
         const fixture = await createRenderTargetScene()
-        fixture.renderTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(fixture.renderTarget)
         const secondTarget = fixture.runtime.createTexture({
             label: 'stale epoch render target',
             size: { width: 64, height: 64 },
@@ -686,7 +691,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('rejects draw reads of the current TextureResource color attachment before encoding', async() => {
 
         const fixture = await createRenderTargetScene()
-        fixture.renderTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(fixture.renderTarget)
         const conflictingDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
             count: { vertexCount: 3 },
@@ -757,7 +762,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('attaches render resource conflict diagnostics and continues in warn mode', async() => {
 
         const fixture = await createRenderTargetScene()
-        fixture.renderTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(fixture.renderTarget)
         const conflictingDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
             count: { vertexCount: 3 },
@@ -811,7 +816,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('skips render resource conflict diagnostics and continues in off mode', async() => {
 
         const fixture = await createRenderTargetScene()
-        fixture.renderTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(fixture.renderTarget)
         const conflictingDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
             count: { vertexCount: 3 },

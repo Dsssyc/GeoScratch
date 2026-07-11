@@ -176,6 +176,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     scratchTexture.descriptor = scratchTexture.descriptor
     // @ts-expect-error Allocation transitions are internal lifecycle operations
     scratchTexture._replaceAllocation({})
+    // @ts-expect-error Content transitions are internal lifecycle operations
+    scratchTexture._advanceContentEpoch()
     // @ts-expect-error TextureResource physical allocation fields are read-only
     scratchTexture.gpuTexture = scratchTexture.gpuTexture
     // @ts-expect-error TextureResource normalized size is read-only
@@ -200,6 +202,30 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     scratchTexture.allocationVersion = 2
     // @ts-expect-error TextureResource contentEpoch is read-only
     scratchTexture.contentEpoch = 1
+
+    const scratchResource: scr.Resource = scratchTexture
+    // @ts-expect-error Resource runtime owner is read-only
+    scratchResource.runtime = runtime
+    // @ts-expect-error Resource logical id is read-only
+    scratchResource.id = 'forged-resource-id'
+    // @ts-expect-error Resource label is read-only
+    scratchResource.label = 'forged label'
+    // @ts-expect-error Resource kind is read-only
+    scratchResource.resourceKind = 'ForgedResource'
+    // @ts-expect-error Resource lifecycle state is read-only
+    scratchResource.isDisposed = true
+    // @ts-expect-error Resource readiness state is read-only
+    scratchResource.state = 'ready'
+    // @ts-expect-error Resource allocationVersion is read-only
+    scratchResource.allocationVersion = 2
+    // @ts-expect-error Resource contentEpoch is read-only
+    scratchResource.contentEpoch = 1
+    // @ts-expect-error Resource transition helpers are not package API
+    scr.replaceResourceAllocation(scratchResource, scratchResource.descriptor)
+    // @ts-expect-error Resource transition helpers are not package API
+    scr.advanceResourceContentEpoch(scratchResource)
+    // @ts-expect-error Resource transition helpers are not package API
+    scr.setResourceContentState(scratchResource, 'ready', 1)
 
     const diagnostic: scr.ScratchDiagnostic = scr.createScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',

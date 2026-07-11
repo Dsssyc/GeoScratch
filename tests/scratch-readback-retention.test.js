@@ -4,7 +4,11 @@ import {
     ScratchRuntime,
     layoutCodec,
 } from 'geoscratch'
-import { createFakeGpu, replaceResourceAllocationForTest } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeGpu,
+    replaceResourceAllocationForTest,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
@@ -229,7 +233,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
 
         await readback.toBytes()
         setBytes(source, [ 9, 9, 9, 9 ])
-        source._advanceContentEpoch()
+        advanceResourceContentEpochForTest(source)
 
         const retained = await readback.toBytes()
 
@@ -247,7 +251,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
             range: { offset: 0, byteLength: 4 },
             retain: 'until-dispose',
         })
-        source._advanceContentEpoch()
+        advanceResourceContentEpochForTest(source)
 
         const diagnostic = await expectScratchDiagnostic(() => readback.toBytes(), {
             code: 'SCRATCH_READBACK_SOURCE_EPOCH_STALE',

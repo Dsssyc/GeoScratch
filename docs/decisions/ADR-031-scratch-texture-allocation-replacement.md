@@ -79,10 +79,13 @@ textureBindingViewDimension
 
 The normalized size and the materialized `viewFormats` iterable are immutable
 snapshots. Caller mutation after construction cannot change a later physical
-replacement. The descriptor and public allocation facts are read-only;
-`gpuTexture` may return a different identity after resize but cannot be
-assigned by a caller. Allocation transition bookkeeping is internal, so
-`TextureResource.resize()` is the only public texture replacement path.
+replacement. Stable identity, descriptor, lifecycle, version, physical
+texture, and view-cache state use ECMAScript-private backing slots and are
+exposed only through read-only getters. `gpuTexture` may return a different
+identity after resize but cannot be assigned by a caller. Allocation and
+content transition functions remain module-internal and are absent from both
+package entrypoints, so `TextureResource.resize()` is the only public texture
+replacement path.
 
 ### Deterministic validation
 
@@ -210,6 +213,8 @@ allocation-scoped lifetime.
   changing logical identity.
 - Complete descriptor retention becomes a required invariant for every
   replacement.
+- Logical identity, provenance, and physical allocation state cannot be
+  rewritten through public fields or an upcast to `Resource`.
 - Allocation and content history remain factually separate.
 - Existing binding, pass, transfer, readback, and ledger paths must prove that
   they resolve or validate the current allocation at use time.

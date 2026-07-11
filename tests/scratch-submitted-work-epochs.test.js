@@ -3,7 +3,11 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
 } from 'geoscratch'
-import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeGpu,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
@@ -294,7 +298,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const { runtime } = await createRuntimeFixture()
         const source = createBuffer(runtime, 'copy source')
         const target = createBuffer(runtime, 'copy target')
-        source._advanceContentEpoch()
+        advanceResourceContentEpochForTest(source)
         const copy = runtime.createCopyCommand({
             label: 'copy bytes',
             source: copySource(source, 1),
@@ -356,7 +360,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             'texture copy target',
             GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
         )
-        source._advanceContentEpoch()
+        advanceResourceContentEpochForTest(source)
         const copy = runtime.createCopyCommand({
             label: 'copy texture',
             source: copySource(source, 1),
@@ -523,7 +527,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const { runtime, calls } = await createRuntimeFixture()
             const source = createBuffer(runtime, `future copy source ${validation}`)
             const target = createBuffer(runtime, `future copy target ${validation}`)
-            source._advanceContentEpoch()
+            advanceResourceContentEpochForTest(source)
             const copy = runtime.createCopyCommand({
                 label: `copy future source ${validation}`,
                 source: copySource(source, 2),
@@ -597,7 +601,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const { runtime, calls } = await createRuntimeFixture()
             const source = createBuffer(runtime, `stale copy source ${validation}`)
             const target = createBuffer(runtime, `stale copy target ${validation}`)
-            source._advanceContentEpoch()
+            advanceResourceContentEpochForTest(source)
             const upload = runtime.createUploadCommand({
                 label: `refresh copy source ${validation}`,
                 target: source,
@@ -688,7 +692,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 `future texture copy target ${validation}`,
                 GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
             )
-            source._advanceContentEpoch()
+            advanceResourceContentEpochForTest(source)
             const copy = runtime.createCopyCommand({
                 label: `copy future texture source ${validation}`,
                 source: copySource(source, 2),
@@ -770,7 +774,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 `stale texture copy target ${validation}`,
                 GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
             )
-            source._advanceContentEpoch()
+            advanceResourceContentEpochForTest(source)
             const upload = runtime.createTextureUploadCommand({
                 label: `refresh texture copy source ${validation}`,
                 target: source,
@@ -1201,7 +1205,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
         )
         const renderTarget = createTexture(runtime, 'draw after texture copy render target')
-        source._advanceContentEpoch()
+        advanceResourceContentEpochForTest(source)
         const copy = runtime.createCopyCommand({
             label: 'copy before draw read',
             source: copySource(source, 1),
@@ -1243,7 +1247,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const firstSource = createBuffer(runtime, 'copy chain source')
         const firstTarget = createBuffer(runtime, 'copy chain middle')
         const secondTarget = createBuffer(runtime, 'copy chain target')
-        firstSource._advanceContentEpoch()
+        advanceResourceContentEpochForTest(firstSource)
         const firstCopy = runtime.createCopyCommand({
             label: 'first copy in chain',
             source: copySource(firstSource, 1),
@@ -1292,7 +1296,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             size: 32,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
         })
-        buffer._advanceContentEpoch()
+        advanceResourceContentEpochForTest(buffer)
         const copy = runtime.createCopyCommand({
             label: 'self non-overlap copy',
             source: copySource(buffer, 2),
@@ -1455,7 +1459,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const { runtime, calls } = await createRuntimeFixture()
             const input = createBuffer(runtime, `future compute input ${validation}`)
             const output = createBuffer(runtime, `future compute output ${validation}`)
-            input._advanceContentEpoch()
+            advanceResourceContentEpochForTest(input)
             const compute = createCompute(runtime, input, output, 2)
             const builder = runtime.createSubmission({ validation })
                 .compute(compute.pass, [ compute.dispatch ])
@@ -1522,7 +1526,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const { runtime, calls } = await createRuntimeFixture()
             const input = createBuffer(runtime, `stale compute input ${validation}`)
             const output = createBuffer(runtime, `stale compute output ${validation}`)
-            input._advanceContentEpoch()
+            advanceResourceContentEpochForTest(input)
             const upload = runtime.createUploadCommand({
                 label: 'refresh stale input',
                 target: input,

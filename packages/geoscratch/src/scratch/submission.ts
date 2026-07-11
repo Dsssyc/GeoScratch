@@ -13,6 +13,7 @@ import {
     throwScratchDiagnostic,
 } from './diagnostics.js'
 import { createScheduledReadbackOperation } from './readback.js'
+import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
@@ -2640,12 +2641,12 @@ function advanceRenderAttachmentEpochs(passSpec: RenderPassSpec) {
         const target = attachment.target
         if (!(target instanceof TextureResource) || writtenTargets.has(target)) continue
 
-        target._advanceContentEpoch()
+        advanceResourceContentEpoch(target)
         writtenTargets.add(target)
     }
 
     if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target)) {
-        passSpec.depth.target._advanceContentEpoch()
+        advanceResourceContentEpoch(passSpec.depth.target)
         writtenTargets.add(passSpec.depth.target)
     }
 }
@@ -2722,8 +2723,7 @@ function restorePreparedContentState(
 ): void {
 
     for (const [resource, snapshot] of resourceSnapshots) {
-        resource.state = snapshot.state
-        resource.contentEpoch = snapshot.contentEpoch
+        setResourceContentState(resource, snapshot.state, snapshot.contentEpoch)
     }
     for (const [querySet, slots] of querySlotSnapshots) {
         for (const [index, snapshot] of slots) {
@@ -2737,8 +2737,7 @@ function applyPreparedQueueEffects(effects: readonly PreparedQueueEffect[]): voi
 
     for (const effect of effects) {
         if (effect.kind === 'resource-content') {
-            effect.resource.state = effect.state
-            effect.resource.contentEpoch = effect.contentEpoch
+            setResourceContentState(effect.resource, effect.state, effect.contentEpoch)
             continue
         }
 

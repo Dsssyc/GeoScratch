@@ -1,6 +1,10 @@
 import { expect } from 'chai'
 import { ScratchDiagnosticError, ScratchRuntime } from 'geoscratch'
-import { createFakeExternalImageSource, createFakeGpu } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeExternalImageSource,
+    createFakeGpu,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
@@ -189,7 +193,7 @@ function createFallbackCompute(runtime) {
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
     })
-    ready._advanceContentEpoch()
+    advanceResourceContentEpochForTest(ready)
     const program = runtime.createProgram({
         modules: [
             `
@@ -252,7 +256,7 @@ async function createOrderingFixture() {
         usage: GPU_BUFFER_USAGE_COPY_DST,
     })
 
-    copySource._advanceContentEpoch()
+    advanceResourceContentEpochForTest(copySource)
 
     const firstCopy = runtime.createCopyCommand({
         label: 'queue order first copy',

@@ -54,6 +54,8 @@ await submitted.done                    // GPU completion, not host readback
 
 `allocationVersion` 是 `BindSet`、view cache、render attachment 和 command cache 在复用前比较的对象。单纯内容写入不应触发 bind group 重建，除非它也改变了物理 binding target。
 
+Resource identity、lifecycle、readiness、`allocationVersion` 与 `contentEpoch` 都是由 ECMAScript-private slots 支撑的只读公开事实。Package consumer 不能通过字段、上转型到 `Resource`、object-level transition method 或任一公开 package entrypoint 改写 provenance。内部 command 与 submission modules 通过不属于 entrypoint 的 module functions 提交 transition。
+
 `contentEpoch` 在 bytes 或 texels 变化时递增:
 
 - `UploadCommand`

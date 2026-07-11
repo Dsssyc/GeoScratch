@@ -47,6 +47,11 @@ describe('scratch texture resize documentation', () => {
         expect(resources).to.include('state = empty')
         expect(resources).to.include('TRANSIENT_ATTACHMENT | RENDER_ATTACHMENT')
         expect(resources).to.include('only public size-replacement path')
+        expect(resources).to.include('ECMAScript-private backing slots')
+        expect(resources).to.include('read-only getters')
+        expect(resources).to.include('not exported from either package entrypoint')
+        expect(resourcesZh).to.include('ECMAScript-private backing slots')
+        expect(resourcesZh).to.include('read-only getters')
         expect(resources).to.not.include('sceneColor.invalidateSize()')
         expect(resources).to.not.include('size: derived(() => surface.size')
         expect(resourcesZh).to.not.include('sceneColor.invalidateSize()')
@@ -107,6 +112,8 @@ describe('scratch texture resize documentation', () => {
 
         expect(agents).to.include('`TextureResource.resize()`')
         expect(agents).to.include('the only public texture allocation transition')
+        expect(agents).to.include('ECMAScript-private backing slots')
+        expect(agents).to.include('TypeScript `private` fields')
         expect(agents).to.include('must not wait for queue completion')
         expect(examples).to.include('`textureResize/`')
         expect(examples).to.include('exact padded readback bytes')
@@ -129,6 +136,8 @@ describe('scratch texture resize documentation', () => {
         expect(audit).to.include('test evidence')
         expect(audit).to.include('browser evidence')
         expect(audit).to.include('documentation evidence')
+        expect(audit).to.include('writable base-class escape hatches')
+        expect(audit).to.include('package-exported transition helper')
 
         const completedRows = audit.match(/^\| \d+ \|.*\| Complete \|$/gm) ?? []
         expect(completedRows).to.have.length(17)

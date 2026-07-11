@@ -5,7 +5,11 @@ import {
     ScratchRuntime,
     TextureResource,
 } from 'geoscratch'
-import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeGpu,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
@@ -388,7 +392,7 @@ describe('scratch depth/stencil render attachments', () => {
     it('rejects draw reads and writes of the current depth attachment before encoding', async() => {
 
         const fixture = await createDepthFixture()
-        fixture.depthTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(fixture.depthTarget)
         const readDepth = fixture.runtime.createDrawCommand({
             pipeline: fixture.depthPipeline,
             count: { vertexCount: 3 },
@@ -454,7 +458,7 @@ describe('scratch depth/stencil render attachments', () => {
     it('applies validation disposition to depth attachment conflicts', async() => {
 
         const warnFixture = await createDepthFixture()
-        warnFixture.depthTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(warnFixture.depthTarget)
         const warnConflict = warnFixture.runtime.createDrawCommand({
             pipeline: warnFixture.depthPipeline,
             count: { vertexCount: 3 },
@@ -485,7 +489,7 @@ describe('scratch depth/stencil render attachments', () => {
         await warned.done
 
         const offFixture = await createDepthFixture()
-        offFixture.depthTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(offFixture.depthTarget)
         const offConflict = offFixture.runtime.createDrawCommand({
             pipeline: offFixture.depthPipeline,
             count: { vertexCount: 3 },
@@ -548,7 +552,7 @@ describe('scratch depth/stencil render attachments', () => {
     it('uses existing epoch diagnostics for future and stale depth reads', async() => {
 
         const futureFixture = await createDepthFixture()
-        futureFixture.depthTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(futureFixture.depthTarget)
         const futureRead = futureFixture.runtime.createDrawCommand({
             pipeline: futureFixture.colorOnlyPipeline,
             count: { vertexCount: 3 },
@@ -573,7 +577,7 @@ describe('scratch depth/stencil render attachments', () => {
         })
 
         const staleFixture = await createDepthFixture()
-        staleFixture.depthTarget._advanceContentEpoch()
+        advanceResourceContentEpochForTest(staleFixture.depthTarget)
         const staleRead = staleFixture.runtime.createDrawCommand({
             pipeline: staleFixture.colorOnlyPipeline,
             count: { vertexCount: 3 },

@@ -6,7 +6,10 @@ import {
     ScratchRuntime,
     TextureResource,
 } from 'geoscratch'
-import { replaceResourceAllocationForTest } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    replaceResourceAllocationForTest,
+} from './scratch-test-utils.js'
 
 function createFakeGpu() {
 
@@ -189,8 +192,8 @@ describe('scratch resources', () => {
         expect(buffer.isReady).to.equal(false)
         expect(texture.isReady).to.equal(false)
 
-        buffer._advanceContentEpoch()
-        texture._advanceContentEpoch()
+        advanceResourceContentEpochForTest(buffer)
+        advanceResourceContentEpochForTest(texture)
 
         expect(buffer.contentEpoch).to.equal(1)
         expect(texture.contentEpoch).to.equal(1)

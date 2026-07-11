@@ -7,6 +7,7 @@ import {
     UploadCommand,
 } from 'geoscratch'
 import {
+    advanceResourceContentEpochForTest,
     createFakeCanvas,
     createFakeGpu,
     replaceResourceAllocationForTest,
@@ -169,7 +170,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
 
         const firstBindGroup = fixture.bindSet.getBindGroup()
         const secondBindGroup = fixture.bindSet.getBindGroup()
-        fixture.uniformBuffer._advanceContentEpoch()
+        advanceResourceContentEpochForTest(fixture.uniformBuffer)
         const afterContentChange = fixture.bindSet.getBindGroup()
 
         expect(firstBindGroup).to.equal(secondBindGroup)

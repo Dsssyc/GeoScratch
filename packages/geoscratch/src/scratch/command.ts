@@ -5,6 +5,7 @@ import { isLayoutArtifact, isLayoutUploadView, layoutArtifactSubject } from './l
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import { QuerySetResource } from './query-set.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
+import { advanceResourceContentEpoch } from './resource.js'
 import { TextureResource } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { BindLayoutEntry, BindSet } from './binding.js'
@@ -757,7 +758,7 @@ export class DrawCommand {
         }
         if (this._producesDeclaredWrites) {
             for (const resource of this.resources.write) {
-                resource._advanceContentEpoch()
+                advanceResourceContentEpoch(resource)
             }
         }
     }
@@ -1191,7 +1192,7 @@ export class DispatchCommand {
         }
         if (this._producesDeclaredWrites) {
             for (const resource of this.resources.write) {
-                resource._advanceContentEpoch()
+                advanceResourceContentEpoch(resource)
             }
         }
     }
@@ -1708,7 +1709,7 @@ export class CopyCommand {
             )
         }
 
-        this.target._advanceContentEpoch()
+        advanceResourceContentEpoch(this.target)
     }
 
     dispose(): void {
@@ -2161,7 +2162,7 @@ export class ResolveQuerySetCommand {
             this.destination.gpuBuffer,
             this.destinationOffset
         )
-        this.destination._advanceContentEpoch()
+        advanceResourceContentEpoch(this.destination)
     }
 
     dispose(): void {
@@ -2520,7 +2521,7 @@ export function commitUploadCommandLogicalWrite(
     command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand
 ): void {
 
-    if (uploadCommandHasContentEffect(command)) command.target._advanceContentEpoch()
+    if (uploadCommandHasContentEffect(command)) advanceResourceContentEpoch(command.target)
 }
 
 function assertNeverUploadCommand(command: never): never {

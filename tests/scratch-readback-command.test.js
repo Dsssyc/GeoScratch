@@ -1,6 +1,6 @@
 import { expect } from 'chai'
 import * as scr from 'geoscratch'
-import { createFakeGpu } from './scratch-test-utils.js'
+import { advanceResourceContentEpochForTest, createFakeGpu } from './scratch-test-utils.js'
 
 const COPY_SRC = 0x4
 const COPY_DST = 0x8
@@ -235,7 +235,7 @@ describe('scratch ReadbackCommand', () => {
         const fake = createFakeGpu()
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = runtime.createBuffer({ size: 16, usage: COPY_SRC })
-        source._advanceContentEpoch()
+        advanceResourceContentEpochForTest(source)
         const command = runtime.createReadbackCommand({
             source: { resource: source, contentEpoch: 1 },
             whenMissing: 'throw',
@@ -342,7 +342,7 @@ describe('scratch ReadbackCommand', () => {
                 const fake = createFakeGpu()
                 const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
                 const source = runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
-                source._advanceContentEpoch()
+                advanceResourceContentEpochForTest(source)
                 const upload = scenario === 'stale'
                     ? runtime.createUploadCommand({ target: source, data: new Uint8Array(16) })
                     : undefined
@@ -391,7 +391,7 @@ describe('scratch ReadbackCommand', () => {
         const standaloneFake = createFakeGpu()
         const standaloneRuntime = await scr.ScratchRuntime.create({ gpu: standaloneFake.gpu })
         const standaloneSource = standaloneRuntime.createBuffer({ size: 16, usage: COPY_SRC })
-        standaloneSource._advanceContentEpoch()
+        advanceResourceContentEpochForTest(standaloneSource)
         const standaloneCommand = standaloneRuntime.createReadbackCommand({
             source: { resource: standaloneSource, contentEpoch: 1 },
             whenMissing: 'throw',

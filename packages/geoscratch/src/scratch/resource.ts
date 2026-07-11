@@ -11,29 +11,51 @@ export type ResourceOptions = {
 
 export type ResourceState = 'empty' | 'ready' | 'disposed'
 
-export interface Resource {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    resourceKind: string
-    isDisposed: boolean
-    state: ResourceState
-    allocationVersion: number
-    contentEpoch: number
+type ResourceMutators = {
+    replaceAllocation(descriptor: object): void
+    advanceContentEpoch(): void
+    setContentState(state: ResourceState, contentEpoch: number): void
 }
 
-const allocationReplacers = new WeakMap<Resource, (descriptor: object) => void>()
+const resourceMutators = new WeakMap<Resource, ResourceMutators>()
+
+function mutatorsFor(resource: Resource): ResourceMutators {
+
+    const mutators = resourceMutators.get(resource)
+    if (mutators === undefined) throw new TypeError('Resource transition is unavailable.')
+    return mutators
+}
 
 export function replaceResourceAllocation(resource: Resource, descriptor: object): void {
 
-    const replace = allocationReplacers.get(resource)
-    if (replace === undefined) throw new TypeError('Resource allocation transition is unavailable.')
-    replace(descriptor)
+    mutatorsFor(resource).replaceAllocation(descriptor)
+}
+
+export function advanceResourceContentEpoch(resource: Resource): void {
+
+    mutatorsFor(resource).advanceContentEpoch()
+}
+
+export function setResourceContentState(
+    resource: Resource,
+    state: ResourceState,
+    contentEpoch: number
+): void {
+
+    mutatorsFor(resource).setContentState(state, contentEpoch)
 }
 
 export class Resource {
 
+    #runtime: ScratchRuntime
+    #id: string
+    #label: string | undefined
+    #resourceKind: string
     #descriptor: object
+    #isDisposed = false
+    #state: ResourceState = 'empty'
+    #allocationVersion = 1
+    #contentEpoch = 0
 
     constructor(runtime: ScratchRuntime, options: ResourceOptions = {}) {
 
@@ -51,28 +73,74 @@ export class Resource {
 
         runtime.assertActive()
 
-        this.runtime = runtime
-        this.id = `scratch-resource-${UUID()}`
-        this.resourceKind = options.resourceKind ?? 'Resource'
+        this.#runtime = runtime
+        this.#id = `scratch-resource-${UUID()}`
+        this.#label = options.label
+        this.#resourceKind = options.resourceKind ?? 'Resource'
         this.#descriptor = options.descriptor ?? {}
-        this.isDisposed = false
-        this.state = 'empty'
-        this.allocationVersion = 1
-        this.contentEpoch = 0
-        if (options.label !== undefined) this.label = options.label
 
-        allocationReplacers.set(this, descriptor => {
-            this.#descriptor = descriptor
-            this.allocationVersion++
-            this.state = this.isDisposed ? 'disposed' : 'empty'
+        resourceMutators.set(this, {
+            replaceAllocation: descriptor => {
+                this.#descriptor = descriptor
+                this.#allocationVersion++
+                this.#state = this.#isDisposed ? 'disposed' : 'empty'
+            },
+            advanceContentEpoch: () => {
+                this.#contentEpoch++
+                this.#state = this.#isDisposed ? 'disposed' : 'ready'
+            },
+            setContentState: (state, contentEpoch) => {
+                this.#state = this.#isDisposed ? 'disposed' : state
+                this.#contentEpoch = contentEpoch
+            },
         })
 
         runtime._registerResource(this)
     }
 
+    get runtime(): ScratchRuntime {
+
+        return this.#runtime
+    }
+
+    get id(): string {
+
+        return this.#id
+    }
+
+    get label(): string | undefined {
+
+        return this.#label
+    }
+
+    get resourceKind(): string {
+
+        return this.#resourceKind
+    }
+
     get descriptor(): object {
 
         return this.#descriptor
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
+    }
+
+    get state(): ResourceState {
+
+        return this.#state
+    }
+
+    get allocationVersion(): number {
+
+        return this.#allocationVersion
+    }
+
+    get contentEpoch(): number {
+
+        return this.#contentEpoch
     }
 
     get subject(): DiagnosticSubject {
@@ -116,7 +184,7 @@ export class Resource {
 
     assertUsable(): void {
 
-        if (this.isDisposed) {
+        if (this.#isDisposed) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_RESOURCE_DISPOSED',
                 severity: 'error',
@@ -132,16 +200,10 @@ export class Resource {
 
     dispose(): void {
 
-        if (this.isDisposed) return
+        if (this.#isDisposed) return
 
-        this.isDisposed = true
-        this.state = 'disposed'
+        this.#isDisposed = true
+        this.#state = 'disposed'
         this.runtime._unregisterResource(this)
-    }
-
-    _advanceContentEpoch(): void {
-
-        this.contentEpoch++
-        this.state = this.isDisposed ? 'disposed' : 'ready'
     }
 }

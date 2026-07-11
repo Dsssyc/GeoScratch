@@ -3,7 +3,11 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
 } from 'geoscratch'
-import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeGpu,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_STORAGE = 0x80
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
@@ -570,7 +574,7 @@ describe('scratch readiness fallback execution outcomes', () => {
             const fallbackInput = createBuffer(fixture, 'ready fallback input')
             const output = createBuffer(fixture, 'output')
             for (let epoch = 0; epoch < testCase.availableEpoch; epoch++) {
-                fallbackInput._advanceContentEpoch()
+                advanceResourceContentEpochForTest(fallbackInput)
             }
             const fallback = createDispatch(fixture, {
                 resources: {
@@ -614,8 +618,8 @@ describe('scratch readiness fallback execution outcomes', () => {
             const primaryInput = createBuffer(fixture, 'primary input')
             const fallbackInput = createBuffer(fixture, 'stale fallback input')
             const output = createBuffer(fixture, 'output')
-            fallbackInput._advanceContentEpoch()
-            fallbackInput._advanceContentEpoch()
+            advanceResourceContentEpochForTest(fallbackInput)
+            advanceResourceContentEpochForTest(fallbackInput)
             const fallback = createDispatch(fixture, {
                 resources: {
                     read: [ { resource: fallbackInput, contentEpoch: 1 } ],
@@ -769,7 +773,7 @@ describe('scratch readiness fallback execution outcomes', () => {
 
         const fixture = await createRenderFixture()
         const primaryInput = createBuffer(fixture, 'primary input')
-        fixture.target._advanceContentEpoch()
+        advanceResourceContentEpochForTest(fixture.target)
         const fallback = createDraw(fixture, {
             resources: {
                 read: [ { resource: fixture.target, contentEpoch: 1 } ],

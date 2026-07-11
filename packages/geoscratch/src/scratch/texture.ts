@@ -55,16 +55,11 @@ type NormalizedTextureDescriptor = Readonly<{
     textureBindingViewDimension?: GPUTextureViewDimension
 }>
 
-export interface TextureResource {
-    readonly allocationVersion: number
-    readonly contentEpoch: number
-}
-
 export class TextureResource extends Resource {
 
-    private _gpuTexture: GPUTexture
-    private _physicalDescriptor: NormalizedTextureDescriptor
-    private _viewCache: Map<string, GPUTextureView>
+    #gpuTexture: GPUTexture
+    #physicalDescriptor: NormalizedTextureDescriptor
+    #viewCache: Map<string, GPUTextureView>
 
     constructor(runtime: ScratchRuntime, descriptor: TextureResourceDescriptor) {
 
@@ -76,9 +71,9 @@ export class TextureResource extends Resource {
             ...(normalizedDescriptor.label !== undefined ? { label: normalizedDescriptor.label } : {}),
         })
 
-        this._physicalDescriptor = normalizedDescriptor
-        this._gpuTexture = runtime.device.createTexture(normalizedDescriptor)
-        this._viewCache = new Map()
+        this.#physicalDescriptor = normalizedDescriptor
+        this.#gpuTexture = runtime.device.createTexture(normalizedDescriptor)
+        this.#viewCache = new Map()
     }
 
     static create(runtime: ScratchRuntime, descriptor: TextureResourceDescriptor): TextureResource {
@@ -88,12 +83,12 @@ export class TextureResource extends Resource {
 
     get gpuTexture(): GPUTexture {
 
-        return this._gpuTexture
+        return this.#gpuTexture
     }
 
     get size(): NormalizedTextureSize {
 
-        return this._physicalDescriptor.size
+        return this.#physicalDescriptor.size
     }
 
     get width(): number {
@@ -113,27 +108,27 @@ export class TextureResource extends Resource {
 
     get format(): GPUTextureFormat {
 
-        return this._physicalDescriptor.format
+        return this.#physicalDescriptor.format
     }
 
     get usage(): GPUTextureUsageFlags {
 
-        return this._physicalDescriptor.usage
+        return this.#physicalDescriptor.usage
     }
 
     get dimension(): GPUTextureDimension {
 
-        return this._physicalDescriptor.dimension
+        return this.#physicalDescriptor.dimension
     }
 
     get mipLevelCount(): number {
 
-        return this._physicalDescriptor.mipLevelCount
+        return this.#physicalDescriptor.mipLevelCount
     }
 
     get sampleCount(): number {
 
-        return this._physicalDescriptor.sampleCount
+        return this.#physicalDescriptor.sampleCount
     }
 
     resize(size: TextureResourceSize): void {
@@ -141,13 +136,13 @@ export class TextureResource extends Resource {
         this.assertUsable()
 
         const nextSize = normalizeTextureSize(this.subject, size)
-        validateTextureAllocationDescriptor(this.runtime, this._physicalDescriptor, nextSize, size)
+        validateTextureAllocationDescriptor(this.runtime, this.#physicalDescriptor, nextSize, size)
         if (sameTextureSize(nextSize, this.size)) return
 
         assertTextureCreationAvailable(this.runtime)
 
         const nextDescriptor = freezeTextureDescriptor({
-            ...this._physicalDescriptor,
+            ...this.#physicalDescriptor,
             size: nextSize,
         })
 
@@ -177,10 +172,10 @@ export class TextureResource extends Resource {
             }, { cause })
         }
 
-        const previousTexture = this._gpuTexture
-        this._gpuTexture = nextTexture
-        this._physicalDescriptor = nextDescriptor
-        this._viewCache.clear()
+        const previousTexture = this.#gpuTexture
+        this.#gpuTexture = nextTexture
+        this.#physicalDescriptor = nextDescriptor
+        this.#viewCache.clear()
         replaceResourceAllocation(this, nextDescriptor)
         previousTexture.destroy()
     }
@@ -191,11 +186,11 @@ export class TextureResource extends Resource {
 
         const normalizedDescriptor = normalizeTextureViewDescriptor(this, descriptor)
         const key = JSON.stringify(normalizedDescriptor)
-        if (!this._viewCache.has(key)) {
-            this._viewCache.set(key, this.gpuTexture.createView(normalizedDescriptor))
+        if (!this.#viewCache.has(key)) {
+            this.#viewCache.set(key, this.gpuTexture.createView(normalizedDescriptor))
         }
 
-        return this._viewCache.get(key)!
+        return this.#viewCache.get(key)!
     }
 
     dispose(): void {
@@ -206,7 +201,7 @@ export class TextureResource extends Resource {
             this.gpuTexture.destroy()
         }
 
-        this._viewCache.clear()
+        this.#viewCache.clear()
         super.dispose()
     }
 }
