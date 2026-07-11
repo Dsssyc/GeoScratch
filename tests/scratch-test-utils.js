@@ -1,3 +1,5 @@
+const fakeExternalImageSourcePlatforms = new Map()
+
 export function createFakeExternalImageSource(
     kind = 'ImageData',
     { width = 4, height = 4, ...properties } = {}
@@ -14,15 +16,61 @@ export function createFakeExternalImageSource(
     }[kind]
     if (dimensionFields === undefined) throw new TypeError(`Unsupported fake external image source kind: ${kind}`)
 
-    const source = {
-        [Symbol.toStringTag]: kind,
+    const platform = fakeExternalImageSourcePlatform(kind, dimensionFields)
+    const source = new platform.constructor({
+        [dimensionFields[0]]: width,
+        [dimensionFields[1]]: height,
+    })
+    Object.assign(source, {
         revision: 0,
         ...properties,
-    }
-    source[dimensionFields[0]] = width
-    source[dimensionFields[1]] = height
+    })
 
     return source
+}
+
+function fakeExternalImageSourcePlatform(kind, dimensionFields) {
+
+    let platform = fakeExternalImageSourcePlatforms.get(kind)
+    if (platform === undefined) {
+        const slots = new WeakMap()
+        const constructor = function(initialDimensions) {
+
+            slots.set(this, initialDimensions)
+        }
+        Object.defineProperty(constructor, 'name', { value: kind })
+        Object.defineProperty(constructor.prototype, Symbol.toStringTag, { value: kind })
+
+        for (const field of dimensionFields) {
+            Object.defineProperty(constructor.prototype, field, {
+                get() {
+
+                    const dimensions = slots.get(this)
+                    if (dimensions === undefined) throw new TypeError('Illegal invocation')
+                    return dimensions[field]
+                },
+                set(value) {
+
+                    const dimensions = slots.get(this)
+                    if (dimensions === undefined) throw new TypeError('Illegal invocation')
+                    dimensions[field] = value
+                },
+            })
+        }
+
+        platform = { constructor }
+        fakeExternalImageSourcePlatforms.set(kind, platform)
+    }
+
+    if (globalThis[kind] !== platform.constructor) {
+        Object.defineProperty(globalThis, kind, {
+            configurable: true,
+            writable: true,
+            value: platform.constructor,
+        })
+    }
+
+    return platform
 }
 
 export function createFakeGpu() {

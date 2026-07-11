@@ -293,6 +293,32 @@ describe('scratch external image upload', () => {
         }
     })
 
+    it('rejects a toStringTag spoof when the platform constructor is unavailable', async() => {
+
+        const original = Object.getOwnPropertyDescriptor(globalThis, 'HTMLImageElement')
+        delete globalThis.HTMLImageElement
+
+        try {
+            const fixture = await createFixture()
+            const spoofed = {
+                [Symbol.toStringTag]: 'HTMLImageElement',
+                naturalWidth: 3,
+                naturalHeight: 2,
+            }
+
+            expectDiagnostic(
+                () => createCommand(fixture, { source: spoofed }),
+                'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
+                'source'
+            )
+            expect(fixture.calls.queueTimeline).to.be.empty
+        } finally {
+            if (original !== undefined) {
+                Object.defineProperty(globalThis, 'HTMLImageElement', original)
+            }
+        }
+    })
+
     it('keeps zero-area copies as native queue actions without logical content effects', async() => {
 
         for (const size of [

@@ -5255,20 +5255,16 @@ function inspectExternalImageSource(source: unknown): ExternalImageSourceInspect
     for (const contract of EXTERNAL_IMAGE_SOURCE_CONTRACTS) {
         const widthGetter = getPlatformPropertyGetter(contract.kind, contract.widthField)
         const heightGetter = getPlatformPropertyGetter(contract.kind, contract.heightField)
+        if (widthGetter === undefined || heightGetter === undefined) continue
+
         let width: unknown
         let height: unknown
 
-        if (widthGetter !== undefined && heightGetter !== undefined) {
-            try {
-                width = widthGetter.call(source)
-                height = heightGetter.call(source)
-            } catch {
-                continue
-            }
-        } else {
-            if (platformObjectTag(source) !== `[object ${contract.kind}]`) continue
-            width = source[contract.widthField]
-            height = source[contract.heightField]
+        try {
+            width = widthGetter.call(source)
+            height = heightGetter.call(source)
+        } catch {
+            continue
         }
 
         if (contract.dimensionsAreContextSpecific) return {}
@@ -5297,15 +5293,6 @@ function getPlatformPropertyGetter(kind: ExternalImageSourceKind, property: stri
     }
 
     return undefined
-}
-
-function platformObjectTag(source: object): string | undefined {
-
-    try {
-        return Object.prototype.toString.call(source)
-    } catch {
-        return undefined
-    }
 }
 
 function runtimeHasFeature(runtime: ScratchRuntime, requiredFeature: string): boolean {
