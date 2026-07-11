@@ -1,5 +1,6 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
+    boundedGpuOperationNativeLabel,
     createGpuDescriptorEvidence,
     createGpuIncidentReport,
     createGpuOperationRecord,
@@ -204,7 +205,7 @@ export type ScratchPendingGpuOperation = Readonly<{
     contentEpoch: number
     logicalFootprintBytes: number
     descriptor: GpuDescriptorEvidence
-    fullDescriptor: GpuDescriptorEvidence
+    fullDescriptor?: GpuDescriptorEvidence
     nativeLabel?: string
     startedAtMs: number
     stack?: string
@@ -233,7 +234,7 @@ type RuntimeDiagnosticsOwner = {
     label?: string
     isDisposed: boolean
     isDeviceLost: boolean
-    deviceLostInfo?: GPUDeviceLostInfo
+    deviceLostInfo: GPUDeviceLostInfo | undefined
 }
 
 export type ScratchRuntimeLifecycleChange =
@@ -250,13 +251,13 @@ type AggregateFacts = ScratchRuntimeDiagnosticsSnapshot['aggregates']
 type CaptureState = {
     id: string
     runtimeId: string
-    controller: ScratchRuntimeDiagnosticsController
+    controller: ScratchRuntimeDiagnosticsController | undefined
     options: NormalizedScratchDiagnosticCaptureOptions
     operations: ScratchGpuOperationRecord[]
     retainedEvidenceBytes: number
     omittedOperations: number
     startedAtMs: number
-    timer: ReturnType<typeof setTimeout>
+    timer: ReturnType<typeof setTimeout> | undefined
     isActive: boolean
     report?: ScratchDiagnosticCaptureReport
 }
@@ -421,7 +422,7 @@ export class ScratchRuntimeDiagnosticsController {
             version: 1,
             runtime: {
                 id: this.#owner.id,
-                ...(this.#owner.label !== undefined ? { label: this.#owner.label } : {}),
+                ...(this.#owner.label !== undefined ? { label: boundedLabel(this.#owner.label) } : {}),
                 isDisposed: this.#owner.isDisposed,
                 isDeviceLost: this.#owner.isDeviceLost,
             },
@@ -489,10 +490,12 @@ export class ScratchRuntimeDiagnosticsController {
 
         const sequence = ++this.#operationSequence
         const id = `${this.#owner.id}/gpu-operation-${sequence}`
-        const needsStack = [ ...this.#captures ].some(capture => {
-            const state = captureStateFor(capture)
-            return state.isActive && state.options.includeStacks
-        })
+        const activeCaptureStates = [ ...this.#captures ]
+            .map(captureStateFor)
+            .filter(state => state.isActive)
+        const needsStack = activeCaptureStates.some(state => state.options.includeStacks)
+        const needsFullDescriptor = activeCaptureStates.some(state => state.options.includeDescriptors)
+        const nativeLabel = boundedGpuOperationNativeLabel(input.nativeLabel, input.resourceId)
         const operation: ScratchPendingGpuOperation = Object.freeze({
             id,
             sequence,
@@ -504,8 +507,13 @@ export class ScratchRuntimeDiagnosticsController {
             contentEpoch: input.contentEpoch,
             logicalFootprintBytes: input.logicalFootprintBytes,
             descriptor: createGpuDescriptorEvidence(input.descriptorSummary),
-            fullDescriptor: createGpuDescriptorEvidence(input.descriptorSummary, input.fullDescriptor),
-            ...(input.nativeLabel !== undefined ? { nativeLabel: input.nativeLabel } : {}),
+            ...(needsFullDescriptor ? {
+                fullDescriptor: createGpuDescriptorEvidence(
+                    input.descriptorSummary,
+                    input.fullDescriptor
+                ),
+            } : {}),
+            ...(nativeLabel !== undefined ? { nativeLabel } : {}),
             startedAtMs: nowMs(),
             ...(needsStack ? { stack: captureStack() } : {}),
         })
@@ -687,8 +695,44 @@ export class ScratchRuntimeDiagnosticsController {
 
     unregisterResource(resource: Resource): void {
 
+        const fact = this.#resourceFacts.get(resource.id)
         this.#resourceFacts.delete(resource.id)
         this.#recalculatePressure()
+        if (fact !== undefined) this.#recordResourceDisposal(resource, fact)
+    }
+
+    #recordResourceDisposal(resource: Resource, fact: ScratchRuntimeResourceFact): void {
+
+        if (fact.resourceKind !== 'BufferResource' && fact.resourceKind !== 'TextureResource') return
+        const sequence = ++this.#operationSequence
+        const id = `${this.#owner.id}/gpu-operation-${sequence}`
+        const settledAtMs = nowMs()
+        const descriptor = createGpuDescriptorEvidence(resourceDescriptorSummary(resource))
+        const record = createGpuOperationRecord({
+            sequence,
+            id,
+            kind: 'resource-disposal',
+            status: 'succeeded',
+            runtimeId: this.#owner.id,
+            resourceId: fact.id,
+            resourceKind: fact.resourceKind,
+            allocationVersion: fact.allocationVersion,
+            contentEpoch: fact.contentEpoch,
+            logicalFootprintBytes: fact.logicalFootprintBytes,
+            descriptor,
+            startedAtMs: settledAtMs,
+            settledAtMs,
+        })
+
+        this.#recordOperation(record)
+        const needsStack = [ ...this.#captures ].some(capture => {
+            const state = captureStateFor(capture)
+            return state.isActive && state.options.includeStacks
+        })
+        const stack = needsStack ? captureStack() : undefined
+        for (const capture of [ ...this.#captures ]) {
+            acceptCaptureInstantOperation(capture, record, stack)
+        }
     }
 
     linkResourceOperation(resourceId: string, operationId: string): void {
@@ -966,7 +1010,7 @@ export class ScratchRuntimeDiagnosticsController {
         return {
             kind: 'ScratchRuntime',
             id: this.#owner.id,
-            ...(this.#owner.label !== undefined ? { label: this.#owner.label } : {}),
+            ...(this.#owner.label !== undefined ? { label: boundedLabel(this.#owner.label) } : {}),
         }
     }
 }
@@ -1017,7 +1061,7 @@ function createDiagnosticCapture(input: {
         retainedEvidenceBytes: 0,
         omittedOperations: 0,
         startedAtMs: nowMs(),
-        timer: undefined as unknown as ReturnType<typeof setTimeout>,
+        timer: undefined,
         isActive: true,
     }
     captureStates.set(capture, state)
@@ -1047,7 +1091,9 @@ function acceptCaptureOperation(
         allocationVersion: operation.allocationVersion,
         contentEpoch: operation.contentEpoch,
         logicalFootprintBytes: operation.logicalFootprintBytes,
-        descriptor: state.options.includeDescriptors ? operation.fullDescriptor : operation.descriptor,
+        descriptor: state.options.includeDescriptors && operation.fullDescriptor !== undefined
+            ? operation.fullDescriptor
+            : operation.descriptor,
         ...(operation.nativeLabel !== undefined ? { nativeLabel: operation.nativeLabel } : {}),
         ...(completion.nativeErrorCategory !== undefined
             ? { nativeErrorCategory: completion.nativeErrorCategory }
@@ -1057,6 +1103,29 @@ function acceptCaptureOperation(
         settledAtMs: nowMs(),
         ...(state.options.includeStacks && operation.stack !== undefined ? { stack: operation.stack } : {}),
     })
+    retainCaptureRecord(capture, state, record)
+}
+
+function acceptCaptureInstantOperation(
+    capture: ScratchDiagnosticCapture,
+    record: ScratchGpuOperationRecord,
+    stack?: string
+): void {
+
+    const state = captureStateFor(capture)
+    if (!state.isActive) return
+    const captureRecord = state.options.includeStacks && stack !== undefined
+        ? createGpuOperationRecord({ ...record, stack })
+        : record
+    retainCaptureRecord(capture, state, captureRecord)
+}
+
+function retainCaptureRecord(
+    capture: ScratchDiagnosticCapture,
+    state: CaptureState,
+    record: ScratchGpuOperationRecord
+): void {
+
     const bytes = serializedEvidenceBytes(record)
 
     if (state.retainedEvidenceBytes + bytes > state.options.maxEvidenceBytes) {
@@ -1081,7 +1150,8 @@ function stopCapture(
     if (state.report !== undefined) return state.report
 
     state.isActive = false
-    clearTimeout(state.timer)
+    if (state.timer !== undefined) clearTimeout(state.timer)
+    state.timer = undefined
     state.report = freezeEvidence({
         version: 1,
         id: state.id,
@@ -1093,7 +1163,10 @@ function stopCapture(
         startedAtMs: state.startedAtMs,
         stoppedAtMs: nowMs(),
     })
-    state.controller.captureStopped(capture, reason)
+    state.operations = []
+    const controller = state.controller
+    state.controller = undefined
+    controller?.captureStopped(capture, reason)
     return state.report
 }
 
@@ -1205,7 +1278,7 @@ function resourceFact(
     const descriptor = createGpuDescriptorEvidence(resourceDescriptorSummary(resource))
     return Object.freeze({
         id: resource.id,
-        ...(resource.label !== undefined ? { label: resource.label } : {}),
+        ...(resource.label !== undefined ? { label: boundedLabel(resource.label) } : {}),
         resourceKind: resource.resourceKind,
         descriptorHash: descriptor.hash,
         allocationVersion: resource.allocationVersion,
@@ -1274,9 +1347,11 @@ export function logicalTextureDescriptorFootprint(
     const mipLevelCount = descriptor.mipLevelCount
     const sampleCount = descriptor.sampleCount
     const format = descriptor.format
+    const dimension = descriptor.dimension
     if (
         typeof width !== 'number' || typeof height !== 'number' || typeof layers !== 'number' ||
-        typeof mipLevelCount !== 'number' || typeof sampleCount !== 'number' || typeof format !== 'string'
+        typeof mipLevelCount !== 'number' || typeof sampleCount !== 'number' || typeof format !== 'string' ||
+        (dimension !== '1d' && dimension !== '2d' && dimension !== '3d')
     ) return { bytes: 0, known: false }
 
     const block = textureFormatBlock(format)
@@ -1286,9 +1361,12 @@ export function logicalTextureDescriptorFootprint(
     for (let mip = 0; mip < mipLevelCount; mip++) {
         const mipWidth = Math.max(1, Math.floor(width / 2 ** mip))
         const mipHeight = Math.max(1, Math.floor(height / 2 ** mip))
+        const mipLayers = dimension === '3d'
+            ? Math.max(1, Math.floor(layers / 2 ** mip))
+            : layers
         total += Math.ceil(mipWidth / block.width) *
             Math.ceil(mipHeight / block.height) *
-            layers * block.bytes * sampleCount
+            mipLayers * block.bytes * sampleCount
         if (!Number.isSafeInteger(total)) return { bytes: 0, known: false }
     }
 

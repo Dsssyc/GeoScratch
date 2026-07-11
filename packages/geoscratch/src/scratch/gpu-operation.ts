@@ -10,6 +10,7 @@ export type GpuOperationKind =
     | 'buffer-allocation'
     | 'texture-allocation'
     | 'texture-replacement'
+    | 'resource-disposal'
 
 export type GpuOperationStatus =
     | 'pending'
@@ -180,8 +181,10 @@ export function createGpuOperationRecord(
         descriptor: cloneJsonValue(input.descriptor),
     }
 
+    const nativeLabel = boundedGpuOperationNativeLabel(input.nativeLabel, input.resourceId)
+    if (nativeLabel !== undefined) record.nativeLabel = nativeLabel
+
     copyDefined(record, input, [
-        'nativeLabel',
         'nativeErrorCategory',
         'incidentId',
         'startedAtMs',
@@ -265,10 +268,18 @@ export function createGpuDescriptorEvidence(
     full?: Record<string, unknown>
 ): GpuDescriptorEvidence {
 
-    const normalizedSummary = cloneJsonValue(summary) as Readonly<Record<string, ScratchJsonValue>>
+    const normalizedSummary = cloneJsonValue(
+        summary,
+        new Set<object>(),
+        true
+    ) as Readonly<Record<string, ScratchJsonValue>>
     const normalizedFull = full === undefined
         ? undefined
-        : cloneJsonValue(full) as Readonly<Record<string, ScratchJsonValue>>
+        : cloneJsonValue(
+            full,
+            new Set<object>(),
+            true
+        ) as Readonly<Record<string, ScratchJsonValue>>
     const canonical = JSON.stringify(normalizedFull ?? normalizedSummary)
 
     return deepFreeze({
@@ -328,7 +339,11 @@ function copyJsonDefined(
     }
 }
 
-function cloneJsonValue(value: unknown, ancestors = new Set<object>()): ScratchJsonValue {
+function cloneJsonValue(
+    value: unknown,
+    ancestors = new Set<object>(),
+    boundDescriptorLabels = false
+): ScratchJsonValue {
 
     if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
     if (typeof value === 'number') return Number.isFinite(value) ? value : String(value)
@@ -339,7 +354,7 @@ function cloneJsonValue(value: unknown, ancestors = new Set<object>()): ScratchJ
         nextAncestors.add(value)
         return value
             .filter(item => item !== undefined && typeof item !== 'function' && typeof item !== 'symbol')
-            .map(item => cloneJsonValue(item, nextAncestors))
+            .map(item => cloneJsonValue(item, nextAncestors, boundDescriptorLabels))
     }
 
     if (value !== null && typeof value === 'object') {
@@ -350,7 +365,9 @@ function cloneJsonValue(value: unknown, ancestors = new Set<object>()): ScratchJ
         for (const key of Object.keys(value).sort()) {
             const item = (value as Record<string, unknown>)[key]
             if (item === undefined || typeof item === 'function' || typeof item === 'symbol') continue
-            result[key] = cloneJsonValue(item, nextAncestors)
+            result[key] = boundDescriptorLabels && key === 'label' && typeof item === 'string'
+                ? boundString(item, 256)!
+                : cloneJsonValue(item, nextAncestors, boundDescriptorLabels)
         }
         return result
     }
@@ -389,6 +406,20 @@ function boundString(value: string | undefined, maxLength: number): string | und
 
     if (value === undefined || value.length <= maxLength) return value
     return `${value.slice(0, Math.max(0, maxLength - 3))}...`
+}
+
+export function boundedGpuOperationNativeLabel(value: unknown, resourceId: unknown): string | undefined {
+
+    if (typeof value !== 'string') return undefined
+    const maxLength = 256
+    if (value.length <= maxLength) return value
+
+    const suffix = typeof resourceId === 'string' ? ` [scratch:${resourceId}]` : undefined
+    if (suffix !== undefined && value.endsWith(suffix) && suffix.length <= maxLength - 3) {
+        const prefix = value.slice(0, -suffix.length)
+        return `${prefix.slice(0, maxLength - suffix.length - 3)}...${suffix}`
+    }
+    return boundString(value, maxLength)
 }
 
 function fnv1a(value: string): string {

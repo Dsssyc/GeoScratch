@@ -61,8 +61,14 @@ try {
     )
     await mobileContext.close()
 
-    const failures = [ ...result.desktop, result.mobile ]
-        .flatMap(entry => entry.failures.map(failure => `${entry.name}/${entry.viewport}: ${failure}`))
+    const failures = [
+        ...(result.adapter.available === true && result.adapter.adapterAvailable === true
+            ? []
+            : [ 'adapter: WebGPU adapter is unavailable' ]),
+        ...result.allocationProbe.failures.map(failure => `allocation-probe: ${failure}`),
+        ...[ ...result.desktop, result.mobile ]
+            .flatMap(entry => entry.failures.map(failure => `${entry.name}/${entry.viewport}: ${failure}`)),
+    ]
     result.status = failures.length === 0 ? 'passed' : 'failed'
     result.failures = failures
 
@@ -109,12 +115,19 @@ async function measureAllocations(browser) {
     const page = await context.newPage()
     const consoleFailures = []
     const pageErrors = []
+    const requestFailures = []
     page.on('console', message => {
         if (message.type() === 'error' || message.type() === 'warning') {
             consoleFailures.push({ type: message.type(), text: message.text() })
         }
     })
     page.on('pageerror', error => pageErrors.push(error.message))
+    page.on('requestfailed', request => {
+        requestFailures.push({
+            url: request.url(),
+            errorText: request.failure()?.errorText ?? 'unknown',
+        })
+    })
     await page.goto(`${baseUrl}/textureResize/index.html`, { waitUntil: 'domcontentloaded', timeout })
 
     const moduleUrl = `${baseUrl}/@fs${resolve('packages/geoscratch/dist/index.js')}`
@@ -175,6 +188,16 @@ async function measureAllocations(browser) {
                 pendingOperationCount: evidence.snapshot.pendingOperations.length,
                 liveResourceCount: evidence.snapshot.resources.length,
                 lifecycleSubscriberCount: diagnosticsControllerFor(runtime).lifecycleSubscriberCount,
+                allocationAttempts: evidence.snapshot.aggregates.allocationAttempts,
+                successfulAllocations: evidence.snapshot.aggregates.successfulAllocations,
+                operationKinds: Object.fromEntries(
+                    [ ...new Set(evidence.operations.map(operation => operation.kind)) ]
+                        .sort()
+                        .map(kind => [
+                            kind,
+                            evidence.operations.filter(operation => operation.kind === kind).length,
+                        ])
+                ),
                 allOperationsSucceeded: evidence.operations.every(operation => (
                     operation.status === 'succeeded'
                 )),
@@ -192,11 +215,44 @@ async function measureAllocations(browser) {
 
     await page.close()
     await context.close()
+    const expectedOperations = (measurement.warmup + measurement.iterations) * 2
+    const failures = []
+    if (consoleFailures.length > 0) failures.push(`${consoleFailures.length} console warning/error messages`)
+    if (pageErrors.length > 0) failures.push(`${pageErrors.length} page errors`)
+    if (requestFailures.length > 0) failures.push(`${requestFailures.length} request failures`)
+    if (measurement.diagnostics.retainedOperationCount !== expectedOperations) {
+        failures.push(
+            `retained ${measurement.diagnostics.retainedOperationCount} operations, expected ${expectedOperations}`
+        )
+    }
+    if (measurement.diagnostics.retainedIncidentCount !== 0) failures.push('retained diagnostic incidents')
+    if (measurement.diagnostics.pendingOperationCount !== 0) failures.push('retained pending operations')
+    if (measurement.diagnostics.liveResourceCount !== 0) failures.push('retained live resources')
+    if (measurement.diagnostics.lifecycleSubscriberCount !== 0) failures.push('retained lifecycle subscribers')
+    if (measurement.diagnostics.allocationAttempts !== measurement.warmup + measurement.iterations) {
+        failures.push('allocation-attempt aggregate does not match issued allocations')
+    }
+    if (measurement.diagnostics.successfulAllocations !== measurement.warmup + measurement.iterations) {
+        failures.push('successful-allocation aggregate does not match resolved allocations')
+    }
+    if (measurement.diagnostics.operationKinds['buffer-allocation'] !== measurement.warmup + measurement.iterations) {
+        failures.push('buffer-allocation operation count is incomplete')
+    }
+    if (measurement.diagnostics.operationKinds['resource-disposal'] !== measurement.warmup + measurement.iterations) {
+        failures.push('resource-disposal operation count is incomplete')
+    }
+    if (!measurement.diagnostics.allOperationsSucceeded) failures.push('one or more operations did not succeed')
+    if (!measurement.diagnostics.defaultStacksOmitted) failures.push('default records retained stacks')
+    if (!measurement.diagnostics.defaultFullDescriptorsOmitted) {
+        failures.push('default records retained full descriptors')
+    }
     return {
         ...measurement,
         moduleUrl,
         consoleFailures,
         pageErrors,
+        requestFailures,
+        failures,
     }
 }
 
@@ -260,6 +316,17 @@ async function verifyExample(context, example, viewport) {
     }, { selector: example.selector })
 
     const screenshot = resolve(outputDirectory, `${example.name}-${viewport}.png`)
+    const canvasScreenshot = resolve(outputDirectory, `${example.name}-${viewport}-canvas.png`)
+    let visual
+    let visualError
+    if (facts.canvas !== undefined) {
+        try {
+            const canvasPng = await page.locator('#GPUFrame').screenshot({ path: canvasScreenshot })
+            visual = await analyzeScreenshotPixels(page, canvasPng.toString('base64'))
+        } catch (error) {
+            visualError = error instanceof Error ? error.message : String(error)
+        }
+    }
     await page.screenshot({ path: screenshot, fullPage: true })
     await page.close()
 
@@ -268,6 +335,16 @@ async function verifyExample(context, example, viewport) {
     if (facts.status !== example.status) failures.push(`status ${facts.status}, expected ${example.status}`)
     if (facts.canvas === undefined || facts.canvas.width <= 0 || facts.canvas.height <= 0) {
         failures.push('canvas is missing or empty')
+    }
+    if (visualError !== undefined) failures.push(`canvas pixel inspection failed: ${visualError}`)
+    if (
+        visual !== undefined &&
+        (visual.quantizedColorCount < 2 || visual.luminanceRange < 4)
+    ) {
+        failures.push(
+            `canvas appears blank (${visual.quantizedColorCount} sampled colors, ` +
+            `${visual.luminanceRange} luminance range)`
+        )
     }
     if (facts.layout.scrollWidth > facts.layout.innerWidth) failures.push('horizontal viewport overflow')
     if (consoleFailures.length > 0) failures.push(`${consoleFailures.length} console warning/error messages`)
@@ -298,6 +375,54 @@ async function verifyExample(context, example, viewport) {
         pageErrors,
         requestFailures,
         screenshot,
+        canvasScreenshot,
+        visual,
         failures,
     }
+}
+
+async function analyzeScreenshotPixels(page, base64Png) {
+
+    return page.evaluate(async encoded => {
+        const image = new Image()
+        image.src = `data:image/png;base64,${encoded}`
+        await image.decode()
+
+        const scale = Math.min(1, 256 / Math.max(image.naturalWidth, image.naturalHeight))
+        const width = Math.max(1, Math.round(image.naturalWidth * scale))
+        const height = Math.max(1, Math.round(image.naturalHeight * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const context = canvas.getContext('2d', { willReadFrequently: true })
+        context.drawImage(image, 0, 0, width, height)
+        const pixels = context.getImageData(0, 0, width, height).data
+        const step = Math.max(1, Math.floor((width * height) / 8_192))
+        const colors = new Set()
+        let minLuminance = 255
+        let maxLuminance = 0
+        let sampledPixelCount = 0
+
+        for (let pixel = 0; pixel < width * height; pixel += step) {
+            const offset = pixel * 4
+            const red = pixels[offset]
+            const green = pixels[offset + 1]
+            const blue = pixels[offset + 2]
+            const alpha = pixels[offset + 3]
+            if (alpha === 0) continue
+            colors.add(`${red >> 4}:${green >> 4}:${blue >> 4}:${alpha >> 4}`)
+            const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+            minLuminance = Math.min(minLuminance, luminance)
+            maxLuminance = Math.max(maxLuminance, luminance)
+            sampledPixelCount++
+        }
+
+        return {
+            width,
+            height,
+            sampledPixelCount,
+            quantizedColorCount: colors.size,
+            luminanceRange: sampledPixelCount === 0 ? 0 : maxLuminance - minLuminance,
+        }
+    }, base64Png)
 }

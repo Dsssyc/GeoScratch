@@ -4,6 +4,7 @@ import {
     createScratchNativeLabel,
     destroyNativeCandidate,
     issueScopedNativeAllocation,
+    recheckScopedNativeAllocationLifecycle,
     throwScopedAllocationFailure,
 } from './native-allocation.js'
 import { createScratchResourceIdentity, Resource } from './resource.js'
@@ -118,10 +119,11 @@ export async function createBufferResource(
         fullDescriptor: { ...normalizedDescriptor },
         nativeLabel,
     })
-    const outcome = await issueScopedNativeAllocation(
+    let outcome = await issueScopedNativeAllocation(
         runtime,
         () => runtime.device.createBuffer(nativeDescriptor)
     )
+    outcome = recheckScopedNativeAllocationLifecycle(runtime, outcome)
 
     if (!outcome.ok) {
         return throwScopedAllocationFailure(

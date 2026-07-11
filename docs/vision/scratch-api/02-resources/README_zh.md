@@ -81,7 +81,7 @@ const uploadPositions = scratch.command.upload({
 })
 ```
 
-持久 buffer 创建是一个返回 Promise 的 allocation operation。Scratch 在 matching validation 与 out-of-memory scope 内只 issue 一次 native allocation，并在此之前 normalize 和校验 descriptor。只有两个 scope 都成功 settle 后才注册逻辑 buffer；失败 candidate 永远不会成为 live resource。
+持久 buffer 创建是一个返回 Promise 的 allocation operation。Scratch 在 matching validation 与 out-of-memory scope 内只 issue 一次 native allocation，并在此之前 normalize 和校验 descriptor。await scope acknowledgement 后，Scratch 会在 construction 前立即重新检查 runtime disposal 与 device loss。只有该 handoff 仍然有效时才注册逻辑 buffer；失败或取消的 candidate 永远不会成为 live resource。
 
 ## Buffer Layout
 
@@ -165,7 +165,9 @@ await sceneColor.resize(surface.size)
 
 稳定身份（`runtime`、`id`、`label`、`resourceKind`）、descriptor、lifecycle、readiness、allocation/content provenance、physical texture 与 view-cache 事实都使用 ECMAScript-private backing slots，并且只通过 read-only getters 暴露。具体 `TextureResource` handle 不可扩展并拒绝 subclass construction，因此 own-property 或 prototype shadowing 不能伪造这些事实；上转型到 `Resource` 也不能把它们变成可写字段。Allocation 与 content transition functions 保持 module-internal，不从任一 package entrypoint 导出，也不是暴露给 package consumer 的 object methods；`resize()` 是唯一公开 size-replacement 路径。可选 height 与 layer member 只有在 `undefined` 时才取默认值；`null` 是非法输入。确定性 validation 也保留完整 WebGPU transient-attachment contract：usage 必须恰好为 `TRANSIENT_ATTACHMENT | RENDER_ATTACHMENT`，`viewFormats` 为空，dimension 为 `2d`，mip-level count 为 `1`，depth 或 array-layer count 为 `1`。
 
-size 发生变化时采用返回 Promise 的 create-before-swap transaction：normalize 并校验请求 size，在 candidate 的 validation 与 out-of-memory scope settle 期间保持旧 allocation 已安装，然后安装经确认的 allocation，清除 allocation-scoped views，恰好推进一次 `allocationVersion`，设置 `state = empty`，最后销毁旧 texture。下一次成功 content producer 从保留的 `contentEpoch` 继续递增。任何 candidate failure 都让旧 allocation 的全部事实保持安装状态；Scratch 不会先销毁，也不会等待 queue completion。已有 replacement pending 时，第二次 changed resize 会结构化失败。
+size 发生变化时采用返回 Promise 的 create-before-swap transaction：normalize 并校验请求 size，在 candidate 的 validation 与 out-of-memory scope settle 期间保持旧 allocation 已安装，然后在 commit 前立即重新检查 runtime disposal、device loss 与 resource disposal。只有 handoff 仍有效时才安装经确认的 allocation，清除 allocation-scoped views，恰好推进一次 `allocationVersion`，设置 `state = empty`，最后销毁旧 texture。下一次成功 content producer 从保留的 `contentEpoch` 继续递增。任何 candidate failure 或 lifecycle cancellation 都让旧 allocation 的全部事实保持安装状态；Scratch 不会先销毁，也不会等待 queue completion。已有 replacement pending 时，第二次 changed resize 会结构化失败。
+
+诊断中的 texture footprint 是 logical value，不是 physical residency。每个 mip 的 width 与 height 都会缩小；`2d` array texture 的 array-layer count 保持不变，而 `3d` texture 的 depth 会在每个 mip 缩小，然后再按各级 format block 与 sample count 计算。
 
 normalized same-size resize 返回 already-resolved Promise，并且是真正的 no-op；它不会打开 native error scope。Raw `GPUTextureView` 属于 allocation-scoped 值；每次 `createView()` 都会在 native creation 前针对 current allocation 校验 mip、layer 与 dimension。Bind set 从 bind-layout dimension 派生 current view；render attachment 则在 encoder creation 前预检并显式选择一个 2D mip-level array layer，同一 pass 的全部 attachments 还必须保持匹配的 current render extents 与 sample counts。没有 `core-features-and-limits` 时，省略的 `textureBindingViewDimension` 会为每个 allocation 重新派生（单层为 `2d`，多层为 `2d-array`），因此不再匹配的 binding consumer 会在 native bind-group creation 前失败。Core-feature 设备在 layer growth 后仍可使用显式单层 `2d` binding；compatibility mode 下若要持续复用 binding，必须从一开始声明兼容的 contract，例如 `2d-array`。该派生 binding dimension 不会使原本有效的 raw view 或 render attachment 失效。Resize 不接受 `Surface`、observer 或 size-provider callback。未来 tracked value 必须降低到同一个显式 primitive，而不是取代它。
 

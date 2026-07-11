@@ -3,6 +3,7 @@ import {
     createScratchNativeLabel,
     destroyNativeCandidate,
     issueScopedNativeAllocation,
+    recheckScopedNativeAllocationLifecycle,
     throwScopedAllocationFailure,
 } from './native-allocation.js'
 import {
@@ -225,13 +226,7 @@ export class TextureResource extends Resource {
             this
         )
 
-        if (outcome.ok && this.isDisposed) {
-            outcome = {
-                ok: false,
-                kind: this.runtime.isDisposed ? 'runtime-disposed' : 'resource-disposed',
-                candidate: outcome.candidate,
-            }
-        }
+        outcome = recheckScopedNativeAllocationLifecycle(this.runtime, outcome, this)
         if (!outcome.ok) {
             this.#pendingReplacement = undefined
             return throwScopedAllocationFailure(
@@ -309,10 +304,11 @@ export async function createTextureResource(
         fullDescriptor: { ...normalizedDescriptor },
         nativeLabel,
     })
-    const outcome = await issueScopedNativeAllocation(
+    let outcome = await issueScopedNativeAllocation(
         runtime,
         () => runtime.device.createTexture(nativeDescriptor)
     )
+    outcome = recheckScopedNativeAllocationLifecycle(runtime, outcome)
 
     if (!outcome.ok) {
         return throwScopedAllocationFailure(

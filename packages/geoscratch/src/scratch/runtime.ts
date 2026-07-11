@@ -54,19 +54,16 @@ type ScratchRuntimeConstructorOptions = ScratchRuntimeCreateOptions & {
 }
 
 export interface ScratchRuntime {
-    id: string
-    label?: string
-    gpu: GPU
-    adapter: GPUAdapter
-    device: GPUDevice
-    queue: GPUQueue
-    adapterFeatures: GPUSupportedFeatures
-    adapterLimits: GPUSupportedLimits
-    deviceFeatures: GPUSupportedFeatures
-    deviceLimits: GPUSupportedLimits
-    isDisposed: boolean
-    isDeviceLost: boolean
-    deviceLostInfo?: GPUDeviceLostInfo
+    readonly id: string
+    readonly label?: string
+    readonly gpu: GPU
+    readonly adapter: GPUAdapter
+    readonly device: GPUDevice
+    readonly queue: GPUQueue
+    readonly adapterFeatures: GPUSupportedFeatures
+    readonly adapterLimits: GPUSupportedLimits
+    readonly deviceFeatures: GPUSupportedFeatures
+    readonly deviceLimits: GPUSupportedLimits
     readonly diagnostics: ScratchRuntimeDiagnostics
     _resources: Set<Resource>
     _surfaces: Set<Surface>
@@ -75,6 +72,9 @@ export interface ScratchRuntime {
 export class ScratchRuntime {
 
     #diagnosticsController: ScratchRuntimeDiagnosticsController
+    #isDisposed = false
+    #isDeviceLost = false
+    #deviceLostInfo: GPUDeviceLostInfo | undefined
 
     private constructor(token: symbol, options: ScratchRuntimeConstructorOptions) {
 
@@ -89,18 +89,21 @@ export class ScratchRuntime {
             })
         }
 
-        this.id = `scratch-runtime-${UUID()}`
-        if (options.label !== undefined) this.label = options.label
-        this.gpu = options.gpu
-        this.adapter = options.adapter
-        this.device = options.device
-        this.queue = options.device.queue
-        this.adapterFeatures = options.adapter.features
-        this.adapterLimits = options.adapter.limits
-        this.deviceFeatures = options.device.features
-        this.deviceLimits = options.device.limits
-        this.isDisposed = false
-        this.isDeviceLost = false
+        Object.defineProperties(this, {
+            id: immutableRuntimeProperty(`scratch-runtime-${UUID()}`),
+            label: immutableRuntimeProperty(options.label),
+            gpu: immutableRuntimeProperty(options.gpu),
+            adapter: immutableRuntimeProperty(options.adapter),
+            device: immutableRuntimeProperty(options.device),
+            queue: immutableRuntimeProperty(options.device.queue),
+            adapterFeatures: immutableRuntimeProperty(options.adapter.features),
+            adapterLimits: immutableRuntimeProperty(options.adapter.limits),
+            deviceFeatures: immutableRuntimeProperty(options.device.features),
+            deviceLimits: immutableRuntimeProperty(options.device.limits),
+            isDisposed: immutableRuntimeGetter(() => this.#isDisposed),
+            isDeviceLost: immutableRuntimeGetter(() => this.#isDeviceLost),
+            deviceLostInfo: immutableRuntimeGetter(() => this.#deviceLostInfo),
+        })
         this._resources = new Set()
         this._surfaces = new Set()
         this.#diagnosticsController = new ScratchRuntimeDiagnosticsController(
@@ -118,11 +121,26 @@ export class ScratchRuntime {
 
         if (options.device.lost && typeof options.device.lost.then === 'function') {
             options.device.lost.then((info) => {
-                this.isDeviceLost = true
-                this.deviceLostInfo = info
+                this.#isDeviceLost = true
+                this.#deviceLostInfo = info
                 this.#diagnosticsController.recordDeviceLoss(info)
             })
         }
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
+    }
+
+    get isDeviceLost(): boolean {
+
+        return this.#isDeviceLost
+    }
+
+    get deviceLostInfo(): GPUDeviceLostInfo | undefined {
+
+        return this.#deviceLostInfo
     }
 
     static async create(options: ScratchRuntimeCreateOptions = {}) {
@@ -494,7 +512,7 @@ export class ScratchRuntime {
             resource.dispose()
         }
 
-        this.isDisposed = true
+        this.#isDisposed = true
         this.#diagnosticsController.dispose()
 
         if (this.device && typeof this.device.destroy === 'function') {
@@ -533,6 +551,25 @@ function createAdapterOptions(options: ScratchRuntimeCreateOptions): GPURequestA
     if (options.forceFallbackAdapter !== undefined) adapterOptions.forceFallbackAdapter = options.forceFallbackAdapter
 
     return Object.keys(adapterOptions).length ? adapterOptions : undefined
+}
+
+function immutableRuntimeProperty<T>(value: T): PropertyDescriptor {
+
+    return {
+        value,
+        enumerable: true,
+        writable: false,
+        configurable: false,
+    }
+}
+
+function immutableRuntimeGetter<T>(get: () => T): PropertyDescriptor {
+
+    return {
+        get,
+        enumerable: true,
+        configurable: false,
+    }
 }
 
 function createDeviceDescriptor(options: ScratchRuntimeCreateOptions): GPUDeviceDescriptor {

@@ -148,6 +148,40 @@ export function createScratchNativeLabel(label: string | undefined, resourceId: 
         : `${label} [scratch:${resourceId}]`
 }
 
+export function recheckScopedNativeAllocationLifecycle<T>(
+    runtime: ScratchRuntime,
+    outcome: ScopedNativeAllocationOutcome<T>,
+    resource?: Resource
+): ScopedNativeAllocationOutcome<T> {
+
+    if (!outcome.ok) return outcome
+    if (runtime.isDisposed) {
+        return Object.freeze({
+            ok: false,
+            kind: 'runtime-disposed',
+            candidate: outcome.candidate,
+        } as const)
+    }
+    if (runtime.isDeviceLost) {
+        return Object.freeze({
+            ok: false,
+            kind: 'device-lost',
+            candidate: outcome.candidate,
+            ...(runtime.deviceLostInfo !== undefined
+                ? { deviceLostInfo: runtime.deviceLostInfo }
+                : {}),
+        } as const)
+    }
+    if (resource?.isDisposed) {
+        return Object.freeze({
+            ok: false,
+            kind: 'resource-disposed',
+            candidate: outcome.candidate,
+        } as const)
+    }
+    return outcome
+}
+
 export function destroyNativeCandidate(candidate: unknown): void {
 
     if (

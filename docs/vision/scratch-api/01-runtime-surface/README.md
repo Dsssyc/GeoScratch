@@ -54,6 +54,11 @@ const surface = scratch.surface(canvas, {
 ## Ownership Rules
 
 - A resource belongs to exactly one `ScratchRuntime`.
+- A runtime's `GPU`, adapter, device, queue, and feature/limit snapshots are
+  immutable ownership facts after creation; application code cannot swap the
+  native device underneath diagnostics or allocation.
+- Runtime disposal and device-loss properties are read-only observations of
+  runtime-owned lifecycle transitions.
 - A surface is configured by exactly one `ScratchRuntime` at a time.
 - Resources from one runtime cannot be used by commands recorded on another runtime.
 - A surface current texture is presentation-submission-scoped and must not be stored as a persistent resource.
@@ -104,7 +109,7 @@ Core does not install a `ResizeObserver`, poll canvas dimensions, register a hid
 - surfaces must be reconfigured against the replacement device
 - commands and pass specs can remain as logical descriptions if their dependencies can be rebuilt
 
-Device loss produces a bounded runtime incident with pending-operation and current-resource context. Nearby operations are temporal evidence, not proof of causality. The runtime does not automatically retry allocations, recreate the device, rehydrate resources, or replay submissions.
+Device loss produces a bounded runtime incident with pending-operation and current-resource context. Nearby operations are temporal evidence, not proof of causality. The listener and every covered allocation remain tied to the same immutable runtime-owned device. The runtime does not automatically retry allocations, recreate the device, rehydrate resources, or replay submissions.
 
 The first implementation may choose a conservative failure mode, but the API should not make rehydration impossible.
 

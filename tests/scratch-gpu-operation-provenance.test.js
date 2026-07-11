@@ -6,10 +6,12 @@ import {
 } from '../packages/geoscratch/dist/scratch/gpu-operation.js'
 import {
     diagnosticsControllerFor,
+    logicalTextureDescriptorFootprint,
 } from '../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
 import { ScratchRuntime } from '../packages/geoscratch/dist/scratch/runtime.js'
 import { BufferResource } from '../packages/geoscratch/dist/scratch/buffer.js'
 import { TextureResource } from '../packages/geoscratch/dist/scratch/texture.js'
+import { layoutCodec } from '../packages/geoscratch/dist/scratch/layout-codec.js'
 import { resourceDisposalSubscriberCount } from '../packages/geoscratch/dist/scratch/resource.js'
 import { ScratchDiagnosticError } from '../packages/geoscratch/dist/scratch/diagnostics.js'
 import {
@@ -209,6 +211,32 @@ describe('fake WebGPU error scopes', () => {
 
 describe('ScratchRuntime bounded GPU diagnostics', () => {
 
+    it('keeps the runtime native-device ownership immutable', async () => {
+
+        const primary = createFakeGpu()
+        const replacement = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: primary.gpu })
+        const originalDevice = runtime.device
+        const originalQueue = runtime.queue
+
+        expect(() => { runtime.device = replacement.device }).to.throw(TypeError)
+        expect(() => { runtime.queue = replacement.device.queue }).to.throw(TypeError)
+        expect(() => {
+            Object.defineProperty(runtime, 'device', { value: replacement.device })
+        }).to.throw(TypeError)
+        expect(() => {
+            Object.defineProperty(runtime, 'isDeviceLost', { value: false })
+        }).to.throw(TypeError)
+        expect(runtime.device).to.equal(originalDevice)
+        expect(runtime.queue).to.equal(originalQueue)
+
+        primary.errors.loseDevice({ reason: 'unknown', message: 'owned device lost' })
+        await settleMicrotasks()
+
+        expect(runtime.isDeviceLost).to.equal(true)
+        expect(runtime.diagnostics.incidents().at(-1).kind).to.equal('device-loss')
+    })
+
     it('exposes a readonly immutable current fact graph without GPU handles', async () => {
 
         const { gpu } = createFakeGpu()
@@ -258,6 +286,81 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
         expect(runtime.diagnostics.snapshot().pressure.currentScratchLogicalFootprintBytes).to.equal(0)
     })
 
+    it('bounds diagnostic labels while preserving the full native label and Scratch ID suffix', async () => {
+
+        const { gpu, calls } = createFakeGpu()
+        const longRuntimeLabel = `runtime-${'r'.repeat(100_000)}`
+        const longResourceLabel = `buffer-${'b'.repeat(100_000)}`
+        const longLayoutLabel = `layout-${'l'.repeat(1_000_000)}`
+        const codec = layoutCodec({
+            label: longLayoutLabel,
+            name: 'CapturedLayout',
+            fields: [ { name: 'value', type: 'f32' } ],
+        })
+        const runtime = await ScratchRuntime.create({ gpu, label: longRuntimeLabel })
+        const buffer = await runtime.createBuffer({
+            label: longResourceLabel,
+            size: 4,
+            usage: 1,
+        })
+        const nativeSuffix = ` [scratch:${buffer.id}]`
+        const operation = runtime.diagnostics.operations().at(-1)
+        const snapshot = runtime.diagnostics.snapshot()
+        const evidenceJson = JSON.stringify(runtime.diagnostics.exportEvidence())
+
+        expect(calls.buffers[0].descriptor.label).to.equal(`${longResourceLabel}${nativeSuffix}`)
+        expect(snapshot.runtime.label.length).to.be.at.most(256)
+        expect(snapshot.resources[0].label.length).to.be.at.most(256)
+        expect(operation.nativeLabel.length).to.be.at.most(256)
+        expect(operation.nativeLabel.endsWith(nativeSuffix)).to.equal(true)
+        expect(evidenceJson).not.to.include(longRuntimeLabel)
+        expect(evidenceJson).not.to.include(longResourceLabel)
+
+        const capture = runtime.diagnostics.capture({
+            maxOperations: 1,
+            maxDurationMs: 1_000,
+            maxEvidenceBytes: 16_384,
+            includeDescriptors: true,
+        })
+        const capturedBuffer = await runtime.createBuffer({
+            label: longResourceLabel,
+            size: codec.artifact.stride,
+            usage: 1,
+            layout: codec.artifact,
+        })
+        const captureReport = capture.stop()
+        expect(calls.buffers[1].descriptor.label).to.equal(
+            `${longResourceLabel} [scratch:${capturedBuffer.id}]`
+        )
+        expect(captureReport.operations[0].descriptor.full.label.length).to.be.at.most(256)
+        expect(captureReport.operations[0].descriptor.full.layout.label.length).to.be.at.most(256)
+        expect(JSON.stringify(captureReport)).not.to.include(longResourceLabel)
+        expect(JSON.stringify(captureReport)).not.to.include(longLayoutLabel)
+    })
+
+    it('shrinks depth across 3D mip levels without shrinking 2D array layers', () => {
+
+        const baseDescriptor = {
+            size: { width: 8, height: 8, depthOrArrayLayers: 8 },
+            format: 'rgba8unorm',
+            mipLevelCount: 4,
+            sampleCount: 1,
+        }
+
+        expect(logicalTextureDescriptorFootprint({
+            ...baseDescriptor,
+            dimension: '3d',
+        })).to.deep.equal({ bytes: 2_340, known: true })
+        expect(logicalTextureDescriptorFootprint({
+            ...baseDescriptor,
+            dimension: '2d',
+        })).to.deep.equal({ bytes: 2_720, known: true })
+        expect(logicalTextureDescriptorFootprint({
+            ...baseDescriptor,
+            dimension: 'future-dimension',
+        })).to.deep.equal({ bytes: 0, known: false })
+    })
+
     it('bounds operation records, evidence bytes, and monotonic sequence facts', async () => {
 
         const { gpu } = createFakeGpu()
@@ -297,6 +400,69 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
         expect(secondSnapshot.recorder.overwrittenOperations).to.equal(17)
         expect(secondSnapshot.aggregates.allocationAttempts).to.equal(20)
         expect(secondSnapshot.aggregates.successfulAllocations).to.equal(20)
+    })
+
+    it('does not clone full descriptors into default pending operation state', async () => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const controller = diagnosticsControllerFor(runtime)
+        const compact = controller.beginOperation(operationInput(0))
+
+        expect(compact).not.to.have.property('fullDescriptor')
+        controller.completeOperation(compact, { status: 'succeeded' })
+
+        const oversizedInput = operationInput(2)
+        const oversizedPending = controller.beginOperation({
+            ...oversizedInput,
+            nativeLabel: `${'x'.repeat(100_000)} [scratch:${oversizedInput.resourceId}]`,
+        })
+        expect(oversizedPending.nativeLabel.length).to.be.at.most(256)
+        expect(oversizedPending.nativeLabel.endsWith(
+            ` [scratch:${oversizedInput.resourceId}]`
+        )).to.equal(true)
+        controller.completeOperation(oversizedPending, { status: 'succeeded' })
+
+        const capture = runtime.diagnostics.capture({
+            maxOperations: 1,
+            maxDurationMs: 1_000,
+            maxEvidenceBytes: 16_384,
+            includeDescriptors: true,
+        })
+        const longNestedLabel = `layout-${'l'.repeat(100_000)}`
+        const detailedInput = operationInput(1)
+        const detailed = controller.beginOperation({
+            ...detailedInput,
+            fullDescriptor: {
+                ...detailedInput.fullDescriptor,
+                layout: { label: longNestedLabel },
+            },
+        })
+        expect(detailed.fullDescriptor.full).to.deep.include({ label: 'candidate 1' })
+        expect(detailed.fullDescriptor.full.layout.label.length).to.be.at.most(256)
+        expect(JSON.stringify(detailed)).not.to.include(longNestedLabel)
+        controller.completeOperation(detailed, { status: 'succeeded' })
+        expect(capture.stop().operations[0].descriptor.full).to.deep.include({ label: 'candidate 1' })
+    })
+
+    it('removes disposed resources from current facts before disposal capture can degrade', async () => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const buffer = await runtime.createBuffer({ size: 4, usage: 1 })
+        const capture = runtime.diagnostics.capture({
+            maxOperations: 8,
+            maxDurationMs: 1_000,
+            maxEvidenceBytes: 1,
+        })
+
+        buffer.dispose()
+
+        const incident = runtime.diagnostics.incidents().at(-1)
+        expect(capture.stop().stopReason).to.equal('evidence-limit')
+        expect(runtime.diagnostics.snapshot().resources).to.have.length(0)
+        expect(incident.kind).to.equal('capture-degraded')
+        expect((incident.currentResources ?? []).map(resource => resource.id)).not.to.include(buffer.id)
     })
 
     it('keeps recorder state structurally bounded under sustained overwrite stress', async () => {
@@ -580,6 +746,31 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         })
     })
 
+    it('keeps a returned failure incident finite when the native label is extremely long', async () => {
+
+        const { gpu, calls, errors } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({
+            gpu,
+            diagnostics: { evidenceByteCapacity: 1_024 },
+        })
+        const label = `oversized-${'x'.repeat(1_000_000)}`
+        errors.failNext(
+            'createBuffer',
+            'validation',
+            Object.assign(new Error('invalid native descriptor'), { name: 'GPUValidationError' })
+        )
+
+        const error = await rejectedDiagnostic(runtime.createBuffer({ label, size: 4, usage: 1 }))
+        const nativeSuffix = ` [scratch:${error.incident.resourceId}]`
+        const serializedIncident = JSON.stringify(error.incident)
+
+        expect(calls.buffers[0].descriptor.label).to.equal(`${label}${nativeSuffix}`)
+        expect(error.incident.triggerOperation.nativeLabel.length).to.be.at.most(256)
+        expect(error.incident.triggerOperation.nativeLabel.endsWith(nativeSuffix)).to.equal(true)
+        expect(serializedIncident.length).to.be.lessThan(16_384)
+        expect(serializedIncident).not.to.include(label)
+    })
+
     it('attributes OOM to the trigger operation while preserving contributor caveats', async () => {
 
         const { gpu, calls, errors } = createFakeGpu()
@@ -605,6 +796,48 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         )
         expect(calls.textures[0].destroyed).to.equal(true)
         expect(runtime._resources.size).to.equal(1)
+    })
+
+    it('records bounded disposal churn without counting disposal as allocation', async () => {
+
+        const { gpu, errors } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const resident = await runtime.createBuffer({
+            label: 'temporary resident',
+            size: 32,
+            usage: 1,
+        })
+        resident.dispose()
+        errors.failNext(
+            'createBuffer',
+            'out-of-memory',
+            Object.assign(new Error('out of memory'), { name: 'GPUOutOfMemoryError' })
+        )
+
+        const error = await rejectedDiagnostic(runtime.createBuffer({ size: 64, usage: 1 }))
+        const disposal = runtime.diagnostics.operations()
+            .find(operation => operation.kind === 'resource-disposal')
+        const queriedDisposals = runtime.diagnostics.operations({ kind: 'resource-disposal' })
+        const snapshot = runtime.diagnostics.snapshot()
+
+        expect(disposal).to.deep.include({
+            status: 'succeeded',
+            resourceId: resident.id,
+            resourceKind: 'BufferResource',
+            logicalFootprintBytes: 32,
+        })
+        expect(queriedDisposals.map(operation => operation.id)).to.deep.equal([ disposal.id ])
+        expect(error.incident.pressure.recentChurn).to.deep.include({
+            sequence: disposal.sequence,
+            operationId: disposal.id,
+            operationKind: 'resource-disposal',
+            status: 'succeeded',
+            resourceId: resident.id,
+            logicalFootprintBytes: 32,
+        })
+        expect(snapshot.aggregates.allocationAttempts).to.equal(2)
+        expect(snapshot.aggregates.successfulAllocations).to.equal(1)
+        expect(snapshot.resources).to.have.length(0)
     })
 
     it('balances scopes after a synchronous native throw and reports the native category', async () => {
@@ -725,6 +958,33 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         expect(disposedRuntime._resources.size).to.equal(0)
         disposedFake.errors.settlePop(0)
         disposedFake.errors.settlePop(1)
+    })
+
+    it('rechecks runtime lifecycle after scope acknowledgement and before resource installation', async () => {
+
+        const bufferFake = createFakeGpu()
+        const bufferRuntime = await ScratchRuntime.create({ gpu: bufferFake.gpu })
+        triggerOnLifecycleUnsubscribe(bufferRuntime, () => bufferRuntime.dispose())
+        const bufferFailure = await rejectedDiagnostic(
+            bufferRuntime.createBuffer({ size: 4, usage: 1 })
+        )
+
+        expect(bufferFailure.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
+        expect(bufferFake.calls.buffers[0].destroyed).to.equal(true)
+        expect(bufferRuntime._resources.size).to.equal(0)
+        expect(bufferRuntime.diagnostics.operations().at(-1).status).to.equal('cancelled')
+
+        const textureFake = createFakeGpu()
+        const textureRuntime = await ScratchRuntime.create({ gpu: textureFake.gpu })
+        triggerOnLifecycleUnsubscribe(textureRuntime, () => textureRuntime.dispose())
+        const textureFailure = await rejectedDiagnostic(
+            textureRuntime.createTexture(textureDescriptor('dispose after scopes'))
+        )
+
+        expect(textureFailure.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
+        expect(textureFake.calls.textures[0].destroyed).to.equal(true)
+        expect(textureRuntime._resources.size).to.equal(0)
+        expect(textureRuntime.diagnostics.operations().at(-1).status).to.equal('cancelled')
     })
 
     it('removes every synchronous public allocation bypass', async () => {
@@ -905,6 +1165,27 @@ describe('TextureResource transactional replacement allocation', () => {
         fake.errors.settlePop(2)
         fake.errors.settlePop(3)
     })
+
+    it('rechecks device loss after scope acknowledgement and before replacement commit', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const texture = await runtime.createTexture(textureDescriptor('late replacement loss'))
+        const oldTexture = texture.gpuTexture
+        const oldVersion = texture.allocationVersion
+        triggerOnLifecycleUnsubscribe(runtime, () => {
+            fake.errors.loseDevice({ reason: 'unknown', message: 'loss after scope acknowledgement' })
+        })
+
+        const failure = await rejectedDiagnostic(texture.resize({ width: 8, height: 8 }))
+
+        expect(failure.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
+        expect(fake.calls.textures[1].destroyed).to.equal(true)
+        expect(oldTexture.destroyed).to.equal(false)
+        expect(texture.gpuTexture).to.equal(oldTexture)
+        expect(texture.allocationVersion).to.equal(oldVersion)
+        expect(runtime.diagnostics.operations().at(-1).status).to.equal('cancelled')
+    })
 })
 
 function operationInput(index) {
@@ -943,6 +1224,22 @@ async function rejectedDiagnostic(promise) {
         return error
     }
     throw new Error('Expected a ScratchDiagnosticError rejection.')
+}
+
+function triggerOnLifecycleUnsubscribe(runtime, trigger) {
+
+    const controller = diagnosticsControllerFor(runtime)
+    const subscribeLifecycle = controller.subscribeLifecycle.bind(controller)
+    let triggered = false
+    controller.subscribeLifecycle = subscriber => {
+        const unsubscribe = subscribeLifecycle(subscriber)
+        return () => {
+            unsubscribe()
+            if (triggered) return
+            triggered = true
+            trigger()
+        }
+    }
 }
 
 function textureDescriptor(label) {

@@ -141,17 +141,17 @@ type ScratchDiagnosticReport = {
 Native GPU error 可能在 issue operation 的 JavaScript 调用之后才 settle。因此 Scratch 区分四种 retention model:
 
 - 始终开启的 **Runtime Fact Graph** 只包含当前 live resource、已安装 allocation、被覆盖的 pending operation、pending replacement，以及 Scratch-owned logical footprint 的 current/peak 值。它随当前状态增长，而不随 runtime 年龄增长。
-- 默认 **Incident Flight Recorder** 在有限 serialized-evidence budget 下，将紧凑 operation 与 incident record 保存在有限 ring 中。它不保存成功 operation stack、mutable handle、resource content、shader source、command payload 或 `SubmittedWork` 对象。
+- 默认 **Incident Flight Recorder** 在有限 serialized-evidence budget 下，将紧凑 allocation、replacement、disposal 与 incident record 保存在有限 ring 中。它不保存成功 operation stack、mutable handle、resource content、shader source、command payload 或 `SubmittedWork` 对象。
 - **Incident Report** 是 deeply frozen JSON causal slice，包含已知的 trigger operation、subjects、native category 与 serializable facts、有界近期 operation、logical pressure evidence、evidence completeness 和 attribution confidence。
-- **Deep Capture Session** 是显式、有限、临时的。它可以增加 call-site stack 与 normalized descriptor，但会在 operation、duration 或 retained-evidence 的首个边界处自动停止。它不是 thenable，也不等待 queue work。
+- **Deep Capture Session** 是显式、有限、临时的。它可以增加 call-site stack 与 normalized descriptor，但会在 operation、duration 或 retained-evidence 的首个边界处自动停止。停止后会冻结 report，并解除 controller 与工作存储的引用。它不是 thenable，也不等待 queue work。
 
 只读 `runtime.diagnostics` facade 暴露 `snapshot()`、`operations(query?)`、`incidents(query?)`、`operation(id)`、`incident(id)`、`capture(options)` 与 `exportEvidence()`。query 覆盖 ID、kind、resource、status 与 sequence facts。`exportEvidence()` 冻结同一份 serializable snapshot 以及当前 retained 的有界 operation 和 incident arrays。导出 evidence 永远不包含 live device、resource、buffer、texture、command、pass、submission 或 mutable runtime collection。
 
-默认 retention 为 256 条 operation record、32 条 incident 和 256 KiB serialized evidence；它们全部有限且可配置。将 operation capacity 设为 0 可以关闭 successful-operation history，但不会关闭 current facts 或 failure handling。retained-byte counter 衡量 deterministic JSON evidence，不是 JavaScript heap size。
+默认 retention 为 256 条 operation record、32 条 incident 和 256 KiB serialized evidence；它们全部有限且可配置。将 operation capacity 设为 0 可以关闭 successful-operation history，但不会关闭 current facts 或 failure handling。当前 runtime/resource label、紧凑 native-label evidence、incident evidence，以及任意嵌套深度的 capture descriptor label 都有界；native `GPUBuffer`/`GPUTexture` descriptor 仍保留完整 user label 与稳定 Scratch-ID suffix。retained-byte counter 衡量 deterministic JSON evidence，不是 JavaScript heap size。
 
-被覆盖的 initial buffer/texture allocation 与 texture replacement 使用精确 synchronous issue boundary: push OOM、push validation、只 issue 一次 native allocation、pop validation、pop OOM，之后才 await 两个 pop promise。matching scope 提供 `exact-operation` attribution。除非存在更强 native evidence，uncaptured error 与 device loss 只能是 `temporal-correlation` 或 `unknown`。Scratch 绝不通过解析 native message prose 派生稳定字段。
+被覆盖的 initial buffer/texture allocation 与 texture replacement 使用精确 synchronous issue boundary: push OOM、push validation、只 issue 一次 native allocation、pop validation、pop OOM，之后才 await 两个 pop promise。await 后会在 logical construction 或 replacement commit 前立即重新检查 runtime/device/resource lifecycle。matching scope 提供 `exact-operation` attribution。除非存在更强 native evidence，uncaptured error 与 device loss 只能是 `temporal-correlation` 或 `unknown`。Scratch 绝不通过解析 native message prose 派生稳定字段。
 
-OOM evidence 将精确 `triggerOperation` 与有界 `pressureContributors` 分开。Descriptor byte size 与按 texture format/block/mip/layer/sample 计算的大小是 logical footprint，不是 physical residency、free VRAM、driver padding、compression、eviction state 或 process/system total memory。非 Scratch allocation 始终未知。
+OOM evidence 将精确 `triggerOperation`、有界 `pressureContributors` 与近期 create/replace/dispose churn 分开。Descriptor byte size 与按 texture format/block/mip/layer/sample 计算的大小是 logical footprint，不是 physical residency、free VRAM、driver padding、compression、eviction state 或 process/system total memory。texture array layer 在各 mip 保持不变；3D depth 按 mip 缩小。非 Scratch allocation 始终未知。
 
 ## Validation Modes 与 Actions
 

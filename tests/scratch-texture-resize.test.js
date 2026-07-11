@@ -382,16 +382,21 @@ describe('scratch texture resize', () => {
         )
 
         const lostFixture = await createFixture()
-        lostFixture.runtime.isDeviceLost = true
+        lostFixture.errors.loseDevice({ reason: 'unknown', message: 'synthetic device loss' })
+        await Promise.resolve()
         await expectDiagnostic(
             async () => await lostFixture.texture.resize([ 16, 8 ]),
             'SCRATCH_RUNTIME_DEVICE_LOST'
         )
 
         const runtimeFixture = await createFixture()
-        runtimeFixture.runtime.isDisposed = true
+        runtimeFixture.runtime.dispose()
         await expectDiagnostic(
-            async () => await runtimeFixture.texture.resize([ 16, 8 ]),
+            async () => await runtimeFixture.runtime.createTexture({
+                size: [ 1, 1 ],
+                format: 'rgba8unorm',
+                usage: GPU_TEXTURE_USAGE_COPY_DST,
+            }),
             'SCRATCH_RUNTIME_DISPOSED'
         )
 

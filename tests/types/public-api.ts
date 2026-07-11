@@ -65,6 +65,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         kind: 'buffer-allocation',
         sequenceFrom: 1,
     })
+    const disposalRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+        kind: 'resource-disposal',
+    })
     const incidentRecords: readonly scr.ScratchGpuIncidentReport[] = diagnostics.incidents({
         kind: 'allocation-failure',
         sequenceFrom: 1,
@@ -77,6 +80,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         includeDescriptors: true,
     })
     const diagnosticCaptureReport: scr.ScratchDiagnosticCaptureReport = diagnosticCapture.stop()
+    // @ts-expect-error Runtime native device ownership is read-only
+    runtime.device = runtime.device
+    // @ts-expect-error Runtime queue ownership is read-only
+    runtime.queue = runtime.queue
+    // @ts-expect-error Runtime disposal state is read-only
+    runtime.isDisposed = false
+    // @ts-expect-error Runtime device-loss state is read-only
+    runtime.isDeviceLost = false
     // @ts-expect-error Runtime diagnostics are read-only
     runtime.diagnostics = compatDiagnostics
     // @ts-expect-error Runtime diagnostics cannot be externally constructed

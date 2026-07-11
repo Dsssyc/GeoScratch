@@ -89,6 +89,16 @@ scope remains outermost before and after the Scratch operation. Raw operations
 issued through `runtime.device` outside this boundary retain native semantics
 and are not claimed as exactly attributed by Scratch.
 
+Scope acknowledgement and resource installation are separated by a Promise
+handoff. Scratch therefore rechecks runtime disposal, device loss, and, for
+replacement, resource disposal synchronously after the allocation await and
+immediately before construction or commit. A lifecycle transition in that
+handoff cancels and destroys the candidate instead of installing it.
+
+The runtime's `GPU`, adapter, device, queue, and feature/limit snapshots are
+read-only after creation. Callers cannot replace the device used by allocation
+while diagnostics and `device.lost` still observe an older device.
+
 ### Transactional initial creation
 
 Descriptor normalization and deterministic validation happen before the native
@@ -159,7 +169,11 @@ serialization. It is not an exact JavaScript heap measurement. Old records are
 overwritten and overwrite/omission counts remain as fixed-size counters.
 Successful default records contain no call stack, resource contents, shader
 source, command payload, repeated full descriptors, mutable GPU handles, or
-retained `SubmittedWork` objects.
+retained `SubmittedWork` objects. Covered resource disposal is a compact
+`resource-disposal` operation in the same bounded ring, so recent pressure
+evidence can represent create/replace/dispose churn without a second history.
+Default pending operations do not clone full descriptors. Stopped captures
+detach their runtime controller and working array after freezing the report.
 
 ### Read-only runtime diagnostics facade
 
@@ -221,7 +235,8 @@ prove that one candidate caused total memory pressure. The incident separates
 
 Buffer descriptor size is a logical byte footprint. Texture footprint is a
 logical format-block, mip, layer, and sample calculation where the format
-contract permits it. Neither value is physical VRAM, residency, driver padding,
+contract permits it. Array layers remain constant across mips; a 3D texture's
+depth shrinks at each mip. Neither value is physical VRAM, residency, driver padding,
 compression, eviction, free memory, or process/system GPU memory. Browser,
 driver, operating-system, other-tab, and other-process allocations are unknown.
 
@@ -231,7 +246,11 @@ Scratch preserves the user label as the logical label and supplies native
 buffer/texture labels in the form `<user label> [scratch:<resource id>]`, or
 `scratch:<resource id>` when no user label exists. Labels are advisory
 correlation aids only. Scratch does not intern them globally, embed descriptors
-or stacks, or parse them back into facts.
+or stacks, or parse them back into facts. Native descriptors preserve the full
+user label. Runtime facts, compact operation records, incident reports, and
+capture descriptor evidence bound label copies at every descriptor nesting
+depth while preserving the stable Scratch-ID suffix, so one user string cannot
+defeat finite evidence retention.
 
 ### Diagnostic codes and subjects
 

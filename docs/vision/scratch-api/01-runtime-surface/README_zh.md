@@ -54,6 +54,11 @@ const surface = scratch.surface(canvas, {
 ## 所有权规则
 
 - 一个 resource 只属于一个 `ScratchRuntime`。
+- runtime 的 `GPU`、adapter、device、queue 与 feature/limit snapshot 在创建后
+  都是不可变 ownership fact；应用代码不能在 diagnostics 或 allocation
+  底层替换 native device。
+- runtime disposal 与 device-loss 属性是 runtime-owned lifecycle transition
+  的只读观察值。
 - 一个 surface 同一时间只由一个 `ScratchRuntime` 配置。
 - 一个 runtime 的资源不能被另一个 runtime 记录的 command 使用。
 - surface current texture 是 presentation-submission-scoped，不允许作为持久 resource 保存。
@@ -104,7 +109,7 @@ Core 不安装 `ResizeObserver`，不轮询 canvas dimensions，不注册隐藏 
 - surfaces 必须基于替换 device 重新 configure
 - 如果依赖可重建，commands 与 pass specs 可以作为逻辑描述保留
 
-Device loss 会产生一个有界 runtime incident，其中包含 pending-operation 与 current-resource 上下文。临近 operation 只是时间相关证据，不是因果证明。runtime 不会自动重试 allocation、重建设备、rehydrate resource 或 replay submission。
+Device loss 会产生一个有界 runtime incident，其中包含 pending-operation 与 current-resource 上下文。临近 operation 只是时间相关证据，不是因果证明。listener 与每个 covered allocation 始终绑定同一个不可替换的 runtime-owned device。runtime 不会自动重试 allocation、重建设备、rehydrate resource 或 replay submission。
 
 第一版实现可以选择保守失败模式，但 API 不应让后续 rehydration 无法实现。
 

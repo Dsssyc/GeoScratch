@@ -25,6 +25,8 @@ describe('scratch GPU operation provenance documentation', () => {
         expect(adr).to.include('physical VRAM')
         expect(adr).to.include('per-submission')
         expect(adr).to.include('Raw WebGPU')
+        expect(adr).to.include('read-only after creation')
+        expect(adr).to.include('resource-disposal')
     })
 
     it('completes every required audit dimension with executable evidence', () => {
@@ -97,8 +99,8 @@ describe('scratch GPU operation provenance documentation', () => {
             'Capture with full descriptors',
             'Capture with stacks',
             'Promise And Record Inventory',
-            'After 10000 events',
-            'After 20000 events',
+            'After 10000 allocation cycles',
+            'After 20000 allocation cycles',
             'Chrome WebGPU Evidence',
             '`textureResize` desktop',
             '`submissionOrder`',
@@ -114,6 +116,35 @@ describe('scratch GPU operation provenance documentation', () => {
         expect(report).to.include('not a portable percentage claim')
         expect(report).to.include('not a heap guarantee')
         expect(report).to.include('not part of these allocation numbers')
+    })
+
+    it('promotes browser diagnostic and canvas evidence into failing gates', () => {
+
+        const verifier = read('tests', 'browser', 'scratch-gpu-operation-provenance.mjs')
+
+        expect(verifier).to.include('result.allocationProbe.failures')
+        expect(verifier).to.include('retained lifecycle subscribers')
+        expect(verifier).to.include('default records retained full descriptors')
+        expect(verifier).to.include('canvas appears blank')
+        expect(verifier).to.include('quantizedColorCount')
+        expect(verifier).to.include('requestFailures.length > 0')
+    })
+
+    it('makes benchmark bounds and the browser port executable reproduction gates', () => {
+
+        const benchmark = read('tests', 'benchmarks', 'scratch-gpu-operation-provenance.mjs')
+        const report = read(
+            'docs',
+            'review',
+            'scratch-gpu-operation-provenance-performance.md'
+        )
+
+        expect(benchmark).to.include('verifyBenchmarkProfileSample')
+        expect(benchmark).to.include('verifyLongRunResult')
+        expect(benchmark).to.include("status: 'passed'")
+        expect(benchmark).to.include('timingThresholdsEnforced: false')
+        expect(report).to.include('--strictPort')
+        expect(report).to.include('exits non-zero')
     })
 })
 

@@ -22,15 +22,22 @@ npm --workspace geoscratch run build
 node --expose-gc tests/benchmarks/scratch-gpu-operation-provenance.mjs \
   > /tmp/geoscratch-gpu-operation-provenance-benchmark.json
 
-npm run dev
+npm --workspace examples run dev -- --host 127.0.0.1 --port 4173 --strictPort
 node tests/browser/scratch-gpu-operation-provenance.mjs \
   > /tmp/geoscratch-gpu-operation-provenance-browser.json
 ```
 
-The browser verifier writes regenerated screenshots under
-`/tmp/geoscratch-gpu-operation-provenance-browser/`. Pixel variance was checked
-with Pillow against those screenshots; it is supporting visual evidence rather
-than an API requirement.
+The browser verifier writes regenerated page and canvas screenshots under
+`/tmp/geoscratch-gpu-operation-provenance-browser/`. Status, diagnostic-probe
+facts, console/page/request failures, and canvas pixel variance are executable
+failure gates. The screenshots remain reviewable supporting evidence.
+
+The Node benchmark verifies structural facts before printing its JSON and exits non-zero
+on a failed capacity, operation-count, failure-count, capture-stop, or
+lifecycle invariant. Its `verification` result records how many profile rounds
+were checked. Timing values remain measurements: the script deliberately does
+not enforce machine-dependent timing thresholds. `--strictPort` makes the Vite
+command fail instead of silently moving the browser verifier to another port.
 
 ## Node CPU Evidence
 
@@ -43,22 +50,26 @@ Environment:
 - 200 untimed warmup allocations per round
 - 1000 measured allocations per ordinary profile
 - 500 measured allocations per capture profile
+- 35 profile rounds passed structural self-verification
 
-Each operation creates and disposes a 4-byte public `BufferResource`. `issue`
+Each measured allocation cycle creates and disposes a 4-byte public
+`BufferResource`. `issue`
 ends after both native scope pops have been requested and before promise
-settlement. `settlement` ends when the public allocation promise resolves. The
+settlement. `settlement` and `total` end when the public allocation promise
+resolves; subsequent disposal is excluded from allocation timing even though its
+compact churn record participates in recorder retention. The
 fake device settles scopes in-process, so this table excludes browser IPC,
 driver work, physical GPU allocation, and queue work.
 
-| Profile | Issue median us/op (range) | Settlement median us/op (range) | Total median us/op (range) | Retained evidence at end |
+| Profile | Issue median us/allocation (range) | Settlement median us/allocation (range) | Total median us/allocation (range) | Retained evidence at end |
 | --- | ---: | ---: | ---: | --- |
-| History capacity zero | 4.915 (4.364-8.455) | 5.391 (4.707-11.221) | 10.588 (9.377-21.357) | 0 operations, 0 bytes |
-| Default bounded recorder | 4.698 (3.631-5.386) | 7.174 (6.949-8.100) | 12.208 (11.734-13.864) | 256 operations, 150012 bytes |
-| Steady-state overwrite, capacity 32 | 4.390 (3.580-5.935) | 6.966 (5.477-8.896) | 12.797 (9.264-13.577) | 32 operations, 18767 bytes |
-| Capture with full descriptors | 3.476 (3.286-3.688) | 9.392 (7.554-10.314) | 13.082 (11.064-14.219) | 500 capture records, 306192 bytes |
-| Capture with stacks and full descriptors | 16.031 (15.024-17.791) | 11.297 (9.401-12.635) | 28.127 (24.694-30.635) | 500 capture records, 924712 bytes |
-| Capture without stacks | 3.664 (3.257-5.280) | 9.119 (6.715-11.127) | 14.537 (10.167-15.452) | 500 capture records, 292202 bytes |
-| Capture with stacks | 15.408 (14.801-34.786) | 9.246 (8.556-10.547) | 24.880 (23.567-45.611) | 500 capture records, 910701 bytes |
+| History capacity zero | 3.892 (3.234-7.368) | 6.613 (4.858-10.041) | 11.001 (8.092-15.172) | 0 operations, 0 bytes |
+| Default bounded recorder | 3.444 (2.885-4.142) | 7.134 (6.813-9.054) | 10.258 (10.219-12.770) | 256 operations, 140130 bytes |
+| Steady-state overwrite, capacity 32 | 3.164 (2.916-3.650) | 8.058 (7.007-8.781) | 10.974 (10.204-12.432) | 32 operations, 17519 bytes |
+| Capture with full descriptors | 4.591 (4.013-7.179) | 8.093 (7.582-10.451) | 14.458 (11.595-16.456) | 1000 capture records, 560216 bytes |
+| Capture with stacks and full descriptors | 17.608 (17.002-20.250) | 13.587 (10.223-14.523) | 32.131 (27.225-33.507) | 1000 capture records, 1987692 bytes |
+| Capture without stacks | 2.744 (2.657-3.140) | 7.441 (6.843-9.712) | 10.184 (9.524-12.369) | 1000 capture records, 546212 bytes |
+| Capture with stacks | 16.036 (15.612-30.197) | 12.337 (9.640-15.588) | 28.287 (25.285-45.785) | 1000 capture records, 1973684 bytes |
 
 `History capacity zero` disables retained operation and incident history. It
 does not disable descriptor normalization, balanced error scopes, current fact
@@ -66,8 +77,8 @@ maintenance, operation IDs, completion classification, or fixed-size
 aggregates. It is therefore the minimum correct path, not a return to
 synchronous unchecked allocation.
 
-The default total median was 1.620 us/op above the history-capacity-zero median
-in this run. The ranges overlap, and this is not a portable percentage claim.
+The default total median was 0.743 us/allocation below the history-capacity-zero median
+in this run. The ranges overlap. This is not a speedup claim and not a portable percentage claim.
 Stack capture increased both issue cost and retained serialized evidence in the
 same environment, supporting its explicit opt-in policy.
 
@@ -76,25 +87,26 @@ same environment, supporting its explicit opt-in policy.
 One runtime performed 20000 successful create/dispose cycles with operation
 capacity 64, incident capacity 8, and a 64 KiB serialized-evidence budget.
 
-| Fact | After 10000 events | After 20000 events |
+| Fact | After 10000 allocation cycles (20000 operation events) | After 20000 allocation cycles (40000 operation events) |
 | --- | ---: | ---: |
 | Retained operations | 64 | 64 |
 | Retained incidents | 0 | 0 |
-| Retained serialized evidence | 37533 bytes | 37663 bytes |
-| Overwritten operations | 9936 | 19936 |
+| Retained serialized evidence | 35170 bytes | 35290 bytes |
+| Overwritten operations | 19936 | 39936 |
 | Live resources | 0 | 0 |
 | Pending operations | 0 | 0 |
 | Lifecycle subscribers | 0 | 0 |
 
-The retained count did not grow after capacity. The 130-byte serialized-size
-difference comes from longer monotonic IDs in the retained records and remains
-inside the configured budget; it is not linear retained history.
+The retained count did not grow after capacity. Serialized timestamps and
+generated IDs vary between the two retained windows, so the 120-byte
+serialized-size difference is expected bounded variation rather than linear
+retained history. The evidence remains inside the configured budget.
 
 The configured serialized-evidence budget is not a heap guarantee. It bounds
 retained JSON evidence, not JavaScript engine allocation or physical memory.
 
-With explicit GC enabled, `process.memoryUsage().heapUsed` changed from 6854048
-to 6793328 bytes between the two samples, a delta of -60720 bytes. This is
+With explicit GC enabled, `process.memoryUsage().heapUsed` changed from 6963784
+to 6905336 bytes between the two samples, a delta of -58448 bytes. This is
 environment-specific supporting evidence only. A transient heap reading is not
 used as the boundedness guarantee.
 
@@ -126,7 +138,8 @@ The source-level logical record inventory is:
 
 - Pending initial allocation: one pending operation fact and no live resource.
 - Successful initial allocation: one compact bounded operation record and one
-  current live resource fact; the detailed pending descriptor is released.
+  current live resource fact; default pending state never clones the full
+  descriptor, while an active bounded capture may retain it.
 - Pending replacement: one pending operation fact plus the existing current
   resource fact linked to the pending replacement; the old allocation remains
   current.
@@ -135,7 +148,8 @@ The source-level logical record inventory is:
 - Active deep capture: one additional bounded capture record per accepted
   operation.
 - Successful operation: zero incident records.
-- Resource disposal: removes the current resource fact.
+- Resource disposal: one compact bounded `resource-disposal` record and removal
+  of the current resource fact; allocation aggregates are unchanged.
 
 Nested immutable descriptor and subject values are implementation objects, so
 this is a logical-record count rather than a JavaScript object-allocation claim.
@@ -152,19 +166,21 @@ Environment:
 
 | Browser allocation measure | Median | Range |
 | --- | ---: | ---: |
-| CPU issue | 0 ms | 0-0.100000 ms |
-| Scope settlement through public promise | 0.100000 ms | 0-0.600000 ms |
-| Total public allocation | 0.100000 ms | 0-0.600000 ms |
+| CPU issue | 0 ms | 0-0.200000 ms |
+| Scope settlement through public promise | 0.200000 ms | 0-1.400000 ms |
+| Total public allocation | 0.200000 ms | 0-1.500000 ms |
 
 Chrome's timer resolution quantized several issue samples to zero. The probe
-retained 72 successful bounded operation records including warmup, 0 incidents,
-0 pending operations, 0 live resources, and 0 lifecycle subscribers. Default
-records omitted stacks and full descriptors. Console warnings/errors and page
-errors were both zero.
+retained 144 successful bounded operation records including warmup: 72 buffer
+allocations and 72 resource disposals. It retained 0 incidents, 0 pending
+operations, 0 live resources, and 0 lifecycle subscribers. Default records
+omitted stacks and full descriptors; retained serialized evidence was 79757
+bytes. Console warnings/errors, page errors, and request failures were all zero,
+and each fact was an executable verifier gate.
 
 The `textureResize` proof separately measured its cold-path operations. In the
-final desktop run, initial texture issue/settlement were 1.100000/1.899999 ms,
-and replacement issue/settlement were 0.299999/4.700000 ms. Those are individual
+final desktop run, initial texture issue/settlement were 1.000000/1.700000 ms,
+and replacement issue/settlement were 0.200000/4.900000 ms. Those are individual
 samples, not benchmark distributions.
 
 ## Browser Regression Matrix
@@ -173,14 +189,14 @@ All required examples passed in the same headed Chrome run:
 
 | Example | Machine status | Console warning/error | Page error | Request failure | Visual evidence |
 | --- | --- | ---: | ---: | ---: | --- |
-| `textureResize` desktop | `passed` | 0 | 0 | 0 | Nonblank; 124 sampled colors |
-| `textureResize` mobile, 390x844 | `passed` | 0 | 0 | 0 | Nonblank; 130 sampled colors; no horizontal overflow |
-| `submissionOrder` | `passed`, result 11 | 0 | 0 | 0 | Nonblank; 272 sampled colors |
-| `externalImageUpload` | `passed` | 0 | 0 | 0 | Nonblank; 146 sampled colors |
-| `readinessPolicies` | `ready` | 0 | 0 | 0 | Nonblank; 266 sampled colors |
-| `indirectExecution` | `ready` | 0 | 0 | 0 | Nonblank; 314 sampled colors |
-| `scratch_textureSampling` | `ready` | 0 | 0 | 0 | Nonblank; 115 sampled colors |
-| `scratch_renderToTexture` | `ready` | 0 | 0 | 0 | Nonblank; 7900 sampled colors |
+| `textureResize` desktop | `passed` | 0 | 0 | 0 | Gated nonblank; 5 quantized colors; 129.6888 luminance range |
+| `textureResize` mobile, 390x844 | `passed` | 0 | 0 | 0 | Gated nonblank; 7 colors; 129.6888 range; no horizontal overflow |
+| `submissionOrder` | `passed`, result 11 | 0 | 0 | 0 | Gated nonblank; 39 colors; 184.2014 range |
+| `externalImageUpload` | `passed` | 0 | 0 | 0 | Gated nonblank; 13 colors; 227.4446 range |
+| `readinessPolicies` | `ready` | 0 | 0 | 0 | Gated nonblank; 43 colors; 166.2060 range |
+| `indirectExecution` | `ready` | 0 | 0 | 0 | Gated nonblank; 36 colors; 139.2180 range |
+| `scratch_textureSampling` | `ready` | 0 | 0 | 0 | Gated nonblank; 23 colors; 190.6756 range |
+| `scratch_renderToTexture` | `ready` | 0 | 0 | 0 | Gated nonblank; 644 colors; 203.6676 range |
 
 `textureResize` produced 21 true boolean proof facts, exact padded readback
 bytes, two successful texture allocation-operation records, zero incidents,
