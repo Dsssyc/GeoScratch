@@ -642,7 +642,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const resolveSourceQuerySet: scr.QuerySetResource = resolveQueries.source.querySet
     const resolveSourceSlotEpoch: number = resolveQueries.source.slots[0].contentEpoch
-    const scratchPipeline: scr.ScratchRenderPipeline = runtime.createRenderPipeline({
+    const scratchPipelinePromise: Promise<scr.ScratchRenderPipeline> = runtime.createRenderPipeline({
         label: 'typed scratch pipeline',
         program,
         bindLayouts: [ bindLayout ],
@@ -656,6 +656,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         ],
         targets: [ { format: surface.format } ],
     })
+    const scratchPipeline: scr.ScratchRenderPipeline = await scratchPipelinePromise
+    const scratchPipelineAlias: scr.ScratchRenderPipeline = await runtime.renderPipeline({
+        program,
+        targets: [ { format: surface.format } ],
+    })
+    const compatRenderPipeline: scratchCompat.ScratchRenderPipeline = scratchPipelineAlias
+    // @ts-expect-error Pipeline construction is runtime-owned and asynchronous
+    new scr.ScratchRenderPipeline(runtime, { program, targets: [ { format: surface.format } ] })
     const draw: scr.DrawCommand = runtime.createDrawCommand({
         pipeline: scratchPipeline,
         bindSets: [ bindSet ],
@@ -882,10 +890,18 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatShaderReport: scratchCompat.ScratchDiagnosticReport = scratchCompat.inspectShader([
         '@group(9) @binding(9) var<uniform> camera: Camera;',
     ]).compareBindLayouts([], compatShaderComparisonOptions)
-    const computePipeline: scr.ScratchComputePipeline = runtime.createComputePipeline({
+    const computePipelinePromise: Promise<scr.ScratchComputePipeline> = runtime.createComputePipeline({
         program: computeProgram,
         bindLayouts: [ storageLayout ],
     })
+    const computePipeline: scr.ScratchComputePipeline = await computePipelinePromise
+    const computePipelineAlias: scr.ScratchComputePipeline = await runtime.computePipeline({
+        program: computeProgram,
+        bindLayouts: [ storageLayout ],
+    })
+    const compatComputePipeline: scratchCompat.ScratchComputePipeline = computePipelineAlias
+    // @ts-expect-error Pipeline construction is runtime-owned and asynchronous
+    new scr.ScratchComputePipeline(runtime, { program: computeProgram })
     runtime.createDispatchCommand({
         pipeline: computePipeline,
         // @ts-expect-error direct and indirect dispatch count fields are mutually exclusive
@@ -893,7 +909,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         resources: { read: [ indirectRead ], write: [] },
         whenMissing: 'throw',
     })
-    const dynamicComputePipeline: scr.ScratchComputePipeline = runtime.createComputePipeline({
+    const dynamicComputePipeline: scr.ScratchComputePipeline = await runtime.createComputePipeline({
         program: computeProgram,
         bindLayouts: [ dynamicStorageLayout ],
     })

@@ -99,6 +99,25 @@ await target.resize(surface.size)
 
 Core does not install a `ResizeObserver`, poll canvas dimensions, register a hidden surface subscription, scan runtime textures, or infer which resource follows which surface. Future tracked or derived dimensions may call the same explicit resize primitive, but they must not create a second allocation-replacement path.
 
+## Async Pipeline Ownership
+
+Render and compute pipeline factories are runtime-owned asynchronous
+transactions:
+
+```ts
+const renderPipeline = await runtime.createRenderPipeline(renderDescriptor)
+const computePipeline = await runtime.createComputePipeline(computeDescriptor)
+```
+
+The runtime does not publish a pending pipeline wrapper. It retains only one
+bounded pending fact while shader-module and pipeline-layout scopes,
+compilation information, and the native async pipeline Promise settle. Before
+commit it rechecks the runtime, device, Program, and every BindLayout. Disposal
+or device loss cancels the transaction and installs no current pipeline fact.
+Current pipeline facts scale with live pipelines; historical operations remain
+in the bounded recorder. Pipeline creation does not add work or waits to
+`SubmissionBuilder.submit()`.
+
 ## Device Loss
 
 `ScratchRuntime` owns device-loss handling. After device loss:

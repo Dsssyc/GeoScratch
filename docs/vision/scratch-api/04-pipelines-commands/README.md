@@ -245,6 +245,35 @@ scratch.command.endOcclusionQuery()
 
 They require the active render pass to own the same `occlusionQuerySet`, cannot be nested, and write one indexed query slot.
 
+## Acknowledged Pipeline Creation
+
+Scratch pipeline construction is asynchronous and symmetric for render and
+compute:
+
+```ts
+const render = await runtime.createRenderPipeline(renderDescriptor)
+const compute = await runtime.createComputePipeline(computeDescriptor)
+```
+
+Only `createRenderPipelineAsync()` and `createComputePipelineAsync()` are valid
+native lowering paths. A pipeline wrapper is returned only after one native
+pipeline Promise, shader compilation information, validation/internal/OOM
+scopes around the supporting shader module and pipeline layout, and lifecycle
+checks have all settled. All scope pops are issued before the first `await`;
+the implementation does not assume any Promise settlement order.
+
+The exported pipeline classes remain valid `instanceof` targets, but direct and
+subclass construction are closed with an internal token. A successful wrapper
+owns one immutable bounded `compilationReport`. Warnings and information remain
+successful evidence. Compilation errors, pipeline rejection, supporting-object
+errors, structural Promise failures, disposal, and device loss reject the
+factory with one structured `ScratchDiagnosticError`; no pending wrapper enters
+a Draw or Dispatch command.
+
+Pipeline creation and compilation are initialization work. Command encoding,
+pass lowering, queue submission, and `SubmittedWork` add no hidden compilation,
+scope, operation record, or wait.
+
 ## Count Triage
 
 Draw and dispatch counts span three cases; choose by what the count actually depends on:

@@ -144,6 +144,23 @@ Submission records the explicit order.
 
 A future `geo` layer may introduce layer styles, symbolizers, renderable layers, or material-like scene concepts if they are useful. Those concepts must lower into scratch primitives; they must not become scratch primitives.
 
+## Program Snapshots And Compilation Provenance
+
+`Program` remains the caller-owned shader contract. Before the native pipeline Promise is issued, pipeline creation snapshots
+its module strings, entry points, required layouts, and identity before native
+work starts; mutation after that boundary cannot alter the in-flight
+transaction. The snapshot is combined with one explicit separator contract and
+uses JavaScript UTF-16 code-unit offsets so native compilation locations can be
+mapped back to a Program module when the location is actually known.
+
+The resulting pipeline compilation report retains combined and per-module
+hashes, module spans, counts, and bounded native messages. It does not retain
+complete WGSL or source excerpts in default history, incidents, exported
+evidence, or deep descriptor capture. Native message prose is localized and is
+never parsed into a stable code. Unknown or separator locations remain
+unmapped. This evidence does not move source ownership from Program to
+Pipeline, and Program does not gain concrete resources or submission state.
+
 ## Authoring And Runtime Boundary
 
 Codec and shader composition can happen before runtime, but scratch still needs one coherent contract:

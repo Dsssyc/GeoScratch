@@ -98,10 +98,11 @@ Descriptor 不适合承担时间变化行为:
 - `BindLayout` 描述 shader binding 形状。
 - `BindSet` 把具体资源绑定到 layout。
 - `Program` 描述 shader source、生成模块、entry points 与所需 layouts，但不拥有具体资源。
-- `Pipeline` 描述某个 `Program` entry point 的稳定 WebGPU 可执行状态。
+- `Pipeline` 描述某个 `Program` entry point 的稳定 WebGPU 可执行状态。公开 render 与 compute factory 只返回 Promise；只有原生异步创建、compilation evidence、supporting-object scopes 与 lifecycle checks 全部成功 settle 后才暴露 wrapper。
 - `Command` 描述一个可执行 GPU 动作。
 - `ScratchDiagnostic` 是统一 machine-readable validation contract; prose message 不是稳定 API。
 - `runtime.diagnostics` 将始终当前的事实、有界近期 operation、不可变 incident 与显式临时 deep capture 分开。
+- GPU operation evidence 使用 schema-v2 resource/pipeline target union。Pipeline fact 不伪装成 allocation version、content epoch、footprint 或 pressure evidence。
 - `PassSpec` 描述稳定 pass 形状。
 - `SubmissionBuilder` 按显式顺序把 commands 记录进 pass specs。
 - `SubmittedWork` 是 `.submit()` 返回的可 inspect 句柄，并通过 `done` promise 等待 GPU 完成。

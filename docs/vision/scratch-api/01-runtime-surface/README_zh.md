@@ -99,6 +99,24 @@ await target.resize(surface.size)
 
 Core 不安装 `ResizeObserver`，不轮询 canvas dimensions，不注册隐藏 surface subscription，不扫描 runtime textures，也不推断哪个 resource 跟随哪个 surface。未来 tracked 或 derived dimensions 可以调用同一个显式 resize primitive，但不能建立第二条 allocation-replacement 路径。
 
+## 异步 Pipeline Ownership
+
+Render 与 compute pipeline factory 是 runtime-owned asynchronous
+transaction:
+
+```ts
+const renderPipeline = await runtime.createRenderPipeline(renderDescriptor)
+const computePipeline = await runtime.createComputePipeline(computeDescriptor)
+```
+
+runtime 不发布 pending pipeline wrapper。shader-module 与 pipeline-layout
+scope、compilation information 以及原生 async pipeline Promise settle 期间，
+它只保留一个有界 pending fact。commit 前会重新检查 runtime、device、
+Program 与每个 BindLayout。dispose 或 device loss 会取消 transaction，且不
+安装 current pipeline fact。current pipeline facts 的规模随 live pipelines
+变化；历史 operation 留在有界 recorder 中。Pipeline 创建不会给
+`SubmissionBuilder.submit()` 增加工作或等待。
+
 ## Device Loss
 
 `ScratchRuntime` 拥有 device-loss 处理。Device loss 后:

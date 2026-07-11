@@ -473,6 +473,39 @@ suggestions: [
 ]
 ```
 
+## Pipeline Creation And Compilation Evidence
+
+GPU operation, incident, snapshot, capture, and exported-evidence schemas use
+version 2. Operations and pending facts select one explicit target:
+
+```ts
+type ScratchGpuOperationTarget =
+    | { kind: 'resource'; resourceId: string; resourceKind: string; allocationVersion: number; contentEpoch: number; logicalFootprintBytes: number }
+    | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programSourceHash: string }
+```
+
+Queries select `targetKind`, `resourceId`, or `pipelineId` rather than guessing
+from optional fields. Resource allocation incidents retain ADR-032 pressure and
+attribution semantics. Pipeline incidents contain compilation and creation
+evidence and never receive fabricated allocation pressure.
+
+Each successful pipeline exposes an immutable source-free compilation report.
+It retains at most 64 native messages, at most 4096 UTF-16 code units per
+message, and at most 64 KiB of serialized compilation evidence. Counts and
+omission fields remain even when evidence is truncated. Native order is
+preserved; native prose is not parsed; zero-valued unknown locations and
+separator locations are not assigned invented module coordinates.
+
+Stable pipeline creation failure codes are
+`SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`,
+`SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED`,
+`SCRATCH_PIPELINE_CREATION_INTERNAL_FAILED`,
+`SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED`,
+`SCRATCH_PIPELINE_CREATION_NATIVE_FAILED`, and
+`SCRATCH_PIPELINE_CREATION_SCOPE_FAILED`. `GPUPipelineError.reason` and scope
+categories are structural facts. Independent Promise outcomes are joined
+without treating settlement order or localized text as causality.
+
 ## Non-Goals
 
 - Do not make prose error messages the stable API.

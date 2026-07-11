@@ -473,6 +473,38 @@ suggestions: [
 ]
 ```
 
+## Pipeline 创建与 Compilation Evidence
+
+GPU operation、incident、snapshot、capture 与 exported-evidence schema 使用
+version 2。operation 与 pending fact 显式选择一种 target:
+
+```ts
+type ScratchGpuOperationTarget =
+    | { kind: 'resource'; resourceId: string; resourceKind: string; allocationVersion: number; contentEpoch: number; logicalFootprintBytes: number }
+    | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programSourceHash: string }
+```
+
+Query 通过 `targetKind`、`resourceId` 或 `pipelineId` 选择，而不是猜 optional
+field。Resource allocation incident 保留 ADR-032 的 pressure 与 attribution
+语义。Pipeline incident 只包含 compilation 与 creation evidence，不获得虚构的
+allocation pressure。
+
+每个成功 pipeline 都暴露不可变、source-free 的 compilation report。它最多
+保留 64 条 native message，每条最多 4096 个 UTF-16 code unit，全部 serialized
+compilation evidence 最多 64 KiB。即使 evidence 被截断，计数与 omission field
+仍然存在。Native order 保持不变；不解析 native prose；值为零的未知位置与
+separator location 不会被赋予虚构的 module coordinate。
+
+稳定 pipeline creation failure code 为
+`SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`、
+`SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED`、
+`SCRATCH_PIPELINE_CREATION_INTERNAL_FAILED`、
+`SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED`、
+`SCRATCH_PIPELINE_CREATION_NATIVE_FAILED` 与
+`SCRATCH_PIPELINE_CREATION_SCOPE_FAILED`。`GPUPipelineError.reason` 与 scope
+category 是结构化事实。独立 Promise outcome 在 join 时不把 settlement order
+或 localized text 当作因果。
+
 ## 非目标
 
 - 不把 prose error message 做成稳定 API。

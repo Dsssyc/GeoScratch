@@ -144,6 +144,21 @@ Submission 记录显式顺序。
 
 未来 `geo` 层如果需要，可以引入 layer style、symbolizer、renderable layer 或 material-like scene concepts。这些概念必须降低到 scratch primitives; 它们不能成为 scratch primitives。
 
+## Program Snapshot 与 Compilation Provenance
+
+`Program` 仍是调用者拥有的 shader contract。Pipeline 创建在原生 pipeline Promise 发起前
+snapshot 它的 module strings、entry points、required layouts 与 identity；
+此边界之后的 mutation 不能改变 in-flight transaction。snapshot 按一个显式
+separator contract 合并，并使用 JavaScript UTF-16 code-unit offset，使原生
+compilation location 在确实已知时能够映射回 Program module。
+
+最终 pipeline compilation report 保留 combined/per-module hash、module span、
+计数与有界 native messages。default history、incident、exported evidence 与
+deep descriptor capture 都不保留完整 WGSL 或 source excerpt。Native message
+prose 是 localized text，绝不被解析为稳定 code。未知位置或 separator location
+保持 unmapped。这些 evidence 不会把 source ownership 从 Program 移到
+Pipeline，Program 也不会获得具体 resource 或 submission state。
+
 ## Authoring 与 Runtime 边界
 
 Codec 与 shader composition 可以发生在 runtime 之前，但 scratch 仍需要一套连贯契约:

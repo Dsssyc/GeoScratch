@@ -218,6 +218,33 @@ scratch.command.endOcclusionQuery()
 
 它们要求 active render pass 拥有同一个 `occlusionQuerySet`，不能嵌套，并写入一个 indexed query slot。
 
+## 已确认的 Pipeline 创建
+
+Scratch pipeline 构造对 render 与 compute 都是对称的异步过程:
+
+```ts
+const render = await runtime.createRenderPipeline(renderDescriptor)
+const compute = await runtime.createComputePipeline(computeDescriptor)
+```
+
+只有 `createRenderPipelineAsync()` 与 `createComputePipelineAsync()` 是合法
+原生 lowering path。只有一个原生 pipeline Promise、shader compilation
+information、包围 supporting shader module 与 pipeline layout 的
+validation/internal/OOM scopes，以及 lifecycle checks 全部 settle 后，才返回
+pipeline wrapper。所有 scope pop 都必须在第一次 `await` 前发起；实现不假设
+任何 Promise settlement order。
+
+导出的 pipeline class 仍可用于 `instanceof`，但 direct 与 subclass
+construction 由 internal token 关闭。成功 wrapper 拥有一个不可变、有界的
+`compilationReport`。warning 与 information 是成功证据。Compilation error、
+pipeline rejection、supporting-object error、structural Promise failure、
+dispose 与 device loss 都让 factory 以一个结构化 `ScratchDiagnosticError`
+reject；pending wrapper 不会进入 Draw 或 Dispatch command。
+
+Pipeline 创建与 compilation 属于初始化工作。Command encoding、pass
+lowering、queue submission 与 `SubmittedWork` 不增加隐藏 compilation、scope、
+operation record 或 wait。
+
 ## Count 分流
 
 draw 与 dispatch count 分三种情况; 按 count 实际依赖什么来选:

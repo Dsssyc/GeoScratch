@@ -98,10 +98,11 @@ The new API should make these boundaries hard to miss:
 - `BindLayout` describes shader binding shape.
 - `BindSet` binds concrete resources to a layout.
 - `Program` describes shader source, generated modules, entry points, and required layouts without owning concrete resources.
-- `Pipeline` describes stable WebGPU executable state for a `Program` entry point.
+- `Pipeline` describes stable WebGPU executable state for a `Program` entry point. Public render and compute factories are Promise-only transactions and expose a wrapper only after native async creation, compilation evidence, supporting-object scopes, and lifecycle checks settle successfully.
 - `Command` describes one executable GPU action.
 - `ScratchDiagnostic` is the unified machine-readable validation contract; prose messages are not the stable API.
 - `runtime.diagnostics` separates always-current facts, bounded recent operations, immutable incidents, and explicit temporary deep capture.
+- GPU operation evidence uses schema-v2 resource/pipeline target unions. Pipeline facts never masquerade as allocation versions, content epochs, footprints, or pressure evidence.
 - `PassSpec` describes stable pass shape.
 - `SubmissionBuilder` records commands into pass specs in explicit order.
 - `SubmittedWork` is the inspectable handle returned by `.submit()`, with a `done` promise for GPU completion.
