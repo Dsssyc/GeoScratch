@@ -67,6 +67,27 @@ export type ScratchNativeGpuErrorFacts = Readonly<{
     name?: string
     message: string
     reason?: string
+    truncated?: boolean
+}>
+
+export type ScratchGpuIncidentPendingOperation = Readonly<{
+    id: string
+    sequence: number
+    kind: GpuOperationKind
+    resourceId: string
+    resourceKind: string
+    logicalFootprintBytes: number
+    allocationVersion: number
+    contentEpoch: number
+}>
+
+export type ScratchGpuIncidentResourceFact = Readonly<{
+    id: string
+    resourceKind: string
+    logicalFootprintBytes: number
+    allocationVersion: number
+    contentEpoch: number
+    state: string
 }>
 
 export type ScratchGpuPressureContributor = Readonly<{
@@ -125,6 +146,8 @@ export type ScratchGpuIncidentReport = Readonly<{
     triggerOperation?: ScratchGpuOperationRecord
     nativeError?: ScratchNativeGpuErrorFacts
     recentOperations: readonly ScratchGpuOperationRecord[]
+    pendingOperations?: readonly ScratchGpuIncidentPendingOperation[]
+    currentResources?: readonly ScratchGpuIncidentResourceFact[]
     pressure?: ScratchGpuPressureEvidence
     evidence: ScratchGpuIncidentEvidenceCompleteness
 }>
@@ -199,6 +222,8 @@ export function createGpuIncidentReport(
         'operationId',
         'triggerOperation',
         'nativeError',
+        'pendingOperations',
+        'currentResources',
         'pressure',
     ])
 
@@ -219,10 +244,19 @@ export function serializeNativeGpuError(error: unknown): ScratchNativeGpuErrorFa
         message = safeString(error)
     }
 
+    const boundedName = boundString(name, 256)
+    const boundedMessage = boundString(message, 4_096)!
+    const boundedReason = boundString(reason, 256)
+
     return deepFreeze({
-        ...(name !== undefined ? { name } : {}),
-        message,
-        ...(reason !== undefined ? { reason } : {}),
+        ...(boundedName !== undefined ? { name: boundedName } : {}),
+        message: boundedMessage,
+        ...(boundedReason !== undefined ? { reason: boundedReason } : {}),
+        ...(
+            boundedName !== name || boundedMessage !== message || boundedReason !== reason
+                ? { truncated: true }
+                : {}
+        ),
     })
 }
 
@@ -349,6 +383,12 @@ function safeString(value: unknown): string {
     } catch {
         return '[unprintable native error]'
     }
+}
+
+function boundString(value: string | undefined, maxLength: number): string | undefined {
+
+    if (value === undefined || value.length <= maxLength) return value
+    return `${value.slice(0, Math.max(0, maxLength - 3))}...`
 }
 
 function fnv1a(value: string): string {

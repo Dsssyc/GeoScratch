@@ -4,6 +4,10 @@ import {
     createGpuOperationRecord,
     serializeNativeGpuError,
 } from '../packages/geoscratch/dist/scratch/gpu-operation.js'
+import {
+    diagnosticsControllerFor,
+} from '../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
+import { ScratchRuntime } from '../packages/geoscratch/dist/scratch/runtime.js'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 describe('scratch GPU operation provenance facts', () => {
@@ -195,3 +199,244 @@ describe('fake WebGPU error scopes', () => {
         expect(await validationResult).to.equal(null)
     })
 })
+
+describe('ScratchRuntime bounded GPU diagnostics', () => {
+
+    it('exposes a readonly immutable current fact graph without GPU handles', async () => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu, label: 'facts runtime' })
+        const buffer = runtime.createBuffer({
+            label: 'facts buffer',
+            size: 64,
+            usage: 1,
+        })
+
+        const snapshot = runtime.diagnostics.snapshot()
+        const descriptor = Object.getOwnPropertyDescriptor(runtime, 'diagnostics')
+
+        expect(descriptor).to.include({ writable: false, configurable: false })
+        expect(snapshot.runtime).to.deep.include({
+            id: runtime.id,
+            label: 'facts runtime',
+            isDisposed: false,
+            isDeviceLost: false,
+        })
+        expect(snapshot.resources).to.have.length(1)
+        expect(snapshot.resources[0]).to.deep.include({
+            id: buffer.id,
+            resourceKind: 'BufferResource',
+            logicalFootprintBytes: 64,
+            allocationVersion: 1,
+            contentEpoch: 0,
+            state: 'empty',
+        })
+        expect(snapshot.pressure).to.deep.include({
+            currentScratchLogicalFootprintBytes: 64,
+            peakScratchLogicalFootprintBytes: 64,
+        })
+        expect(Object.isFrozen(snapshot)).to.equal(true)
+        expect(Object.isFrozen(snapshot.resources)).to.equal(true)
+        expect(JSON.parse(JSON.stringify(snapshot))).to.deep.equal(snapshot)
+        expect(JSON.stringify(snapshot)).not.to.include('gpuBuffer')
+        expect(snapshot.runtime).not.to.have.property('device')
+        expect(JSON.stringify(snapshot)).not.to.include('"type":"buffer"')
+
+        buffer.dispose()
+        expect(runtime.diagnostics.snapshot().resources).to.have.length(0)
+        expect(runtime.diagnostics.snapshot().pressure.currentScratchLogicalFootprintBytes).to.equal(0)
+    })
+
+    it('bounds operation records, evidence bytes, and monotonic sequence facts', async () => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({
+            gpu,
+            diagnostics: {
+                operationCapacity: 3,
+                incidentCapacity: 2,
+                evidenceByteCapacity: 2_048,
+            },
+        })
+        const controller = diagnosticsControllerFor(runtime)
+
+        for (let index = 0; index < 10; index++) {
+            const operation = controller.beginOperation(operationInput(index))
+            controller.completeOperation(operation, { status: 'succeeded' })
+        }
+
+        const firstSnapshot = runtime.diagnostics.snapshot()
+        const firstRecords = runtime.diagnostics.operations()
+        expect(firstRecords).to.have.length(3)
+        expect(firstRecords.map(record => record.sequence)).to.deep.equal([ 8, 9, 10 ])
+        expect(firstSnapshot.recorder.overwrittenOperations).to.equal(7)
+        expect(firstSnapshot.recorder.retainedEvidenceBytes).to.be.at.most(2_048)
+        expect(firstSnapshot.pendingOperations).to.have.length(0)
+        expect(firstRecords.every(record => record.stack === undefined)).to.equal(true)
+        expect(firstRecords.every(record => record.descriptor.full === undefined)).to.equal(true)
+
+        for (let index = 10; index < 20; index++) {
+            const operation = controller.beginOperation(operationInput(index))
+            controller.completeOperation(operation, { status: 'succeeded' })
+        }
+
+        const secondSnapshot = runtime.diagnostics.snapshot()
+        expect(runtime.diagnostics.operations()).to.have.length(3)
+        expect(secondSnapshot.recorder.retainedEvidenceBytes).to.be.at.most(2_048)
+        expect(secondSnapshot.recorder.overwrittenOperations).to.equal(17)
+        expect(secondSnapshot.aggregates.allocationAttempts).to.equal(20)
+        expect(secondSnapshot.aggregates.successfulAllocations).to.equal(20)
+    })
+
+    it('releases successful pending detail after settlement', async () => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const controller = diagnosticsControllerFor(runtime)
+        const operation = controller.beginOperation(operationInput(0))
+
+        const pendingSnapshot = runtime.diagnostics.snapshot()
+        expect(pendingSnapshot.pendingOperations).to.have.length(1)
+        expect(pendingSnapshot.pendingOperations[0]).to.deep.include({
+            id: operation.id,
+            resourceId: 'candidate-buffer-0',
+            kind: 'buffer-allocation',
+        })
+
+        controller.completeOperation(operation, { status: 'succeeded' })
+
+        expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
+        expect(runtime.diagnostics.operation(operation.id).descriptor).not.to.have.property('full')
+    })
+
+    it('keeps uncaptured incidents bounded and removes only its own listener', async () => {
+
+        const { gpu, device, errors } = createFakeGpu()
+        let applicationEvents = 0
+        const applicationListener = () => applicationEvents++
+        device.addEventListener('uncapturederror', applicationListener)
+        const runtime = await ScratchRuntime.create({
+            gpu,
+            diagnostics: {
+                operationCapacity: 2,
+                incidentCapacity: 2,
+                evidenceByteCapacity: 8_192,
+            },
+        })
+
+        expect(errors.listenerCount('uncapturederror')).to.equal(2)
+        errors.emitUncaptured(Object.assign(new Error('raw 1'), { name: 'GPUValidationError' }))
+        errors.emitUncaptured(Object.assign(new Error('raw 2'), { name: 'GPUValidationError' }))
+        errors.emitUncaptured(Object.assign(new Error('raw 3'), { name: 'GPUValidationError' }))
+        await settleMicrotasks()
+
+        const incidents = runtime.diagnostics.incidents()
+        expect(applicationEvents).to.equal(3)
+        expect(incidents).to.have.length(2)
+        expect(incidents.every(incident => incident.diagnosticCode === 'SCRATCH_RUNTIME_UNCAPTURED_GPU_ERROR')).to.equal(true)
+        expect(incidents.every(incident => [ 'temporal-correlation', 'unknown' ].includes(incident.attribution))).to.equal(true)
+        expect(runtime.diagnostics.snapshot().recorder.overwrittenIncidents).to.equal(1)
+
+        runtime.dispose()
+        expect(errors.listenerCount('uncapturederror')).to.equal(1)
+        device.removeEventListener('uncapturederror', applicationListener)
+    })
+
+    it('records device loss without fabricating operation causality', async () => {
+
+        const { gpu, errors } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const controller = diagnosticsControllerFor(runtime)
+        const pending = controller.beginOperation(operationInput(0))
+
+        errors.loseDevice({ reason: 'unknown', message: 'fake device disappeared' })
+        await settleMicrotasks()
+
+        const incident = runtime.diagnostics.incidents().at(-1)
+        expect(runtime.isDeviceLost).to.equal(true)
+        expect(incident).to.deep.include({
+            kind: 'device-loss',
+            diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+            nativeErrorCategory: 'device-lost',
+            attribution: 'temporal-correlation',
+        })
+        expect(incident).not.to.have.property('causeOperationId')
+        expect(runtime.diagnostics.snapshot().pendingOperations.map(item => item.id)).to.include(pending.id)
+    })
+
+    it('captures stacks and full descriptors only in finite deep capture sessions', async () => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const controller = diagnosticsControllerFor(runtime)
+        const capture = runtime.diagnostics.capture({
+            maxOperations: 2,
+            maxDurationMs: 1_000,
+            maxEvidenceBytes: 16_384,
+            includeStacks: true,
+            includeDescriptors: true,
+        })
+
+        expect(capture).not.to.have.property('then')
+        for (let index = 0; index < 2; index++) {
+            const operation = controller.beginOperation(operationInput(index))
+            controller.completeOperation(operation, { status: 'succeeded' })
+        }
+
+        expect(capture.isActive).to.equal(false)
+        const report = capture.stop()
+        expect(report.stopReason).to.equal('operation-limit')
+        expect(report.operations).to.have.length(2)
+        expect(report.operations.every(record => typeof record.stack === 'string')).to.equal(true)
+        expect(report.operations.every(record => record.descriptor.full !== undefined)).to.equal(true)
+        expect(report.retainedEvidenceBytes).to.be.at.most(16_384)
+        expect(Object.isFrozen(report)).to.equal(true)
+        expect(runtime.diagnostics.operations().every(record => record.stack === undefined)).to.equal(true)
+        expect(runtime.diagnostics.operations().every(record => record.descriptor.full === undefined)).to.equal(true)
+    })
+
+    it('automatically expires capture sessions by duration', async () => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const capture = runtime.diagnostics.capture({
+            maxOperations: 100,
+            maxDurationMs: 5,
+            maxEvidenceBytes: 16_384,
+            includeStacks: false,
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 20))
+
+        expect(capture.isActive).to.equal(false)
+        expect(capture.stop().stopReason).to.equal('duration-limit')
+        expect(runtime.diagnostics.snapshot().capture.activeCount).to.equal(0)
+    })
+})
+
+function operationInput(index) {
+
+    return {
+        kind: 'buffer-allocation',
+        resourceId: `candidate-buffer-${index}`,
+        resourceKind: 'BufferResource',
+        allocationVersion: 1,
+        contentEpoch: 0,
+        logicalFootprintBytes: 64 + index,
+        descriptorSummary: { size: 64 + index, usage: 1 },
+        fullDescriptor: {
+            label: `candidate ${index}`,
+            size: 64 + index,
+            usage: 1,
+            mappedAtCreation: false,
+        },
+        nativeLabel: `candidate ${index} [scratch:candidate-buffer-${index}]`,
+    }
+}
+
+async function settleMicrotasks() {
+
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+}

@@ -24,6 +24,18 @@ export type {
     ScratchNativeGpuErrorFacts,
 } from './gpu-operation.js'
 export { ScratchRuntime } from './runtime.js'
+export { ScratchDiagnosticCapture, ScratchRuntimeDiagnostics } from './runtime-diagnostics.js'
+export type {
+    ScratchDiagnosticCaptureOptions,
+    ScratchDiagnosticCaptureReport,
+    ScratchDiagnosticCaptureStopReason,
+    ScratchGpuIncidentQuery,
+    ScratchGpuOperationQuery,
+    ScratchPendingGpuOperationFact,
+    ScratchRuntimeDiagnosticsOptions,
+    ScratchRuntimeDiagnosticsSnapshot,
+    ScratchRuntimeResourceFact,
+} from './runtime-diagnostics.js'
 export { Surface } from './surface.js'
 export { Resource } from './resource.js'
 export type { ResourceState } from './resource.js'

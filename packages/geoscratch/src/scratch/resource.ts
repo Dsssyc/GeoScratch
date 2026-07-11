@@ -1,5 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { updateRuntimeResourceFact } from './runtime-diagnostics.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
@@ -84,14 +85,17 @@ export class Resource {
                 this.#descriptor = descriptor
                 this.#allocationVersion++
                 this.#state = this.#isDisposed ? 'disposed' : 'empty'
+                updateRuntimeResourceFact(this.#runtime, this)
             },
             advanceContentEpoch: () => {
                 this.#contentEpoch++
                 this.#state = this.#isDisposed ? 'disposed' : 'ready'
+                updateRuntimeResourceFact(this.#runtime, this)
             },
             setContentState: (state, contentEpoch) => {
                 this.#state = this.#isDisposed ? 'disposed' : state
                 this.#contentEpoch = contentEpoch
+                updateRuntimeResourceFact(this.#runtime, this)
             },
         })
 

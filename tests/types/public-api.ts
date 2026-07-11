@@ -55,6 +55,32 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         requiredFeatures: [ 'timestamp-query' ],
         requiredLimits: { maxBufferSize: 1024 },
     })
+    const diagnostics: scr.ScratchRuntimeDiagnostics = runtime.diagnostics
+    const compatDiagnostics: scratchCompat.ScratchRuntimeDiagnostics = diagnostics
+    const diagnosticsSnapshot: scr.ScratchRuntimeDiagnosticsSnapshot = diagnostics.snapshot()
+    const compatDiagnosticsSnapshot: scratchCompat.ScratchRuntimeDiagnosticsSnapshot = diagnosticsSnapshot
+    const operationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+        kind: 'buffer-allocation',
+        sequenceFrom: 1,
+    })
+    const incidentRecords: readonly scr.ScratchGpuIncidentReport[] = diagnostics.incidents({
+        kind: 'allocation-failure',
+        sequenceFrom: 1,
+    })
+    const diagnosticCapture: scr.ScratchDiagnosticCapture = diagnostics.capture({
+        maxOperations: 8,
+        maxDurationMs: 100,
+        maxEvidenceBytes: 4096,
+        includeStacks: true,
+        includeDescriptors: true,
+    })
+    const diagnosticCaptureReport: scr.ScratchDiagnosticCaptureReport = diagnosticCapture.stop()
+    // @ts-expect-error Runtime diagnostics are read-only
+    runtime.diagnostics = compatDiagnostics
+    // @ts-expect-error Runtime diagnostics cannot be externally constructed
+    new scr.ScratchRuntimeDiagnostics()
+    // @ts-expect-error Capture sessions cannot be externally constructed
+    new scr.ScratchDiagnosticCapture()
 
     const surface: scr.Surface = runtime.createSurface(canvas, {
         format: 'preferred',
@@ -1150,6 +1176,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void compatDrawReadContentEpoch
     void resolveQueries
     void resolveAlias
+    void compatDiagnosticsSnapshot
+    void operationRecords
+    void incidentRecords
+    void diagnosticCaptureReport
     void error
     void submitted
     void resourceAccesses

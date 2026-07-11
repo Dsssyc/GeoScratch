@@ -8,6 +8,10 @@ import { ComputePipeline, RenderPipeline } from './pipeline.js'
 import { Program } from './program.js'
 import { QuerySetResource } from './query-set.js'
 import { ReadbackOperation } from './readback.js'
+import {
+    registerRuntimeDiagnostics,
+    ScratchRuntimeDiagnosticsController,
+} from './runtime-diagnostics.js'
 import { SamplerResource } from './sampler.js'
 import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
@@ -22,6 +26,10 @@ import type { ProgramDescriptor } from './program.js'
 import type { QuerySetResourceDescriptor } from './query-set.js'
 import type { ReadbackOperationDescriptor } from './readback.js'
 import type { Resource } from './resource.js'
+import type {
+    ScratchRuntimeDiagnostics,
+    ScratchRuntimeDiagnosticsOptions,
+} from './runtime-diagnostics.js'
 import type { SamplerResourceDescriptor } from './sampler.js'
 import type { SubmissionBuilderOptions } from './submission.js'
 import type { SurfaceOptions } from './surface.js'
@@ -36,6 +44,7 @@ export type ScratchRuntimeCreateOptions = {
     forceFallbackAdapter?: boolean
     requiredFeatures?: Iterable<GPUFeatureName>
     requiredLimits?: Record<string, number>
+    diagnostics?: ScratchRuntimeDiagnosticsOptions
 }
 
 type ScratchRuntimeConstructorOptions = ScratchRuntimeCreateOptions & {
@@ -58,11 +67,14 @@ export interface ScratchRuntime {
     isDisposed: boolean
     isDeviceLost: boolean
     deviceLostInfo?: GPUDeviceLostInfo
+    readonly diagnostics: ScratchRuntimeDiagnostics
     _resources: Set<Resource>
     _surfaces: Set<Surface>
 }
 
 export class ScratchRuntime {
+
+    #diagnosticsController: ScratchRuntimeDiagnosticsController
 
     private constructor(token: symbol, options: ScratchRuntimeConstructorOptions) {
 
@@ -91,11 +103,24 @@ export class ScratchRuntime {
         this.isDeviceLost = false
         this._resources = new Set()
         this._surfaces = new Set()
+        this.#diagnosticsController = new ScratchRuntimeDiagnosticsController(
+            this,
+            options.device,
+            options.diagnostics
+        )
+        registerRuntimeDiagnostics(this, this.#diagnosticsController)
+        Object.defineProperty(this, 'diagnostics', {
+            value: this.#diagnosticsController.facade,
+            enumerable: true,
+            writable: false,
+            configurable: false,
+        })
 
         if (options.device.lost && typeof options.device.lost.then === 'function') {
             options.device.lost.then((info) => {
                 this.isDeviceLost = true
                 this.deviceLostInfo = info
+                this.#diagnosticsController.recordDeviceLoss(info)
             })
         }
     }
@@ -152,6 +177,7 @@ export class ScratchRuntime {
             adapter,
             device,
             ...(options.label !== undefined ? { label: options.label } : {}),
+            ...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
         })
     }
 
@@ -468,21 +494,24 @@ export class ScratchRuntime {
             resource.dispose()
         }
 
+        this.isDisposed = true
+        this.#diagnosticsController.dispose()
+
         if (this.device && typeof this.device.destroy === 'function') {
             this.device.destroy()
         }
-
-        this.isDisposed = true
     }
 
     _registerResource(resource: Resource): void {
 
         this._resources.add(resource)
+        this.#diagnosticsController.registerResource(resource)
     }
 
     _unregisterResource(resource: Resource): void {
 
         this._resources.delete(resource)
+        this.#diagnosticsController.unregisterResource(resource)
     }
 
     _registerSurface(surface: Surface): void {
