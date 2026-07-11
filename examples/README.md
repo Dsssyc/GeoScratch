@@ -7,3 +7,5 @@ Keep example runtime code in `main.js` and place only page shell concerns, such 
 Keep ordinary example assets beside the example that owns them. Use relative asset URLs for images and raw shader imports for WGSL files. Reserve `examples/public/` for large local data that must be loaded by stable absolute URL, such as `/json/examples/flow/station.bin`.
 
 `submissionOrder/` is the deterministic queue-ordering proof. It must report `document.body.dataset.status === "passed"` and `document.body.dataset.result === "11"` in a WebGPU-capable browser.
+
+`externalImageUpload/` is the deterministic native external-image upload proof. It constructs the command before mutating a local source canvas, uploads a cropped and vertically flipped region, verifies exact padded readback bytes, renders the same texture, and reports the result through `document.body.dataset.status`, `expectedBytes`, and `actualBytes`.

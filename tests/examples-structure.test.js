@@ -12,6 +12,7 @@ describe('examples structure', () => {
         'scratch_uniformTriangle',
         'scratch_computeReadback',
         'submissionOrder',
+        'externalImageUpload',
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
         'scratch_renderToTexture',
@@ -28,6 +29,7 @@ describe('examples structure', () => {
         'scratch_uniformTriangle',
         'scratch_computeReadback',
         'submissionOrder',
+        'externalImageUpload',
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
         'scratch_renderToTexture',
@@ -90,6 +92,7 @@ describe('examples structure', () => {
             [ 'scratch_uniformTriangle', 'Uniform Triangle' ],
             [ 'scratch_computeReadback', 'Compute Readback' ],
             [ 'submissionOrder', 'Submission Order' ],
+            [ 'externalImageUpload', 'External Image Upload' ],
             [ 'scratch_helloVertexBuffer', 'Hello Vertex Buffer' ],
             [ 'scratch_textureSampling', 'Texture Sampling' ],
             [ 'scratch_renderToTexture', 'Render To Texture' ],
@@ -238,5 +241,37 @@ describe('examples structure', () => {
         expect(source).to.include('result === 11')
         expect(source).to.include("dataset.status = passed ? 'passed' : 'failed'")
         expect(source).to.include('dataset.result = String(result)')
+    })
+
+    it('provides a deterministic native external image upload proof', () => {
+
+        const html = read('examples', 'externalImageUpload', 'index.html')
+        const source = read('examples', 'externalImageUpload', 'main.js')
+
+        expect(html).to.include('<title>External Image Upload | GeoScratch Examples</title>')
+        expect(html).to.include('<h1>External Image Upload</h1>')
+        expect(html).to.include('data-status="pending"')
+        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include("document.createElement('canvas')")
+        expect(source).to.include('createExternalImageUploadCommand')
+        expect(source).to.include('sourceOrigin: { x: 1, y: 1 }')
+        expect(source).to.include('flipY: true')
+        expect(source).to.include("format: 'rgba8unorm'")
+        expect(source).to.include('GPUTextureUsage.RENDER_ATTACHMENT')
+        expect(source).to.include('GPUTextureUsage.COPY_DST')
+        expect(source).to.include('GPUTextureUsage.COPY_SRC')
+        expect(source).to.include('GPUTextureUsage.TEXTURE_BINDING')
+        expect(source).to.include('createCopyCommand')
+        expect(source).to.include('bytesPerRow: 256')
+        expect(source).to.include('createReadbackCommand')
+        expect(source).to.include('.upload(externalUpload)')
+        expect(source).to.include('.copy(copyToReadback)')
+        expect(source).to.include('.readback(readback)')
+        expect(source).to.include('.render(surfacePass, [ draw ])')
+        expect(source).to.include('expectedRows')
+        expect(source).to.include("dataset.status = passed ? 'passed' : 'failed'")
+        expect(source.indexOf('createExternalImageUploadCommand')).to.be.lessThan(source.indexOf('drawFinalSourcePattern'))
+        expect(source).to.not.match(/getImageData|createTextureUploadCommand|writeTexture/)
+        expect(source).to.not.match(/https?:\/\//)
     })
 })
