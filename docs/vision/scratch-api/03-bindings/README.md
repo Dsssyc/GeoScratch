@@ -68,7 +68,7 @@ The normalized binding table and its entries are immutable after `BindSet` const
 
 `BindSet` does not rebuild merely because a bound resource's `contentEpoch` changes. Content changes affect dependency validation and readback, not the physical binding target.
 
-`TextureResource.resize()` makes this distinction observable. On the next use after a changed resize, `BindSet` compares the new `allocationVersion`, obtains a view from the current texture, and creates exactly one replacement bind group. Later uses of that allocation reuse it. A content-only write does not rebuild it, and a normalized same-size resize changes no version and therefore rebuilds nothing.
+`TextureResource.resize()` makes this distinction observable. On the next use after a changed resize, `BindSet` compares the new `allocationVersion`, derives a view from the bind layout's explicit view dimension, validates that view against the current mip/layer extent, and creates exactly one replacement bind group. The default layout dimension is `2d`, so array-layer growth still selects one layer instead of silently becoming a `2d-array` view. An incompatible cube, array, mip, or layer selection fails before native bind-group creation. Later uses of that allocation reuse the group. A content-only write does not rebuild it, and a normalized same-size resize changes no version and therefore rebuilds nothing.
 
 A raw `GPUTextureView` is allocation-scoped. Scratch invalidates its own view cache when the texture allocation changes, but a raw view retained independently by application code remains stale and cannot be repaired through `BindSet`.
 

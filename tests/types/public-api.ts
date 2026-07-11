@@ -226,6 +226,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     scr.advanceResourceContentEpoch(scratchResource)
     // @ts-expect-error Resource transition helpers are not package API
     scr.setResourceContentState(scratchResource, 'ready', 1)
+    // @ts-expect-error Texture view preparation is not package API
+    scr.prepareTextureViewDescriptor(scratchTexture, {})
+    // @ts-expect-error Render attachment preflight is not package API
+    scr.validateRenderPassAttachments(undefined as never)
 
     const diagnostic: scr.ScratchDiagnostic = scr.createScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',

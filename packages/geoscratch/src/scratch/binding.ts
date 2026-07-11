@@ -2,7 +2,7 @@ import { UUID } from '../core/utils/uuid.js'
 import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { SamplerResource } from './sampler.js'
-import { TextureResource } from './texture.js'
+import { TextureResource, prepareTextureViewDescriptor } from './texture.js'
 import { describeValue, getGlobalConstant } from './type-utils.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -283,7 +283,7 @@ export class BindSet {
         this.runtime.assertActive()
         this.layout.assertUsable()
         for (const binding of this.bindings.values()) {
-            binding.resource.assertUsable()
+            validateBindingResource(this, binding.entry, binding.resource)
         }
     }
 
@@ -600,6 +600,8 @@ function validateTextureResource(bindSet: BindSet, entry: TextureBindLayoutEntry
             actual: { usage: resource.usage },
         })
     }
+
+    prepareTextureViewDescriptor(resource, { dimension: entry.viewDimension ?? '2d' })
 }
 
 function validateSamplerResource(bindSet: BindSet, entry: SamplerBindLayoutEntry, resource: unknown) {
@@ -663,8 +665,8 @@ function createBindingResource(binding: NormalizedBindSetBinding): GPUBindingRes
         }
     }
 
-    if (resource instanceof TextureResource) {
-        return resource.createView()
+    if (resource instanceof TextureResource && binding.entry.type === 'texture') {
+        return resource.createView({ dimension: binding.entry.viewDimension ?? '2d' })
     }
 
     if (resource instanceof SamplerResource) {

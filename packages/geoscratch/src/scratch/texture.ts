@@ -63,6 +63,10 @@ export class TextureResource extends Resource {
 
     constructor(runtime: ScratchRuntime, descriptor: TextureResourceDescriptor) {
 
+        if (new.target !== TextureResource) {
+            throw new TypeError('TextureResource does not support subclass construction.')
+        }
+
         const normalizedDescriptor = normalizeTextureDescriptor(runtime, descriptor)
 
         super(runtime, {
@@ -74,6 +78,7 @@ export class TextureResource extends Resource {
         this.#physicalDescriptor = normalizedDescriptor
         this.#gpuTexture = runtime.device.createTexture(normalizedDescriptor)
         this.#viewCache = new Map()
+        Object.preventExtensions(this)
     }
 
     static create(runtime: ScratchRuntime, descriptor: TextureResourceDescriptor): TextureResource {
@@ -184,7 +189,7 @@ export class TextureResource extends Resource {
 
         this.assertUsable()
 
-        const normalizedDescriptor = normalizeTextureViewDescriptor(this, descriptor)
+        const normalizedDescriptor = prepareTextureViewDescriptor(this, descriptor)
         const key = JSON.stringify(normalizedDescriptor)
         if (!this.#viewCache.has(key)) {
             this.#viewCache.set(key, this.gpuTexture.createView(normalizedDescriptor))
@@ -206,6 +211,8 @@ export class TextureResource extends Resource {
     }
 }
 
+Object.freeze(TextureResource.prototype)
+
 function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: unknown): NormalizedTextureDescriptor {
 
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
@@ -221,9 +228,20 @@ function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: unknown
     const size = normalizeTextureSize(subject, descriptor.size)
     const format = normalizeTextureFormat(subject, descriptor.format)
     const usage = normalizeTextureUsage(subject, descriptor.usage)
-    const dimension = normalizeTextureDimension(subject, descriptor, descriptor.dimension ?? '2d')
-    const mipLevelCount = normalizePositiveInteger(subject, descriptor.mipLevelCount ?? 1, 'mipLevelCount')
-    const sampleCount = normalizeSampleCount(subject, descriptor.sampleCount ?? 1)
+    const dimension = normalizeTextureDimension(
+        subject,
+        descriptor,
+        descriptor.dimension === undefined ? '2d' : descriptor.dimension
+    )
+    const mipLevelCount = normalizePositiveInteger(
+        subject,
+        descriptor.mipLevelCount === undefined ? 1 : descriptor.mipLevelCount,
+        'mipLevelCount'
+    )
+    const sampleCount = normalizeSampleCount(
+        subject,
+        descriptor.sampleCount === undefined ? 1 : descriptor.sampleCount
+    )
     const viewFormats = normalizeTextureViewFormats(subject, descriptor.viewFormats)
     const textureBindingViewDimension = normalizeTextureBindingViewDimension(
         subject,
@@ -264,12 +282,12 @@ function normalizeTextureSize(subject: DiagnosticSubject, size: unknown): Normal
             })
         }
         width = size[0]
-        height = size[1] ?? 1
-        depthOrArrayLayers = size[2] ?? 1
+        height = size[1] === undefined ? 1 : size[1]
+        depthOrArrayLayers = size[2] === undefined ? 1 : size[2]
     } else if (isRecord(size)) {
         width = size.width
-        height = size.height ?? 1
-        depthOrArrayLayers = size.depthOrArrayLayers ?? 1
+        height = size.height === undefined ? 1 : size.height
+        depthOrArrayLayers = size.depthOrArrayLayers === undefined ? 1 : size.depthOrArrayLayers
     } else {
         throwTextureDescriptorDiagnostic(subject, { size }, {
             size: '{ width, height?, depthOrArrayLayers? } or [width, height?, depthOrArrayLayers?]',
@@ -417,6 +435,128 @@ function normalizeTextureViewDescriptor(texture: TextureResource, descriptor: un
     }
 
     return sortObjectKeys(descriptor) as GPUTextureViewDescriptor
+}
+
+export function prepareTextureViewDescriptor(
+    texture: TextureResource,
+    descriptor: unknown = {}
+): GPUTextureViewDescriptor {
+
+    texture.assertUsable()
+    const normalized = normalizeTextureViewDescriptor(texture, descriptor)
+    validateTextureViewDescriptor(texture, normalized, descriptor)
+    return normalized
+}
+
+function validateTextureViewDescriptor(
+    texture: TextureResource,
+    descriptor: GPUTextureViewDescriptor,
+    actual: unknown
+): void {
+
+    const baseMipLevel = descriptor.baseMipLevel === undefined ? 0 : descriptor.baseMipLevel
+    const mipLevelCount = descriptor.mipLevelCount === undefined
+        ? texture.mipLevelCount - baseMipLevel
+        : descriptor.mipLevelCount
+    const baseArrayLayer = descriptor.baseArrayLayer === undefined ? 0 : descriptor.baseArrayLayer
+    const dimension = descriptor.dimension === undefined
+        ? texture.depthOrArrayLayers === 1 ? '2d' : '2d-array'
+        : descriptor.dimension
+
+    if (
+        !Number.isInteger(baseMipLevel) || baseMipLevel < 0 ||
+        !Number.isInteger(mipLevelCount) || mipLevelCount <= 0 ||
+        baseMipLevel + mipLevelCount > texture.mipLevelCount ||
+        !Number.isInteger(baseArrayLayer) || baseArrayLayer < 0 ||
+        !TEXTURE_BINDING_VIEW_DIMENSIONS.has(dimension)
+    ) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            baseMipLevel: `integer in [0, ${texture.mipLevelCount - 1}]`,
+            mipLevelCount: `positive integer within ${texture.mipLevelCount} mip levels`,
+            baseArrayLayer: `integer in [0, ${texture.depthOrArrayLayers - 1}]`,
+            dimension: [ ...TEXTURE_BINDING_VIEW_DIMENSIONS ],
+        })
+    }
+
+    const arrayLayerCount = descriptor.arrayLayerCount === undefined
+        ? defaultTextureViewArrayLayerCount(texture, dimension, baseArrayLayer)
+        : descriptor.arrayLayerCount
+    const textureBindingViewDimension = (
+        texture.descriptor as NormalizedTextureDescriptor
+    ).textureBindingViewDimension
+    if (
+        !Number.isInteger(arrayLayerCount) ||
+        arrayLayerCount <= 0 ||
+        baseArrayLayer + arrayLayerCount > texture.depthOrArrayLayers
+    ) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            arrayLayerCount: `positive integer within ${texture.depthOrArrayLayers} array layers`,
+        })
+    }
+
+    const requiresDeclaredBindingDimension =
+        !texture.runtime.deviceFeatures.has('core-features-and-limits') &&
+        textureBindingViewDimension !== undefined
+    const validDimension =
+        dimension !== '1d' &&
+        dimension !== '3d' &&
+        (dimension !== '2d' || arrayLayerCount === 1) &&
+        (dimension !== 'cube' || (
+            arrayLayerCount === 6 &&
+            texture.width === texture.height
+        )) &&
+        (dimension !== 'cube-array' || (
+            arrayLayerCount % 6 === 0 &&
+            texture.width === texture.height &&
+            texture.runtime.deviceFeatures.has('core-features-and-limits')
+        )) &&
+        (texture.sampleCount === 1 || dimension === '2d') &&
+        (!requiresDeclaredBindingDimension || dimension === textureBindingViewDimension)
+
+    if (!validDimension) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            dimension: {
+                '2d': 'exactly one array layer',
+                '2d-array': 'one or more array layers',
+                cube: 'six layers on a square texture',
+                'cube-array': 'a positive multiple of six layers on a square texture with core-features-and-limits',
+            },
+            textureBindingViewDimension:
+                textureBindingViewDimension ?? 'not constrained by the texture descriptor',
+        })
+    }
+}
+
+function defaultTextureViewArrayLayerCount(
+    texture: TextureResource,
+    dimension: GPUTextureViewDimension,
+    baseArrayLayer: number
+): number {
+
+    if (dimension === 'cube') return 6
+    if (dimension === '2d-array' || dimension === 'cube-array') {
+        return texture.depthOrArrayLayers - baseArrayLayer
+    }
+
+    return 1
+}
+
+function throwTextureViewDescriptorDiagnostic(
+    texture: TextureResource,
+    actual: unknown,
+    expected: object
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+        severity: 'error',
+        phase: 'resource',
+        subject: texture.subject,
+        message: 'TextureResource view descriptor is invalid for the current allocation.',
+        expected: { viewDescriptor: expected },
+        actual: { viewDescriptor: actual },
+        hints: [ 'Select mip levels, array layers, and a view dimension valid for the current texture allocation.' ],
+    })
 }
 
 function sortObjectKeys(value: unknown): unknown {

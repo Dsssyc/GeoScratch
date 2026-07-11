@@ -224,7 +224,11 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         expect(fixture.calls.textureViews).to.have.length(1)
         expect(fixture.calls.textureViews[0].texture).to.equal(fixture.renderTarget.gpuTexture)
-        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({})
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({
+            dimension: '2d',
+            mipLevelCount: 1,
+            arrayLayerCount: 1,
+        })
         expect(fixture.calls.renderPasses).to.have.length(1)
         expect(fixture.calls.renderPasses[0].descriptor.colorAttachments[0]).to.deep.equal({
             view: fixture.calls.textureViews[0],
@@ -245,7 +249,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .render(pass, [ draw ])
 
-        fixture.renderTarget.resize([ 32, 16 ])
+        fixture.renderTarget.resize([ 32, 16, 3 ])
         const replacementTexture = fixture.renderTarget.gpuTexture
         const submitted = builder.submit()
 
@@ -255,6 +259,11 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(previousTexture.destroyed).to.equal(true)
         expect(fixture.calls.textureViews).to.have.length(1)
         expect(fixture.calls.textureViews[0].texture).to.equal(replacementTexture)
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({
+            dimension: '2d',
+            mipLevelCount: 1,
+            arrayLayerCount: 1,
+        })
         expect(fixture.calls.renderPasses[0].descriptor.colorAttachments[0].view)
             .to.equal(fixture.calls.textureViews[0])
         expect(fixture.renderTarget.allocationVersion).to.equal(2)
@@ -268,6 +277,33 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         })
 
         await submitted.done
+    })
+
+    it('rejects a stale color attachment layer before encoder creation', async() => {
+
+        const fixture = await createRenderTargetScene()
+        fixture.renderTarget.resize([ 64, 64, 3 ])
+        const pass = fixture.runtime.createRenderPass({
+            color: [ {
+                target: fixture.renderTarget,
+                viewDescriptor: { baseArrayLayer: 2 },
+            } ],
+        })
+        fixture.renderTarget.resize([ 64, 64, 1 ])
+
+        await expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [ fixture.draw ])
+            .submit(), {
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.textureViews).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+        expect(fixture.renderTarget.contentEpoch).to.equal(0)
+        expect(fixture.renderTarget.state).to.equal('empty')
     })
 
     it('advances TextureResource contentEpoch after render attachment writes', async() => {

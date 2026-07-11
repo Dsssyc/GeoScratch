@@ -181,6 +181,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const bindGroup = fixture.bindSet.getBindGroup()
 
         expect(fixture.calls.bindGroups).to.have.length(1)
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({ dimension: '2d' })
         expect(fixture.calls.bindGroups[0]).to.equal(bindGroup)
         expect(fixture.calls.bindGroups[0].descriptor.entries).to.deep.equal([
             {
@@ -192,6 +193,64 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
                 resource: fixture.sampler.gpuSampler,
             },
         ])
+    })
+
+    it('keeps a default 2d binding valid after array-layer growth', async() => {
+
+        const fixture = await createTextureFixture()
+        const firstBindGroup = fixture.bindSet.getBindGroup()
+
+        fixture.texture.resize([ 2, 2, 3 ])
+        const secondBindGroup = fixture.bindSet.getBindGroup()
+
+        expect(secondBindGroup).to.not.equal(firstBindGroup)
+        expect(fixture.calls.textureViews.map(view => view.descriptor)).to.deep.equal([
+            { dimension: '2d' },
+            { dimension: '2d' },
+        ])
+        expect(fixture.calls.textureViews[1].texture).to.equal(fixture.texture.gpuTexture)
+        expect(fixture.calls.bindGroups).to.have.length(2)
+    })
+
+    it('revalidates bind-layout view dimensions after array-layer resize', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const texture = runtime.createTexture({
+            size: [ 2, 2, 6 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const layout = runtime.createBindLayout({
+            group: 0,
+            entries: [ {
+                binding: 0,
+                name: 'cubeTexture',
+                type: 'texture',
+                visibility: [ 'fragment' ],
+                viewDimension: 'cube',
+            } ],
+        })
+        const bindSet = runtime.createBindSet(layout, { cubeTexture: texture })
+        bindSet.getBindGroup()
+        const bindGroupCount = fake.calls.bindGroups.length
+        const viewCount = fake.calls.textureViews.length
+
+        texture.resize([ 2, 2, 5 ])
+
+        try {
+            bindSet.getBindGroup()
+            throw new Error('expected current cube view validation to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+        expect(fake.calls.textureViews).to.have.length(viewCount)
+        expect(fake.calls.bindGroups).to.have.length(bindGroupCount)
     })
 
     it('uploads CPU pixel data into textures through an explicit writeTexture command', async() => {

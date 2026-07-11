@@ -237,9 +237,13 @@ describe('scratch texture resize', () => {
             [ 1.5, 1 ],
             [ Number.NaN, 1 ],
             [ 1, 0 ],
+            [ 1, null ],
             [ 1, 1, -1 ],
+            [ 1, 1, null ],
             { width: 0 },
             { width: 1, height: Number.NaN },
+            { width: 1, height: null },
+            { width: 1, depthOrArrayLayers: null },
             null,
             '8x8',
         ]
@@ -333,6 +337,9 @@ describe('scratch texture resize', () => {
             { usage: transientUsage, viewFormats: [ 'rgba8unorm-srgb' ] },
             { usage: transientUsage, mipLevelCount: 2 },
             { usage: transientUsage, size: [ 8, 8, 2 ] },
+            { usage: transientUsage, dimension: null },
+            { usage: transientUsage, mipLevelCount: null },
+            { usage: transientUsage, sampleCount: null },
         ]
 
         for (const descriptor of invalidDescriptors) {
@@ -401,6 +408,8 @@ describe('scratch texture resize', () => {
         const fixture = await createFixture()
         const facts = captureTextureFacts(fixture.texture)
 
+        expect(Object.isExtensible(fixture.texture)).to.equal(false)
+
         for (const [ key, value ] of [
             [ 'runtime', {} ],
             [ 'id', 'forged-resource-id' ],
@@ -427,7 +436,49 @@ describe('scratch texture resize', () => {
             }).to.throw(TypeError)
         }
 
+        for (const [ key, value ] of [
+            [ 'allocationVersion', 99 ],
+            [ 'contentEpoch', 99 ],
+            [ 'state', 'ready' ],
+            [ 'gpuTexture', {} ],
+            [ 'width', 99 ],
+        ]) {
+            expect(() => Object.defineProperty(fixture.texture, key, { value })).to.throw(TypeError)
+        }
+        expect(() => Object.setPrototypeOf(fixture.texture, {})).to.throw(TypeError)
+        expect(Object.isFrozen(TextureResource.prototype)).to.equal(true)
+        const resourcePrototype = Object.getPrototypeOf(TextureResource.prototype)
+        expect(Object.isFrozen(resourcePrototype)).to.equal(true)
+        expect(() => Object.defineProperty(
+            TextureResource.prototype,
+            'allocationVersion',
+            { value: 99 }
+        )).to.throw(TypeError)
+        expect(() => Object.defineProperty(
+            resourcePrototype,
+            'allocationVersion',
+            { value: 99 }
+        )).to.throw(TypeError)
+
         expectTextureFacts(fixture.texture, facts)
+    })
+
+    it('rejects subclass construction that could override logical facts', async() => {
+
+        const fixture = await createFixture()
+        class ForgedTextureResource extends TextureResource {
+
+            get allocationVersion() {
+
+                return 99
+            }
+        }
+
+        expect(() => new ForgedTextureResource(fixture.runtime, {
+            size: [ 1, 1 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })).to.throw(TypeError, 'does not support subclass construction')
     })
 
     it('does not expose an alternate allocation transition on the resource object', async() => {
@@ -441,11 +492,36 @@ describe('scratch texture resize', () => {
         expect(fixture.texture._physicalDescriptor).to.equal(undefined)
         expect(fixture.texture._viewCache).to.equal(undefined)
 
-        fixture.texture._gpuTexture = {}
-        fixture.texture._physicalDescriptor = {}
-        fixture.texture._viewCache = new Map()
+        for (const [ key, value ] of [
+            [ '_gpuTexture', {} ],
+            [ '_physicalDescriptor', {} ],
+            [ '_viewCache', new Map() ],
+        ]) {
+            expect(() => {
+                fixture.texture[key] = value
+            }).to.throw(TypeError)
+        }
 
         expectTextureFacts(fixture.texture, facts)
+    })
+
+    it('revalidates texture view ranges against the current allocation', async() => {
+
+        const fixture = await createFixture({ size: [ 8, 8, 3 ] })
+        fixture.texture.createView({ dimension: '2d', baseArrayLayer: 2 })
+        const viewCount = fixture.calls.textureViews.length
+
+        fixture.texture.resize([ 8, 8, 1 ])
+
+        expectDiagnostic(
+            () => fixture.texture.createView({ dimension: '2d', baseArrayLayer: 2 }),
+            'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+        )
+        expectDiagnostic(
+            () => fixture.texture.createView({ dimension: 'cube-array', arrayLayerCount: 1n }),
+            'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+        )
+        expect(fixture.calls.textureViews).to.have.length(viewCount)
     })
 
     it('invalidates cached views and lazily rebuilds one bind group', async() => {

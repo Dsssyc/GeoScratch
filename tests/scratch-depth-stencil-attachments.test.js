@@ -169,8 +169,8 @@ describe('scratch depth/stencil render attachments', () => {
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .render(pass, [ draw ])
 
-        fixture.colorTarget.resize([ 32, 32 ])
-        fixture.depthTarget.resize([ 32, 32 ])
+        fixture.colorTarget.resize([ 32, 32, 3 ])
+        fixture.depthTarget.resize([ 32, 32, 3 ])
         const replacementColorTexture = fixture.colorTarget.gpuTexture
         const replacementDepthTexture = fixture.depthTarget.gpuTexture
         const submitted = builder.submit()
@@ -182,6 +182,16 @@ describe('scratch depth/stencil render attachments', () => {
         expect(fixture.calls.textureViews).to.have.length(2)
         expect(fixture.calls.textureViews[0].texture).to.equal(replacementColorTexture)
         expect(fixture.calls.textureViews[1].texture).to.equal(replacementDepthTexture)
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({
+            dimension: '2d',
+            mipLevelCount: 1,
+            arrayLayerCount: 1,
+        })
+        expect(fixture.calls.textureViews[1].descriptor).to.deep.equal({
+            dimension: '2d',
+            mipLevelCount: 1,
+            arrayLayerCount: 1,
+        })
         expect(fixture.calls.renderPasses[0].descriptor.colorAttachments[0].view)
             .to.equal(fixture.calls.textureViews[0])
         expect(fixture.calls.renderPasses[0].descriptor.depthStencilAttachment.view)
@@ -197,6 +207,26 @@ describe('scratch depth/stencil render attachments', () => {
         ])
 
         await submitted.done
+    })
+
+    it('rejects mismatched current attachment extents before encoder creation', async() => {
+
+        const fixture = await createDepthFixture()
+        fixture.colorTarget.resize([ 32, 32 ])
+
+        await expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ fixture.draw ])
+            .submit(), {
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.textureViews).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+        expect(fixture.colorTarget.contentEpoch).to.equal(0)
+        expect(fixture.depthTarget.contentEpoch).to.equal(0)
     })
 
     it('lowers stencil fields for stencil-capable depth/stencil formats', async() => {

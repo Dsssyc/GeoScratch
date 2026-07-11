@@ -235,6 +235,8 @@ async function main() {
         paddedBytesPerRow,
         expectedTexel
     )
+    const replacementTextureAccesses = replacementWork.resourceAccesses
+        .filter(access => access.resourceId === texture.id)
     const checks = {
         resourceIdUnchanged: texture.id === initialResourceId,
         gpuTextureChanged: replacementTexture !== initialTexture,
@@ -256,9 +258,10 @@ async function main() {
             access.resourceId === texture.id &&
             access.allocationVersion === initialAllocationVersion
         )),
-        replacementLedgerUsesCurrentAllocation: replacementWork.resourceAccesses
-            .filter(access => access.resourceId === texture.id)
-            .every(access => access.allocationVersion === allocationVersionAfterResize),
+        replacementLedgerUsesCurrentAllocation:
+            replacementTextureAccesses.length > 0 &&
+            replacementTextureAccesses
+                .every(access => access.allocationVersion === allocationVersionAfterResize),
     }
     const failedChecks = Object.entries(checks)
         .filter(([, passed ]) => !passed)

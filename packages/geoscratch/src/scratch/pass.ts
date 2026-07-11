@@ -1,7 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { QuerySetResource } from './query-set.js'
-import { TextureResource } from './texture.js'
+import { TextureResource, prepareTextureViewDescriptor } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -60,6 +60,13 @@ export type RenderPassSpecDescriptor = {
 export type ComputePassSpecDescriptor = {
     label?: string
     timestampWrites?: TimestampWritesSpec
+}
+
+type RenderAttachmentExtent = {
+    subject: DiagnosticSubject
+    width: number
+    height: number
+    sampleCount: number
 }
 
 export interface RenderPassSpec {
@@ -504,7 +511,7 @@ function createColorAttachmentView(attachment: RenderPassColorAttachmentSpec): G
 
     const target = attachment.target
     if (target instanceof TextureResource) {
-        return target.createView(attachment.viewDescriptor)
+        return target.createView(renderAttachmentViewDescriptor(attachment.viewDescriptor))
     }
 
     return target.getCurrentTexture().createView(attachment.viewDescriptor)
@@ -619,7 +626,7 @@ function createDepthStencilAttachmentDescriptor(
 ): GPURenderPassDepthStencilAttachment {
 
     const descriptor: GPURenderPassDepthStencilAttachment = {
-        view: attachment.target.createView(attachment.viewDescriptor),
+        view: attachment.target.createView(renderAttachmentViewDescriptor(attachment.viewDescriptor)),
     }
     if (attachment.depthLoad !== undefined) descriptor.depthLoadOp = attachment.depthLoad
     if (attachment.depthStore !== undefined) descriptor.depthStoreOp = attachment.depthStore
@@ -629,6 +636,142 @@ function createDepthStencilAttachmentDescriptor(
     if (attachment.stencilClear !== undefined) descriptor.stencilClearValue = attachment.stencilClear
 
     return descriptor
+}
+
+export function validateRenderPassAttachments(pass: RenderPassSpec): void {
+
+    pass.assertUsable()
+    const extents: RenderAttachmentExtent[] = []
+    for (const attachment of pass.color) {
+        if (attachment.target instanceof TextureResource) {
+            const descriptor = validateRenderAttachmentView(
+                pass,
+                attachment.target,
+                attachment.viewDescriptor
+            )
+            extents.push(textureRenderAttachmentExtent(attachment.target, descriptor))
+            continue
+        }
+
+        attachment.target.assertUsable()
+        extents.push({
+            subject: attachment.target.subject,
+            width: attachment.target.size.width,
+            height: attachment.target.size.height,
+            sampleCount: 1,
+        })
+    }
+    if (pass.depth !== undefined) {
+        const descriptor = validateRenderAttachmentView(
+            pass,
+            pass.depth.target,
+            pass.depth.viewDescriptor
+        )
+        extents.push(textureRenderAttachmentExtent(pass.depth.target, descriptor))
+    }
+
+    validateMatchingRenderAttachmentExtents(pass, extents)
+}
+
+function validateRenderAttachmentView(
+    pass: RenderPassSpec,
+    target: TextureResource,
+    descriptor?: GPUTextureViewDescriptor
+): GPUTextureViewDescriptor {
+
+    target.assertRuntime(pass.runtime)
+    const prepared = prepareTextureViewDescriptor(
+        target,
+        renderAttachmentViewDescriptor(descriptor)
+    )
+    if (
+        prepared.dimension !== '2d' ||
+        prepared.mipLevelCount !== 1 ||
+        prepared.arrayLayerCount !== 1
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject: target.subject,
+            related: [ pass.subject ],
+            message: 'Render attachment views must select exactly one 2D mip-level array layer.',
+            expected: {
+                viewDescriptor: {
+                    dimension: '2d',
+                    mipLevelCount: 1,
+                    arrayLayerCount: 1,
+                },
+            },
+            actual: { viewDescriptor: prepared },
+        })
+    }
+
+    return prepared
+}
+
+function textureRenderAttachmentExtent(
+    target: TextureResource,
+    descriptor: GPUTextureViewDescriptor
+): RenderAttachmentExtent {
+
+    const baseMipLevel = descriptor.baseMipLevel ?? 0
+    const divisor = 2 ** baseMipLevel
+    return {
+        subject: target.subject,
+        width: Math.max(1, Math.floor(target.width / divisor)),
+        height: Math.max(1, Math.floor(target.height / divisor)),
+        sampleCount: target.sampleCount,
+    }
+}
+
+function validateMatchingRenderAttachmentExtents(
+    pass: RenderPassSpec,
+    extents: RenderAttachmentExtent[]
+): void {
+
+    const expected = extents[0]
+    if (expected === undefined) return
+    if (extents.every(extent => (
+        extent.width === expected.width &&
+        extent.height === expected.height &&
+        extent.sampleCount === expected.sampleCount
+    ))) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+        severity: 'error',
+        phase: 'resource',
+        subject: pass.subject,
+        related: extents.map(extent => extent.subject),
+        message: 'Render pass attachments must have matching current render extents and sample counts.',
+        expected: {
+            renderExtent: {
+                width: expected.width,
+                height: expected.height,
+                sampleCount: expected.sampleCount,
+            },
+        },
+        actual: {
+            renderExtents: extents.map(extent => ({
+                subject: extent.subject,
+                width: extent.width,
+                height: extent.height,
+                sampleCount: extent.sampleCount,
+            })),
+        },
+    })
+}
+
+function renderAttachmentViewDescriptor(
+    descriptor?: GPUTextureViewDescriptor
+): GPUTextureViewDescriptor {
+
+    const normalized = { ...descriptor }
+    if (normalized.dimension === undefined) normalized.dimension = '2d'
+    if (normalized.mipLevelCount === undefined) normalized.mipLevelCount = 1
+    if (normalized.arrayLayerCount === undefined) normalized.arrayLayerCount = 1
+    return normalized
 }
 
 function validateTextureDepthStencilAttachmentUsage(pass: RenderPassSpec, texture: TextureResource) {

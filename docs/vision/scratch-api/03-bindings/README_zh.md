@@ -68,7 +68,7 @@ const terrainSet = scratch.bindSet(terrainLayout, {
 
 `BindSet` 不会仅因已绑定 resource 的 `contentEpoch` 改变而重建。内容变化影响 dependency validation 与 readback，不代表 physical binding target 变化。
 
-`TextureResource.resize()` 让这一区别成为可观察事实。size-changing resize 后第一次使用时，`BindSet` 会比较新的 `allocationVersion`，从当前 texture 获取 view，并创建 exactly one replacement bind group。此 allocation 的后续使用会复用它。只改变 content 的写入不会重建；normalized same-size resize 不改变任何 version，因此也不重建。
+`TextureResource.resize()` 让这一区别成为可观察事实。size-changing resize 后第一次使用时，`BindSet` 会比较新的 `allocationVersion`，从 bind layout 的显式 view dimension 派生 view，针对 current mip/layer extent 完成校验，并创建 exactly one replacement bind group。默认 layout dimension 是 `2d`，因此 array-layer 增长后仍选择单层，而不会静默变成 `2d-array` view。不兼容的 cube、array、mip 或 layer selection 会在 native bind-group creation 前失败。此 allocation 的后续使用会复用该 group。只改变 content 的写入不会重建；normalized same-size resize 不改变任何 version，因此也不重建。
 
 Raw `GPUTextureView` 是 allocation-scoped。Texture allocation 变化时，Scratch 会使自身 view cache 失效；但应用代码独立保留的 raw view 已过期，不能通过 `BindSet` 修复。
 

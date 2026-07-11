@@ -444,30 +444,34 @@ describe('scratch external image upload', () => {
 
     it('rejects target usage, shape, sample count, mip, origin, layer, and format violations', async() => {
 
-        for (const [ options, mutation, reason ] of [
-            [ { usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT }, undefined, 'target-usage' ],
-            [ { usage: GPU_TEXTURE_USAGE_COPY_DST }, undefined, 'target-usage' ],
-            [ {}, target => {
-                Object.defineProperty(target, 'dimension', { value: '3d' })
-            }, 'target-dimension' ],
+        for (const [ options, reason ] of [
+            [ { usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT }, 'target-usage' ],
+            [ { usage: GPU_TEXTURE_USAGE_COPY_DST }, 'target-usage' ],
             [ {
                 sampleCount: 4,
                 mipLevelCount: 1,
                 targetSize: { width: 8, height: 8, depthOrArrayLayers: 1 },
-            }, undefined, 'target-sample-count' ],
-            [ { format: 'rgba8snorm' }, undefined, 'target-format' ],
-            [ { format: 'rgba8uint' }, undefined, 'target-format' ],
-            [ { format: 'depth24plus' }, undefined, 'target-format' ],
-            [ { format: 'rgb9e5ufloat' }, undefined, 'target-format' ],
+            }, 'target-sample-count' ],
+            [ { format: 'rgba8snorm' }, 'target-format' ],
+            [ { format: 'rgba8uint' }, 'target-format' ],
+            [ { format: 'depth24plus' }, 'target-format' ],
+            [ { format: 'rgb9e5ufloat' }, 'target-format' ],
         ]) {
             const fixture = await createFixture(options)
-            mutation?.(fixture.target)
             expectDiagnostic(
                 () => createCommand(fixture),
                 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
                 reason
             )
         }
+
+        const dimensionFixture = await createFixture()
+        expectDiagnostic(() => dimensionFixture.runtime.createTexture({
+            size: [ 8, 8 ],
+            dimension: '3d',
+            format: 'rgba8unorm',
+            usage: externalUploadUsage(),
+        }), 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
 
         const fixture = await createFixture()
         for (const [ descriptor, reason ] of [

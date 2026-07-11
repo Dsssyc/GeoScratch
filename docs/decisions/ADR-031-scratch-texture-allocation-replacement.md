@@ -81,19 +81,22 @@ The normalized size and the materialized `viewFormats` iterable are immutable
 snapshots. Caller mutation after construction cannot change a later physical
 replacement. Stable identity, descriptor, lifecycle, version, physical
 texture, and view-cache state use ECMAScript-private backing slots and are
-exposed only through read-only getters. `gpuTexture` may return a different
-identity after resize but cannot be assigned by a caller. Allocation and
-content transition functions remain module-internal and are absent from both
-package entrypoints, so `TextureResource.resize()` is the only public texture
-replacement path.
+exposed only through read-only getters. Concrete `TextureResource` handles are
+non-extensible and reject subclass construction, so own-property or prototype
+shadowing cannot counterfeit those getters. `gpuTexture` may return a
+different identity after resize but cannot be assigned by a caller.
+Allocation and content transition functions remain module-internal and are
+absent from both package entrypoints, so `TextureResource.resize()` is the
+only public texture replacement path.
 
 ### Deterministic validation
 
 Before replacement, Scratch validates the requested size grammar, positive
 integer dimensions, device 2D dimension and layer limits, retained mip-level
 validity, retained sample-count constraints, transient-attachment descriptor
-constraints, and format block dimensions. It also validates the resource,
-runtime, device lifecycle, and native `createTexture()` capability.
+constraints, and format block dimensions. Only `undefined` optional size
+members receive WebGPU defaults; `null` is invalid input. It also validates the
+resource, runtime, device lifecycle, and native `createTexture()` capability.
 
 Deterministic size failures use
 `SCRATCH_RESOURCE_DESCRIPTOR_INVALID`. A synchronous exception thrown directly
@@ -145,11 +148,15 @@ Cached `GPUTextureView` objects are allocation-scoped and are discarded on
 replacement. A raw view retained by application code remains stale and Scratch
 does not attempt to repair it.
 
-`BindSet` compares resource allocation versions and lazily builds one new bind
-group on next use. Render attachments create views from the current texture at
-submission time. Upload, external-image upload, and all texture-copy directions
-lower against the current physical texture and revalidate current mip, origin,
-extent, and layer ranges before a queue side effect.
+`BindSet` compares resource allocation versions, derives the replacement view
+from the bind layout's explicit view dimension, revalidates that view against
+the current mip/layer extent, and lazily builds one new bind group on next use.
+Render attachments preflight their current view before command encoder
+creation and explicitly select one 2D mip-level array layer from the current
+texture. All attachments in the pass must also retain matching current render
+extents and sample counts. Upload, external-image upload, and all texture-copy
+directions lower against the current physical texture and revalidate current
+mip, origin, extent, and layer ranges before a queue side effect.
 
 Stable pass and command objects survive because they retain logical resources.
 Readiness and required-epoch validation treat a replacement as empty even
@@ -214,7 +221,8 @@ allocation-scoped lifetime.
 - Complete descriptor retention becomes a required invariant for every
   replacement.
 - Logical identity, provenance, and physical allocation state cannot be
-  rewritten through public fields or an upcast to `Resource`.
+  rewritten through public fields, getter shadowing, subclass construction, or
+  an upcast to `Resource`.
 - Allocation and content history remain factually separate.
 - Existing binding, pass, transfer, readback, and ledger paths must prove that
   they resolve or validate the current allocation at use time.

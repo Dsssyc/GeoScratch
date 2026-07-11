@@ -103,7 +103,7 @@ Submission 职责:
 
 ### 构造与提交之间的 Resize
 
-`TextureResource.resize()` does not add a submission step。它是 immediate resource allocation lifecycle，不是 queue work。`SubmissionBuilder` 保存逻辑 pass、command 与 resource reference；若 texture 在 builder 构造后、`.submit()` 前 resize，preflight 与 encoding 会解析并校验 submission 时的 current allocation。
+`TextureResource.resize()` does not add a submission step。它是 immediate resource allocation lifecycle，不是 queue work。`SubmissionBuilder` 保存逻辑 pass、command 与 resource reference；若 texture 在 builder 构造后、`.submit()` 前 resize，preflight 与 encoding 会解析并校验 submission 时的 current allocation。Texture-backed color 与 depth/stencil attachment 会显式选择一个 `2d` mip-level array layer；过期的 mip/layer view descriptor，或不匹配的 current render extents/sample counts，都会在 command encoder creation 或 ledger mutation 前失败。
 
 Resize 自身不记录 resource access、producer epoch、command buffer、queue action 或 completion registration。replacement 虽然保留 `contentEpoch` 数值，但初始为 empty。后续 write 可以在同一 submission 中让它 ready，供更后的 read 使用；两份 ledger 此时都记录新的 `allocationVersion` 与下一个 `contentEpoch`。
 

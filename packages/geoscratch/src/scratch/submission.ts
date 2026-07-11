@@ -12,6 +12,7 @@ import {
     createScratchDiagnosticReport,
     throwScratchDiagnostic,
 } from './diagnostics.js'
+import { validateRenderPassAttachments } from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { TextureResource } from './texture.js'
@@ -2245,6 +2246,8 @@ function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
             actual: { passKind: passSpec.passKind },
         })
     }
+
+    validateRenderPassAttachments(passSpec)
 
     for (const command of step.commands) {
         if (!isRenderCommand(command)) {

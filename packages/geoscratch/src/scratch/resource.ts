@@ -207,3 +207,5 @@ export class Resource {
         this.runtime._unregisterResource(this)
     }
 }
+
+Object.freeze(Resource.prototype)

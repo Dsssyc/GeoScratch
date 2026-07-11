@@ -301,6 +301,7 @@ describe('examples structure', () => {
         expect(source).to.include('sameDrawCommandObject')
         expect(source).to.include('oldTextureDestroyed')
         expect(source).to.include('exactReadbackBytesMatched')
+        expect(source).to.include('replacementTextureAccesses.length > 0')
         expect(source).to.include("dataset.status = failedChecks.length === 0 ? 'passed' : 'failed'")
         expect(source).to.not.match(/ResizeObserver|sizeProvider|getImageData|writeTexture/)
         expect(source).to.not.match(/https?:\/\//)
