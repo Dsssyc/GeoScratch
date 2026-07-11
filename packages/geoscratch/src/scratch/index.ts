@@ -17,12 +17,31 @@ export type {
     GpuOperationStatus,
     ScratchGpuIncidentEvidenceCompleteness,
     ScratchGpuIncidentKind,
+    ScratchGpuIncidentFailureStage,
+    ScratchGpuIncidentOutcome,
+    ScratchGpuIncidentTarget,
     ScratchGpuIncidentReport,
     ScratchGpuOperationRecord,
+    ScratchGpuOperationTarget,
+    ScratchGpuPipelineOperationRecord,
+    ScratchGpuPipelineOperationTarget,
     ScratchGpuPressureContributor,
     ScratchGpuPressureEvidence,
+    ScratchGpuResourceOperationRecord,
+    ScratchGpuResourceOperationTarget,
+    ScratchGpuRuntimeIncidentTarget,
+    ScratchPipelineNativeLabelEvidence,
+    ScratchPipelineNativeLabelFact,
     ScratchNativeGpuErrorFacts,
 } from './gpu-operation.js'
+export type {
+    PipelineCompilationMessage,
+    PipelineCompilationModuleFact,
+    PipelineCompilationModuleLocation,
+    PipelineCompilationNativeLocation,
+    PipelineCompilationReport,
+    PipelineKind,
+} from './pipeline-compilation.js'
 export { ScratchRuntime } from './runtime.js'
 export { ScratchDiagnosticCapture, ScratchRuntimeDiagnostics } from './runtime-diagnostics.js'
 export type {
@@ -35,6 +54,7 @@ export type {
     ScratchRuntimeDiagnosticsOptions,
     ScratchRuntimeDiagnosticsEvidence,
     ScratchRuntimeDiagnosticsSnapshot,
+    ScratchRuntimePipelineFact,
     ScratchRuntimeResourceFact,
 } from './runtime-diagnostics.js'
 export { Surface } from './surface.js'

@@ -104,11 +104,14 @@ export async function createBufferResource(
     const controller = diagnosticsControllerFor(runtime)
     const operation = controller.beginOperation({
         kind: 'buffer-allocation',
-        resourceId: identity.id,
-        resourceKind: 'BufferResource',
-        allocationVersion: 1,
-        contentEpoch: 0,
-        logicalFootprintBytes: normalizedDescriptor.size,
+        target: {
+            kind: 'resource',
+            resourceId: identity.id,
+            resourceKind: 'BufferResource',
+            allocationVersion: 1,
+            contentEpoch: 0,
+            logicalFootprintBytes: normalizedDescriptor.size,
+        },
         descriptorSummary: {
             size: normalizedDescriptor.size,
             usage: normalizedDescriptor.usage,

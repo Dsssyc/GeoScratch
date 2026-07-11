@@ -207,11 +207,14 @@ export class TextureResource extends Resource {
         const controller = diagnosticsControllerFor(this.runtime)
         const operation = controller.beginOperation({
             kind: 'texture-replacement',
-            resourceId: this.id,
-            resourceKind: 'TextureResource',
-            allocationVersion: this.allocationVersion + 1,
-            contentEpoch: this.contentEpoch,
-            logicalFootprintBytes: footprint.bytes,
+            target: {
+                kind: 'resource',
+                resourceId: this.id,
+                resourceKind: 'TextureResource',
+                allocationVersion: this.allocationVersion + 1,
+                contentEpoch: this.contentEpoch,
+                logicalFootprintBytes: footprint.bytes,
+            },
             descriptorSummary: textureDescriptorSummary(nextDescriptor),
             fullDescriptor: { ...nextDescriptor },
             nativeLabel,
@@ -295,11 +298,14 @@ export async function createTextureResource(
     const controller = diagnosticsControllerFor(runtime)
     const operation = controller.beginOperation({
         kind: 'texture-allocation',
-        resourceId: identity.id,
-        resourceKind: 'TextureResource',
-        allocationVersion: 1,
-        contentEpoch: 0,
-        logicalFootprintBytes: footprint.bytes,
+        target: {
+            kind: 'resource',
+            resourceId: identity.id,
+            resourceKind: 'TextureResource',
+            allocationVersion: 1,
+            contentEpoch: 0,
+            logicalFootprintBytes: footprint.bytes,
+        },
         descriptorSummary: textureDescriptorSummary(normalizedDescriptor),
         fullDescriptor: { ...normalizedDescriptor },
         nativeLabel,

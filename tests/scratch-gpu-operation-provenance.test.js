@@ -3,6 +3,7 @@ import {
     createGpuIncidentReport,
     createGpuOperationRecord,
     serializeNativeGpuError,
+    serializedEvidenceBytes,
 } from '../packages/geoscratch/dist/scratch/gpu-operation.js'
 import {
     diagnosticsControllerFor,
@@ -30,11 +31,14 @@ describe('scratch GPU operation provenance facts', () => {
             kind: 'buffer-allocation',
             status: 'succeeded',
             runtimeId: 'scratch-runtime-1',
-            resourceId: 'scratch-resource-1',
-            resourceKind: 'BufferResource',
-            allocationVersion: 1,
-            contentEpoch: 0,
-            logicalFootprintBytes: 4096,
+            target: {
+                kind: 'resource',
+                resourceId: 'scratch-resource-1',
+                resourceKind: 'BufferResource',
+                allocationVersion: 1,
+                contentEpoch: 0,
+                logicalFootprintBytes: 4096,
+            },
             descriptor: {
                 hash: 'buffer-4096-12',
                 summary: { size: 4096, usage: 12 },
@@ -45,17 +49,20 @@ describe('scratch GPU operation provenance facts', () => {
         })
 
         expect(record).to.deep.equal({
-            version: 1,
+            version: 2,
             sequence: 7,
             id: 'gpu-operation-7',
             kind: 'buffer-allocation',
             status: 'succeeded',
             runtimeId: 'scratch-runtime-1',
-            resourceId: 'scratch-resource-1',
-            resourceKind: 'BufferResource',
-            allocationVersion: 1,
-            contentEpoch: 0,
-            logicalFootprintBytes: 4096,
+            target: {
+                kind: 'resource',
+                resourceId: 'scratch-resource-1',
+                resourceKind: 'BufferResource',
+                allocationVersion: 1,
+                contentEpoch: 0,
+                logicalFootprintBytes: 4096,
+            },
             descriptor: {
                 hash: 'buffer-4096-12',
                 summary: { size: 4096, usage: 12 },
@@ -78,11 +85,14 @@ describe('scratch GPU operation provenance facts', () => {
             kind: 'texture-allocation',
             status: 'failed',
             runtimeId: 'scratch-runtime-1',
-            resourceId: 'scratch-resource-2',
-            resourceKind: 'TextureResource',
-            allocationVersion: 1,
-            contentEpoch: 0,
-            logicalFootprintBytes: 16_777_216,
+            target: {
+                kind: 'resource',
+                resourceId: 'scratch-resource-2',
+                resourceKind: 'TextureResource',
+                allocationVersion: 1,
+                contentEpoch: 0,
+                logicalFootprintBytes: 16_777_216,
+            },
             descriptor: {
                 hash: 'texture-1024',
                 summary: { width: 1024, height: 1024, format: 'rgba8unorm' },
@@ -96,7 +106,7 @@ describe('scratch GPU operation provenance facts', () => {
             nativeErrorCategory: 'out-of-memory',
             attribution: 'exact-operation',
             runtimeId: 'scratch-runtime-1',
-            resourceId: 'scratch-resource-2',
+            target: triggerOperation.target,
             operationId: triggerOperation.id,
             triggerOperation,
             nativeError: { name: 'GPUOutOfMemoryError', message: 'allocation failed' },
@@ -415,11 +425,11 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
         const oversizedInput = operationInput(2)
         const oversizedPending = controller.beginOperation({
             ...oversizedInput,
-            nativeLabel: `${'x'.repeat(100_000)} [scratch:${oversizedInput.resourceId}]`,
+            nativeLabel: `${'x'.repeat(100_000)} [scratch:${oversizedInput.target.resourceId}]`,
         })
         expect(oversizedPending.nativeLabel.length).to.be.at.most(256)
         expect(oversizedPending.nativeLabel.endsWith(
-            ` [scratch:${oversizedInput.resourceId}]`
+            ` [scratch:${oversizedInput.target.resourceId}]`
         )).to.equal(true)
         controller.completeOperation(oversizedPending, { status: 'succeeded' })
 
@@ -490,11 +500,11 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
                         diagnosticCode: 'SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED',
                         nativeErrorCategory: 'validation',
                         attribution: 'exact-operation',
-                        resourceId: record.resourceId,
+                        target: record.target,
                         operationId: record.id,
                         triggerOperation: record,
                         nativeError: { name: 'GPUValidationError', message: 'synthetic stress incident' },
-                        triggerLogicalFootprintBytes: record.logicalFootprintBytes,
+                        triggerLogicalFootprintBytes: record.target.logicalFootprintBytes,
                     })
                 }
             }
@@ -557,8 +567,11 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
         expect(pendingSnapshot.pendingOperations).to.have.length(1)
         expect(pendingSnapshot.pendingOperations[0]).to.deep.include({
             id: operation.id,
-            resourceId: 'candidate-buffer-0',
             kind: 'buffer-allocation',
+        })
+        expect(pendingSnapshot.pendingOperations[0].target).to.deep.include({
+            kind: 'resource',
+            resourceId: 'candidate-buffer-0',
         })
 
         controller.completeOperation(operation, { status: 'succeeded' })
@@ -711,7 +724,11 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         expect(runtime.diagnostics.operations()[0]).to.deep.include({
             kind: 'buffer-allocation',
             status: 'succeeded',
+        })
+        expect(runtime.diagnostics.operations()[0].target).to.deep.equal({
+            kind: 'resource',
             resourceId: buffer.id,
+            resourceKind: 'BufferResource',
             allocationVersion: 1,
             contentEpoch: 0,
             logicalFootprintBytes: 64,
@@ -761,7 +778,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         )
 
         const error = await rejectedDiagnostic(runtime.createBuffer({ label, size: 4, usage: 1 }))
-        const nativeSuffix = ` [scratch:${error.incident.resourceId}]`
+        const nativeSuffix = ` [scratch:${error.incident.target.resourceId}]`
         const serializedIncident = JSON.stringify(error.incident)
 
         expect(calls.buffers[0].descriptor.label).to.equal(`${label}${nativeSuffix}`)
@@ -769,6 +786,38 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         expect(error.incident.triggerOperation.nativeLabel.endsWith(nativeSuffix)).to.equal(true)
         expect(serializedIncident.length).to.be.lessThan(16_384)
         expect(serializedIncident).not.to.include(label)
+    })
+
+    it('links incidents into active and operation-limited capture records', async () => {
+
+        for (const maxOperations of [ 1, 2 ]) {
+            const { gpu, errors } = createFakeGpu()
+            const runtime = await ScratchRuntime.create({
+                gpu,
+                diagnostics: { operationCapacity: 0 },
+            })
+            const capture = runtime.diagnostics.capture({
+                maxOperations,
+                maxDurationMs: 1_000,
+                maxEvidenceBytes: 16_384,
+            })
+            errors.failNext(
+                'createBuffer',
+                'validation',
+                Object.assign(new Error('captured validation'), { name: 'GPUValidationError' })
+            )
+
+            const error = await rejectedDiagnostic(runtime.createBuffer({ size: 4, usage: 1 }))
+            const report = capture.stop()
+
+            expect(report.operations).to.have.length(1)
+            expect(report.operations[0].incidentId).to.equal(error.incident.id)
+            expect(report.retainedEvidenceBytes).to.be.at.most(16_384)
+            expect(report.retainedEvidenceBytes).to.equal(
+                serializedEvidenceBytes(report.operations[0])
+            )
+            expect(runtime.diagnostics.operations()).to.have.length(0)
+        }
     })
 
     it('attributes OOM to the trigger operation while preserving contributor caveats', async () => {
@@ -822,6 +871,9 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
 
         expect(disposal).to.deep.include({
             status: 'succeeded',
+        })
+        expect(disposal.target).to.deep.include({
+            kind: 'resource',
             resourceId: resident.id,
             resourceKind: 'BufferResource',
             logicalFootprintBytes: 32,
@@ -1048,6 +1100,9 @@ describe('TextureResource transactional replacement allocation', () => {
         expect(runtime.diagnostics.operations().at(-1)).to.deep.include({
             kind: 'texture-replacement',
             status: 'succeeded',
+        })
+        expect(runtime.diagnostics.operations().at(-1).target).to.deep.include({
+            kind: 'resource',
             allocationVersion: 2,
             contentEpoch: 1,
         })
@@ -1072,6 +1127,9 @@ describe('TextureResource transactional replacement allocation', () => {
         expect(failure.incident).to.deep.include({
             nativeErrorCategory: 'validation',
             attribution: 'exact-operation',
+        })
+        expect(failure.incident.target).to.deep.include({
+            kind: 'resource',
             resourceId: texture.id,
         })
         expect(texture.gpuTexture).to.equal(oldTexture)
@@ -1192,11 +1250,14 @@ function operationInput(index) {
 
     return {
         kind: 'buffer-allocation',
-        resourceId: `candidate-buffer-${index}`,
-        resourceKind: 'BufferResource',
-        allocationVersion: 1,
-        contentEpoch: 0,
-        logicalFootprintBytes: 64 + index,
+        target: {
+            kind: 'resource',
+            resourceId: `candidate-buffer-${index}`,
+            resourceKind: 'BufferResource',
+            allocationVersion: 1,
+            contentEpoch: 0,
+            logicalFootprintBytes: 64 + index,
+        },
         descriptorSummary: { size: 64 + index, usage: 1 },
         fullDescriptor: {
             label: `candidate ${index}`,

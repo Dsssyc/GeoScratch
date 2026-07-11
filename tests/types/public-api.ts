@@ -10,6 +10,10 @@ declare const typedVideoElement: HTMLVideoElement
 declare const typedVideoFrame: VideoFrame
 declare const typedCanvasElement: HTMLCanvasElement
 declare const typedOffscreenCanvas: OffscreenCanvas
+declare const typedPipelineCompilationReport: scr.PipelineCompilationReport
+const typedPendingOperationKind: scr.ScratchPendingGpuOperationFact['kind'] = 'buffer-allocation'
+// @ts-expect-error Disposal records are instantaneous and cannot be pending
+const invalidPendingOperationKind: scr.ScratchPendingGpuOperationFact['kind'] = 'resource-disposal'
 
 const startResult: Promise<GPUDevice | undefined> = scr.StartDash()
 const device: GPUDevice = scr.getDevice()
@@ -63,15 +67,37 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatDiagnosticsEvidence: scratchCompat.ScratchRuntimeDiagnosticsEvidence = diagnosticsEvidence
     const operationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
         kind: 'buffer-allocation',
+        targetKind: 'resource',
         sequenceFrom: 1,
     })
+    const pipelineOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+        kind: 'render-pipeline-creation',
+        targetKind: 'pipeline',
+        pipelineId: 'pipeline-id',
+    })
+    const operationTarget: scr.ScratchGpuOperationTarget | undefined = operationRecords[0]?.target
+    if (operationTarget?.kind === 'resource') {
+        const operationResourceId: string = operationTarget.resourceId
+        // @ts-expect-error Resource targets do not fabricate pipeline identity
+        operationTarget.pipelineId
+    }
+    if (pipelineOperationRecords[0]?.target.kind === 'pipeline') {
+        const operationPipelineId: string = pipelineOperationRecords[0].target.pipelineId
+        // @ts-expect-error Pipeline targets do not fabricate allocation versions
+        pipelineOperationRecords[0].target.allocationVersion
+    }
     const disposalRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
         kind: 'resource-disposal',
     })
     const incidentRecords: readonly scr.ScratchGpuIncidentReport[] = diagnostics.incidents({
         kind: 'allocation-failure',
+        targetKind: 'resource',
         sequenceFrom: 1,
     })
+    const currentPipelineFacts: readonly scr.ScratchRuntimePipelineFact[] = diagnosticsSnapshot.pipelines
+    const evidenceSchemaVersion: 2 = diagnosticsEvidence.version
+    const snapshotSchemaVersion: 2 = diagnosticsSnapshot.version
+    const compatPipelineCompilationReport: scratchCompat.PipelineCompilationReport = typedPipelineCompilationReport
     const diagnosticCapture: scr.ScratchDiagnosticCapture = diagnostics.capture({
         maxOperations: 8,
         maxDurationMs: 100,

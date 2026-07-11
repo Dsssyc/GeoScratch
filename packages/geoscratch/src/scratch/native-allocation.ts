@@ -207,6 +207,10 @@ export function throwScopedAllocationFailure<T>(
 
     destroyNativeCandidate(outcome.candidate)
     const controller = diagnosticsControllerFor(runtime)
+    const target = operation.target
+    if (target.kind !== 'resource') {
+        throw new TypeError('Scoped allocation failure requires a resource operation target.')
+    }
 
     if (outcome.kind === 'device-lost') {
         const info = outcome.deviceLostInfo ?? runtime.deviceLostInfo ?? {
@@ -226,11 +230,11 @@ export function throwScopedAllocationFailure<T>(
             subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
             related: [
                 runtime.subject,
-                { kind: 'Resource', id: operation.resourceId, resourceKind: operation.resourceKind },
+                { kind: 'Resource', id: target.resourceId, resourceKind: target.resourceKind },
                 ...(incident !== undefined ? [ incident.subject ] : []),
             ],
             message: `GPU device was lost while ${operationName} was pending.`,
-            actual: { operationId: operation.id, resourceId: operation.resourceId },
+            actual: { operationId: operation.id, resourceId: target.resourceId },
         }, { ...(incident !== undefined ? { incident } : {}) })
     }
 
@@ -248,13 +252,13 @@ export function throwScopedAllocationFailure<T>(
         diagnosticCode: code,
         nativeErrorCategory,
         attribution: 'exact-operation',
-        resourceId: operation.resourceId,
+        target,
         operationId: operation.id,
         triggerOperation: record,
         ...(outcome.cause !== undefined
             ? { nativeError: serializeNativeGpuError(outcome.cause) }
             : {}),
-        triggerLogicalFootprintBytes: operation.logicalFootprintBytes,
+        triggerLogicalFootprintBytes: target.logicalFootprintBytes,
     })
 
     throwScratchDiagnostic({
@@ -264,13 +268,13 @@ export function throwScopedAllocationFailure<T>(
         subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
         related: [
             runtime.subject,
-            { kind: 'Resource', id: operation.resourceId, resourceKind: operation.resourceKind },
+            { kind: 'Resource', id: target.resourceId, resourceKind: target.resourceKind },
             incident.subject,
         ],
         message: failureMessage(outcome.kind, operationName),
         actual: {
             operationId: operation.id,
-            resourceId: operation.resourceId,
+            resourceId: target.resourceId,
             ...(outcome.cause !== undefined
                 ? { nativeError: serializeNativeGpuError(outcome.cause) }
                 : {}),

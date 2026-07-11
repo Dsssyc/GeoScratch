@@ -1,5 +1,6 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
+    assertGpuOperationTarget,
     boundedGpuOperationNativeLabel,
     createGpuDescriptorEvidence,
     createGpuIncidentReport,
@@ -15,11 +16,19 @@ import type {
     GpuOperationKind,
     GpuOperationStatus,
     ScratchGpuIncidentKind,
+    ScratchGpuIncidentFailureStage,
+    ScratchGpuIncidentOutcome,
     ScratchGpuIncidentReport,
     ScratchGpuOperationRecord,
+    ScratchGpuOperationTarget,
+    ScratchGpuPipelineOperationRecord,
+    ScratchGpuPipelineOperationTarget,
     ScratchGpuPressureEvidence,
+    ScratchGpuResourceOperationTarget,
+    ScratchPipelineNativeLabelEvidence,
     ScratchNativeGpuErrorFacts,
 } from './gpu-operation.js'
+import type { PipelineCompilationReport, PipelineKind } from './pipeline-compilation.js'
 import type { Resource, ResourceState } from './resource.js'
 
 const DEFAULT_OPERATION_CAPACITY = 256
@@ -31,8 +40,14 @@ const DEFAULT_MAX_ACTIVE_CAPTURES = 4
 const DEFAULT_CAPTURE_MAX_OPERATIONS = 128
 const DEFAULT_CAPTURE_MAX_DURATION_MS = 5_000
 const DEFAULT_CAPTURE_MAX_EVIDENCE_BYTES = 256 * 1024
+const CAPTURE_INCIDENT_LINK_RESERVE_BYTES = 256
 const diagnosticsFacadeToken = Symbol('ScratchRuntimeDiagnostics')
 const diagnosticCaptureToken = Symbol('ScratchDiagnosticCapture')
+
+export type ScratchPendingGpuOperationKind = Exclude<
+    GpuOperationKind,
+    'resource-disposal' | 'pipeline-disposal'
+>
 
 export type ScratchRuntimeDiagnosticsOptions = Readonly<{
     operationCapacity?: number
@@ -69,18 +84,35 @@ export type ScratchRuntimeResourceFact = Readonly<{
 export type ScratchPendingGpuOperationFact = Readonly<{
     id: string
     sequence: number
-    kind: GpuOperationKind
-    resourceId: string
-    resourceKind: 'BufferResource' | 'TextureResource'
-    allocationVersion: number
-    contentEpoch: number
-    logicalFootprintBytes: number
+    kind: ScratchPendingGpuOperationKind
+    target: ScratchGpuOperationTarget
     descriptorHash: string
     startedAtMs: number
 }>
 
+export type ScratchRuntimePipelineFact = Readonly<{
+    id: string
+    label?: string
+    pipelineKind: PipelineKind
+    programId: string
+    programSourceHash: string
+    descriptorHash: string
+    state: 'ready'
+    lastCreationOperationId: string
+    compilation: Readonly<{
+        errorCount: number
+        warningCount: number
+        infoCount: number
+    }>
+}>
+
+export type ScratchRuntimePipelineRegistration = Readonly<{
+    label?: string
+    creationOperation: ScratchGpuPipelineOperationRecord
+}>
+
 export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
-    version: 1
+    version: 2
     runtime: Readonly<{
         id: string
         label?: string
@@ -88,6 +120,7 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
         isDeviceLost: boolean
     }>
     resources: readonly ScratchRuntimeResourceFact[]
+    pipelines: readonly ScratchRuntimePipelineFact[]
     pendingOperations: readonly ScratchPendingGpuOperationFact[]
     pressure: Readonly<{
         currentScratchLogicalFootprintBytes: number
@@ -113,6 +146,11 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
         nativeFailures: number
         scopeFailures: number
         cancelledAllocations: number
+        pipelineCreationAttempts: number
+        successfulPipelineCreations: number
+        failedPipelineCreations: number
+        cancelledPipelineCreations: number
+        pipelineDisposals: number
         uncapturedErrors: number
         deviceLosses: number
     }>
@@ -123,7 +161,7 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
 }>
 
 export type ScratchRuntimeDiagnosticsEvidence = Readonly<{
-    version: 1
+    version: 2
     snapshot: ScratchRuntimeDiagnosticsSnapshot
     operations: readonly ScratchGpuOperationRecord[]
     incidents: readonly ScratchGpuIncidentReport[]
@@ -132,6 +170,8 @@ export type ScratchRuntimeDiagnosticsEvidence = Readonly<{
 export type ScratchGpuOperationQuery = Readonly<{
     operationId?: string
     resourceId?: string
+    pipelineId?: string
+    targetKind?: ScratchGpuOperationTarget['kind']
     kind?: GpuOperationKind
     status?: GpuOperationStatus
     sequenceFrom?: number
@@ -142,6 +182,8 @@ export type ScratchGpuIncidentQuery = Readonly<{
     incidentId?: string
     operationId?: string
     resourceId?: string
+    pipelineId?: string
+    targetKind?: 'resource' | 'pipeline' | 'runtime'
     kind?: ScratchGpuIncidentKind
     sequenceFrom?: number
     sequenceTo?: number
@@ -171,7 +213,7 @@ export type ScratchDiagnosticCaptureStopReason =
     | 'runtime-disposed'
 
 export type ScratchDiagnosticCaptureReport = Readonly<{
-    version: 1
+    version: 2
     id: string
     runtimeId: string
     stopReason: ScratchDiagnosticCaptureStopReason
@@ -183,12 +225,8 @@ export type ScratchDiagnosticCaptureReport = Readonly<{
 }>
 
 export type ScratchGpuOperationStart = Readonly<{
-    kind: GpuOperationKind
-    resourceId: string
-    resourceKind: 'BufferResource' | 'TextureResource'
-    allocationVersion: number
-    contentEpoch: number
-    logicalFootprintBytes: number
+    kind: ScratchPendingGpuOperationKind
+    target: ScratchGpuOperationTarget
     descriptorSummary: Record<string, unknown>
     fullDescriptor: Record<string, unknown>
     nativeLabel?: string
@@ -198,12 +236,8 @@ export type ScratchPendingGpuOperation = Readonly<{
     id: string
     sequence: number
     runtimeId: string
-    kind: GpuOperationKind
-    resourceId: string
-    resourceKind: 'BufferResource' | 'TextureResource'
-    allocationVersion: number
-    contentEpoch: number
-    logicalFootprintBytes: number
+    kind: ScratchPendingGpuOperationKind
+    target: ScratchGpuOperationTarget
     descriptor: GpuDescriptorEvidence
     fullDescriptor?: GpuDescriptorEvidence
     nativeLabel?: string
@@ -215,6 +249,8 @@ export type ScratchGpuOperationCompletion = Readonly<{
     status: Exclude<GpuOperationStatus, 'pending'>
     nativeErrorCategory?: GpuNativeErrorCategory
     incidentId?: string
+    nativeLabels?: ScratchPipelineNativeLabelEvidence
+    compilationReport?: PipelineCompilationReport
 }>
 
 export type ScratchGpuIncidentInput = Readonly<{
@@ -222,11 +258,15 @@ export type ScratchGpuIncidentInput = Readonly<{
     diagnosticCode: string
     nativeErrorCategory: GpuNativeErrorCategory
     attribution: GpuAttributionConfidence
-    resourceId?: string
+    target?: ScratchGpuOperationTarget
     operationId?: string
     triggerOperation?: ScratchGpuOperationRecord
     nativeError?: ScratchNativeGpuErrorFacts
     triggerLogicalFootprintBytes?: number
+    failureStage?: ScratchGpuIncidentFailureStage
+    pipelineErrorReason?: GPUPipelineErrorReason
+    compilationReport?: PipelineCompilationReport
+    outcomes?: readonly ScratchGpuIncidentOutcome[]
 }>
 
 type RuntimeDiagnosticsOwner = {
@@ -255,6 +295,7 @@ type CaptureState = {
     options: NormalizedScratchDiagnosticCaptureOptions
     operations: ScratchGpuOperationRecord[]
     retainedEvidenceBytes: number
+    budgetedEvidenceBytes: number
     omittedOperations: number
     startedAtMs: number
     timer: ReturnType<typeof setTimeout> | undefined
@@ -343,10 +384,14 @@ export class ScratchRuntimeDiagnosticsController {
     #options: NormalizedScratchRuntimeDiagnosticsOptions
     #facade: ScratchRuntimeDiagnostics
     #resourceFacts = new Map<string, ScratchRuntimeResourceFact>()
+    #pipelineFacts = new Map<string, ScratchRuntimePipelineFact>()
     #pendingOperations = new Map<string, ScratchPendingGpuOperation>()
+    #completedOperations = new WeakSet<ScratchGpuOperationRecord>()
+    #registeredPipelineCreations = new WeakSet<ScratchGpuPipelineOperationRecord>()
     #operations: RetainedEvidence<ScratchGpuOperationRecord>[] = []
     #incidents: RetainedEvidence<ScratchGpuIncidentReport>[] = []
     #captures = new Set<ScratchDiagnosticCapture>()
+    #linkableStoppedCaptures = new Set<ScratchDiagnosticCapture>()
     #operationSequence = 0
     #incidentSequence = 0
     #captureSequence = 0
@@ -364,6 +409,11 @@ export class ScratchRuntimeDiagnosticsController {
         nativeFailures: 0,
         scopeFailures: 0,
         cancelledAllocations: 0,
+        pipelineCreationAttempts: 0,
+        successfulPipelineCreations: 0,
+        failedPipelineCreations: 0,
+        cancelledPipelineCreations: 0,
+        pipelineDisposals: 0,
         uncapturedErrors: 0,
         deviceLosses: 0,
     }
@@ -414,12 +464,14 @@ export class ScratchRuntimeDiagnosticsController {
 
         const resources = [ ...this.#resourceFacts.values() ]
             .sort((left, right) => left.id.localeCompare(right.id))
+        const pipelines = [ ...this.#pipelineFacts.values() ]
+            .sort((left, right) => left.id.localeCompare(right.id))
         const pendingOperations = [ ...this.#pendingOperations.values() ]
             .sort((left, right) => left.sequence - right.sequence)
             .map(operation => pendingFact(operation))
 
         return freezeEvidence({
-            version: 1,
+            version: 2,
             runtime: {
                 id: this.#owner.id,
                 ...(this.#owner.label !== undefined ? { label: boundedLabel(this.#owner.label) } : {}),
@@ -427,6 +479,7 @@ export class ScratchRuntimeDiagnosticsController {
                 isDeviceLost: this.#owner.isDeviceLost,
             },
             resources,
+            pipelines,
             pendingOperations,
             pressure: {
                 currentScratchLogicalFootprintBytes: this.#currentLogicalFootprintBytes,
@@ -479,7 +532,7 @@ export class ScratchRuntimeDiagnosticsController {
     exportEvidence(): ScratchRuntimeDiagnosticsEvidence {
 
         return freezeEvidence({
-            version: 1,
+            version: 2,
             snapshot: this.snapshot(),
             operations: this.operations(),
             incidents: this.incidents(),
@@ -488,6 +541,9 @@ export class ScratchRuntimeDiagnosticsController {
 
     beginOperation(input: ScratchGpuOperationStart): ScratchPendingGpuOperation {
 
+        const kind: unknown = input.kind
+        assertPendingGpuOperationKind(kind)
+        assertGpuOperationTarget(kind, input.target)
         const sequence = ++this.#operationSequence
         const id = `${this.#owner.id}/gpu-operation-${sequence}`
         const activeCaptureStates = [ ...this.#captures ]
@@ -495,17 +551,15 @@ export class ScratchRuntimeDiagnosticsController {
             .filter(state => state.isActive)
         const needsStack = activeCaptureStates.some(state => state.options.includeStacks)
         const needsFullDescriptor = activeCaptureStates.some(state => state.options.includeDescriptors)
-        const nativeLabel = boundedGpuOperationNativeLabel(input.nativeLabel, input.resourceId)
+        const target = freezeEvidence({ ...input.target })
+        const targetId = target.kind === 'resource' ? target.resourceId : target.pipelineId
+        const nativeLabel = boundedGpuOperationNativeLabel(input.nativeLabel, targetId)
         const operation: ScratchPendingGpuOperation = Object.freeze({
             id,
             sequence,
             runtimeId: this.#owner.id,
-            kind: input.kind,
-            resourceId: input.resourceId,
-            resourceKind: input.resourceKind,
-            allocationVersion: input.allocationVersion,
-            contentEpoch: input.contentEpoch,
-            logicalFootprintBytes: input.logicalFootprintBytes,
+            kind,
+            target,
             descriptor: createGpuDescriptorEvidence(input.descriptorSummary),
             ...(needsFullDescriptor ? {
                 fullDescriptor: createGpuDescriptorEvidence(
@@ -519,12 +573,19 @@ export class ScratchRuntimeDiagnosticsController {
         })
 
         this.#pendingOperations.set(id, operation)
-        this.#aggregates = {
-            ...this.#aggregates,
-            allocationAttempts: this.#aggregates.allocationAttempts + 1,
+        if (target.kind === 'resource') {
+            this.#aggregates = {
+                ...this.#aggregates,
+                allocationAttempts: this.#aggregates.allocationAttempts + 1,
+            }
+        } else {
+            this.#aggregates = {
+                ...this.#aggregates,
+                pipelineCreationAttempts: this.#aggregates.pipelineCreationAttempts + 1,
+            }
         }
-        if (input.kind === 'texture-replacement') {
-            this.#setPendingReplacement(input.resourceId, id)
+        if (kind === 'texture-replacement' && target.kind === 'resource') {
+            this.#setPendingReplacement(target.resourceId, id)
         }
 
         return operation
@@ -539,37 +600,42 @@ export class ScratchRuntimeDiagnosticsController {
             throw new TypeError(`GPU operation ${operation.id} is not pending on this runtime.`)
         }
 
-        this.#pendingOperations.delete(operation.id)
-        this.#clearPendingReplacement(operation.resourceId, operation.id)
-
         const baseInput = {
             sequence: operation.sequence,
             id: operation.id,
             kind: operation.kind,
             status: completion.status,
             runtimeId: operation.runtimeId,
-            resourceId: operation.resourceId,
-            resourceKind: operation.resourceKind,
-            allocationVersion: operation.allocationVersion,
-            contentEpoch: operation.contentEpoch,
-            logicalFootprintBytes: operation.logicalFootprintBytes,
+            target: operation.target,
             descriptor: operation.descriptor,
             ...(operation.nativeLabel !== undefined ? { nativeLabel: operation.nativeLabel } : {}),
             ...(completion.nativeErrorCategory !== undefined
                 ? { nativeErrorCategory: completion.nativeErrorCategory }
                 : {}),
             ...(completion.incidentId !== undefined ? { incidentId: completion.incidentId } : {}),
+            ...(completion.nativeLabels !== undefined ? { nativeLabels: completion.nativeLabels } : {}),
+            ...(completion.compilationReport !== undefined
+                ? { compilationReport: completion.compilationReport }
+                : {}),
             startedAtMs: operation.startedAtMs,
             settledAtMs: nowMs(),
         } as const
         const record = createGpuOperationRecord(baseInput)
 
+        this.#pendingOperations.delete(operation.id)
+        if (operation.target.kind === 'resource') {
+            this.#clearPendingReplacement(operation.target.resourceId, operation.id)
+        }
+        this.#completedOperations.add(record)
+
         this.#recordOperation(record)
         for (const capture of [ ...this.#captures ]) {
             acceptCaptureOperation(capture, operation, completion)
         }
-        this.#recordCompletionAggregate(completion)
-        if (completion.status === 'succeeded') this.linkResourceOperation(operation.resourceId, operation.id)
+        this.#recordCompletionAggregate(operation, completion)
+        if (completion.status === 'succeeded' && operation.target.kind === 'resource') {
+            this.linkResourceOperation(operation.target.resourceId, operation.id)
+        }
 
         return record
     }
@@ -577,27 +643,49 @@ export class ScratchRuntimeDiagnosticsController {
     linkOperationIncident(operationId: string, incidentId: string): void {
 
         const entry = this.#operations.find(item => item.value.id === operationId)
-        if (entry === undefined) return
-
-        const replacement = createGpuOperationRecord({ ...entry.value, incidentId })
-        const bytes = serializedEvidenceBytes(replacement)
-        this.#retainedEvidenceBytes += bytes - entry.bytes
-        entry.value = replacement
-        entry.bytes = bytes
-        this.#trimOperationEvidenceToBudget()
+        if (entry !== undefined) {
+            const replacement = createGpuOperationRecord({ ...entry.value, incidentId })
+            const bytes = serializedEvidenceBytes(replacement)
+            this.#retainedEvidenceBytes += bytes - entry.bytes
+            entry.value = replacement
+            entry.bytes = bytes
+            this.#trimOperationEvidenceToBudget()
+        }
+        for (const capture of new Set([
+            ...this.#captures,
+            ...this.#linkableStoppedCaptures,
+        ])) {
+            linkCaptureOperationIncident(capture, operationId, incidentId)
+        }
     }
 
     recordIncident(input: ScratchGpuIncidentInput): ScratchGpuIncidentReport {
 
         const sequence = ++this.#incidentSequence
         const id = `${this.#owner.id}/gpu-incident-${sequence}`
+        const target = input.target ?? freezeEvidence({
+            kind: 'runtime' as const,
+            runtimeId: this.#owner.id,
+        })
         const recentOperations = this.#recentOperations(input.operationId)
         const pendingOperations = [ ...this.#pendingOperations.values() ]
             .slice(0, this.#options.recentOperationLimit)
             .map(pendingFact)
-        const currentResources = this.#largestResourceFacts(this.#options.contributorLimit)
+        const currentResources = target.kind === 'pipeline'
+            ? []
+            : this.#largestResourceFacts(this.#options.contributorLimit)
+        const currentPipelines = target.kind === 'resource'
+            ? []
+            : [ ...this.#pipelineFacts.values() ]
+                .sort((left, right) => left.id.localeCompare(right.id))
+                .slice(0, this.#options.contributorLimit)
         const localOmissions = Math.max(0, this.#pendingOperations.size - pendingOperations.length) +
-            Math.max(0, this.#resourceFacts.size - currentResources.length)
+            (target.kind === 'pipeline'
+                ? 0
+                : Math.max(0, this.#resourceFacts.size - currentResources.length)) +
+            (target.kind === 'resource'
+                ? 0
+                : Math.max(0, this.#pipelineFacts.size - currentPipelines.length))
         const report = createGpuIncidentReport({
             sequence,
             id,
@@ -606,14 +694,25 @@ export class ScratchRuntimeDiagnosticsController {
             nativeErrorCategory: input.nativeErrorCategory,
             attribution: input.attribution,
             runtimeId: this.#owner.id,
-            ...(input.resourceId !== undefined ? { resourceId: input.resourceId } : {}),
+            target,
             ...(input.operationId !== undefined ? { operationId: input.operationId } : {}),
             ...(input.triggerOperation !== undefined ? { triggerOperation: input.triggerOperation } : {}),
             ...(input.nativeError !== undefined ? { nativeError: input.nativeError } : {}),
             recentOperations,
             ...(pendingOperations.length > 0 ? { pendingOperations } : {}),
             ...(currentResources.length > 0 ? { currentResources } : {}),
-            pressure: this.#pressureEvidence(input.triggerLogicalFootprintBytes ?? 0),
+            ...(currentPipelines.length > 0 ? { currentPipelines } : {}),
+            ...(input.kind === 'allocation-failure' && target.kind === 'resource'
+                ? { pressure: this.#pressureEvidence(input.triggerLogicalFootprintBytes ?? 0) }
+                : {}),
+            ...(input.failureStage !== undefined ? { failureStage: input.failureStage } : {}),
+            ...(input.pipelineErrorReason !== undefined
+                ? { pipelineErrorReason: input.pipelineErrorReason }
+                : {}),
+            ...(input.compilationReport !== undefined
+                ? { compilationReport: input.compilationReport }
+                : {}),
+            ...(input.outcomes !== undefined ? { outcomes: input.outcomes } : {}),
             evidence: {
                 complete: this.#overwrittenOperations === 0 &&
                     this.#overwrittenIncidents === 0 &&
@@ -701,6 +800,92 @@ export class ScratchRuntimeDiagnosticsController {
         if (fact !== undefined) this.#recordResourceDisposal(resource, fact)
     }
 
+    registerPipeline(registration: ScratchRuntimePipelineRegistration): void {
+
+        const operation = registration.creationOperation
+        if (
+            !this.#completedOperations.has(operation) ||
+            operation.runtimeId !== this.#owner.id ||
+            operation.status !== 'succeeded' ||
+            operation.target.kind !== 'pipeline' ||
+            operation.compilationReport === undefined
+        ) {
+            throw new TypeError('Pipeline registration requires its matching successful creation operation.')
+        }
+        const target = operation.target
+        const expectedKind = target.pipelineKind === 'render'
+            ? 'render-pipeline-creation'
+            : 'compute-pipeline-creation'
+        if (operation.kind !== expectedKind) {
+            throw new TypeError('Pipeline registration requires its matching successful creation operation.')
+        }
+        if (this.#pipelineFacts.has(target.pipelineId)) {
+            throw new TypeError(`Pipeline ${target.pipelineId} is already registered.`)
+        }
+        if (this.#registeredPipelineCreations.has(operation)) {
+            throw new TypeError(`Pipeline creation operation ${operation.id} has already been registered.`)
+        }
+        this.#registeredPipelineCreations.add(operation)
+        this.#pipelineFacts.set(target.pipelineId, freezeEvidence({
+            id: target.pipelineId,
+            ...(registration.label !== undefined ? { label: boundedLabel(registration.label) } : {}),
+            pipelineKind: target.pipelineKind,
+            programId: target.programId,
+            programSourceHash: target.programSourceHash,
+            descriptorHash: operation.descriptor.hash,
+            state: 'ready' as const,
+            lastCreationOperationId: operation.id,
+            compilation: {
+                errorCount: operation.compilationReport.errorCount,
+                warningCount: operation.compilationReport.warningCount,
+                infoCount: operation.compilationReport.infoCount,
+            },
+        }))
+    }
+
+    unregisterPipeline(pipelineId: string): void {
+
+        const fact = this.#pipelineFacts.get(pipelineId)
+        if (fact === undefined) return
+        this.#pipelineFacts.delete(pipelineId)
+        this.#aggregates = {
+            ...this.#aggregates,
+            pipelineDisposals: this.#aggregates.pipelineDisposals + 1,
+        }
+
+        const sequence = ++this.#operationSequence
+        const settledAtMs = nowMs()
+        const record = createGpuOperationRecord({
+            sequence,
+            id: `${this.#owner.id}/gpu-operation-${sequence}`,
+            kind: 'pipeline-disposal',
+            status: 'succeeded',
+            runtimeId: this.#owner.id,
+            target: {
+                kind: 'pipeline',
+                pipelineId: fact.id,
+                pipelineKind: fact.pipelineKind,
+                programId: fact.programId,
+                programSourceHash: fact.programSourceHash,
+            },
+            descriptor: createGpuDescriptorEvidence({
+                descriptorHash: fact.descriptorHash,
+                pipelineKind: fact.pipelineKind,
+            }),
+            startedAtMs: settledAtMs,
+            settledAtMs,
+        })
+        this.#recordOperation(record)
+        const needsStack = [ ...this.#captures ].some(capture => {
+            const state = captureStateFor(capture)
+            return state.isActive && state.options.includeStacks
+        })
+        const stack = needsStack ? captureStack() : undefined
+        for (const capture of [ ...this.#captures ]) {
+            acceptCaptureInstantOperation(capture, record, stack)
+        }
+    }
+
     #recordResourceDisposal(resource: Resource, fact: ScratchRuntimeResourceFact): void {
 
         if (fact.resourceKind !== 'BufferResource' && fact.resourceKind !== 'TextureResource') return
@@ -714,11 +899,14 @@ export class ScratchRuntimeDiagnosticsController {
             kind: 'resource-disposal',
             status: 'succeeded',
             runtimeId: this.#owner.id,
-            resourceId: fact.id,
-            resourceKind: fact.resourceKind,
-            allocationVersion: fact.allocationVersion,
-            contentEpoch: fact.contentEpoch,
-            logicalFootprintBytes: fact.logicalFootprintBytes,
+            target: {
+                kind: 'resource',
+                resourceId: fact.id,
+                resourceKind: fact.resourceKind,
+                allocationVersion: fact.allocationVersion,
+                contentEpoch: fact.contentEpoch,
+                logicalFootprintBytes: fact.logicalFootprintBytes,
+            },
             descriptor,
             startedAtMs: settledAtMs,
             settledAtMs,
@@ -766,6 +954,10 @@ export class ScratchRuntimeDiagnosticsController {
     captureStopped(capture: ScratchDiagnosticCapture, reason: ScratchDiagnosticCaptureStopReason): void {
 
         this.#captures.delete(capture)
+        if (reason === 'operation-limit') {
+            this.#linkableStoppedCaptures.add(capture)
+            queueMicrotask(() => this.#linkableStoppedCaptures.delete(capture))
+        }
         if (reason === 'evidence-limit') {
             this.recordIncident({
                 kind: 'capture-degraded',
@@ -895,11 +1087,20 @@ export class ScratchRuntimeDiagnosticsController {
         }
     }
 
-    #recordCompletionAggregate(completion: ScratchGpuOperationCompletion): void {
+    #recordCompletionAggregate(
+        operation: ScratchPendingGpuOperation,
+        completion: ScratchGpuOperationCompletion
+    ): void {
 
         const next = { ...this.#aggregates }
-        if (completion.status === 'succeeded') next.successfulAllocations++
-        if (completion.status === 'cancelled') next.cancelledAllocations++
+        if (operation.target.kind === 'resource') {
+            if (completion.status === 'succeeded') next.successfulAllocations++
+            if (completion.status === 'cancelled') next.cancelledAllocations++
+        } else {
+            if (completion.status === 'succeeded') next.successfulPipelineCreations++
+            if (completion.status === 'failed') next.failedPipelineCreations++
+            if (completion.status === 'cancelled') next.cancelledPipelineCreations++
+        }
         if (completion.nativeErrorCategory === 'validation') next.validationFailures++
         if (completion.nativeErrorCategory === 'out-of-memory') next.outOfMemoryFailures++
         if (completion.nativeErrorCategory === 'native-exception') next.nativeFailures++
@@ -929,14 +1130,15 @@ export class ScratchRuntimeDiagnosticsController {
                 allocationVersion: fact.allocationVersion,
             }))
         const recentChurn = this.#operations
+            .filter(({ value }) => value.target.kind === 'resource')
             .slice(-this.#options.recentOperationLimit)
             .map(({ value }) => ({
                 sequence: value.sequence,
                 operationId: value.id,
                 operationKind: value.kind,
                 status: value.status,
-                resourceId: value.resourceId,
-                logicalFootprintBytes: value.logicalFootprintBytes,
+                resourceId: (value.target as ScratchGpuResourceOperationTarget).resourceId,
+                logicalFootprintBytes: (value.target as ScratchGpuResourceOperationTarget).logicalFootprintBytes,
             }))
 
         return freezeEvidence({
@@ -1059,6 +1261,7 @@ function createDiagnosticCapture(input: {
         ...input,
         operations: [],
         retainedEvidenceBytes: 0,
+        budgetedEvidenceBytes: 0,
         omittedOperations: 0,
         startedAtMs: nowMs(),
         timer: undefined,
@@ -1086,11 +1289,7 @@ function acceptCaptureOperation(
         kind: operation.kind,
         status: completion.status,
         runtimeId: operation.runtimeId,
-        resourceId: operation.resourceId,
-        resourceKind: operation.resourceKind,
-        allocationVersion: operation.allocationVersion,
-        contentEpoch: operation.contentEpoch,
-        logicalFootprintBytes: operation.logicalFootprintBytes,
+        target: operation.target,
         descriptor: state.options.includeDescriptors && operation.fullDescriptor !== undefined
             ? operation.fullDescriptor
             : operation.descriptor,
@@ -1099,6 +1298,10 @@ function acceptCaptureOperation(
             ? { nativeErrorCategory: completion.nativeErrorCategory }
             : {}),
         ...(completion.incidentId !== undefined ? { incidentId: completion.incidentId } : {}),
+        ...(completion.nativeLabels !== undefined ? { nativeLabels: completion.nativeLabels } : {}),
+        ...(completion.compilationReport !== undefined
+            ? { compilationReport: completion.compilationReport }
+            : {}),
         startedAtMs: operation.startedAtMs,
         settledAtMs: nowMs(),
         ...(state.options.includeStacks && operation.stack !== undefined ? { stack: operation.stack } : {}),
@@ -1120,6 +1323,41 @@ function acceptCaptureInstantOperation(
     retainCaptureRecord(capture, state, captureRecord)
 }
 
+function linkCaptureOperationIncident(
+    capture: ScratchDiagnosticCapture,
+    operationId: string,
+    incidentId: string
+): void {
+
+    const state = captureStateFor(capture)
+    const records = state.report?.operations ?? state.operations
+    const index = records.findIndex(record => record.id === operationId)
+    if (index < 0) return
+
+    const previous = records[index]
+    const replacement = createGpuOperationRecord({ ...previous, incidentId })
+    const nextBytes = state.retainedEvidenceBytes -
+        serializedEvidenceBytes(previous) +
+        serializedEvidenceBytes(replacement)
+    if (
+        nextBytes > state.options.maxEvidenceBytes ||
+        nextBytes > state.budgetedEvidenceBytes
+    ) return
+
+    const nextRecords = [ ...records ]
+    nextRecords[index] = replacement
+    state.retainedEvidenceBytes = nextBytes
+    if (state.report === undefined) {
+        state.operations = nextRecords
+        return
+    }
+    state.report = freezeEvidence({
+        ...state.report,
+        operations: nextRecords,
+        retainedEvidenceBytes: nextBytes,
+    })
+}
+
 function retainCaptureRecord(
     capture: ScratchDiagnosticCapture,
     state: CaptureState,
@@ -1127,8 +1365,9 @@ function retainCaptureRecord(
 ): void {
 
     const bytes = serializedEvidenceBytes(record)
+    const budgetedBytes = bytes + CAPTURE_INCIDENT_LINK_RESERVE_BYTES
 
-    if (state.retainedEvidenceBytes + bytes > state.options.maxEvidenceBytes) {
+    if (state.budgetedEvidenceBytes + budgetedBytes > state.options.maxEvidenceBytes) {
         state.omittedOperations++
         stopCapture(capture, 'evidence-limit')
         return
@@ -1136,6 +1375,7 @@ function retainCaptureRecord(
 
     state.operations.push(record)
     state.retainedEvidenceBytes += bytes
+    state.budgetedEvidenceBytes += budgetedBytes
     if (state.operations.length >= state.options.maxOperations) {
         stopCapture(capture, 'operation-limit')
     }
@@ -1153,7 +1393,7 @@ function stopCapture(
     if (state.timer !== undefined) clearTimeout(state.timer)
     state.timer = undefined
     state.report = freezeEvidence({
-        version: 1,
+        version: 2,
         id: state.id,
         runtimeId: state.runtimeId,
         stopReason: reason,
@@ -1259,14 +1499,24 @@ function pendingFact(operation: ScratchPendingGpuOperation): ScratchPendingGpuOp
         id: operation.id,
         sequence: operation.sequence,
         kind: operation.kind,
-        resourceId: operation.resourceId,
-        resourceKind: operation.resourceKind,
-        allocationVersion: operation.allocationVersion,
-        contentEpoch: operation.contentEpoch,
-        logicalFootprintBytes: operation.logicalFootprintBytes,
+        target: operation.target,
         descriptorHash: operation.descriptor.hash,
         startedAtMs: operation.startedAtMs,
     })
+}
+
+function assertPendingGpuOperationKind(
+    kind: unknown
+): asserts kind is ScratchPendingGpuOperationKind {
+
+    if (
+        kind === 'buffer-allocation' ||
+        kind === 'texture-allocation' ||
+        kind === 'texture-replacement' ||
+        kind === 'render-pipeline-creation' ||
+        kind === 'compute-pipeline-creation'
+    ) return
+    throw new TypeError(`GPU operation ${String(kind)} cannot be pending.`)
 }
 
 function resourceFact(
@@ -1416,7 +1666,13 @@ function matchesOperationQuery(
 ): boolean {
 
     return (query.operationId === undefined || record.id === query.operationId) &&
-        (query.resourceId === undefined || record.resourceId === query.resourceId) &&
+        (query.targetKind === undefined || record.target.kind === query.targetKind) &&
+        (query.resourceId === undefined || (
+            record.target.kind === 'resource' && record.target.resourceId === query.resourceId
+        )) &&
+        (query.pipelineId === undefined || (
+            record.target.kind === 'pipeline' && record.target.pipelineId === query.pipelineId
+        )) &&
         (query.kind === undefined || record.kind === query.kind) &&
         (query.status === undefined || record.status === query.status) &&
         (query.sequenceFrom === undefined || record.sequence >= query.sequenceFrom) &&
@@ -1430,7 +1686,13 @@ function matchesIncidentQuery(
 
     return (query.incidentId === undefined || report.id === query.incidentId) &&
         (query.operationId === undefined || report.operationId === query.operationId) &&
-        (query.resourceId === undefined || report.resourceId === query.resourceId) &&
+        (query.targetKind === undefined || report.target.kind === query.targetKind) &&
+        (query.resourceId === undefined || (
+            report.target.kind === 'resource' && report.target.resourceId === query.resourceId
+        )) &&
+        (query.pipelineId === undefined || (
+            report.target.kind === 'pipeline' && report.target.pipelineId === query.pipelineId
+        )) &&
         (query.kind === undefined || report.kind === query.kind) &&
         (query.sequenceFrom === undefined || report.sequence >= query.sequenceFrom) &&
         (query.sequenceTo === undefined || report.sequence <= query.sequenceTo)
