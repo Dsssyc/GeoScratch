@@ -11,6 +11,7 @@ export type ScopedNativeAllocationFailureKind =
     | 'scope-failure'
     | 'device-lost'
     | 'runtime-disposed'
+    | 'resource-disposed'
 
 export type ScopedNativeAllocationOutcome<T> =
     | Readonly<{
@@ -44,10 +45,12 @@ type ScopeSettlement = Readonly<{
 type LifecycleSettlement =
     | Readonly<{ kind: 'device-lost', info: GPUDeviceLostInfo }>
     | Readonly<{ kind: 'runtime-disposed' }>
+    | Readonly<{ kind: 'resource-disposed' }>
 
 export function issueScopedNativeAllocation<T>(
     runtime: ScratchRuntime,
-    issue: () => T
+    issue: () => T,
+    resourceDisposal?: Promise<void>
 ): Promise<ScopedNativeAllocationOutcome<T>> {
 
     const device = runtime.device
@@ -122,7 +125,8 @@ export function issueScopedNativeAllocation<T>(
         boundaryFailures,
         scopeSettlement,
         deviceLoss,
-        runtimeDisposal
+        runtimeDisposal,
+        resourceDisposal?.then(() => ({ kind: 'resource-disposed' }))
     )
 }
 
@@ -185,7 +189,9 @@ export function throwScopedAllocationFailure<T>(
         }, { ...(incident !== undefined ? { incident } : {}) })
     }
 
-    const status = outcome.kind === 'runtime-disposed' ? 'cancelled' : 'failed'
+    const status = outcome.kind === 'runtime-disposed' || outcome.kind === 'resource-disposed'
+        ? 'cancelled'
+        : 'failed'
     const nativeErrorCategory = failureNativeCategory(outcome.kind)
     const record = controller.completeOperation(operation, {
         status,
@@ -237,14 +243,17 @@ async function settleScopedNativeAllocation<T>(
     boundaryFailures: unknown[],
     scopeSettlement: Promise<ScopeSettlement>,
     deviceLoss: Promise<LifecycleSettlement>,
-    runtimeDisposal: Promise<LifecycleSettlement>
+    runtimeDisposal: Promise<LifecycleSettlement>,
+    resourceDisposal?: Promise<LifecycleSettlement>
 ): Promise<ScopedNativeAllocationOutcome<T>> {
 
-    const settlement = await Promise.race([
+    const settlements: Array<Promise<ScopeSettlement | LifecycleSettlement>> = [
         scopeSettlement,
         deviceLoss,
         runtimeDisposal,
-    ])
+    ]
+    if (resourceDisposal !== undefined) settlements.push(resourceDisposal)
+    const settlement = await Promise.race(settlements)
 
     if (settlement.kind === 'device-lost') {
         return Object.freeze({
@@ -258,6 +267,13 @@ async function settleScopedNativeAllocation<T>(
         return Object.freeze({
             ok: false,
             kind: 'runtime-disposed',
+            ...(candidate !== undefined ? { candidate } : {}),
+        })
+    }
+    if (settlement.kind === 'resource-disposed') {
+        return Object.freeze({
+            ok: false,
+            kind: runtime.isDisposed ? 'runtime-disposed' : 'resource-disposed',
             ...(candidate !== undefined ? { candidate } : {}),
         })
     }
@@ -364,6 +380,7 @@ function failureCode(
     if (kind === 'out-of-memory') return codes.outOfMemory
     if (kind === 'scope-failure') return 'SCRATCH_GPU_ERROR_SCOPE_FAILED'
     if (kind === 'runtime-disposed') return 'SCRATCH_RUNTIME_DISPOSED'
+    if (kind === 'resource-disposed') return 'SCRATCH_RESOURCE_DISPOSED'
     return codes.nativeException
 }
 
@@ -372,7 +389,7 @@ function failureNativeCategory(
 ): 'validation' | 'out-of-memory' | 'native-exception' | 'scope-failure' | 'none' {
 
     if (kind === 'validation' || kind === 'out-of-memory' || kind === 'scope-failure') return kind
-    if (kind === 'runtime-disposed') return 'none'
+    if (kind === 'runtime-disposed' || kind === 'resource-disposed') return 'none'
     return 'native-exception'
 }
 
@@ -382,5 +399,6 @@ function failureMessage(kind: ScopedNativeAllocationFailureKind, operationName: 
     if (kind === 'out-of-memory') return `${operationName} observed native out-of-memory.`
     if (kind === 'scope-failure') return `${operationName} error scopes failed to settle structurally.`
     if (kind === 'runtime-disposed') return `ScratchRuntime was disposed while ${operationName} was pending.`
+    if (kind === 'resource-disposed') return `Resource was disposed while ${operationName} was pending.`
     return `${operationName} failed with a synchronous native exception.`
 }

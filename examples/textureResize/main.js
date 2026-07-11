@@ -57,7 +57,7 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4f {
 
 document.body.dataset.status = 'pending'
 
-await main().catch((error) => {
+await await main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error)
     document.body.dataset.status = 'failed'
     document.body.dataset.error = message
@@ -181,7 +181,7 @@ async function main() {
     const initialContentEpoch = texture.contentEpoch
 
     surface.resize(resizedSurfaceSize)
-    texture.resize(surface.size)
+    await texture.resize(surface.size)
 
     const allocationVersionAfterResize = texture.allocationVersion
     const contentEpochAfterResize = texture.contentEpoch

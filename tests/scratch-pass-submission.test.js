@@ -246,7 +246,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         const fixture = await createRenderTargetScene()
         const pass = fixture.pass
         const draw = fixture.draw
-        fixture.renderTarget.resize([ 64, 64, 3 ])
+        await fixture.renderTarget.resize([ 64, 64, 3 ])
 
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .render(pass, [ draw ])
@@ -278,7 +278,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .render(pass, [ draw ])
 
-        fixture.renderTarget.resize([ 32, 16, 3 ])
+        await fixture.renderTarget.resize([ 32, 16, 3 ])
         const replacementTexture = fixture.renderTarget.gpuTexture
         const submitted = builder.submit()
 
@@ -311,14 +311,14 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('rejects a stale color attachment layer before encoder creation', async() => {
 
         const fixture = await createRenderTargetScene()
-        fixture.renderTarget.resize([ 64, 64, 3 ])
+        await fixture.renderTarget.resize([ 64, 64, 3 ])
         const pass = fixture.runtime.createRenderPass({
             color: [ {
                 target: fixture.renderTarget,
                 viewDescriptor: { baseArrayLayer: 2 },
             } ],
         })
-        fixture.renderTarget.resize([ 64, 64, 1 ])
+        await fixture.renderTarget.resize([ 64, 64, 1 ])
 
         await expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
             .render(pass, [ fixture.draw ])
@@ -462,7 +462,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .render(secondPass, [ readBeforeReplacement ])
 
-        fixture.renderTarget.resize([ 32, 32 ])
+        await fixture.renderTarget.resize([ 32, 32 ])
 
         const diagnostic = await expectScratchDiagnostic(() => builder.submit(), {
             code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',

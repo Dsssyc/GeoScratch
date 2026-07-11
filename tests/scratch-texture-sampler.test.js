@@ -204,7 +204,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const fixture = await createTextureFixture({ features: [ 'core-features-and-limits' ] })
         const firstBindGroup = fixture.bindSet.getBindGroup()
 
-        fixture.texture.resize([ 2, 2, 3 ])
+        await fixture.texture.resize([ 2, 2, 3 ])
         const secondBindGroup = fixture.bindSet.getBindGroup()
 
         expect(secondBindGroup).to.not.equal(firstBindGroup)
@@ -223,7 +223,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const bindGroupCount = fixture.calls.bindGroups.length
         const viewCount = fixture.calls.textureViews.length
 
-        fixture.texture.resize([ 2, 2, 3 ])
+        await fixture.texture.resize([ 2, 2, 3 ])
 
         try {
             fixture.bindSet.getBindGroup()
@@ -263,7 +263,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const bindSet = runtime.createBindSet(layout, { arrayTexture: texture })
         const firstBindGroup = bindSet.getBindGroup()
 
-        texture.resize([ 2, 2, 3 ])
+        await texture.resize([ 2, 2, 3 ])
         const secondBindGroup = bindSet.getBindGroup()
 
         expect(secondBindGroup).to.not.equal(firstBindGroup)
@@ -298,7 +298,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const bindGroupCount = fake.calls.bindGroups.length
         const viewCount = fake.calls.textureViews.length
 
-        texture.resize([ 2, 2, 5 ])
+        await texture.resize([ 2, 2, 5 ])
 
         try {
             bindSet.getBindGroup()
@@ -355,7 +355,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(upload)
 
-        fixture.texture.resize([ 4, 4 ])
+        await fixture.texture.resize([ 4, 4 ])
         const replacementTexture = fixture.texture.gpuTexture
         const submitted = builder.submit()
 
@@ -383,7 +383,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.upload)
 
-        fixture.texture.resize([ 1, 1 ])
+        await fixture.texture.resize([ 1, 1 ])
 
         try {
             builder.submit()
@@ -467,7 +467,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             .upload(fixture.upload)
             .render(pass, [ draw ])
 
-        fixture.texture.resize([ 4, 4 ])
+        await fixture.texture.resize([ 4, 4 ])
         const replacementTexture = fixture.texture.gpuTexture
         const submitted = builder.submit()
         const bindGroupAction = fixture.calls.renderPasses[0].actions
@@ -532,7 +532,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             .upload(fixture.upload)
             .compute(pass, [ dispatch ])
 
-        fixture.texture.resize([ 4, 4 ])
+        await fixture.texture.resize([ 4, 4 ])
         const replacementTexture = fixture.texture.gpuTexture
         const submitted = builder.submit()
         const bindGroupAction = fixture.calls.computePasses[0].actions

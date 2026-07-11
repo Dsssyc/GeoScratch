@@ -232,7 +232,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
             range: { offset: 0, byteLength: 16 },
         })
 
-        texture.resize([ 4, 4 ])
+        await texture.resize([ 4, 4 ])
         const bytes = await readback.toBytes()
 
         expect(bytes).to.have.length(16)

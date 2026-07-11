@@ -197,7 +197,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         minFilter: 'nearest',
     })
     const scratchTextureView: GPUTextureView = scratchTexture.createView()
-    scratchTexture.resize(compatTextureSize)
+    await scratchTexture.resize(compatTextureSize)
     // @ts-expect-error TextureResource descriptor is read-only
     scratchTexture.descriptor = scratchTexture.descriptor
     // @ts-expect-error Allocation transitions are internal lifecycle operations

@@ -169,8 +169,8 @@ describe('scratch depth/stencil render attachments', () => {
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .render(pass, [ draw ])
 
-        fixture.colorTarget.resize([ 32, 32, 3 ])
-        fixture.depthTarget.resize([ 32, 32, 3 ])
+        await fixture.colorTarget.resize([ 32, 32, 3 ])
+        await fixture.depthTarget.resize([ 32, 32, 3 ])
         const replacementColorTexture = fixture.colorTarget.gpuTexture
         const replacementDepthTexture = fixture.depthTarget.gpuTexture
         const submitted = builder.submit()
@@ -212,7 +212,7 @@ describe('scratch depth/stencil render attachments', () => {
     it('rejects mismatched current attachment extents before encoder creation', async() => {
 
         const fixture = await createDepthFixture()
-        fixture.colorTarget.resize([ 32, 32 ])
+        await fixture.colorTarget.resize([ 32, 32 ])
 
         await expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
             .render(fixture.pass, [ fixture.draw ])

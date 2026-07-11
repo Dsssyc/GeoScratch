@@ -18,6 +18,7 @@ import { getGlobalConstant, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchResourceIdentity } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
+import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
 
 const GPU_TEXTURE_USAGE_STORAGE_BINDING = getGlobalConstant('GPUTextureUsage', 'STORAGE_BINDING', 0x8)
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
@@ -36,6 +37,11 @@ const TEXTURE_ALLOCATION_CODES = Object.freeze({
     validation: 'SCRATCH_TEXTURE_ALLOCATION_VALIDATION_FAILED',
     outOfMemory: 'SCRATCH_TEXTURE_ALLOCATION_OUT_OF_MEMORY',
     nativeException: 'SCRATCH_TEXTURE_ALLOCATION_NATIVE_FAILED',
+})
+const TEXTURE_REPLACEMENT_CODES = Object.freeze({
+    validation: 'SCRATCH_TEXTURE_REPLACEMENT_VALIDATION_FAILED',
+    outOfMemory: 'SCRATCH_TEXTURE_REPLACEMENT_OUT_OF_MEMORY',
+    nativeException: 'SCRATCH_TEXTURE_REPLACEMENT_NATIVE_FAILED',
 })
 
 export type TextureResourceSize =
@@ -81,6 +87,9 @@ export class TextureResource extends Resource {
     #gpuTexture: GPUTexture
     #physicalDescriptor: NormalizedTextureDescriptor
     #viewCache: Map<string, GPUTextureView>
+    #pendingReplacement: ScratchPendingGpuOperation | undefined
+    #disposePromise: Promise<void>
+    #resolveDispose!: () => void
 
     private constructor(
         token: symbol,
@@ -107,6 +116,9 @@ export class TextureResource extends Resource {
         this.#physicalDescriptor = descriptor
         this.#gpuTexture = gpuTexture
         this.#viewCache = new Map()
+        this.#disposePromise = new Promise(resolve => {
+            this.#resolveDispose = resolve
+        })
         Object.preventExtensions(this)
     }
 
@@ -160,12 +172,30 @@ export class TextureResource extends Resource {
         return this.#physicalDescriptor.sampleCount
     }
 
-    resize(size: TextureResourceSize): void {
+    async resize(size: TextureResourceSize): Promise<void> {
 
         this.assertUsable()
 
         const nextSize = normalizeTextureSize(this.subject, size)
         validateTextureAllocationDescriptor(this.runtime, this.#physicalDescriptor, nextSize, size)
+        if (this.#pendingReplacement !== undefined) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_TEXTURE_REPLACEMENT_PENDING',
+                severity: 'error',
+                phase: 'resource',
+                subject: this.subject,
+                related: [
+                    {
+                        kind: 'GpuOperation',
+                        id: this.#pendingReplacement.id,
+                        operationKind: this.#pendingReplacement.kind,
+                    },
+                ],
+                message: 'TextureResource already has a replacement allocation pending.',
+                expected: { pendingReplacement: false },
+                actual: { pendingOperationId: this.#pendingReplacement.id },
+            })
+        }
         if (sameTextureSize(nextSize, this.size)) return
 
         assertTextureCreationAvailable(this.runtime)
@@ -174,42 +204,58 @@ export class TextureResource extends Resource {
             ...this.#physicalDescriptor,
             size: nextSize,
         })
-
-        let nextTexture: GPUTexture
-        try {
-            nextTexture = this.runtime.device.createTexture({
+        const nativeLabel = createScratchNativeLabel(this.label, this.id)
+        const footprint = logicalTextureDescriptorFootprint(
+            nextDescriptor as unknown as Record<string, unknown>
+        )
+        const controller = diagnosticsControllerFor(this.runtime)
+        const operation = controller.beginOperation({
+            kind: 'texture-replacement',
+            resourceId: this.id,
+            resourceKind: 'TextureResource',
+            allocationVersion: this.allocationVersion + 1,
+            contentEpoch: this.contentEpoch,
+            logicalFootprintBytes: footprint.bytes,
+            descriptorSummary: textureDescriptorSummary(nextDescriptor),
+            fullDescriptor: { ...nextDescriptor },
+            nativeLabel,
+        })
+        this.#pendingReplacement = operation
+        let outcome = await issueScopedNativeAllocation(
+            this.runtime,
+            () => this.runtime.device.createTexture({
                 ...nextDescriptor,
-                label: createScratchNativeLabel(this.label, this.id),
-            })
-        } catch (cause) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED',
-                severity: 'error',
-                phase: 'resource',
-                subject: this.subject,
-                related: [ this.runtime.subject ],
-                message: 'TextureResource replacement creation failed synchronously.',
-                expected: {
-                    createTexture: 'returns a replacement GPUTexture',
-                    previousAllocation: 'remains installed on failure',
-                },
-                actual: {
-                    size: nextSize,
-                    nativeError: nativeErrorFacts(cause),
-                },
-                hints: [
-                    'The old allocation remains usable; correct the synchronous native failure before retrying.',
-                    'Asynchronous WebGPU validation and allocation errors are reported by the device error model.',
-                ],
-            }, { cause })
+                label: nativeLabel,
+            }),
+            this.#disposePromise
+        )
+
+        if (outcome.ok && this.isDisposed) {
+            outcome = {
+                ok: false,
+                kind: this.runtime.isDisposed ? 'runtime-disposed' : 'resource-disposed',
+                candidate: outcome.candidate,
+            }
+        }
+        if (!outcome.ok) {
+            this.#pendingReplacement = undefined
+            return throwScopedAllocationFailure(
+                this.runtime,
+                operation,
+                outcome,
+                TEXTURE_REPLACEMENT_CODES,
+                'Texture replacement allocation'
+            )
         }
 
         const previousTexture = this.#gpuTexture
-        this.#gpuTexture = nextTexture
+        this.#gpuTexture = outcome.candidate
         this.#physicalDescriptor = nextDescriptor
         this.#viewCache.clear()
         replaceResourceAllocation(this, nextDescriptor)
-        previousTexture.destroy()
+        this.#pendingReplacement = undefined
+        controller.completeOperation(operation, { status: 'succeeded' })
+        destroyNativeCandidate(previousTexture)
     }
 
     createView(descriptor: TextureViewDescriptor = {}): GPUTextureView {
@@ -228,6 +274,8 @@ export class TextureResource extends Resource {
     dispose(): void {
 
         if (this.isDisposed) return
+
+        this.#resolveDispose()
 
         if (this.gpuTexture && typeof this.gpuTexture.destroy === 'function') {
             this.gpuTexture.destroy()
@@ -881,18 +929,6 @@ function assertTextureCreationAvailable(runtime: ScratchRuntime): void {
             actual: { createTexture: typeof runtime?.device?.createTexture },
         })
     }
-}
-
-function nativeErrorFacts(error: unknown): { name?: string, message: string } {
-
-    if (error instanceof Error) {
-        return {
-            name: error.name,
-            message: error.message,
-        }
-    }
-
-    return { message: String(error) }
 }
 
 function throwTextureDescriptorDiagnostic(

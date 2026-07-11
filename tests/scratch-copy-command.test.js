@@ -401,8 +401,8 @@ describe('scratch CopyCommand', () => {
             .copy(textureCopy.copy)
         const previousTextureSource = textureCopy.source.gpuTexture
         const previousTextureTarget = textureCopy.target.gpuTexture
-        textureCopy.source.resize([ 8, 8 ])
-        textureCopy.target.resize([ 8, 8 ])
+        await textureCopy.source.resize([ 8, 8 ])
+        await textureCopy.target.resize([ 8, 8 ])
         const textureCopySubmitted = textureCopyBuilder.submit()
 
         expect(previousTextureSource.destroyed).to.equal(true)
@@ -423,7 +423,7 @@ describe('scratch CopyCommand', () => {
             .upload(bufferToTexture.upload)
             .copy(bufferToTexture.copy)
         const previousBufferTarget = bufferToTexture.target.gpuTexture
-        bufferToTexture.target.resize([ 8, 8 ])
+        await bufferToTexture.target.resize([ 8, 8 ])
         const bufferToTextureSubmitted = bufferToTextureBuilder.submit()
 
         expect(previousBufferTarget.destroyed).to.equal(true)
@@ -439,7 +439,7 @@ describe('scratch CopyCommand', () => {
             .upload(textureToBuffer.upload)
             .copy(textureToBuffer.copy)
         const previousBufferSource = textureToBuffer.source.gpuTexture
-        textureToBuffer.source.resize([ 8, 8 ])
+        await textureToBuffer.source.resize([ 8, 8 ])
         const textureToBufferSubmitted = textureToBufferBuilder.submit()
 
         expect(previousBufferSource.destroyed).to.equal(true)
@@ -464,7 +464,7 @@ describe('scratch CopyCommand', () => {
         const textureCopyBuilder = textureCopy.runtime.createSubmission({ validation: 'throw' })
             .upload(textureCopy.upload)
             .copy(textureCopy.copy)
-        textureCopy.target.resize([ 2, 2 ])
+        await textureCopy.target.resize([ 2, 2 ])
 
         await expectScratchDiagnostic(() => textureCopyBuilder.submit(), {
             code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
@@ -481,7 +481,7 @@ describe('scratch CopyCommand', () => {
             .createSubmission({ validation: 'throw' })
             .upload(bufferToTexture.upload)
             .copy(bufferToTexture.copy)
-        bufferToTexture.target.resize([ 2, 2 ])
+        await bufferToTexture.target.resize([ 2, 2 ])
 
         await expectScratchDiagnostic(() => bufferToTextureBuilder.submit(), {
             code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
@@ -494,7 +494,7 @@ describe('scratch CopyCommand', () => {
         expect(bufferToTexture.calls.queueSubmissions).to.have.length(0)
 
         const textureToBuffer = await createTextureToBufferCopyFixture()
-        textureToBuffer.source.resize([ 2, 2 ])
+        await textureToBuffer.source.resize([ 2, 2 ])
         const replacementUpload = textureToBuffer.runtime.createTextureUploadCommand({
             target: textureToBuffer.source,
             data: new Uint8Array(16),

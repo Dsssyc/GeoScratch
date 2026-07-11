@@ -1969,7 +1969,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const initialAccessFacts = initialWork.resourceAccesses.map(accessFacts)
         const initialProducerFacts = initialWork.producerEpochs.map(producerFacts)
 
-        texture.resize([ 4, 2 ])
+        await texture.resize([ 4, 2 ])
         expect(texture.contentEpoch).to.equal(1)
         expect(texture.allocationVersion).to.equal(2)
         expect(texture.state).to.equal('empty')

@@ -60,22 +60,7 @@ function expectTextureFacts(texture, expected) {
     expect(captureTextureFacts(texture)).to.deep.equal(expected)
 }
 
-function expectDiagnostic(action, code) {
-
-    try {
-        action()
-        throw new Error(`expected ${code}`)
-    } catch (error) {
-        expect(error).to.be.instanceOf(ScratchDiagnosticError)
-        expect(error.diagnostic).to.include({
-            code,
-            severity: 'error',
-        })
-        return error
-    }
-}
-
-async function expectAsyncDiagnostic(action, code) {
+async function expectDiagnostic(action, code) {
 
     try {
         await action()
@@ -127,7 +112,7 @@ describe('scratch texture resize', () => {
         expect(Object.isFrozen(fixture.texture.size)).to.equal(true)
         expect(Object.isFrozen(fixture.texture.descriptor.viewFormats)).to.equal(true)
 
-        fixture.texture.resize([ 4, 4 ])
+        await fixture.texture.resize([ 4, 4 ])
 
         expect(fixture.calls.textures[1].descriptor).to.deep.equal({
             ...fixture.calls.textures[0].descriptor,
@@ -152,7 +137,7 @@ describe('scratch texture resize', () => {
             completionRegistrations: fixture.calls.submittedWorkDoneRegistrations.length,
         }
 
-        fixture.texture.resize({ width: 16, height: 4 })
+        await fixture.texture.resize({ width: 16, height: 4 })
 
         expect(fixture.texture).to.equal(logicalTexture)
         expect(fixture.texture.id).to.equal(logicalId)
@@ -187,7 +172,7 @@ describe('scratch texture resize', () => {
             return nativeCreateTexture(descriptor)
         }
 
-        fixture.texture.resize([ 16, 8 ])
+        await fixture.texture.resize([ 16, 8 ])
 
         expect(oldWasDestroyedDuringCreate).to.equal(false)
         expect(previousTexture.destroyed).to.equal(true)
@@ -200,7 +185,7 @@ describe('scratch texture resize', () => {
         const facts = captureTextureFacts(fixture.texture)
         const createdTextureCount = fixture.calls.textures.length
 
-        fixture.texture.resize([ 8, 8, 1 ])
+        await fixture.texture.resize([ 8, 8, 1 ])
 
         expectTextureFacts(fixture.texture, facts)
         expect(fixture.calls.textures).to.have.length(createdTextureCount)
@@ -221,7 +206,7 @@ describe('scratch texture resize', () => {
         ]) {
             const previousVersion = fixture.texture.allocationVersion
             const previousEpoch = fixture.texture.contentEpoch
-            fixture.texture.resize(size)
+            await fixture.texture.resize(size)
             allocations.push(fixture.texture.gpuTexture)
 
             expect(fixture.texture.allocationVersion).to.equal(previousVersion + 1)
@@ -264,8 +249,8 @@ describe('scratch texture resize', () => {
         ]
 
         for (const size of invalidSizes) {
-            expectDiagnostic(
-                () => fixture.texture.resize(size),
+            await expectDiagnostic(
+                async () => await fixture.texture.resize(size),
                 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
             )
             expectTextureFacts(fixture.texture, facts)
@@ -285,8 +270,8 @@ describe('scratch texture resize', () => {
             { width: 8, height: 17 },
             { width: 8, height: 8, depthOrArrayLayers: 5 },
         ]) {
-            expectDiagnostic(
-                () => fixture.texture.resize(size),
+            await expectDiagnostic(
+                async () => await fixture.texture.resize(size),
                 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
             )
             expectTextureFacts(fixture.texture, facts)
@@ -296,8 +281,8 @@ describe('scratch texture resize', () => {
     it('validates retained mip, sample, and format size constraints', async() => {
 
         const mipFixture = await createFixture({ mipLevelCount: 4 })
-        expectDiagnostic(
-            () => mipFixture.texture.resize([ 4, 4 ]),
+        await expectDiagnostic(
+            async () => await mipFixture.texture.resize([ 4, 4 ]),
             'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
         )
 
@@ -305,8 +290,8 @@ describe('scratch texture resize', () => {
             sampleCount: 4,
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
         })
-        expectDiagnostic(
-            () => multisampleFixture.texture.resize([ 8, 8, 2 ]),
+        await expectDiagnostic(
+            async () => await multisampleFixture.texture.resize([ 8, 8, 2 ]),
             'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
         )
 
@@ -314,8 +299,8 @@ describe('scratch texture resize', () => {
             format: 'bc1-rgba-unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
         })
-        expectDiagnostic(
-            () => compressedFixture.texture.resize([ 6, 8 ]),
+        await expectDiagnostic(
+            async () => await compressedFixture.texture.resize([ 6, 8 ]),
             'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
         )
     })
@@ -330,8 +315,8 @@ describe('scratch texture resize', () => {
         const facts = captureTextureFacts(fixture.texture)
         const textureCount = fixture.calls.textures.length
 
-        expectDiagnostic(
-            () => fixture.texture.resize([ 8, 8, 2 ]),
+        await expectDiagnostic(
+            async () => await fixture.texture.resize([ 8, 8, 2 ]),
             'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
         )
 
@@ -358,7 +343,7 @@ describe('scratch texture resize', () => {
         ]
 
         for (const descriptor of invalidDescriptors) {
-            await expectAsyncDiagnostic(async () => await fixture.runtime.createTexture({
+            await expectDiagnostic(async () => await fixture.runtime.createTexture({
                 size: [ 8, 8 ],
                 format: 'rgba8unorm',
                 ...descriptor,
@@ -376,9 +361,9 @@ describe('scratch texture resize', () => {
             throw nativeError
         }
 
-        const error = expectDiagnostic(
-            () => fixture.texture.resize([ 16, 8 ]),
-            'SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED'
+        const error = await expectDiagnostic(
+            async () => await fixture.texture.resize([ 16, 8 ]),
+            'SCRATCH_TEXTURE_REPLACEMENT_NATIVE_FAILED'
         )
 
         expect(error.cause).to.equal(nativeError)
@@ -391,29 +376,29 @@ describe('scratch texture resize', () => {
 
         const disposedFixture = await createFixture()
         disposedFixture.texture.dispose()
-        expectDiagnostic(
-            () => disposedFixture.texture.resize([ 16, 8 ]),
+        await expectDiagnostic(
+            async () => await disposedFixture.texture.resize([ 16, 8 ]),
             'SCRATCH_RESOURCE_DISPOSED'
         )
 
         const lostFixture = await createFixture()
         lostFixture.runtime.isDeviceLost = true
-        expectDiagnostic(
-            () => lostFixture.texture.resize([ 16, 8 ]),
+        await expectDiagnostic(
+            async () => await lostFixture.texture.resize([ 16, 8 ]),
             'SCRATCH_RUNTIME_DEVICE_LOST'
         )
 
         const runtimeFixture = await createFixture()
         runtimeFixture.runtime.isDisposed = true
-        expectDiagnostic(
-            () => runtimeFixture.texture.resize([ 16, 8 ]),
+        await expectDiagnostic(
+            async () => await runtimeFixture.texture.resize([ 16, 8 ]),
             'SCRATCH_RUNTIME_DISPOSED'
         )
 
         const nativeFixture = await createFixture()
         nativeFixture.device.createTexture = undefined
-        expectDiagnostic(
-            () => nativeFixture.texture.resize([ 16, 8 ]),
+        await expectDiagnostic(
+            async () => await nativeFixture.texture.resize([ 16, 8 ]),
             'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE'
         )
     })
@@ -526,13 +511,13 @@ describe('scratch texture resize', () => {
         fixture.texture.createView({ dimension: '2d', baseArrayLayer: 2 })
         const viewCount = fixture.calls.textureViews.length
 
-        fixture.texture.resize([ 8, 8, 1 ])
+        await fixture.texture.resize([ 8, 8, 1 ])
 
-        expectDiagnostic(
+        await expectDiagnostic(
             () => fixture.texture.createView({ dimension: '2d', baseArrayLayer: 2 }),
             'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
         )
-        expectDiagnostic(
+        await expectDiagnostic(
             () => fixture.texture.createView({ dimension: 'cube-array', arrayLayerCount: 1n }),
             'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
         )
@@ -567,12 +552,12 @@ describe('scratch texture resize', () => {
         const oldView = fixture.texture.createView()
         const oldBindGroup = bindSet.getBindGroup()
 
-        fixture.texture.resize({ width: 8, height: 8, depthOrArrayLayers: 1 })
+        await fixture.texture.resize({ width: 8, height: 8, depthOrArrayLayers: 1 })
 
         expect(bindSet.getBindGroup()).to.equal(oldBindGroup)
         expect(fixture.calls.bindGroups).to.have.length(1)
 
-        fixture.texture.resize([ 16, 8 ])
+        await fixture.texture.resize([ 16, 8 ])
 
         const newView = fixture.texture.createView()
         const newBindGroup = bindSet.getBindGroup()
@@ -602,12 +587,12 @@ describe('scratch texture resize', () => {
         expect(objectTexture).to.be.instanceOf(TextureResource)
         expect(tupleTexture.size).to.deep.equal(objectTexture.size)
 
-        tupleTexture.resize({ width: 2 })
-        objectTexture.resize([ 2 ])
+        await tupleTexture.resize({ width: 2 })
+        await objectTexture.resize([ 2 ])
         expect(tupleTexture.size).to.deep.equal(objectTexture.size)
 
         for (const size of [ [], [ 1, 2, 3, 4 ] ]) {
-            await expectAsyncDiagnostic(async () => await fixture.runtime.createTexture({
+            await expectDiagnostic(async () => await fixture.runtime.createTexture({
                 size,
                 format: 'rgba8unorm',
                 usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,

@@ -215,7 +215,7 @@ describe('scratch external image upload', () => {
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(command)
 
-        fixture.target.resize([ 16, 8, 2 ])
+        await fixture.target.resize([ 16, 8, 2 ])
         const replacementTexture = fixture.target.gpuTexture
         const submitted = builder.submit()
 
@@ -246,7 +246,7 @@ describe('scratch external image upload', () => {
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(command)
 
-        fixture.target.resize([ 7, 8, 2 ])
+        await fixture.target.resize([ 7, 8, 2 ])
 
         expectDiagnostic(
             () => builder.submit(),

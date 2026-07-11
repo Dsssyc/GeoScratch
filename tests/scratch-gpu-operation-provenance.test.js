@@ -11,7 +11,10 @@ import { ScratchRuntime } from '../packages/geoscratch/dist/scratch/runtime.js'
 import { BufferResource } from '../packages/geoscratch/dist/scratch/buffer.js'
 import { TextureResource } from '../packages/geoscratch/dist/scratch/texture.js'
 import { ScratchDiagnosticError } from '../packages/geoscratch/dist/scratch/diagnostics.js'
-import { createFakeGpu } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeGpu,
+} from './scratch-test-utils.js'
 
 describe('scratch GPU operation provenance facts', () => {
 
@@ -582,6 +585,33 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         expect(errors.scopeDepth).to.equal(0)
     })
 
+    it('keeps concurrent allocation scope ownership separate across runtimes', async () => {
+
+        const fakeA = createFakeGpu({ deferErrorScopePops: true })
+        const fakeB = createFakeGpu({ deferErrorScopePops: true })
+        const runtimeA = await ScratchRuntime.create({ gpu: fakeA.gpu })
+        const runtimeB = await ScratchRuntime.create({ gpu: fakeB.gpu })
+        const validationError = Object.assign(new Error('runtime A invalid'), {
+            name: 'GPUValidationError',
+        })
+        fakeA.errors.failNext('createBuffer', 'validation', validationError)
+
+        const allocationA = runtimeA.createBuffer({ size: 4, usage: 1 })
+        const allocationB = runtimeB.createBuffer({ size: 8, usage: 1 })
+        fakeB.errors.settlePop(1)
+        fakeA.errors.settlePop(0)
+        fakeB.errors.settlePop(0)
+        fakeA.errors.settlePop(1)
+
+        const errorA = await rejectedDiagnostic(allocationA)
+        const bufferB = await allocationB
+        expect(errorA.diagnostic.code).to.equal('SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED')
+        expect(errorA.incident.runtimeId).to.equal(runtimeA.id)
+        expect(bufferB.runtime).to.equal(runtimeB)
+        expect(runtimeA._resources.size).to.equal(0)
+        expect(runtimeB._resources.size).to.equal(1)
+    })
+
     it('rejects device loss and runtime disposal while scopes settle without exposing candidates', async () => {
 
         const lostFake = createFakeGpu({ deferErrorScopePops: true })
@@ -622,6 +652,172 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         expect(() => new TextureResource(runtime, textureDescriptor('direct'))).to.throw()
         expect(calls.buffers).to.have.length(0)
         expect(calls.textures).to.have.length(0)
+    })
+})
+
+describe('TextureResource transactional replacement allocation', () => {
+
+    it('keeps the old allocation current until scoped replacement acknowledgement', async () => {
+
+        const fake = createFakeGpu({ deferErrorScopePops: true })
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const initial = runtime.createTexture(textureDescriptor('transactional'))
+        fake.errors.settlePop(0)
+        fake.errors.settlePop(1)
+        const texture = await initial
+        advanceResourceContentEpochForTest(texture)
+        const oldTexture = texture.gpuTexture
+        const oldView = texture.createView()
+        const replacement = texture.resize({ width: 8, height: 8 })
+
+        expect(replacement).to.be.an.instanceOf(Promise)
+        expect(texture.gpuTexture).to.equal(oldTexture)
+        expect(texture.width).to.equal(4)
+        expect(texture.height).to.equal(4)
+        expect(texture.allocationVersion).to.equal(1)
+        expect(texture.contentEpoch).to.equal(1)
+        expect(texture.state).to.equal('ready')
+        expect(texture.createView()).to.equal(oldView)
+        expect(oldTexture.destroyed).to.equal(false)
+        expect(runtime.diagnostics.snapshot().resources[0].pendingReplacementOperationId).to.be.a('string')
+
+        const conflict = await rejectedDiagnostic(texture.resize({ width: 16, height: 16 }))
+        expect(conflict.diagnostic.code).to.equal('SCRATCH_TEXTURE_REPLACEMENT_PENDING')
+        expect(fake.calls.textures).to.have.length(2)
+
+        fake.errors.settlePop(3)
+        fake.errors.settlePop(2)
+        await replacement
+
+        expect(texture.gpuTexture).to.equal(fake.calls.textures[1])
+        expect(texture.gpuTexture).not.to.equal(oldTexture)
+        expect(texture.width).to.equal(8)
+        expect(texture.height).to.equal(8)
+        expect(texture.allocationVersion).to.equal(2)
+        expect(texture.contentEpoch).to.equal(1)
+        expect(texture.state).to.equal('empty')
+        expect(oldTexture.destroyed).to.equal(true)
+        expect(texture.createView()).not.to.equal(oldView)
+        expect(runtime.diagnostics.snapshot().resources[0]).not.to.have.property('pendingReplacementOperationId')
+        expect(runtime.diagnostics.operations().at(-1)).to.deep.include({
+            kind: 'texture-replacement',
+            status: 'succeeded',
+            allocationVersion: 2,
+            contentEpoch: 1,
+        })
+    })
+
+    it('preserves every old allocation fact after validation failure', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const texture = await runtime.createTexture(textureDescriptor('rollback'))
+        advanceResourceContentEpochForTest(texture)
+        const oldTexture = texture.gpuTexture
+        const oldView = texture.createView()
+        const oldDescriptor = texture.descriptor
+        const error = Object.assign(new Error('replacement invalid'), { name: 'GPUValidationError' })
+        fake.errors.failNext('createTexture', 'validation', error)
+
+        const failure = await rejectedDiagnostic(texture.resize({ width: 8, height: 8 }))
+
+        expect(failure.diagnostic.code).to.equal('SCRATCH_TEXTURE_REPLACEMENT_VALIDATION_FAILED')
+        expect(failure.cause).to.equal(error)
+        expect(failure.incident).to.deep.include({
+            nativeErrorCategory: 'validation',
+            attribution: 'exact-operation',
+            resourceId: texture.id,
+        })
+        expect(texture.gpuTexture).to.equal(oldTexture)
+        expect(texture.descriptor).to.equal(oldDescriptor)
+        expect(texture.width).to.equal(4)
+        expect(texture.height).to.equal(4)
+        expect(texture.allocationVersion).to.equal(1)
+        expect(texture.contentEpoch).to.equal(1)
+        expect(texture.state).to.equal('ready')
+        expect(texture.createView()).to.equal(oldView)
+        expect(oldTexture.destroyed).to.equal(false)
+        expect(fake.calls.textures[1].destroyed).to.equal(true)
+    })
+
+    it('reports replacement OOM without treating the trigger as the sole cause', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const texture = await runtime.createTexture(textureDescriptor('replacement oom'))
+        const error = Object.assign(new Error('replacement oom'), { name: 'GPUOutOfMemoryError' })
+        fake.errors.failNext('createTexture', 'out-of-memory', error)
+
+        const failure = await rejectedDiagnostic(texture.resize({ width: 8, height: 8 }))
+
+        expect(failure.diagnostic.code).to.equal('SCRATCH_TEXTURE_REPLACEMENT_OUT_OF_MEMORY')
+        expect(failure.incident.pressure.triggerLogicalFootprintBytes).to.equal(256)
+        expect(failure.incident.pressure.caveats).to.include(
+            'The triggering operation is not necessarily the sole OOM cause.'
+        )
+        expect(texture.width).to.equal(4)
+        expect(texture.allocationVersion).to.equal(1)
+    })
+
+    it('keeps same-size resize scope-free and cancels a candidate on resource disposal', async () => {
+
+        const noOpFake = createFakeGpu()
+        const noOpRuntime = await ScratchRuntime.create({ gpu: noOpFake.gpu })
+        const texture = await noOpRuntime.createTexture(textureDescriptor('no-op'))
+        const scopeCallsBefore = noOpFake.calls.errorScopes.length
+        const operationRecordsBefore = noOpRuntime.diagnostics.operations().length
+
+        const noOp = texture.resize([ 4, 4, 1 ])
+        expect(noOp).to.be.an.instanceOf(Promise)
+        await noOp
+        expect(noOpFake.calls.errorScopes).to.have.length(scopeCallsBefore)
+        expect(noOpFake.calls.textures).to.have.length(1)
+        expect(noOpRuntime.diagnostics.operations()).to.have.length(operationRecordsBefore)
+
+        const disposeFake = createFakeGpu({ deferErrorScopePops: true })
+        const disposeRuntime = await ScratchRuntime.create({ gpu: disposeFake.gpu })
+        const initial = disposeRuntime.createTexture(textureDescriptor('dispose pending'))
+        disposeFake.errors.settlePop(0)
+        disposeFake.errors.settlePop(1)
+        const disposable = await initial
+        const replacement = disposable.resize({ width: 8, height: 8 })
+        disposable.dispose()
+        const failure = await rejectedDiagnostic(replacement)
+
+        expect(failure.diagnostic.code).to.equal('SCRATCH_RESOURCE_DISPOSED')
+        expect(disposeFake.calls.textures[0].destroyed).to.equal(true)
+        expect(disposeFake.calls.textures[1].destroyed).to.equal(true)
+        expect(disposeRuntime._resources.size).to.equal(0)
+        disposeFake.errors.settlePop(2)
+        disposeFake.errors.settlePop(3)
+    })
+
+    it('records device loss during replacement without claiming rollback usability', async () => {
+
+        const fake = createFakeGpu({ deferErrorScopePops: true })
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const initial = runtime.createTexture(textureDescriptor('loss replacement'))
+        fake.errors.settlePop(0)
+        fake.errors.settlePop(1)
+        const texture = await initial
+        const oldTexture = texture.gpuTexture
+        const replacement = texture.resize({ width: 8, height: 8 })
+
+        fake.errors.loseDevice({ reason: 'unknown', message: 'replacement device loss' })
+        const failure = await rejectedDiagnostic(replacement)
+
+        expect(failure.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
+        expect(failure.incident).to.deep.include({
+            kind: 'device-loss',
+            attribution: 'temporal-correlation',
+        })
+        expect(runtime.isDeviceLost).to.equal(true)
+        expect(fake.calls.textures[1].destroyed).to.equal(true)
+        expect(texture.gpuTexture).to.equal(oldTexture)
+        expect(() => texture.assertUsable()).to.throw(ScratchDiagnosticError)
+        expect(failure.incident).not.to.have.property('rollbackRestoredUsability')
+        fake.errors.settlePop(2)
+        fake.errors.settlePop(3)
     })
 })
 
