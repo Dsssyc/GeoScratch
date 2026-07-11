@@ -5,6 +5,22 @@ import {
 
 const fakeExternalImageSourcePlatforms = new Map()
 
+export function createFakePipelineError(reason = 'validation', message = 'fake pipeline failure') {
+
+    if (reason !== 'validation' && reason !== 'internal') {
+        throw new TypeError(`Unsupported fake pipeline error reason: ${reason}`)
+    }
+    const error = new Error(message)
+    error.name = 'GPUPipelineError'
+    Object.defineProperty(error, 'reason', {
+        value: reason,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+    })
+    return error
+}
+
 export function replaceResourceAllocationForTest(resource, descriptor = resource.descriptor) {
 
     replaceResourceAllocation(resource, descriptor)
@@ -121,6 +137,9 @@ export function createFakeGpu(options = {}) {
         resolveQueries: [],
         maps: [],
         errorScopes: [],
+        nativeTimeline: [],
+        compilationInfoRequests: [],
+        asyncPipelineRequests: [],
         uncapturedErrors: [],
         deviceLosses: [],
     }
@@ -128,6 +147,10 @@ export function createFakeGpu(options = {}) {
     const errorScopeStack = []
     const nativeFailures = []
     const pendingPops = []
+    const compilationRequests = []
+    const pipelineRequests = []
+    const nextCompilationOutcomes = []
+    const nextPipelineOutcomes = []
     const eventListeners = new Map()
     let resolveDeviceLost
     let deviceLossSettled = false
@@ -183,14 +206,141 @@ export function createFakeGpu(options = {}) {
         },
     }
 
+    const pipelines = {
+        setNextCompilationInfo(info) {
+            nextCompilationOutcomes.push({ kind: 'resolve', value: normalizeCompilationInfo(info) })
+        },
+        rejectNextCompilation(error = new Error('fake compilation info failure')) {
+            nextCompilationOutcomes.push({ kind: 'reject', error })
+        },
+        rejectNextPipeline(kind, error = createFakePipelineError()) {
+            assertPipelineKind(kind)
+            nextPipelineOutcomes.push({ kind: 'reject', pipelineKind: kind, error })
+        },
+        settleCompilation(index) {
+            const request = pendingRequest(compilationRequests, index, 'compilation info')
+            request.settled = true
+            if (request.outcome.kind === 'reject') request.reject(request.outcome.error)
+            else request.resolve(request.outcome.value)
+        },
+        resolveCompilation(index, info) {
+            const request = pendingRequest(compilationRequests, index, 'compilation info')
+            request.settled = true
+            request.resolve(info === undefined ? request.defaultInfo : normalizeCompilationInfo(info))
+        },
+        rejectCompilation(index, error = new Error('fake compilation info failure')) {
+            const request = pendingRequest(compilationRequests, index, 'compilation info')
+            request.settled = true
+            request.reject(error)
+        },
+        settlePipeline(index) {
+            const request = pendingRequest(pipelineRequests, index, 'pipeline creation')
+            request.settled = true
+            if (request.outcome?.kind === 'reject') request.reject(request.outcome.error)
+            else request.resolve(request.pipeline)
+        },
+        resolvePipeline(index) {
+            const request = pendingRequest(pipelineRequests, index, 'pipeline creation')
+            request.settled = true
+            request.resolve(request.pipeline)
+        },
+        rejectPipeline(index, error = createFakePipelineError()) {
+            const request = pendingRequest(pipelineRequests, index, 'pipeline creation')
+            request.settled = true
+            request.reject(error)
+        },
+        get compilationRequests() {
+            return compilationRequests
+        },
+        get pipelineRequests() {
+            return pipelineRequests
+        },
+    }
+
     function applyNativeFailure(method) {
 
-        const index = nativeFailures.findIndex(failure => failure.method === method)
-        if (index < 0) return
-
-        const [ failure ] = nativeFailures.splice(index, 1)
+        const failure = takeNativeFailure(method)
+        if (failure === undefined) return
         if (failure.kind === 'throw') throw failure.error
         captureOrDispatchError(failure.filter, failure.error)
+    }
+
+    function applyPromiseMethodSynchronousFailure(method) {
+
+        const failure = takeNativeFailure(method)
+        if (failure === undefined) return
+        if (failure.kind === 'throw') throw failure.error
+        throw new TypeError(`${method} failures must be configured as Promise rejections.`)
+    }
+
+    function takeNativeFailure(method) {
+
+        const index = nativeFailures.findIndex(failure => failure.method === method)
+        if (index < 0) return undefined
+        return nativeFailures.splice(index, 1)[0]
+    }
+
+    function issueCompilationInfo(shaderModule) {
+
+        calls.nativeTimeline.push({ type: 'get-compilation-info' })
+        calls.compilationInfoRequests.push({ shaderModule })
+        applyPromiseMethodSynchronousFailure('getCompilationInfo')
+        const defaultInfo = normalizeCompilationInfo({
+            messages: options.compilationMessages ?? [],
+        })
+        const nextOutcome = nextCompilationOutcomes.shift()
+        const outcome = nextOutcome ?? { kind: 'resolve', value: defaultInfo }
+
+        if (!options.deferCompilationInfo) {
+            if (outcome.kind === 'reject') return Promise.reject(outcome.error)
+            return Promise.resolve(outcome.value)
+        }
+
+        return new Promise((resolve, reject) => {
+            compilationRequests.push({
+                shaderModule,
+                defaultInfo: outcome.kind === 'resolve' ? outcome.value : defaultInfo,
+                outcome,
+                resolve,
+                reject,
+                settled: false,
+            })
+        })
+    }
+
+    function issueAsyncPipeline(kind, descriptor) {
+
+        assertPipelineKind(kind)
+        const method = kind === 'render'
+            ? 'createRenderPipelineAsync'
+            : 'createComputePipelineAsync'
+        calls.nativeTimeline.push({ type: `create-${kind}-pipeline-async` })
+        applyPromiseMethodSynchronousFailure(method)
+        const pipeline = { type: `${kind}Pipeline`, descriptor }
+        const targetCalls = kind === 'render' ? calls.renderPipelines : calls.computePipelines
+        targetCalls.push(pipeline)
+        calls.asyncPipelineRequests.push({ kind, descriptor, pipeline })
+
+        const outcomeIndex = nextPipelineOutcomes.findIndex(outcome => outcome.pipelineKind === kind)
+        const nextOutcome = outcomeIndex < 0
+            ? undefined
+            : nextPipelineOutcomes.splice(outcomeIndex, 1)[0]
+        if (!options.deferAsyncPipelines) {
+            if (nextOutcome?.kind === 'reject') return Promise.reject(nextOutcome.error)
+            return Promise.resolve(pipeline)
+        }
+
+        return new Promise((resolve, reject) => {
+            pipelineRequests.push({
+                kind,
+                descriptor,
+                pipeline,
+                resolve,
+                reject,
+                settled: false,
+                outcome: nextOutcome,
+            })
+        })
     }
 
     function captureOrDispatchError(filter, error) {
@@ -297,6 +447,7 @@ export function createFakeGpu(options = {}) {
         pushErrorScope(filter) {
             errorScopeStack.push({ filter, error: null })
             calls.errorScopes.push({ action: 'push', filter })
+            calls.nativeTimeline.push({ type: 'push-error-scope', filter })
         },
         popErrorScope() {
             const scope = errorScopeStack.pop()
@@ -306,6 +457,7 @@ export function createFakeGpu(options = {}) {
             }
 
             calls.errorScopes.push({ action: 'pop', filter: scope.filter })
+            calls.nativeTimeline.push({ type: 'pop-error-scope', filter: scope.filter })
             if (!options.deferErrorScopePops) return Promise.resolve(scope.error)
 
             return new Promise((resolve, reject) => {
@@ -346,9 +498,14 @@ export function createFakeGpu(options = {}) {
             return buffer
         },
         createShaderModule(descriptor) {
+            calls.nativeTimeline.push({ type: 'create-shader-module' })
+            applyNativeFailure('createShaderModule')
             const shaderModule = {
                 type: 'shaderModule',
                 descriptor,
+                getCompilationInfo() {
+                    return issueCompilationInfo(this)
+                },
             }
             calls.shaderModules.push(shaderModule)
             return shaderModule
@@ -403,6 +560,8 @@ export function createFakeGpu(options = {}) {
             return sampler
         },
         createPipelineLayout(descriptor) {
+            calls.nativeTimeline.push({ type: 'create-pipeline-layout' })
+            applyNativeFailure('createPipelineLayout')
             const layout = {
                 type: 'pipelineLayout',
                 descriptor,
@@ -425,6 +584,12 @@ export function createFakeGpu(options = {}) {
             }
             calls.computePipelines.push(pipeline)
             return pipeline
+        },
+        createRenderPipelineAsync(descriptor) {
+            return issueAsyncPipeline('render', descriptor)
+        },
+        createComputePipelineAsync(descriptor) {
+            return issueAsyncPipeline('compute', descriptor)
         },
         createQuerySet(descriptor) {
             const querySet = {
@@ -473,7 +638,32 @@ export function createFakeGpu(options = {}) {
         },
     }
 
-    return { gpu, adapter, device, queue, calls, errors }
+    return { gpu, adapter, device, queue, calls, errors, pipelines }
+}
+
+function normalizeCompilationInfo(info) {
+
+    if (!info || !Array.isArray(info.messages)) {
+        throw new TypeError('Fake compilation info requires a messages array.')
+    }
+    return {
+        messages: info.messages.map(message => ({ ...message })),
+    }
+}
+
+function assertPipelineKind(kind) {
+
+    if (kind !== 'render' && kind !== 'compute') {
+        throw new TypeError(`Unsupported fake pipeline kind: ${kind}`)
+    }
+}
+
+function pendingRequest(requests, index, name) {
+
+    const request = requests[index]
+    if (request === undefined) throw new RangeError(`No pending ${name} at index ${index}.`)
+    if (request.settled) throw new Error(`${name} ${index} is already settled.`)
+    return request
 }
 
 export function createFakeCanvas() {
