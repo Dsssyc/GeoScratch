@@ -902,7 +902,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     // @ts-expect-error texture logical commitment is package-internal submission lowering
     textureUpload._commitLogicalWrite()
     const builder: scr.SubmissionBuilder = runtime.createSubmission(submissionOptions)
-    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
+    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).upload(externalImageUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
     const resourceAccesses: readonly scr.SubmissionResourceAccess[] = submitted.resourceAccesses
     const producerEpochs: readonly scr.SubmittedResourceEpoch[] = submitted.producerEpochs
     const diagnosticSubject: scr.DiagnosticSubject = storageInput.subject

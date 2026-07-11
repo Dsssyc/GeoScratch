@@ -2,6 +2,7 @@ import { UUID } from '../core/utils/uuid.js'
 import {
     commitUploadCommandLogicalWrite,
     registerReadbackCommandResult,
+    uploadCommandHasContentEffect,
     validateUploadCommandQueueAction,
     writeUploadCommandQueueAction,
 } from './command.js'
@@ -14,7 +15,7 @@ import {
 import { createScheduledReadbackOperation } from './readback.js'
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
-import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
+import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
@@ -136,7 +137,7 @@ type ComputeStep = {
 
 type UploadStep = {
     kind: 'upload'
-    command: UploadCommand | TextureUploadCommand
+    command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand
 }
 
 type CopyStep = {
@@ -225,6 +226,40 @@ type PreparedQueueAction =
         command: TextureUploadCommand
         effects: PreparedQueueEffect[]
     }
+    | {
+        kind: 'external-image-upload'
+        command: ExternalImageUploadCommand
+        effects: PreparedQueueEffect[]
+    }
+
+type PreparedUploadQueueAction = Exclude<PreparedQueueAction, { kind: 'command-buffer' }>
+
+function createPreparedUploadQueueAction(
+    command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand,
+    effects: PreparedQueueEffect[]
+): PreparedUploadQueueAction {
+
+    switch (command.uploadKind) {
+        case 'buffer':
+            return { kind: 'buffer-upload', command, effects }
+        case 'texture':
+            return { kind: 'texture-upload', command, effects }
+        case 'external-image':
+            return { kind: 'external-image-upload', command, effects }
+        default:
+            return assertNeverUploadCommand(command)
+    }
+}
+
+function assertNeverUploadCommand(command: never): never {
+
+    throw new TypeError(`Unsupported upload command: ${String(command)}`)
+}
+
+function assertNeverPreparedQueueAction(action: never): never {
+
+    throw new TypeError(`Unsupported prepared queue action: ${String(action)}`)
+}
 
 type ResourceContentSnapshot = {
     state: ResourceState
@@ -234,11 +269,6 @@ type ResourceContentSnapshot = {
 type QuerySlotContentSnapshot = {
     state: QuerySetSlotState
     contentEpoch: number
-}
-
-function isTextureUploadCommand(command: UploadCommand | TextureUploadCommand): command is TextureUploadCommand {
-
-    return 'uploadKind' in command && command.uploadKind === 'texture'
 }
 
 type ResourceSimulationState = {
@@ -340,7 +370,7 @@ export class SubmissionBuilder {
         return this
     }
 
-    upload(command: UploadCommand | TextureUploadCommand) {
+    upload(command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand) {
 
         this.steps.push({
             kind: 'upload',
@@ -474,16 +504,17 @@ export class SubmissionBuilder {
             for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
                 if (step.kind === 'upload') {
                     finishEncoderSegment()
-                    const writes = [
-                        captureResourceAccess(step.command.target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
-                    ]
-                    captureResourceContentSnapshot(resourceSnapshots, step.command.target)
-                    commitUploadCommandLogicalWrite(step.command)
-                    completeResourceAccesses(resourceAccesses, writes)
-                    const effects = [ createPreparedResourceContentEffect(step.command.target) ]
-                    queueTimeline.push(isTextureUploadCommand(step.command)
-                        ? { kind: 'texture-upload', command: step.command, effects }
-                        : { kind: 'buffer-upload', command: step.command, effects })
+                    const effects: PreparedQueueEffect[] = []
+                    if (uploadCommandHasContentEffect(step.command)) {
+                        const writes = [
+                            captureResourceAccess(step.command.target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
+                        ]
+                        captureResourceContentSnapshot(resourceSnapshots, step.command.target)
+                        commitUploadCommandLogicalWrite(step.command)
+                        completeResourceAccesses(resourceAccesses, writes)
+                        effects.push(createPreparedResourceContentEffect(step.command.target))
+                    }
+                    queueTimeline.push(createPreparedUploadQueueAction(step.command, effects))
                     continue
                 }
 
@@ -597,10 +628,17 @@ export class SubmissionBuilder {
         }
         this.isSubmitted = true
         for (const action of queueTimeline) {
-            if (action.kind === 'command-buffer') {
-                this.runtime.queue.submit([ action.commandBuffer ])
-            } else {
-                writeUploadCommandQueueAction(action.command, this.runtime.queue)
+            switch (action.kind) {
+                case 'command-buffer':
+                    this.runtime.queue.submit([ action.commandBuffer ])
+                    break
+                case 'buffer-upload':
+                case 'texture-upload':
+                case 'external-image-upload':
+                    writeUploadCommandQueueAction(action.command, this.runtime.queue)
+                    break
+                default:
+                    assertNeverPreparedQueueAction(action)
             }
 
             applyPreparedQueueEffects(action.effects)
@@ -656,7 +694,7 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
     for (const [stepIndex, step] of builder.steps.entries()) {
         if (step.kind === 'upload') {
             validateUploadStep(builder, step)
-            markSimulatedReady(readiness, step.command.target)
+            if (uploadCommandHasContentEffect(step.command)) markSimulatedReady(readiness, step.command.target)
             steps.push(step)
             continue
         }
@@ -785,7 +823,7 @@ function validateUploadStep(builder: SubmissionBuilder, step: UploadStep) {
             phase: 'submission',
             subject: builder.subject,
             message: 'Submission upload step requires an upload command.',
-            expected: { command: 'UploadCommand or TextureUploadCommand' },
+            expected: { command: 'UploadCommand, TextureUploadCommand, or ExternalImageUploadCommand' },
             actual: { command: command === undefined || command === null ? String(command) : typeof command },
         })
     }

@@ -7,6 +7,8 @@ const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_BUFFER_USAGE_STORAGE = 0x80
 const GPU_BUFFER_USAGE_QUERY_RESOLVE = 0x200
 const GPU_TEXTURE_USAGE_COPY_DST = 0x2
+const GPU_TEXTURE_USAGE_COPY_SRC = 0x1
+const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
 function timelineTypes(calls) {
@@ -58,6 +60,73 @@ function createBufferUpload(runtime, label, data = new Uint8Array(16)) {
     const command = runtime.createUploadCommand({ label, target, data })
 
     return { target, command }
+}
+
+function createExternalImageUpload(runtime, label, options = {}) {
+
+    const source = options.source ?? { width: 4, height: 4, revision: 0 }
+    const target = runtime.createTexture({
+        label: `${label} target`,
+        size: options.targetSize ?? { width: 4, height: 4 },
+        format: 'rgba8unorm',
+        usage: GPU_TEXTURE_USAGE_COPY_SRC |
+            GPU_TEXTURE_USAGE_COPY_DST |
+            GPU_TEXTURE_USAGE_TEXTURE_BINDING |
+            GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+    })
+    const command = runtime.createExternalImageUploadCommand({
+        label,
+        source,
+        sourceOrigin: options.sourceOrigin ?? { x: 0, y: 0 },
+        target,
+        size: options.size ?? { width: 2, height: 2 },
+    })
+
+    return { source, target, command }
+}
+
+function createComputeWork(runtime) {
+
+    const output = runtime.createBuffer({
+        label: 'external upload compute output',
+        size: 16,
+        usage: GPU_BUFFER_USAGE_STORAGE,
+    })
+    const program = runtime.createProgram({
+        modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+        entryPoints: { compute: 'csMain' },
+    })
+    const pipeline = runtime.createComputePipeline({ program, bindLayouts: [] })
+    const command = runtime.createDispatchCommand({
+        pipeline,
+        count: { workgroups: [ 1 ] },
+        resources: { read: [], write: [ output ] },
+        whenMissing: 'throw',
+    })
+    const pass = runtime.createComputePass({ label: 'external upload compute pass' })
+
+    return { output, command, pass }
+}
+
+function createRenderWork(runtime) {
+
+    const target = runtime.createTexture({
+        label: 'external upload render target',
+        size: { width: 2, height: 2 },
+        format: 'rgba8unorm',
+        usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+    })
+    const pass = runtime.createRenderPass({
+        label: 'external upload render pass',
+        color: [ {
+            target,
+            load: 'clear',
+            store: 'store',
+            clear: [ 0, 0, 0, 1 ],
+        } ],
+    })
+
+    return { target, pass }
 }
 
 function createSkippedCompute(runtime, whenMissing) {
@@ -376,6 +445,332 @@ describe('scratch submission queue order', () => {
         ])
 
         await submitted.done
+    })
+
+    it('keeps leading, trailing, and interleaved external image uploads in exact queue order', async() => {
+
+        for (const placement of [ 'leading', 'trailing', 'interleaved' ]) {
+            const fixture = await createOrderingFixture()
+            const external = createExternalImageUpload(fixture.runtime, `${placement} external image upload`)
+            const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+
+            if (placement === 'leading') {
+                builder.upload(external.command).copy(fixture.firstCopy)
+            } else if (placement === 'trailing') {
+                builder.copy(fixture.firstCopy).upload(external.command)
+            } else {
+                builder.copy(fixture.firstCopy).upload(external.command).copy(fixture.secondCopy)
+            }
+            const submitted = builder.submit()
+
+            expect(timelineTypes(fixture.calls)).to.deep.equal(placement === 'leading'
+                ? [ 'external-image-upload', 'submit' ]
+                : placement === 'trailing'
+                    ? [ 'submit', 'external-image-upload' ]
+                    : [ 'submit', 'external-image-upload', 'submit' ])
+            expect(submitted.commandBuffers).to.have.length(placement === 'interleaved' ? 2 : 1)
+            expect(external.target.contentEpoch).to.equal(1)
+            await submitted.done
+        }
+    })
+
+    it('orders all three upload kinds without creating empty command buffers', async() => {
+
+        const fixture = await createOrderingFixture()
+        const firstExternal = createExternalImageUpload(fixture.runtime, 'first external image upload')
+        const secondExternal = createExternalImageUpload(fixture.runtime, 'second external image upload')
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+            .upload(firstExternal.command)
+            .upload(fixture.textureUpload)
+            .upload(secondExternal.command)
+            .submit()
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([
+            'write-buffer',
+            'external-image-upload',
+            'write-texture',
+            'external-image-upload',
+        ])
+        expect(submitted.commandBuffers).to.deep.equal([])
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+        expect(fixture.calls.submittedWorkDoneRegistrations).to.deep.equal([
+            { queueTimelineLength: 4 },
+        ])
+        expect([
+            fixture.uploadTarget.contentEpoch,
+            firstExternal.target.contentEpoch,
+            fixture.textureTarget.contentEpoch,
+            secondExternal.target.contentEpoch,
+        ]).to.deep.equal([ 1, 1, 1, 1 ])
+
+        await submitted.done
+    })
+
+    it('preserves external upload order relative to copy, readback, compute, and render work', async() => {
+
+        const fixture = await createOrderingFixture()
+        const firstExternal = createExternalImageUpload(fixture.runtime, 'external before copy and readback')
+        const secondExternal = createExternalImageUpload(fixture.runtime, 'external before compute and render')
+        const readback = fixture.runtime.createReadbackCommand({
+            source: { resource: fixture.copySource, contentEpoch: 1 },
+            whenMissing: 'throw',
+        })
+        const compute = createComputeWork(fixture.runtime)
+        const render = createRenderWork(fixture.runtime)
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(firstExternal.command)
+            .copy(fixture.firstCopy)
+            .readback(readback)
+            .upload(secondExternal.command)
+            .compute(compute.pass, [ compute.command ])
+            .render(render.pass, [])
+            .submit()
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([
+            'external-image-upload',
+            'submit',
+            'external-image-upload',
+            'submit',
+        ])
+        expect(submitted.commandBuffers).to.have.length(2)
+        expect(fixture.calls.copies).to.have.length(2)
+        expect(fixture.calls.computePasses).to.have.length(1)
+        expect(fixture.calls.renderPasses).to.have.length(1)
+        expect(readback.result({ after: submitted }).contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => access.stepIndex)).to.deep.equal([
+            0,
+            1, 1,
+            2,
+            3,
+            4,
+            5,
+        ])
+
+        await submitted.done
+    })
+
+    it('records exactly one external upload target write and producer epoch', async() => {
+
+        const fixture = await createOrderingFixture()
+        const external = createExternalImageUpload(fixture.runtime, 'ledger external image upload')
+        const allocationVersion = external.target.allocationVersion
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(external.command)
+            .submit()
+
+        expect(submitted.resourceAccesses).to.have.length(1)
+        expect(submitted.resourceAccesses[0]).to.include({
+            stepIndex: 0,
+            stepKind: 'upload',
+            commandKind: 'upload',
+            commandId: external.command.id,
+            resourceId: external.target.id,
+            access: 'write',
+            contentEpochBefore: 0,
+            contentEpochAfter: 1,
+            allocationVersion,
+        })
+        expect(submitted.producerEpochs).to.have.length(1)
+        expect(submitted.producerEpochs[0]).to.include({
+            resourceId: external.target.id,
+            contentEpoch: 1,
+            allocationVersion,
+        })
+        expect(submitted.producerEpochs[0].producedBy).to.deep.equal({
+            stepIndex: 0,
+            stepKind: 'upload',
+            commandKind: 'upload',
+            commandId: external.command.id,
+        })
+        expect(external.target.allocationVersion).to.equal(allocationVersion)
+        expect(submitted.commandBuffers).to.deep.equal([])
+
+        await submitted.done
+    })
+
+    it('keeps zero-area external uploads ordered but absent from epochs and ledgers', async() => {
+
+        const fixture = await createOrderingFixture()
+        const external = createExternalImageUpload(fixture.runtime, 'zero-area external image upload', {
+            size: { width: 0, height: 2 },
+        })
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(external.command)
+            .submit()
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([ 'external-image-upload' ])
+        expect(external.target.contentEpoch).to.equal(0)
+        expect(external.target.state).to.equal('empty')
+        expect(submitted.resourceAccesses).to.deep.equal([])
+        expect(submitted.producerEpochs).to.deep.equal([])
+        expect(submitted.commandBuffers).to.deep.equal([])
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.submittedWorkDoneRegistrations).to.deep.equal([
+            { queueTimelineLength: 1 },
+        ])
+
+        await submitted.done
+    })
+
+    it('does not let a zero-area external upload satisfy a later resource epoch dependency', async() => {
+
+        const fixture = await createOrderingFixture()
+        const external = createExternalImageUpload(fixture.runtime, 'zero-area dependency upload', {
+            size: { width: 0, height: 1 },
+        })
+        const target = fixture.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_COPY_DST,
+        })
+        const copy = fixture.runtime.createCopyCommand({
+            source: { resource: external.target, contentEpoch: 1 },
+            target,
+            size: { width: 1, height: 1 },
+            whenMissing: 'throw',
+        })
+
+        expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(external.command)
+            .copy(copy)
+            .submit(), 'SCRATCH_COMMAND_RESOURCE_NOT_READY')
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([])
+        expect(external.target.contentEpoch).to.equal(0)
+        expect(target.contentEpoch).to.equal(0)
+    })
+
+    it('lets a non-empty external upload produce a texture epoch for a later GPU copy', async() => {
+
+        const fixture = await createOrderingFixture()
+        const external = createExternalImageUpload(fixture.runtime, 'external producer upload')
+        const target = fixture.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_COPY_DST,
+        })
+        const copy = fixture.runtime.createCopyCommand({
+            source: { resource: external.target, contentEpoch: 1 },
+            target,
+            size: { width: 2, height: 2 },
+            whenMissing: 'throw',
+        })
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(external.command)
+            .copy(copy)
+            .submit()
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([ 'external-image-upload', 'submit' ])
+        expect(external.target.contentEpoch).to.equal(1)
+        expect(target.contentEpoch).to.equal(1)
+        expect(submitted.resourceAccesses.map(access => ({
+            stepIndex: access.stepIndex,
+            resourceId: access.resourceId,
+            access: access.access,
+            contentEpochAfter: access.contentEpochAfter,
+        }))).to.deep.equal([
+            { stepIndex: 0, resourceId: external.target.id, access: 'write', contentEpochAfter: 1 },
+            { stepIndex: 1, resourceId: external.target.id, access: 'read', contentEpochAfter: 1 },
+            { stepIndex: 1, resourceId: target.id, access: 'write', contentEpochAfter: 1 },
+        ])
+
+        await submitted.done
+    })
+
+    it('preflights every external upload before the first physical queue action', async() => {
+
+        const fixture = await createOrderingFixture()
+        const first = createExternalImageUpload(fixture.runtime, 'valid external preflight')
+        const second = createExternalImageUpload(fixture.runtime, 'invalid external preflight')
+        second.source.width = 1
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .copy(fixture.firstCopy)
+            .upload(first.command)
+            .upload(second.command)
+
+        expectScratchDiagnostic(() => builder.submit(), 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID')
+
+        expect(timelineTypes(fixture.calls)).to.deep.equal([])
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.firstCopyTarget.contentEpoch).to.equal(0)
+        expect(first.target.contentEpoch).to.equal(0)
+        expect(second.target.contentEpoch).to.equal(0)
+        expect(builder.isSubmitted).to.equal(false)
+    })
+
+    it('stops external upload replay after a native failure and remains non-retryable', async() => {
+
+        const fixture = await createOrderingFixture()
+        const first = createExternalImageUpload(fixture.runtime, 'successful external action')
+        const failed = createExternalImageUpload(fixture.runtime, 'failed external action')
+        const later = createExternalImageUpload(fixture.runtime, 'unreplayed external action')
+        const nativeCopy = fixture.queue.copyExternalImageToTexture.bind(fixture.queue)
+        const cause = new DOMException('injected source failure', 'OperationError')
+        let nativeCalls = 0
+        fixture.queue.copyExternalImageToTexture = (...args) => {
+            nativeCalls++
+            if (nativeCalls === 2) throw cause
+            nativeCopy(...args)
+        }
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .copy(fixture.firstCopy)
+            .upload(first.command)
+            .upload(failed.command)
+            .upload(later.command)
+
+        let caught
+        try {
+            builder.submit()
+        } catch (error) {
+            caught = error
+        }
+
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED')
+        expect(caught.cause).to.equal(cause)
+        expect(timelineTypes(fixture.calls)).to.deep.equal([ 'submit', 'external-image-upload' ])
+        expect(nativeCalls).to.equal(2)
+        expect(fixture.firstCopyTarget.contentEpoch).to.equal(1)
+        expect(first.target.contentEpoch).to.equal(1)
+        expect(failed.target.contentEpoch).to.equal(0)
+        expect(later.target.contentEpoch).to.equal(0)
+        expect(builder.isSubmitted).to.equal(true)
+        expectScratchDiagnostic(() => builder.submit(), 'SCRATCH_SUBMISSION_WORK_ALREADY_SUBMITTED')
+        expect(nativeCalls).to.equal(2)
+    })
+
+    it('commits no effects when the first external image queue action fails', async() => {
+
+        const fixture = await createOrderingFixture()
+        const failed = createExternalImageUpload(fixture.runtime, 'first failed external action')
+        const cause = new DOMException('first action failed', 'OperationError')
+        let nativeCalls = 0
+        fixture.queue.copyExternalImageToTexture = () => {
+            nativeCalls++
+            throw cause
+        }
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(failed.command)
+            .copy(fixture.firstCopy)
+
+        let caught
+        try {
+            builder.submit()
+        } catch (error) {
+            caught = error
+        }
+
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED')
+        expect(caught.cause).to.equal(cause)
+        expect(nativeCalls).to.equal(1)
+        expect(timelineTypes(fixture.calls)).to.deep.equal([])
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+        expect(failed.target.contentEpoch).to.equal(0)
+        expect(fixture.firstCopyTarget.contentEpoch).to.equal(0)
+        expect(builder.isSubmitted).to.equal(true)
     })
 
     it('does not create an empty segment between consecutive uploads', async() => {
