@@ -9,6 +9,20 @@ export type {
     ScratchDiagnostic,
     ScratchDiagnosticReport,
 } from './diagnostics.js'
+export type {
+    GpuAttributionConfidence,
+    GpuDescriptorEvidence,
+    GpuNativeErrorCategory,
+    GpuOperationKind,
+    GpuOperationStatus,
+    ScratchGpuIncidentEvidenceCompleteness,
+    ScratchGpuIncidentKind,
+    ScratchGpuIncidentReport,
+    ScratchGpuOperationRecord,
+    ScratchGpuPressureContributor,
+    ScratchGpuPressureEvidence,
+    ScratchNativeGpuErrorFacts,
+} from './gpu-operation.js'
 export { ScratchRuntime } from './runtime.js'
 export { Surface } from './surface.js'
 export { Resource } from './resource.js'

@@ -88,7 +88,7 @@ function fakeExternalImageSourcePlatform(kind, dimensionFields) {
     return platform
 }
 
-export function createFakeGpu() {
+export function createFakeGpu(options = {}) {
 
     const calls = {
         buffers: [],
@@ -120,6 +120,99 @@ export function createFakeGpu() {
         textureBufferCopies: [],
         resolveQueries: [],
         maps: [],
+        errorScopes: [],
+        uncapturedErrors: [],
+        deviceLosses: [],
+    }
+
+    const errorScopeStack = []
+    const nativeFailures = []
+    const pendingPops = []
+    const eventListeners = new Map()
+    let resolveDeviceLost
+    let deviceLossSettled = false
+    const deviceLost = new Promise(resolve => {
+        resolveDeviceLost = resolve
+    })
+
+    const errors = {
+        failNext(method, filter, error) {
+            nativeFailures.push({ method, kind: 'error', filter, error })
+        },
+        throwNext(method, error) {
+            nativeFailures.push({ method, kind: 'throw', error })
+        },
+        settlePop(index) {
+            const pending = pendingPops[index]
+            if (pending === undefined) throw new RangeError(`No pending error-scope pop at index ${index}.`)
+            if (pending.settled) throw new Error(`Error-scope pop ${index} is already settled.`)
+            pending.settled = true
+            pending.resolve(pending.scope.error)
+        },
+        rejectPop(index, error = new Error('fake error-scope pop failure')) {
+            const pending = pendingPops[index]
+            if (pending === undefined) throw new RangeError(`No pending error-scope pop at index ${index}.`)
+            if (pending.settled) throw new Error(`Error-scope pop ${index} is already settled.`)
+            pending.settled = true
+            pending.reject(error)
+        },
+        emit(filter, error) {
+            captureOrDispatchError(filter, error)
+        },
+        emitUncaptured(error) {
+            queueMicrotask(() => dispatchUncapturedError(error))
+        },
+        loseDevice(info = { reason: 'unknown', message: 'fake device loss' }) {
+            if (deviceLossSettled) return
+            deviceLossSettled = true
+            calls.deviceLosses.push(info)
+            resolveDeviceLost(info)
+        },
+        listenerCount(type) {
+            return eventListeners.get(type)?.size ?? 0
+        },
+        get pendingPops() {
+            return pendingPops.map(({ scope, settled }) => ({
+                filter: scope.filter,
+                error: scope.error,
+                settled,
+            }))
+        },
+        get scopeDepth() {
+            return errorScopeStack.length
+        },
+    }
+
+    function applyNativeFailure(method) {
+
+        const index = nativeFailures.findIndex(failure => failure.method === method)
+        if (index < 0) return
+
+        const [ failure ] = nativeFailures.splice(index, 1)
+        if (failure.kind === 'throw') throw failure.error
+        captureOrDispatchError(failure.filter, failure.error)
+    }
+
+    function captureOrDispatchError(filter, error) {
+
+        for (let index = errorScopeStack.length - 1; index >= 0; index--) {
+            const scope = errorScopeStack[index]
+            if (scope.filter !== filter) continue
+            if (scope.error === null) scope.error = error
+            return
+        }
+
+        queueMicrotask(() => dispatchUncapturedError(error))
+    }
+
+    function dispatchUncapturedError(error) {
+
+        const event = { type: 'uncapturederror', error }
+        calls.uncapturedErrors.push(event)
+        for (const listener of [ ...(eventListeners.get('uncapturederror') ?? []) ]) {
+            if (typeof listener === 'function') listener.call(device, event)
+            else if (listener && typeof listener.handleEvent === 'function') listener.handleEvent(event)
+        }
     }
 
     const queue = {
@@ -200,8 +293,34 @@ export function createFakeGpu() {
             minStorageBufferOffsetAlignment: 256,
         },
         queue,
-        lost: new Promise(() => {}),
+        lost: deviceLost,
+        pushErrorScope(filter) {
+            errorScopeStack.push({ filter, error: null })
+            calls.errorScopes.push({ action: 'push', filter })
+        },
+        popErrorScope() {
+            const scope = errorScopeStack.pop()
+            if (scope === undefined) {
+                calls.errorScopes.push({ action: 'pop', filter: 'none' })
+                return Promise.reject(new Error('No error scope is currently pushed.'))
+            }
+
+            calls.errorScopes.push({ action: 'pop', filter: scope.filter })
+            if (!options.deferErrorScopePops) return Promise.resolve(scope.error)
+
+            return new Promise((resolve, reject) => {
+                pendingPops.push({ scope, resolve, reject, settled: false })
+            })
+        },
+        addEventListener(type, listener) {
+            if (!eventListeners.has(type)) eventListeners.set(type, new Set())
+            eventListeners.get(type).add(listener)
+        },
+        removeEventListener(type, listener) {
+            eventListeners.get(type)?.delete(listener)
+        },
         createBuffer(descriptor) {
+            applyNativeFailure('createBuffer')
             const data = new Uint8Array(descriptor.size ?? 0)
             const buffer = {
                 type: 'buffer',
@@ -251,6 +370,7 @@ export function createFakeGpu() {
             return bindGroup
         },
         createTexture(descriptor) {
+            applyNativeFailure('createTexture')
             const texture = {
                 type: 'texture',
                 descriptor,
@@ -324,7 +444,9 @@ export function createFakeGpu() {
             calls.commandEncoders.push(encoder)
             return encoder
         },
-        destroy() {},
+        destroy() {
+            errors.loseDevice({ reason: 'destroyed', message: 'Fake GPUDevice was destroyed.' })
+        },
     }
 
     const adapter = {
@@ -351,7 +473,7 @@ export function createFakeGpu() {
         },
     }
 
-    return { gpu, adapter, device, queue, calls }
+    return { gpu, adapter, device, queue, calls, errors }
 }
 
 export function createFakeCanvas() {
