@@ -15,6 +15,7 @@ const examplePages = {
   scratchComputeReadback: path.resolve(examplesRoot, 'scratch_computeReadback/index.html'),
   submissionOrder: path.resolve(examplesRoot, 'submissionOrder/index.html'),
   externalImageUpload: path.resolve(examplesRoot, 'externalImageUpload/index.html'),
+  textureResize: path.resolve(examplesRoot, 'textureResize/index.html'),
   scratchHelloVertexBuffer: path.resolve(examplesRoot, 'scratch_helloVertexBuffer/index.html'),
   scratchTextureSampling: path.resolve(examplesRoot, 'scratch_textureSampling/index.html'),
   scratchRenderToTexture: path.resolve(examplesRoot, 'scratch_renderToTexture/index.html'),

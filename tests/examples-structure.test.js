@@ -13,6 +13,7 @@ describe('examples structure', () => {
         'scratch_computeReadback',
         'submissionOrder',
         'externalImageUpload',
+        'textureResize',
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
         'scratch_renderToTexture',
@@ -30,6 +31,7 @@ describe('examples structure', () => {
         'scratch_computeReadback',
         'submissionOrder',
         'externalImageUpload',
+        'textureResize',
         'scratch_helloVertexBuffer',
         'scratch_textureSampling',
         'scratch_renderToTexture',
@@ -93,6 +95,7 @@ describe('examples structure', () => {
             [ 'scratch_computeReadback', 'Compute Readback' ],
             [ 'submissionOrder', 'Submission Order' ],
             [ 'externalImageUpload', 'External Image Upload' ],
+            [ 'textureResize', 'Texture Resize' ],
             [ 'scratch_helloVertexBuffer', 'Hello Vertex Buffer' ],
             [ 'scratch_textureSampling', 'Texture Sampling' ],
             [ 'scratch_renderToTexture', 'Render To Texture' ],
@@ -272,6 +275,34 @@ describe('examples structure', () => {
         expect(source).to.include("dataset.status = passed ? 'passed' : 'failed'")
         expect(source.indexOf('createExternalImageUploadCommand')).to.be.lessThan(source.indexOf('drawFinalSourcePattern'))
         expect(source).to.not.match(/getImageData|createTextureUploadCommand|writeTexture/)
+        expect(source).to.not.match(/https?:\/\//)
+    })
+
+    it('provides a deterministic texture allocation replacement proof', () => {
+
+        const html = read('examples', 'textureResize', 'index.html')
+        const source = read('examples', 'textureResize', 'main.js')
+
+        expect(html).to.include('<title>Texture Resize | GeoScratch Examples</title>')
+        expect(html).to.include('<h1>Texture Resize</h1>')
+        expect(html).to.include('data-status="pending"')
+        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include('surface.resize(resizedSurfaceSize)')
+        expect(source).to.include('texture.resize(surface.size)')
+        expect(source).to.include('createCopyCommand')
+        expect(source).to.include('bytesPerRow: paddedBytesPerRow')
+        expect(source).to.include('createReadbackCommand')
+        expect(source).to.include('.render(texturePass, [])')
+        expect(source).to.include('.copy(copyToReadback)')
+        expect(source).to.include('.readback(readback)')
+        expect(source).to.include('.render(surfacePass, [ draw ])')
+        expect(source).to.include('sameBindSetObject')
+        expect(source).to.include('samePassSpecObject')
+        expect(source).to.include('sameDrawCommandObject')
+        expect(source).to.include('oldTextureDestroyed')
+        expect(source).to.include('exactReadbackBytesMatched')
+        expect(source).to.include("dataset.status = failedChecks.length === 0 ? 'passed' : 'failed'")
+        expect(source).to.not.match(/ResizeObserver|sizeProvider|getImageData|writeTexture/)
         expect(source).to.not.match(/https?:\/\//)
     })
 })
