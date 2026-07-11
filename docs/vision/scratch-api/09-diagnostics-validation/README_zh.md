@@ -1,7 +1,7 @@
 # Diagnostics 与 Validation
 
 状态: Vision draft
-日期: 2026-07-06
+日期: 2026-07-11
 
 ## 决策
 
@@ -152,6 +152,7 @@ type ValidationMode = 'off' | 'warn' | 'throw'
 type ScratchDiagnosticError = Error & {
     diagnostic: ScratchDiagnostic
     report?: ScratchDiagnosticReport
+    cause?: unknown
 }
 ```
 
@@ -293,11 +294,17 @@ type CommandDiagnosticCode =
     | 'SCRATCH_COMMAND_FALLBACK_INVALID'
     | 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE'
     | 'SCRATCH_COMMAND_RESOURCE_NOT_READY'
+    | 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID'
+    | 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED'
 ```
 
 预期的 Draw/Dispatch `skip-command`、`skip-pass` 与成功 `use-fallback` 决策不是 diagnostics，而是不可变的 `SubmittedWork.executionOutcomes`。`SCRATCH_COMMAND_FALLBACK_INVALID` 只用于 missing/forbidden fallback shape、伪造的非 command 节点、kind/runtime/lifecycle/write-set 不兼容，以及重复 object 或 command ID。最终选中的 fallback 无法进入当前 pass 时使用 `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`。
 
 Fallback readiness 或 dependency failure 以最终选中的 fallback 作为 `subject`。`related` 包含 requested command、attempted chain、pass、resources 与 submission。结构化 `actual` facts 包含 step/pass IDs、requested command ID、attempted command IDs、携带每个可用 missing-resource state/epoch fact 的完整 `attempts` 数组、当前 command/resource state 与 epochs，以及 validation mode。构造后变为不可用的 selected fallback dependency 使用 `SCRATCH_COMMAND_FALLBACK_INVALID`，并在 `actual.cause` 中保留底层 lifecycle diagnostic。针对 selected fallback 生成的 render attachment resource-conflict diagnostic 也保留相同的 requested/attempted provenance。
+
+`ExternalImageUploadCommand` diagnostic 在结构化 command facts 中使用 `commandKind: 'upload'` 与 `uploadKind: 'external-image'`。`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` 覆盖调用 `GPUQueue.copyExternalImageToTexture()` 前可确定的 descriptor、live source-range、target、ownership、lifecycle 与 queue-capability failure。它的 `expected` 和 `actual` 字段携带 machine-readable validation facts，不要求解析 message。
+
+`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED` 专用于原生 queue method 同步抛出的 exception。diagnostic 的 `actual.cause` 只包含可序列化 exception facts，而 `ScratchDiagnosticError.cause` 保留原始 thrown value，供程序化检查。失败的原生调用不提交 target epoch、readiness transition、access entry 或 producer fact。
 
 ### Submission
 

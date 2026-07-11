@@ -1,7 +1,7 @@
 # Passes, Submissions 与 Scheduler
 
 状态: Vision draft
-日期: 2026-07-06
+日期: 2026-07-11
 
 ## 决策
 
@@ -111,7 +111,7 @@ Submission 职责:
 2. 准备完整的内部 discriminated queue-action timeline。基于临时 content-state snapshot，按声明 step 顺序模拟逻辑 resource access 与 epoch effect，并编码 command-buffer segments，但此时不调用 queue write 或 submit method。replay 前恢复 live content state。
 3. 按准确顺序 replay 已准备 timeline，只在对应 queue call 成功后提交该 action 的逻辑 effects，并在最后一个 action 入队后注册 `queue.onSubmittedWorkDone()`。
 
-内部 action family 是 command buffer、buffer upload 与 texture upload。它们是显式 variant，不是任意 callback，也不是 public scheduler API。
+内部 action family 是 command buffer、buffer upload、texture upload 与 external-image upload。它们是显式 variant，不是任意 callback，也不是 public scheduler API。
 
 command-buffer segment 是一段最大的连续 executed encoder-backed steps。queue-side upload 会结束前一段，并与后一段隔开:
 
@@ -133,6 +133,20 @@ submit(render + readback)
 `SubmittedWork.commandBuffers` 按物理 queue 顺序包含每个真实 segment。upload-only work 的 command-buffer array 为空，但仍在最后一次 queue write 后注册 completion。effect-free work 不创建 encoder 或 queue action，并使用已 resolve 的 `done` promise。见 ADR-029。
 
 每个 resolved upload 都会在 encoder 创建前重新校验 live data range 与所需 queue method。replay 一旦开始，builder 就不可重试: 意外的同步 queue failure 不能重复先前 action，且只有成功入队的 action 才提交其 prepared logical effects。
+
+### External Image Queue Actions
+
+`ExternalImageUploadCommand` 以 `uploadKind: 'external-image'` 和下列内部 prepared action 进入同一全序:
+
+```ts
+{ kind: 'external-image-upload', command, effects }
+```
+
+与 buffer 和 texture upload 一样，它会结束前一 encoder segment，并隔开后续 encoder-backed work。连续 external upload 不创建空 command buffer; external-upload-only work 保持 `SubmittedWork.commandBuffers` 为空，并在最后一次 queue call 后注册 `done`。
+
+所有 external upload 都会在第一个 encoder 或 queue side effect 前完成 preflight。Preparation 只模拟非空 target write，并在 replay 前恢复 live state。Replay 在 action 的准确位置调用 `GPUQueue.copyExternalImageToTexture()`，且 only after the native queue call succeeds 才提交 prepared target effect。zero-width 或 zero-height action 仍保留在物理 timeline 中，但不携带 target effect、resource access、producer epoch 或 simulated readiness。
+
+如果原生调用同步抛错，replay 会停止。先前成功 action 保留已提交效果，failed 与 later action 不提交 effect，builder 保持不可重试。原生异常按 external-image command diagnostic contract 包装，而不是转成通用 queue callback failure。见 ADR-030。
 
 ## Resolved Readiness Execution
 

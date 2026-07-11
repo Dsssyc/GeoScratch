@@ -1,7 +1,7 @@
 # Diagnostics And Validation
 
 Status: Vision draft
-Date: 2026-07-06
+Date: 2026-07-11
 
 ## Decision
 
@@ -152,6 +152,7 @@ type ValidationMode = 'off' | 'warn' | 'throw'
 type ScratchDiagnosticError = Error & {
     diagnostic: ScratchDiagnostic
     report?: ScratchDiagnosticReport
+    cause?: unknown
 }
 ```
 
@@ -293,11 +294,17 @@ type CommandDiagnosticCode =
     | 'SCRATCH_COMMAND_FALLBACK_INVALID'
     | 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE'
     | 'SCRATCH_COMMAND_RESOURCE_NOT_READY'
+    | 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID'
+    | 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED'
 ```
 
 Expected Draw/Dispatch `skip-command`, `skip-pass`, and successful `use-fallback` decisions are not diagnostics. They are immutable `SubmittedWork.executionOutcomes`. `SCRATCH_COMMAND_FALLBACK_INVALID` is reserved for missing/forbidden fallback shapes, forged non-command nodes, kind/runtime/lifecycle/write-set incompatibility, and repeated objects or command IDs. A selected fallback that cannot enter the current pass uses `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`.
 
 Fallback readiness or dependency failures use the selected fallback as `subject`. `related` includes the requested command, attempted chain, pass, resources, and submission. Structured `actual` facts include step/pass IDs, requested command ID, attempted command IDs, a complete `attempts` array with every available missing-resource state/epoch fact, current command/resource state and epochs, plus validation mode. A selected fallback dependency that becomes unusable after construction uses `SCRATCH_COMMAND_FALLBACK_INVALID` and retains the underlying lifecycle diagnostic in `actual.cause`. Render attachment resource-conflict diagnostics generated for a selected fallback retain the same requested/attempted provenance.
+
+`ExternalImageUploadCommand` diagnostics use `commandKind: 'upload'` and `uploadKind: 'external-image'` in their structured command facts. `SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` covers deterministic descriptor, live source-range, target, ownership, lifecycle, and queue-capability failures before `GPUQueue.copyExternalImageToTexture()` is called. Its `expected` and `actual` fields contain machine-readable validation facts rather than requiring message parsing.
+
+`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED` is reserved for a synchronous exception thrown by the native queue method. The diagnostic's `actual.cause` contains only serializable exception facts, while `ScratchDiagnosticError.cause` preserves the original thrown value for programmatic inspection. A failed native call does not commit a target epoch, readiness transition, access entry, or producer fact.
 
 ### Submission
 

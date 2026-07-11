@@ -1,7 +1,7 @@
 # Pipelines And Commands
 
 Status: Vision draft
-Date: 2026-07-06
+Date: 2026-07-11
 
 ## Decision
 
@@ -58,6 +58,21 @@ Target command families:
 - future explicit clear or attachment-resolve commands, if needed
 
 `CopyCommand` covers WebGPU-native GPU-side copy directions: buffer-to-buffer, texture-to-texture, buffer-to-texture, and texture-to-buffer. CPU upload and CPU readback remain explicit transfer/readback operations rather than substitutes for these command encoder copies.
+
+### ExternalImageUploadCommand
+
+`ExternalImageUploadCommand` represents the native immediate queue operation `GPUQueue.copyExternalImageToTexture()`. It is an upload rather than a fifth `CopyCommand` direction:
+
+```ts
+commandKind: 'upload'
+uploadKind: 'external-image'
+```
+
+The other upload variants are explicitly discriminated as `uploadKind: 'buffer'` and `uploadKind: 'texture'`. The external-image descriptor retains a canonical `GPUCopyExternalImageSource` by identity and exposes `sourceOrigin`, `flipY`, target texture `origin`, `mipLevel`, `colorSpace`, `premultipliedAlpha`, and explicit width/height. Destination aspect is fixed to `all` and `depthOrArrayLayers` to `1`.
+
+The complete current source union is accepted: `ImageBitmap`, `ImageData`, `HTMLImageElement`, `HTMLVideoElement`, `VideoFrame`, `HTMLCanvasElement`, and `OffscreenCanvas`. Construction locks command fields without requiring the source to be loaded. Execution revalidates live source dimensions and target constraints, then lowers directly through canonical `GPUCopyExternalImageSourceInfo` and `GPUCopyExternalImageDestInfo`. Pixels are captured when the native queue method is called. Scratch does not extract CPU pixels, use `writeTexture()`, close or dispose the source, or invent a source resource epoch.
+
+Eligible targets are single-sampled 2D plain color textures with both `COPY_DST` and `RENDER_ATTACHMENT` usage and a device-enabled renderable `unorm`, `unorm-srgb`, `float`, or `ufloat` format. Direct execution and submission use the same validation, native-call, failure, and target-epoch path. See ADR-030.
 
 The first `ReadbackCommand` slice is implemented for buffer sources. It uses an explicit source `contentEpoch`, enters submission order through `SubmissionBuilder.readback(...)`, stages once at that position, and returns the associated `ReadbackOperation` through `result({ after })`. Direct texture readback, mapped leases, and staging-budget policy remain future work.
 

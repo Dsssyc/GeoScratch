@@ -137,6 +137,7 @@ function main(canvas) {
 | Uniform Triangle | `examples/scratch_uniformTriangle/` |
 | Compute Readback | `examples/scratch_computeReadback/` |
 | Submission Order | `examples/submissionOrder/` |
+| External Image Upload | `examples/externalImageUpload/` |
 | Hello Vertex Buffer | `examples/scratch_helloVertexBuffer/` |
 | Texture Sampling | `examples/scratch_textureSampling/` |
 | Render To Texture | `examples/scratch_renderToTexture/` |

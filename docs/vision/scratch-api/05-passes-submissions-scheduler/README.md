@@ -1,7 +1,7 @@
 # Passes, Submissions, And Scheduler
 
 Status: Vision draft
-Date: 2026-07-06
+Date: 2026-07-11
 
 ## Decision
 
@@ -111,7 +111,7 @@ Submission lowering therefore uses three phases:
 2. Prepare a complete internal discriminated queue-action timeline. Simulate logical resource accesses and epoch effects against temporary content-state snapshots in declared step order while encoding command-buffer segments, but do not call queue write or submit methods yet. Restore live content state before replay.
 3. Replay the prepared timeline in exact order and commit each action's logical effects only after its queue call succeeds, then register `queue.onSubmittedWorkDone()` after the final action.
 
-The internal action families are command buffer, buffer upload, and texture upload. They are explicit variants, not arbitrary callbacks and not a public scheduler API.
+The internal action families are command buffer, buffer upload, texture upload, and external-image upload. They are explicit variants, not arbitrary callbacks and not a public scheduler API.
 
 A command-buffer segment is a maximal contiguous sequence of executed encoder-backed steps. A queue-side upload ends the preceding segment and separates it from the next one:
 
@@ -133,6 +133,20 @@ Consecutive uploads do not create empty command buffers. Skipped commands, skipp
 `SubmittedWork.commandBuffers` contains every real segment in physical queue order. Upload-only work has an empty command-buffer array but still registers completion after the final queue write. Effect-free work creates no encoder or queue action and uses an already-resolved `done` promise. See ADR-029.
 
 Every resolved upload revalidates its live data range and required queue method before encoder creation. Once replay begins, the builder is non-retryable: an unexpected synchronous queue failure cannot duplicate earlier actions, and only successfully enqueued actions commit their prepared logical effects.
+
+### External Image Queue Actions
+
+`ExternalImageUploadCommand` enters the same total order with `uploadKind: 'external-image'` and an internal prepared action:
+
+```ts
+{ kind: 'external-image-upload', command, effects }
+```
+
+Like buffer and texture uploads, it ends a preceding encoder segment and separates later encoder-backed work. Consecutive external uploads do not create empty command buffers, and external-upload-only work keeps `SubmittedWork.commandBuffers` empty while registering `done` after the final queue call.
+
+All external uploads are preflighted before the first encoder or queue side effect. Preparation simulates only non-empty target writes and restores live state before replay. Replay calls `GPUQueue.copyExternalImageToTexture()` at the action's exact position and commits the prepared target effect only after the native queue call succeeds. A zero-width or zero-height action stays in the physical timeline but carries no target effect, resource access, producer epoch, or simulated readiness.
+
+If the native call throws synchronously, replay stops. Earlier successful actions remain committed, the failed and later actions do not commit effects, and the builder remains non-retryable. The native exception is wrapped by the external-image command diagnostic contract rather than converted into a generic queue callback failure. See ADR-030.
 
 ## Resolved Readiness Execution
 

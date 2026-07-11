@@ -1,7 +1,7 @@
 # Transfers And Epochs
 
 Status: Vision draft
-Date: 2026-07-06
+Date: 2026-07-11
 
 ## Decision
 
@@ -109,6 +109,21 @@ The complete timeline is prepared before any queue action is replayed. Preparati
 Replay is non-retryable once it begins. If an unexpected synchronous queue call fails after earlier actions were enqueued, only those successful earlier actions keep their logical effects; the failed and later actions do not. This prevents both fabricated epochs and duplicate retries.
 
 Upload-only submissions execute their writes in order, expose no fake command buffer, and register `done` after the final write. Consecutive uploads do not create empty queue submissions. See ADR-029.
+
+### External Image Upload
+
+`ExternalImageUploadCommand` is the explicit external-source upload variant:
+
+```ts
+commandKind: 'upload'
+uploadKind: 'external-image'
+```
+
+It lowers directly to `GPUQueue.copyExternalImageToTexture()`. The command retains the application-owned source object by identity, and the browser captures its current pixels when the native queue call occurs. Scratch performs no CPU pixel extraction, creates no intermediate byte snapshot, and provides no `writeTexture()` fallback. The external source is not a Scratch resource and receives no invented allocation version, content epoch, readiness state, access entry, or producer fact.
+
+After a non-empty native call returns successfully, Scratch advances the target texture's `contentEpoch` exactly once, marks the target ready, and records one target write and producer epoch. The target's `allocationVersion` does not change because the physical texture is unchanged. Direct execution and submission replay use the same effect rule.
+
+A zero-width or zero-height command remains an ordered queue action and still calls `GPUQueue.copyExternalImageToTexture()` so native source usability and argument validation remain observable. It does not advance `contentEpoch`, make the target ready, create a resource access or producer fact, or fabricate a command buffer. If the native call throws, the failed action commits none of these effects; earlier successful actions stay committed and later actions are not replayed. See ADR-030.
 
 ## Readback
 

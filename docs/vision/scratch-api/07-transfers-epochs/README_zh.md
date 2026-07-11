@@ -1,7 +1,7 @@
 # 传输与 Epoch
 
 状态: Vision draft
-日期: 2026-07-06
+日期: 2026-07-11
 
 ## 决策
 
@@ -109,6 +109,21 @@ queue.submit(commandBufferC)
 replay 一旦开始就不可重试。如果意外同步 queue call 在先前 actions 已入队后失败，只有那些成功的先前 actions 保留逻辑 effects; failed 与 later actions 都不提交。这同时避免伪造 epoch 与重复 retry。
 
 upload-only submission 按顺序执行 writes，不暴露伪造 command buffer，并在最后一次 write 后注册 `done`。连续 uploads 不创建空 queue submission。见 ADR-029。
+
+### External Image Upload
+
+`ExternalImageUploadCommand` 是显式 external-source upload variant:
+
+```ts
+commandKind: 'upload'
+uploadKind: 'external-image'
+```
+
+它直接降低到 `GPUQueue.copyExternalImageToTexture()`。command 按身份保留由应用拥有的 source object，browser 在原生 queue call 发生时捕获其当前 pixels。Scratch 不执行 CPU pixel extraction，不创建中间 byte snapshot，也不提供 `writeTexture()` fallback。external source 不是 Scratch resource，因此不会获得虚构的 allocation version、content epoch、readiness state、access entry 或 producer fact。
+
+非空原生调用成功返回后，Scratch 恰好推进一次 target texture 的 `contentEpoch`，把 target 标为 ready，并记录一次 target write 与 producer epoch。physical texture 没有改变，所以 target 的 `allocationVersion` 不变。直接执行与 submission replay 使用同一套 effect rule。
+
+zero-width or zero-height command 仍是 ordered queue action，并且仍调用 `GPUQueue.copyExternalImageToTexture()`，使原生 source usability 与 argument validation 保持可观察。它 does not advance `contentEpoch`，也不让 target ready、不创建 resource access 或 producer fact、不伪造 command buffer。如果原生调用抛错，failed action 不提交上述任何 effect；先前成功 actions 保持已提交，后续 actions 不 replay。见 ADR-030。
 
 ## Readback
 
