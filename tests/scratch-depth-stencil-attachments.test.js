@@ -229,6 +229,45 @@ describe('scratch depth/stencil render attachments', () => {
         expect(fixture.depthTarget.contentEpoch).to.equal(0)
     })
 
+    it('rejects mismatched current attachment sample counts before encoder creation', async() => {
+
+        const fixture = await createDepthFixture()
+        const multisampledDepth = fixture.runtime.createTexture({
+            label: 'multisampled scene depth',
+            size: { width: 64, height: 64 },
+            format: 'depth24plus',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+            sampleCount: 4,
+        })
+        const pass = fixture.runtime.createRenderPass({
+            color: [ {
+                target: fixture.colorTarget,
+                load: 'clear',
+                store: 'store',
+            } ],
+            depth: {
+                target: multisampledDepth,
+                depthLoad: 'clear',
+                depthStore: 'store',
+                depthClear: 1,
+            },
+        })
+
+        await expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [])
+            .submit(), {
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.textureViews).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+        expect(fixture.colorTarget.contentEpoch).to.equal(0)
+        expect(multisampledDepth.contentEpoch).to.equal(0)
+    })
+
     it('lowers stencil fields for stencil-capable depth/stencil formats', async() => {
 
         const fixture = await createDepthFixture('depth24plus-stencil8')
