@@ -18,7 +18,7 @@ fn csMain(@builtin(global_invocation_id) id: vec3u) {
 }
 `
 
-await main().catch((error) => {
+void main().catch((error) => {
     result.textContent = `GPU result: ${error.message}`
     console.error(error)
 })

@@ -89,7 +89,7 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4f {
 }
 `
 
-await main().catch((error) => {
+void main().catch((error) => {
     canvas.dataset.status = 'error'
     console.error(error)
 })

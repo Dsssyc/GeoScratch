@@ -144,6 +144,16 @@ describe('examples structure', () => {
         }
     })
 
+    it('keeps async example startup compatible with the configured build target', () => {
+
+        for (const name of standaloneExamples) {
+            const source = read('examples', name, 'main.js')
+
+            expect(source, name).to.not.match(/^\s*await\s+main\(\)/m)
+            expect(source, name).to.not.include('await await')
+        }
+    })
+
     it('loads MapLibre only for the map-backed terrain examples', () => {
         const demHtml = read('examples', 'm_demLayer', 'index.html')
         const flowHtml = read('examples', 'm_flowLayer', 'index.html')
@@ -215,6 +225,18 @@ describe('examples structure', () => {
         expect(source).to.include('count: { indirect: drawArguments')
         expect(source).to.include('count: { indirect: indexedArguments')
         expect(source).to.not.match(/readback|mapAsync|getMappedRange|toBytes|toArray/i)
+    })
+
+    it('publishes first-frame completion for continuous Scratch examples', () => {
+
+        for (const name of [ 'scratch_textureSampling', 'scratch_renderToTexture' ]) {
+            const source = read('examples', name, 'main.js')
+
+            expect(source, name).to.include("canvas.dataset.status = 'loading'")
+            expect(source, name).to.include("canvas.dataset.status = 'ready'")
+            expect(source, name).to.include("canvas.dataset.status = 'error'")
+            expect(source, name).to.include('submitted.done.then')
+        }
     })
 
     it('demonstrates readiness policy execution without GPU readback', () => {
@@ -301,6 +323,13 @@ describe('examples structure', () => {
         expect(source).to.include('sameDrawCommandObject')
         expect(source).to.include('oldTextureDestroyed')
         expect(source).to.include('exactReadbackBytesMatched')
+        expect(source).to.include('runtime.diagnostics.exportEvidence()')
+        expect(source).to.include('allocationDiagnosticsSucceeded')
+        expect(source).to.include('diagnosticEvidenceSerializable')
+        expect(source).to.include('diagnosticEvidenceCompact')
+        expect(source).to.include('initialTextureSettlementMs')
+        expect(source).to.include('replacementSettlementMs')
+        expect(source).to.not.include('await await')
         expect(source).to.include('replacementTextureAccesses.length > 0')
         expect(source).to.include("dataset.status = failedChecks.length === 0 ? 'passed' : 'failed'")
         expect(source).to.not.match(/ResizeObserver|sizeProvider|getImageData|writeTexture/)

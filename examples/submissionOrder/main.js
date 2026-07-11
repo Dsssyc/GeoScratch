@@ -15,7 +15,7 @@ fn csMain() {
 
 renderResult('...', 'pending')
 
-await main().catch((error) => {
+void main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error)
     document.body.dataset.status = 'failed'
     document.body.dataset.result = 'error'

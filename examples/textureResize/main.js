@@ -57,7 +57,7 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4f {
 
 document.body.dataset.status = 'pending'
 
-await await main().catch((error) => {
+void main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error)
     document.body.dataset.status = 'failed'
     document.body.dataset.error = message
@@ -76,7 +76,8 @@ async function main() {
         alphaMode: 'opaque',
         size: initialSurfaceSize,
     })
-    const texture = await runtime.createTexture({
+    const initialTextureIssueStartedAt = performance.now()
+    const initialTextureAllocation = runtime.createTexture({
         label: 'texture resize offscreen color',
         size: surface.size,
         format: 'rgba8unorm',
@@ -84,6 +85,9 @@ async function main() {
             GPUTextureUsage.COPY_SRC |
             GPUTextureUsage.TEXTURE_BINDING,
     })
+    const initialTextureIssuedAt = performance.now()
+    const texture = await initialTextureAllocation
+    const initialTextureSettledAt = performance.now()
     const sampler = runtime.createSampler({
         label: 'texture resize sampler',
         magFilter: 'nearest',
@@ -181,7 +185,11 @@ async function main() {
     const initialContentEpoch = texture.contentEpoch
 
     surface.resize(resizedSurfaceSize)
-    await texture.resize(surface.size)
+    const replacementIssueStartedAt = performance.now()
+    const replacement = texture.resize(surface.size)
+    const replacementIssuedAt = performance.now()
+    await replacement
+    const replacementSettledAt = performance.now()
 
     const allocationVersionAfterResize = texture.allocationVersion
     const contentEpochAfterResize = texture.contentEpoch
@@ -237,6 +245,14 @@ async function main() {
     )
     const replacementTextureAccesses = replacementWork.resourceAccesses
         .filter(access => access.resourceId === texture.id)
+    const evidence = runtime.diagnostics.exportEvidence()
+    const serializedEvidence = JSON.stringify(evidence)
+    const textureOperations = evidence.operations
+        .filter(operation => operation.resourceId === texture.id)
+    const initialAllocationOperation = textureOperations
+        .find(operation => operation.kind === 'texture-allocation')
+    const replacementOperation = textureOperations
+        .find(operation => operation.kind === 'texture-replacement')
     const checks = {
         resourceIdUnchanged: texture.id === initialResourceId,
         gpuTextureChanged: replacementTexture !== initialTexture,
@@ -262,6 +278,19 @@ async function main() {
             replacementTextureAccesses.length > 0 &&
             replacementTextureAccesses
                 .every(access => access.allocationVersion === allocationVersionAfterResize),
+        allocationDiagnosticsSucceeded:
+            initialAllocationOperation?.status === 'succeeded' &&
+            initialAllocationOperation.allocationVersion === initialAllocationVersion &&
+            replacementOperation?.status === 'succeeded' &&
+            replacementOperation.allocationVersion === allocationVersionAfterResize,
+        diagnosticEvidenceSerializable:
+            JSON.stringify(JSON.parse(serializedEvidence)) === serializedEvidence,
+        diagnosticEvidenceCompact:
+            textureOperations.every(operation => (
+                operation.stack === undefined && operation.descriptor.full === undefined
+            )),
+        diagnosticEvidenceSettled:
+            evidence.snapshot.pendingOperations.length === 0 && evidence.incidents.length === 0,
     }
     const failedChecks = Object.entries(checks)
         .filter(([, passed ]) => !passed)
@@ -280,6 +309,24 @@ async function main() {
     document.body.dataset.expectedBytes = JSON.stringify(Array.from(expectedBytes))
     document.body.dataset.actualBytes = JSON.stringify(Array.from(bytes))
     document.body.dataset.drawExecutionCount = '2'
+    document.body.dataset.initialTextureIssueMs = String(
+        initialTextureIssuedAt - initialTextureIssueStartedAt
+    )
+    document.body.dataset.initialTextureSettlementMs = String(
+        initialTextureSettledAt - initialTextureIssuedAt
+    )
+    document.body.dataset.replacementIssueMs = String(
+        replacementIssuedAt - replacementIssueStartedAt
+    )
+    document.body.dataset.replacementSettlementMs = String(
+        replacementSettledAt - replacementIssuedAt
+    )
+    document.body.dataset.diagnosticOperationCount = String(evidence.operations.length)
+    document.body.dataset.textureAllocationOperationCount = String(textureOperations.length)
+    document.body.dataset.diagnosticIncidentCount = String(evidence.incidents.length)
+    document.body.dataset.diagnosticRetainedEvidenceBytes = String(
+        evidence.snapshot.recorder.retainedEvidenceBytes
+    )
     document.body.dataset.status = failedChecks.length === 0 ? 'passed' : 'failed'
     statusElement.textContent = failedChecks.length === 0 ? 'Passed' : 'Failed'
     factsElement.textContent = `${initialSurfaceSize.width}x${initialSurfaceSize.height} -> ${surface.size.width}x${surface.size.height}  |  allocation ${initialAllocationVersion} -> ${allocationVersionAfterResize}  |  epoch ${initialContentEpoch} -> ${contentEpochAfterRender}`

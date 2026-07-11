@@ -38,6 +38,11 @@ inspection less useful over time.
 
 ## Decision
 
+This decision uses ordinary Promises for covered allocation acknowledgement.
+No synchronous compatibility path remains. Current facts and retained history are separate
+by construction, and Raw WebGPU escape-hatch operations retain
+explicitly lower-confidence attribution rather than fabricated scope ownership.
+
 ### Promise-returning allocation API
 
 Public persistent buffer and texture allocation is asynchronous:

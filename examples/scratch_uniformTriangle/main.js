@@ -29,7 +29,7 @@ fn fsMain() -> @location(0) vec4f {
 }
 `
 
-await main().catch((error) => {
+void main().catch((error) => {
     console.error(error)
 })
 

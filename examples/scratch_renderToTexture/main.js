@@ -93,7 +93,7 @@ fn fsMain(input: VertexOutput) -> @location(0) vec4f {
 }
 `
 
-await main().catch((error) => {
+void main().catch((error) => {
     console.error(error)
 })
 
@@ -204,6 +204,9 @@ async function main() {
         },
         whenMissing: 'throw',
     })
+    let firstFrameSettled = false
+    canvas.dataset.status = 'loading'
+
     function render() {
 
         resizeSurface(surface, canvas)
@@ -226,7 +229,15 @@ async function main() {
             .render(offscreenPass, [ offscreenDraw ])
             .render(surfacePass, [ sampleDraw ])
             .submit()
-        void submitted.done
+        if (!firstFrameSettled) {
+            firstFrameSettled = true
+            void submitted.done.then(() => {
+                canvas.dataset.status = 'ready'
+            }).catch((error) => {
+                canvas.dataset.status = 'error'
+                console.error(error)
+            })
+        }
 
         requestAnimationFrame(render)
     }

@@ -38,7 +38,7 @@ const vertices = new Float32Array([
 ])
 const instanceSize = new Float32Array([ 1 ])
 
-await main().catch((error) => {
+void main().catch((error) => {
     console.error(error)
 })
 

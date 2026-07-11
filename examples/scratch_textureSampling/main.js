@@ -54,7 +54,7 @@ const checkerboard = new Uint8Array([
     244, 204, 74, 255,
 ])
 
-await main().catch((error) => {
+void main().catch((error) => {
     console.error(error)
 })
 
@@ -156,6 +156,8 @@ async function main() {
     })
 
     let needsUpload = true
+    let firstFrameSettled = false
+    canvas.dataset.status = 'loading'
 
     function render() {
 
@@ -170,7 +172,15 @@ async function main() {
         const submitted = submission
             .render(pass, [ draw ])
             .submit()
-        void submitted.done
+        if (!firstFrameSettled) {
+            firstFrameSettled = true
+            void submitted.done.then(() => {
+                canvas.dataset.status = 'ready'
+            }).catch((error) => {
+                canvas.dataset.status = 'error'
+                console.error(error)
+            })
+        }
 
         requestAnimationFrame(render)
     }
