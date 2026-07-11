@@ -85,10 +85,12 @@ current facts remain separate from bounded history.
 
 1. Combine Program modules with one explicit separator contract.
 2. Compute combined/per-module hashes and UTF-16 offset/line spans.
-3. Map native locations across LF, CRLF, empty modules, separators, and
+3. Join modules with exactly one U+000A separator and map zero-based half-open
+   UTF-16 spans across LF, CRLF, empty modules, separators, and
    non-ASCII source without inventing unknown locations.
-4. Normalize native messages in order under 64-message, 4096-code-unit, and
-   64-KiB limits.
+4. Normalize module facts and native messages in order under 256-module,
+   64-message, 4096-code-unit, and shared 64-KiB limits, with explicit omission
+   counts and no valid-Program rejection caused only by evidence truncation.
 5. Prove full WGSL and excerpts never enter default, incident, capture, or
    exported evidence.
 
@@ -160,4 +162,3 @@ current facts remain separate from bounded history.
 7. Run `npm test`, `npm run typecheck`, `npm run build`, `git diff --check`,
    browser tests, benchmarks, and final source inventories.
 8. Confirm a clean worktree and wait for explicit merge approval.
-

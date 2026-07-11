@@ -72,6 +72,19 @@ Before the first native call, Scratch:
 6. computes bounded descriptor and source hashes; and
 7. computes module spans in the exact combined shader string.
 
+The combined shader string is exactly `modules.join('\n')`: one U+000A UTF-16
+code unit is inserted between adjacent modules and no separator is appended
+after the final module. Offset spans are zero-based half-open intervals
+`[startOffset, endOffset)`. Each inserted separator owns its own one-code-unit
+interval and never belongs to either adjacent module. Combined native
+`lineNum`/`linePos` and derived module `lineNum`/`linePos` are one-based;
+derived offsets are zero-based. CRLF is one line break, while lone CR and LF
+are each one line break. Every module, including an empty module, has a
+one-based `startLine`, `endLine`, and `lineCount`; an empty module has no
+mappable code-unit interval. A native location maps only when its specific
+offset falls inside one module interval. Unknown all-zero locations and
+separator locations remain explicitly unmapped.
+
 The snapshot prevents mutable descriptor arrays or Program module arrays from
 changing the transaction after native work starts. It does not redesign the
 Program authoring API. Existing render targets, vertex layouts, primitive,
@@ -81,6 +94,13 @@ Program requirements, required features, and limits are lowered one-to-one.
 Deterministic validation failure performs no native call and creates no
 operation record. Once native work starts, exactly one matching pipeline
 operation exists.
+
+Pipeline, shader-module, and pipeline-layout native labels are also fixed
+before native work. Each ends with `[scratch:<pipelineId>]`; absent user labels
+use `scratch:<pipelineId>`. Native descriptors receive the complete label.
+Diagnostic copies retain at most 256 UTF-16 code units while preserving the ID
+suffix and expose whether truncation occurred. Labels are correlation evidence,
+not an ownership or causality proof.
 
 ### One uninterrupted native issue turn
 
@@ -154,17 +174,46 @@ not receive fake allocation versions, content epochs, footprints, or pressure
 facts. Resource allocation incidents retain ADR-032 attribution and pressure
 semantics unchanged.
 
-Pipeline operations use `render-pipeline-creation` and
-`compute-pipeline-creation`. Pipeline disposal uses a pipeline target and does
-not alter allocation aggregates. Current pipeline facts contain bounded
-identity, kind, Program/source hash, descriptor hash, lifecycle, and latest
-operation links. Their cardinality scales with live pipelines and pending
-transactions, not runtime age.
+Pipeline operations use `render-pipeline-creation`,
+`compute-pipeline-creation`, and `pipeline-disposal`. Pipeline disposal uses a
+pipeline target and does not alter allocation aggregates. A pending pipeline
+fact contains `id`, `sequence`, `kind`, `target`, `descriptorHash`, and
+`startedAtMs`; its cardinality scales only with in-flight transactions. A
+current pipeline fact contains `id`, bounded `label`, `pipelineKind`,
+`programId`, `programSourceHash`, `descriptorHash`, `state`,
+`lastCreationOperationId`, and compilation error/warning/info counts; its
+cardinality scales only with live committed pipelines. Runtime disposal removes
+all current pipeline facts through normal wrapper disposal. Neither collection
+scales with runtime age.
 
 ### Bounded source-free compilation evidence
 
-`PipelineCompilationReport` is deeply immutable and JSON-serializable. It
-contains:
+`PipelineCompilationReport` is deeply immutable and JSON-serializable. Its
+public shape is conceptually:
+
+```ts
+type PipelineCompilationReport = Readonly<{
+    version: 1
+    pipelineId: string
+    pipelineKind: 'render' | 'compute'
+    programId: string
+    combinedSourceHash: string
+    moduleCount: number
+    retainedModuleCount: number
+    omittedModuleCount: number
+    modules: readonly PipelineCompilationModuleFact[]
+    errorCount: number
+    warningCount: number
+    infoCount: number
+    nativeMessageCount: number
+    retainedMessageCount: number
+    omittedMessageCount: number
+    retainedEvidenceBytes: number
+    messages: readonly PipelineCompilationMessage[]
+}>
+```
+
+The report contains:
 
 - schema version, pipeline ID/kind, Program ID, and combined source hash;
 - per-module index, hash, UTF-16 offset span, and line span;
@@ -179,18 +228,29 @@ unknown. A location on a separator inserted between Program modules has no
 module mapping. Scratch never invents precision and never parses message prose
 into a stable code.
 
-The v1 limits are:
+The report-version-1 limits are:
 
+- at most 256 retained module facts;
 - at most 64 retained messages;
 - at most 4096 UTF-16 code units of text per retained message; and
 - at most 64 KiB of serialized compilation evidence.
 
-Messages are retained in native order until either bound is reached. Omitted
-counts preserve evidence completeness. Complete WGSL source and source excerpts
-are forbidden in default history, incidents, exported evidence, and deep
-descriptor capture. Hashes and module spans are sufficient to correlate a
-report with the caller-owned Program snapshot without copying source into the
-ledger.
+Module facts and messages share the 64-KiB budget. Module facts are considered
+in module-index order and messages in native order; mandatory fixed report
+metadata is retained first. `moduleCount`, `retainedModuleCount`,
+`omittedModuleCount`, and the equivalent message counts preserve evidence
+completeness. A valid Program is never rejected merely because diagnostic
+evidence needs truncation. Complete WGSL source and source excerpts are
+forbidden in default history, incidents, exported evidence, and deep descriptor
+capture. Hashes and bounded module spans correlate a report with the
+caller-owned Program snapshot without copying source into the ledger.
+
+Every successful pipeline wrapper owns the complete bounded report. The
+matching successful operation record retains that same frozen report and
+therefore participates in ADR-032 recorder and capture byte budgets. Current
+pipeline facts retain only hashes and counts, not message text. Failed pipeline
+incidents retain the bounded report when compilation information settled
+successfully.
 
 Combined and module-relative locations use JavaScript string indexing, which
 is UTF-16 code-unit indexing. Mapping explicitly covers LF, CRLF, empty modules,
@@ -212,7 +272,16 @@ uses structural native facts, never localized prose:
 - `SCRATCH_PIPELINE_CREATION_NATIVE_FAILED` for a synchronous native exception
   or a structurally invalid native result; and
 - `SCRATCH_PIPELINE_CREATION_SCOPE_FAILED` for a scope-pop or compilation-info
-  structural failure.
+  structural failure;
+- `SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED` for runtime disposal before
+  commit;
+- `SCRATCH_PIPELINE_CREATION_DEVICE_LOST` for device loss before commit;
+- `SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED` for Program disposal before
+  commit;
+- `SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED` for BindLayout disposal
+  before commit; and
+- `SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES` when more than one independent
+  failure outcome is present.
 
 The incident identifies the Pipeline and Program subjects, related BindLayout
 subjects, pipeline kind and entry points, descriptor/source hashes, failure
@@ -220,10 +289,19 @@ stage, compilation report when available, `GPUPipelineError.reason` when
 available, bounded native error facts, attribution confidence, and evidence
 completeness. Pipeline incidents do not include allocation pressure evidence.
 
-When multiple independent failures are observed, the incident retains bounded
-facts for each observed outcome and reports evidence as ambiguous rather than
-inventing a temporal primary cause. Device loss retains temporal or unknown
-attribution unless an independent exact operation signal exists.
+Single failures select the matching code above by structural category, never
+by settlement order. When multiple independent failures are observed, the
+single rejected diagnostic uses
+`SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES`; the incident retains a bounded
+`outcomes` array in fixed transaction-stage order so every observed category,
+native fact, lifecycle fact, and stage remains inspectable. It reports
+causality as ambiguous rather than inventing a temporal primary cause. Device
+loss retains temporal or unknown attribution unless an independent exact
+operation signal exists.
+
+`ScratchDiagnostic` itself remains envelope version 1. Schema version 2 applies
+to GPU operation, incident, runtime snapshot, capture, and exported-evidence
+records; it does not silently renumber the shared diagnostic envelope.
 
 ### Submission boundary
 

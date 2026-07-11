@@ -68,11 +68,26 @@ describe('scratch async pipeline public contract', () => {
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
 
-        for (const Pipeline of [ ScratchRenderPipeline, ScratchComputePipeline ]) {
-            expect(() => new Pipeline(runtime, {
-                program,
-                targets: [ { format: 'bgra8unorm' } ],
-            })).to.throw(ScratchDiagnosticError)
+        const cases = [
+            {
+                Pipeline: ScratchRenderPipeline,
+                descriptor: { program, targets: [ { format: 'bgra8unorm' } ] },
+            },
+            {
+                Pipeline: ScratchComputePipeline,
+                descriptor: { program },
+            },
+        ]
+        for (const { Pipeline, descriptor } of cases) {
+            for (const Candidate of [ Pipeline, class extends Pipeline {} ]) {
+                try {
+                    new Candidate(runtime, descriptor)
+                    throw new Error('expected direct pipeline construction to fail')
+                } catch (error) {
+                    expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                    expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_CONSTRUCTOR_PRIVATE')
+                }
+            }
         }
     })
 })
@@ -194,8 +209,8 @@ describe('scratch GPU provenance schema v2 contract', () => {
 
         expect(report.version).to.equal(2)
         expect(report.target).to.deep.equal(operation.target)
+        expect(report.failureStage).to.equal('pipeline-creation')
         expect(report).not.to.have.property('pressure')
         expect(JSON.stringify(report)).not.to.include(triangleWgsl)
     })
 })
-
