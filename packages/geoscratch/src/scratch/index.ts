@@ -15,6 +15,11 @@ export { Resource } from './resource.js'
 export type { ResourceState } from './resource.js'
 export { BufferResource } from './buffer.js'
 export { TextureResource } from './texture.js'
+export type {
+    TextureResourceDescriptor,
+    TextureResourceSize,
+    TextureViewDescriptor,
+} from './texture.js'
 export { SamplerResource } from './sampler.js'
 export { QuerySetResource } from './query-set.js'
 export type { QuerySetSlotState } from './query-set.js'

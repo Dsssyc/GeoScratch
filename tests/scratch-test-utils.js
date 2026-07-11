@@ -179,6 +179,8 @@ export function createFakeGpu() {
         limits: {
             maxColorAttachments: 8,
             maxComputeWorkgroupsPerDimension: 65_535,
+            maxTextureDimension2D: 8192,
+            maxTextureArrayLayers: 256,
             minUniformBufferOffsetAlignment: 256,
             minStorageBufferOffsetAlignment: 256,
         },
@@ -315,6 +317,8 @@ export function createFakeGpu() {
         limits: {
             maxColorAttachments: 8,
             maxComputeWorkgroupsPerDimension: 65_535,
+            maxTextureDimension2D: 8192,
+            maxTextureArrayLayers: 256,
             minUniformBufferOffsetAlignment: 256,
             minStorageBufferOffsetAlignment: 256,
         },

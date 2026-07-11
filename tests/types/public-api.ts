@@ -135,11 +135,16 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 256,
         usage: 0x4 | 0x200,
     })
+    const objectTextureSize: scr.TextureResourceSize = { width: 2, height: 2 }
+    const tupleTextureSize: scr.TextureResourceSize = [ 2, 2, 1 ]
+    const compatTextureSize: scratchCompat.TextureResourceSize = tupleTextureSize
     const scratchTexture: scr.TextureResource = runtime.createTexture({
         label: 'typed scratch texture',
-        size: { width: 2, height: 2 },
+        size: objectTextureSize,
         format: 'rgba8unorm',
         usage: 0x1 | 0x2 | 0x4 | 0x10,
+        viewFormats: [ 'rgba8unorm-srgb' ],
+        textureBindingViewDimension: '2d',
     })
     const scratchTextureCopyTarget: scr.TextureResource = runtime.createTexture({
         label: 'typed scratch texture copy target',
@@ -166,6 +171,31 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         minFilter: 'nearest',
     })
     const scratchTextureView: GPUTextureView = scratchTexture.createView()
+    scratchTexture.resize(compatTextureSize)
+    // @ts-expect-error TextureResource physical allocation fields are read-only
+    scratchTexture.gpuTexture = scratchTexture.gpuTexture
+    // @ts-expect-error TextureResource normalized size is read-only
+    scratchTexture.size = { width: 4, height: 4, depthOrArrayLayers: 1 }
+    // @ts-expect-error TextureResource width is read-only
+    scratchTexture.width = 4
+    // @ts-expect-error TextureResource height is read-only
+    scratchTexture.height = 4
+    // @ts-expect-error TextureResource depthOrArrayLayers is read-only
+    scratchTexture.depthOrArrayLayers = 2
+    // @ts-expect-error TextureResource format is read-only
+    scratchTexture.format = 'bgra8unorm'
+    // @ts-expect-error TextureResource usage is read-only
+    scratchTexture.usage = 0
+    // @ts-expect-error TextureResource dimension is read-only
+    scratchTexture.dimension = '3d'
+    // @ts-expect-error TextureResource mipLevelCount is read-only
+    scratchTexture.mipLevelCount = 2
+    // @ts-expect-error TextureResource sampleCount is read-only
+    scratchTexture.sampleCount = 4
+    // @ts-expect-error TextureResource allocationVersion is read-only
+    scratchTexture.allocationVersion = 2
+    // @ts-expect-error TextureResource contentEpoch is read-only
+    scratchTexture.contentEpoch = 1
 
     const diagnostic: scr.ScratchDiagnostic = scr.createScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',

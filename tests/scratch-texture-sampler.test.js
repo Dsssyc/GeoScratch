@@ -106,6 +106,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             dimension: '2d',
             mipLevelCount: 1,
             sampleCount: 1,
+            viewFormats: [],
         })
         expect(fixture.calls.textures[0].descriptor).to.deep.equal(fixture.texture.descriptor)
 

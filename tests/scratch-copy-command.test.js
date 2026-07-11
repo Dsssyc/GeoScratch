@@ -14,6 +14,7 @@ const GPU_BUFFER_USAGE_UNIFORM = 0x40
 const GPU_TEXTURE_USAGE_COPY_SRC = 0x1
 const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
+const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
 function sourceBytes() {
 
@@ -646,7 +647,7 @@ describe('scratch CopyCommand', () => {
         const multisampledTarget = fixture.runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
-            usage: GPU_TEXTURE_USAGE_COPY_DST,
+            usage: GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
             sampleCount: 4,
         })
 

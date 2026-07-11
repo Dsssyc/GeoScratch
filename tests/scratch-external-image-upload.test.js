@@ -394,8 +394,14 @@ describe('scratch external image upload', () => {
         for (const [ options, mutation, reason ] of [
             [ { usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT }, undefined, 'target-usage' ],
             [ { usage: GPU_TEXTURE_USAGE_COPY_DST }, undefined, 'target-usage' ],
-            [ {}, target => { target.dimension = '3d' }, 'target-dimension' ],
-            [ { sampleCount: 4 }, undefined, 'target-sample-count' ],
+            [ {}, target => {
+                Object.defineProperty(target, 'dimension', { value: '3d' })
+            }, 'target-dimension' ],
+            [ {
+                sampleCount: 4,
+                mipLevelCount: 1,
+                targetSize: { width: 8, height: 8, depthOrArrayLayers: 1 },
+            }, undefined, 'target-sample-count' ],
             [ { format: 'rgba8snorm' }, undefined, 'target-format' ],
             [ { format: 'rgba8uint' }, undefined, 'target-format' ],
             [ { format: 'depth24plus' }, undefined, 'target-format' ],
