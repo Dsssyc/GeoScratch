@@ -154,7 +154,13 @@ the current mip/layer extent, and lazily builds one new bind group on next use.
 Render attachments preflight their current view before command encoder
 creation and explicitly select one 2D mip-level array layer from the current
 texture. All attachments in the pass must also retain matching current render
-extents and sample counts. Upload, external-image upload, and all texture-copy
+extents and sample counts. On devices without `core-features-and-limits`, an
+omitted `textureBindingViewDimension` is derived again from the current
+allocation: one layer is `2d`, multiple layers are `2d-array`. A stable
+consumer whose view dimension no longer matches therefore fails preflight;
+core-feature devices may continue to use an explicit single-layer `2d` view,
+and an explicitly preserved `2d-array` contract remains stable in
+compatibility mode. Upload, external-image upload, and all texture-copy
 directions lower against the current physical texture and revalidate current
 mip, origin, extent, and layer ranges before a queue side effect.
 

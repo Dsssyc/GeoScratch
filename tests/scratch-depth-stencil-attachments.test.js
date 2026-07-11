@@ -14,9 +14,10 @@ import {
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
-async function createDepthFixture(depthFormat = 'depth24plus') {
+async function createDepthFixture(depthFormat = 'depth24plus', features = []) {
 
     const fake = createFakeGpu()
+    for (const feature of features) fake.device.features.add(feature)
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
     const colorTarget = runtime.createTexture({
         label: 'scene color',
@@ -161,7 +162,10 @@ describe('scratch depth/stencil render attachments', () => {
 
     it('reuses persistent color and depth attachments against replacement allocations', async() => {
 
-        const fixture = await createDepthFixture()
+        const fixture = await createDepthFixture(
+            'depth24plus',
+            [ 'core-features-and-limits' ]
+        )
         const pass = fixture.pass
         const draw = fixture.draw
         const previousColorTexture = fixture.colorTarget.gpuTexture

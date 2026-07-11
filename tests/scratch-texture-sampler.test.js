@@ -23,9 +23,10 @@ function checkerboardPixels() {
     ])
 }
 
-async function createTextureFixture() {
+async function createTextureFixture({ features = [] } = {}) {
 
     const fake = createFakeGpu()
+    for (const feature of features) fake.device.features.add(feature)
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
     const texture = runtime.createTexture({
         label: 'checker texture',
@@ -195,9 +196,9 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         ])
     })
 
-    it('keeps a default 2d binding valid after array-layer growth', async() => {
+    it('keeps a default 2d binding valid after array-layer growth on core devices', async() => {
 
-        const fixture = await createTextureFixture()
+        const fixture = await createTextureFixture({ features: [ 'core-features-and-limits' ] })
         const firstBindGroup = fixture.bindSet.getBindGroup()
 
         fixture.texture.resize([ 2, 2, 3 ])
@@ -212,9 +213,67 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         expect(fixture.calls.bindGroups).to.have.length(2)
     })
 
+    it('rejects a derived binding-dimension change on compatibility devices', async() => {
+
+        const fixture = await createTextureFixture()
+        fixture.bindSet.getBindGroup()
+        const bindGroupCount = fixture.calls.bindGroups.length
+        const viewCount = fixture.calls.textureViews.length
+
+        fixture.texture.resize([ 2, 2, 3 ])
+
+        try {
+            fixture.bindSet.getBindGroup()
+            throw new Error('expected compatibility binding dimension validation to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+        expect(fixture.calls.textureViews).to.have.length(viewCount)
+        expect(fixture.calls.bindGroups).to.have.length(bindGroupCount)
+    })
+
+    it('preserves an explicit 2d-array binding dimension on compatibility devices', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const texture = runtime.createTexture({
+            size: [ 2, 2 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+            textureBindingViewDimension: '2d-array',
+        })
+        const layout = runtime.createBindLayout({
+            group: 0,
+            entries: [ {
+                binding: 0,
+                name: 'arrayTexture',
+                type: 'texture',
+                visibility: [ 'fragment' ],
+                viewDimension: '2d-array',
+            } ],
+        })
+        const bindSet = runtime.createBindSet(layout, { arrayTexture: texture })
+        const firstBindGroup = bindSet.getBindGroup()
+
+        texture.resize([ 2, 2, 3 ])
+        const secondBindGroup = bindSet.getBindGroup()
+
+        expect(secondBindGroup).to.not.equal(firstBindGroup)
+        expect(fake.calls.textureViews.map(view => view.descriptor)).to.deep.equal([
+            { dimension: '2d-array' },
+            { dimension: '2d-array' },
+        ])
+    })
+
     it('revalidates bind-layout view dimensions after array-layer resize', async() => {
 
         const fake = createFakeGpu()
+        fake.device.features.add('core-features-and-limits')
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
         const texture = runtime.createTexture({
             size: [ 2, 2, 6 ],

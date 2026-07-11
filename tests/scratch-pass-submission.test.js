@@ -62,9 +62,10 @@ async function createTriangleScene(format = 'bgra8unorm') {
     return { ...fake, ...canvas, runtime, surface, program, pipeline, draw, pass }
 }
 
-async function createRenderTargetScene(format = 'rgba8unorm') {
+async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
 
     const fake = createFakeGpu()
+    for (const feature of features) fake.device.features.add(feature)
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
     const renderTarget = runtime.createTexture({
         label: 'offscreen color target',
@@ -240,9 +241,31 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         await submitted.done
     })
 
-    it('reuses a persistent color pass and draw against the allocation current at submit time', async() => {
+    it('rejects a compatibility render-view dimension change before encoder creation', async() => {
 
         const fixture = await createRenderTargetScene()
+        fixture.renderTarget.resize([ 64, 64, 3 ])
+
+        await expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ fixture.draw ])
+            .submit(), {
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.textureViews).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+        expect(fixture.renderTarget.contentEpoch).to.equal(0)
+    })
+
+    it('reuses a persistent color pass and draw against the allocation current at submit time', async() => {
+
+        const fixture = await createRenderTargetScene(
+            'rgba8unorm',
+            [ 'core-features-and-limits' ]
+        )
         const pass = fixture.pass
         const draw = fixture.draw
         const previousTexture = fixture.renderTarget.gpuTexture

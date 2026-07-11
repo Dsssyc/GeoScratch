@@ -481,9 +481,7 @@ function validateTextureViewDescriptor(
     const arrayLayerCount = descriptor.arrayLayerCount === undefined
         ? defaultTextureViewArrayLayerCount(texture, dimension, baseArrayLayer)
         : descriptor.arrayLayerCount
-    const textureBindingViewDimension = (
-        texture.descriptor as NormalizedTextureDescriptor
-    ).textureBindingViewDimension
+    const textureBindingViewDimension = currentTextureBindingViewDimension(texture)
     if (
         !Number.isInteger(arrayLayerCount) ||
         arrayLayerCount <= 0 ||
@@ -494,9 +492,7 @@ function validateTextureViewDescriptor(
         })
     }
 
-    const requiresDeclaredBindingDimension =
-        !texture.runtime.deviceFeatures.has('core-features-and-limits') &&
-        textureBindingViewDimension !== undefined
+    const requiresTextureBindingDimension = textureBindingViewDimension !== undefined
     const validDimension =
         dimension !== '1d' &&
         dimension !== '3d' &&
@@ -511,7 +507,7 @@ function validateTextureViewDescriptor(
             texture.runtime.deviceFeatures.has('core-features-and-limits')
         )) &&
         (texture.sampleCount === 1 || dimension === '2d') &&
-        (!requiresDeclaredBindingDimension || dimension === textureBindingViewDimension)
+        (!requiresTextureBindingDimension || dimension === textureBindingViewDimension)
 
     if (!validDimension) {
         throwTextureViewDescriptorDiagnostic(texture, actual, {
@@ -525,6 +521,20 @@ function validateTextureViewDescriptor(
                 textureBindingViewDimension ?? 'not constrained by the texture descriptor',
         })
     }
+}
+
+function currentTextureBindingViewDimension(
+    texture: TextureResource
+): GPUTextureViewDimension | undefined {
+
+    if (texture.runtime.deviceFeatures.has('core-features-and-limits')) return undefined
+
+    const declared = (
+        texture.descriptor as NormalizedTextureDescriptor
+    ).textureBindingViewDimension
+    if (declared !== undefined) return declared
+
+    return texture.depthOrArrayLayers === 1 ? '2d' : '2d-array'
 }
 
 function defaultTextureViewArrayLayerCount(
