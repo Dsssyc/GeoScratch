@@ -1,0 +1,93 @@
+# Scratch GPU Operation Provenance Audit
+
+Status: Complete
+Date: 2026-07-11
+Decision: ADR-032
+Scope: Public persistent buffer allocation, public persistent texture allocation,
+and public texture replacement allocation
+
+## Result
+
+Every contract in the approved V1 allocation slice has implementation and
+executable evidence. No row is complete from documentation alone. Native
+staging and legacy/raw creation paths are inventoried but are not presented as
+covered by this goal.
+
+| # | Official or vision contract | Public Scratch representation | Implementation location | Automated test evidence | Browser evidence | Documentation evidence | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Current runtime facts scale with live resources and pending operations, not runtime age. | Read-only `runtime.diagnostics.snapshot()` exposes current runtime, resource, pending-operation, pressure, aggregate, recorder, and capture facts. | `runtime-diagnostics.ts` resource and pending maps; resource registration and disposal hooks. | Provenance tests create, settle, and dispose resources, then assert current resources and pending facts return to zero; 20k benchmark records both as zero. | The 64-operation Chrome probe ends with zero live resources and pending operations. | ADR-032; Vision 01, 02, and 09. | Complete |
+| 2 | Default operation history is finite, overwrites oldest compact records, and reports loss. | Diagnostics options define operation capacity and serialized-evidence capacity; snapshots expose retained, overwritten, and omitted counts. | Bounded operation ring and shared evidence trimming in `runtime-diagnostics.ts`. | Capacity, byte-budget, monotonic-sequence, 256-event stress, and 20k benchmark evidence prove bounded retention. | Chrome retains 72 compact records within the default 256 capacity. | ADR-032; Vision 09; performance report. | Complete |
+| 3 | Incident history and each incident's causal evidence are finite and immutable. | `incidents(query?)` and `incident(id)` return frozen JSON reports with completeness counters. | Incident ring, bounded recent operations/contributors, and evidence budget in `runtime-diagnostics.ts` and `gpu-operation.ts`. | Tests overflow incident capacity, serialize reports, and reject mutable/native-handle leakage. | Successful Chrome paths retain zero incidents; deterministic failure categories remain fake-device evidence. | ADR-032; Vision 09. | Complete |
+| 4 | Deep capture is explicit, finite, and self-terminating. | `runtime.diagnostics.capture()` requires finite normalized operation, duration, and evidence boundaries; capture is non-thenable. | Capture state, timer, operation/evidence stops, and disposal stop in `runtime-diagnostics.ts`. | Tests prove operation/evidence detail, default omission, operation limit, duration expiration, and capture limit diagnostics. | Chrome verifier exercises only the default profile, confirming capture detail is not silently enabled. | ADR-032; Vision 09; performance report. | Complete |
+| 5 | Initial public buffer allocation is usable only after validation and OOM scope acknowledgement. | `ScratchRuntime.createBuffer()` and `buffer()` return `Promise<BufferResource>`; no public constructor/static bypass exists. | `buffer.ts`, `native-allocation.ts`, and runtime factories. | Tests prove push/pop order, pop-before-await, success registration, validation/OOM/native/scope failure, candidate cleanup, and no resource leak. | Chrome allocation probe completes 72 acknowledged buffer allocations with all operation statuses successful. | ADR-032; Vision 02 and 09; READMEs. | Complete |
+| 6 | Initial public texture allocation follows the same fallible transaction. | `ScratchRuntime.createTexture()` and `texture()` return `Promise<TextureResource>`; direct/static construction is closed. | Initial transaction in `texture.ts` through `native-allocation.ts`. | Tests cover success, validation, OOM, scope failure, device loss, candidate cleanup, and initial version/epoch/readiness. | `textureResize` publishes a successful initial allocation operation and real issue/settlement timing. | ADR-032; Vision 02 and 09; READMEs. | Complete |
+| 7 | Texture replacement keeps the old allocation current until acknowledged success and rolls back all logical facts on failure. | `TextureResource.resize()` returns `Promise<void>`; concurrent changed resize rejects and same-size returns a resolved no-op. | Transactional replacement in `texture.ts`; shared scopes in `native-allocation.ts`. | Provenance and resize tests prove pending facts, old-view usability, exact commit, validation/OOM rollback, disposal/device-loss cancellation, and same-size scope-free behavior. | Desktop/mobile `textureResize` proves stable identity, changed native identity, versions, epoch, readiness, destruction, reuse, and exact bytes. | ADR-031/032; Vision 02, 05, 07, and 09; texture-resize audit. | Complete |
+| 8 | Scoped native validation is attributed without parsing message prose. | Allocation-specific stable diagnostic codes link `ScratchDiagnosticError` to an exact immutable incident and operation. | Scope classification and failure envelope in `native-allocation.ts`. | Fake scope tests prove filter matching, innermost ownership, exact code/category, cause, and candidate cleanup. | Real successful paths prove no leaked validation error; injected validation remains deterministic fake evidence. | ADR-032; Vision 09. | Complete |
+| 9 | OOM identifies the observable trigger but not a fabricated sole root cause. | OOM incidents contain `triggerOperation`, pressure contributors, caveats, and `exact-operation` attribution only for observability. | Pressure evidence and OOM classification in `runtime-diagnostics.ts`, `gpu-operation.ts`, and `native-allocation.ts`. | Buffer and replacement OOM tests assert exact trigger, bounded contributors, caveats, and absence of a `rootCause` claim. | Real OOM is intentionally not induced; browser success validates only the nonfailure path. | ADR-032; Vision 09. | Complete |
+| 10 | A synchronous native exception balances every pushed scope and remains machine-readable. | Operation-specific native-exception diagnostic preserves `cause` and bounded serializable error facts. | Guarded issue boundary and structural pop handling in `native-allocation.ts`. | Tests force `createBuffer()` throws and prove two pops, zero scope depth, native category, code, cause, and no resource registration. | Not intentionally injected into the real browser. | ADR-032; Vision 09. | Complete |
+| 11 | Device loss creates a runtime incident without claiming that the latest operation caused it or that rollback restored usability. | Runtime state and diagnostics expose one idempotent device-loss incident with temporal/unknown attribution. | Runtime device-loss hook and `recordDeviceLoss()` in `runtime.ts` and `runtime-diagnostics.ts`. | Tests lose the device during initial/replacement scope settlement and assert candidate cleanup, low-confidence causality, no retry, and unusable runtime/resource. | Chrome adapter remained healthy; no synthetic browser device loss was induced. | ADR-032; Vision 01 and 09. | Complete |
+| 12 | Uncaptured errors coexist with application listeners and have bounded low-confidence attribution. | Runtime-owned `uncapturederror` listener records a temporal/unknown incident and does not log separately. | Listener install/remove and incident recording in `runtime-diagnostics.ts`. | Tests emit three raw errors, retain only capacity two, preserve the application listener, and remove only Scratch's listener on disposal. | Required pages report zero console and page errors; raw fallback remains deterministic fake evidence. | ADR-032; Vision 09. | Complete |
+| 13 | Pressure evidence is Scratch-owned logical footprint, never exact VRAM. | Snapshot and incidents use `currentScratchLogicalFootprintBytes`, peak, counts, bounded contributors, churn, and explicit caveats. | Logical buffer/texture footprint helpers and pressure aggregation in `runtime-diagnostics.ts`. | Immutable incident tests assert every caveat and absence of physical-memory/root-cause fields. | Browser output reports serialized evidence bytes only, not GPU residency. | ADR-032; Vision 02 and 09; performance report. | Complete |
+| 14 | Public TypeScript and emitted JavaScript agree on async allocation and diagnostics. | Main and `geoscratch/scratch` entrypoints export Promise factories, diagnostics facade/capture/evidence types, operation/incident facts, and no sync compatibility API. | TypeScript source entrypoints and generated declarations. | `tests/types/public-api.ts`, strict TypeScript 6 and TypeScript 5.9 WebGPU checks, runtime constructor tests, and package build prove parity. | Browser imports the built package and exercises the public API. | ADR-032; AGENTS; READMEs. | Complete |
+| 15 | The 0.x migration is a clean cut with every consumer explicitly awaiting required allocation or replacement completion. | No sync overload, alias, flag, wrapper, duplicate class, or thenable control operation exists. | Runtime/resource APIs and migrated tests/examples/docs. | Full tests, source scans, example-structure tests, production Vite build, and absence checks prove no compatibility route or top-level-await build break. | All seven required migrated examples pass in Chrome. | ADR-032; README set; examples README; all changed vision modules. | Complete |
+| 16 | Every native buffer/texture creation call is classified without presenting deferred work as covered. | The inventory below uses only the required categories and keeps raw/legacy and staging boundaries explicit. | Seventeen call sites under `packages/geoscratch/src/`. | `scratch-gpu-operation-provenance-docs.test.js` scans source, requires all 17 current path/line facts, and checks 3 covered, 2 internal deferred, and 12 raw-native rows. | Covered public paths pass Chrome; deferred/raw paths are not claimed by this browser proof. | ADR-032 implementation and follow-up boundaries; this inventory. | Complete |
+| 17 | Performance decisions use measured issue, settlement, overwrite, capture, stack, promise/record, retention, and browser evidence. | Recorder/capture options remain explicit; per-submission scopes stay deferred. | Benchmark and browser verifier scripts under `tests/benchmarks/` and `tests/browser/`. | Five-round Node profiles, 20k retention run, source-level promise/record inventory, and strict benchmark result checks. | Chrome 64-operation probe and seven-example matrix distinguish scope settlement from queue completion. | Performance report; ADR-032. | Complete |
+| 18 | Agent-facing evidence is a bounded causal slice, not a raw full log or mutable runtime view. | `exportEvidence()` freezes one snapshot plus retained bounded operations/incidents; ID/kind/resource/status/sequence queries select smaller slices. | Evidence export, immutable factories, filtering, and serialization in `runtime-diagnostics.ts` and `gpu-operation.ts`. | Tests JSON-round-trip exported evidence, prove immutability and no native handles, and query exact operation/incident facts. | `textureResize` round-trips export evidence and publishes compact/settled diagnostics facts. | ADR-032; Vision 09; READMEs. | Complete |
+| 19 | Scope ownership remains exact under concurrency, outer application scopes, and out-of-order settlement. | One synchronous issue boundary pushes OOM then validation, issues once, and pops validation then OOM before awaiting. | `issueScopedNativeAllocation()` and `popScope()` in `native-allocation.ts`. | Fake GPU stack tests cover concurrent calls on one/two runtimes, application outer scope, filter ownership, out-of-order pops, dual-error structural failure, and zero remaining depth. | Chrome probe acknowledges 72 operations with no leaked warning/error. | ADR-032; Vision 09. | Complete |
+| 20 | Native labels preserve user labels and correlate stable Scratch resource IDs without carrying descriptors/stacks. | Buffer and texture candidates use `<label> [scratch:<resource-id>]` or `scratch:<resource-id>`. | `createScratchNativeLabel()` and all three covered issue callbacks. | Allocation tests inspect exact native descriptors and labels; evidence tests keep label facts bounded and never parse them. | Browser allocation records retain advisory labels without validation leakage. | ADR-032; Vision 09. | Complete |
+| 21 | Successful operations release pending detail and cancellable lifecycle subscriptions instead of accumulating Promise race losers. | No extra public API; lifecycle state remains internal and scales with currently pending operations. | Cancellable runtime/resource subscriptions in `runtime-diagnostics.ts`, `resource.ts`, and `native-allocation.ts`. | Repeated 64 buffer and 16 replacement tests assert both subscriber counts return to zero; pending full descriptors disappear; 20k run ends at zero subscribers. | Chrome 64-operation probe ends at zero lifecycle subscribers. | Performance report; ADR-032 boundedness contract. | Complete |
+| 22 | Real browser behavior preserves rendering, submission, upload, readiness, indirect execution, sampling, and replacement semantics. | Existing examples retain stable names; only machine-readable completion/diagnostic facts were added. | Seven example modules and Playwright verifier. | Example structure, package build, and verifier assertions enforce statuses and proof fields. | Headed Chrome 150 on Apple Metal 3 passes all pages, desktop/mobile texture resize, 21 boolean facts, exact bytes, zero console/page/request failures, no overflow, and nonblank screenshots. | Performance report; examples README; texture-resize audit. | Complete |
+
+## Native Buffer And Texture Creation Inventory
+
+Inventory command:
+
+```bash
+rg -n --glob '*.{ts,js}' '\.createBuffer\(|\.createTexture\(' packages/geoscratch/src
+```
+
+`ScratchRuntime.createBuffer()` and `createTexture()` alias calls are not native
+device calls and are excluded. Every actual `device.createBuffer()` and
+`device.createTexture()` call is listed below.
+
+| ID | Native call site | Native object | Classification | Fact |
+| --- | --- | --- | --- | --- |
+| N1 | `packages/geoscratch/src/scratch/buffer.ts:123` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
+| N2 | `packages/geoscratch/src/scratch/command.ts:1806` | Buffer | Internal deferred allocation | `ReadbackCommand` staging allocation during encoding; follow-up scope. |
+| N3 | `packages/geoscratch/src/scratch/readback.ts:227` | Buffer | Internal deferred allocation | Direct `ReadbackOperation` staging allocation; follow-up scope. |
+| N4 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:4674` | Buffer | Raw native escape hatch | Legacy/vendored uniform-buffer utility outside Scratch operation provenance. |
+| N5 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5073` | Buffer | Raw native escape hatch | Legacy/vendored generic vertex-buffer utility. |
+| N6 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5098` | Buffer | Raw native escape hatch | Legacy/vendored index-buffer utility. |
+| N7 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4537` | Buffer | Raw native escape hatch | Legacy binding utility generic vertex-buffer path. |
+| N8 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4562` | Buffer | Raw native escape hatch | Legacy binding utility index-buffer path. |
+| N9 | `packages/geoscratch/src/gpu/director/director.js:195` | Buffer | Raw native escape hatch | Legacy director persistent buffer creation. |
+| N10 | `packages/geoscratch/src/gpu/director/director.js:371` | Buffer | Raw native escape hatch | Legacy director temporary texture-copy staging buffer. |
+| N11 | `packages/geoscratch/src/scratch/texture.ts:221` | Texture | Covered by this goal | Public persistent texture replacement transaction. |
+| N12 | `packages/geoscratch/src/scratch/texture.ts:314` | Texture | Covered by this goal | Public persistent initial texture transaction. |
+| N13 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5352` | Texture | Raw native escape hatch | Legacy/vendored texture-from-source utility. |
+| N14 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4767` | Texture | Raw native escape hatch | Legacy binding texture-from-source utility. |
+| N15 | `packages/geoscratch/src/gpu/director/director.js:341` | Texture | Raw native escape hatch | Legacy director intermediate image texture. |
+| N16 | `packages/geoscratch/src/gpu/director/director.js:382` | Texture | Raw native escape hatch | Legacy director parsed image texture. |
+| N17 | `packages/geoscratch/src/gpu/director/director.js:412` | Texture | Raw native escape hatch | Legacy director size-based texture creation. |
+
+Inventory totals:
+
+- Covered by this goal: 3
+- Deterministically prevented before native call: 0
+- Internal deferred allocation: 2
+- Raw native escape hatch: 12
+- Unresolved defect: 0
+
+The 12 raw rows are factual legacy/native boundaries, not a claim that their
+errors are attributed by Scratch. The two staging rows remain explicit follow-up
+work. Neither group weakens or bypasses the one canonical public persistent
+Scratch allocation path implemented by this goal.
+
+## Audit Boundary
+
+This audit does not claim exact native attribution for internal staging,
+sampler/query creation, bind-group or pipeline creation, encoder/finalization,
+queue submission/uploads, buffer mapping, or arbitrary `runtime.device` calls.
+The next operation-family goal must reuse ADR-032 operation IDs, bounded
+recorder, incident reports, lifecycle subscriptions, and attribution confidence
+rather than create a second diagnostics system.
