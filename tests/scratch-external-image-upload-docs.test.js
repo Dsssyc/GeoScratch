@@ -80,6 +80,8 @@ describe('scratch external image upload documentation', () => {
 
         expect(adr).to.include('# ADR-030:')
         expect(adr).to.match(/## Status\s+\nAccepted/)
+        expect(adr).to.include('forged platform tags are not accepted')
+        expect(adr).to.not.include('platform tag fallback')
         expect(audit).to.include('No unresolved native-parity rows remain.')
         expect(audit).to.include('official/native contract')
         expect(audit).to.include('public Scratch representation')
