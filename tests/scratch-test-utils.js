@@ -237,12 +237,17 @@ export function createFakeGpu(options = {}) {
             const request = pendingRequest(pipelineRequests, index, 'pipeline creation')
             request.settled = true
             if (request.outcome?.kind === 'reject') request.reject(request.outcome.error)
-            else request.resolve(request.pipeline)
+            else {
+                request.install()
+                request.resolve(request.pipeline)
+            }
         },
-        resolvePipeline(index) {
+        resolvePipeline(index, value) {
             const request = pendingRequest(pipelineRequests, index, 'pipeline creation')
             request.settled = true
-            request.resolve(request.pipeline)
+            const resolved = value === undefined ? request.pipeline : value
+            if (resolved === request.pipeline) request.install()
+            request.resolve(resolved)
         },
         rejectPipeline(index, error = createFakePipelineError()) {
             const request = pendingRequest(pipelineRequests, index, 'pipeline creation')
@@ -318,7 +323,12 @@ export function createFakeGpu(options = {}) {
         applyPromiseMethodSynchronousFailure(method)
         const pipeline = { type: `${kind}Pipeline`, descriptor }
         const targetCalls = kind === 'render' ? calls.renderPipelines : calls.computePipelines
-        targetCalls.push(pipeline)
+        let installed = false
+        const install = () => {
+            if (installed) return
+            installed = true
+            targetCalls.push(pipeline)
+        }
         calls.asyncPipelineRequests.push({ kind, descriptor, pipeline })
 
         const outcomeIndex = nextPipelineOutcomes.findIndex(outcome => outcome.pipelineKind === kind)
@@ -327,6 +337,7 @@ export function createFakeGpu(options = {}) {
             : nextPipelineOutcomes.splice(outcomeIndex, 1)[0]
         if (!options.deferAsyncPipelines) {
             if (nextOutcome?.kind === 'reject') return Promise.reject(nextOutcome.error)
+            install()
             return Promise.resolve(pipeline)
         }
 
@@ -339,6 +350,7 @@ export function createFakeGpu(options = {}) {
                 reject,
                 settled: false,
                 outcome: nextOutcome,
+                install,
             })
         })
     }

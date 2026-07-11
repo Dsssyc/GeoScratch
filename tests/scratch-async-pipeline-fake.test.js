@@ -102,6 +102,15 @@ describe('fake WebGPU async pipeline state machine', () => {
         expect(await scope).to.equal(null)
         await Promise.resolve()
         expect(calls.uncapturedErrors).to.have.length(0)
+        expect(calls.renderPipelines).to.have.length(0)
+
+        const computeRejection = createFakePipelineError('internal', 'compute rejected')
+        pipelines.rejectNextPipeline('compute', computeRejection)
+        await expectRejectedWith(device.createComputePipelineAsync({
+            layout: 'auto',
+            compute: { module },
+        }), computeRejection)
+        expect(calls.computePipelines).to.have.length(0)
     })
 
     it('defers configured compilation and pipeline rejections until explicit settlement', async() => {
@@ -170,6 +179,42 @@ describe('fake WebGPU async pipeline state machine', () => {
 
         expect(await validation).to.equal(validationError)
         expect(await internal).to.equal(internalError)
+
+        const oomError = Object.assign(new Error('module allocation failed'), {
+            name: 'GPUOutOfMemoryError',
+        })
+        device.pushErrorScope('out-of-memory')
+        errors.failNext('createShaderModule', 'out-of-memory', oomError)
+        device.createShaderModule({ code: 'large shader' })
+        expect(await device.popErrorScope()).to.equal(oomError)
+    })
+
+    it('supports concurrent render/compute settlement around device loss', async() => {
+
+        const { device, calls, errors, pipelines } = createFakeGpu({
+            deferAsyncPipelines: true,
+        })
+        const module = device.createShaderModule({ code: 'fake shader' })
+        const render = device.createRenderPipelineAsync({
+            layout: 'auto',
+            vertex: { module },
+        })
+        const compute = device.createComputePipelineAsync({
+            layout: 'auto',
+            compute: { module },
+        })
+
+        errors.loseDevice({ reason: 'unknown', message: 'interleaved loss' })
+        pipelines.resolvePipeline(1)
+        pipelines.resolvePipeline(0)
+
+        expect(await device.lost).to.deep.equal({ reason: 'unknown', message: 'interleaved loss' })
+        expect(await compute).to.equal(calls.computePipelines[0])
+        expect(await render).to.equal(calls.renderPipelines[0])
+        expect(calls.asyncPipelineRequests.map(request => request.kind)).to.deep.equal([
+            'render',
+            'compute',
+        ])
     })
 
     it('records one exact native issue timeline', async() => {
