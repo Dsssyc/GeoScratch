@@ -69,9 +69,9 @@ Resource identity、lifecycle、readiness、`allocationVersion` 与 `contentEpoc
 
 ### Texture Allocation Replacement
 
-`TextureResource.resize()` 会在一个稳定逻辑 texture 后方显式替换 physical allocation。它不是 transfer 或 submission work：resize 不创建 encoder、不调用 queue method、不注册 `onSubmittedWorkDone()`，也不会在销毁旧 texture 前等待先前 queue completion。
+`TextureResource.resize()` 会在一个稳定逻辑 texture 后方显式替换 physical allocation。它是返回 Promise 的 scoped allocation transaction，不是 transfer 或 submission work：resize 不创建 encoder、不调用 queue method、不注册 `onSubmittedWorkDone()`，也不会在销毁旧 texture 前等待先前 queue completion。candidate 的 validation 与 out-of-memory scope settle 期间，旧 allocation 保持 installed；只有确认成功才推进 allocation facts。
 
-normalized same-size resize 不改变任何事实。成功的 size-changing resize 只有以下效果:
+normalized same-size resize 返回 resolved Promise 且不改变任何事实。成功的 size-changing resize 只有以下效果:
 
 ```text
 allocationVersion = previous allocationVersion + 1

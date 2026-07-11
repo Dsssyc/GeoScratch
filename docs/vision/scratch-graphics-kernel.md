@@ -182,6 +182,10 @@ Future designs should make room for:
 - validation modes that control disposition without changing diagnostic identity
 - repair suggestions that help tooling make local edits without letting scratch silently auto-fix state
 
+The first native asynchronous error slice is now concrete for persistent buffer allocation, texture allocation, and texture replacement. Those APIs return Promises and install a candidate only after exact validation and out-of-memory scopes settle. Runtime evidence is deliberately split into an always-current fact graph, a bounded incident flight recorder, immutable incident reports, and explicit finite deep capture. Default recording omits call stacks and command/submission breadcrumbs; raw-device operations remain escape hatches with temporal or unknown attribution unless native evidence proves more.
+
+Logical allocation footprint is inspectable pressure evidence, not physical VRAM. An OOM operation is the exact observation trigger but not automatically the sole pressure cause. Device loss similarly freezes pending/current context without assigning fabricated operation causality or automatic recovery.
+
 This is part of the intelligent-friendly goal: agents and tests should assert diagnostic codes and subjects, not parse English messages.
 
 ### Escape Hatches
@@ -247,10 +251,11 @@ This preserves GeoScratch's design philosophy:
 - improve CPU-side performance by letting the kernel understand dependencies and invalidation
 - keep shader/data composition explicit through `Program`, `BindSet`, and `Command`, not `Material`
 - expose validation failures through stable diagnostics, not prose-only exceptions
+- expose bounded causal evidence without retaining an ever-growing runtime log
 
 ## Open Questions For Future ADRs And Living Reviews
 
 - How strict should buffer layout typing be across CPU views, vertex attributes, WGSL storage, and readback?
 - Should future graph orchestration remain a helper over explicit `Submission` order, or become a separate upper-layer API?
-- How should allocation replacement notify bindings, pass attachments, commands, and pending transfer operations without broad event coupling?
+- Which deferred native operation family should next reuse allocation operation provenance: internal staging, pipeline/binding creation, or submission-level scopes?
 - What compatibility guarantees should the raw primitive API keep once a recommended command/scheduler API exists?

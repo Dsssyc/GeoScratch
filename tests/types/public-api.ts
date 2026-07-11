@@ -59,6 +59,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatDiagnostics: scratchCompat.ScratchRuntimeDiagnostics = diagnostics
     const diagnosticsSnapshot: scr.ScratchRuntimeDiagnosticsSnapshot = diagnostics.snapshot()
     const compatDiagnosticsSnapshot: scratchCompat.ScratchRuntimeDiagnosticsSnapshot = diagnosticsSnapshot
+    const diagnosticsEvidence: scr.ScratchRuntimeDiagnosticsEvidence = diagnostics.exportEvidence()
+    const compatDiagnosticsEvidence: scratchCompat.ScratchRuntimeDiagnosticsEvidence = diagnosticsEvidence
     const operationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
         kind: 'buffer-allocation',
         sequenceFrom: 1,
@@ -1177,6 +1179,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void resolveQueries
     void resolveAlias
     void compatDiagnosticsSnapshot
+    void compatDiagnosticsEvidence
     void operationRecords
     void incidentRecords
     void diagnosticCaptureReport

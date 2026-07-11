@@ -145,7 +145,9 @@ Native GPU error 可能在 issue operation 的 JavaScript 调用之后才 settle
 - **Incident Report** 是 deeply frozen JSON causal slice，包含已知的 trigger operation、subjects、native category 与 serializable facts、有界近期 operation、logical pressure evidence、evidence completeness 和 attribution confidence。
 - **Deep Capture Session** 是显式、有限、临时的。它可以增加 call-site stack 与 normalized descriptor，但会在 operation、duration 或 retained-evidence 的首个边界处自动停止。它不是 thenable，也不等待 queue work。
 
-只读 `runtime.diagnostics` facade 暴露 current snapshot、有界 operations、有界 incidents、按 ID/kind/resource/sequence 的 query，以及有界 capture。导出 evidence 永远不包含 live device、resource、buffer、texture、command、pass、submission 或 mutable runtime collection。
+只读 `runtime.diagnostics` facade 暴露 `snapshot()`、`operations(query?)`、`incidents(query?)`、`operation(id)`、`incident(id)`、`capture(options)` 与 `exportEvidence()`。query 覆盖 ID、kind、resource、status 与 sequence facts。`exportEvidence()` 冻结同一份 serializable snapshot 以及当前 retained 的有界 operation 和 incident arrays。导出 evidence 永远不包含 live device、resource、buffer、texture、command、pass、submission 或 mutable runtime collection。
+
+默认 retention 为 256 条 operation record、32 条 incident 和 256 KiB serialized evidence；它们全部有限且可配置。将 operation capacity 设为 0 可以关闭 successful-operation history，但不会关闭 current facts 或 failure handling。retained-byte counter 衡量 deterministic JSON evidence，不是 JavaScript heap size。
 
 被覆盖的 initial buffer/texture allocation 与 texture replacement 使用精确 synchronous issue boundary: push OOM、push validation、只 issue 一次 native allocation、pop validation、pop OOM，之后才 await 两个 pop promise。matching scope 提供 `exact-operation` attribution。除非存在更强 native evidence，uncaptured error 与 device loss 只能是 `temporal-correlation` 或 `unknown`。Scratch 绝不通过解析 native message prose 派生稳定字段。
 

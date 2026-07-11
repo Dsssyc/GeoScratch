@@ -99,6 +99,7 @@ export type {
     ScratchNativeGpuErrorFacts,
     ScratchPendingGpuOperationFact,
     ScratchRuntimeDiagnosticsOptions,
+    ScratchRuntimeDiagnosticsEvidence,
     ScratchRuntimeDiagnosticsSnapshot,
     ScratchRuntimeResourceFact,
     SamplerBindLayoutEntry,

@@ -121,6 +121,13 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
     }>
 }>
 
+export type ScratchRuntimeDiagnosticsEvidence = Readonly<{
+    version: 1
+    snapshot: ScratchRuntimeDiagnosticsSnapshot
+    operations: readonly ScratchGpuOperationRecord[]
+    incidents: readonly ScratchGpuIncidentReport[]
+}>
+
 export type ScratchGpuOperationQuery = Readonly<{
     operationId?: string
     resourceId?: string
@@ -226,7 +233,12 @@ type RuntimeDiagnosticsOwner = {
     label?: string
     isDisposed: boolean
     isDeviceLost: boolean
+    deviceLostInfo?: GPUDeviceLostInfo
 }
+
+export type ScratchRuntimeLifecycleChange =
+    | Readonly<{ kind: 'device-lost', info: GPUDeviceLostInfo }>
+    | Readonly<{ kind: 'runtime-disposed' }>
 
 type RetainedEvidence<T> = {
     value: T
@@ -286,6 +298,11 @@ export class ScratchRuntimeDiagnostics {
     incident(incidentId: string): ScratchGpuIncidentReport | undefined {
 
         return this.#controller.incident(incidentId)
+    }
+
+    exportEvidence(): ScratchRuntimeDiagnosticsEvidence {
+
+        return this.#controller.exportEvidence()
     }
 
     capture(options: ScratchDiagnosticCaptureOptions = {}): ScratchDiagnosticCapture {
@@ -350,10 +367,9 @@ export class ScratchRuntimeDiagnosticsController {
         deviceLosses: 0,
     }
     #uncapturedErrorListener: ((event: GPUUncapturedErrorEvent) => void) | undefined
+    #lifecycleSubscribers = new Set<(change: ScratchRuntimeLifecycleChange) => void>()
     #isDisposed = false
-    #resolveDisposed!: () => void
     #deviceLossIncident: ScratchGpuIncidentReport | undefined
-    readonly whenDisposed: Promise<void>
 
     constructor(
         owner: RuntimeDiagnosticsOwner,
@@ -364,9 +380,6 @@ export class ScratchRuntimeDiagnosticsController {
         this.#owner = owner
         this.#device = device
         this.#options = normalizeDiagnosticsOptions(owner, options)
-        this.whenDisposed = new Promise(resolve => {
-            this.#resolveDisposed = resolve
-        })
         this.#facade = createDiagnosticsFacade(this)
         this.#installUncapturedErrorListener()
     }
@@ -374,6 +387,26 @@ export class ScratchRuntimeDiagnosticsController {
     get facade(): ScratchRuntimeDiagnostics {
 
         return this.#facade
+    }
+
+    get lifecycleSubscriberCount(): number {
+
+        return this.#lifecycleSubscribers.size
+    }
+
+    subscribeLifecycle(subscriber: (change: ScratchRuntimeLifecycleChange) => void): () => void {
+
+        if (this.#isDisposed || this.#owner.isDisposed) {
+            subscriber(Object.freeze({ kind: 'runtime-disposed' }))
+            return () => {}
+        }
+        if (this.#owner.isDeviceLost && this.#owner.deviceLostInfo !== undefined) {
+            subscriber(Object.freeze({ kind: 'device-lost', info: this.#owner.deviceLostInfo }))
+            return () => {}
+        }
+
+        this.#lifecycleSubscribers.add(subscriber)
+        return () => this.#lifecycleSubscribers.delete(subscriber)
     }
 
     snapshot(): ScratchRuntimeDiagnosticsSnapshot {
@@ -440,6 +473,16 @@ export class ScratchRuntimeDiagnosticsController {
     incident(incidentId: string): ScratchGpuIncidentReport | undefined {
 
         return this.#incidents.find(entry => entry.value.id === incidentId)?.value
+    }
+
+    exportEvidence(): ScratchRuntimeDiagnosticsEvidence {
+
+        return freezeEvidence({
+            version: 1,
+            snapshot: this.snapshot(),
+            operations: this.operations(),
+            incidents: this.incidents(),
+        })
     }
 
     beginOperation(input: ScratchGpuOperationStart): ScratchPendingGpuOperation {
@@ -582,6 +625,7 @@ export class ScratchRuntimeDiagnosticsController {
     recordDeviceLoss(info: GPUDeviceLostInfo): ScratchGpuIncidentReport | undefined {
 
         if (this.#isDisposed) return undefined
+        this.#publishLifecycleChange(Object.freeze({ kind: 'device-lost', info }))
         if (this.#deviceLossIncident !== undefined) return this.#deviceLossIncident
 
         this.#aggregates = {
@@ -661,11 +705,18 @@ export class ScratchRuntimeDiagnosticsController {
 
         if (this.#isDisposed) return
         this.#isDisposed = true
-        this.#resolveDisposed()
+        this.#publishLifecycleChange(Object.freeze({ kind: 'runtime-disposed' }))
         if (this.#uncapturedErrorListener !== undefined && typeof this.#device.removeEventListener === 'function') {
             this.#device.removeEventListener('uncapturederror', this.#uncapturedErrorListener)
         }
         for (const capture of [ ...this.#captures ]) stopCapture(capture, 'runtime-disposed')
+    }
+
+    #publishLifecycleChange(change: ScratchRuntimeLifecycleChange): void {
+
+        const subscribers = [ ...this.#lifecycleSubscribers ]
+        this.#lifecycleSubscribers.clear()
+        for (const subscriber of subscribers) subscriber(change)
     }
 
     captureStopped(capture: ScratchDiagnosticCapture, reason: ScratchDiagnosticCaptureStopReason): void {

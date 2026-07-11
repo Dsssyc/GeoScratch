@@ -54,7 +54,7 @@ Readback interpretation remains explicit. Returned bytes are still interpreted t
 
 ## Consequences
 
-- `runtime.createBuffer({ size, usage, layout: codec.artifact })` creates a typed logical buffer while preserving raw buffers.
+- `await runtime.createBuffer({ size, usage, layout: codec.artifact })` creates a typed logical buffer while preserving raw buffers.
 - `runtime.createUploadCommand({ target, data: codec.uploadView(values) })` validates the upload artifact against the target layout before writing bytes.
 - A buffer can allocate more GPU bytes than its logical layout region, but upload commands cannot write past the declared layout region unless no layout metadata is attached.
 - Program, BindSet, and shader accessor validation can later compare the same `LayoutArtifact.structuralHash` without changing this buffer/upload contract.

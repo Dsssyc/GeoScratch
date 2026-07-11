@@ -8,6 +8,10 @@ Accepted
 
 2026-07-11
 
+## Later Refinement
+
+ADR-032 supersedes this decision's synchronous allocation acknowledgement and failure boundary. `TextureResource.resize()` is now Promise-returning, keeps the old allocation installed while validation and out-of-memory scopes settle, and commits only after scoped native acknowledgement. The stable identity, size-only replacement, version/epoch, downstream invalidation, and no-queue-wait decisions below remain accepted.
+
 ## Context
 
 Scratch models a GPU resource as a stable logical object with two independent
@@ -99,25 +103,24 @@ members receive WebGPU defaults; `null` is invalid input. It also validates the
 resource, runtime, device lifecycle, and native `createTexture()` capability.
 
 Deterministic size failures use
-`SCRATCH_RESOURCE_DESCRIPTOR_INVALID`. A synchronous exception thrown directly
-by native replacement creation is wrapped as
-`SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED` with its original cause.
-Scratch does not claim that this catches asynchronous WebGPU validation,
-out-of-memory, or device errors.
+`SCRATCH_RESOURCE_DESCRIPTOR_INVALID`. ADR-032 adds operation-specific
+validation, out-of-memory, native-exception, and error-scope diagnostics and
+preserves the original native error as the diagnostic cause when available.
 
-### Create before swap
+### Acknowledge before swap
 
 A changed resize performs these observable steps:
 
 1. Normalize and validate the requested size.
 2. Derive the next complete physical descriptor.
-3. Create the replacement `GPUTexture`.
-4. After creation returns, install the new texture and descriptor, update the
+3. Create the replacement `GPUTexture` inside the ADR-032 validation and
+   out-of-memory scope boundary.
+4. After both scope promises acknowledge success, install the new texture and descriptor, update the
    normalized size, clear the allocation-scoped view cache, advance
    `allocationVersion` exactly once, and mark the resource `empty`.
 5. Destroy the previous `GPUTexture`.
 
-If normalization or synchronous native creation fails, the old texture,
+If normalization, native issue, validation, OOM, scope settlement, or lifecycle handling fails, the old texture,
 descriptor, views, versions, content epoch, and readiness remain unchanged.
 The old allocation is never destroyed before a replacement exists.
 
@@ -180,7 +183,7 @@ coordinate explicitly:
 
 ```ts
 surface.resize(nextSurfaceSize)
-target.resize(surface.size)
+await target.resize(surface.size)
 ```
 
 Scratch does not install a `ResizeObserver`, poll canvas dimensions, scan
@@ -202,8 +205,9 @@ resource-access and producer-epoch facts.
 
 ### Destroy before creating the replacement
 
-Rejected. A synchronous creation failure would leave the logical resource
-without a usable allocation and violate failure atomicity.
+Rejected. A deterministic, native, validation, OOM, scope-settlement, or
+lifecycle failure would leave the logical resource without a usable allocation
+and violate failure atomicity.
 
 ### Wait for queue completion before destruction
 
@@ -236,5 +240,5 @@ allocation-scoped lifetime.
   they resolve or validate the current allocation at use time.
 - Resize performs no queue action, command encoding, producer recording, or
   queue-completion wait.
-- Asynchronous native validation and allocation errors remain governed by the
-  WebGPU device error model and are not synchronously observable by this API.
+- Asynchronous native validation and allocation errors are acknowledged through
+  ADR-032's Promise-returning scoped operation before replacement commit.

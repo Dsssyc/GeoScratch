@@ -33,6 +33,7 @@ export type {
     ScratchGpuOperationQuery,
     ScratchPendingGpuOperationFact,
     ScratchRuntimeDiagnosticsOptions,
+    ScratchRuntimeDiagnosticsEvidence,
     ScratchRuntimeDiagnosticsSnapshot,
     ScratchRuntimeResourceFact,
 } from './runtime-diagnostics.js'

@@ -10,6 +10,7 @@ import {
 import { ScratchRuntime } from '../packages/geoscratch/dist/scratch/runtime.js'
 import { BufferResource } from '../packages/geoscratch/dist/scratch/buffer.js'
 import { TextureResource } from '../packages/geoscratch/dist/scratch/texture.js'
+import { resourceDisposalSubscriberCount } from '../packages/geoscratch/dist/scratch/resource.js'
 import { ScratchDiagnosticError } from '../packages/geoscratch/dist/scratch/diagnostics.js'
 import {
     advanceResourceContentEpochForTest,
@@ -247,6 +248,10 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
         expect(JSON.stringify(snapshot)).not.to.include('gpuBuffer')
         expect(snapshot.runtime).not.to.have.property('device')
         expect(JSON.stringify(snapshot)).not.to.include('"type":"buffer"')
+        const exported = runtime.diagnostics.exportEvidence()
+        expect(Object.isFrozen(exported)).to.equal(true)
+        expect(JSON.parse(JSON.stringify(exported))).to.deep.equal(exported)
+        expect(exported.snapshot).to.deep.equal(snapshot)
 
         buffer.dispose()
         expect(runtime.diagnostics.snapshot().resources).to.have.length(0)
@@ -292,6 +297,87 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
         expect(secondSnapshot.recorder.overwrittenOperations).to.equal(17)
         expect(secondSnapshot.aggregates.allocationAttempts).to.equal(20)
         expect(secondSnapshot.aggregates.successfulAllocations).to.equal(20)
+    })
+
+    it('keeps recorder state structurally bounded under sustained overwrite stress', async () => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({
+            gpu,
+            diagnostics: {
+                operationCapacity: 8,
+                incidentCapacity: 4,
+                evidenceByteCapacity: 32_768,
+                recentOperationLimit: 4,
+                contributorLimit: 2,
+            },
+        })
+        const controller = diagnosticsControllerFor(runtime)
+
+        const emitBatch = (offset) => {
+            for (let index = 0; index < 128; index++) {
+                const operation = controller.beginOperation(operationInput(offset + index))
+                const record = controller.completeOperation(operation, { status: 'succeeded' })
+                if (index % 8 === 0) {
+                    controller.recordIncident({
+                        kind: 'allocation-failure',
+                        diagnosticCode: 'SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED',
+                        nativeErrorCategory: 'validation',
+                        attribution: 'exact-operation',
+                        resourceId: record.resourceId,
+                        operationId: record.id,
+                        triggerOperation: record,
+                        nativeError: { name: 'GPUValidationError', message: 'synthetic stress incident' },
+                        triggerLogicalFootprintBytes: record.logicalFootprintBytes,
+                    })
+                }
+            }
+        }
+
+        emitBatch(0)
+        const first = runtime.diagnostics.snapshot()
+        const firstRetainedCount = first.recorder.retainedOperationCount + first.recorder.retainedIncidentCount
+        emitBatch(128)
+        const second = runtime.diagnostics.snapshot()
+        const operations = runtime.diagnostics.operations()
+        const incidents = runtime.diagnostics.incidents()
+
+        expect(operations.length).to.be.at.most(8)
+        expect(incidents.length).to.be.at.most(4)
+        expect(second.recorder.retainedEvidenceBytes).to.be.at.most(32_768)
+        expect(second.recorder.overwrittenOperations).to.be.greaterThan(first.recorder.overwrittenOperations)
+        expect(second.recorder.overwrittenIncidents).to.be.greaterThan(first.recorder.overwrittenIncidents)
+        expect(second.recorder.retainedOperationCount + second.recorder.retainedIncidentCount).to.be.at.most(firstRetainedCount)
+        expect(operations.map(record => record.sequence)).to.deep.equal(
+            [ ...operations ].map(record => record.sequence).sort((left, right) => left - right)
+        )
+        expect(incidents.map(report => report.sequence)).to.deep.equal(
+            [ ...incidents ].map(report => report.sequence).sort((left, right) => left - right)
+        )
+        expect(operations.every(record => record.stack === undefined)).to.equal(true)
+        expect(operations.every(record => record.descriptor.full === undefined)).to.equal(true)
+    })
+
+    it('releases runtime and resource lifecycle subscriptions after successful settlement', async () => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const controller = diagnosticsControllerFor(runtime)
+
+        for (let index = 0; index < 64; index++) {
+            const buffer = await runtime.createBuffer({ size: 4, usage: 1 })
+            buffer.dispose()
+            expect(controller.lifecycleSubscriberCount).to.equal(0)
+        }
+
+        const texture = await runtime.createTexture(textureDescriptor('subscription retention'))
+        expect(controller.lifecycleSubscriberCount).to.equal(0)
+        for (let index = 0; index < 16; index++) {
+            const size = index % 2 === 0 ? 8 : 4
+            await texture.resize({ width: size, height: size })
+            expect(controller.lifecycleSubscriberCount).to.equal(0)
+            expect(resourceDisposalSubscriberCount(texture)).to.equal(0)
+        }
     })
 
     it('releases successful pending detail after settlement', async () => {

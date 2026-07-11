@@ -68,6 +68,30 @@ import { MercatorCoordinate } from 'geoscratch/geo'
 import { sphere } from 'geoscratch/geometry'
 ```
 
+## Scratch 异步资源分配
+
+持久 Scratch buffer 与 texture allocation 需要异步确认。只有原生 validation 与 out-of-memory scope 都成功 settle 后才返回资源；texture replacement 使用同一 transaction boundary。
+
+```js
+const runtime = await scr.ScratchRuntime.create()
+const vertices = await runtime.createBuffer({
+    label: 'vertices',
+    size: 4096,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+})
+const color = await runtime.createTexture({
+    label: 'color',
+    size: { width: 1024, height: 768 },
+    format: 'rgba8unorm',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+})
+
+await color.resize({ width: 1920, height: 1080 })
+const evidence = runtime.diagnostics.exportEvidence()
+```
+
+`runtime.diagnostics` 暴露当前 resource facts、有界 operation/incident history 与显式临时 deep capture。logical footprint evidence 不是 physical VRAM。
+
 ## 最小示例
 
 下面的代码在 canvas 上渲染一个硬编码三角形。

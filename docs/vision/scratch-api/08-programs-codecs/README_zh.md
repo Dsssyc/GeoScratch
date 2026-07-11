@@ -87,7 +87,7 @@ const pointCodec = scratch.layoutCodec(pointLayout, {
     usage: ['storage', 'readback'],
 })
 
-const points = scratch.buffer({
+const points = await scratch.buffer({
     label: 'points',
     usage: ['storage', 'copyDst', 'copySrc'],
     layout: pointCodec.artifact,

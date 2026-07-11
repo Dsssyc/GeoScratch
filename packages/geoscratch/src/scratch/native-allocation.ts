@@ -1,7 +1,10 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
+import { subscribeResourceDisposal } from './resource.js'
 import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
+import type { ScratchRuntimeLifecycleChange } from './runtime-diagnostics.js'
+import type { Resource } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type ScopedNativeAllocationFailureKind =
@@ -50,7 +53,7 @@ type LifecycleSettlement =
 export function issueScopedNativeAllocation<T>(
     runtime: ScratchRuntime,
     issue: () => T,
-    resourceDisposal?: Promise<void>
+    resource?: Resource
 ): Promise<ScopedNativeAllocationOutcome<T>> {
 
     const device = runtime.device
@@ -111,12 +114,19 @@ export function issueScopedNativeAllocation<T>(
         validation,
         outOfMemory,
     }))
-    const deviceLoss: Promise<LifecycleSettlement> = device.lost.then(info => ({
-        kind: 'device-lost',
-        info,
-    }))
-    const runtimeDisposal: Promise<LifecycleSettlement> = diagnosticsControllerFor(runtime)
-        .whenDisposed.then(() => ({ kind: 'runtime-disposed' }))
+    let resolveLifecycle!: (settlement: LifecycleSettlement) => void
+    const lifecycle = new Promise<LifecycleSettlement>(resolve => {
+        resolveLifecycle = resolve
+    })
+    const controller = diagnosticsControllerFor(runtime)
+    const unsubscribeRuntime = controller.subscribeLifecycle(change => {
+        resolveLifecycle(runtimeLifecycleSettlement(change))
+    })
+    const unsubscribeResource = resource === undefined
+        ? () => {}
+        : subscribeResourceDisposal(resource, () => {
+            resolveLifecycle({ kind: 'resource-disposed' })
+        })
 
     return settleScopedNativeAllocation(
         runtime,
@@ -124,10 +134,11 @@ export function issueScopedNativeAllocation<T>(
         nativeException,
         boundaryFailures,
         scopeSettlement,
-        deviceLoss,
-        runtimeDisposal,
-        resourceDisposal?.then(() => ({ kind: 'resource-disposed' }))
-    )
+        lifecycle
+    ).finally(() => {
+        unsubscribeRuntime()
+        unsubscribeResource()
+    })
 }
 
 export function createScratchNativeLabel(label: string | undefined, resourceId: string): string {
@@ -242,18 +253,13 @@ async function settleScopedNativeAllocation<T>(
     nativeException: unknown,
     boundaryFailures: unknown[],
     scopeSettlement: Promise<ScopeSettlement>,
-    deviceLoss: Promise<LifecycleSettlement>,
-    runtimeDisposal: Promise<LifecycleSettlement>,
-    resourceDisposal?: Promise<LifecycleSettlement>
+    lifecycle: Promise<LifecycleSettlement>
 ): Promise<ScopedNativeAllocationOutcome<T>> {
 
-    const settlements: Array<Promise<ScopeSettlement | LifecycleSettlement>> = [
+    const settlement = await Promise.race<ScopeSettlement | LifecycleSettlement>([
         scopeSettlement,
-        deviceLoss,
-        runtimeDisposal,
-    ]
-    if (resourceDisposal !== undefined) settlements.push(resourceDisposal)
-    const settlement = await Promise.race(settlements)
+        lifecycle,
+    ])
 
     if (settlement.kind === 'device-lost') {
         return Object.freeze({
@@ -357,6 +363,13 @@ async function settleScopedNativeAllocation<T>(
     }
 
     return Object.freeze({ ok: true, candidate })
+}
+
+function runtimeLifecycleSettlement(change: ScratchRuntimeLifecycleChange): LifecycleSettlement {
+
+    return change.kind === 'device-lost'
+        ? { kind: 'device-lost', info: change.info }
+        : { kind: 'runtime-disposed' }
 }
 
 function popScope(device: GPUDevice): Promise<SettledScope> {

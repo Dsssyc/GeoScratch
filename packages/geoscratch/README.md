@@ -68,6 +68,30 @@ import { MercatorCoordinate } from 'geoscratch/geo'
 import { sphere } from 'geoscratch/geometry'
 ```
 
+## Scratch Async Resource Allocation
+
+Persistent Scratch buffer and texture allocation is acknowledged asynchronously. A resource is returned only after its native validation and out-of-memory scopes settle successfully; texture replacement follows the same transaction boundary.
+
+```js
+const runtime = await scr.ScratchRuntime.create()
+const vertices = await runtime.createBuffer({
+    label: 'vertices',
+    size: 4096,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+})
+const color = await runtime.createTexture({
+    label: 'color',
+    size: { width: 1024, height: 768 },
+    format: 'rgba8unorm',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+})
+
+await color.resize({ width: 1920, height: 1080 })
+const evidence = runtime.diagnostics.exportEvidence()
+```
+
+`runtime.diagnostics` exposes current resource facts, bounded operation and incident history, and explicit temporary deep capture. Logical footprint evidence is not physical VRAM.
+
 ## Minimal Usage
 
 The example below renders a hard-coded triangle onto a canvas.

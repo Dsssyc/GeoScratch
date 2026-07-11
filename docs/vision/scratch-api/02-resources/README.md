@@ -90,7 +90,7 @@ A buffer is raw bytes; its layout declares how those bytes are typed and is the 
 Layout is **compositional**, not a fixed set of modes. A buffer is a sequence of **segments**; each segment is an array (`count`) of an **element**; an element is either a scalar/vector `format` or a nested `struct` of named fields — and struct fields are elements too, so structs nest.
 
 ```ts
-const sim = scratch.buffer({
+const sim = await scratch.buffer({
     usage: ['storage', 'copySrc'],
     segments: [
         // a segment of structs (AoS region)

@@ -69,9 +69,9 @@ Resource identity, lifecycle, readiness, `allocationVersion`, and `contentEpoch`
 
 ### Texture Allocation Replacement
 
-`TextureResource.resize()` explicitly replaces the physical allocation behind one stable logical texture. It is not transfer or submission work: resize creates no encoder, calls no queue method, registers no `onSubmittedWorkDone()`, and does not wait for prior queue completion before destroying the old texture.
+`TextureResource.resize()` explicitly replaces the physical allocation behind one stable logical texture. It is a Promise-returning scoped allocation transaction, not transfer or submission work: resize creates no encoder, calls no queue method, registers no `onSubmittedWorkDone()`, and does not wait for prior queue completion before destroying the old texture. The old allocation stays installed while the candidate's validation and out-of-memory scopes settle; only acknowledged success advances allocation facts.
 
-A normalized same-size resize changes nothing. A successful size-changing resize has exactly these effects:
+A normalized same-size resize returns a resolved Promise and changes nothing. A successful size-changing resize has exactly these effects:
 
 ```text
 allocationVersion = previous allocationVersion + 1

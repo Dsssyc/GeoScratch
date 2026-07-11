@@ -61,7 +61,7 @@ Target command families:
 
 ### Texture Allocation Replacement
 
-`TextureResource.resize()` is a resource-lifecycle operation, not a `Command`, upload, copy, or submission step. It creates no encoder, queue action, resource-access entry, producer epoch, or content write. A changed resize advances `allocationVersion`, preserves `contentEpoch`, and marks the replacement empty.
+`TextureResource.resize()` is a Promise-returning resource-lifecycle operation, not a `Command`, upload, copy, or submission step. It creates no encoder, queue action, resource-access entry, producer epoch, or content write. While native scopes settle, the old allocation remains current; acknowledged changed resize advances `allocationVersion`, preserves `contentEpoch`, and marks the replacement empty.
 
 Pass specs and commands retain logical resources rather than one physical texture. At submit or encode time, render attachments, texture uploads, external-image uploads, all texture copy directions, and texture bindings resolve the current physical texture or a current view. Commands created before resize therefore remain reusable when their immutable descriptor still fits.
 
@@ -123,7 +123,7 @@ An indexed static count requires `indexBuffer`; a static vertex count forbids it
 Static values are the default path:
 
 ```ts
-const vertexBuffer = scratch.buffer({
+const vertexBuffer = await scratch.buffer({
     label: 'triangle vertices',
     usage: ['vertex', 'copyDst'],
     size: vertexBytes.byteLength,

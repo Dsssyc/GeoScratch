@@ -25,7 +25,26 @@ type ResourceMutators = {
 }
 
 const resourceMutators = new WeakMap<Resource, ResourceMutators>()
+const resourceDisposalSubscribers = new WeakMap<Resource, Set<() => void>>()
 const resourceIdentityToken = Symbol('ScratchResourceIdentity')
+
+export function subscribeResourceDisposal(resource: Resource, subscriber: () => void): () => void {
+
+    if (resource.isDisposed) {
+        subscriber()
+        return () => {}
+    }
+
+    const subscribers = resourceDisposalSubscribers.get(resource)
+    if (subscribers === undefined) throw new TypeError('Resource disposal subscriptions are unavailable.')
+    subscribers.add(subscriber)
+    return () => subscribers.delete(subscriber)
+}
+
+export function resourceDisposalSubscriberCount(resource: Resource): number {
+
+    return resourceDisposalSubscribers.get(resource)?.size ?? 0
+}
 
 export function createScratchResourceIdentity(): ScratchResourceIdentity {
 
@@ -115,6 +134,7 @@ export class Resource {
                 updateRuntimeResourceFact(this.#runtime, this)
             },
         })
+        resourceDisposalSubscribers.set(this, new Set())
 
         runtime._registerResource(this)
     }
@@ -225,6 +245,12 @@ export class Resource {
 
         this.#isDisposed = true
         this.#state = 'disposed'
+        const subscribers = resourceDisposalSubscribers.get(this)
+        resourceDisposalSubscribers.delete(this)
+        if (subscribers !== undefined) {
+            for (const subscriber of subscribers) subscriber()
+            subscribers.clear()
+        }
         this.runtime._unregisterResource(this)
     }
 }

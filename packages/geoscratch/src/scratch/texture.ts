@@ -88,8 +88,6 @@ export class TextureResource extends Resource {
     #physicalDescriptor: NormalizedTextureDescriptor
     #viewCache: Map<string, GPUTextureView>
     #pendingReplacement: ScratchPendingGpuOperation | undefined
-    #disposePromise: Promise<void>
-    #resolveDispose!: () => void
 
     private constructor(
         token: symbol,
@@ -116,9 +114,6 @@ export class TextureResource extends Resource {
         this.#physicalDescriptor = descriptor
         this.#gpuTexture = gpuTexture
         this.#viewCache = new Map()
-        this.#disposePromise = new Promise(resolve => {
-            this.#resolveDispose = resolve
-        })
         Object.preventExtensions(this)
     }
 
@@ -227,7 +222,7 @@ export class TextureResource extends Resource {
                 ...nextDescriptor,
                 label: nativeLabel,
             }),
-            this.#disposePromise
+            this
         )
 
         if (outcome.ok && this.isDisposed) {
@@ -274,8 +269,6 @@ export class TextureResource extends Resource {
     dispose(): void {
 
         if (this.isDisposed) return
-
-        this.#resolveDispose()
 
         if (this.gpuTexture && typeof this.gpuTexture.destroy === 'function') {
             this.gpuTexture.destroy()
