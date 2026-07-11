@@ -1,12 +1,6 @@
 import type { DiagnosticSubject } from './diagnostics.js'
-import {
-    PIPELINE_COMPILATION_MAX_EVIDENCE_BYTES,
-    PIPELINE_COMPILATION_MAX_MESSAGE_LENGTH,
-    PIPELINE_COMPILATION_MAX_MESSAGES,
-    PIPELINE_COMPILATION_MAX_MODULE_FACTS,
-} from './pipeline-compilation.js'
+import { normalizePipelineCompilationReport } from './pipeline-compilation.js'
 import type {
-    PipelineCompilationModuleFact,
     PipelineCompilationReport,
     PipelineKind,
 } from './pipeline-compilation.js'
@@ -443,157 +437,12 @@ function normalizeCompilationReportEvidence(
     target: ScratchGpuPipelineOperationTarget
 ): PipelineCompilationReport {
 
-    if (
-        input.pipelineId !== target.pipelineId ||
-        input.pipelineKind !== target.pipelineKind ||
-        input.programId !== target.programId ||
-        input.combinedSourceHash !== target.programSourceHash
-    ) {
-        throw new TypeError('Pipeline compilation report identity does not match its operation target.')
-    }
-
-    const sourceModules = Array.isArray(input.modules) ? input.modules : []
-    const sourceMessages = Array.isArray(input.messages) ? input.messages : []
-    const moduleCount = Math.max(nonNegativeInteger(input.moduleCount), sourceModules.length)
-    const nativeMessageCount = Math.max(
-        nonNegativeInteger(input.nativeMessageCount),
-        sourceMessages.length
-    )
-    const modules: PipelineCompilationModuleFact[] = []
-    for (const module of sourceModules) {
-        const fact = {
-            index: nonNegativeInteger(module.index),
-            hash: boundString(String(module.hash), 128)!,
-            startOffset: nonNegativeInteger(module.startOffset),
-            endOffset: nonNegativeInteger(module.endOffset),
-            startLine: positiveInteger(module.startLine),
-            endLine: positiveInteger(module.endLine),
-            lineCount: positiveInteger(module.lineCount),
-        }
-        let low = 0
-        let high = modules.length
-        while (low < high) {
-            const middle = (low + high) >>> 1
-            if (modules[middle].index <= fact.index) low = middle + 1
-            else high = middle
-        }
-        modules.splice(low, 0, fact)
-        if (modules.length > PIPELINE_COMPILATION_MAX_MODULE_FACTS) modules.pop()
-    }
-    const messages = sourceMessages
-        .slice(0, PIPELINE_COMPILATION_MAX_MESSAGES)
-        .map(message => {
-            const originalMessage = typeof message.message === 'string'
-                ? message.message
-                : String(message.message)
-            const boundedMessage = boundString(
-                originalMessage,
-                PIPELINE_COMPILATION_MAX_MESSAGE_LENGTH
-            )!
-            const locationKind = [ 'unknown', 'module', 'separator', 'unmapped' ].includes(
-                message.locationKind
-            )
-                ? message.locationKind
-                : 'unmapped'
-            return {
-                nativeIndex: nonNegativeInteger(message.nativeIndex),
-                type: message.type === 'error' || message.type === 'warning'
-                    ? message.type
-                    : 'info',
-                message: boundedMessage,
-                messageTruncated: message.messageTruncated === true || boundedMessage !== originalMessage,
-                locationKind,
-                nativeLocation: normalizeNativeLocation(message.nativeLocation),
-                ...(locationKind === 'module' && message.moduleLocation !== undefined
-                    ? { moduleLocation: normalizeModuleLocation(message.moduleLocation) }
-                    : {}),
-            }
-        })
-
-    const report: Record<string, unknown> = {
-        version: 1,
+    return normalizePipelineCompilationReport(input, {
         pipelineId: target.pipelineId,
         pipelineKind: target.pipelineKind,
         programId: target.programId,
         combinedSourceHash: target.programSourceHash,
-        moduleCount,
-        retainedModuleCount: modules.length,
-        omittedModuleCount: Math.max(0, moduleCount - modules.length),
-        modules,
-        errorCount: nonNegativeInteger(input.errorCount),
-        warningCount: nonNegativeInteger(input.warningCount),
-        infoCount: nonNegativeInteger(input.infoCount),
-        nativeMessageCount,
-        retainedMessageCount: messages.length,
-        omittedMessageCount: Math.max(0, nativeMessageCount - messages.length),
-        retainedEvidenceBytes: 0,
-        messages,
-    }
-
-    fitCompilationReportToBudget(report, modules, messages, moduleCount, nativeMessageCount)
-    return deepFreeze(report) as PipelineCompilationReport
-}
-
-function fitCompilationReportToBudget(
-    report: Record<string, unknown>,
-    modules: Record<string, unknown>[],
-    messages: Record<string, unknown>[],
-    moduleCount: number,
-    nativeMessageCount: number
-): void {
-
-    const refresh = () => {
-        report.retainedModuleCount = modules.length
-        report.omittedModuleCount = Math.max(0, moduleCount - modules.length)
-        report.retainedMessageCount = messages.length
-        report.omittedMessageCount = Math.max(0, nativeMessageCount - messages.length)
-        let bytes = serializedEvidenceBytes(report)
-        report.retainedEvidenceBytes = bytes
-        bytes = serializedEvidenceBytes(report)
-        report.retainedEvidenceBytes = bytes
-        return bytes
-    }
-
-    while (refresh() > PIPELINE_COMPILATION_MAX_EVIDENCE_BYTES && messages.length > 0) {
-        messages.pop()
-    }
-    while (refresh() > PIPELINE_COMPILATION_MAX_EVIDENCE_BYTES && modules.length > 0) {
-        modules.pop()
-    }
-    if (refresh() > PIPELINE_COMPILATION_MAX_EVIDENCE_BYTES) {
-        throw new TypeError('Pipeline compilation report fixed evidence exceeds its byte budget.')
-    }
-}
-
-function normalizeNativeLocation(location: PipelineCompilationReport['messages'][number]['nativeLocation']) {
-
-    return {
-        offset: nonNegativeInteger(location?.offset),
-        length: nonNegativeInteger(location?.length),
-        lineNum: nonNegativeInteger(location?.lineNum),
-        linePos: nonNegativeInteger(location?.linePos),
-    }
-}
-
-function normalizeModuleLocation(location: NonNullable<PipelineCompilationReport['messages'][number]['moduleLocation']>) {
-
-    return {
-        moduleIndex: nonNegativeInteger(location.moduleIndex),
-        offset: nonNegativeInteger(location.offset),
-        length: nonNegativeInteger(location.length),
-        lineNum: positiveInteger(location.lineNum),
-        linePos: positiveInteger(location.linePos),
-    }
-}
-
-function nonNegativeInteger(value: unknown): number {
-
-    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0
-}
-
-function positiveInteger(value: unknown): number {
-
-    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 ? value : 1
+    })
 }
 
 export function serializeNativeGpuError(error: unknown): ScratchNativeGpuErrorFacts {
