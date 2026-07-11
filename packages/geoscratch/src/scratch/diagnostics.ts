@@ -119,9 +119,13 @@ export class ScratchDiagnosticError extends Error {
     diagnostic: ScratchDiagnostic
     report: ScratchDiagnosticReport
 
-    constructor(diagnostic: ScratchDiagnostic, report = createScratchDiagnosticReport([ diagnostic ])) {
+    constructor(
+        diagnostic: ScratchDiagnostic,
+        report = createScratchDiagnosticReport([ diagnostic ]),
+        options?: ErrorOptions
+    ) {
 
-        super(diagnostic.message)
+        super(diagnostic.message, options)
 
         this.name = 'ScratchDiagnosticError'
         this.diagnostic = diagnostic
@@ -129,10 +133,10 @@ export class ScratchDiagnosticError extends Error {
     }
 }
 
-export function throwScratchDiagnostic(input: ScratchDiagnosticInput): never {
+export function throwScratchDiagnostic(input: ScratchDiagnosticInput, options?: ErrorOptions): never {
 
     const diagnostic = createScratchDiagnostic(input)
-    throw new ScratchDiagnosticError(diagnostic)
+    throw new ScratchDiagnosticError(diagnostic, createScratchDiagnosticReport([ diagnostic ]), options)
 }
 
 function normalizeHints(hints: string | string[] | undefined): string[] | undefined {

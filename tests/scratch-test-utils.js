@@ -15,6 +15,7 @@ export function createFakeGpu() {
         commandEncoders: [],
         queueWrites: [],
         queueTextureWrites: [],
+        queueExternalImageCopies: [],
         queueSubmissions: [],
         queueTimeline: [],
         submittedWorkDoneRegistrations: [],
@@ -65,6 +66,18 @@ export function createFakeGpu() {
                 data: bytesFrom(data),
                 layout,
                 size,
+            })
+        },
+        copyExternalImageToTexture(source, destination, copySize) {
+            calls.queueTimeline.push({
+                type: 'external-image-upload',
+                source,
+                destination,
+            })
+            calls.queueExternalImageCopies.push({
+                source,
+                destination,
+                copySize,
             })
         },
         submit(commandBuffers) {

@@ -59,7 +59,7 @@ export type {
     ShaderInspectionOptions,
 } from './shader-inspection.js'
 export { ComputePipeline, RenderPipeline } from './pipeline.js'
-export { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+export { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 export type {
     BeginOcclusionQueryCommandDescriptor,
     CommandDynamicOffsets,
@@ -78,6 +78,9 @@ export type {
     DrawIndexBufferBinding,
     DrawVertexBufferBinding,
     EndOcclusionQueryCommandDescriptor,
+    ExternalImageUploadCommandDescriptor,
+    ExternalImageUploadSize,
+    ExternalImageUploadSourceOrigin,
     QuerySetSlotReadDescriptor,
     ReadbackCommandDescriptor,
     ReadbackCommandResultOptions,

@@ -3,6 +3,14 @@ import * as scratchCompat from 'geoscratch/scratch'
 import { MercatorCoordinate } from 'geoscratch/geo'
 import { plane, sphere } from 'geoscratch/geometry'
 
+declare const typedImageBitmap: ImageBitmap
+declare const typedImageData: ImageData
+declare const typedImageElement: HTMLImageElement
+declare const typedVideoElement: HTMLVideoElement
+declare const typedVideoFrame: VideoFrame
+declare const typedCanvasElement: HTMLCanvasElement
+declare const typedOffscreenCanvas: OffscreenCanvas
+
 const startResult: Promise<GPUDevice | undefined> = scr.StartDash()
 const device: GPUDevice = scr.getDevice()
 
@@ -360,6 +368,51 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         layout: { bytesPerRow: 8, rowsPerImage: 2 },
         size: { width: 2, height: 2 },
     })
+    const externalImageSources: GPUCopyExternalImageSource[] = [
+        typedImageBitmap,
+        typedImageData,
+        typedImageElement,
+        typedVideoElement,
+        typedVideoFrame,
+        typedCanvasElement,
+        typedOffscreenCanvas,
+    ]
+    const externalImageSourceOrigin: scr.ExternalImageUploadSourceOrigin = [ 0, 0 ]
+    const externalImageUploadSize: scr.ExternalImageUploadSize = { width: 2, height: 2 }
+    const externalImageUploadDescriptors: scr.ExternalImageUploadCommandDescriptor[] = externalImageSources.map(source => ({
+        source,
+        sourceOrigin: externalImageSourceOrigin,
+        flipY: true,
+        target: scratchTexture,
+        origin: { x: 0, y: 0, z: 0 },
+        mipLevel: 0,
+        colorSpace: 'srgb',
+        premultipliedAlpha: false,
+        size: externalImageUploadSize,
+    }))
+    const compatExternalImageUploadDescriptor: scratchCompat.ExternalImageUploadCommandDescriptor = externalImageUploadDescriptors[0]
+    const externalImageUpload: scr.ExternalImageUploadCommand = runtime.createExternalImageUploadCommand(externalImageUploadDescriptors[0])
+    const externalImageUploadAlias: scratchCompat.ExternalImageUploadCommand = runtime.externalImageUploadCommand(compatExternalImageUploadDescriptor)
+    const bufferUploadKind: 'buffer' = upload.uploadKind
+    const textureUploadKind: 'texture' = textureUpload.uploadKind
+    const externalImageUploadKind: 'external-image' = externalImageUpload.uploadKind
+    const canonicalExternalImageSourceInfo: GPUCopyExternalImageSourceInfo = {
+        source: externalImageUpload.source,
+        origin: externalImageUpload.sourceOrigin,
+        flipY: externalImageUpload.flipY,
+    }
+    const canonicalExternalImageDestInfo: GPUCopyExternalImageDestInfo = {
+        texture: externalImageUpload.target.gpuTexture,
+        origin: externalImageUpload.origin,
+        mipLevel: externalImageUpload.mipLevel,
+        aspect: 'all',
+        colorSpace: externalImageUpload.colorSpace,
+        premultipliedAlpha: externalImageUpload.premultipliedAlpha,
+    }
+    // @ts-expect-error external image upload source identity is immutable
+    externalImageUpload.source = typedImageData
+    // @ts-expect-error normalized external source origin is immutable
+    externalImageUpload.sourceOrigin.x = 1
     const copy: scr.CopyCommand = runtime.createCopyCommand({
         label: 'typed scratch copy',
         source: genericCopySource,
@@ -1080,6 +1133,18 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void shaderBindingType
     void shaderComparisonOptions
     void shaderComparisonReport
+    void externalImageSources
+    void externalImageSourceOrigin
+    void externalImageUploadSize
+    void externalImageUploadDescriptors
+    void compatExternalImageUploadDescriptor
+    void externalImageUpload
+    void externalImageUploadAlias
+    void bufferUploadKind
+    void textureUploadKind
+    void externalImageUploadKind
+    void canonicalExternalImageSourceInfo
+    void canonicalExternalImageDestInfo
     void compatShaderInspection
     void compatShaderInspectionInput
     void compatShaderInspectionOptions

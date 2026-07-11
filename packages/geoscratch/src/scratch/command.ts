@@ -27,12 +27,36 @@ const GPU_BUFFER_USAGE_COPY_DST = getGlobalConstant('GPUBufferUsage', 'COPY_DST'
 const GPU_BUFFER_USAGE_QUERY_RESOLVE = getGlobalConstant('GPUBufferUsage', 'QUERY_RESOLVE', 0x200)
 const GPU_TEXTURE_USAGE_COPY_SRC = getGlobalConstant('GPUTextureUsage', 'COPY_SRC', 0x1)
 const GPU_TEXTURE_USAGE_COPY_DST = getGlobalConstant('GPUTextureUsage', 'COPY_DST', 0x2)
+const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
 const GPU_SIZE_32_MAX = 0xffff_ffff
 const GPU_SIGNED_OFFSET_32_MIN = -0x8000_0000
 const GPU_SIGNED_OFFSET_32_MAX = 0x7fff_ffff
 const DRAW_INDIRECT_BYTE_LENGTH = 16
 const DRAW_INDEXED_INDIRECT_BYTE_LENGTH = 20
 const DISPATCH_INDIRECT_BYTE_LENGTH = 12
+
+const EXTERNAL_IMAGE_UPLOAD_BASE_FORMATS = new Set<GPUTextureFormat>([
+    'r8unorm',
+    'rg8unorm',
+    'rgba8unorm',
+    'rgba8unorm-srgb',
+    'bgra8unorm',
+    'r16float',
+    'rg16float',
+    'rgba16float',
+    'r32float',
+    'rg32float',
+    'rgba32float',
+    'rgb10a2unorm',
+])
+
+const EXTERNAL_IMAGE_UPLOAD_FEATURE_FORMATS = new Map<GPUTextureFormat, readonly string[]>([
+    [ 'bgra8unorm-srgb', [ 'core-features-and-limits' ] ],
+    [ 'rg11b10ufloat', [ 'rg11b10ufloat-renderable', 'texture-formats-tier1', 'texture-formats-tier2' ] ],
+    [ 'r16unorm', [ 'texture-formats-tier1', 'texture-formats-tier2' ] ],
+    [ 'rg16unorm', [ 'texture-formats-tier1', 'texture-formats-tier2' ] ],
+    [ 'rgba16unorm', [ 'texture-formats-tier1', 'texture-formats-tier2' ] ],
+])
 
 type Mutable<T> = { -readonly [Key in keyof T]: T[Key] }
 
@@ -323,6 +347,29 @@ export type TextureUploadCommandDescriptor = {
     mipLevel?: number
 }
 
+export type ExternalImageUploadSourceOrigin = {
+    x?: number
+    y?: number
+} | [number, number?]
+
+export type ExternalImageUploadSize = {
+    width: number
+    height: number
+} | [number, number]
+
+export type ExternalImageUploadCommandDescriptor = {
+    label?: string
+    source: GPUCopyExternalImageSource
+    sourceOrigin?: ExternalImageUploadSourceOrigin
+    flipY?: boolean
+    target: TextureResource
+    origin?: TextureUploadOrigin
+    mipLevel?: number
+    colorSpace?: PredefinedColorSpace
+    premultipliedAlpha?: boolean
+    size: ExternalImageUploadSize
+}
+
 export type StaticDispatchCount = {
     workgroups: [number] | [number, number] | [number, number, number]
 }
@@ -437,6 +484,30 @@ type TextureUploadDiagnosticInput = {
     size?: unknown
     mipLevel?: unknown
     reason: string
+}
+
+type ExternalImageUploadDiagnosticInput = {
+    command?: ExternalImageUploadCommand
+    runtime?: ScratchRuntime
+    source?: unknown
+    sourceOrigin?: unknown
+    sourceDimensions?: unknown
+    flipY?: unknown
+    target?: unknown
+    origin?: unknown
+    mipLevel?: unknown
+    colorSpace?: unknown
+    premultipliedAlpha?: unknown
+    size?: unknown
+    requiredFeatures?: readonly string[]
+    nativeError?: Record<string, unknown>
+    reason: string
+}
+
+type ExternalImageDimensions = {
+    width: number
+    height: number
+    fields: string
 }
 
 type VertexBufferDiagnosticDetails = {
@@ -1180,11 +1251,36 @@ function lockCommandProperties(command: object, properties: string[]): void {
     }
 }
 
+function lockExternalImageUploadCommandContract(command: ExternalImageUploadCommand): void {
+
+    Object.freeze(command.sourceOrigin)
+    Object.freeze(command.origin)
+    Object.freeze(command.size)
+    lockCommandProperties(command, [
+        'runtime',
+        'id',
+        'label',
+        'commandKind',
+        'uploadKind',
+        'source',
+        'sourceOrigin',
+        'flipY',
+        'target',
+        'origin',
+        'mipLevel',
+        'colorSpace',
+        'premultipliedAlpha',
+        'size',
+    ])
+    Object.preventExtensions(command)
+}
+
 export interface UploadCommand {
     runtime: ScratchRuntime
     id: string
     label?: string
     commandKind: 'upload'
+    uploadKind: 'buffer'
     target: BufferResource
     data: ArrayBuffer | ArrayBufferView
     layout?: LayoutArtifact
@@ -1218,6 +1314,7 @@ export class UploadCommand {
         this.id = `scratch-command-${UUID()}`
         if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'upload'
+        this.uploadKind = 'buffer'
         this.target = target
         this.data = uploadSource.data
         const layout = normalizeUploadLayout(runtime, descriptor.layout ?? descriptor.artifact ?? uploadSource.layout, descriptor)
@@ -1237,6 +1334,7 @@ export class UploadCommand {
             kind: 'Command',
             id: this.id,
             commandKind: 'upload',
+            uploadKind: 'buffer',
         }
         if (this.label !== undefined) subject.label = this.label
 
@@ -2150,83 +2248,231 @@ export class TextureUploadCommand {
     }
 }
 
+export interface ExternalImageUploadCommand {
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'upload'
+    readonly uploadKind: 'external-image'
+    readonly source: GPUCopyExternalImageSource
+    readonly sourceOrigin: Readonly<{ x: number, y: number }>
+    readonly flipY: boolean
+    readonly target: TextureResource
+    readonly origin: Readonly<{ x: number, y: number, z: number }>
+    readonly mipLevel: number
+    readonly colorSpace: PredefinedColorSpace
+    readonly premultipliedAlpha: boolean
+    readonly size: Readonly<{ width: number, height: number, depthOrArrayLayers: 1 }>
+}
+
+export class ExternalImageUploadCommand {
+
+    #isDisposed = false
+
+    constructor(
+        runtime: ScratchRuntime,
+        descriptor: ExternalImageUploadCommandDescriptor = {} as ExternalImageUploadCommandDescriptor
+    ) {
+
+        runtime.assertActive()
+
+        const target = descriptor.target
+        if (!(target instanceof TextureResource)) {
+            throwExternalImageUploadInvalid({
+                runtime,
+                source: descriptor.source,
+                target,
+                size: descriptor.size,
+                reason: 'target',
+            })
+        }
+        target.assertRuntime(runtime)
+
+        const mutable = this as Mutable<ExternalImageUploadCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) mutable.label = descriptor.label
+        mutable.commandKind = 'upload'
+        mutable.uploadKind = 'external-image'
+        mutable.source = normalizeExternalImageUploadSource(runtime, descriptor.source)
+        mutable.sourceOrigin = normalizeExternalImageUploadSourceOrigin(runtime, descriptor.sourceOrigin)
+        mutable.flipY = normalizeExternalImageUploadBoolean(runtime, descriptor.flipY ?? false, 'flipY')
+        mutable.target = target
+        mutable.origin = normalizeExternalImageUploadTargetOrigin(runtime, descriptor.origin)
+        mutable.mipLevel = normalizeExternalImageUploadMipLevel(runtime, target, descriptor.mipLevel ?? 0)
+        mutable.colorSpace = normalizeExternalImageUploadColorSpace(runtime, descriptor.colorSpace ?? 'srgb')
+        mutable.premultipliedAlpha = normalizeExternalImageUploadBoolean(
+            runtime,
+            descriptor.premultipliedAlpha ?? false,
+            'premultiplied-alpha'
+        )
+        mutable.size = normalizeExternalImageUploadSize(runtime, descriptor.size)
+
+        validateExternalImageUploadTarget(this)
+        lockExternalImageUploadCommandContract(this)
+    }
+
+    get subject(): DiagnosticSubject {
+
+        const subject: DiagnosticSubject = {
+            kind: 'Command',
+            id: this.id,
+            commandKind: 'upload',
+            uploadKind: 'external-image',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
+    }
+
+    assertRuntime(runtime: ScratchRuntime): void {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [ this.runtime.subject, runtime?.subject ].filter(Boolean),
+                message: 'Command belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable(): void {
+
+        if (this.isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DISPOSED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Command has been disposed.',
+            })
+        }
+
+        this.runtime.assertActive()
+        this.target.assertRuntime(this.runtime)
+    }
+
+    execute(queue: GPUQueue): void {
+
+        validateUploadCommandQueueAction(this, queue)
+        writeUploadCommandQueueAction(this, queue)
+        commitUploadCommandLogicalWrite(this)
+    }
+
+    dispose(): void {
+
+        this.#isDisposed = true
+    }
+}
+
 export function validateUploadCommandQueueAction(
-    command: UploadCommand | TextureUploadCommand,
+    command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand,
     queue: GPUQueue
 ): void {
 
     command.assertUsable()
 
-    if (isTextureUploadQueueCommand(command)) {
-        if (!queue || typeof queue.writeTexture !== 'function') {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
-                severity: 'error',
-                phase: 'runtime',
-                subject: command.runtime.subject,
-                related: [ command.subject ],
-                message: 'ScratchRuntime queue cannot write GPU textures.',
-                expected: { queue: 'GPUQueue with writeTexture()' },
-                actual: { writeTexture: typeof queue?.writeTexture },
-            })
-        }
-
-        validateTextureUploadRange(command)
-        return
+    switch (command.uploadKind) {
+        case 'buffer':
+            if (!queue || typeof queue.writeBuffer !== 'function') {
+                throwScratchDiagnostic({
+                    code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                    severity: 'error',
+                    phase: 'runtime',
+                    subject: command.runtime.subject,
+                    related: [ command.subject ],
+                    message: 'ScratchRuntime queue cannot write GPU buffers.',
+                    expected: { queue: 'GPUQueue with writeBuffer()' },
+                    actual: { writeBuffer: typeof queue?.writeBuffer },
+                })
+            }
+            validateUploadRange(command)
+            return
+        case 'texture':
+            if (!queue || typeof queue.writeTexture !== 'function') {
+                throwScratchDiagnostic({
+                    code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                    severity: 'error',
+                    phase: 'runtime',
+                    subject: command.runtime.subject,
+                    related: [ command.subject ],
+                    message: 'ScratchRuntime queue cannot write GPU textures.',
+                    expected: { queue: 'GPUQueue with writeTexture()' },
+                    actual: { writeTexture: typeof queue?.writeTexture },
+                })
+            }
+            validateTextureUploadRange(command)
+            return
+        case 'external-image':
+            validateExternalImageUploadQueueAction(command, queue)
+            return
+        default:
+            return assertNeverUploadCommand(command)
     }
-
-    if (!queue || typeof queue.writeBuffer !== 'function') {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
-            severity: 'error',
-            phase: 'runtime',
-            subject: command.runtime.subject,
-            related: [ command.subject ],
-            message: 'ScratchRuntime queue cannot write GPU buffers.',
-            expected: { queue: 'GPUQueue with writeBuffer()' },
-            actual: { writeBuffer: typeof queue?.writeBuffer },
-        })
-    }
-
-    validateUploadRange(command)
 }
 
 export function writeUploadCommandQueueAction(
-    command: UploadCommand | TextureUploadCommand,
+    command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand,
     queue: GPUQueue
 ): void {
 
-    if (isTextureUploadQueueCommand(command)) {
-        queue.writeTexture(
-            {
-                texture: command.target.gpuTexture,
-                mipLevel: command.mipLevel,
-                origin: command.origin,
-            },
-            command.data,
-            command.layout,
-            command.size
-        )
-        return
+    switch (command.uploadKind) {
+        case 'buffer':
+            queue.writeBuffer(
+                command.target.gpuBuffer,
+                command.offset,
+                createUploadSource(command.data, command.dataOffset, command.byteLength)
+            )
+            return
+        case 'texture':
+            queue.writeTexture(
+                {
+                    texture: command.target.gpuTexture,
+                    mipLevel: command.mipLevel,
+                    origin: command.origin,
+                },
+                command.data,
+                command.layout,
+                command.size
+            )
+            return
+        case 'external-image':
+            writeExternalImageUploadQueueAction(command, queue)
+            return
+        default:
+            return assertNeverUploadCommand(command)
     }
-
-    queue.writeBuffer(
-        command.target.gpuBuffer,
-        command.offset,
-        createUploadSource(command.data, command.dataOffset, command.byteLength)
-    )
 }
 
-export function commitUploadCommandLogicalWrite(command: UploadCommand | TextureUploadCommand): void {
+export function uploadCommandHasContentEffect(
+    command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand
+): boolean {
 
-    command.target._advanceContentEpoch()
+    return command.uploadKind !== 'external-image' || (command.size.width > 0 && command.size.height > 0)
 }
 
-function isTextureUploadQueueCommand(
-    command: UploadCommand | TextureUploadCommand
-): command is TextureUploadCommand {
+export function commitUploadCommandLogicalWrite(
+    command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand
+): void {
 
-    return 'uploadKind' in command && command.uploadKind === 'texture'
+    if (uploadCommandHasContentEffect(command)) command.target._advanceContentEpoch()
+}
+
+function assertNeverUploadCommand(command: never): never {
+
+    throw new TypeError(`Unsupported upload command: ${describeValue(command)}`)
 }
 
 function normalizeOcclusionQueryIndex(runtime: ScratchRuntime, querySet: QuerySetResource, index: number): number {
@@ -4680,6 +4926,406 @@ function throwTextureUploadDiagnostic({
             mipLevel,
         },
     })
+}
+
+function normalizeExternalImageUploadSource(
+    runtime: ScratchRuntime,
+    source: GPUCopyExternalImageSource
+): GPUCopyExternalImageSource {
+
+    if (!isRecord(source)) {
+        throwExternalImageUploadInvalid({ runtime, source, reason: 'source' })
+    }
+
+    return source
+}
+
+function normalizeExternalImageUploadSourceOrigin(
+    runtime: ScratchRuntime,
+    origin: ExternalImageUploadSourceOrigin = { x: 0, y: 0 }
+): { x: number, y: number } {
+
+    let x: unknown
+    let y: unknown
+
+    if (Array.isArray(origin)) {
+        x = origin[0] ?? 0
+        y = origin[1] ?? 0
+    } else if (isRecord(origin)) {
+        x = origin.x ?? 0
+        y = origin.y ?? 0
+    } else {
+        throwExternalImageUploadInvalid({ runtime, sourceOrigin: origin, reason: 'source-origin' })
+    }
+
+    if (!isGpuSize32(x) || !isGpuSize32(y)) {
+        throwExternalImageUploadInvalid({ runtime, sourceOrigin: origin, reason: 'source-origin' })
+    }
+
+    return { x, y }
+}
+
+function normalizeExternalImageUploadTargetOrigin(
+    runtime: ScratchRuntime,
+    origin: TextureUploadOrigin = { x: 0, y: 0, z: 0 }
+): { x: number, y: number, z: number } {
+
+    let x: unknown
+    let y: unknown
+    let z: unknown
+
+    if (Array.isArray(origin)) {
+        x = origin[0] ?? 0
+        y = origin[1] ?? 0
+        z = origin[2] ?? 0
+    } else if (isRecord(origin)) {
+        x = origin.x ?? 0
+        y = origin.y ?? 0
+        z = origin.z ?? 0
+    } else {
+        throwExternalImageUploadInvalid({ runtime, origin, reason: 'target-origin' })
+    }
+
+    if (!isGpuSize32(x) || !isGpuSize32(y) || !isGpuSize32(z)) {
+        throwExternalImageUploadInvalid({ runtime, origin, reason: 'target-origin' })
+    }
+
+    return { x, y, z }
+}
+
+function normalizeExternalImageUploadMipLevel(
+    runtime: ScratchRuntime,
+    target: TextureResource,
+    mipLevel: number
+): number {
+
+    if (!isGpuSize32(mipLevel) || mipLevel >= target.mipLevelCount) {
+        throwExternalImageUploadInvalid({ runtime, target, mipLevel, reason: 'mip-level' })
+    }
+
+    return mipLevel
+}
+
+function normalizeExternalImageUploadColorSpace(
+    runtime: ScratchRuntime,
+    colorSpace: PredefinedColorSpace
+): PredefinedColorSpace {
+
+    if (colorSpace !== 'srgb' && colorSpace !== 'display-p3') {
+        throwExternalImageUploadInvalid({ runtime, colorSpace, reason: 'color-space' })
+    }
+
+    return colorSpace
+}
+
+function normalizeExternalImageUploadBoolean(
+    runtime: ScratchRuntime,
+    value: unknown,
+    reason: 'flipY' | 'premultiplied-alpha'
+): boolean {
+
+    if (typeof value !== 'boolean') {
+        throwExternalImageUploadInvalid({
+            runtime,
+            ...(reason === 'flipY' ? { flipY: value } : { premultipliedAlpha: value }),
+            reason,
+        })
+    }
+
+    return value
+}
+
+function normalizeExternalImageUploadSize(
+    runtime: ScratchRuntime,
+    size: ExternalImageUploadSize
+): { width: number, height: number, depthOrArrayLayers: 1 } {
+
+    let width: unknown
+    let height: unknown
+
+    if (Array.isArray(size)) {
+        width = size[0]
+        height = size[1]
+    } else if (isRecord(size)) {
+        width = size.width
+        height = size.height
+    } else {
+        throwExternalImageUploadInvalid({ runtime, size, reason: 'size' })
+    }
+
+    if (!isGpuSize32(width) || !isGpuSize32(height)) {
+        throwExternalImageUploadInvalid({ runtime, size, reason: 'size' })
+    }
+
+    return { width, height, depthOrArrayLayers: 1 }
+}
+
+function validateExternalImageUploadQueueAction(
+    command: ExternalImageUploadCommand,
+    queue: GPUQueue
+): void {
+
+    if (!queue || typeof queue.copyExternalImageToTexture !== 'function') {
+        throwExternalImageUploadInvalid({
+            command,
+            runtime: command.runtime,
+            target: command.target,
+            source: command.source,
+            reason: 'queue-method',
+        })
+    }
+
+    validateExternalImageUploadTarget(command)
+    const sourceDimensions = readExternalImageDimensions(command)
+    if (
+        command.sourceOrigin.x + command.size.width > sourceDimensions.width ||
+        command.sourceOrigin.y + command.size.height > sourceDimensions.height
+    ) {
+        throwExternalImageUploadInvalid({
+            command,
+            runtime: command.runtime,
+            source: command.source,
+            sourceOrigin: command.sourceOrigin,
+            sourceDimensions,
+            size: command.size,
+            reason: 'source-range',
+        })
+    }
+}
+
+function validateExternalImageUploadTarget(command: ExternalImageUploadCommand): void {
+
+    const { runtime, target } = command
+    target.assertRuntime(runtime)
+
+    const requiredUsage = GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT
+    if ((target.usage & requiredUsage) !== requiredUsage) {
+        throwExternalImageUploadInvalid({ command, runtime, target, reason: 'target-usage' })
+    }
+    if (target.dimension !== '2d') {
+        throwExternalImageUploadInvalid({ command, runtime, target, reason: 'target-dimension' })
+    }
+    if (target.sampleCount !== 1) {
+        throwExternalImageUploadInvalid({ command, runtime, target, reason: 'target-sample-count' })
+    }
+
+    validateExternalImageUploadTargetFormat(command)
+
+    if (!isGpuSize32(command.mipLevel) || command.mipLevel >= target.mipLevelCount) {
+        throwExternalImageUploadInvalid({
+            command,
+            runtime,
+            target,
+            mipLevel: command.mipLevel,
+            reason: 'mip-level',
+        })
+    }
+
+    const mipWidth = Math.max(1, Math.floor(target.width / (2 ** command.mipLevel)))
+    const mipHeight = Math.max(1, Math.floor(target.height / (2 ** command.mipLevel)))
+    if (
+        command.origin.x + command.size.width > mipWidth ||
+        command.origin.y + command.size.height > mipHeight ||
+        command.origin.z + command.size.depthOrArrayLayers > target.depthOrArrayLayers
+    ) {
+        throwExternalImageUploadInvalid({
+            command,
+            runtime,
+            target,
+            origin: command.origin,
+            mipLevel: command.mipLevel,
+            size: command.size,
+            reason: 'target-range',
+        })
+    }
+}
+
+function validateExternalImageUploadTargetFormat(command: ExternalImageUploadCommand): void {
+
+    const { format } = command.target
+    if (EXTERNAL_IMAGE_UPLOAD_BASE_FORMATS.has(format)) return
+
+    const requiredFeatures = EXTERNAL_IMAGE_UPLOAD_FEATURE_FORMATS.get(format)
+    if (requiredFeatures === undefined) {
+        throwExternalImageUploadInvalid({
+            command,
+            runtime: command.runtime,
+            target: command.target,
+            reason: 'target-format',
+        })
+    }
+
+    if (requiredFeatures.some(feature => runtimeHasFeature(command.runtime, feature))) return
+
+    throwExternalImageUploadInvalid({
+        command,
+        runtime: command.runtime,
+        target: command.target,
+        requiredFeatures,
+        reason: 'target-format-feature',
+    })
+}
+
+function readExternalImageDimensions(command: ExternalImageUploadCommand): ExternalImageDimensions {
+
+    const source = command.source as GPUCopyExternalImageSource & Record<string, unknown>
+    const candidates: [string, string][] = [
+        [ 'naturalWidth', 'naturalHeight' ],
+        [ 'videoWidth', 'videoHeight' ],
+        [ 'displayWidth', 'displayHeight' ],
+        [ 'width', 'height' ],
+    ]
+
+    for (const [ widthField, heightField ] of candidates) {
+        if (!(widthField in source) && !(heightField in source)) continue
+
+        const width = source[widthField]
+        const height = source[heightField]
+        if (!isGpuSize32(width) || !isGpuSize32(height)) {
+            throwExternalImageUploadInvalid({
+                command,
+                runtime: command.runtime,
+                source: command.source,
+                sourceDimensions: { width, height, fields: `${widthField}/${heightField}` },
+                reason: 'source-dimensions',
+            })
+        }
+
+        return { width, height, fields: `${widthField}/${heightField}` }
+    }
+
+    throwExternalImageUploadInvalid({
+        command,
+        runtime: command.runtime,
+        source: command.source,
+        reason: 'source-dimensions',
+    })
+}
+
+function runtimeHasFeature(runtime: ScratchRuntime, requiredFeature: string): boolean {
+
+    for (const enabledFeature of runtime.deviceFeatures) {
+        if (String(enabledFeature) === requiredFeature) return true
+    }
+
+    return false
+}
+
+function writeExternalImageUploadQueueAction(
+    command: ExternalImageUploadCommand,
+    queue: GPUQueue
+): void {
+
+    const source: GPUCopyExternalImageSourceInfo = {
+        source: command.source,
+        origin: command.sourceOrigin,
+        flipY: command.flipY,
+    }
+    const destination: GPUCopyExternalImageDestInfo = {
+        texture: command.target.gpuTexture,
+        mipLevel: command.mipLevel,
+        origin: command.origin,
+        aspect: 'all',
+        colorSpace: command.colorSpace,
+        premultipliedAlpha: command.premultipliedAlpha,
+    }
+    const copySize = {
+        width: command.size.width,
+        height: command.size.height,
+        depthOrArrayLayers: command.size.depthOrArrayLayers,
+    }
+
+    try {
+        queue.copyExternalImageToTexture(source, destination, copySize)
+    } catch (cause) {
+        throwExternalImageUploadFailed(command, cause)
+    }
+}
+
+function throwExternalImageUploadInvalid(input: ExternalImageUploadDiagnosticInput): never {
+
+    const target = input.target instanceof TextureResource ? input.target : input.command?.target
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: input.command?.subject ?? {
+            kind: 'Command',
+            commandKind: 'upload',
+            uploadKind: 'external-image',
+        },
+        related: [
+            input.runtime?.subject,
+            diagnosticSubjectOf(target),
+        ].filter(isDefined),
+        message: 'ExternalImageUploadCommand requires a valid external source and an eligible texture destination.',
+        expected: {
+            source: 'GPUCopyExternalImageSource with live non-negative integer dimensions',
+            sourceOrigin: '{ x?: GPUIntegerCoordinate, y?: GPUIntegerCoordinate }',
+            flipY: 'boolean',
+            target: 'single-sampled 2D TextureResource with COPY_DST and RENDER_ATTACHMENT usage',
+            targetFormat: 'renderable plain unorm, unorm-srgb, float, or ufloat format enabled on the device',
+            origin: '{ x?: GPUIntegerCoordinate, y?: GPUIntegerCoordinate, z?: GPUIntegerCoordinate }',
+            mipLevel: 'GPUIntegerCoordinate within target mip levels',
+            colorSpace: [ 'srgb', 'display-p3' ],
+            premultipliedAlpha: 'boolean',
+            size: '{ width: GPUIntegerCoordinate, height: GPUIntegerCoordinate }',
+            queue: 'GPUQueue with copyExternalImageToTexture()',
+        },
+        actual: {
+            reason: input.reason,
+            source: describeValue(input.source ?? input.command?.source),
+            sourceOrigin: input.sourceOrigin ?? input.command?.sourceOrigin,
+            sourceDimensions: input.sourceDimensions,
+            flipY: input.flipY ?? input.command?.flipY,
+            target: target === undefined ? describeValue(input.target) : {
+                id: target.id,
+                format: target.format,
+                usage: target.usage,
+                dimension: target.dimension,
+                sampleCount: target.sampleCount,
+                mipLevelCount: target.mipLevelCount,
+                size: target.size,
+            },
+            origin: input.origin ?? input.command?.origin,
+            mipLevel: input.mipLevel ?? input.command?.mipLevel,
+            colorSpace: input.colorSpace ?? input.command?.colorSpace,
+            premultipliedAlpha: input.premultipliedAlpha ?? input.command?.premultipliedAlpha,
+            size: input.size ?? input.command?.size,
+            requiredFeatures: input.requiredFeatures,
+        },
+    })
+}
+
+function throwExternalImageUploadFailed(command: ExternalImageUploadCommand, cause: unknown): never {
+
+    const nativeError = serializeNativeError(cause)
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [ command.runtime.subject, command.target.subject ],
+        message: 'GPUQueue.copyExternalImageToTexture() failed synchronously.',
+        expected: { nativeCall: 'copyExternalImageToTexture returns successfully' },
+        actual: {
+            reason: 'native-call',
+            nativeError,
+        },
+    }, { cause })
+}
+
+function serializeNativeError(cause: unknown): Record<string, unknown> {
+
+    if (!isRecord(cause)) return { value: String(cause) }
+
+    const nativeError: Record<string, unknown> = {
+        name: typeof cause.name === 'string' ? cause.name : 'Error',
+        message: typeof cause.message === 'string' ? cause.message : String(cause),
+    }
+    if (typeof cause.code === 'number' && Number.isFinite(cause.code)) nativeError.code = cause.code
+
+    return nativeError
 }
 
 function normalizeReadinessContract<Command extends DrawCommand | DispatchCommand>(

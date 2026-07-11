@@ -1,7 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BindLayout, BindSet } from './binding.js'
 import { BufferResource } from './buffer.js'
-import { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+import { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import { ComputePipeline, RenderPipeline } from './pipeline.js'
@@ -14,7 +14,7 @@ import { Surface } from './surface.js'
 import { TextureResource } from './texture.js'
 import type { BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './binding.js'
 import type { BufferResourceDescriptor } from './buffer.js'
-import type { BeginOcclusionQueryCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
+import type { BeginOcclusionQueryCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpecDescriptor, RenderPassSpecDescriptor } from './pass.js'
 import type { ComputePipelineDescriptor, RenderPipelineDescriptor } from './pipeline.js'
@@ -399,6 +399,17 @@ export class ScratchRuntime {
     textureUploadCommand(descriptor: TextureUploadCommandDescriptor) {
 
         return this.createTextureUploadCommand(descriptor)
+    }
+
+    createExternalImageUploadCommand(descriptor: ExternalImageUploadCommandDescriptor) {
+
+        this.assertActive()
+        return new ExternalImageUploadCommand(this, descriptor)
+    }
+
+    externalImageUploadCommand(descriptor: ExternalImageUploadCommandDescriptor) {
+
+        return this.createExternalImageUploadCommand(descriptor)
     }
 
     createRenderPass(descriptor: RenderPassSpecDescriptor) {
