@@ -101,6 +101,14 @@ Submission responsibilities:
 - submit command buffers
 - return `SubmittedWork`
 
+### Resize Between Construction And Submission
+
+`TextureResource.resize()` does not add a submission step. It is immediate resource allocation lifecycle, not queue work. A `SubmissionBuilder` stores logical pass, command, and resource references; if a texture is resized after builder construction but before `.submit()`, preflight and encoding resolve and validate the allocation current at submission time.
+
+Resize itself records no resource access, producer epoch, command buffer, queue action, or completion registration. The replacement starts empty even though its `contentEpoch` number is preserved. A later write may make it ready for a later read in the same submission, and both ledgers then report the new `allocationVersion` and the next `contentEpoch`.
+
+After submission, `SubmittedWork.resourceAccesses` and `producerEpochs` remain an immutable historical record of the allocation and content facts used by that submission. A later texture resize cannot rewrite those arrays or alter the existing `done` promise.
+
 ## Physical Queue Timeline
 
 `SubmissionBuilder.steps` defines one total order across encoder-backed work and queue-side uploads. Recording commands into an encoder is not the same as enqueuing them: `GPUQueue.writeBuffer(...)` and `GPUQueue.writeTexture(...)` enter the queue when called, while copy, readback staging, resolve, compute, and render work enter the queue only when a finished command buffer is submitted.

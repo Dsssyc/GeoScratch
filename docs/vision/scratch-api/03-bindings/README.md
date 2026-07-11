@@ -68,6 +68,10 @@ The normalized binding table and its entries are immutable after `BindSet` const
 
 `BindSet` does not rebuild merely because a bound resource's `contentEpoch` changes. Content changes affect dependency validation and readback, not the physical binding target.
 
+`TextureResource.resize()` makes this distinction observable. On the next use after a changed resize, `BindSet` compares the new `allocationVersion`, obtains a view from the current texture, and creates exactly one replacement bind group. Later uses of that allocation reuse it. A content-only write does not rebuild it, and a normalized same-size resize changes no version and therefore rebuilds nothing.
+
+A raw `GPUTextureView` is allocation-scoped. Scratch invalidates its own view cache when the texture allocation changes, but a raw view retained independently by application code remains stale and cannot be repaired through `BindSet`.
+
 `BindSet` is not a material parameter object. It supplies concrete resources for an explicit `BindLayout`; it does not own shader source, generated accessor modules, pipeline state, render style, object assignment, draw counts, or dispatch counts. A command is the place where a pipeline and bind sets meet for one executable action.
 
 ## Shader Inspection And Cross-Check

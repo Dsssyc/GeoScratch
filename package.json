@@ -11,12 +11,14 @@
     "build": "npm --workspace geoscratch run build && npm --workspace examples run build",
     "serve": "npm --workspace examples run serve",
     "test": "npm --workspace geoscratch run build && mocha \"tests/**/*.test.js\"",
-    "typecheck": "npm --workspace geoscratch run build && tsc -p tsconfig.types.json"
+    "typecheck": "npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm run typecheck:webgpu",
+    "typecheck:webgpu": "node node_modules/typescript-webgpu/bin/tsc -p tsconfig.webgpu-types.json"
   },
   "devDependencies": {
     "chai": "^5.1.0",
     "mocha": "^10.3.0",
     "playwright": "^1.60.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "typescript-webgpu": "npm:typescript@^5.9.3"
   }
 }

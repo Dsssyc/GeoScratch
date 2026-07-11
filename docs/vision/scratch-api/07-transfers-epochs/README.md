@@ -65,6 +65,22 @@ Every resource should expose or internally track:
 
 `contentEpoch` may be tracked per resource first, and later by buffer range or texture region where useful. The important contract is that readback and dependency validation talk about content epochs, while binding invalidation talks about allocation versions.
 
+### Texture Allocation Replacement
+
+`TextureResource.resize()` explicitly replaces the physical allocation behind one stable logical texture. It is not transfer or submission work: resize creates no encoder, calls no queue method, registers no `onSubmittedWorkDone()`, and does not wait for prior queue completion before destroying the old texture.
+
+A normalized same-size resize changes nothing. A successful size-changing resize has exactly these effects:
+
+```text
+allocationVersion = previous allocationVersion + 1
+contentEpoch = previous contentEpoch
+state = empty
+```
+
+The next successful texture upload, external-image upload, copy target write, render attachment write, or storage write advances from that preserved epoch and makes the replacement ready. Transfer commands resolve the current physical allocation when executed and revalidate current mip, origin, extent, and layer ranges before any encoder or queue effect.
+
+`SubmittedWork` remains historical: later resize cannot alter an earlier submission's allocation-version or producer facts. `ReadbackOperation` captures its source allocation version. The implemented readback source is a buffer, so replacing that captured buffer before materialization rejects with `SCRATCH_READBACK_SOURCE_ALLOCATION_STALE`. Texture data reaches host memory through an explicit texture-to-buffer `CopyCommand`; replacing the texture afterward does not rewrite the already captured destination-buffer provenance. A future direct texture-readback path must use the same allocation-stale rule.
+
 ## Upload
 
 CPU-to-GPU writes are explicit transfer commands:
@@ -330,7 +346,7 @@ The same model covers graphics resources:
 - A later pass that samples that texture declares a read of the produced `contentEpoch`.
 - Depth and stencil attachments use the same rule. Load/store policy and read-as-texture use must be explicit enough for dependency validation.
 - The surface current texture is a borrowed presentation-submission-scoped target, not a persistent `TextureResource`. It cannot be retained beyond the presentation submission that acquired it.
-- Resizing a render target advances `allocationVersion` and invalidates cached views, bind sets, pass attachments, and commands that depend on the previous physical object.
+- `TextureResource.resize()` advances `allocationVersion`, clears allocation-scoped cached views, and marks the replacement empty. Bind sets and pass attachments lazily resolve new views; stable logical commands remain reusable and fail only when their declared range, readiness, or required epoch no longer validates against the current allocation.
 - Temporal resources such as TAA history, trails, or iterative simulation textures are ordinary resources whose previous-frame contents are represented by content epochs, not by a special core feature.
 
 ## Timing And Queries

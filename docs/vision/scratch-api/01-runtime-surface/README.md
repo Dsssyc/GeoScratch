@@ -80,6 +80,19 @@ The exact syntax may change, but the semantic boundary should not.
 
 `Submission` here means the core submission builder defined in `05` / `07`. A compute-only submission has no current surface texture; only a presentation submission can borrow a surface current texture view.
 
+## Explicit Surface And Resource Resize
+
+`Surface` and persistent `TextureResource` allocations have separate ownership. An application that wants an offscreen texture to follow a surface coordinates both lifecycle operations explicitly:
+
+```ts
+surface.resize(nextSize)
+target.resize(surface.size)
+```
+
+`TextureResource.resize()` replaces the physical allocation behind the same logical texture. A changed size advances `allocationVersion`, preserves `contentEpoch`, and leaves the replacement allocation empty until a later content-producing operation writes it. This is not a surface responsibility and does not add submission or queue work.
+
+Core does not install a `ResizeObserver`, poll canvas dimensions, register a hidden surface subscription, scan runtime textures, or infer which resource follows which surface. Future tracked or derived dimensions may call the same explicit resize primitive, but they must not create a second allocation-replacement path.
+
 ## Device Loss
 
 `ScratchRuntime` owns device-loss handling. After device loss:

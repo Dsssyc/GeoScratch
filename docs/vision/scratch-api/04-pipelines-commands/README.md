@@ -59,6 +59,14 @@ Target command families:
 
 `CopyCommand` covers WebGPU-native GPU-side copy directions: buffer-to-buffer, texture-to-texture, buffer-to-texture, and texture-to-buffer. CPU upload and CPU readback remain explicit transfer/readback operations rather than substitutes for these command encoder copies.
 
+### Texture Allocation Replacement
+
+`TextureResource.resize()` is a resource-lifecycle operation, not a `Command`, upload, copy, or submission step. It creates no encoder, queue action, resource-access entry, producer epoch, or content write. A changed resize advances `allocationVersion`, preserves `contentEpoch`, and marks the replacement empty.
+
+Pass specs and commands retain logical resources rather than one physical texture. At submit or encode time, render attachments, texture uploads, external-image uploads, all texture copy directions, and texture bindings resolve the current physical texture or a current view. Commands created before resize therefore remain reusable when their immutable descriptor still fits.
+
+That reuse does not bypass validation. Upload and copy commands revalidate mip, origin, extent, layer, and sample constraints against the current allocation before encoder or queue effects. A fixed required `contentEpoch` remains exact: preserving the numeric epoch across replacement does not make the empty new allocation readable.
+
 ### ExternalImageUploadCommand
 
 `ExternalImageUploadCommand` represents the native immediate queue operation `GPUQueue.copyExternalImageToTexture()`. It is an upload rather than a fifth `CopyCommand` direction:

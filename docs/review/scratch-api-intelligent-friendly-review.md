@@ -9,6 +9,19 @@ Accepted vision still lives under `docs/vision/scratch-api/`. This review file i
 
 ## Recently Resolved
 
+### Texture Allocation Replacement And Resize Invalidation
+
+Resolved direction:
+
+- `TextureResource.resize()` is the lasting explicit resource-lifecycle primitive for size-only physical replacement behind stable logical identity.
+- Construction snapshots the complete recreation descriptor, including immutable normalized size and materialized `viewFormats`; replacement follows create-before-swap failure atomicity.
+- Changed resize advances `allocationVersion` once, preserves `contentEpoch`, marks the replacement empty, clears allocation-scoped views, and destroys the old texture without a queue-completion wait.
+- Bind sets, color/depth attachments, uploads, external-image uploads, every native texture copy direction, draw, and dispatch resolve or validate the current allocation at use time. Stable logical commands remain reusable; stale ranges and readiness still fail.
+- Surface coordination is explicit through `surface.resize(...)` followed by `texture.resize(surface.size)`. Core owns no observer, size-provider closure, runtime texture scan, or hidden surface relationship.
+- The deterministic `Texture Resize` browser proof reuses one logical texture, pass spec, bind set, and draw command, then verifies physical identity replacement, exact epochs, destruction, visible rendering, and exact padded readback bytes.
+
+This closes the resize-invalidation gap without promoting surface policy or a second persistent logical view abstraction into Scratch core. See ADR-031 and `scratch-texture-resize-audit.md`.
+
 ### Physical Queue Timeline Ordering
 
 Resolved in ADR-029 and the submission/transfer vision docs: `SubmissionBuilder.steps` now defines one physical queue order across queue-side buffer/texture uploads and encoder-backed copy, ordered readback staging, query resolve, compute, and render work. The discovered implementation gap was that immediate queue writes were enqueued before one final command-buffer submission even when an upload appeared later in the builder sequence.

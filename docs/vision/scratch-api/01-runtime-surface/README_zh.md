@@ -80,6 +80,19 @@ submission.render(outputPass, [compositeTo(surface.currentView(submission))])
 
 这里的 `Submission` 指 `05` / `07` 定义的核心 submission builder。compute-only submission 没有 surface current texture; 只有 presentation submission 能借用 surface current texture view。
 
+## 显式协调 Surface 与 Resource Resize
+
+`Surface` 与持久 `TextureResource` allocation 分属不同 ownership。应用若希望 offscreen texture 跟随 surface，需要显式协调两次 lifecycle operation:
+
+```ts
+surface.resize(nextSize)
+target.resize(surface.size)
+```
+
+`TextureResource.resize()` 会在同一个逻辑 texture 后方替换物理 allocation。size 发生变化时，`allocationVersion` 递增，`contentEpoch` 保持不变，replacement allocation 保持 empty，直到后续 content-producing operation 写入。这不是 surface 的职责，也不会增加 submission 或 queue work。
+
+Core 不安装 `ResizeObserver`，不轮询 canvas dimensions，不注册隐藏 surface subscription，不扫描 runtime textures，也不推断哪个 resource 跟随哪个 surface。未来 tracked 或 derived dimensions 可以调用同一个显式 resize primitive，但不能建立第二条 allocation-replacement 路径。
+
 ## Device Loss
 
 `ScratchRuntime` 拥有 device-loss 处理。Device loss 后:

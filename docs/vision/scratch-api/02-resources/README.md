@@ -137,29 +137,33 @@ External AoS feature schemas can lower into this grammar by producing a compatib
 
 ## TextureResource
 
-Textures should support:
-
-- explicit usage declarations
-- fixed size or size provider
-- format and sample count
-- mip policy
-- view cache keyed by view descriptor
-- resize invalidation
-- storage texture read/write declarations
-- attachment write and sampled-read declarations
-
-Example shape:
+`TextureResource` is a stable logical resource whose current `GPUTexture` allocation may be replaced explicitly. Construction and replacement share one size grammar:
 
 ```ts
+type TextureResourceSize =
+    | Readonly<{
+        width: number
+        height?: number
+        depthOrArrayLayers?: number
+    }>
+    | readonly [number, number?, number?]
+
 const sceneColor = scratch.texture({
     label: 'scene color',
-    size: derived(() => surface.size, [surface]),
+    size: surface.size,
     format: 'rgba16float',
     usage: ['render', 'sample', 'copySrc'],
 })
 
-sceneColor.invalidateSize()
+surface.resize(nextSize)
+sceneColor.resize(surface.size)
 ```
+
+`TextureResource.resize()` is a size-only resource-lifecycle operation. It preserves logical object identity, id, runtime, label, format, usage, dimension, mip-level count, sample count, `viewFormats`, `textureBindingViewDimension`, and `contentEpoch`. Scratch snapshots the complete physical descriptor, including a materialized immutable `viewFormats` iterable, so caller mutation cannot alter a later replacement.
+
+A changed resize follows create-before-swap ordering: normalize and validate the requested size, create the complete replacement allocation, install it, clear allocation-scoped views, advance `allocationVersion` once, set `state = empty`, then destroy the old texture. The next successful content producer advances from the preserved `contentEpoch`. A synchronous creation failure leaves every old allocation fact installed; Scratch does not destroy first or wait for queue completion.
+
+Normalized same-size resize is a true no-op. Raw `GPUTextureView` values are allocation-scoped; internal view caches, bind sets, and pass attachments must resolve a new view after replacement. Resize accepts no `Surface`, observer, or size-provider callback. Future tracked values must lower into the same explicit primitive rather than replace it.
 
 ## Readiness State
 
@@ -183,7 +187,7 @@ Values that feed a resource (size, initial or updated data) are sometimes static
 
 - Static value, known at construction time → pass it directly; do not wrap it in a thunk.
 - Runtime-varying data → a stable handle whose contents change and can lower into explicit upload commands, or a GPU resource written by prior commands.
-- Runtime-varying value computed from other tracked sources (e.g. texture size from the surface) → a **derived value**: the runtime can inspect its dependency, subscribe to it for invalidation, and check it during validation.
+- Runtime-varying value computed from other tracked sources (for example a future texture size derived from a surface) → a **derived value**: the runtime can inspect its dependency, subscribe to it for invalidation, and lower a detected change into `TextureResource.resize()`.
 - Last resort → a raw closure, only when no handle or derived value can express the case.
 
 A tracked handle or derived value is inspectable and invalidation-aware; a bare `size: () => surface.size` closure is a black box — the runtime must poll it every submission and cannot know when or why it changed. This rule generalizes to command counts (`04-pipelines-commands`).
@@ -211,6 +215,7 @@ Expected absence is observable through `SubmittedWork.executionOutcomes`; it is 
 - Do not encode tile, LoD, terrain, flow, or projection policy in resources.
 - Do not have resources directly rebuild bind groups through callbacks.
 - Do not force all dynamic counts or readiness checks through CPU closures.
+- Do not add a hidden texture size-provider or surface subscription alongside `TextureResource.resize()`.
 - Do not make surface swapchain textures persistent resources.
 - Do not expose core `resource.write()` methods; upload is an explicit transfer.
 - Do not expose core `resource.toArray()` / `resource.toBytes()` methods; readback creates an explicit operation.

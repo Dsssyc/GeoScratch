@@ -101,6 +101,14 @@ Submission 职责:
 - 提交 command buffers
 - 返回 `SubmittedWork`
 
+### 构造与提交之间的 Resize
+
+`TextureResource.resize()` does not add a submission step。它是 immediate resource allocation lifecycle，不是 queue work。`SubmissionBuilder` 保存逻辑 pass、command 与 resource reference；若 texture 在 builder 构造后、`.submit()` 前 resize，preflight 与 encoding 会解析并校验 submission 时的 current allocation。
+
+Resize 自身不记录 resource access、producer epoch、command buffer、queue action 或 completion registration。replacement 虽然保留 `contentEpoch` 数值，但初始为 empty。后续 write 可以在同一 submission 中让它 ready，供更后的 read 使用；两份 ledger 此时都记录新的 `allocationVersion` 与下一个 `contentEpoch`。
+
+Submission 完成后，`SubmittedWork.resourceAccesses` 与 `producerEpochs` 保持为 immutable historical record，描述该 submission 实际使用的 allocation 与 content facts。之后的 texture resize 不能改写这些 arrays，也不能改变已有 `done` promise。
+
 ## 物理 Queue 时间线
 
 `SubmissionBuilder.steps` 在 encoder-backed work 与 queue-side upload 之间定义一个全序。把 command 记录进 encoder 不等于把它送入 queue: `GPUQueue.writeBuffer(...)` 和 `GPUQueue.writeTexture(...)` 在调用时进入 queue，而 copy、readback staging、resolve、compute 与 render work 只有在 finished command buffer 被 submit 时才进入 queue。

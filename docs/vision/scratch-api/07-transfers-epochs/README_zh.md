@@ -65,6 +65,22 @@ await submitted.done                    // GPU completion, not host readback
 
 `contentEpoch` 可以先按整个 resource 追踪，之后在有价值时细化到 buffer range 或 texture region。关键契约是: readback 与 dependency validation 讨论 content epoch; binding invalidation 讨论 allocation version。
 
+### Texture Allocation Replacement
+
+`TextureResource.resize()` 会在一个稳定逻辑 texture 后方显式替换 physical allocation。它不是 transfer 或 submission work：resize 不创建 encoder、不调用 queue method、不注册 `onSubmittedWorkDone()`，也不会在销毁旧 texture 前等待先前 queue completion。
+
+normalized same-size resize 不改变任何事实。成功的 size-changing resize 只有以下效果:
+
+```text
+allocationVersion = previous allocationVersion + 1
+contentEpoch = previous contentEpoch
+state = empty
+```
+
+下一次成功 texture upload、external-image upload、copy target write、render attachment write 或 storage write 会从保留的 epoch 继续递增，并让 replacement ready。Transfer command 在执行时解析 current physical allocation，并在任何 encoder 或 queue effect 前重新校验当前 mip、origin、extent 与 layer range。
+
+`SubmittedWork` 保持历史事实：之后的 resize 不能改变早先 submission 的 allocation-version 或 producer facts。`ReadbackOperation` 会捕获 source allocation version。当前已实现的 readback source 是 buffer，因此 captured buffer 在 materialization 前被替换时，会以 `SCRATCH_READBACK_SOURCE_ALLOCATION_STALE` 拒绝。Texture 数据通过显式 texture-to-buffer `CopyCommand` 到达 host memory；之后替换 texture 不会改写已捕获的 destination-buffer provenance。未来直接 texture-readback 路径必须遵守同一个 allocation-stale 规则。
+
 ## Upload
 
 CPU-to-GPU 写入是显式 transfer command:
@@ -330,7 +346,7 @@ Copy 读取 source `contentEpoch`，并推进 target `contentEpoch`。如果 cop
 - 后续 pass 采样该 texture 时，声明读取已产生的 `contentEpoch`。
 - depth 与 stencil attachment 使用同一规则。load/store policy 与 read-as-texture 用法必须足够显式，供 dependency validation 判断。
 - surface current texture 是借来的 presentation-submission-scoped target，不是持久 `TextureResource`。它不能在获取它的 presentation submission 之外保留。
-- render target resize 会推进 `allocationVersion`，并使依赖旧物理对象的 cached views、bind sets、pass attachments 与 commands 失效。
+- `TextureResource.resize()` 会推进 `allocationVersion`，清除 allocation-scoped cached views，并把 replacement 标为 empty。Bind set 与 pass attachment 会惰性解析新 view；稳定逻辑 command 可继续复用，只有当其声明 range、readiness 或 required epoch 无法针对 current allocation 通过校验时才失败。
 - TAA history、trails、迭代仿真纹理这类 temporal resources 都是普通资源; 它们的 previous-frame contents 由 content epochs 表达，而不是内核里的特殊一等特性。
 
 ## Timing 与 Query

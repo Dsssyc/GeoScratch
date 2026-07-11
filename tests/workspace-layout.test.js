@@ -23,7 +23,7 @@ describe('workspace layout', () => {
         expect(pkg.scripts.dev).to.equal('npm --workspace geoscratch run build && npm --workspace examples run dev')
         expect(pkg.scripts.build).to.equal('npm --workspace geoscratch run build && npm --workspace examples run build')
         expect(pkg.scripts.test).to.equal('npm --workspace geoscratch run build && mocha "tests/**/*.test.js"')
-        expect(pkg.scripts.typecheck).to.equal('npm --workspace geoscratch run build && tsc -p tsconfig.types.json')
+        expect(pkg.scripts.typecheck).to.equal('npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm run typecheck:webgpu')
     })
 
     it('publishes the library from packages/geoscratch only', () => {
@@ -48,7 +48,7 @@ describe('workspace layout', () => {
             'dist',
             'src',
         ])
-        expect(pkg.scripts.build).to.equal('tsc -p tsconfig.build.json')
+        expect(pkg.scripts.build).to.equal('node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json')
         expect(Object.keys(pkg.dependencies)).to.deep.equal(['@webgpu/types'])
     })
 

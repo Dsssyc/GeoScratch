@@ -62,7 +62,7 @@ The goal is not to build a high-level scene graph. The goal is to provide a comp
 
 Descriptor-style APIs are still useful, but their job is to describe stable shape:
 
-- texture formats and size providers
+- texture formats and explicit allocation-size shape
 - buffer usage and backing refs
 - layout artifacts and codec output shape
 - shader modules and entry points

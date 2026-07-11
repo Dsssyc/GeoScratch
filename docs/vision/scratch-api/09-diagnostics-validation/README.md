@@ -186,9 +186,15 @@ type ResourceDiagnosticCode =
     | 'SCRATCH_RESOURCE_LOST'
     | 'SCRATCH_RESOURCE_NOT_READY'
     | 'SCRATCH_RESOURCE_USAGE_MISSING'
+    | 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+    | 'SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED'
     | 'SCRATCH_RESOURCE_ALLOCATION_VERSION_STALE'
     | 'SCRATCH_RESOURCE_CONTENT_EPOCH_UNAVAILABLE'
 ```
+
+`TextureResource.resize()` uses `SCRATCH_RESOURCE_DESCRIPTOR_INVALID` for deterministic size grammar, integer-domain, limit, mip, sample, format-block, lifecycle, and native-capability failures detected before replacement creation. It uses `SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED` only when `GPUDevice.createTexture()` itself throws synchronously; `ScratchDiagnosticError.cause` retains that exception.
+
+The synchronous wrapper does not claim to observe asynchronous WebGPU validation, out-of-memory, or device errors. Those remain part of WebGPU's device error model rather than being reclassified as a successful or failed synchronous resize. Failure before a replacement is installed leaves the previous texture, descriptor, views, `allocationVersion`, `contentEpoch`, and readiness state unchanged.
 
 ### Layout Codec
 

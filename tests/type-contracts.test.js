@@ -11,8 +11,9 @@ describe('type contracts', () => {
 
     it('keeps the public API typecheck entrypoint wired', () => {
 
-        expect(readJson('package.json').scripts.typecheck).to.equal('npm --workspace geoscratch run build && tsc -p tsconfig.types.json')
+        expect(readJson('package.json').scripts.typecheck).to.equal('npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm run typecheck:webgpu')
         expect(exists('tests', 'types', 'public-api.ts')).to.equal(true)
+        expect(exists('tsconfig.webgpu-types.json')).to.equal(true)
     })
 
     it('builds the package through TypeScript into dist outputs', () => {

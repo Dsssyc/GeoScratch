@@ -9,3 +9,5 @@ Keep ordinary example assets beside the example that owns them. Use relative ass
 `submissionOrder/` is the deterministic queue-ordering proof. It must report `document.body.dataset.status === "passed"` and `document.body.dataset.result === "11"` in a WebGPU-capable browser.
 
 `externalImageUpload/` is the deterministic native external-image upload proof. It constructs the command before mutating a local source canvas, uploads a cropped and vertically flipped region, verifies exact padded readback bytes, renders the same texture, and reports the result through `document.body.dataset.status`, `expectedBytes`, and `actualBytes`.
+
+`textureResize/` is the deterministic logical-texture replacement proof. It explicitly resizes a surface and one persistent `TextureResource`, reuses the same `BindSet`, `PassSpec`, and `DrawCommand`, renders through the replacement allocation, copies it to a padded buffer, verifies exact padded readback bytes, and publishes identity, version, readiness, destruction, reuse, and byte-match facts through `document.body.dataset`.
