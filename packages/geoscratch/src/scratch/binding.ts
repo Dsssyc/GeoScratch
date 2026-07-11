@@ -2,7 +2,7 @@ import { UUID } from '../core/utils/uuid.js'
 import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { SamplerResource } from './sampler.js'
-import { TextureResource, prepareTextureViewDescriptor } from './texture.js'
+import { TextureResource, prepareTextureBindingViewDescriptor } from './texture.js'
 import { describeValue, getGlobalConstant } from './type-utils.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -601,7 +601,7 @@ function validateTextureResource(bindSet: BindSet, entry: TextureBindLayoutEntry
         })
     }
 
-    prepareTextureViewDescriptor(resource, { dimension: entry.viewDimension ?? '2d' })
+    prepareTextureBindingViewDescriptor(resource, { dimension: entry.viewDimension ?? '2d' })
 }
 
 function validateSamplerResource(bindSet: BindSet, entry: SamplerBindLayoutEntry, resource: unknown) {

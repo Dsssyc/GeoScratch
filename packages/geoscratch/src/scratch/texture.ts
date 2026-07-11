@@ -448,6 +448,26 @@ export function prepareTextureViewDescriptor(
     return normalized
 }
 
+export function prepareTextureBindingViewDescriptor(
+    texture: TextureResource,
+    descriptor: unknown = {}
+): GPUTextureViewDescriptor {
+
+    const prepared = prepareTextureViewDescriptor(texture, descriptor)
+    const dimension = prepared.dimension === undefined
+        ? texture.depthOrArrayLayers === 1 ? '2d' : '2d-array'
+        : prepared.dimension
+    const requiredDimension = currentTextureBindingViewDimension(texture)
+
+    if (requiredDimension !== undefined && dimension !== requiredDimension) {
+        throwTextureViewDescriptorDiagnostic(texture, descriptor, {
+            textureBindingViewDimension: requiredDimension,
+        })
+    }
+
+    return prepared
+}
+
 function validateTextureViewDescriptor(
     texture: TextureResource,
     descriptor: GPUTextureViewDescriptor,
@@ -481,7 +501,6 @@ function validateTextureViewDescriptor(
     const arrayLayerCount = descriptor.arrayLayerCount === undefined
         ? defaultTextureViewArrayLayerCount(texture, dimension, baseArrayLayer)
         : descriptor.arrayLayerCount
-    const textureBindingViewDimension = currentTextureBindingViewDimension(texture)
     if (
         !Number.isInteger(arrayLayerCount) ||
         arrayLayerCount <= 0 ||
@@ -492,7 +511,6 @@ function validateTextureViewDescriptor(
         })
     }
 
-    const requiresTextureBindingDimension = textureBindingViewDimension !== undefined
     const validDimension =
         dimension !== '1d' &&
         dimension !== '3d' &&
@@ -506,8 +524,7 @@ function validateTextureViewDescriptor(
             texture.width === texture.height &&
             texture.runtime.deviceFeatures.has('core-features-and-limits')
         )) &&
-        (texture.sampleCount === 1 || dimension === '2d') &&
-        (!requiresTextureBindingDimension || dimension === textureBindingViewDimension)
+        (texture.sampleCount === 1 || dimension === '2d')
 
     if (!validDimension) {
         throwTextureViewDescriptorDiagnostic(texture, actual, {
@@ -517,8 +534,6 @@ function validateTextureViewDescriptor(
                 cube: 'six layers on a square texture',
                 'cube-array': 'a positive multiple of six layers on a square texture with core-features-and-limits',
             },
-            textureBindingViewDimension:
-                textureBindingViewDimension ?? 'not constrained by the texture descriptor',
         })
     }
 }

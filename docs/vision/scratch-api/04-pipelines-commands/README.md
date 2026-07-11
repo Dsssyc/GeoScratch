@@ -65,7 +65,7 @@ Target command families:
 
 Pass specs and commands retain logical resources rather than one physical texture. At submit or encode time, render attachments, texture uploads, external-image uploads, all texture copy directions, and texture bindings resolve the current physical texture or a current view. Commands created before resize therefore remain reusable when their immutable descriptor still fits.
 
-That reuse does not bypass validation. Upload and copy commands revalidate mip, origin, extent, layer, and sample constraints against the current allocation before encoder or queue effects. Texture bindings revalidate the bind-layout view dimension against both the current layer range and compatibility-mode effective texture binding dimension. Render attachments revalidate a single 2D mip/layer view before command encoder creation and fail when compatibility-mode derivation no longer permits that view. A fixed required `contentEpoch` remains exact: preserving the numeric epoch across replacement does not make the empty new allocation readable.
+That reuse does not bypass validation. Upload and copy commands revalidate mip, origin, extent, layer, and sample constraints against the current allocation before encoder or queue effects. Texture bindings revalidate the bind-layout view dimension against both the current layer range and compatibility-mode effective texture binding dimension. Render attachments revalidate a single 2D mip/layer view before command encoder creation but do not apply the texture-binding-only dimension constraint. A fixed required `contentEpoch` remains exact: preserving the numeric epoch across replacement does not make the empty new allocation readable.
 
 ### ExternalImageUploadCommand
 

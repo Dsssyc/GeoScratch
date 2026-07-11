@@ -12,10 +12,9 @@ const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 const GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT = 0x20
 
-async function createFixture(descriptor = {}, features = []) {
+async function createFixture(descriptor = {}) {
 
     const fake = createFakeGpu()
-    for (const feature of features) fake.device.features.add(feature)
     Object.assign(fake.device.limits, {
         maxTextureDimension2D: 8192,
         maxTextureArrayLayers: 256,
@@ -508,10 +507,7 @@ describe('scratch texture resize', () => {
 
     it('revalidates texture view ranges against the current allocation', async() => {
 
-        const fixture = await createFixture(
-            { size: [ 8, 8, 3 ] },
-            [ 'core-features-and-limits' ]
-        )
+        const fixture = await createFixture({ size: [ 8, 8, 3 ] })
         fixture.texture.createView({ dimension: '2d', baseArrayLayer: 2 })
         const viewCount = fixture.calls.textureViews.length
 

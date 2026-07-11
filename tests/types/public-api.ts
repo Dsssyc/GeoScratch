@@ -228,6 +228,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     scr.setResourceContentState(scratchResource, 'ready', 1)
     // @ts-expect-error Texture view preparation is not package API
     scr.prepareTextureViewDescriptor(scratchTexture, {})
+    // @ts-expect-error Texture binding view preparation is not package API
+    scr.prepareTextureBindingViewDescriptor(scratchTexture, {})
     // @ts-expect-error Render attachment preflight is not package API
     scr.validateRenderPassAttachments(undefined as never)
 

@@ -241,23 +241,29 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         await submitted.done
     })
 
-    it('rejects a compatibility render-view dimension change before encoder creation', async() => {
+    it('keeps compatibility render attachments valid after array-layer growth', async() => {
 
         const fixture = await createRenderTargetScene()
+        const pass = fixture.pass
+        const draw = fixture.draw
         fixture.renderTarget.resize([ 64, 64, 3 ])
 
-        await expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
-            .render(fixture.pass, [ fixture.draw ])
-            .submit(), {
-            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
-            severity: 'error',
-            phase: 'resource',
-        })
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [ draw ])
+            .submit()
 
-        expect(fixture.calls.commandEncoders).to.have.length(0)
-        expect(fixture.calls.textureViews).to.have.length(0)
-        expect(fixture.calls.queueSubmissions).to.have.length(0)
-        expect(fixture.renderTarget.contentEpoch).to.equal(0)
+        expect(fixture.pass).to.equal(pass)
+        expect(fixture.draw).to.equal(draw)
+        expect(fixture.calls.commandEncoders).to.have.length(1)
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({
+            dimension: '2d',
+            mipLevelCount: 1,
+            arrayLayerCount: 1,
+        })
+        expect(fixture.calls.queueSubmissions).to.have.length(1)
+        expect(fixture.renderTarget.contentEpoch).to.equal(1)
+
+        await submitted.done
     })
 
     it('reuses a persistent color pass and draw against the allocation current at submit time', async() => {

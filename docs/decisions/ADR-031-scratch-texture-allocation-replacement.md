@@ -157,10 +157,12 @@ texture. All attachments in the pass must also retain matching current render
 extents and sample counts. On devices without `core-features-and-limits`, an
 omitted `textureBindingViewDimension` is derived again from the current
 allocation: one layer is `2d`, multiple layers are `2d-array`. A stable
-consumer whose view dimension no longer matches therefore fails preflight;
-core-feature devices may continue to use an explicit single-layer `2d` view,
-and an explicitly preserved `2d-array` contract remains stable in
-compatibility mode. Upload, external-image upload, and all texture-copy
+binding consumer whose view dimension no longer matches therefore fails
+preflight; core-feature devices may continue to bind an explicit single-layer
+`2d` view, and an explicitly preserved `2d-array` binding contract remains
+stable in compatibility mode. This is a bind-group validation constraint, not
+a generic texture-view or render-attachment constraint. Upload,
+external-image upload, and all texture-copy
 directions lower against the current physical texture and revalidate current
 mip, origin, extent, and layer ranges before a queue side effect.
 
