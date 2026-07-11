@@ -10,7 +10,7 @@
 `scratch` 应降低这些重复低层工作的负担:
 
 - runtime 与 device 生命周期
-- 资源身份、allocation replacement、readiness、content epoch、显式 transfer
+- 资源身份、经确认的 allocation、allocation replacement、readiness、content epoch、显式 transfer
 - layout artifact、layout codec 与 shader accessor 生成
 - bind layout 与 bind group 构建
 - shader program 组合与 pipeline cache 兼容性
@@ -89,6 +89,7 @@ Descriptor 不适合承担时间变化行为:
 新 API 应让这些边界很难被误解:
 
 - `ScratchRuntime` 拥有 GPU device 状态与缓存。
+- 被覆盖的原生 allocation 是返回 Promise 的 GPU operation。只有 validation 与 out-of-memory scope 都成功 settle 后，逻辑资源才会安装。
 - `Surface` 拥有呈现目标配置，不拥有 GPU 执行上下文。
 - `Resource` 是带有 physical GPU allocation version 与 content epoch 的逻辑句柄。
 - `QuerySetResource` 是 indexed query-slot resource，不是无序集合，也不是 shader binding。
@@ -100,6 +101,7 @@ Descriptor 不适合承担时间变化行为:
 - `Pipeline` 描述某个 `Program` entry point 的稳定 WebGPU 可执行状态。
 - `Command` 描述一个可执行 GPU 动作。
 - `ScratchDiagnostic` 是统一 machine-readable validation contract; prose message 不是稳定 API。
+- `runtime.diagnostics` 将始终当前的事实、有界近期 operation、不可变 incident 与显式临时 deep capture 分开。
 - `PassSpec` 描述稳定 pass 形状。
 - `SubmissionBuilder` 按显式顺序把 commands 记录进 pass specs。
 - `SubmittedWork` 是 `.submit()` 返回的可 inspect 句柄，并通过 `done` promise 等待 GPU 完成。

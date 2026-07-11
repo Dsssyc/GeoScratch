@@ -66,7 +66,7 @@ Static data should not require a per-submission callback. Dynamic data should be
 Example shape:
 
 ```ts
-const positions = scratch.buffer({
+const positions = await scratch.buffer({
     label: 'positions',
     usage: ['vertex', 'storage', 'copyDst'],
     struct: [
@@ -80,6 +80,8 @@ const uploadPositions = scratch.command.upload({
     range: { offset: 0 },
 })
 ```
+
+Persistent buffer creation is one Promise-returning allocation operation. Scratch validates and normalizes the descriptor before issuing exactly one native allocation inside matching validation and out-of-memory scopes. The logical buffer is registered only after both scopes settle successfully; a failed candidate never becomes a live resource.
 
 ## Buffer Layout
 
@@ -148,7 +150,7 @@ type TextureResourceSize =
     }>
     | readonly [number, number?, number?]
 
-const sceneColor = scratch.texture({
+const sceneColor = await scratch.texture({
     label: 'scene color',
     size: surface.size,
     format: 'rgba16float',
@@ -156,16 +158,16 @@ const sceneColor = scratch.texture({
 })
 
 surface.resize(nextSize)
-sceneColor.resize(surface.size)
+await sceneColor.resize(surface.size)
 ```
 
 `TextureResource.resize()` is a size-only resource-lifecycle operation. It preserves logical object identity, id, runtime, label, format, usage, dimension, mip-level count, sample count, `viewFormats`, `textureBindingViewDimension`, and `contentEpoch`. Scratch snapshots the complete physical descriptor, including a materialized immutable `viewFormats` iterable, so caller mutation cannot alter a later replacement.
 
 Stable identity (`runtime`, `id`, `label`, `resourceKind`), descriptor, lifecycle, readiness, allocation/content provenance, physical texture, and view-cache facts use ECMAScript-private backing slots and are exposed only through read-only getters. Concrete `TextureResource` handles are non-extensible and reject subclass construction, so own-property and prototype shadowing cannot counterfeit those facts; an upcast to `Resource` cannot turn them into writable fields either. Allocation and content transition functions are module-internal, are not exported from either package entrypoint, and are not object methods exposed to package consumers; `resize()` is the only public size-replacement path. Optional height and layer members default only when they are `undefined`; `null` is invalid. Deterministic validation also preserves the complete WebGPU transient-attachment contract: usage is exactly `TRANSIENT_ATTACHMENT | RENDER_ATTACHMENT`, `viewFormats` is empty, dimension is `2d`, mip-level count is `1`, and depth or array-layer count is `1`.
 
-A changed resize follows create-before-swap ordering: normalize and validate the requested size, create the complete replacement allocation, install it, clear allocation-scoped views, advance `allocationVersion` once, set `state = empty`, then destroy the old texture. The next successful content producer advances from the preserved `contentEpoch`. A synchronous creation failure leaves every old allocation fact installed; Scratch does not destroy first or wait for queue completion.
+A changed resize is a Promise-returning create-before-swap transaction. Scratch normalizes and validates the requested size, keeps the old allocation installed while the candidate's validation and out-of-memory scopes settle, then installs the acknowledged allocation, clears allocation-scoped views, advances `allocationVersion` once, sets `state = empty`, and destroys the old texture. The next successful content producer advances from the preserved `contentEpoch`. Any candidate failure leaves every old allocation fact installed; Scratch does not destroy first or wait for queue completion. A second changed resize while one is pending fails structurally.
 
-Normalized same-size resize is a true no-op. Raw `GPUTextureView` values are allocation-scoped; every `createView()` call validates its mip, layer, and dimension against the current allocation before native creation. Bind sets derive a current view from their bind-layout dimension, while render attachments preflight and explicitly select one 2D mip-level array layer before encoder creation; all attachments in that pass must still have matching current render extents and sample counts. Without `core-features-and-limits`, an omitted `textureBindingViewDimension` is re-derived for each allocation (`2d` for one layer, `2d-array` for multiple), so a binding consumer that no longer matches fails before native bind-group creation. Core-feature devices can keep an explicit single-layer `2d` binding after layer growth; compatibility-mode binding persistence requires an explicit compatible contract such as `2d-array`. The derived binding dimension does not invalidate an otherwise valid raw view or render attachment. Resize accepts no `Surface`, observer, or size-provider callback. Future tracked values must lower into the same explicit primitive rather than replace it.
+Normalized same-size resize is an already-resolved Promise and a true no-op; it opens no native error scope. Raw `GPUTextureView` values are allocation-scoped; every `createView()` call validates its mip, layer, and dimension against the current allocation before native creation. Bind sets derive a current view from their bind-layout dimension, while render attachments preflight and explicitly select one 2D mip-level array layer before encoder creation; all attachments in that pass must still have matching current render extents and sample counts. Without `core-features-and-limits`, an omitted `textureBindingViewDimension` is re-derived for each allocation (`2d` for one layer, `2d-array` for multiple), so a binding consumer that no longer matches fails before native bind-group creation. Core-feature devices can keep an explicit single-layer `2d` binding after layer growth; compatibility-mode binding persistence requires an explicit compatible contract such as `2d-array`. The derived binding dimension does not invalidate an otherwise valid raw view or render attachment. Resize accepts no `Surface`, observer, or size-provider callback. Future tracked values must lower into the same explicit primitive rather than replace it.
 
 ## Readiness State
 

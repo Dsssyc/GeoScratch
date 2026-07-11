@@ -40,6 +40,7 @@ const surface = scratch.surface(canvas, {
 - pipeline 与 bind group caches
 - submission scheduler 默认配置
 - device-loss 状态
+- 当前 GPU operation facts 与有界 diagnostic evidence
 
 `Surface` 拥有:
 
@@ -86,10 +87,10 @@ submission.render(outputPass, [compositeTo(surface.currentView(submission))])
 
 ```ts
 surface.resize(nextSize)
-target.resize(surface.size)
+await target.resize(surface.size)
 ```
 
-`TextureResource.resize()` 会在同一个逻辑 texture 后方替换物理 allocation。size 发生变化时，`allocationVersion` 递增，`contentEpoch` 保持不变，replacement allocation 保持 empty，直到后续 content-producing operation 写入。这不是 surface 的职责，也不会增加 submission 或 queue work。
+`TextureResource.resize()` 是返回 Promise 的 allocation transaction。原 allocation 在原生 validation 与 out-of-memory scope settle 期间保持 current。size 成功变化时，`allocationVersion` 递增，`contentEpoch` 保持不变，replacement allocation 保持 empty，直到后续 content-producing operation 写入。这不是 surface 的职责，也不会增加 submission 或 queue work。
 
 Core 不安装 `ResizeObserver`，不轮询 canvas dimensions，不注册隐藏 surface subscription，不扫描 runtime textures，也不推断哪个 resource 跟随哪个 surface。未来 tracked 或 derived dimensions 可以调用同一个显式 resize primitive，但不能建立第二条 allocation-replacement 路径。
 
@@ -102,6 +103,8 @@ Core 不安装 `ResizeObserver`，不轮询 canvas dimensions，不注册隐藏 
 - caches 必须丢弃
 - surfaces 必须基于替换 device 重新 configure
 - 如果依赖可重建，commands 与 pass specs 可以作为逻辑描述保留
+
+Device loss 会产生一个有界 runtime incident，其中包含 pending-operation 与 current-resource 上下文。临近 operation 只是时间相关证据，不是因果证明。runtime 不会自动重试 allocation、重建设备、rehydrate resource 或 replay submission。
 
 第一版实现可以选择保守失败模式，但 API 不应让后续 rehydration 无法实现。
 

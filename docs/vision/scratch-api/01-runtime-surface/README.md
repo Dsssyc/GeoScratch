@@ -40,6 +40,7 @@ const surface = scratch.surface(canvas, {
 - pipeline and bind group caches
 - submission scheduler defaults
 - device-loss state
+- current GPU operation facts and bounded diagnostic evidence
 
 `Surface` owns:
 
@@ -86,10 +87,10 @@ The exact syntax may change, but the semantic boundary should not.
 
 ```ts
 surface.resize(nextSize)
-target.resize(surface.size)
+await target.resize(surface.size)
 ```
 
-`TextureResource.resize()` replaces the physical allocation behind the same logical texture. A changed size advances `allocationVersion`, preserves `contentEpoch`, and leaves the replacement allocation empty until a later content-producing operation writes it. This is not a surface responsibility and does not add submission or queue work.
+`TextureResource.resize()` is a Promise-returning allocation transaction. The old allocation remains current while native validation and out-of-memory scopes settle. A successful changed size advances `allocationVersion`, preserves `contentEpoch`, and leaves the replacement allocation empty until a later content-producing operation writes it. This is not a surface responsibility and does not add submission or queue work.
 
 Core does not install a `ResizeObserver`, poll canvas dimensions, register a hidden surface subscription, scan runtime textures, or infer which resource follows which surface. Future tracked or derived dimensions may call the same explicit resize primitive, but they must not create a second allocation-replacement path.
 
@@ -102,6 +103,8 @@ Core does not install a `ResizeObserver`, poll canvas dimensions, register a hid
 - caches must be dropped
 - surfaces must be reconfigured against the replacement device
 - commands and pass specs can remain as logical descriptions if their dependencies can be rebuilt
+
+Device loss produces a bounded runtime incident with pending-operation and current-resource context. Nearby operations are temporal evidence, not proof of causality. The runtime does not automatically retry allocations, recreate the device, rehydrate resources, or replay submissions.
 
 The first implementation may choose a conservative failure mode, but the API should not make rehydration impossible.
 

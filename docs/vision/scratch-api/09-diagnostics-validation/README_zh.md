@@ -100,6 +100,8 @@ type DiagnosticSubject =
     | { kind: 'Submission', id: string, label?: string }
     | { kind: 'QuerySet', id: string, label?: string, queryType?: string }
     | { kind: 'ReadbackOperation', id: string, label?: string }
+    | { kind: 'GpuOperation', id: string, operationKind?: string }
+    | { kind: 'Incident', id: string, incidentKind?: string }
 ```
 
 示例:
@@ -133,6 +135,21 @@ type ScratchDiagnosticReport = {
 - `readback.diagnostics`
 
 同一个 inspected state 应产出确定性的 report。如果 diagnostics 受 validation mode 影响，diagnostic `code` 与结构化 payload 仍保持稳定; 变化的是 action。
+
+## Runtime GPU Operation Evidence
+
+Native GPU error 可能在 issue operation 的 JavaScript 调用之后才 settle。因此 Scratch 区分四种 retention model:
+
+- 始终开启的 **Runtime Fact Graph** 只包含当前 live resource、已安装 allocation、被覆盖的 pending operation、pending replacement，以及 Scratch-owned logical footprint 的 current/peak 值。它随当前状态增长，而不随 runtime 年龄增长。
+- 默认 **Incident Flight Recorder** 在有限 serialized-evidence budget 下，将紧凑 operation 与 incident record 保存在有限 ring 中。它不保存成功 operation stack、mutable handle、resource content、shader source、command payload 或 `SubmittedWork` 对象。
+- **Incident Report** 是 deeply frozen JSON causal slice，包含已知的 trigger operation、subjects、native category 与 serializable facts、有界近期 operation、logical pressure evidence、evidence completeness 和 attribution confidence。
+- **Deep Capture Session** 是显式、有限、临时的。它可以增加 call-site stack 与 normalized descriptor，但会在 operation、duration 或 retained-evidence 的首个边界处自动停止。它不是 thenable，也不等待 queue work。
+
+只读 `runtime.diagnostics` facade 暴露 current snapshot、有界 operations、有界 incidents、按 ID/kind/resource/sequence 的 query，以及有界 capture。导出 evidence 永远不包含 live device、resource、buffer、texture、command、pass、submission 或 mutable runtime collection。
+
+被覆盖的 initial buffer/texture allocation 与 texture replacement 使用精确 synchronous issue boundary: push OOM、push validation、只 issue 一次 native allocation、pop validation、pop OOM，之后才 await 两个 pop promise。matching scope 提供 `exact-operation` attribution。除非存在更强 native evidence，uncaptured error 与 device loss 只能是 `temporal-correlation` 或 `unknown`。Scratch 绝不通过解析 native message prose 派生稳定字段。
+
+OOM evidence 将精确 `triggerOperation` 与有界 `pressureContributors` 分开。Descriptor byte size 与按 texture format/block/mip/layer/sample 计算的大小是 logical footprint，不是 physical residency、free VRAM、driver padding、compression、eviction state 或 process/system total memory。非 Scratch allocation 始终未知。
 
 ## Validation Modes 与 Actions
 
@@ -171,6 +188,11 @@ type RuntimeDiagnosticCode =
     | 'SCRATCH_RUNTIME_LIMIT_UNSATISFIED'
     | 'SCRATCH_RUNTIME_DISPOSED'
     | 'SCRATCH_RUNTIME_DEVICE_LOST'
+    | 'SCRATCH_RUNTIME_UNCAPTURED_GPU_ERROR'
+    | 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION'
+    | 'SCRATCH_GPU_ERROR_SCOPE_FAILED'
+    | 'SCRATCH_DIAGNOSTIC_CAPTURE_DEGRADED'
+    | 'SCRATCH_DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED'
 ```
 
 ### Resource
@@ -188,13 +210,24 @@ type ResourceDiagnosticCode =
     | 'SCRATCH_RESOURCE_USAGE_MISSING'
     | 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
     | 'SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED'
+    | 'SCRATCH_GPU_ALLOCATION_PENDING_CONFLICT'
+    | 'SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED'
+    | 'SCRATCH_BUFFER_ALLOCATION_OUT_OF_MEMORY'
+    | 'SCRATCH_BUFFER_ALLOCATION_NATIVE_FAILED'
+    | 'SCRATCH_TEXTURE_ALLOCATION_VALIDATION_FAILED'
+    | 'SCRATCH_TEXTURE_ALLOCATION_OUT_OF_MEMORY'
+    | 'SCRATCH_TEXTURE_ALLOCATION_NATIVE_FAILED'
+    | 'SCRATCH_TEXTURE_REPLACEMENT_PENDING'
+    | 'SCRATCH_TEXTURE_REPLACEMENT_VALIDATION_FAILED'
+    | 'SCRATCH_TEXTURE_REPLACEMENT_OUT_OF_MEMORY'
+    | 'SCRATCH_TEXTURE_REPLACEMENT_NATIVE_FAILED'
     | 'SCRATCH_RESOURCE_ALLOCATION_VERSION_STALE'
     | 'SCRATCH_RESOURCE_CONTENT_EPOCH_UNAVAILABLE'
 ```
 
-`TextureResource.resize()` 对 replacement creation 前检测出的确定性 size grammar、integer-domain、limit、mip、sample、transient-attachment、format-block、lifecycle 与 native-capability failure 使用 `SCRATCH_RESOURCE_DESCRIPTOR_INVALID`。只有 `GPUDevice.createTexture()` 自身同步抛错时才使用 `SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED`；`ScratchDiagnosticError.cause` 保留原始 exception。
+`TextureResource.resize()` 对 native issue 前检测出的确定性 size grammar、integer-domain、limit、mip、sample、transient-attachment、format-block、lifecycle 与 native-capability failure 使用 `SCRATCH_RESOURCE_DESCRIPTOR_INVALID`。Native validation、OOM、同步 exception 与 scope failure 使用各自 operation-specific code 并链接 immutable incident；`ScratchDiagnosticError.cause` 可以保留原始 native error。
 
-同步 wrapper 不声称能观察 asynchronous WebGPU validation、out-of-memory 或 device error。它们仍由 WebGPU device error model 管理，不能被重新分类为同步 resize 成功或失败。replacement 安装前的 failure 会保持旧 texture、descriptor、views、`allocationVersion`、`contentEpoch` 与 readiness state 不变。
+Promise 只有在 validation 与 OOM scope 确认 candidate 后才 resolve。commit 前的 failure 会保持旧 texture、descriptor、views、`allocationVersion`、`contentEpoch` 与 readiness state 不变。
 
 ### Layout Codec
 

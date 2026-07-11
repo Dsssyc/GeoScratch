@@ -10,7 +10,7 @@ The new `scratch` API should maximize locally-verifiable correctness while prese
 `scratch` should make repeated low-level work easier:
 
 - runtime and device lifecycle
-- resource identity, allocation replacement, readiness, content epochs, and explicit transfers
+- resource identity, acknowledged allocation, allocation replacement, readiness, content epochs, and explicit transfers
 - layout artifacts, layout codecs, and shader accessor generation
 - bind layout and bind group construction
 - shader program composition and pipeline cache compatibility
@@ -89,6 +89,7 @@ Dynamic behavior should live in resource state, command state, and submission sc
 The new API should make these boundaries hard to miss:
 
 - `ScratchRuntime` owns GPU device state and caches.
+- Covered native allocation is a Promise-returning GPU operation. A logical resource is installed only after its validation and out-of-memory scopes settle successfully.
 - `Surface` owns presentation target configuration, not GPU execution.
 - `Resource` is a logical handle with physical GPU allocation versions and content epochs.
 - `QuerySetResource` is an indexed query-slot resource, not an unordered collection or shader binding.
@@ -100,6 +101,7 @@ The new API should make these boundaries hard to miss:
 - `Pipeline` describes stable WebGPU executable state for a `Program` entry point.
 - `Command` describes one executable GPU action.
 - `ScratchDiagnostic` is the unified machine-readable validation contract; prose messages are not the stable API.
+- `runtime.diagnostics` separates always-current facts, bounded recent operations, immutable incidents, and explicit temporary deep capture.
 - `PassSpec` describes stable pass shape.
 - `SubmissionBuilder` records commands into pass specs in explicit order.
 - `SubmittedWork` is the inspectable handle returned by `.submit()`, with a `done` promise for GPU completion.

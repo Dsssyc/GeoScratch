@@ -100,6 +100,8 @@ type DiagnosticSubject =
     | { kind: 'Submission', id: string, label?: string }
     | { kind: 'QuerySet', id: string, label?: string, queryType?: string }
     | { kind: 'ReadbackOperation', id: string, label?: string }
+    | { kind: 'GpuOperation', id: string, operationKind?: string }
+    | { kind: 'Incident', id: string, incidentKind?: string }
 ```
 
 Examples:
@@ -133,6 +135,21 @@ Potential report sources:
 - `readback.diagnostics`
 
 Reports should be deterministic for the same inspected state. If diagnostics depend on validation mode, the diagnostic `code` and structured payload remain stable; only the action changes.
+
+## Runtime GPU Operation Evidence
+
+Native GPU errors can settle after the JavaScript call that issued an operation. Scratch therefore distinguishes four retention models:
+
+- The always-on **Runtime Fact Graph** contains only current live resources, installed allocations, pending covered operations, pending replacements, and current/peak Scratch-owned logical footprints. It scales with current state, not runtime age.
+- The default **Incident Flight Recorder** stores compact operation and incident records in finite rings under a finite serialized-evidence budget. It omits successful-operation stacks, mutable handles, contents, shader source, command payloads, and retained `SubmittedWork` objects.
+- An **Incident Report** is a deeply frozen JSON causal slice containing the triggering operation where known, subjects, native category and serializable facts, bounded recent operations, logical pressure evidence, evidence completeness, and attribution confidence.
+- A **Deep Capture Session** is explicit, finite, and temporary. It can add call-site stacks and normalized descriptors, but automatically stops at its first operation, duration, or retained-evidence limit. It is not thenable and does not wait for queue work.
+
+The read-only `runtime.diagnostics` facade exposes current snapshots, bounded operations, bounded incidents, ID/kind/resource/sequence queries, and bounded captures. Exported evidence never contains a live device, resource, buffer, texture, command, pass, submission, or mutable runtime collection.
+
+Covered initial buffer/texture allocation and texture replacement use an exact synchronous issue boundary: push OOM, push validation, issue exactly one native allocation, pop validation, pop OOM, and only then await both pop promises. A matching scope gives `exact-operation` attribution. Uncaptured errors and device loss remain `temporal-correlation` or `unknown` unless stronger native evidence exists. Scratch never derives stable fields by parsing native message prose.
+
+OOM evidence separates the exact `triggerOperation` from bounded `pressureContributors`. Descriptor byte size and calculated texture format/block/mip/layer/sample size are logical footprints, not physical residency, free VRAM, driver padding, compression, eviction state, or total process/system memory. Non-Scratch allocations remain unknown.
 
 ## Validation Modes And Actions
 
@@ -171,6 +188,11 @@ type RuntimeDiagnosticCode =
     | 'SCRATCH_RUNTIME_LIMIT_UNSATISFIED'
     | 'SCRATCH_RUNTIME_DISPOSED'
     | 'SCRATCH_RUNTIME_DEVICE_LOST'
+    | 'SCRATCH_RUNTIME_UNCAPTURED_GPU_ERROR'
+    | 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION'
+    | 'SCRATCH_GPU_ERROR_SCOPE_FAILED'
+    | 'SCRATCH_DIAGNOSTIC_CAPTURE_DEGRADED'
+    | 'SCRATCH_DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED'
 ```
 
 ### Resource
@@ -188,13 +210,24 @@ type ResourceDiagnosticCode =
     | 'SCRATCH_RESOURCE_USAGE_MISSING'
     | 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
     | 'SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED'
+    | 'SCRATCH_GPU_ALLOCATION_PENDING_CONFLICT'
+    | 'SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED'
+    | 'SCRATCH_BUFFER_ALLOCATION_OUT_OF_MEMORY'
+    | 'SCRATCH_BUFFER_ALLOCATION_NATIVE_FAILED'
+    | 'SCRATCH_TEXTURE_ALLOCATION_VALIDATION_FAILED'
+    | 'SCRATCH_TEXTURE_ALLOCATION_OUT_OF_MEMORY'
+    | 'SCRATCH_TEXTURE_ALLOCATION_NATIVE_FAILED'
+    | 'SCRATCH_TEXTURE_REPLACEMENT_PENDING'
+    | 'SCRATCH_TEXTURE_REPLACEMENT_VALIDATION_FAILED'
+    | 'SCRATCH_TEXTURE_REPLACEMENT_OUT_OF_MEMORY'
+    | 'SCRATCH_TEXTURE_REPLACEMENT_NATIVE_FAILED'
     | 'SCRATCH_RESOURCE_ALLOCATION_VERSION_STALE'
     | 'SCRATCH_RESOURCE_CONTENT_EPOCH_UNAVAILABLE'
 ```
 
-`TextureResource.resize()` uses `SCRATCH_RESOURCE_DESCRIPTOR_INVALID` for deterministic size grammar, integer-domain, limit, mip, sample, transient-attachment, format-block, lifecycle, and native-capability failures detected before replacement creation. It uses `SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED` only when `GPUDevice.createTexture()` itself throws synchronously; `ScratchDiagnosticError.cause` retains that exception.
+`TextureResource.resize()` uses `SCRATCH_RESOURCE_DESCRIPTOR_INVALID` for deterministic size grammar, integer-domain, limit, mip, sample, transient-attachment, format-block, lifecycle, and native-capability failures detected before native issue. Native validation, OOM, synchronous exceptions, and scope failures use their operation-specific codes and link an immutable incident; `ScratchDiagnosticError.cause` may retain the original native error.
 
-The synchronous wrapper does not claim to observe asynchronous WebGPU validation, out-of-memory, or device errors. Those remain part of WebGPU's device error model rather than being reclassified as a successful or failed synchronous resize. Failure before a replacement is installed leaves the previous texture, descriptor, views, `allocationVersion`, `contentEpoch`, and readiness state unchanged.
+The Promise resolves only after validation and OOM scopes acknowledge the candidate. Failure before commit leaves the previous texture, descriptor, views, `allocationVersion`, `contentEpoch`, and readiness state unchanged.
 
 ### Layout Codec
 

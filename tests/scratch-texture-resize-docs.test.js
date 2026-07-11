@@ -89,8 +89,8 @@ describe('scratch texture resize documentation', () => {
         expect(transfers).to.include('contentEpoch = previous contentEpoch')
         expect(transfers).to.include('SCRATCH_READBACK_SOURCE_ALLOCATION_STALE')
         expect(diagnostics).to.include('SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
-        expect(diagnostics).to.include('SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED')
-        expect(diagnostics).to.include('asynchronous WebGPU validation')
+        expect(diagnostics).to.include('SCRATCH_TEXTURE_REPLACEMENT_VALIDATION_FAILED')
+        expect(diagnostics).to.include('Promise resolves only after validation and OOM scopes acknowledge')
         expect(diagnostics).to.include('transient-attachment')
     })
 
