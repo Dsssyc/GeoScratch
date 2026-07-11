@@ -70,7 +70,9 @@ uploadKind: 'external-image'
 
 另外两种 upload variant 也显式区分为 `uploadKind: 'buffer'` 与 `uploadKind: 'texture'`。external-image descriptor 按身份保留 canonical `GPUCopyExternalImageSource`，并暴露 `sourceOrigin`、`flipY`、目标 texture `origin`、`mipLevel`、`colorSpace`、`premultipliedAlpha` 和显式 width/height。destination aspect 固定为 `all`，`depthOrArrayLayers` 固定为 `1`。
 
-当前完整 source union 都可接受: `ImageBitmap`、`ImageData`、`HTMLImageElement`、`HTMLVideoElement`、`VideoFrame`、`HTMLCanvasElement` 与 `OffscreenCanvas`。构造会锁定 command fields，但不要求 source 已加载。执行会重新校验 live source dimensions 与 target constraints，再通过 canonical `GPUCopyExternalImageSourceInfo` 和 `GPUCopyExternalImageDestInfo` 直接降低。pixels 在原生 queue method 调用时捕获。Scratch 不提取 CPU pixels、不使用 `writeTexture()`、不关闭或 dispose source，也不为 source 发明 resource epoch。
+当前完整 source union 都可接受: `ImageBitmap`、`ImageData`、`HTMLImageElement`、`HTMLVideoElement`、`VideoFrame`、`HTMLCanvasElement` 与 `OffscreenCanvas`。跨 realm 的 platform getter brand check 会拒绝任意 record，而不依赖 realm-local `instanceof`。构造会锁定 command fields，但不要求 source 已加载。执行会重新校验 image、video、frame 与 data source 的准确公开 dimension fields。Canvas dimensions 也可能来自当前 WebGL drawing buffer 或 `ImageBitmapRenderingContext` internal output bitmap；canvas 没有无副作用的 context-mode query，因此 Scratch 把这项 context-specific source-range check 留给原生 content timeline，并把同步 `OperationError` 分类为 invalid input。
+
+降低使用 canonical `GPUCopyExternalImageSourceInfo` 与 `GPUCopyExternalImageDestInfo`，并要求 command runtime 自己的 queue。pixels 在原生 queue method 调用时捕获。Scratch 不调用 `getContext()` 检查 canvas、不提取 CPU pixels、不使用 `writeTexture()`、不关闭或 dispose source，也不为 source 发明 resource epoch。
 
 合格 target 必须是 single-sampled 2D plain color texture，同时具有 `COPY_DST` 与 `RENDER_ATTACHMENT` usage，并使用设备已启用的 renderable `unorm`、`unorm-srgb`、`float` 或 `ufloat` format。直接执行与 submission 共用同一套 validation、native-call、failure 与 target-epoch path。见 ADR-030。
 

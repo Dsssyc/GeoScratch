@@ -49,6 +49,6 @@
   },
   "homepage": "https://github.com/YcSoku/GeoScratch#readme",
   "dependencies": {
-    "@webgpu/types": "^0.1.40"
+    "@webgpu/types": "^0.1.71"
   }
 }

@@ -146,7 +146,7 @@ Like buffer and texture uploads, it ends a preceding encoder segment and separat
 
 All external uploads are preflighted before the first encoder or queue side effect. Preparation simulates only non-empty target writes and restores live state before replay. Replay calls `GPUQueue.copyExternalImageToTexture()` at the action's exact position and commits the prepared target effect only after the native queue call succeeds. A zero-width or zero-height action stays in the physical timeline but carries no target effect, resource access, producer epoch, or simulated readiness.
 
-If the native call throws synchronously, replay stops. Earlier successful actions remain committed, the failed and later actions do not commit effects, and the builder remains non-retryable. The native exception is wrapped by the external-image command diagnostic contract rather than converted into a generic queue callback failure. See ADR-030.
+If the native call throws synchronously, replay stops. Earlier successful actions remain committed, the failed and later actions do not commit effects, and the builder remains non-retryable. Because `submit()` throws and returns no `SubmittedWork`, staging buffers for unreplayed readbacks are destroyed immediately; staging already referenced by a submitted command buffer is destroyed after `queue.onSubmittedWorkDone()` settles. The native exception is wrapped by the external-image command diagnostic contract rather than converted into a generic queue callback failure. See ADR-030.
 
 ## Resolved Readiness Execution
 

@@ -58,6 +58,32 @@ const EXTERNAL_IMAGE_UPLOAD_FEATURE_FORMATS = new Map<GPUTextureFormat, readonly
     [ 'rgba16unorm', [ 'texture-formats-tier1', 'texture-formats-tier2' ] ],
 ])
 
+type ExternalImageSourceKind =
+    | 'ImageBitmap'
+    | 'ImageData'
+    | 'HTMLImageElement'
+    | 'HTMLVideoElement'
+    | 'VideoFrame'
+    | 'HTMLCanvasElement'
+    | 'OffscreenCanvas'
+
+type ExternalImageSourceContract = {
+    kind: ExternalImageSourceKind
+    widthField: string
+    heightField: string
+    dimensionsAreContextSpecific: boolean
+}
+
+const EXTERNAL_IMAGE_SOURCE_CONTRACTS: readonly ExternalImageSourceContract[] = [
+    { kind: 'ImageBitmap', widthField: 'width', heightField: 'height', dimensionsAreContextSpecific: false },
+    { kind: 'ImageData', widthField: 'width', heightField: 'height', dimensionsAreContextSpecific: false },
+    { kind: 'HTMLImageElement', widthField: 'naturalWidth', heightField: 'naturalHeight', dimensionsAreContextSpecific: false },
+    { kind: 'HTMLVideoElement', widthField: 'videoWidth', heightField: 'videoHeight', dimensionsAreContextSpecific: false },
+    { kind: 'VideoFrame', widthField: 'displayWidth', heightField: 'displayHeight', dimensionsAreContextSpecific: false },
+    { kind: 'HTMLCanvasElement', widthField: 'width', heightField: 'height', dimensionsAreContextSpecific: true },
+    { kind: 'OffscreenCanvas', widthField: 'width', heightField: 'height', dimensionsAreContextSpecific: true },
+]
+
 type Mutable<T> = { -readonly [Key in keyof T]: T[Key] }
 
 export type ResourceReadinessPolicy =
@@ -508,6 +534,14 @@ type ExternalImageDimensions = {
     width: number
     height: number
     fields: string
+}
+
+type ExternalImageSourceInspection = {
+    dimensions?: {
+        width: unknown
+        height: unknown
+        fields: string
+    }
 }
 
 type VertexBufferDiagnosticDetails = {
@@ -2271,10 +2305,14 @@ export class ExternalImageUploadCommand {
 
     constructor(
         runtime: ScratchRuntime,
-        descriptor: ExternalImageUploadCommandDescriptor = {} as ExternalImageUploadCommandDescriptor
+        descriptor: ExternalImageUploadCommandDescriptor
     ) {
 
         runtime.assertActive()
+
+        if (!isRecord(descriptor)) {
+            throwExternalImageUploadInvalid({ runtime, reason: 'descriptor' })
+        }
 
         const target = descriptor.target
         if (!(target instanceof TextureResource)) {
@@ -4933,7 +4971,7 @@ function normalizeExternalImageUploadSource(
     source: GPUCopyExternalImageSource
 ): GPUCopyExternalImageSource {
 
-    if (!isRecord(source)) {
+    if (!isRecord(source) || inspectExternalImageSource(source) === undefined) {
         throwExternalImageUploadInvalid({ runtime, source, reason: 'source' })
     }
 
@@ -4949,6 +4987,9 @@ function normalizeExternalImageUploadSourceOrigin(
     let y: unknown
 
     if (Array.isArray(origin)) {
+        if (origin.length < 1 || origin.length > 2) {
+            throwExternalImageUploadInvalid({ runtime, sourceOrigin: origin, reason: 'source-origin' })
+        }
         x = origin[0] ?? 0
         y = origin[1] ?? 0
     } else if (isRecord(origin)) {
@@ -4975,6 +5016,9 @@ function normalizeExternalImageUploadTargetOrigin(
     let z: unknown
 
     if (Array.isArray(origin)) {
+        if (origin.length < 1 || origin.length > 3) {
+            throwExternalImageUploadInvalid({ runtime, origin, reason: 'target-origin' })
+        }
         x = origin[0] ?? 0
         y = origin[1] ?? 0
         z = origin[2] ?? 0
@@ -5044,6 +5088,9 @@ function normalizeExternalImageUploadSize(
     let height: unknown
 
     if (Array.isArray(size)) {
+        if (size.length !== 2) {
+            throwExternalImageUploadInvalid({ runtime, size, reason: 'size' })
+        }
         width = size[0]
         height = size[1]
     } else if (isRecord(size)) {
@@ -5065,7 +5112,17 @@ function validateExternalImageUploadQueueAction(
     queue: GPUQueue
 ): void {
 
-    if (!queue || typeof queue.copyExternalImageToTexture !== 'function') {
+    if (queue !== command.runtime.queue) {
+        throwExternalImageUploadInvalid({
+            command,
+            runtime: command.runtime,
+            target: command.target,
+            source: command.source,
+            reason: 'queue-owner',
+        })
+    }
+
+    if (typeof queue.copyExternalImageToTexture !== 'function') {
         throwExternalImageUploadInvalid({
             command,
             runtime: command.runtime,
@@ -5077,10 +5134,10 @@ function validateExternalImageUploadQueueAction(
 
     validateExternalImageUploadTarget(command)
     const sourceDimensions = readExternalImageDimensions(command)
-    if (
+    if (sourceDimensions !== undefined && (
         command.sourceOrigin.x + command.size.width > sourceDimensions.width ||
         command.sourceOrigin.y + command.size.height > sourceDimensions.height
-    ) {
+    )) {
         throwExternalImageUploadInvalid({
             command,
             runtime: command.runtime,
@@ -5166,40 +5223,89 @@ function validateExternalImageUploadTargetFormat(command: ExternalImageUploadCom
     })
 }
 
-function readExternalImageDimensions(command: ExternalImageUploadCommand): ExternalImageDimensions {
+function readExternalImageDimensions(command: ExternalImageUploadCommand): ExternalImageDimensions | undefined {
 
-    const source = command.source as GPUCopyExternalImageSource & Record<string, unknown>
-    const candidates: [string, string][] = [
-        [ 'naturalWidth', 'naturalHeight' ],
-        [ 'videoWidth', 'videoHeight' ],
-        [ 'displayWidth', 'displayHeight' ],
-        [ 'width', 'height' ],
-    ]
-
-    for (const [ widthField, heightField ] of candidates) {
-        if (!(widthField in source) && !(heightField in source)) continue
-
-        const width = source[widthField]
-        const height = source[heightField]
-        if (!isGpuSize32(width) || !isGpuSize32(height)) {
-            throwExternalImageUploadInvalid({
-                command,
-                runtime: command.runtime,
-                source: command.source,
-                sourceDimensions: { width, height, fields: `${widthField}/${heightField}` },
-                reason: 'source-dimensions',
-            })
-        }
-
-        return { width, height, fields: `${widthField}/${heightField}` }
+    const inspection = inspectExternalImageSource(command.source)
+    if (inspection === undefined) {
+        throwExternalImageUploadInvalid({
+            command,
+            runtime: command.runtime,
+            source: command.source,
+            reason: 'source',
+        })
     }
+    if (inspection.dimensions === undefined) return undefined
+
+    const { width, height, fields } = inspection.dimensions
+    if (isGpuSize32(width) && isGpuSize32(height)) return { width, height, fields }
 
     throwExternalImageUploadInvalid({
         command,
         runtime: command.runtime,
         source: command.source,
+        sourceDimensions: inspection.dimensions,
         reason: 'source-dimensions',
     })
+}
+
+function inspectExternalImageSource(source: unknown): ExternalImageSourceInspection | undefined {
+
+    if (!isRecord(source)) return undefined
+
+    for (const contract of EXTERNAL_IMAGE_SOURCE_CONTRACTS) {
+        const widthGetter = getPlatformPropertyGetter(contract.kind, contract.widthField)
+        const heightGetter = getPlatformPropertyGetter(contract.kind, contract.heightField)
+        let width: unknown
+        let height: unknown
+
+        if (widthGetter !== undefined && heightGetter !== undefined) {
+            try {
+                width = widthGetter.call(source)
+                height = heightGetter.call(source)
+            } catch {
+                continue
+            }
+        } else {
+            if (platformObjectTag(source) !== `[object ${contract.kind}]`) continue
+            width = source[contract.widthField]
+            height = source[contract.heightField]
+        }
+
+        if (contract.dimensionsAreContextSpecific) return {}
+        return {
+            dimensions: {
+                width,
+                height,
+                fields: `${contract.widthField}/${contract.heightField}`,
+            },
+        }
+    }
+
+    return undefined
+}
+
+function getPlatformPropertyGetter(kind: ExternalImageSourceKind, property: string): (() => unknown) | undefined {
+
+    const constructor = (globalThis as unknown as Record<string, unknown>)[kind]
+    if (typeof constructor !== 'function') return undefined
+
+    let prototype: unknown = (constructor as { prototype?: unknown }).prototype
+    while (isRecord(prototype)) {
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, property)
+        if (typeof descriptor?.get === 'function') return descriptor.get
+        prototype = Object.getPrototypeOf(prototype)
+    }
+
+    return undefined
+}
+
+function platformObjectTag(source: object): string | undefined {
+
+    try {
+        return Object.prototype.toString.call(source)
+    } catch {
+        return undefined
+    }
 }
 
 function runtimeHasFeature(runtime: ScratchRuntime, requiredFeature: string): boolean {
@@ -5238,11 +5344,22 @@ function writeExternalImageUploadQueueAction(
     try {
         queue.copyExternalImageToTexture(source, destination, copySize)
     } catch (cause) {
+        if (nativeErrorName(cause) === 'OperationError') {
+            throwExternalImageUploadInvalid({
+                command,
+                runtime: command.runtime,
+                source: command.source,
+                sourceOrigin: command.sourceOrigin,
+                size: command.size,
+                nativeError: serializeNativeError(cause),
+                reason: 'source-range-native',
+            }, cause)
+        }
         throwExternalImageUploadFailed(command, cause)
     }
 }
 
-function throwExternalImageUploadInvalid(input: ExternalImageUploadDiagnosticInput): never {
+function throwExternalImageUploadInvalid(input: ExternalImageUploadDiagnosticInput, cause?: unknown): never {
 
     const target = input.target instanceof TextureResource ? input.target : input.command?.target
     throwScratchDiagnostic({
@@ -5293,8 +5410,9 @@ function throwExternalImageUploadInvalid(input: ExternalImageUploadDiagnosticInp
             premultipliedAlpha: input.premultipliedAlpha ?? input.command?.premultipliedAlpha,
             size: input.size ?? input.command?.size,
             requiredFeatures: input.requiredFeatures,
+            nativeError: input.nativeError,
         },
-    })
+    }, cause === undefined ? undefined : { cause })
 }
 
 function throwExternalImageUploadFailed(command: ExternalImageUploadCommand, cause: unknown): never {
@@ -5326,6 +5444,11 @@ function serializeNativeError(cause: unknown): Record<string, unknown> {
     if (typeof cause.code === 'number' && Number.isFinite(cause.code)) nativeError.code = cause.code
 
     return nativeError
+}
+
+function nativeErrorName(cause: unknown): string | undefined {
+
+    return isRecord(cause) && typeof cause.name === 'string' ? cause.name : undefined
 }
 
 function normalizeReadinessContract<Command extends DrawCommand | DispatchCommand>(

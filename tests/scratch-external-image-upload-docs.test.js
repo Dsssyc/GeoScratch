@@ -44,7 +44,20 @@ describe('scratch external image upload documentation', () => {
         expect(transfers).to.include('no `writeTexture()` fallback')
         expect(diagnostics).to.include('SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID')
         expect(diagnostics).to.include('SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED')
+        expect(diagnostics).to.include('actual.nativeError')
         expect(diagnostics).to.include('ScratchDiagnosticError.cause')
+    })
+
+    it('ships a canonical WebGPU type provider for the generated declarations', () => {
+
+        const packageJson = JSON.parse(read('packages', 'geoscratch', 'package.json'))
+        const provider = read('node_modules', '@webgpu', 'types', 'dist', 'index.d.ts')
+
+        expect(packageJson.dependencies).to.have.property('@webgpu/types')
+        expect(provider).to.include('type GPUCopyExternalImageSource =')
+        expect(provider).to.include('interface GPUCopyExternalImageSourceInfo')
+        expect(provider).to.include('interface GPUCopyExternalImageDestInfo')
+        expect(provider).to.include('"texture-formats-tier2"')
     })
 
     it('records the contributor boundary and both user-facing example catalogs', () => {
@@ -79,4 +92,3 @@ describe('scratch external image upload documentation', () => {
         expect(audit).to.not.match(/\| (Pending|Incomplete|Blocked) \|/)
     })
 })
-

@@ -393,6 +393,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatExternalImageUploadDescriptor: scratchCompat.ExternalImageUploadCommandDescriptor = externalImageUploadDescriptors[0]
     const externalImageUpload: scr.ExternalImageUploadCommand = runtime.createExternalImageUploadCommand(externalImageUploadDescriptors[0])
     const externalImageUploadAlias: scratchCompat.ExternalImageUploadCommand = runtime.externalImageUploadCommand(compatExternalImageUploadDescriptor)
+    // @ts-expect-error ExternalImageUploadCommand requires its native descriptor
+    new scr.ExternalImageUploadCommand(runtime)
     const bufferUploadKind: 'buffer' = upload.uploadKind
     const textureUploadKind: 'texture' = textureUpload.uploadKind
     const externalImageUploadKind: 'external-image' = externalImageUpload.uploadKind

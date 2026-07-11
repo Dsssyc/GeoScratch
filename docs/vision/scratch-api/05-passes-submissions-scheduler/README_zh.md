@@ -146,7 +146,7 @@ submit(render + readback)
 
 所有 external upload 都会在第一个 encoder 或 queue side effect 前完成 preflight。Preparation 只模拟非空 target write，并在 replay 前恢复 live state。Replay 在 action 的准确位置调用 `GPUQueue.copyExternalImageToTexture()`，且 only after the native queue call succeeds 才提交 prepared target effect。zero-width 或 zero-height action 仍保留在物理 timeline 中，但不携带 target effect、resource access、producer epoch 或 simulated readiness。
 
-如果原生调用同步抛错，replay 会停止。先前成功 action 保留已提交效果，failed 与 later action 不提交 effect，builder 保持不可重试。原生异常按 external-image command diagnostic contract 包装，而不是转成通用 queue callback failure。见 ADR-030。
+如果原生调用同步抛错，replay 会停止。先前成功 action 保留已提交效果，failed 与 later action 不提交 effect，builder 保持不可重试。由于 `submit()` 抛错且不返回 `SubmittedWork`，未 replay readback 的 staging buffer 会立即销毁；已被 submitted command buffer 引用的 staging 会在 `queue.onSubmittedWorkDone()` settle 后销毁。原生异常按 external-image command diagnostic contract 包装，而不是转成通用 queue callback failure。见 ADR-030。
 
 ## Resolved Readiness Execution
 

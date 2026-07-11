@@ -248,4 +248,3 @@ function resizeSurface(surface, targetCanvas) {
         surface.resize({ width, height })
     }
 }
-

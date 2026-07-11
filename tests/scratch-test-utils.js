@@ -1,3 +1,30 @@
+export function createFakeExternalImageSource(
+    kind = 'ImageData',
+    { width = 4, height = 4, ...properties } = {}
+) {
+
+    const dimensionFields = {
+        ImageBitmap: [ 'width', 'height' ],
+        ImageData: [ 'width', 'height' ],
+        HTMLImageElement: [ 'naturalWidth', 'naturalHeight' ],
+        HTMLVideoElement: [ 'videoWidth', 'videoHeight' ],
+        VideoFrame: [ 'displayWidth', 'displayHeight' ],
+        HTMLCanvasElement: [ 'width', 'height' ],
+        OffscreenCanvas: [ 'width', 'height' ],
+    }[kind]
+    if (dimensionFields === undefined) throw new TypeError(`Unsupported fake external image source kind: ${kind}`)
+
+    const source = {
+        [Symbol.toStringTag]: kind,
+        revision: 0,
+        ...properties,
+    }
+    source[dimensionFields[0]] = width
+    source[dimensionFields[1]] = height
+
+    return source
+}
+
 export function createFakeGpu() {
 
     const calls = {

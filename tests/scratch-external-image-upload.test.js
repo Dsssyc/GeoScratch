@@ -5,7 +5,7 @@ import {
     ScratchRuntime,
 } from 'geoscratch'
 import { ExternalImageUploadCommand as CompatExternalImageUploadCommand } from 'geoscratch/scratch'
-import { createFakeGpu } from './scratch-test-utils.js'
+import { createFakeExternalImageSource, createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
@@ -31,7 +31,7 @@ async function createFixture(options = {}) {
         mipLevelCount: options.mipLevelCount ?? 2,
         sampleCount: options.sampleCount ?? 1,
     })
-    const source = options.source ?? { width: 8, height: 6, revision: 0 }
+    const source = options.source ?? createFakeExternalImageSource('ImageData', { width: 8, height: 6 })
 
     return { ...fake, runtime, target, source }
 }
@@ -101,6 +101,17 @@ describe('scratch external image upload', () => {
         expect(command.size).to.deep.equal({ width: 2, height: 2, depthOrArrayLayers: 1 })
         expect(bufferUpload.uploadKind).to.equal('buffer')
         expect(textureUpload.uploadKind).to.equal('texture')
+    })
+
+    it('requires a descriptor at runtime with a structured diagnostic', async() => {
+
+        const fixture = await createFixture()
+
+        expectDiagnostic(
+            () => new ExternalImageUploadCommand(fixture.runtime),
+            'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
+            'descriptor'
+        )
     })
 
     it('locks command fields while retaining mutable source contents by identity', async() => {
@@ -184,7 +195,7 @@ describe('scratch external image upload', () => {
 
     it('allows deferred source readiness and revalidates live dimensions', async() => {
 
-        const source = { naturalWidth: 0, naturalHeight: 0 }
+        const source = createFakeExternalImageSource('HTMLImageElement', { width: 0, height: 0 })
         const fixture = await createFixture({ source })
         const command = createCommand(fixture, {
             sourceOrigin: { x: 1, y: 1 },
@@ -209,13 +220,16 @@ describe('scratch external image upload', () => {
         expect(fixture.calls.queueExternalImageCopies).to.have.length(1)
     })
 
-    it('uses natural, video, display, and width dimensions without realm-local instanceof checks', async() => {
+    it('uses the canonical dimensions for every external source kind without realm-local instanceof checks', async() => {
 
         for (const source of [
-            { width: 3, height: 2 },
-            { naturalWidth: 3, naturalHeight: 2, width: 99, height: 99 },
-            { videoWidth: 3, videoHeight: 2, width: 99, height: 99 },
-            { displayWidth: 3, displayHeight: 2, codedWidth: 99, codedHeight: 99 },
+            createFakeExternalImageSource('ImageBitmap', { width: 3, height: 2 }),
+            createFakeExternalImageSource('ImageData', { width: 3, height: 2 }),
+            createFakeExternalImageSource('HTMLImageElement', { width: 3, height: 2, widthAttribute: 99 }),
+            createFakeExternalImageSource('HTMLVideoElement', { width: 3, height: 2, widthAttribute: 99 }),
+            createFakeExternalImageSource('VideoFrame', { width: 3, height: 2, codedWidth: 99 }),
+            createFakeExternalImageSource('HTMLCanvasElement', { width: 3, height: 2 }),
+            createFakeExternalImageSource('OffscreenCanvas', { width: 3, height: 2 }),
         ]) {
             const fixture = await createFixture({ source })
             createCommand(fixture, {
@@ -223,6 +237,59 @@ describe('scratch external image upload', () => {
                 size: [ 2, 2 ],
             }).execute(fixture.queue)
             expect(fixture.calls.queueExternalImageCopies).to.have.length(1)
+        }
+    })
+
+    it('uses platform prototype getters as cross-realm brand checks when the constructor is available', async() => {
+
+        const original = Object.getOwnPropertyDescriptor(globalThis, 'HTMLImageElement')
+        const slots = new WeakMap()
+        function TestHTMLImageElement() {}
+        Object.defineProperties(TestHTMLImageElement.prototype, {
+            naturalWidth: {
+                get() {
+                    if (!slots.has(this)) throw new TypeError('Illegal invocation')
+                    return slots.get(this).width
+                },
+            },
+            naturalHeight: {
+                get() {
+                    if (!slots.has(this)) throw new TypeError('Illegal invocation')
+                    return slots.get(this).height
+                },
+            },
+        })
+        Object.defineProperty(globalThis, 'HTMLImageElement', {
+            configurable: true,
+            value: TestHTMLImageElement,
+        })
+
+        try {
+            const fixture = await createFixture({
+                source: createFakeExternalImageSource('ImageBitmap', { width: 3, height: 2 }),
+            })
+            const spoofed = {
+                [Symbol.toStringTag]: 'HTMLImageElement',
+                naturalWidth: 3,
+                naturalHeight: 2,
+            }
+            expectDiagnostic(
+                () => createCommand(fixture, { source: spoofed }),
+                'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
+                'source'
+            )
+
+            const source = Object.create(TestHTMLImageElement.prototype)
+            slots.set(source, { width: 3, height: 2 })
+            const validFixture = await createFixture({ source })
+            createCommand(validFixture, { size: [ 3, 2 ] }).execute(validFixture.queue)
+            expect(validFixture.calls.queueExternalImageCopies).to.have.length(1)
+        } finally {
+            if (original === undefined) {
+                delete globalThis.HTMLImageElement
+            } else {
+                Object.defineProperty(globalThis, 'HTMLImageElement', original)
+            }
         }
     })
 
@@ -255,14 +322,21 @@ describe('scratch external image upload', () => {
         const fixture = await createFixture()
         const invalidDescriptors = [
             [ { source: null }, 'source' ],
+            [ { source: { width: 8, height: 6 } }, 'source' ],
+            [ { sourceOrigin: [] }, 'source-origin' ],
+            [ { sourceOrigin: [ 0, 0, 0 ] }, 'source-origin' ],
             [ { sourceOrigin: { x: -1, y: 0 } }, 'source-origin' ],
             [ { sourceOrigin: { x: 0.5, y: 0 } }, 'source-origin' ],
             [ { flipY: 'yes' }, 'flipY' ],
+            [ { origin: [] }, 'target-origin' ],
+            [ { origin: [ 0, 0, 0, 0 ] }, 'target-origin' ],
             [ { origin: { x: -1, y: 0, z: 0 } }, 'target-origin' ],
             [ { mipLevel: -1 }, 'mip-level' ],
             [ { mipLevel: 2 }, 'mip-level' ],
             [ { colorSpace: 'linear-srgb' }, 'color-space' ],
             [ { premultipliedAlpha: 1 }, 'premultiplied-alpha' ],
+            [ { size: [ 1 ] }, 'size' ],
+            [ { size: [ 1, 1, 1 ] }, 'size' ],
             [ { size: { width: -1, height: 1 } }, 'size' ],
             [ { size: { width: 1.5, height: 1 } }, 'size' ],
             [ { size: { width: 0x1_0000_0000, height: 1 } }, 'size' ],
@@ -407,6 +481,53 @@ describe('scratch external image upload', () => {
             'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
             'queue-method'
         )
+        expect(fixture.target.contentEpoch).to.equal(0)
+    })
+
+    it('rejects direct execution on a queue that is not owned by the command runtime', async() => {
+
+        const fixtureA = await createFixture()
+        const fixtureB = await createFixture()
+        const command = createCommand(fixtureA)
+
+        expectDiagnostic(
+            () => command.execute(fixtureB.queue),
+            'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
+            'queue-owner'
+        )
+        expect(fixtureA.target.contentEpoch).to.equal(0)
+        expect(fixtureB.calls.queueExternalImageCopies).to.have.length(0)
+    })
+
+    it('defers context-specific canvas dimensions to the native content-timeline validation', async() => {
+
+        const source = createFakeExternalImageSource('HTMLCanvasElement', { width: 1, height: 1 })
+        const fixture = await createFixture({ source })
+        const command = createCommand(fixture, { size: { width: 2, height: 2 } })
+
+        command.execute(fixture.queue)
+
+        expect(fixture.calls.queueExternalImageCopies).to.have.length(1)
+        expect(fixture.target.contentEpoch).to.equal(1)
+    })
+
+    it('classifies native canvas source-range OperationError as deterministic invalid input', async() => {
+
+        const source = createFakeExternalImageSource('HTMLCanvasElement', { width: 8, height: 6 })
+        const fixture = await createFixture({ source })
+        const command = createCommand(fixture)
+        const cause = new DOMException('source range exceeds the context output bitmap', 'OperationError')
+        fixture.queue.copyExternalImageToTexture = () => {
+            throw cause
+        }
+
+        const error = expectDiagnostic(
+            () => command.execute(fixture.queue),
+            'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
+            'source-range-native'
+        )
+        expect(error.cause).to.equal(cause)
+        expect(error.diagnostic.actual.nativeError).to.deep.include({ name: 'OperationError' })
         expect(fixture.target.contentEpoch).to.equal(0)
     })
 

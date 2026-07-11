@@ -1,6 +1,6 @@
 import { expect } from 'chai'
 import { ScratchDiagnosticError, ScratchRuntime } from 'geoscratch'
-import { createFakeGpu } from './scratch-test-utils.js'
+import { createFakeExternalImageSource, createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
@@ -64,7 +64,7 @@ function createBufferUpload(runtime, label, data = new Uint8Array(16)) {
 
 function createExternalImageUpload(runtime, label, options = {}) {
 
-    const source = options.source ?? { width: 4, height: 4, revision: 0 }
+    const source = options.source ?? createFakeExternalImageSource('ImageData')
     const target = runtime.createTexture({
         label: `${label} target`,
         size: options.targetSize ?? { width: 4, height: 4 },
@@ -707,7 +707,7 @@ describe('scratch submission queue order', () => {
         const failed = createExternalImageUpload(fixture.runtime, 'failed external action')
         const later = createExternalImageUpload(fixture.runtime, 'unreplayed external action')
         const nativeCopy = fixture.queue.copyExternalImageToTexture.bind(fixture.queue)
-        const cause = new DOMException('injected source failure', 'OperationError')
+        const cause = new DOMException('injected source failure', 'SecurityError')
         let nativeCalls = 0
         fixture.queue.copyExternalImageToTexture = (...args) => {
             nativeCalls++
@@ -745,7 +745,7 @@ describe('scratch submission queue order', () => {
 
         const fixture = await createOrderingFixture()
         const failed = createExternalImageUpload(fixture.runtime, 'first failed external action')
-        const cause = new DOMException('first action failed', 'OperationError')
+        const cause = new DOMException('first action failed', 'SecurityError')
         let nativeCalls = 0
         fixture.queue.copyExternalImageToTexture = () => {
             nativeCalls++
@@ -771,6 +771,47 @@ describe('scratch submission queue order', () => {
         expect(failed.target.contentEpoch).to.equal(0)
         expect(fixture.firstCopyTarget.contentEpoch).to.equal(0)
         expect(builder.isSubmitted).to.equal(true)
+    })
+
+    it('releases submitted and unreplayed readback staging after a later external upload fails', async() => {
+
+        const fixture = await createOrderingFixture()
+        const firstReadback = fixture.runtime.createReadbackCommand({
+            label: 'submitted readback before failed external upload',
+            source: { resource: fixture.copySource, contentEpoch: 1 },
+            whenMissing: 'throw',
+        })
+        const laterReadback = fixture.runtime.createReadbackCommand({
+            label: 'unreplayed readback after failed external upload',
+            source: { resource: fixture.copySource, contentEpoch: 1 },
+            whenMissing: 'throw',
+        })
+        const failed = createExternalImageUpload(fixture.runtime, 'external failure between readbacks')
+        const cause = new DOMException('injected source failure', 'SecurityError')
+        fixture.queue.copyExternalImageToTexture = () => {
+            throw cause
+        }
+        const bufferCountBeforeSubmit = fixture.calls.buffers.length
+        const builder = fixture.runtime.createSubmission({ validation: 'throw' })
+            .readback(firstReadback)
+            .upload(failed.command)
+            .readback(laterReadback)
+
+        let caught
+        try {
+            builder.submit()
+        } catch (error) {
+            caught = error
+        }
+        const stagingBuffers = fixture.calls.buffers.slice(bufferCountBeforeSubmit)
+
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED')
+        expect(timelineTypes(fixture.calls)).to.deep.equal([ 'submit' ])
+        expect(stagingBuffers).to.have.length(2)
+        expect(fixture.calls.submittedWorkDoneRegistrations).to.have.length(1)
+        await Promise.resolve()
+        expect(stagingBuffers.map(buffer => buffer.destroyed)).to.deep.equal([ true, true ])
     })
 
     it('does not create an empty segment between consecutive uploads', async() => {

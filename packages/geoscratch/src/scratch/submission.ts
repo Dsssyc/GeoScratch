@@ -437,12 +437,14 @@ export class SubmissionBuilder {
         const queueTimeline: PreparedQueueAction[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
         const pendingReadbacks: PendingReadback[] = []
+        const commandBufferReadbacks = new Map<GPUCommandBuffer, PendingReadback[]>()
         const resourceSnapshots = new Map<Resource, ResourceContentSnapshot>()
         const querySlotSnapshots = new Map<QuerySetResource, Map<number, QuerySlotContentSnapshot>>()
         let encoder: GPUCommandEncoder | undefined
         let encoderSegmentIndex = 0
         let segmentResources = new Set<Resource>()
         let segmentQuerySlots = new Map<QuerySetResource, Set<number>>()
+        let segmentReadbacks: PendingReadback[] = []
 
         const trackSegmentResourceWrite = (resource: Resource) => {
 
@@ -495,9 +497,11 @@ export class SubmissionBuilder {
                 commandBuffer,
                 effects: createPreparedQueueEffects(segmentResources, segmentQuerySlots),
             })
+            commandBufferReadbacks.set(commandBuffer, segmentReadbacks)
             encoder = undefined
             segmentResources = new Set()
             segmentQuerySlots = new Map()
+            segmentReadbacks = []
         }
 
         try {
@@ -535,13 +539,15 @@ export class SubmissionBuilder {
                     const encoder = getEncoder()
                     const origin = commandAccessOrigin(stepIndex, 'readback', step.command)
                     const readAccess = captureResourceAccess(step.command.source.resource, 'read', origin)
-                    pendingReadbacks.push({
+                    const pendingReadback = {
                         command: step.command,
                         stagingBuffer: step.command.encode(encoder),
                         stepIndex,
                         contentEpoch: readAccess.contentEpochBefore,
                         allocationVersion: step.command.source.resource.allocationVersion,
-                    })
+                    }
+                    pendingReadbacks.push(pendingReadback)
+                    segmentReadbacks.push(pendingReadback)
                     completeResourceAccesses(resourceAccesses, [ readAccess ])
                     continue
                 }
@@ -627,21 +633,30 @@ export class SubmissionBuilder {
             restorePreparedContentState(resourceSnapshots, querySlotSnapshots)
         }
         this.isSubmitted = true
-        for (const action of queueTimeline) {
-            switch (action.kind) {
-                case 'command-buffer':
-                    this.runtime.queue.submit([ action.commandBuffer ])
-                    break
-                case 'buffer-upload':
-                case 'texture-upload':
-                case 'external-image-upload':
-                    writeUploadCommandQueueAction(action.command, this.runtime.queue)
-                    break
-                default:
-                    assertNeverPreparedQueueAction(action)
-            }
+        const submittedReadbacks = new Set<PendingReadback>()
+        try {
+            for (const action of queueTimeline) {
+                switch (action.kind) {
+                    case 'command-buffer':
+                        this.runtime.queue.submit([ action.commandBuffer ])
+                        for (const pending of commandBufferReadbacks.get(action.commandBuffer) ?? []) {
+                            submittedReadbacks.add(pending)
+                        }
+                        break
+                    case 'buffer-upload':
+                    case 'texture-upload':
+                    case 'external-image-upload':
+                        writeUploadCommandQueueAction(action.command, this.runtime.queue)
+                        break
+                    default:
+                        assertNeverPreparedQueueAction(action)
+                }
 
-            applyPreparedQueueEffects(action.effects)
+                applyPreparedQueueEffects(action.effects)
+            }
+        } catch (cause) {
+            releaseFailedSubmissionReadbacks(this.runtime.queue, pendingReadbacks, submittedReadbacks)
+            throw cause
         }
 
         const submitted = new SubmittedWork(this.runtime, {
@@ -2738,4 +2753,46 @@ function createDonePromise(queue: GPUQueue): Promise<unknown> {
     }
 
     return Promise.resolve()
+}
+
+function releaseFailedSubmissionReadbacks(
+    queue: GPUQueue,
+    pendingReadbacks: readonly PendingReadback[],
+    submittedReadbacks: ReadonlySet<PendingReadback>
+): void {
+
+    const submitted: PendingReadback[] = []
+    for (const pending of pendingReadbacks) {
+        if (submittedReadbacks.has(pending)) {
+            submitted.push(pending)
+        } else {
+            destroyPendingReadbackStaging(pending)
+        }
+    }
+    if (submitted.length === 0) return
+
+    let done: Promise<unknown>
+    try {
+        done = createDonePromise(queue)
+    } catch {
+        for (const pending of submitted) destroyPendingReadbackStaging(pending)
+        return
+    }
+
+    void done.then(
+        () => {
+            for (const pending of submitted) destroyPendingReadbackStaging(pending)
+        },
+        () => {
+            for (const pending of submitted) destroyPendingReadbackStaging(pending)
+        }
+    )
+}
+
+function destroyPendingReadbackStaging(pending: PendingReadback): void {
+
+    if (typeof pending.stagingBuffer.destroy !== 'function') return
+    try {
+        pending.stagingBuffer.destroy()
+    } catch {}
 }

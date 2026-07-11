@@ -302,9 +302,9 @@ type CommandDiagnosticCode =
 
 Fallback readiness 或 dependency failure 以最终选中的 fallback 作为 `subject`。`related` 包含 requested command、attempted chain、pass、resources 与 submission。结构化 `actual` facts 包含 step/pass IDs、requested command ID、attempted command IDs、携带每个可用 missing-resource state/epoch fact 的完整 `attempts` 数组、当前 command/resource state 与 epochs，以及 validation mode。构造后变为不可用的 selected fallback dependency 使用 `SCRATCH_COMMAND_FALLBACK_INVALID`，并在 `actual.cause` 中保留底层 lifecycle diagnostic。针对 selected fallback 生成的 render attachment resource-conflict diagnostic 也保留相同的 requested/attempted provenance。
 
-`ExternalImageUploadCommand` diagnostic 在结构化 command facts 中使用 `commandKind: 'upload'` 与 `uploadKind: 'external-image'`。`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` 覆盖调用 `GPUQueue.copyExternalImageToTexture()` 前可确定的 descriptor、live source-range、target、ownership、lifecycle 与 queue-capability failure。它的 `expected` 和 `actual` 字段携带 machine-readable validation facts，不要求解析 message。
+`ExternalImageUploadCommand` diagnostic 在结构化 command facts 中使用 `commandKind: 'upload'` 与 `uploadKind: 'external-image'`。`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` 覆盖确定性的 descriptor、platform brand、live source-range、target、queue ownership、lifecycle 与 queue-capability failure。context-specific canvas dimensions 没有无副作用的 JavaScript query，因此原生权威 range check 同步抛出的 `OperationError` 也使用这个 invalid code。它的 `expected` 和 `actual` 字段携带 machine-readable validation facts，不要求解析 message。
 
-`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED` 专用于原生 queue method 同步抛出的 exception。diagnostic 的 `actual.cause` 只包含可序列化 exception facts，而 `ScratchDiagnosticError.cause` 保留原始 thrown value，供程序化检查。失败的原生调用不提交 target epoch、readiness transition、access entry 或 producer fact。
+`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED` 专用于 `GPUQueue.copyExternalImageToTexture()` 同步抛出的其他 exception。diagnostic 的 `actual.nativeError` 只包含可序列化 exception facts，而 `ScratchDiagnosticError.cause` 保留原始 thrown value，供程序化检查。失败的原生调用不提交 target epoch、readiness transition、access entry 或 producer fact。
 
 ### Submission
 

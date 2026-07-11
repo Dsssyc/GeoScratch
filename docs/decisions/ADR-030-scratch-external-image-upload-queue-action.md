@@ -51,11 +51,11 @@ Source ownership remains outside Scratch. Scratch does not close `ImageBitmap` o
 
 ### Live validation
 
-Construction normalizes the explicit descriptor without requiring an image or video to be loaded. Direct execution and submission preflight revalidate the command, runtime, target, queue method, current source dimensions and source range, target mip/origin/layer range, usage, dimension, sample count, format, and integer domains.
+Construction normalizes the explicit descriptor without requiring an image or video to be loaded. It verifies source union membership with platform prototype getters when the constructor is available in the current realm and a platform tag fallback where it is not; arbitrary dimension-shaped records are not accepted. Direct execution additionally requires the runtime's own queue. Direct execution and submission preflight revalidate the command, runtime, target, queue method, current public source dimensions and source range, target mip/origin/layer range, usage, dimension, sample count, format, and integer domains.
 
 External-image destinations require both `GPUTextureUsage.COPY_DST` and `GPUTextureUsage.RENDER_ATTACHMENT`, dimension `2d`, sample count `1`, and a currently supported plain renderable `unorm`, `unorm-srgb`, `float`, or `ufloat` format. The format table follows the current WebGPU format capability table and checks device features for `core-features-and-limits`, `rg11b10ufloat-renderable`, `texture-formats-tier1`, and `texture-formats-tier2` where applicable. It is not the smaller byte-layout whitelist used by `TextureUploadCommand`.
 
-Runtime source inspection uses standard dimension properties rather than realm-local constructor identity as the validity model. This keeps Window, Worker, and cross-realm platform objects usable. Origin cleanliness and source usability remain native browser decisions.
+Runtime source inspection follows the WebGPU external-source dimensions table for `ImageBitmap`, `ImageData`, `HTMLImageElement`, `HTMLVideoElement`, and `VideoFrame`. Canvas dimensions depend on its bound context: WebGL uses drawing-buffer dimensions and `ImageBitmapRenderingContext` uses an internal output bitmap. No public API reveals the current canvas context mode and exact output dimensions without potentially creating or changing a context, so Scratch does not call `getContext()` as inspection. The native content-timeline check remains authoritative for canvas source range; its synchronous `OperationError` is wrapped as `SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` with the original cause. Origin cleanliness and source usability remain native browser decisions.
 
 ### Queue order and logical effects
 
@@ -73,13 +73,13 @@ Deterministic descriptor, source-range, target, and queue-capability failures us
 SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID
 ```
 
-If `GPUQueue.copyExternalImageToTexture()` throws synchronously, Scratch wraps the exception with:
+Other synchronous exceptions from `GPUQueue.copyExternalImageToTexture()` are wrapped with:
 
 ```text
 SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED
 ```
 
-The diagnostic payload contains only serializable exception facts, while `ScratchDiagnosticError.cause` retains the original exception object. The failed action does not commit its logical effect, later queue actions are not replayed, earlier successful actions remain committed, and the builder remains non-retryable.
+The diagnostic payload stores serializable exception facts in `actual.nativeError`, while `ScratchDiagnosticError.cause` retains the original exception object. The failed action does not commit its logical effect, later queue actions are not replayed, earlier successful actions remain committed, and the builder remains non-retryable. Since the throwing submission returns no `SubmittedWork`, unreplayed readback staging is destroyed immediately and already-submitted readback staging is destroyed after `queue.onSubmittedWorkDone()` settles.
 
 ## Alternatives Considered
 
@@ -115,4 +115,3 @@ Rejected. `GPUExternalTexture` is a sampled binding with expiry and source-lifet
 - Target epochs and ledgers describe only native calls that returned successfully and had a non-empty content effect.
 - Public TypeScript declarations use `GPUCopyExternalImageSource`, `GPUCopyExternalImageSourceInfo`, and `GPUCopyExternalImageDestInfo`; no compatibility aliases or handwritten declarations are added.
 - Browser-dependent origin-cleanliness and source-usability checks remain at the native call boundary but retain structured Scratch context and the original exception.
-
