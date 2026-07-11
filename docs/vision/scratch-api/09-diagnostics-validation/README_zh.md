@@ -192,7 +192,7 @@ type ResourceDiagnosticCode =
     | 'SCRATCH_RESOURCE_CONTENT_EPOCH_UNAVAILABLE'
 ```
 
-`TextureResource.resize()` 对 replacement creation 前检测出的确定性 size grammar、integer-domain、limit、mip、sample、format-block、lifecycle 与 native-capability failure 使用 `SCRATCH_RESOURCE_DESCRIPTOR_INVALID`。只有 `GPUDevice.createTexture()` 自身同步抛错时才使用 `SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED`；`ScratchDiagnosticError.cause` 保留原始 exception。
+`TextureResource.resize()` 对 replacement creation 前检测出的确定性 size grammar、integer-domain、limit、mip、sample、transient-attachment、format-block、lifecycle 与 native-capability failure 使用 `SCRATCH_RESOURCE_DESCRIPTOR_INVALID`。只有 `GPUDevice.createTexture()` 自身同步抛错时才使用 `SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED`；`ScratchDiagnosticError.cause` 保留原始 exception。
 
 同步 wrapper 不声称能观察 asynchronous WebGPU validation、out-of-memory 或 device error。它们仍由 WebGPU device error model 管理，不能被重新分类为同步 resize 成功或失败。replacement 安装前的 failure 会保持旧 texture、descriptor、views、`allocationVersion`、`contentEpoch` 与 readiness state 不变。
 

@@ -172,6 +172,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const scratchTextureView: GPUTextureView = scratchTexture.createView()
     scratchTexture.resize(compatTextureSize)
+    // @ts-expect-error TextureResource descriptor is read-only
+    scratchTexture.descriptor = scratchTexture.descriptor
+    // @ts-expect-error Allocation transitions are internal lifecycle operations
+    scratchTexture._replaceAllocation({})
     // @ts-expect-error TextureResource physical allocation fields are read-only
     scratchTexture.gpuTexture = scratchTexture.gpuTexture
     // @ts-expect-error TextureResource normalized size is read-only

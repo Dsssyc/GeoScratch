@@ -161,6 +161,8 @@ sceneColor.resize(surface.size)
 
 `TextureResource.resize()` is a size-only resource-lifecycle operation. It preserves logical object identity, id, runtime, label, format, usage, dimension, mip-level count, sample count, `viewFormats`, `textureBindingViewDimension`, and `contentEpoch`. Scratch snapshots the complete physical descriptor, including a materialized immutable `viewFormats` iterable, so caller mutation cannot alter a later replacement.
 
+The public descriptor is a read-only snapshot. Allocation transition bookkeeping is not an object method exposed to package consumers; `resize()` is the only public size-replacement path. Deterministic validation also preserves the complete WebGPU transient-attachment contract: usage is exactly `TRANSIENT_ATTACHMENT | RENDER_ATTACHMENT`, `viewFormats` is empty, dimension is `2d`, mip-level count is `1`, and depth or array-layer count is `1`.
+
 A changed resize follows create-before-swap ordering: normalize and validate the requested size, create the complete replacement allocation, install it, clear allocation-scoped views, advance `allocationVersion` once, set `state = empty`, then destroy the old texture. The next successful content producer advances from the preserved `contentEpoch`. A synchronous creation failure leaves every old allocation fact installed; Scratch does not destroy first or wait for queue completion.
 
 Normalized same-size resize is a true no-op. Raw `GPUTextureView` values are allocation-scoped; internal view caches, bind sets, and pass attachments must resolve a new view after replacement. Resize accepts no `Surface`, observer, or size-provider callback. Future tracked values must lower into the same explicit primitive rather than replace it.

@@ -1,11 +1,12 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { Resource } from './resource.js'
+import { replaceResourceAllocation, Resource } from './resource.js'
 import { getGlobalConstant, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
 const GPU_TEXTURE_USAGE_STORAGE_BINDING = getGlobalConstant('GPUTextureUsage', 'STORAGE_BINDING', 0x8)
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
+const GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'TRANSIENT_ATTACHMENT', 0x20)
 const TEXTURE_DIMENSIONS = new Set<GPUTextureDimension>([ '2d' ])
 const TEXTURE_BINDING_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([
     '1d',
@@ -180,7 +181,7 @@ export class TextureResource extends Resource {
         this._gpuTexture = nextTexture
         this._physicalDescriptor = nextDescriptor
         this._viewCache.clear()
-        super._replaceAllocation(nextDescriptor)
+        replaceResourceAllocation(this, nextDescriptor)
         previousTexture.destroy()
     }
 
@@ -195,12 +196,6 @@ export class TextureResource extends Resource {
         }
 
         return this._viewCache.get(key)!
-    }
-
-    _replaceAllocation(descriptor: object): void {
-
-        super._replaceAllocation(descriptor)
-        this._viewCache.clear()
     }
 
     dispose(): void {
@@ -501,6 +496,28 @@ function validateTextureAllocationDescriptor(
                 mipLevelCount: 1,
                 depthOrArrayLayers: 1,
                 usage: 'includes RENDER_ATTACHMENT and excludes STORAGE_BINDING',
+            },
+        })
+    }
+
+    if (
+        (descriptor.usage & GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0 &&
+        (
+            descriptor.usage !==
+                (GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT) ||
+            descriptor.viewFormats.length !== 0 ||
+            descriptor.dimension !== '2d' ||
+            descriptor.mipLevelCount !== 1 ||
+            size.depthOrArrayLayers !== 1
+        )
+    ) {
+        throwTextureDescriptorDiagnostic(runtime.subject, actual, {
+            transientAttachment: {
+                usage: 'exactly TRANSIENT_ATTACHMENT | RENDER_ATTACHMENT',
+                viewFormats: 'empty',
+                dimension: '2d',
+                mipLevelCount: 1,
+                depthOrArrayLayers: 1,
             },
         })
     }

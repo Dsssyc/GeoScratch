@@ -161,6 +161,8 @@ sceneColor.resize(surface.size)
 
 `TextureResource.resize()` 是只改变 size 的 resource-lifecycle operation。它保留逻辑 object identity、id、runtime、label、format、usage、dimension、mip-level count、sample count、`viewFormats`、`textureBindingViewDimension` 与 `contentEpoch`。Scratch 会快照完整 physical descriptor，包括物化且不可变的 `viewFormats` iterable，因此调用方后续 mutation 不能改变下一次 replacement。
 
+公开 descriptor 是 read-only snapshot。Allocation transition bookkeeping 不是暴露给 package consumer 的 object method；`resize()` 是唯一公开 size-replacement 路径。确定性 validation 也保留完整 WebGPU transient-attachment contract：usage 必须恰好为 `TRANSIENT_ATTACHMENT | RENDER_ATTACHMENT`，`viewFormats` 为空，dimension 为 `2d`，mip-level count 为 `1`，depth 或 array-layer count 为 `1`。
+
 size 发生变化时采用 create-before-swap 顺序: normalize 并校验请求 size，创建完整 replacement allocation，安装新 allocation，清除 allocation-scoped views，恰好推进一次 `allocationVersion`，设置 `state = empty`，最后销毁旧 texture。下一次成功 content producer 从保留的 `contentEpoch` 继续递增。同步创建失败时，旧 allocation 的全部事实仍保持安装状态；Scratch 不会先销毁，也不会等待 queue completion。
 
 normalized same-size resize 是真正的 no-op。Raw `GPUTextureView` 属于 allocation-scoped 值；替换后 internal view cache、bind set 与 pass attachment 必须解析新 view。Resize 不接受 `Surface`、observer 或 size-provider callback。未来 tracked value 必须降低到同一个显式 primitive，而不是取代它。

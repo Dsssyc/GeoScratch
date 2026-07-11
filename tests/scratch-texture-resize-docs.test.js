@@ -45,6 +45,8 @@ describe('scratch texture resize documentation', () => {
         expect(runtime).to.include('does not install a `ResizeObserver`')
         expect(resources).to.include('create-before-swap')
         expect(resources).to.include('state = empty')
+        expect(resources).to.include('TRANSIENT_ATTACHMENT | RENDER_ATTACHMENT')
+        expect(resources).to.include('only public size-replacement path')
         expect(resources).to.not.include('sceneColor.invalidateSize()')
         expect(resources).to.not.include('size: derived(() => surface.size')
         expect(resourcesZh).to.not.include('sceneColor.invalidateSize()')
@@ -72,6 +74,7 @@ describe('scratch texture resize documentation', () => {
         expect(diagnostics).to.include('SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
         expect(diagnostics).to.include('SCRATCH_RESOURCE_ALLOCATION_REPLACEMENT_FAILED')
         expect(diagnostics).to.include('asynchronous WebGPU validation')
+        expect(diagnostics).to.include('transient-attachment')
     })
 
     it('keeps a strict canonical WebGPU declaration-consumer gate', () => {
@@ -103,6 +106,7 @@ describe('scratch texture resize documentation', () => {
         const review = read('docs', 'review', 'scratch-api-intelligent-friendly-review.md')
 
         expect(agents).to.include('`TextureResource.resize()`')
+        expect(agents).to.include('the only public texture allocation transition')
         expect(agents).to.include('must not wait for queue completion')
         expect(examples).to.include('`textureResize/`')
         expect(examples).to.include('exact padded readback bytes')

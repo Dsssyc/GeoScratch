@@ -5,7 +5,7 @@ import {
     ScratchRuntime,
     layoutCodec,
 } from 'geoscratch'
-import { createFakeGpu } from './scratch-test-utils.js'
+import { createFakeGpu, replaceResourceAllocationForTest } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
@@ -180,7 +180,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         const copyCount = calls.copies.length
         const queueSubmissionCount = calls.queueSubmissions.length
 
-        source._replaceAllocation(source.descriptor)
+        replaceResourceAllocationForTest(source)
 
         const diagnostic = await expectDiagnostic(() => readback.toBytes(), {
             code: 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE',
@@ -249,7 +249,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         const source = createReadableBuffer(runtime, 'stale allocation creation source')
         const submitted = submitUpload(runtime, source)
 
-        source._replaceAllocation(source.descriptor)
+        replaceResourceAllocationForTest(source)
 
         const diagnostic = await expectDiagnostic(() => runtime.createReadback({
             source,

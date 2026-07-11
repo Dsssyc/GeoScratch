@@ -79,16 +79,18 @@ textureBindingViewDimension
 
 The normalized size and the materialized `viewFormats` iterable are immutable
 snapshots. Caller mutation after construction cannot change a later physical
-replacement. Public allocation facts are read-only; `gpuTexture` may return a
-different identity after resize but cannot be assigned by a caller.
+replacement. The descriptor and public allocation facts are read-only;
+`gpuTexture` may return a different identity after resize but cannot be
+assigned by a caller. Allocation transition bookkeeping is internal, so
+`TextureResource.resize()` is the only public texture replacement path.
 
 ### Deterministic validation
 
 Before replacement, Scratch validates the requested size grammar, positive
 integer dimensions, device 2D dimension and layer limits, retained mip-level
-validity, retained sample-count constraints, and format block dimensions. It
-also validates the resource, runtime, device lifecycle, and native
-`createTexture()` capability.
+validity, retained sample-count constraints, transient-attachment descriptor
+constraints, and format block dimensions. It also validates the resource,
+runtime, device lifecycle, and native `createTexture()` capability.
 
 Deterministic size failures use
 `SCRATCH_RESOURCE_DESCRIPTOR_INVALID`. A synchronous exception thrown directly

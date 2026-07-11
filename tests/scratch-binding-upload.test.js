@@ -6,7 +6,11 @@ import {
     ScratchRuntime,
     UploadCommand,
 } from 'geoscratch'
-import { createFakeCanvas, createFakeGpu } from './scratch-test-utils.js'
+import {
+    createFakeCanvas,
+    createFakeGpu,
+    replaceResourceAllocationForTest,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_BUFFER_USAGE_UNIFORM = 0x40
@@ -184,7 +188,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
             ],
         })
 
-        fixture.uniformBuffer._replaceAllocation(fixture.uniformBuffer.descriptor)
+        replaceResourceAllocationForTest(fixture.uniformBuffer)
         const afterAllocationChange = fixture.bindSet.getBindGroup()
 
         expect(afterAllocationChange).not.to.equal(firstBindGroup)

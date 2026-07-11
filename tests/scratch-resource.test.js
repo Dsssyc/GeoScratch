@@ -6,6 +6,7 @@ import {
     ScratchRuntime,
     TextureResource,
 } from 'geoscratch'
+import { replaceResourceAllocationForTest } from './scratch-test-utils.js'
 
 function createFakeGpu() {
 
@@ -201,8 +202,8 @@ describe('scratch resources', () => {
         const bufferAllocationVersion = buffer.allocationVersion
         const textureAllocationVersion = texture.allocationVersion
 
-        buffer._replaceAllocation(buffer.descriptor)
-        texture._replaceAllocation(texture.descriptor)
+        replaceResourceAllocationForTest(buffer)
+        replaceResourceAllocationForTest(texture)
 
         expect(buffer.allocationVersion).to.equal(bufferAllocationVersion + 1)
         expect(texture.allocationVersion).to.equal(textureAllocationVersion + 1)

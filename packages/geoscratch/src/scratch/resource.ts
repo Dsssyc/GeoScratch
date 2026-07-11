@@ -16,14 +16,24 @@ export interface Resource {
     id: string
     label?: string
     resourceKind: string
-    descriptor: object
     isDisposed: boolean
     state: ResourceState
     allocationVersion: number
     contentEpoch: number
 }
 
+const allocationReplacers = new WeakMap<Resource, (descriptor: object) => void>()
+
+export function replaceResourceAllocation(resource: Resource, descriptor: object): void {
+
+    const replace = allocationReplacers.get(resource)
+    if (replace === undefined) throw new TypeError('Resource allocation transition is unavailable.')
+    replace(descriptor)
+}
+
 export class Resource {
+
+    #descriptor: object
 
     constructor(runtime: ScratchRuntime, options: ResourceOptions = {}) {
 
@@ -44,14 +54,25 @@ export class Resource {
         this.runtime = runtime
         this.id = `scratch-resource-${UUID()}`
         this.resourceKind = options.resourceKind ?? 'Resource'
-        this.descriptor = options.descriptor ?? {}
+        this.#descriptor = options.descriptor ?? {}
         this.isDisposed = false
         this.state = 'empty'
         this.allocationVersion = 1
         this.contentEpoch = 0
         if (options.label !== undefined) this.label = options.label
 
+        allocationReplacers.set(this, descriptor => {
+            this.#descriptor = descriptor
+            this.allocationVersion++
+            this.state = this.isDisposed ? 'disposed' : 'empty'
+        })
+
         runtime._registerResource(this)
+    }
+
+    get descriptor(): object {
+
+        return this.#descriptor
     }
 
     get subject(): DiagnosticSubject {
@@ -116,13 +137,6 @@ export class Resource {
         this.isDisposed = true
         this.state = 'disposed'
         this.runtime._unregisterResource(this)
-    }
-
-    _replaceAllocation(descriptor: object): void {
-
-        this.descriptor = descriptor
-        this.allocationVersion++
-        this.state = this.isDisposed ? 'disposed' : 'empty'
     }
 
     _advanceContentEpoch(): void {

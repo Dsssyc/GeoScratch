@@ -10,6 +10,7 @@ const GPU_TEXTURE_USAGE_COPY_SRC = 0x1
 const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
+const GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT = 0x20
 
 async function createFixture(descriptor = {}) {
 
@@ -296,6 +297,49 @@ describe('scratch texture resize', () => {
         )
     })
 
+    it('rejects transient attachment array layers before replacing the allocation', async() => {
+
+        const fixture = await createFixture({
+            usage:
+                GPU_TEXTURE_USAGE_RENDER_ATTACHMENT |
+                GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT,
+        })
+        const facts = captureTextureFacts(fixture.texture)
+        const textureCount = fixture.calls.textures.length
+
+        expectDiagnostic(
+            () => fixture.texture.resize([ 8, 8, 2 ]),
+            'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+        )
+
+        expectTextureFacts(fixture.texture, facts)
+        expect(fixture.calls.textures).to.have.length(textureCount)
+        expect(fixture.texture.gpuTexture.destroyed).to.equal(false)
+    })
+
+    it('validates the complete transient attachment descriptor contract', async() => {
+
+        const fixture = await createFixture()
+        const transientUsage =
+            GPU_TEXTURE_USAGE_RENDER_ATTACHMENT |
+            GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT
+        const invalidDescriptors = [
+            { usage: GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT },
+            { usage: transientUsage | GPU_TEXTURE_USAGE_COPY_SRC },
+            { usage: transientUsage, viewFormats: [ 'rgba8unorm-srgb' ] },
+            { usage: transientUsage, mipLevelCount: 2 },
+            { usage: transientUsage, size: [ 8, 8, 2 ] },
+        ]
+
+        for (const descriptor of invalidDescriptors) {
+            expectDiagnostic(() => fixture.runtime.createTexture({
+                size: [ 8, 8 ],
+                format: 'rgba8unorm',
+                ...descriptor,
+            }), 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
+        }
+    })
+
     it('leaves the old allocation fully installed after synchronous native failure', async() => {
 
         const fixture = await createFixture()
@@ -354,6 +398,7 @@ describe('scratch texture resize', () => {
         const facts = captureTextureFacts(fixture.texture)
 
         for (const [ key, value ] of [
+            [ 'descriptor', {} ],
             [ 'gpuTexture', {} ],
             [ 'size', { width: 99, height: 99, depthOrArrayLayers: 1 } ],
             [ 'width', 99 ],
@@ -371,6 +416,13 @@ describe('scratch texture resize', () => {
         }
 
         expectTextureFacts(fixture.texture, facts)
+    })
+
+    it('does not expose an alternate allocation transition on the resource object', async() => {
+
+        const fixture = await createFixture()
+
+        expect(fixture.texture._replaceAllocation).to.equal(undefined)
     })
 
     it('invalidates cached views and lazily rebuilds one bind group', async() => {

@@ -1,4 +1,11 @@
+import { replaceResourceAllocation } from '../packages/geoscratch/dist/scratch/resource.js'
+
 const fakeExternalImageSourcePlatforms = new Map()
+
+export function replaceResourceAllocationForTest(resource, descriptor = resource.descriptor) {
+
+    replaceResourceAllocation(resource, descriptor)
+}
 
 export function createFakeExternalImageSource(
     kind = 'ImageData',
