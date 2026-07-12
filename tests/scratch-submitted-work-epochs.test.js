@@ -165,7 +165,7 @@ function createCompute(runtime, input, output, readContentEpoch = input.contentE
     return { bindLayout, bindSet, program, pipeline, dispatch, pass }
 }
 
-function createRender(runtime, target, resources = { read: [], write: [] }) {
+async function createRender(runtime, target, resources = { read: [], write: [] }) {
 
     const program = runtime.createProgram({
         modules: [ triangleWgsl ],
@@ -174,7 +174,7 @@ function createRender(runtime, target, resources = { read: [], write: [] }) {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         program,
         bindLayouts: [],
         targets: [ { format: target.format } ],
@@ -1159,7 +1159,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             'rendered texture copy target',
             GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING
         )
-        const render = createRender(runtime, source)
+        const render = await createRender(runtime, source)
         const copy = runtime.createCopyCommand({
             label: 'copy rendered texture source',
             source: copySource(source, 1),
@@ -1213,7 +1213,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             size: { width: 2, height: 2 },
             whenMissing: 'throw',
         })
-        const render = createRender(runtime, renderTarget, {
+        const render = await createRender(runtime, renderTarget, {
             read: [ readResource(copied, 1) ],
             write: [],
         })
@@ -1762,7 +1762,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         const { runtime } = await createRuntimeFixture()
         const target = await createTexture(runtime, 'render target')
-        const render = createRender(runtime, target)
+        const render = await createRender(runtime, target)
         const submitted = runtime.createSubmission({ validation: 'throw' })
             .render(render.pass, [ render.draw ])
             .submit()
@@ -1798,7 +1798,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             target: input,
             data: new Uint8Array(16),
         })
-        const render = createRender(runtime, target, {
+        const render = await createRender(runtime, target, {
             read: [ readResource(input, 1) ],
             write: [ output ],
         })
@@ -1894,7 +1894,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             whenMissing: 'throw',
         })
         const compute = createCompute(runtime, copyTarget, computeOutput, 1)
-        const render = createRender(runtime, renderTarget, {
+        const render = await createRender(runtime, renderTarget, {
             read: [ readResource(computeOutput, 1) ],
             write: [],
         })

@@ -437,7 +437,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             ],
             entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
         })
-        const pipeline = fixture.runtime.createRenderPipeline({
+        const pipeline = await fixture.runtime.createRenderPipeline({
             program,
             bindLayouts: [ fixture.bindLayout ],
             targets: [ { format: surface.format } ],

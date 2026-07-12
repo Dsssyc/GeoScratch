@@ -4,7 +4,11 @@ import { BufferResource, createBufferResource } from './buffer.js'
 import { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
-import { ComputePipeline, RenderPipeline } from './pipeline.js'
+import {
+    ComputePipeline,
+    createRenderPipeline as createScratchRenderPipeline,
+    RenderPipeline,
+} from './pipeline.js'
 import { Program } from './program.js'
 import { QuerySetResource } from './query-set.js'
 import { ReadbackOperation } from './readback.js'
@@ -20,6 +24,7 @@ import type { BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './bi
 import type { BufferResourceDescriptor } from './buffer.js'
 import type { BeginOcclusionQueryCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
 import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchGpuPipelineOperationRecord } from './gpu-operation.js'
 import type { ComputePassSpecDescriptor, RenderPassSpecDescriptor } from './pass.js'
 import type { ComputePipelineDescriptor, RenderPipelineDescriptor } from './pipeline.js'
 import type { ProgramDescriptor } from './program.js'
@@ -67,6 +72,7 @@ export interface ScratchRuntime {
     readonly diagnostics: ScratchRuntimeDiagnostics
     _resources: Set<Resource>
     _surfaces: Set<Surface>
+    _pipelines: Set<RenderPipeline | ComputePipeline>
 }
 
 export class ScratchRuntime {
@@ -106,6 +112,7 @@ export class ScratchRuntime {
         })
         this._resources = new Set()
         this._surfaces = new Set()
+        this._pipelines = new Set()
         this.#diagnosticsController = new ScratchRuntimeDiagnosticsController(
             this,
             options.device,
@@ -324,13 +331,13 @@ export class ScratchRuntime {
         return this.createProgram(descriptor)
     }
 
-    createRenderPipeline(descriptor: RenderPipelineDescriptor) {
+    async createRenderPipeline(descriptor: RenderPipelineDescriptor): Promise<RenderPipeline> {
 
         this.assertActive()
-        return new RenderPipeline(this, descriptor)
+        return createScratchRenderPipeline(this, descriptor)
     }
 
-    renderPipeline(descriptor: RenderPipelineDescriptor) {
+    renderPipeline(descriptor: RenderPipelineDescriptor): Promise<RenderPipeline> {
 
         return this.createRenderPipeline(descriptor)
     }
@@ -508,6 +515,10 @@ export class ScratchRuntime {
             surface.dispose()
         }
 
+        for (const pipeline of [ ...this._pipelines ]) {
+            pipeline.dispose()
+        }
+
         for (const resource of [ ...this._resources ]) {
             resource.dispose()
         }
@@ -530,6 +541,24 @@ export class ScratchRuntime {
 
         this._resources.delete(resource)
         this.#diagnosticsController.unregisterResource(resource)
+    }
+
+    _registerPipeline(
+        pipeline: RenderPipeline | ComputePipeline,
+        creationOperation: ScratchGpuPipelineOperationRecord
+    ): void {
+
+        this.#diagnosticsController.registerPipeline({
+            ...(pipeline.label !== undefined ? { label: pipeline.label } : {}),
+            creationOperation,
+        })
+        this._pipelines.add(pipeline)
+    }
+
+    _unregisterPipeline(pipeline: RenderPipeline | ComputePipeline): void {
+
+        if (!this._pipelines.delete(pipeline)) return
+        this.#diagnosticsController.unregisterPipeline(pipeline.id)
     }
 
     _registerSurface(surface: Surface): void {

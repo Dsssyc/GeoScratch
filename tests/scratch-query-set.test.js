@@ -115,7 +115,7 @@ async function createRenderCommandFixture(runtime, pass) {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         program,
         bindLayouts: [],
         targets: [ { format: pass.color[0].format } ],

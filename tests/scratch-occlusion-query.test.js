@@ -58,7 +58,7 @@ async function createOcclusionFixture() {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         program,
         targets: [ { format: target.format } ],
     })

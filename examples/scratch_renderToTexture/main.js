@@ -161,12 +161,12 @@ async function main() {
             fragment: 'fsMain',
         },
     })
-    const offscreenPipeline = runtime.createRenderPipeline({
+    const offscreenPipeline = await runtime.createRenderPipeline({
         label: 'render to texture offscreen pipeline',
         program: offscreenProgram,
         targets: [ { format: offscreenTexture.format } ],
     })
-    const samplePipeline = runtime.createRenderPipeline({
+    const samplePipeline = await runtime.createRenderPipeline({
         label: 'render to texture sample pipeline',
         program: sampleProgram,
         bindLayouts: [ sampleBindLayout ],

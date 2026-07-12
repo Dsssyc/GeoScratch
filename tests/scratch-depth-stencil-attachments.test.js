@@ -37,7 +37,7 @@ async function createDepthFixture(depthFormat = 'depth24plus') {
             fragment: 'fsMain',
         },
     })
-    const depthPipeline = runtime.createRenderPipeline({
+    const depthPipeline = await runtime.createRenderPipeline({
         program,
         targets: [ { format: colorTarget.format } ],
         depthStencil: {
@@ -46,7 +46,7 @@ async function createDepthFixture(depthFormat = 'depth24plus') {
             depthCompare: 'less',
         },
     })
-    const colorOnlyPipeline = runtime.createRenderPipeline({
+    const colorOnlyPipeline = await runtime.createRenderPipeline({
         program,
         targets: [ { format: colorTarget.format } ],
     })
@@ -690,7 +690,7 @@ describe('scratch depth/stencil render attachments', () => {
             passDepthStencilFormat: undefined,
         })
 
-        const mismatchPipeline = fixture.runtime.createRenderPipeline({
+        const mismatchPipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
             targets: [ { format: fixture.colorTarget.format } ],
             depthStencil: {

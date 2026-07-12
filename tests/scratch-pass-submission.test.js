@@ -34,7 +34,7 @@ async function createTriangleScene(format = 'bgra8unorm') {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         program,
         targets: [ { format } ],
     })
@@ -109,7 +109,7 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         program,
         targets: [ { format } ],
     })
@@ -648,7 +648,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('rejects render pipeline target format mismatches against TextureResource attachments', async() => {
 
         const fixture = await createRenderTargetScene('rgba8unorm')
-        const mismatchedPipeline = fixture.runtime.createRenderPipeline({
+        const mismatchedPipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
             targets: [ { format: 'bgra8unorm' } ],
         })

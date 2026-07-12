@@ -35,7 +35,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
 
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             label: 'hello triangle pipeline',
             program,
             vertex: 'vsMain',
@@ -50,7 +50,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         expect(pipeline.targetFormats).to.deep.equal([ 'bgra8unorm' ])
         expect(calls.pipelineLayouts).to.have.length(1)
         expect(calls.pipelineLayouts[0].descriptor).to.deep.equal({
-            label: 'hello triangle pipeline layout',
+            label: `hello triangle pipeline layout [scratch:${pipeline.id}]`,
             bindGroupLayouts: [],
         })
         expect(calls.renderPipelines).to.have.length(1)
@@ -85,7 +85,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             },
         ]
 
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             label: 'vertex layout pipeline',
             program,
             vertexBuffers,
@@ -103,7 +103,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const program = createProgram(runtime)
 
         try {
-            runtime.createRenderPipeline({
+            await runtime.createRenderPipeline({
                 program,
                 vertexBuffers: [
                     {
@@ -136,7 +136,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const program = createProgram(runtimeA)
 
         try {
-            runtimeB.createRenderPipeline({
+            await runtimeB.createRenderPipeline({
                 program,
                 targets: [ { format: 'bgra8unorm' } ],
             })
@@ -158,7 +158,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu, calls } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
@@ -200,7 +200,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu, calls } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             vertexBuffers: [
                 {
@@ -285,7 +285,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
@@ -316,7 +316,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
@@ -350,7 +350,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
@@ -395,7 +395,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
@@ -462,7 +462,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const runtimeA = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
         const runtimeB = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
         const program = createProgram(runtimeA)
-        const pipeline = runtimeA.createRenderPipeline({
+        const pipeline = await runtimeA.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
@@ -499,7 +499,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
@@ -536,7 +536,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const runtimeA = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
         const runtimeB = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
         const program = createProgram(runtimeA)
-        const pipeline = runtimeA.createRenderPipeline({
+        const pipeline = await runtimeA.createRenderPipeline({
             program,
             vertexBuffers: [
                 {
@@ -584,7 +584,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             vertexBuffers: [
                 {
@@ -632,7 +632,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             vertexBuffers: [
                 {
@@ -681,7 +681,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
         })
@@ -715,7 +715,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const pipeline = runtime.createRenderPipeline({
+        const pipeline = await runtime.createRenderPipeline({
             label: 'temporary pipeline',
             program,
             targets: [ { format: 'bgra8unorm' } ],

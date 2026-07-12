@@ -261,6 +261,7 @@ export type ScratchGpuIncidentInput = Readonly<{
     target?: ScratchGpuOperationTarget
     operationId?: string
     triggerOperation?: ScratchGpuOperationRecord
+    related?: readonly DiagnosticSubject[]
     nativeError?: ScratchNativeGpuErrorFacts
     triggerLogicalFootprintBytes?: number
     failureStage?: ScratchGpuIncidentFailureStage
@@ -697,6 +698,7 @@ export class ScratchRuntimeDiagnosticsController {
             target,
             ...(input.operationId !== undefined ? { operationId: input.operationId } : {}),
             ...(input.triggerOperation !== undefined ? { triggerOperation: input.triggerOperation } : {}),
+            ...(input.related !== undefined ? { related: input.related } : {}),
             ...(input.nativeError !== undefined ? { nativeError: input.nativeError } : {}),
             recentOperations,
             ...(pendingOperations.length > 0 ? { pendingOperations } : {}),

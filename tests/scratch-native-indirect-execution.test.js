@@ -30,7 +30,7 @@ async function createRenderFixture() {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         program,
         targets: [ { format: 'rgba8unorm' } ],
     })
@@ -475,7 +475,7 @@ describe('scratch native indexed and indirect execution', () => {
     it('validates strip pipeline index formats before native encoding', async() => {
 
         const fixture = await createRenderFixture()
-        const stripPipeline = fixture.runtime.createRenderPipeline({
+        const stripPipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
             primitive: {
                 topology: 'triangle-strip',
@@ -501,7 +501,7 @@ describe('scratch native indexed and indirect execution', () => {
     it('requires every pipeline vertex slot for direct, indexed, and indirect draws', async() => {
 
         const fixture = await createRenderFixture()
-        const vertexPipeline = fixture.runtime.createRenderPipeline({
+        const vertexPipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
             vertexBuffers: [ {
                 arrayStride: 8,
@@ -590,7 +590,7 @@ describe('scratch native indexed and indirect execution', () => {
             } ],
         })
         const bindSet = fixture.runtime.createBindSet(bindLayout, { input: boundBuffer })
-        const boundPipeline = fixture.runtime.createRenderPipeline({
+        const boundPipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
             bindLayouts: [ bindLayout ],
             targets: [ { format: 'rgba8unorm' } ],
@@ -908,7 +908,7 @@ describe('scratch native indexed and indirect execution', () => {
     it('requires explicit epoch reads for every fixed-function buffer role', async() => {
 
         const render = await createRenderFixture()
-        const vertexPipeline = render.runtime.createRenderPipeline({
+        const vertexPipeline = await render.runtime.createRenderPipeline({
             program: render.program,
             vertexBuffers: [ {
                 arrayStride: 8,

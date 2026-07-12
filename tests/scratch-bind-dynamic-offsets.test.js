@@ -158,7 +158,7 @@ async function createRenderFixture(entries = [ dynamicUniformEntry() ]) {
             fragment: 'fsMain',
         },
     })
-    const pipeline = fixture.runtime.createRenderPipeline({
+    const pipeline = await fixture.runtime.createRenderPipeline({
         label: 'dynamic render pipeline',
         program,
         bindLayouts: [ bindLayout ],

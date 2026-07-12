@@ -219,6 +219,7 @@ export type ScratchGpuIncidentOutcome = Readonly<{
     stage: ScratchGpuIncidentFailureStage
     diagnosticCode: string
     nativeErrorCategory: GpuNativeErrorCategory
+    subject?: DiagnosticSubject
     pipelineErrorReason?: GPUPipelineErrorReason
     nativeError?: ScratchNativeGpuErrorFacts
 }>

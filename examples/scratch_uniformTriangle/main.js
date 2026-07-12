@@ -73,7 +73,7 @@ async function main() {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         label: 'scratch uniform triangle pipeline',
         program,
         bindLayouts: [ bindLayout ],

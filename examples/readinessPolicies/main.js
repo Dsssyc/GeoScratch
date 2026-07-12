@@ -181,32 +181,32 @@ async function main() {
         entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
     })
 
-    const seedPipeline = runtime.createRenderPipeline({
+    const seedPipeline = await runtime.createRenderPipeline({
         label: 'preserved checker pipeline',
         program: seedProgram,
         targets: [ { format: offscreenTexture.format } ],
     })
-    const destructivePipeline = runtime.createRenderPipeline({
+    const destructivePipeline = await runtime.createRenderPipeline({
         label: 'destructive offscreen pipeline',
         program: destructiveProgram,
         targets: [ { format: offscreenTexture.format } ],
     })
-    const fallbackPipeline = runtime.createRenderPipeline({
+    const fallbackPipeline = await runtime.createRenderPipeline({
         label: 'fallback green pipeline',
         program: fallbackProgram,
         targets: [ { format: surface.format } ],
     })
-    const primaryPipeline = runtime.createRenderPipeline({
+    const primaryPipeline = await runtime.createRenderPipeline({
         label: 'primary red pipeline',
         program: primaryProgram,
         targets: [ { format: surface.format } ],
     })
-    const optionalPipeline = runtime.createRenderPipeline({
+    const optionalPipeline = await runtime.createRenderPipeline({
         label: 'optional magenta pipeline',
         program: optionalProgram,
         targets: [ { format: surface.format } ],
     })
-    const samplePipeline = runtime.createRenderPipeline({
+    const samplePipeline = await runtime.createRenderPipeline({
         label: 'preserved texture sample pipeline',
         program: sampleProgram,
         bindLayouts: [ sampleLayout ],

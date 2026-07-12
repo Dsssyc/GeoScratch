@@ -321,7 +321,13 @@ export function createFakeGpu(options = {}) {
             : 'createComputePipelineAsync'
         calls.nativeTimeline.push({ type: `create-${kind}-pipeline-async` })
         applyPromiseMethodSynchronousFailure(method)
-        const pipeline = { type: `${kind}Pipeline`, descriptor }
+        const pipeline = {
+            type: `${kind}Pipeline`,
+            descriptor,
+            getBindGroupLayout(index) {
+                return descriptor.layout?.descriptor?.bindGroupLayouts?.[index]
+            },
+        }
         const targetCalls = kind === 'render' ? calls.renderPipelines : calls.computePipelines
         let installed = false
         const install = () => {
@@ -585,6 +591,9 @@ export function createFakeGpu(options = {}) {
             const pipeline = {
                 type: 'renderPipeline',
                 descriptor,
+                getBindGroupLayout(index) {
+                    return descriptor.layout?.descriptor?.bindGroupLayouts?.[index]
+                },
             }
             calls.renderPipelines.push(pipeline)
             return pipeline
@@ -593,6 +602,9 @@ export function createFakeGpu(options = {}) {
             const pipeline = {
                 type: 'computePipeline',
                 descriptor,
+                getBindGroupLayout(index) {
+                    return descriptor.layout?.descriptor?.bindGroupLayouts?.[index]
+                },
             }
             calls.computePipelines.push(pipeline)
             return pipeline

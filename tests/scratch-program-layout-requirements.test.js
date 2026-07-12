@@ -305,7 +305,7 @@ describe('scratch Program buffer layout requirements', () => {
             visibility: [ 'compute' ],
         })
 
-        const renderPipeline = runtime.createRenderPipeline({
+        const renderPipeline = await runtime.createRenderPipeline({
             program: renderProgram,
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],
@@ -423,7 +423,7 @@ describe('scratch Program buffer layout requirements', () => {
         })
         const renderProgram = createRenderProgram(runtime, renderCodec)
         const computeProgram = createProgram(runtime, computeCodec)
-        const renderPipeline = runtime.createRenderPipeline({
+        const renderPipeline = await runtime.createRenderPipeline({
             program: renderProgram,
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],
@@ -474,7 +474,7 @@ describe('scratch Program buffer layout requirements', () => {
         const computeLayout = createBindLayout(runtime, {
             visibility: [ 'compute' ],
         })
-        const renderPipeline = runtime.createRenderPipeline({
+        const renderPipeline = await runtime.createRenderPipeline({
             program: createRenderProgram(runtime, codec),
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],
@@ -523,7 +523,7 @@ describe('scratch Program buffer layout requirements', () => {
         const computeLayout = createBindLayout(runtime, {
             visibility: [ 'compute' ],
         })
-        const renderPipeline = runtime.createRenderPipeline({
+        const renderPipeline = await runtime.createRenderPipeline({
             program: createRenderProgram(runtime, codec),
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],
@@ -582,7 +582,7 @@ describe('scratch Program buffer layout requirements', () => {
         const computeLayout = createBindLayout(runtime, {
             visibility: [ 'compute' ],
         })
-        const renderPipeline = runtime.createRenderPipeline({
+        const renderPipeline = await runtime.createRenderPipeline({
             program: createRenderProgram(runtime, codec),
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],

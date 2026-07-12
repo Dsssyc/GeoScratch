@@ -24,7 +24,7 @@ async function createRenderFixture() {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         program,
         targets: [ { format: 'rgba8unorm' } ],
     })

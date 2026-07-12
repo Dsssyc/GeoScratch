@@ -114,7 +114,7 @@ async function main() {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         label: 'texture sampling pipeline',
         program,
         bindLayouts: [ bindLayout ],

@@ -166,7 +166,7 @@ async function main() {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         label: 'external image sample pipeline',
         program,
         bindLayouts: [ bindLayout ],

@@ -37,7 +37,7 @@ async function createRenderFixture() {
         modules: [ triangleWgsl ],
         entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         program,
         targets: [ { format: 'rgba8unorm' } ],
     })
@@ -659,7 +659,7 @@ describe('scratch readiness fallback execution outcomes', () => {
 
         const fixture = await createRenderFixture()
         const missing = await createBuffer(fixture, 'primary input')
-        const incompatiblePipeline = fixture.runtime.createRenderPipeline({
+        const incompatiblePipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
             targets: [ { format: 'bgra8unorm' } ],
         })
@@ -720,7 +720,7 @@ describe('scratch readiness fallback execution outcomes', () => {
 
         const fixture = await createRenderFixture()
         const missing = await createBuffer(fixture, 'primary input')
-        const incompatiblePipeline = fixture.runtime.createRenderPipeline({
+        const incompatiblePipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
             targets: [
                 { format: 'rgba8unorm' },

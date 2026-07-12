@@ -135,7 +135,7 @@ async function main() {
             fragment: 'fsMain',
         },
     })
-    const renderPipeline = runtime.createRenderPipeline({
+    const renderPipeline = await runtime.createRenderPipeline({
         label: 'indirect render pipeline',
         program: renderProgram,
         targets: [ { format: surface.format } ],

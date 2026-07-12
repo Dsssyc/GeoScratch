@@ -89,7 +89,7 @@ async function createUniformFixture(format = 'bgra8unorm') {
             fragment: 'fsMain',
         },
     })
-    const pipeline = runtime.createRenderPipeline({
+    const pipeline = await runtime.createRenderPipeline({
         label: 'uniform triangle pipeline',
         program,
         bindLayouts: [ bindLayout ],
@@ -217,7 +217,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         expect(fixture.calls.queueWrites[0].data).to.be.instanceOf(Uint8Array)
         expect(fixture.calls.queueWrites[0].data.byteLength).to.equal(fixture.upload.byteLength)
         expect(fixture.calls.pipelineLayouts[0].descriptor).to.deep.equal({
-            label: 'uniform triangle pipeline layout',
+            label: `uniform triangle pipeline layout [scratch:${fixture.pipeline.id}]`,
             bindGroupLayouts: [ fixture.bindLayout.gpuBindGroupLayout ],
         })
         expect(fixture.calls.renderPasses[0].actions).to.deep.equal([
@@ -290,7 +290,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         const fixtureB = await createUniformFixture()
 
         try {
-            fixtureA.runtime.createRenderPipeline({
+            await fixtureA.runtime.createRenderPipeline({
                 program: fixtureA.program,
                 bindLayouts: [ fixtureB.bindLayout ],
                 targets: [ { format: fixtureA.surface.format } ],
