@@ -30,6 +30,7 @@ import type {
     ScratchNativeGpuErrorFacts,
 } from './gpu-operation.js'
 import type { PipelineCompilationReport, PipelineKind } from './pipeline-compilation.js'
+import type { ScratchReadbackPolicy } from './readback-ownership.js'
 import type { Resource, ResourceState } from './resource.js'
 
 const DEFAULT_OPERATION_CAPACITY = 256
@@ -112,6 +113,54 @@ export type ScratchRuntimePipelineRegistration = Readonly<{
     creationOperation: ScratchGpuPipelineOperationRecord
 }>
 
+export type ScratchReadbackCommandState =
+    | 'allocating'
+    | 'idle'
+    | 'claimed'
+    | 'submitted'
+    | 'mapping'
+    | 'releasing'
+    | 'disposed'
+    | 'failed'
+
+export type ScratchRuntimeReadbackCommandFact = Readonly<{
+    id: string
+    label?: string
+    sourceResourceId: string
+    allocationVersion: number
+    contentEpoch: number
+    byteLength: number
+    state: ScratchReadbackCommandState
+    stagingAllocationOperationId?: string
+}>
+
+export type ScratchRuntimeReadbackOperationFact = Readonly<{
+    id: string
+    label?: string
+    path: 'direct' | 'ordered'
+    state: string
+    retain: 'consume-on-read' | 'until-dispose'
+    sourceResourceId: string
+    allocationVersion: number
+    contentEpoch: number
+    byteLength: number
+    stagingBytes: number
+    retainedHostBytes: number
+    isMapping: boolean
+    commandId?: string
+    submissionId?: string
+    stepIndex?: number
+    lastStagingOperationId?: string
+    lastMappingOperationId?: string
+}>
+
+export type ScratchReadbackStagingReservation = Readonly<{
+    id: string
+    byteLength: number
+    readonly isReleased: boolean
+    release(): void
+}>
+
 export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
     version: 3
     runtime: Readonly<{
@@ -122,11 +171,23 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
     }>
     resources: readonly ScratchRuntimeResourceFact[]
     pipelines: readonly ScratchRuntimePipelineFact[]
+    readbackCommands: readonly ScratchRuntimeReadbackCommandFact[]
+    readbacks: readonly ScratchRuntimeReadbackOperationFact[]
     pendingOperations: readonly ScratchPendingGpuOperationFact[]
     pressure: Readonly<{
         currentScratchLogicalFootprintBytes: number
         peakScratchLogicalFootprintBytes: number
         liveResourceCounts: Readonly<Record<string, number>>
+    }>
+    readbackMemory: Readonly<{
+        maxPendingOperations: number
+        maxStagingBytes: number
+        currentStagingBytes: number
+        peakStagingBytes: number
+        currentRetainedHostBytes: number
+        peakRetainedHostBytes: number
+        activeMappings: number
+        peakActiveMappings: number
     }>
     recorder: Readonly<{
         operationCapacity: number
@@ -408,9 +469,13 @@ export class ScratchRuntimeDiagnosticsController {
     #owner: RuntimeDiagnosticsOwner
     #device: GPUDevice
     #options: NormalizedScratchRuntimeDiagnosticsOptions
+    #readbackPolicy: ScratchReadbackPolicy
     #facade: ScratchRuntimeDiagnostics
     #resourceFacts = new Map<string, ScratchRuntimeResourceFact>()
     #pipelineFacts = new Map<string, ScratchRuntimePipelineFact>()
+    #readbackCommandFacts = new Map<string, ScratchRuntimeReadbackCommandFact>()
+    #readbackFacts = new Map<string, ScratchRuntimeReadbackOperationFact>()
+    #readbackStagingReservations = new Map<string, number>()
     #pendingOperations = new Map<string, ScratchPendingGpuOperation>()
     #completedOperations = new WeakSet<ScratchGpuOperationRecord>()
     #registeredPipelineCreations = new WeakSet<ScratchGpuPipelineOperationRecord>()
@@ -427,6 +492,12 @@ export class ScratchRuntimeDiagnosticsController {
     #omittedRecords = 0
     #currentLogicalFootprintBytes = 0
     #peakLogicalFootprintBytes = 0
+    #currentReadbackStagingBytes = 0
+    #peakReadbackStagingBytes = 0
+    #currentRetainedHostBytes = 0
+    #peakRetainedHostBytes = 0
+    #activeMappings = 0
+    #peakActiveMappings = 0
     #aggregates: AggregateFacts = {
         allocationAttempts: 0,
         successfulAllocations: 0,
@@ -455,12 +526,14 @@ export class ScratchRuntimeDiagnosticsController {
     constructor(
         owner: RuntimeDiagnosticsOwner,
         device: GPUDevice,
-        options: ScratchRuntimeDiagnosticsOptions = {}
+        options: ScratchRuntimeDiagnosticsOptions = {},
+        readbackPolicy: ScratchReadbackPolicy
     ) {
 
         this.#owner = owner
         this.#device = device
         this.#options = normalizeDiagnosticsOptions(owner, options)
+        this.#readbackPolicy = readbackPolicy
         this.#facade = createDiagnosticsFacade(this)
         this.#installUncapturedErrorListener()
     }
@@ -496,6 +569,10 @@ export class ScratchRuntimeDiagnosticsController {
             .sort((left, right) => left.id.localeCompare(right.id))
         const pipelines = [ ...this.#pipelineFacts.values() ]
             .sort((left, right) => left.id.localeCompare(right.id))
+        const readbackCommands = [ ...this.#readbackCommandFacts.values() ]
+            .sort((left, right) => left.id.localeCompare(right.id))
+        const readbacks = [ ...this.#readbackFacts.values() ]
+            .sort((left, right) => left.id.localeCompare(right.id))
         const pendingOperations = [ ...this.#pendingOperations.values() ]
             .sort((left, right) => left.sequence - right.sequence)
             .map(operation => pendingFact(operation))
@@ -510,11 +587,23 @@ export class ScratchRuntimeDiagnosticsController {
             },
             resources,
             pipelines,
+            readbackCommands,
+            readbacks,
             pendingOperations,
             pressure: {
                 currentScratchLogicalFootprintBytes: this.#currentLogicalFootprintBytes,
                 peakScratchLogicalFootprintBytes: this.#peakLogicalFootprintBytes,
                 liveResourceCounts: this.#liveResourceCounts(),
+            },
+            readbackMemory: {
+                maxPendingOperations: this.#readbackPolicy.maxPendingOperations,
+                maxStagingBytes: this.#readbackPolicy.maxStagingBytes,
+                currentStagingBytes: this.#currentReadbackStagingBytes,
+                peakStagingBytes: this.#peakReadbackStagingBytes,
+                currentRetainedHostBytes: this.#currentRetainedHostBytes,
+                peakRetainedHostBytes: this.#peakRetainedHostBytes,
+                activeMappings: this.#activeMappings,
+                peakActiveMappings: this.#peakActiveMappings,
             },
             recorder: {
                 operationCapacity: this.#options.operationCapacity,
@@ -885,6 +974,98 @@ export class ScratchRuntimeDiagnosticsController {
         }))
     }
 
+    registerReadbackCommand(fact: ScratchRuntimeReadbackCommandFact): void {
+
+        if (this.#readbackCommandFacts.has(fact.id)) {
+            throw new TypeError(`Readback command ${fact.id} is already registered.`)
+        }
+        this.#readbackCommandFacts.set(fact.id, readbackCommandFact(fact))
+    }
+
+    updateReadbackCommand(
+        commandId: string,
+        update: Partial<Omit<ScratchRuntimeReadbackCommandFact, 'id'>>
+    ): void {
+
+        const previous = this.#readbackCommandFacts.get(commandId)
+        if (previous === undefined) throw new TypeError(`Readback command ${commandId} is not registered.`)
+        this.#readbackCommandFacts.set(commandId, readbackCommandFact({ ...previous, ...update, id: commandId }))
+    }
+
+    unregisterReadbackCommand(commandId: string): void {
+
+        this.#readbackCommandFacts.delete(commandId)
+    }
+
+    registerReadbackOperation(fact: ScratchRuntimeReadbackOperationFact): void {
+
+        if (this.#readbackFacts.has(fact.id)) {
+            throw new TypeError(`Readback operation ${fact.id} is already registered.`)
+        }
+        if (this.#readbackFacts.size >= this.#readbackPolicy.maxPendingOperations) {
+            this.#throwReadbackBudget('pending-operations', 1)
+        }
+        this.#readbackFacts.set(fact.id, readbackOperationFact(fact))
+        this.#recalculateReadbackOperationMemory()
+    }
+
+    updateReadbackOperation(
+        readbackId: string,
+        update: Partial<Omit<ScratchRuntimeReadbackOperationFact, 'id'>>
+    ): void {
+
+        const previous = this.#readbackFacts.get(readbackId)
+        if (previous === undefined) throw new TypeError(`Readback operation ${readbackId} is not registered.`)
+        this.#readbackFacts.set(readbackId, readbackOperationFact({ ...previous, ...update, id: readbackId }))
+        this.#recalculateReadbackOperationMemory()
+    }
+
+    unregisterReadbackOperation(readbackId: string): void {
+
+        if (!this.#readbackFacts.delete(readbackId)) return
+        this.#recalculateReadbackOperationMemory()
+    }
+
+    reserveReadbackStaging(reservationId: string, byteLength: number): ScratchReadbackStagingReservation {
+
+        if (!Number.isSafeInteger(byteLength) || byteLength <= 0) {
+            throw new TypeError('Readback staging byteLength must be a positive safe integer.')
+        }
+        if (this.#readbackStagingReservations.has(reservationId)) {
+            throw new TypeError(`Readback staging reservation ${reservationId} already exists.`)
+        }
+        if (this.#currentReadbackStagingBytes + byteLength > this.#readbackPolicy.maxStagingBytes) {
+            this.#throwReadbackBudget('staging-bytes', byteLength)
+        }
+
+        this.#readbackStagingReservations.set(reservationId, byteLength)
+        this.#currentReadbackStagingBytes += byteLength
+        this.#peakReadbackStagingBytes = Math.max(
+            this.#peakReadbackStagingBytes,
+            this.#currentReadbackStagingBytes
+        )
+
+        let isReleased = false
+        const controller = this
+        return Object.freeze({
+            id: reservationId,
+            byteLength,
+            get isReleased() {
+
+                return isReleased
+            },
+            release() {
+
+                if (isReleased) return
+                isReleased = true
+                const reserved = controller.#readbackStagingReservations.get(reservationId)
+                if (reserved === undefined) return
+                controller.#readbackStagingReservations.delete(reservationId)
+                controller.#currentReadbackStagingBytes -= reserved
+            },
+        })
+    }
+
     unregisterPipeline(pipelineId: string): void {
 
         const fact = this.#pipelineFacts.get(pipelineId)
@@ -984,6 +1165,12 @@ export class ScratchRuntimeDiagnosticsController {
             this.#device.removeEventListener('uncapturederror', this.#uncapturedErrorListener)
         }
         for (const capture of [ ...this.#captures ]) stopCapture(capture, 'runtime-disposed')
+        this.#readbackCommandFacts.clear()
+        this.#readbackFacts.clear()
+        this.#readbackStagingReservations.clear()
+        this.#currentReadbackStagingBytes = 0
+        this.#currentRetainedHostBytes = 0
+        this.#activeMappings = 0
     }
 
     #publishLifecycleChange(change: ScratchRuntimeLifecycleChange): void {
@@ -1233,6 +1420,39 @@ export class ScratchRuntimeDiagnosticsController {
             this.#peakLogicalFootprintBytes,
             this.#currentLogicalFootprintBytes
         )
+    }
+
+    #recalculateReadbackOperationMemory(): void {
+
+        this.#currentRetainedHostBytes = [ ...this.#readbackFacts.values() ]
+            .reduce((total, fact) => total + fact.retainedHostBytes, 0)
+        this.#peakRetainedHostBytes = Math.max(
+            this.#peakRetainedHostBytes,
+            this.#currentRetainedHostBytes
+        )
+        this.#activeMappings = [ ...this.#readbackFacts.values() ]
+            .filter(fact => fact.isMapping).length
+        this.#peakActiveMappings = Math.max(this.#peakActiveMappings, this.#activeMappings)
+    }
+
+    #throwReadbackBudget(kind: 'pending-operations' | 'staging-bytes', requested: number): never {
+
+        const isPending = kind === 'pending-operations'
+        throwScratchDiagnostic({
+            code: 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED',
+            severity: 'error',
+            phase: 'readback',
+            subject: this.#runtimeSubject(),
+            message: isPending
+                ? 'ScratchRuntime readback pending-operation budget is exhausted.'
+                : 'ScratchRuntime readback staging-byte budget is exhausted.',
+            expected: isPending
+                ? { maxPendingOperations: this.#readbackPolicy.maxPendingOperations }
+                : { maxStagingBytes: this.#readbackPolicy.maxStagingBytes },
+            actual: isPending
+                ? { currentPendingOperations: this.#readbackFacts.size, requested }
+                : { currentStagingBytes: this.#currentReadbackStagingBytes, requested },
+        })
     }
 
     #setPendingReplacement(resourceId: string, operationId: string): void {
@@ -1565,6 +1785,53 @@ function assertPendingGpuOperationKind(
         kind === 'readback-mapping'
     ) return
     throw new TypeError(`GPU operation ${String(kind)} cannot be pending.`)
+}
+
+function readbackCommandFact(
+    fact: ScratchRuntimeReadbackCommandFact
+): ScratchRuntimeReadbackCommandFact {
+
+    return Object.freeze({
+        id: fact.id,
+        ...(fact.label !== undefined ? { label: boundedLabel(fact.label) } : {}),
+        sourceResourceId: fact.sourceResourceId,
+        allocationVersion: fact.allocationVersion,
+        contentEpoch: fact.contentEpoch,
+        byteLength: fact.byteLength,
+        state: fact.state,
+        ...(fact.stagingAllocationOperationId !== undefined
+            ? { stagingAllocationOperationId: fact.stagingAllocationOperationId }
+            : {}),
+    })
+}
+
+function readbackOperationFact(
+    fact: ScratchRuntimeReadbackOperationFact
+): ScratchRuntimeReadbackOperationFact {
+
+    return Object.freeze({
+        id: fact.id,
+        ...(fact.label !== undefined ? { label: boundedLabel(fact.label) } : {}),
+        path: fact.path,
+        state: fact.state,
+        retain: fact.retain,
+        sourceResourceId: fact.sourceResourceId,
+        allocationVersion: fact.allocationVersion,
+        contentEpoch: fact.contentEpoch,
+        byteLength: fact.byteLength,
+        stagingBytes: fact.stagingBytes,
+        retainedHostBytes: fact.retainedHostBytes,
+        isMapping: fact.isMapping,
+        ...(fact.commandId !== undefined ? { commandId: fact.commandId } : {}),
+        ...(fact.submissionId !== undefined ? { submissionId: fact.submissionId } : {}),
+        ...(fact.stepIndex !== undefined ? { stepIndex: fact.stepIndex } : {}),
+        ...(fact.lastStagingOperationId !== undefined
+            ? { lastStagingOperationId: fact.lastStagingOperationId }
+            : {}),
+        ...(fact.lastMappingOperationId !== undefined
+            ? { lastMappingOperationId: fact.lastMappingOperationId }
+            : {}),
+    })
 }
 
 function resourceFact(

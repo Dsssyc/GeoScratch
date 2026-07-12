@@ -50,8 +50,11 @@ export type {
     PipelineKind,
 } from './pipeline-compilation.js'
 export { ScratchRuntime } from './runtime.js'
+export type { ScratchRuntimeCreateOptions } from './runtime.js'
+export type { ScratchReadbackOptions, ScratchReadbackPolicy } from './readback-ownership.js'
 export { ScratchDiagnosticCapture, ScratchRuntimeDiagnostics } from './runtime-diagnostics.js'
 export type {
+    ScratchReadbackCommandState,
     ScratchDeviceLostInfo,
     ScratchDiagnosticCaptureOptions,
     ScratchDiagnosticCaptureReport,
@@ -63,6 +66,8 @@ export type {
     ScratchRuntimeDiagnosticsEvidence,
     ScratchRuntimeDiagnosticsSnapshot,
     ScratchRuntimePipelineFact,
+    ScratchRuntimeReadbackCommandFact,
+    ScratchRuntimeReadbackOperationFact,
     ScratchRuntimeResourceFact,
 } from './runtime-diagnostics.js'
 export { Surface } from './surface.js'

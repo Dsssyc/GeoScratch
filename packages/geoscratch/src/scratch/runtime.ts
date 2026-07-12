@@ -12,6 +12,7 @@ import { runtimePipelineSnapshot } from './pipeline-ownership.js'
 import { Program } from './program.js'
 import { QuerySetResource } from './query-set.js'
 import { ReadbackOperation } from './readback.js'
+import { normalizeScratchReadbackPolicy } from './readback-ownership.js'
 import {
     registerRuntimeDiagnostics,
     retainDeviceLostInfo,
@@ -35,6 +36,7 @@ import type {
 import type { ProgramDescriptor } from './program.js'
 import type { QuerySetResourceDescriptor } from './query-set.js'
 import type { ReadbackOperationDescriptor } from './readback.js'
+import type { ScratchReadbackOptions, ScratchReadbackPolicy } from './readback-ownership.js'
 import type { Resource } from './resource.js'
 import type {
     ScratchRuntimeDiagnostics,
@@ -56,12 +58,14 @@ export type ScratchRuntimeCreateOptions = {
     requiredFeatures?: Iterable<GPUFeatureName>
     requiredLimits?: Record<string, number>
     diagnostics?: ScratchRuntimeDiagnosticsOptions
+    readback?: ScratchReadbackOptions
 }
 
 type ScratchRuntimeConstructorOptions = ScratchRuntimeCreateOptions & {
     gpu: GPU
     adapter: GPUAdapter
     device: GPUDevice
+    readbackPolicy: ScratchReadbackPolicy
 }
 
 export interface ScratchRuntime {
@@ -76,6 +80,7 @@ export interface ScratchRuntime {
     readonly deviceFeatures: GPUSupportedFeatures
     readonly deviceLimits: GPUSupportedLimits
     readonly diagnostics: ScratchRuntimeDiagnostics
+    readonly readbackPolicy: ScratchReadbackPolicy
     _resources: Set<Resource>
     _surfaces: Set<Surface>
 }
@@ -111,6 +116,7 @@ export class ScratchRuntime {
             adapterLimits: immutableRuntimeProperty(options.adapter.limits),
             deviceFeatures: immutableRuntimeProperty(options.device.features),
             deviceLimits: immutableRuntimeProperty(options.device.limits),
+            readbackPolicy: immutableRuntimeProperty(options.readbackPolicy),
             isDisposed: immutableRuntimeGetter(() => this.#isDisposed),
             isDeviceLost: immutableRuntimeGetter(() => this.#isDeviceLost),
             deviceLostInfo: immutableRuntimeGetter(() => this.#deviceLostInfo),
@@ -120,7 +126,8 @@ export class ScratchRuntime {
         this.#diagnosticsController = new ScratchRuntimeDiagnosticsController(
             this,
             options.device,
-            options.diagnostics
+            options.diagnostics,
+            options.readbackPolicy
         )
         registerRuntimeDiagnostics(this, this.#diagnosticsController)
         Object.defineProperty(this, 'diagnostics', {
@@ -156,6 +163,7 @@ export class ScratchRuntime {
 
     static async create(options: ScratchRuntimeCreateOptions = {}) {
 
+        const readbackPolicy = normalizeScratchReadbackPolicy(options.readback, options.label)
         const gpu = options.gpu ?? globalThis.navigator?.gpu
 
         if (!gpu || typeof gpu.requestAdapter !== 'function') {
@@ -205,6 +213,7 @@ export class ScratchRuntime {
             gpu,
             adapter,
             device,
+            readbackPolicy,
             ...(options.label !== undefined ? { label: options.label } : {}),
             ...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
         })
