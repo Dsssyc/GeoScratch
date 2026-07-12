@@ -161,6 +161,24 @@ function expectProgramLayoutDiagnostic(fn) {
     })
 }
 
+async function expectAsyncProgramLayoutDiagnostic(fn) {
+
+    let caught
+    try {
+        await fn()
+    } catch (error) {
+        caught = error
+    }
+
+    expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+    expect(caught.diagnostic).to.include({
+        code: 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH',
+        severity: 'error',
+        phase: 'program',
+    })
+    return caught.diagnostic
+}
+
 describe('scratch Program buffer layout requirements', () => {
 
     it('accepts and exposes normalized buffer layout requirements', async() => {
@@ -310,7 +328,7 @@ describe('scratch Program buffer layout requirements', () => {
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const computePipeline = runtime.createComputePipeline({
+        const computePipeline = await runtime.createComputePipeline({
             program: computeProgram,
             bindLayouts: [ computeLayout ],
         })
@@ -325,8 +343,8 @@ describe('scratch Program buffer layout requirements', () => {
         const codec = createParticleCodec()
         const program = createProgram(runtime, codec)
 
-        const diagnostic = expectProgramLayoutDiagnostic(() => {
-            runtime.createComputePipeline({
+        const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
+            await runtime.createComputePipeline({
                 program,
                 bindLayouts: [],
             })
@@ -357,8 +375,8 @@ describe('scratch Program buffer layout requirements', () => {
         const program = createProgram(runtime, codec, { binding: 1 })
         const bindLayout = createBindLayout(runtime)
 
-        const diagnostic = expectProgramLayoutDiagnostic(() => {
-            runtime.createComputePipeline({
+        const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
+            await runtime.createComputePipeline({
                 program,
                 bindLayouts: [ bindLayout ],
             })
@@ -400,8 +418,8 @@ describe('scratch Program buffer layout requirements', () => {
         for (const testCase of cases) {
             const program = createProgram(runtime, codec, testCase.requirement)
             const bindLayout = createBindLayout(runtime, testCase.entry)
-            const diagnostic = expectProgramLayoutDiagnostic(() => {
-                runtime.createComputePipeline({
+            const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
+                await runtime.createComputePipeline({
                     program,
                     bindLayouts: [ bindLayout ],
                 })
@@ -428,7 +446,7 @@ describe('scratch Program buffer layout requirements', () => {
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const computePipeline = runtime.createComputePipeline({
+        const computePipeline = await runtime.createComputePipeline({
             program: computeProgram,
             bindLayouts: [ computeLayout ],
         })
@@ -479,7 +497,7 @@ describe('scratch Program buffer layout requirements', () => {
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const computePipeline = runtime.createComputePipeline({
+        const computePipeline = await runtime.createComputePipeline({
             program: createProgram(runtime, codec),
             bindLayouts: [ computeLayout ],
         })
@@ -528,7 +546,7 @@ describe('scratch Program buffer layout requirements', () => {
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const computePipeline = runtime.createComputePipeline({
+        const computePipeline = await runtime.createComputePipeline({
             program: createProgram(runtime, codec),
             bindLayouts: [ computeLayout ],
         })
@@ -587,7 +605,7 @@ describe('scratch Program buffer layout requirements', () => {
             bindLayouts: [ renderLayout ],
             targets: [ { format: 'bgra8unorm' } ],
         })
-        const computePipeline = runtime.createComputePipeline({
+        const computePipeline = await runtime.createComputePipeline({
             program: createProgram(runtime, codec),
             bindLayouts: [ computeLayout ],
         })

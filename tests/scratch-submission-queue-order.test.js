@@ -100,7 +100,7 @@ async function createComputeWork(runtime) {
         modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
         entryPoints: { compute: 'csMain' },
     })
-    const pipeline = runtime.createComputePipeline({ program, bindLayouts: [] })
+    const pipeline = await runtime.createComputePipeline({ program, bindLayouts: [] })
     const command = runtime.createDispatchCommand({
         pipeline,
         count: { workgroups: [ 1 ] },
@@ -155,7 +155,7 @@ async function createSkippedCompute(runtime, whenMissing) {
         ],
         entryPoints: { compute: 'csMain' },
     })
-    const pipeline = runtime.createComputePipeline({
+    const pipeline = await runtime.createComputePipeline({
         program,
         bindLayouts: [],
     })
@@ -204,7 +204,7 @@ async function createFallbackCompute(runtime) {
         ],
         entryPoints: { compute: 'csMain' },
     })
-    const pipeline = runtime.createComputePipeline({ program, bindLayouts: [] })
+    const pipeline = await runtime.createComputePipeline({ program, bindLayouts: [] })
     const fallback = runtime.createDispatchCommand({
         label: 'selected fallback dispatch',
         pipeline,

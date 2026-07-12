@@ -29,6 +29,8 @@ import type { ScratchRuntime } from './runtime.js'
 
 const renderPipelineToken = Symbol('RenderPipeline')
 const renderPipelineStates = new WeakMap<RenderPipeline, { isDisposed: boolean }>()
+const computePipelineToken = Symbol('ComputePipeline')
+const computePipelineStates = new WeakMap<ComputePipeline, { isDisposed: boolean }>()
 
 export type RenderPipelineDescriptor = {
     label?: string
@@ -88,7 +90,7 @@ export class RenderPipeline {
             })
         }
         renderPipelineStates.set(this, { isDisposed: false })
-        defineImmutableProperties(this, state)
+        defineImmutableRenderProperties(this, state)
         Object.preventExtensions(this)
     }
 
@@ -168,6 +170,10 @@ type PipelineValidationContext = {
     bindLayouts: readonly BindLayout[]
     bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
 }
+
+type PipelineCreationPlan = PipelineValidationContext & Readonly<{
+    sourceSnapshot: PipelineSourceSnapshot
+}>
 
 type RenderPipelinePlan = PipelineValidationContext & Readonly<{
     pipelineKind: 'render'
@@ -249,7 +255,7 @@ export async function createRenderPipeline(
         issue.nativePipeline === undefined ||
         issue.compilationReport === undefined
     ) {
-        throwRenderPipelineCreationFailure(
+        throwPipelineCreationFailure(
             plan,
             operation,
             issue,
@@ -358,16 +364,26 @@ function prepareRenderPipeline(
     validateEntryPoints(draft)
     validateProgramLayoutRequirements(draft)
 
-    let sourceSnapshot: PipelineSourceSnapshot
+    return Object.freeze({
+        ...draft,
+        sourceSnapshot: snapshotProgramSource(program, subject),
+    })
+}
+
+function snapshotProgramSource(
+    program: Program,
+    pipelineSubject: DiagnosticSubject
+): PipelineSourceSnapshot {
+
     try {
-        sourceSnapshot = snapshotPipelineSource(program)
+        return snapshotPipelineSource(program)
     } catch {
         throwScratchDiagnostic({
             code: 'SCRATCH_PROGRAM_MODULES_INVALID',
             severity: 'error',
             phase: 'program',
             subject: program.subject,
-            related: [ subject ],
+            related: [ pipelineSubject ],
             message: 'Program modules are invalid at the pipeline snapshot boundary.',
             expected: { modules: 'non-empty string[]' },
             actual: {
@@ -377,7 +393,6 @@ function prepareRenderPipeline(
             },
         })
     }
-    return Object.freeze({ ...draft, sourceSnapshot })
 }
 
 function renderPipelineDescriptorEvidence(plan: RenderPipelinePlan): {
@@ -444,7 +459,7 @@ function nativeLabelEvidence(labels: PipelineNativeLabels): ScratchPipelineNativ
     })
 }
 
-function pipelineLifecycleFailures(plan: RenderPipelinePlan): PipelineCreationObservedFailure[] {
+function pipelineLifecycleFailures(plan: PipelineCreationPlan): PipelineCreationObservedFailure[] {
 
     if (plan.runtime.isDisposed) {
         return [ lifecycleFailure(
@@ -500,8 +515,8 @@ function lifecycleFailure(
     })
 }
 
-function throwRenderPipelineCreationFailure(
-    plan: RenderPipelinePlan,
+function throwPipelineCreationFailure(
+    plan: PipelineCreationPlan,
     operation: ScratchPendingGpuOperation,
     issue: PipelineCreationIssueResult,
     observedFailures: readonly PipelineCreationObservedFailure[],
@@ -571,7 +586,7 @@ function throwRenderPipelineCreationFailure(
             : 'pipeline',
         subject: plan.subject,
         related: [ ...related, incident.subject ],
-        message: 'Render pipeline creation did not reach acknowledged ready state.',
+        message: `${plan.pipelineKind === 'render' ? 'Render' : 'Compute'} pipeline creation did not reach acknowledged ready state.`,
         expected: { pipeline: 'all native, compilation, scope, and lifecycle outcomes successful' },
         actual: {
             operationId: operation.id,
@@ -646,7 +661,7 @@ function freezeDepthStencil(state: GPUDepthStencilState): Readonly<GPUDepthStenc
     })
 }
 
-function defineImmutableProperties(
+function defineImmutableRenderProperties(
     pipeline: RenderPipeline,
     state: RenderPipelineState
 ): void {
@@ -692,84 +707,43 @@ function renderPipelineStateFor(pipeline: RenderPipeline): { isDisposed: boolean
 }
 
 export interface ComputePipeline {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    pipelineKind: 'compute'
-    program: Program
-    computeEntryPoint: string
-    bindLayouts: BindLayout[]
-    bindLayoutsByGroup: Map<number, BindLayout>
-    constants?: Record<string, GPUPipelineConstantValue>
-    shaderModule: GPUShaderModule
-    pipelineLayout: GPUPipelineLayout
-    gpuPipeline: GPUComputePipeline
-    isDisposed: boolean
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly pipelineKind: 'compute'
+    readonly program: Program
+    readonly computeEntryPoint: string
+    readonly bindLayouts: readonly BindLayout[]
+    readonly bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
+    readonly constants?: Readonly<Record<string, GPUPipelineConstantValue>>
+    readonly shaderModule: GPUShaderModule
+    readonly pipelineLayout: GPUPipelineLayout
+    readonly gpuPipeline: GPUComputePipeline
+    readonly compilationReport: PipelineCompilationReport
 }
 
 export class ComputePipeline {
 
-    constructor(runtime: ScratchRuntime, descriptor: ComputePipelineDescriptor = {} as ComputePipelineDescriptor) {
+    private constructor(token: symbol, state?: ComputePipelineState) {
 
-        runtime.assertActive()
-
-        const program = descriptor.program
-        if (!program || typeof program.assertRuntime !== 'function') {
+        if (token !== computePipelineToken || state === undefined) {
             throwScratchDiagnostic({
-                code: 'SCRATCH_PIPELINE_PROGRAM_INVALID',
+                code: 'SCRATCH_PIPELINE_CONSTRUCTOR_PRIVATE',
                 severity: 'error',
                 phase: 'pipeline',
                 subject: { kind: 'Pipeline', pipelineKind: 'compute' },
-                message: 'ComputePipeline requires a Program.',
-                expected: { program: 'Program' },
-                actual: { program: program === undefined || program === null ? String(program) : typeof program },
+                message: 'ComputePipeline is created only by ScratchRuntime.',
+                hints: [ 'Use await runtime.createComputePipeline(descriptor).' ],
             })
         }
+        computePipelineStates.set(this, { isDisposed: false })
+        defineImmutableComputeProperties(this, state)
+        Object.preventExtensions(this)
+    }
 
-        program.assertRuntime(runtime)
+    get isDisposed(): boolean {
 
-        this.runtime = runtime
-        this.id = `scratch-pipeline-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.pipelineKind = 'compute'
-        this.program = program
-        this.computeEntryPoint = (descriptor.compute ?? program.entryPoints.compute) as string
-        this.bindLayouts = normalizeBindLayouts(this, descriptor.bindLayouts)
-        this.bindLayoutsByGroup = new Map(this.bindLayouts.map(layout => [ layout.group, layout ]))
-        if (descriptor.constants !== undefined) this.constants = descriptor.constants
-        this.isDisposed = false
-
-        if (!this.computeEntryPoint) {
-            throwMissingEntryPoint(this, 'compute')
-        }
-        validateProgramLayoutRequirements(this)
-
-        const shaderModuleDescriptor: GPUShaderModuleDescriptor = {
-            code: program.modules.join('\n'),
-        }
-        const shaderModuleLabel = labelWithSuffix(this.label, 'shader module')
-        if (shaderModuleLabel !== undefined) shaderModuleDescriptor.label = shaderModuleLabel
-        this.shaderModule = runtime.device.createShaderModule(shaderModuleDescriptor)
-
-        const pipelineLayoutDescriptor: GPUPipelineLayoutDescriptor = {
-            bindGroupLayouts: this.bindLayouts.map(layout => layout.gpuBindGroupLayout),
-        }
-        const pipelineLayoutLabel = labelWithSuffix(this.label, 'layout')
-        if (pipelineLayoutLabel !== undefined) pipelineLayoutDescriptor.label = pipelineLayoutLabel
-        this.pipelineLayout = runtime.device.createPipelineLayout(pipelineLayoutDescriptor)
-
-        const computeStage: GPUProgrammableStage = {
-            module: this.shaderModule,
-            entryPoint: this.computeEntryPoint,
-        }
-        if (this.constants !== undefined) computeStage.constants = this.constants
-
-        const pipelineDescriptor: GPUComputePipelineDescriptor = {
-            layout: this.pipelineLayout,
-            compute: computeStage,
-        }
-        if (this.label !== undefined) pipelineDescriptor.label = this.label
-        this.gpuPipeline = runtime.device.createComputePipeline(pipelineDescriptor)
+        return computePipelineStateFor(this).isDisposed
     }
 
     get subject(): DiagnosticSubject {
@@ -826,8 +800,234 @@ export class ComputePipeline {
 
     dispose(): void {
 
-        this.isDisposed = true
+        const state = computePipelineStateFor(this)
+        if (state.isDisposed) return
+        state.isDisposed = true
+        this.runtime._unregisterPipeline(this)
     }
+}
+
+type ComputePipelinePlan = PipelineCreationPlan & Readonly<{
+    pipelineKind: 'compute'
+    computeEntryPoint: string
+    constants?: Readonly<Record<string, GPUPipelineConstantValue>>
+}>
+
+type ComputePipelineState = ComputePipelinePlan & Readonly<{
+    shaderModule: GPUShaderModule
+    pipelineLayout: GPUPipelineLayout
+    gpuPipeline: GPUComputePipeline
+    compilationReport: PipelineCompilationReport
+}>
+
+export async function createComputePipeline(
+    runtime: ScratchRuntime,
+    descriptor: ComputePipelineDescriptor
+): Promise<ComputePipeline> {
+
+    const plan = prepareComputePipeline(runtime, descriptor)
+    const nativeLabels = pipelineNativeLabels(plan.label, plan.id)
+    const controller = diagnosticsControllerFor(runtime)
+    const target = {
+        kind: 'pipeline' as const,
+        pipelineId: plan.id,
+        pipelineKind: 'compute' as const,
+        programId: plan.program.id,
+        programSourceHash: plan.sourceSnapshot.combinedSourceHash,
+    }
+    const descriptorEvidence = computePipelineDescriptorEvidence(plan)
+    const operation = controller.beginOperation({
+        kind: 'compute-pipeline-creation',
+        target,
+        descriptorSummary: descriptorEvidence.summary,
+        fullDescriptor: descriptorEvidence.full,
+        nativeLabel: nativeLabels.pipeline,
+    })
+    const issue = await issuePipelineCreation({
+        runtime,
+        pipelineId: plan.id,
+        pipelineKind: 'compute',
+        sourceSnapshot: plan.sourceSnapshot,
+        nativeLabels,
+        bindGroupLayouts: plan.bindLayouts.map(layout => layout.gpuBindGroupLayout),
+        lowerPipelineDescriptor: (shaderModule, pipelineLayout) => {
+            const compute: GPUProgrammableStage = {
+                module: shaderModule,
+                entryPoint: plan.computeEntryPoint,
+            }
+            if (plan.constants !== undefined) compute.constants = plan.constants
+            return {
+                label: nativeLabels.pipeline,
+                layout: pipelineLayout,
+                compute,
+            }
+        },
+    })
+    const failures = [ ...issue.failures, ...pipelineLifecycleFailures(plan) ]
+    if (
+        failures.length > 0 ||
+        issue.shaderModule === undefined ||
+        issue.pipelineLayout === undefined ||
+        issue.nativePipeline === undefined ||
+        issue.compilationReport === undefined
+    ) {
+        throwPipelineCreationFailure(
+            plan,
+            operation,
+            issue,
+            failures,
+            nativeLabels
+        )
+    }
+
+    const completion = {
+        status: 'succeeded' as const,
+        nativeLabels: nativeLabelEvidence(nativeLabels),
+        compilationReport: issue.compilationReport,
+    }
+    const creationRecord = controller.completeOperation(operation, completion)
+    if (
+        creationRecord.kind !== 'compute-pipeline-creation' ||
+        creationRecord.target.kind !== 'pipeline'
+    ) {
+        throw new TypeError('Compute pipeline creation produced an incompatible operation record.')
+    }
+    const Constructor = ComputePipeline as unknown as new (
+        token: symbol,
+        state: ComputePipelineState
+    ) => ComputePipeline
+    const pipeline = new Constructor(computePipelineToken, {
+        ...plan,
+        shaderModule: issue.shaderModule,
+        pipelineLayout: issue.pipelineLayout,
+        gpuPipeline: issue.nativePipeline as GPUComputePipeline,
+        compilationReport: creationRecord.compilationReport!,
+    })
+    runtime._registerPipeline(pipeline, creationRecord)
+    return pipeline
+}
+
+function prepareComputePipeline(
+    runtime: ScratchRuntime,
+    descriptor: ComputePipelineDescriptor
+): ComputePipelinePlan {
+
+    runtime.assertActive()
+    const input = descriptor ?? {} as ComputePipelineDescriptor
+    const program = input.program
+    if (!program || typeof program.assertRuntime !== 'function') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_PROGRAM_INVALID',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: { kind: 'Pipeline', pipelineKind: 'compute' },
+            message: 'ComputePipeline requires a Program.',
+            expected: { program: 'Program' },
+            actual: { program: program === undefined || program === null ? String(program) : typeof program },
+        })
+    }
+    program.assertRuntime(runtime)
+
+    const id = `scratch-pipeline-${UUID()}`
+    const subject = Object.freeze({
+        kind: 'Pipeline',
+        id,
+        pipelineKind: 'compute',
+        ...(input.label !== undefined ? { label: input.label } : {}),
+    })
+    const context: PipelineValidationContext & { pipelineKind: 'compute' } = {
+        runtime,
+        id,
+        ...(input.label !== undefined ? { label: input.label } : {}),
+        pipelineKind: 'compute',
+        program,
+        subject,
+        bindLayouts: Object.freeze([]),
+        bindLayoutsByGroup: readonlyMapSnapshot(new Map()),
+    }
+    const bindLayouts = Object.freeze(normalizeBindLayouts(context, input.bindLayouts))
+    const bindLayoutsByGroup = readonlyMapSnapshot(
+        new Map(bindLayouts.map(layout => [ layout.group, layout ]))
+    )
+    const constants = input.constants === undefined
+        ? undefined
+        : Object.freeze({ ...input.constants })
+    const draft: Omit<ComputePipelinePlan, 'sourceSnapshot'> = {
+        ...context,
+        bindLayouts,
+        bindLayoutsByGroup,
+        computeEntryPoint: (input.compute ?? program.entryPoints.compute) as string,
+        ...(constants !== undefined ? { constants } : {}),
+    }
+    if (!draft.computeEntryPoint) throwMissingEntryPoint(draft, 'compute')
+    validateProgramLayoutRequirements(draft)
+
+    return Object.freeze({
+        ...draft,
+        sourceSnapshot: snapshotProgramSource(program, subject),
+    })
+}
+
+function computePipelineDescriptorEvidence(plan: ComputePipelinePlan): {
+    summary: Record<string, unknown>
+    full: Record<string, unknown>
+} {
+
+    const identity = {
+        pipelineKind: plan.pipelineKind,
+        programId: plan.program.id,
+        programSourceHash: plan.sourceSnapshot.combinedSourceHash,
+        entryPoints: { compute: plan.computeEntryPoint },
+        bindLayouts: plan.bindLayouts.map(layout => ({ id: layout.id, group: layout.group })),
+    }
+    return {
+        summary: {
+            ...identity,
+            constantNames: Object.keys(plan.constants ?? {}).sort(),
+        },
+        full: {
+            ...identity,
+            ...(plan.label !== undefined ? { label: plan.label } : {}),
+            ...(plan.constants !== undefined ? { constants: plan.constants } : {}),
+        },
+    }
+}
+
+function defineImmutableComputeProperties(
+    pipeline: ComputePipeline,
+    state: ComputePipelineState
+): void {
+
+    const values: Record<string, unknown> = {
+        runtime: state.runtime,
+        id: state.id,
+        pipelineKind: state.pipelineKind,
+        program: state.program,
+        computeEntryPoint: state.computeEntryPoint,
+        bindLayouts: state.bindLayouts,
+        bindLayoutsByGroup: state.bindLayoutsByGroup,
+        shaderModule: state.shaderModule,
+        pipelineLayout: state.pipelineLayout,
+        gpuPipeline: state.gpuPipeline,
+        compilationReport: state.compilationReport,
+        ...(state.label !== undefined ? { label: state.label } : {}),
+        ...(state.constants !== undefined ? { constants: state.constants } : {}),
+    }
+    Object.defineProperties(pipeline, Object.fromEntries(
+        Object.entries(values).map(([ key, value ]) => [ key, {
+            value,
+            enumerable: true,
+            configurable: false,
+            writable: false,
+        } ])
+    ))
+}
+
+function computePipelineStateFor(pipeline: ComputePipeline): { isDisposed: boolean } {
+
+    const state = computePipelineStates.get(pipeline)
+    if (state === undefined) throw new TypeError('ComputePipeline state is unavailable.')
+    return state
 }
 
 function normalizeVertexBuffers(pipeline: PipelineValidationContext, vertexBuffers: GPUVertexBufferLayout[] = []): GPUVertexBufferLayout[] {
@@ -943,13 +1143,14 @@ function normalizeBindLayouts(
     bindLayouts: BindLayout[] = []
 ): BindLayout[] {
 
+    const pipelineName = pipeline.pipelineKind === 'render' ? 'RenderPipeline' : 'ComputePipeline'
     if (!Array.isArray(bindLayouts)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
             severity: 'error',
             phase: 'pipeline',
             subject: pipeline.subject,
-            message: 'RenderPipeline bindLayouts must be an array.',
+            message: `${pipelineName} bindLayouts must be an array.`,
             expected: { bindLayouts: 'BindLayout[]' },
             actual: { bindLayouts },
         })
@@ -963,7 +1164,7 @@ function normalizeBindLayouts(
                 severity: 'error',
                 phase: 'pipeline',
                 subject: pipeline.subject,
-                message: 'RenderPipeline bindLayouts must contain BindLayout objects.',
+                message: `${pipelineName} bindLayouts must contain BindLayout objects.`,
                 expected: { bindLayout: 'BindLayout' },
                 actual: { bindLayout: describeValue(layout) },
             })
@@ -978,7 +1179,7 @@ function normalizeBindLayouts(
                 phase: 'pipeline',
                 subject: pipeline.subject,
                 related: [ layout.subject ],
-                message: 'RenderPipeline cannot use more than one BindLayout for the same group.',
+                message: `${pipelineName} cannot use more than one BindLayout for the same group.`,
                 expected: { group: 'unique' },
                 actual: { group: layout.group },
             })
@@ -1121,6 +1322,7 @@ function validateEntryPoints(pipeline: PipelineValidationContext & {
 
 function throwMissingEntryPoint(pipeline: PipelineValidationContext, stage: 'vertex' | 'fragment' | 'compute') {
 
+    const pipelineName = pipeline.pipelineKind === 'render' ? 'RenderPipeline' : 'ComputePipeline'
     throwScratchDiagnostic({
         code: 'SCRATCH_PROGRAM_ENTRY_POINT_MISSING',
         severity: 'error',
@@ -1132,13 +1334,8 @@ function throwMissingEntryPoint(pipeline: PipelineValidationContext, stage: 'ver
             stage,
         },
         related: [ pipeline.program.subject, pipeline.subject ],
-        message: 'RenderPipeline requires a Program entry point for each shader stage.',
+        message: `${pipelineName} requires a Program entry point for each shader stage.`,
         expected: { stage, entryPoint: 'string' },
         actual: { entryPoint: undefined },
     })
-}
-
-function labelWithSuffix(label: string | undefined, suffix: string) {
-
-    return label === undefined ? undefined : `${label} ${suffix}`
 }

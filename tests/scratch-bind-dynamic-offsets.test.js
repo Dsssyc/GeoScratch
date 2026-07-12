@@ -205,7 +205,7 @@ async function createComputeFixture(entries = [ dynamicReadStorageEntry(), dynam
             compute: 'csMain',
         },
     })
-    const pipeline = fixture.runtime.createComputePipeline({
+    const pipeline = await fixture.runtime.createComputePipeline({
         label: 'dynamic compute pipeline',
         program,
         bindLayouts: [ bindLayout ],

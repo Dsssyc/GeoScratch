@@ -77,7 +77,7 @@ async function createComputeFixture() {
             compute: 'csMain',
         },
     })
-    const pipeline = runtime.createComputePipeline({
+    const pipeline = await runtime.createComputePipeline({
         label: 'double compute pipeline',
         program,
         compute: 'csMain',
@@ -182,7 +182,7 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
         expect(fixture.pipeline.pipelineKind).to.equal('compute')
         expect(fixture.pipeline.computeEntryPoint).to.equal('csMain')
         expect(fixture.calls.computePipelines[0].descriptor).to.deep.include({
-            label: 'double compute pipeline',
+            label: `double compute pipeline [scratch:${fixture.pipeline.id}]`,
             layout: fixture.pipeline.pipelineLayout,
         })
         expect(fixture.calls.computePipelines[0].descriptor.compute).to.deep.equal({

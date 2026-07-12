@@ -121,7 +121,7 @@ async function main() {
         modules: [ argumentProgramWgsl ],
         entryPoints: { compute: 'makeArguments' },
     })
-    const argumentPipeline = runtime.createComputePipeline({
+    const argumentPipeline = await runtime.createComputePipeline({
         label: 'argument writer pipeline',
         program: argumentProgram,
         compute: 'makeArguments',

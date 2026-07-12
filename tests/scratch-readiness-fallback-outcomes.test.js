@@ -20,7 +20,7 @@ async function createComputeFixture() {
         modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
         entryPoints: { compute: 'csMain' },
     })
-    const pipeline = runtime.createComputePipeline({
+    const pipeline = await runtime.createComputePipeline({
         program,
         compute: 'csMain',
     })

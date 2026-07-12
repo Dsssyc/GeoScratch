@@ -512,7 +512,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             ],
             entryPoints: { compute: 'csMain' },
         })
-        const pipeline = fixture.runtime.createComputePipeline({
+        const pipeline = await fixture.runtime.createComputePipeline({
             program,
             bindLayouts: [ bindLayout ],
         })

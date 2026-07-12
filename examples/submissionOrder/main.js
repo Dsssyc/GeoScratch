@@ -54,7 +54,7 @@ async function main() {
         modules: [ incrementWgsl ],
         entryPoints: { compute: 'csMain' },
     })
-    const pipeline = runtime.createComputePipeline({
+    const pipeline = await runtime.createComputePipeline({
         label: 'submission order increment pipeline',
         program,
         bindLayouts: [ bindLayout ],

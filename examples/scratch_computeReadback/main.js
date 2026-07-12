@@ -69,7 +69,7 @@ async function main() {
             compute: 'csMain',
         },
     })
-    const pipeline = runtime.createComputePipeline({
+    const pipeline = await runtime.createComputePipeline({
         label: 'scratch compute readback pipeline',
         program,
         bindLayouts: [ bindLayout ],

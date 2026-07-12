@@ -108,7 +108,7 @@ async function createTexture(runtime, label, usage = GPU_TEXTURE_USAGE_COPY_DST 
     })
 }
 
-function createCompute(runtime, input, output, readContentEpoch = input.contentEpoch) {
+async function createCompute(runtime, input, output, readContentEpoch = input.contentEpoch) {
 
     const bindLayout = runtime.createBindLayout({
         group: 0,
@@ -143,7 +143,7 @@ function createCompute(runtime, input, output, readContentEpoch = input.contentE
         ],
         entryPoints: { compute: 'csMain' },
     })
-    const pipeline = runtime.createComputePipeline({
+    const pipeline = await runtime.createComputePipeline({
         program,
         bindLayouts: [ bindLayout ],
     })
@@ -1381,7 +1381,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const { runtime, calls } = await createRuntimeFixture()
             const input = await createBuffer(runtime, `empty compute input ${validation}`)
             const output = await createBuffer(runtime, `empty compute output ${validation}`)
-            const compute = createCompute(runtime, input, output)
+            const compute = await createCompute(runtime, input, output)
             const builder = runtime.createSubmission({ validation })
                 .compute(compute.pass, [ compute.dispatch ])
 
@@ -1430,7 +1430,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             target: staged,
             data: new Uint8Array(16),
         })
-        const compute = createCompute(runtime, input, output, 1)
+        const compute = await createCompute(runtime, input, output, 1)
         const builder = runtime.createSubmission({ validation: 'throw' })
             .upload(upload)
             .compute(compute.pass, [ compute.dispatch ])
@@ -1460,7 +1460,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const input = await createBuffer(runtime, `future compute input ${validation}`)
             const output = await createBuffer(runtime, `future compute output ${validation}`)
             advanceResourceContentEpochForTest(input)
-            const compute = createCompute(runtime, input, output, 2)
+            const compute = await createCompute(runtime, input, output, 2)
             const builder = runtime.createSubmission({ validation })
                 .compute(compute.pass, [ compute.dispatch ])
 
@@ -1532,7 +1532,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 target: input,
                 data: new Uint8Array(16),
             })
-            const compute = createCompute(runtime, input, output, 1)
+            const compute = await createCompute(runtime, input, output, 1)
             const builder = runtime.createSubmission({ validation })
                 .upload(upload)
                 .compute(compute.pass, [ compute.dispatch ])
@@ -1607,7 +1607,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             target: input,
             data: new Uint8Array(16),
         })
-        const compute = createCompute(runtime, input, output, 1)
+        const compute = await createCompute(runtime, input, output, 1)
         const submitted = runtime.createSubmission({ validation: 'throw' })
             .upload(uploadInput)
             .compute(compute.pass, [ compute.dispatch ])
@@ -1662,7 +1662,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const { runtime } = await createRuntimeFixture()
         const input = await createBuffer(runtime, 'compute input')
         const output = await createBuffer(runtime, 'compute output')
-        const compute = createCompute(runtime, input, output, 1)
+        const compute = await createCompute(runtime, input, output, 1)
         const uploadInput = runtime.createUploadCommand({
             label: 'upload compute input',
             target: input,
@@ -1893,7 +1893,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             byteLength: 16,
             whenMissing: 'throw',
         })
-        const compute = createCompute(runtime, copyTarget, computeOutput, 1)
+        const compute = await createCompute(runtime, copyTarget, computeOutput, 1)
         const render = await createRender(runtime, renderTarget, {
             read: [ readResource(computeOutput, 1) ],
             write: [],

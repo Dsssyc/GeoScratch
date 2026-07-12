@@ -59,7 +59,7 @@ async function createComputeFixture() {
         modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
         entryPoints: { compute: 'csMain' },
     })
-    const pipeline = runtime.createComputePipeline({
+    const pipeline = await runtime.createComputePipeline({
         program,
         compute: 'csMain',
     })
@@ -560,7 +560,7 @@ describe('scratch native indexed and indirect execution', () => {
             modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
             entryPoints: { compute: 'csMain' },
         })
-        const computePipeline = fixture.runtime.createComputePipeline({
+        const computePipeline = await fixture.runtime.createComputePipeline({
             program: computeProgram,
             compute: 'csMain',
         })
@@ -979,7 +979,7 @@ describe('scratch native indexed and indirect execution', () => {
             modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
             entryPoints: { compute: 'csMain' },
         })
-        const computePipeline = fixture.runtime.createComputePipeline({
+        const computePipeline = await fixture.runtime.createComputePipeline({
             program: computeProgram,
             compute: 'csMain',
         })

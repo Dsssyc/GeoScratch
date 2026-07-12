@@ -2,6 +2,7 @@ import { expect } from 'chai'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -58,12 +59,17 @@ describe('scratch async pipeline creation documentation', () => {
     it('removes every immediate Scratch pipeline creation path', () => {
 
         const pipeline = read('packages', 'geoscratch', 'src', 'scratch', 'pipeline.ts')
+        const creation = read('packages', 'geoscratch', 'src', 'scratch', 'pipeline-creation.ts')
         const runtime = read('packages', 'geoscratch', 'src', 'scratch', 'runtime.ts')
 
-        expect(pipeline).to.include('createRenderPipelineAsync(')
-        expect(pipeline).to.include('createComputePipelineAsync(')
-        expect(pipeline).not.to.match(/\.createRenderPipeline\(/)
-        expect(pipeline).not.to.match(/\.createComputePipeline\(/)
+        const pipelineCalls = propertyCallNames(pipeline, 'pipeline.ts')
+        const creationCalls = propertyCallNames(creation, 'pipeline-creation.ts')
+        expect(creationCalls).to.include('createRenderPipelineAsync')
+        expect(creationCalls).to.include('createComputePipelineAsync')
+        expect([ ...pipelineCalls, ...creationCalls ].filter(name => [
+            'createRenderPipeline',
+            'createComputePipeline',
+        ].includes(name))).to.deep.equal([])
         expect(runtime).not.to.include('new RenderPipeline(')
         expect(runtime).not.to.include('new ComputePipeline(')
     })
@@ -86,3 +92,26 @@ describe('scratch async pipeline creation documentation', () => {
         }
     })
 })
+
+function propertyCallNames(source, fileName) {
+
+    const sourceFile = ts.createSourceFile(
+        fileName,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS
+    )
+    const names = []
+    const visit = (node) => {
+        if (
+            ts.isCallExpression(node) &&
+            ts.isPropertyAccessExpression(node.expression)
+        ) {
+            names.push(node.expression.name.text)
+        }
+        ts.forEachChild(node, visit)
+    }
+    visit(sourceFile)
+    return names
+}

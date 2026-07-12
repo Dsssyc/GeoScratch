@@ -6,6 +6,7 @@ import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import {
     ComputePipeline,
+    createComputePipeline as createScratchComputePipeline,
     createRenderPipeline as createScratchRenderPipeline,
     RenderPipeline,
 } from './pipeline.js'
@@ -342,13 +343,13 @@ export class ScratchRuntime {
         return this.createRenderPipeline(descriptor)
     }
 
-    createComputePipeline(descriptor: ComputePipelineDescriptor) {
+    async createComputePipeline(descriptor: ComputePipelineDescriptor): Promise<ComputePipeline> {
 
         this.assertActive()
-        return new ComputePipeline(this, descriptor)
+        return createScratchComputePipeline(this, descriptor)
     }
 
-    computePipeline(descriptor: ComputePipelineDescriptor) {
+    computePipeline(descriptor: ComputePipelineDescriptor): Promise<ComputePipeline> {
 
         return this.createComputePipeline(descriptor)
     }
