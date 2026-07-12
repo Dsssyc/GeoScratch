@@ -181,27 +181,40 @@ Coverage check for this pass:
 - Legacy top-level renderer calls remain classified rather than silently rewritten: covered by the AST consumer audit and async-pipeline audit.
 - Real render/compute success, structured failure, zero uncaptured errors, and 11 nonblank regression examples: covered by the headed Chrome verifier.
 
-## Current Review Items
-
 ### Readback Staging And Mapping Provenance
 
-ADR-034 accepts the target contract. Completion evidence must prove that
-ordered staging is acknowledged before submission, direct staging is
-acknowledged before copy issue, mapping uses a buffer-specific barrier, terminal
-lifecycle races release every owner exactly once, schema-v3 evidence remains
-bounded, and no native staging handle becomes public.
+Resolved in ADR-034, the bilingual runtime/submission/transfer/diagnostic vision
+modules, and the TypeScript implementation:
 
-The TypeScript implementation and fake-GPU suites now cover both acknowledged
-allocation boundaries, one shared scoped `mapAsync()` transaction, fixed-order
-simultaneous outcomes, one materialization owner, consume/retain concurrency,
-ordered sequential reuse, device-loss/cancel/dispose races, structured
-mapped-range/host-copy/cleanup failures, immutable submitted links, and finite
-current facts. Public and compatibility typechecks pass without a native
-staging field or synchronous ordered factory. The 20,000/5,000-cycle stress
-runner, seven-profile benchmark, exact native-call audit, real WebGPU readback
-probe, and headed 11-page browser matrix are now complete. Keep this item open
-only until the final old-source behavior parity review and strict re-review are
-recorded.
+- Direct and ordered readbacks use one internal staging-allocation transaction.
+  Direct allocation is acknowledged before copy issue; the Promise-only ordered
+  factory acknowledges one reusable slot before command visibility.
+- Both paths use one scoped `mapAsync()` transaction as the buffer-specific host
+  availability barrier. Fixed-order native outcomes, lifecycle races, cleanup,
+  one materialization owner, and consume/retain concurrency are explicit.
+- Pending operations, logical staging bytes, retained host bytes, and active
+  mappings are always-current bounded facts. Schema-v3 operation/incident
+  history remains separately bounded, serializable, source-free, and handle-free.
+- Final fixed-baseline parity preserved 12/12 original JavaScript behaviors and
+  16/16 Goal-start TypeScript behaviors; 10/10 intentional ADR-034 replacements
+  are explicit rather than disguised as compatibility.
+- Strict re-review closed pending-budget provenance, per-link queue-completion
+  incidents, active-mapping lifetime accounting, and disposed-command historical
+  result reachability. A second pass found no remaining required issue.
+- The 20,000/5,000-cycle stress runner, seven-profile benchmark, exact native-call
+  audit, headed real-WebGPU readback probe, and 11-page browser matrix pass.
+
+This closes the buffer readback staging and mapping provenance slice without a
+synchronous factory, public staging handle, CPU roundtrip, unbounded ledger, or
+schema-v2 compatibility path. Texture readback, mapped leases, and broader
+native-operation provenance remain explicit future slices rather than hidden
+partial implementations.
+
+## Current Review Items
+
+No unresolved readback staging or mapping item remains after ADR-034. Add a new
+item only when a distinct design risk is found; do not reopen this completed
+scope merely to absorb one of its explicit non-goals.
 
 ## Update Rules
 

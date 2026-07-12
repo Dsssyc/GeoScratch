@@ -1,7 +1,7 @@
 # Scratch Readback Final Parity Audit / Scratch Readback 最终事实核对
 
 Date: 2026-07-12
-Status: Implementation parity complete; final repository gates are listed below
+Status: Complete on the feature branch
 
 ## Fixed Baselines / 固定基线
 
@@ -101,23 +101,45 @@ archives and shallow CI clones may not contain the two fixed historical commits.
 The default test suite instead locks the current behavior and the existence of
 this reproducible audit.
 
+## Strict Re-review / 严格复审
+
+The final correctness review found and closed four implementation gaps:
+
+- pending-budget and staging-allocation failures now retain the exact readback,
+  source, command, and submission facts available at each ownership boundary;
+- queue-completion rejection emits one command-targeted incident per immutable
+  readback link while retaining enclosing-family attribution;
+- `activeMappings` follows mapping-operation begin/settlement rather than the
+  shorter public readback-fact lifetime, including cancel/runtime-dispose races;
+- command disposal no longer makes an already-submitted historical result
+  unreachable, while still forbidding submission or reuse.
+
+The follow-up review found no remaining required issue across correctness,
+readability, architecture, security, and performance. The implementation adds
+no dependency, source payload, mutable native handle, unbounded recorder, or
+success-path scan. Queue-completion incidents are failure-only and mapping
+ownership accounting is constant-time.
+
 ## Final Gate Record / 最终门禁记录
 
-The final branch verification must run after the last audit edit:
+The feature branch was verified after the final runtime and audit changes:
 
-- `git diff --check`
-- `npm test`
-- `npm run typecheck`
-- `npm run build`
-- `node tests/audits/scratch-readback-final-parity.mjs`
-- `node tests/stress/scratch-readback-staging-mapping.mjs`
-- `node tests/benchmarks/scratch-readback-staging-mapping.mjs`
+- `git diff --check`: passed
+- `npm test`: 642 passing
+- `npm run typecheck`: passed
+- `npm run build`: package and standalone examples passed
+- `node tests/audits/scratch-readback-final-parity.mjs`: 12/12 JavaScript,
+  16/16 Goal-start TypeScript, and 10/10 explicit replacements passed
+- `node tests/stress/scratch-readback-staging-mapping.mjs`: 20,000 direct and
+  5,000 ordered operations passed with zero terminal ownership
+- `node tests/benchmarks/scratch-readback-staging-mapping.mjs`: all seven
+  profiles and five rounds passed structural gates
+- `node tests/browser/scratch-readback-staging-mapping.mjs`: headed Chrome 150
+  on Apple Metal 3 returned exact direct/ordered bytes and passed all 11 pages
 
-Headed Chrome evidence and the 11-page regression matrix are retained in
-`scratch-readback-staging-mapping-performance.md`; they must be rerun if final
-review changes browser/runtime behavior. This parity audit introduced no
-browser/runtime behavior beyond the pending-budget incident fix, which is
-Node-compatible diagnostic bookkeeping.
+The runtime changes from strict review required a fresh browser run. Its exact
+adapter facts, recorder evidence, timings, and interpretation limits are
+retained in `scratch-readback-staging-mapping-performance.md`.
 
 ## Verdict / 结论
 
