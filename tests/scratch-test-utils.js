@@ -136,6 +136,9 @@ export function createFakeGpu(options = {}) {
         textureBufferCopies: [],
         resolveQueries: [],
         maps: [],
+        mappedRanges: [],
+        unmaps: [],
+        bufferDestroys: [],
         errorScopes: [],
         nativeTimeline: [],
         compilationInfoRequests: [],
@@ -147,6 +150,10 @@ export function createFakeGpu(options = {}) {
     const errorScopeStack = []
     const nativeFailures = []
     const pendingPops = []
+    const mapRequests = []
+    const nextMapOutcomes = []
+    const queueCompletionRequests = []
+    const nextQueueCompletionOutcomes = []
     const compilationRequests = []
     const pipelineRequests = []
     const nextCompilationOutcomes = []
@@ -260,6 +267,61 @@ export function createFakeGpu(options = {}) {
         get pipelineRequests() {
             return pipelineRequests
         },
+    }
+
+    const readbacks = {
+        rejectNextMap(error = new DOMException('fake map failure', 'OperationError')) {
+            nextMapOutcomes.push({ kind: 'reject', error })
+        },
+        resolveMap(index, value) {
+            settleMapRequest(index, { kind: 'resolve', value })
+        },
+        rejectMap(index, error = new DOMException('fake map failure', 'OperationError')) {
+            settleMapRequest(index, { kind: 'reject', error })
+        },
+        rejectNextQueueCompletion(error = new Error('fake queue completion failure')) {
+            nextQueueCompletionOutcomes.push({ kind: 'reject', error })
+        },
+        resolveQueueCompletion(index, value) {
+            settleQueueCompletionRequest(index, { kind: 'resolve', value })
+        },
+        rejectQueueCompletion(index, error = new Error('fake queue completion failure')) {
+            settleQueueCompletionRequest(index, { kind: 'reject', error })
+        },
+        get mapRequests() {
+            return mapRequests
+        },
+        get queueCompletionRequests() {
+            return queueCompletionRequests
+        },
+    }
+
+    function settleMapRequest(index, outcome) {
+
+        const request = pendingRequest(mapRequests, index, 'map')
+        request.settled = true
+        request.buffer.mapped = outcome.kind === 'resolve'
+        request.buffer.mapState = outcome.kind === 'resolve' ? 'mapped' : 'unmapped'
+        if (outcome.kind === 'resolve') request.resolve(outcome.value)
+        else request.reject(outcome.error)
+    }
+
+    function settleQueueCompletionRequest(index, outcome) {
+
+        const request = pendingRequest(queueCompletionRequests, index, 'queue completion')
+        request.settled = true
+        if (outcome.kind === 'resolve') request.resolve(outcome.value)
+        else request.reject(outcome.error)
+    }
+
+    function cancelPendingMap(buffer) {
+
+        const request = mapRequests.find(candidate => candidate.buffer === buffer && !candidate.settled)
+        if (request === undefined) return
+        request.settled = true
+        request.buffer.mapped = false
+        request.buffer.mapState = 'unmapped'
+        request.reject(new DOMException('The mapping was cancelled.', 'OperationError'))
     }
 
     function applyNativeFailure(method) {
@@ -446,7 +508,21 @@ export function createFakeGpu(options = {}) {
             calls.submittedWorkDoneRegistrations.push({
                 queueTimelineLength: calls.queueTimeline.length,
             })
-            return Promise.resolve('queue done')
+            const outcome = nextQueueCompletionOutcomes.shift() ?? { kind: 'resolve', value: 'queue done' }
+            if (!options.deferSubmittedWorkDone) {
+                return outcome.kind === 'resolve'
+                    ? Promise.resolve(outcome.value)
+                    : Promise.reject(outcome.error)
+            }
+
+            return new Promise((resolve, reject) => {
+                queueCompletionRequests.push({
+                    resolve,
+                    reject,
+                    settled: false,
+                    outcome,
+                })
+            })
         },
     }
 
@@ -493,23 +569,64 @@ export function createFakeGpu(options = {}) {
             applyNativeFailure('createBuffer')
             const data = new Uint8Array(descriptor.size ?? 0)
             const buffer = {
+                id: `fake-buffer-${calls.buffers.length + 1}`,
                 type: 'buffer',
                 descriptor,
                 data,
                 destroyed: false,
                 mapped: false,
-                async mapAsync(mode, offset = 0, size = data.byteLength - offset) {
-                    this.mapped = true
+                mapState: 'unmapped',
+                mapAsync(mode, offset = 0, size = data.byteLength - offset) {
+                    applyNativeFailure('mapAsync')
+                    this.mapState = 'pending'
                     calls.maps.push({ buffer: this, mode, offset, size })
+                    calls.nativeTimeline.push({
+                        type: 'map-async',
+                        bufferId: this.id,
+                        offset,
+                        size,
+                    })
+                    const outcome = nextMapOutcomes.shift() ?? { kind: 'resolve', value: undefined }
+                    if (!options.deferMaps) {
+                        this.mapped = outcome.kind === 'resolve'
+                        this.mapState = outcome.kind === 'resolve' ? 'mapped' : 'unmapped'
+                        return outcome.kind === 'resolve'
+                            ? Promise.resolve(outcome.value)
+                            : Promise.reject(outcome.error)
+                    }
+
+                    return new Promise((resolve, reject) => {
+                        mapRequests.push({
+                            buffer: this,
+                            mode,
+                            offset,
+                            size,
+                            outcome,
+                            resolve,
+                            reject,
+                            settled: false,
+                        })
+                    })
                 },
                 getMappedRange(offset = 0, size = data.byteLength - offset) {
+                    applyNativeFailure('getMappedRange')
+                    calls.mappedRanges.push({ buffer: this, offset, size })
                     return data.buffer.slice(offset, offset + size)
                 },
                 unmap() {
+                    applyNativeFailure('unmap')
+                    calls.unmaps.push({ buffer: this })
+                    cancelPendingMap(this)
                     this.mapped = false
+                    this.mapState = 'unmapped'
                 },
                 destroy() {
+                    applyNativeFailure('destroyBuffer')
+                    calls.bufferDestroys.push({ buffer: this })
+                    cancelPendingMap(this)
                     this.destroyed = true
+                    this.mapped = false
+                    this.mapState = 'unmapped'
                 },
             }
             calls.buffers.push(buffer)
@@ -662,7 +779,7 @@ export function createFakeGpu(options = {}) {
         },
     }
 
-    return { gpu, adapter, device, queue, calls, errors, pipelines }
+    return { gpu, adapter, device, queue, calls, errors, pipelines, readbacks }
 }
 
 function normalizeCompilationInfo(info) {
