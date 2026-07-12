@@ -1,7 +1,7 @@
 # Transfers And Epochs
 
 Status: Vision draft
-Date: 2026-07-11
+Date: 2026-07-12
 
 ## Decision
 
@@ -166,8 +166,41 @@ Properties:
 
 - **Explicit wait point.** Host access is an `await` on a transfer result, never a transparent stall hidden behind a resource getter.
 - **Epoch capture.** A readback reads the content epoch captured by the readback request or by the declared `after` submission. It must not silently drift to the resource's latest contents.
-- **Auto staging.** The runtime owns `MAP_READ` staging resources. User buffers do not need map usage for common readback, but the source needs the appropriate copy usage or an explicit resolve path.
+- **Acknowledged auto staging.** The runtime owns `MAP_READ` staging resources and acknowledges native validation/OOM outcomes before use. User buffers do not need map usage for common readback, but the source needs the appropriate copy usage or an explicit resolve path.
+- **Buffer-specific mapping barrier.** Host materialization waits on the staging buffer's `mapAsync()` rather than inserting an extra whole-queue completion wait.
 - **Layout-derived views.** Buffer layout from `02-resources` decides whether the result is a `TypedArray`, bytes, or a layout-derived structured view. AoS fields are strided and should not be promised as one contiguous typed array unless explicitly deinterleaved.
+
+## Staging Allocation And Mapping Transaction
+
+The direct and ordered paths share one staging allocator and one mapping
+transaction, but acknowledge allocation at different explicit boundaries:
+
+- direct `ReadbackOperation` allocates one ephemeral slot during the first
+  materialization, then rechecks source allocation/content epochs before copy
+  encoding;
+- ordered `ReadbackCommand` owns one acknowledged reusable slot before the
+  Promise-only factory resolves, so synchronous submission never allocates it;
+- both reserve `maxPendingOperations` and `maxStagingBytes` capacity before the
+  native allocation and release every reservation on success, failure,
+  cancellation, disposal, runtime loss, and device loss.
+
+Mapping issues exactly one `mapAsync(GPUMapMode.READ, 0, byteLength)` under
+validation, internal, and out-of-memory error scopes. Every pushed scope is
+popped before the first await. The map Promise, all scope Promises, device loss,
+and operation lifecycle settle as independent outcomes in fixed transaction
+order; native message text and Promise settlement order do not select a stable
+code.
+
+The mapping transaction distinguishes `mapping`, `mapped-range`, `host-copy`,
+`cleanup`, and `lifecycle-recheck`. `unmap` and staging `destroy` failures use
+separate outcome codes under one `SCRATCH_READBACK_CLEANUP_FAILED` incident. If
+host bytes were already copied, cleanup failure does not discard those owned
+bytes or falsely claim native destruction succeeded.
+
+Each readback has one materialization owner. Concurrent
+`retain: 'until-dispose'` readers share one allocation/copy/map and receive
+independent clones. A competing `retain: 'consume-on-read'` reader fails with
+`SCRATCH_READBACK_IN_PROGRESS` and cannot issue a second native transaction.
 
 ## Readback Operation Lifecycle
 
@@ -203,6 +236,10 @@ State semantics:
 Default host-copy reads are **consume-on-read**:
 
 ```ts
+const readback = runtime.createReadback({
+    source: particlePositions,
+    retain: 'consume-on-read',
+})
 const result = await readback.toArray()  // returns an owned copy
 // operation transitions to consumed; staging can be freed
 ```
@@ -219,7 +256,9 @@ const readback = scratch.readback({
 
 For the host-copy retention path, the first successful read materializes and stores operation-owned host bytes, releases GPU staging, and returns an owned copy. Later `toBytes()`, `toArray()`, and layout-view reads clone from those retained bytes instead of re-staging GPU work. The retained result represents the materialized epoch even if the source resource later advances.
 
-Zero-copy or mapped views must be leased, because a mapped range is invalid after unmap:
+Mapped-view leasing is a follow-up boundary and is not implemented by this
+contract. A future zero-copy or mapped view must be leased because a mapped
+range becomes invalid after unmap:
 
 ```ts
 const lease = await readback.map()
@@ -245,7 +284,7 @@ readback.dispose()
 For uncommon cases where the staging copy point must be placed inside the command graph, use `ReadbackCommand`:
 
 ```ts
-const readParticles = runtime.readbackCommand({
+const readParticles = await runtime.readbackCommand({
     label: 'read particle positions',
     source: {
         resource: particlePositions,
@@ -262,7 +301,7 @@ const submitted = runtime.submission()
 const values = await readParticles.result({ after: submitted }).toArray()
 ```
 
-The buffer-only `ReadbackCommand` ordered-staging path is implemented. It validates the explicit source epoch, records a read-only submission ledger entry, and copies into runtime-owned staging at the declared step. `result({ after })` returns the operation associated with that exact submitted work; materialization maps the existing staging buffer and does not submit a second copy. This remains an escape hatch, not the default readback path. Direct texture readback, mapped leases, and staging-budget policy remain future work.
+The buffer-only `ReadbackCommand` ordered-staging path is implemented. Its Promise-only factory acknowledges the reusable staging slot before returning. It validates the explicit source epoch, records a read-only submission ledger entry, and copies into runtime-owned staging at the declared step. `result({ after })` returns the operation associated with that exact submitted work; materialization maps the existing staging buffer and does not submit a second copy. This remains an escape hatch, not the default readback path. Direct texture readback and mapped leases remain future work; finite staging budgets are implemented runtime policy.
 
 Queue timeline segmentation preserves that declared staging point across queue-side uploads. A readback before an upload submits its staging-copy segment before the queue write; an upload before a readback performs the queue write before submitting the staging-copy segment. Multiple ordered readbacks separated by an upload keep distinct staging buffers, captured epochs, and producer provenance while sharing one aggregate `SubmittedWork` completion handle.
 
@@ -483,39 +522,55 @@ Query diagnostics should include query-set id, type, requested range, pass or co
 
 ## Retention, Budgets, And Diagnostics
 
-Readback retention is a runtime policy, not hidden garbage collection. The default policy should be conservative:
+Readback retention is explicit ownership, not hidden garbage collection. The
+implemented runtime policy is finite and conservative:
 
 - keep an operation until it is consumed, cancelled, disposed, or failed
-- warn in development when a pending operation becomes stale
-- warn in development when a ready operation remains unconsumed
-- fail fast or emit a high-severity diagnostic when staging budgets are exceeded
-- never silently evict a readback result unless the operation was explicitly declared evictable
+- fail before native allocation when pending-operation or staging-byte capacity is exceeded
+- count retained host bytes separately from GPU staging bytes
+- never silently evict a readback result
+- keep operation and incident history bounded independently of current facts
 
 Example configuration shape:
 
 ```ts
 const runtime = await ScratchRuntime.create({
     readback: {
-        staleAfterSubmissions: 3,
-        staleAfterMs: 250,
         maxPendingOperations: 16,
         maxStagingBytes: 64 * 1024 * 1024,
-        onBudgetExceeded: 'throw',
     },
 })
 ```
 
-Potential readback diagnostic codes using the shared envelope from `09-diagnostics-validation`:
+Stale-operation warnings, automatic eviction, and mapped-view lease budgets are
+follow-up policy. They are not aliases or optional flags on the implemented
+budget contract.
+
+Stable readback provenance codes using the shared envelope from
+`09-diagnostics-validation` include:
 
 ```ts
 type ReadbackDiagnosticCode =
-    | 'SCRATCH_READBACK_STALE_PENDING'
-    | 'SCRATCH_READBACK_READY_UNCONSUMED'
     | 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED'
+    | 'SCRATCH_READBACK_STAGING_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_STAGING_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_STAGING_SCOPE_FAILED'
+    | 'SCRATCH_READBACK_COPY_ISSUE_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_INTERNAL_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_MAPPING_SCOPE_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_REJECTED'
+    | 'SCRATCH_READBACK_MAPPED_RANGE_FAILED'
+    | 'SCRATCH_READBACK_HOST_COPY_FAILED'
+    | 'SCRATCH_READBACK_CLEANUP_FAILED'
+    | 'SCRATCH_READBACK_UNMAP_FAILED'
+    | 'SCRATCH_READBACK_STAGING_DESTROY_FAILED'
+    | 'SCRATCH_READBACK_IN_PROGRESS'
     | 'SCRATCH_READBACK_CANCELLED'
-    | 'SCRATCH_READBACK_SOURCE_DISPOSED_BEFORE_COPY'
-    | 'SCRATCH_READBACK_RUNTIME_DISPOSED'
-    | 'SCRATCH_READBACK_LEASE_NOT_RELEASED'
+    | 'SCRATCH_READBACK_OPERATION_DISPOSED'
+    | 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE'
+    | 'SCRATCH_READBACK_SOURCE_EPOCH_STALE'
 ```
 
 Every readback diagnostic should carry enough context for an agent or human to repair the issue without parsing prose:

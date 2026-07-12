@@ -92,6 +92,39 @@ const evidence = runtime.diagnostics.exportEvidence()
 
 `runtime.diagnostics` exposes current resource facts, bounded operation and incident history, and explicit temporary deep capture. Logical footprint evidence is not physical VRAM.
 
+## Scratch Readback
+
+Direct readback stays synchronous until bytes are requested. Its first
+materialization acknowledges an ephemeral staging allocation before copy or
+queue use:
+
+```js
+const direct = runtime.createReadback({ source: resultBuffer })
+const directBytes = await direct.toBytes()
+```
+
+An ordered readback command owns one acknowledged reusable staging slot, so its
+factory is Promise-only while `submit()` remains synchronous:
+
+```js
+const ordered = await runtime.createReadbackCommand({
+    source: {
+        resource: resultBuffer,
+        contentEpoch: resultBuffer.contentEpoch,
+    },
+    whenMissing: 'throw',
+})
+const submitted = runtime.createSubmission().readback(ordered).submit()
+const orderedBytes = await ordered.result({ after: submitted }).toBytes()
+await submitted.done
+```
+
+`SubmittedWork.done` covers replayed queue work, not mapping or host copying.
+Runtime options `maxPendingOperations` and `maxStagingBytes` bound current
+readback ownership. Mapping validation is reported structurally as
+`SCRATCH_READBACK_MAPPING_VALIDATION_FAILED`; native message prose is evidence,
+not the classifier.
+
 ## Minimal Usage
 
 The example below renders a hard-coded triangle onto a canvas.

@@ -1,7 +1,7 @@
 # Diagnostics 与 Validation
 
 状态: Vision draft
-日期: 2026-07-11
+日期: 2026-07-12
 
 ## 决策
 
@@ -383,13 +383,23 @@ type QueryDiagnosticCode =
     | 'SCRATCH_QUERY_RESOLVE_DESTINATION_INVALID'
 
 type ReadbackDiagnosticCode =
-    | 'SCRATCH_READBACK_STALE_PENDING'
-    | 'SCRATCH_READBACK_READY_UNCONSUMED'
     | 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED'
+    | 'SCRATCH_READBACK_STAGING_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_STAGING_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_COPY_ISSUE_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_INTERNAL_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_MAPPING_SCOPE_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_REJECTED'
+    | 'SCRATCH_READBACK_MAPPED_RANGE_FAILED'
+    | 'SCRATCH_READBACK_HOST_COPY_FAILED'
+    | 'SCRATCH_READBACK_CLEANUP_FAILED'
+    | 'SCRATCH_READBACK_UNMAP_FAILED'
+    | 'SCRATCH_READBACK_STAGING_DESTROY_FAILED'
+    | 'SCRATCH_READBACK_IN_PROGRESS'
     | 'SCRATCH_READBACK_CANCELLED'
-    | 'SCRATCH_READBACK_SOURCE_DISPOSED_BEFORE_COPY'
-    | 'SCRATCH_READBACK_RUNTIME_DISPOSED'
-    | 'SCRATCH_READBACK_LEASE_NOT_RELEASED'
+    | 'SCRATCH_READBACK_OPERATION_DISPOSED'
 ```
 
 ## Code Naming 与 Stability
@@ -473,21 +483,66 @@ suggestions: [
 ]
 ```
 
-## Pipeline 创建与 Compilation Evidence
+## GPU Operation、Pipeline 与 Readback Evidence
 
 GPU operation、incident、snapshot、capture 与 exported-evidence schema 使用
-version 2。operation 与 pending fact 显式选择一种 target:
+version 3。`0.x.x` 期间不输出或转换 version 2。operation 与 pending fact
+显式选择一种宏观 target:
 
 ```ts
 type ScratchGpuOperationTarget =
     | { kind: 'resource'; resourceId: string; resourceKind: string; allocationVersion: number; contentEpoch: number; logicalFootprintBytes: number }
     | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programSourceHash: string }
+    | { kind: 'command'; commandId: string; commandKind: 'readback' }
+    | {
+        kind: 'readback'
+        readbackId: string
+        path: 'direct' | 'ordered'
+        sourceResourceId: string
+        allocationVersion: number
+        contentEpoch: number
+        byteLength: number
+        commandId?: string
+        submissionId?: string
+        stepIndex?: number
+    }
 ```
 
-Query 通过 `targetKind`、`resourceId` 或 `pipelineId` 选择，而不是猜 optional
-field。Resource allocation incident 保留 ADR-032 的 pressure 与 attribution
-语义。Pipeline incident 只包含 compilation 与 creation evidence，不获得虚构的
-allocation pressure。
+Query 通过 `targetKind`、`resourceId`、`pipelineId`、`commandId` 或
+`readbackId` 选择，而不是猜 optional field。Resource allocation incident
+保留 ADR-032 的 pressure 与 attribution 语义。Pipeline incident 只包含
+compilation 与 creation evidence，不获得虚构的 allocation pressure。
+Readback target 不伪装成 persistent resource。
+
+Readback provenance 使用 `readback-staging-allocation`、`readback-mapping` 与
+`readback-staging-release` operation，以及 `readback-failure` incident。
+`readback-staging-release` 是瞬时 operation，不能出现在 pending fact 中。
+Failure stage 是结构化事实:
+
+```ts
+type ScratchReadbackFailureStage =
+    | 'staging-allocation'
+    | 'copy-issue'
+    | 'queue-completion'
+    | 'mapping'
+    | 'mapped-range'
+    | 'host-copy'
+    | 'cleanup'
+    | 'budget'
+    | 'lifecycle-recheck'
+```
+
+map Promise、validation、internal、OOM、scope settlement、device loss 与
+lifecycle outcome 按固定 transaction 顺序独立保留。Native message 是有界
+evidence，绝不是 classifier。Cleanup outcome 区分 `unmap` 与 staging
+`destroy`；`destroyRequested` 不会声称一次抛错的 native destroy 已完成。
+
+Always-current fact graph 报告 readback commands、active/retained operations、
+current/peak staging bytes、current/peak retained host bytes 与 active
+mappings。有界 history 不保留 GPUBuffer、mapped ArrayBuffer、source bytes、
+command payload、mutable operation 或 SubmittedWork。`operationCapacity: 0`
+可以省略 operation history，但不能关闭 current facts、incidents、budgets 或
+cleanup。
 
 每个成功 pipeline 都暴露不可变、source-free 的 compilation report。它最多
 保留 64 条 native message，每条最多 4096 个 UTF-16 code unit，全部 serialized

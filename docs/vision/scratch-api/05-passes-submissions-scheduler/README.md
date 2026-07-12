@@ -1,7 +1,7 @@
 # Passes, Submissions, And Scheduler
 
 Status: Vision draft
-Date: 2026-07-11
+Date: 2026-07-12
 
 ## Decision
 
@@ -100,6 +100,46 @@ Submission responsibilities:
 - record only the commands selected by that plan
 - submit command buffers
 - return `SubmittedWork`
+
+### Ordered Readback Preparation And Links
+
+`SubmissionBuilder.submit()` remains synchronous whether or not a builder
+contains readback. Ordered readback preparation therefore happens before the
+hot submission call:
+
+```ts
+const readbackCommand = await runtime.createReadbackCommand(descriptor)
+const submitted = runtime.submission().readback(readbackCommand).submit()
+const bytes = await readbackCommand.result({ after: submitted }).toBytes()
+```
+
+The Promise-only factory validates the immutable command descriptor and
+acknowledges one reusable staging allocation. Submission preflight then claims
+that slot before encoder creation. A second concurrent use of the same command
+fails structurally before encoder or queue effects; successful materialization
+returns the slot for sequential reuse. No staging allocation occurs while
+encoding or replaying a submission.
+
+Every ordered step contributes one frozen serializable link:
+
+```ts
+type SubmittedReadbackLink = Readonly<{
+    commandId: string
+    operationId: string
+    stepIndex: number
+    sourceResourceId: string
+    allocationVersion: number
+    contentEpoch: number
+    stagingAllocationOperationId: string
+}>
+```
+
+`SubmittedWork.readbacks` contains links, not mutable operations, command
+payloads, mapped bytes, or native buffers. `SubmittedWork.done` covers only the
+queue work actually replayed. It does not wait for `mapAsync()`, mapped-range
+access, host copy, retention, cancellation, or cleanup. A native completion
+rejection becomes `SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED` without
+rewriting the linked readback operation's mapping outcome.
 
 ### Resize Between Construction And Submission
 

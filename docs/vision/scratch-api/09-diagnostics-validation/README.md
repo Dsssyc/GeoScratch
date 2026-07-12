@@ -1,7 +1,7 @@
 # Diagnostics And Validation
 
 Status: Vision draft
-Date: 2026-07-11
+Date: 2026-07-12
 
 ## Decision
 
@@ -383,13 +383,23 @@ type QueryDiagnosticCode =
     | 'SCRATCH_QUERY_RESOLVE_DESTINATION_INVALID'
 
 type ReadbackDiagnosticCode =
-    | 'SCRATCH_READBACK_STALE_PENDING'
-    | 'SCRATCH_READBACK_READY_UNCONSUMED'
     | 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED'
+    | 'SCRATCH_READBACK_STAGING_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_STAGING_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_COPY_ISSUE_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_INTERNAL_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_MAPPING_SCOPE_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_REJECTED'
+    | 'SCRATCH_READBACK_MAPPED_RANGE_FAILED'
+    | 'SCRATCH_READBACK_HOST_COPY_FAILED'
+    | 'SCRATCH_READBACK_CLEANUP_FAILED'
+    | 'SCRATCH_READBACK_UNMAP_FAILED'
+    | 'SCRATCH_READBACK_STAGING_DESTROY_FAILED'
+    | 'SCRATCH_READBACK_IN_PROGRESS'
     | 'SCRATCH_READBACK_CANCELLED'
-    | 'SCRATCH_READBACK_SOURCE_DISPOSED_BEFORE_COPY'
-    | 'SCRATCH_READBACK_RUNTIME_DISPOSED'
-    | 'SCRATCH_READBACK_LEASE_NOT_RELEASED'
+    | 'SCRATCH_READBACK_OPERATION_DISPOSED'
 ```
 
 ## Code Naming And Stability
@@ -473,21 +483,67 @@ suggestions: [
 ]
 ```
 
-## Pipeline Creation And Compilation Evidence
+## GPU Operation, Pipeline, And Readback Evidence
 
 GPU operation, incident, snapshot, capture, and exported-evidence schemas use
-version 2. Operations and pending facts select one explicit target:
+version 3. Version 2 is not emitted or converted during `0.x.x`. Operations and
+pending facts select one explicit macro target:
 
 ```ts
 type ScratchGpuOperationTarget =
     | { kind: 'resource'; resourceId: string; resourceKind: string; allocationVersion: number; contentEpoch: number; logicalFootprintBytes: number }
     | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programSourceHash: string }
+    | { kind: 'command'; commandId: string; commandKind: 'readback' }
+    | {
+        kind: 'readback'
+        readbackId: string
+        path: 'direct' | 'ordered'
+        sourceResourceId: string
+        allocationVersion: number
+        contentEpoch: number
+        byteLength: number
+        commandId?: string
+        submissionId?: string
+        stepIndex?: number
+    }
 ```
 
-Queries select `targetKind`, `resourceId`, or `pipelineId` rather than guessing
-from optional fields. Resource allocation incidents retain ADR-032 pressure and
-attribution semantics. Pipeline incidents contain compilation and creation
-evidence and never receive fabricated allocation pressure.
+Queries select `targetKind`, `resourceId`, `pipelineId`, `commandId`, or
+`readbackId` rather than guessing from optional fields. Resource allocation
+incidents retain ADR-032 pressure and attribution semantics. Pipeline incidents
+contain compilation and creation evidence and never receive fabricated
+allocation pressure. Readback targets never masquerade as persistent resources.
+
+Readback provenance uses `readback-staging-allocation`, `readback-mapping`, and
+`readback-staging-release` operations plus `readback-failure` incidents.
+`readback-staging-release` is instantaneous and cannot appear in pending facts.
+Failure stages are structural and include:
+
+```ts
+type ScratchReadbackFailureStage =
+    | 'staging-allocation'
+    | 'copy-issue'
+    | 'queue-completion'
+    | 'mapping'
+    | 'mapped-range'
+    | 'host-copy'
+    | 'cleanup'
+    | 'budget'
+    | 'lifecycle-recheck'
+```
+
+Independent map-Promise, validation, internal, OOM, scope-settlement, device
+loss, and lifecycle outcomes are retained in fixed transaction order. A native
+message is bounded evidence, never the classifier. Cleanup outcomes distinguish
+`unmap` from staging `destroy`; `destroyRequested` does not claim that a native
+destroy call which threw actually completed.
+
+The always-current fact graph reports readback commands, active/retained
+operations, current/peak staging bytes, current/peak retained host bytes, and
+active mappings. Bounded history retains no GPUBuffer, mapped ArrayBuffer,
+source bytes, command payload, mutable operation, or SubmittedWork. Setting
+`operationCapacity: 0` may omit operation history, but it does not disable
+current facts, incidents, budgets, or cleanup.
 
 Each successful pipeline exposes an immutable source-free compilation report.
 It retains at most 64 native messages, at most 4096 UTF-16 code units per

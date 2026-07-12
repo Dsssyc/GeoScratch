@@ -1,7 +1,7 @@
 # 传输与 Epoch
 
 状态: Vision draft
-日期: 2026-07-11
+日期: 2026-07-12
 
 ## 决策
 
@@ -166,8 +166,39 @@ const values = await readback.toArray()
 
 - **显式等待点。** Host access 是 transfer result 上的 `await`，绝不是藏在 resource getter 里的透明 stall。
 - **Epoch 捕获。** readback 读取 readback request 或声明的 `after` submission 捕获的 content epoch。它不能静默漂移到 resource 的最新内容。
-- **自动 staging。** runtime 持有 `MAP_READ` staging resources。常见 readback 下用户 buffer 不需要 map usage，但 source 需要合适的 copy usage 或显式 resolve 路径。
+- **可确认的自动 staging。** runtime 持有 `MAP_READ` staging resources，并在使用前确认原生 validation/OOM outcome。常见 readback 下用户 buffer 不需要 map usage，但 source 需要合适的 copy usage 或显式 resolve 路径。
+- **Buffer-specific mapping barrier。** Host materialization 等待 staging buffer 自身的 `mapAsync()`，不会额外插入一次全 queue completion wait。
 - **由 layout 派生视图。** `02-resources` 的 buffer layout 决定结果是 `TypedArray`、bytes，还是 layout-derived structured view。AoS 字段是 strided 的，除非显式 deinterleave，否则不承诺为一个连续 typed array。
+
+## Staging Allocation 与 Mapping Transaction
+
+Direct 与 ordered 路径共享一个 staging allocator 和一个 mapping
+transaction，但在两个不同的显式边界确认 allocation:
+
+- direct `ReadbackOperation` 在第一次 materialization 时分配一个 ephemeral
+  slot，之后在 copy encoding 前重新检查 source allocation/content epochs；
+- ordered `ReadbackCommand` 在 Promise-only factory resolve 前持有一个已确认
+  的可复用 slot，因此同步 submission 不会分配它；
+- 两条路径都在 native allocation 前预留 `maxPendingOperations` 与
+  `maxStagingBytes` capacity，并在 success、failure、cancellation、disposal、
+  runtime loss 与 device loss 的每条路径精确释放 reservation。
+
+Mapping 在 validation、internal 与 out-of-memory error scope 下只调用一次
+`mapAsync(GPUMapMode.READ, 0, byteLength)`。所有已 push scope 都在第一次
+await 前完成 pop。map Promise、每个 scope Promise、device loss 与 operation
+lifecycle 是固定 transaction 顺序中的独立 outcome；native message 文本与
+Promise settlement 顺序都不决定 stable code。
+
+Mapping transaction 区分 `mapping`、`mapped-range`、`host-copy`、
+`cleanup` 与 `lifecycle-recheck`。`unmap` 和 staging `destroy` failure 在同一
+`SCRATCH_READBACK_CLEANUP_FAILED` incident 下使用不同 outcome code。若 host
+bytes 已完成复制，cleanup failure 不会丢弃 owned bytes，也不会虚构 native
+destruction 成功。
+
+每个 readback 只有一个 materialization owner。并发
+`retain: 'until-dispose'` readers 共享一次 allocation/copy/map，并分别获得
+独立 clone。竞争的 `retain: 'consume-on-read'` reader 以
+`SCRATCH_READBACK_IN_PROGRESS` 失败，不能发起第二次 native transaction。
 
 ## Readback Operation 生命周期
 
@@ -203,6 +234,10 @@ type ReadbackState =
 默认 host-copy 读取采用 **consume-on-read**:
 
 ```ts
+const readback = runtime.createReadback({
+    source: particlePositions,
+    retain: 'consume-on-read',
+})
 const result = await readback.toArray()  // returns an owned copy
 // operation transitions to consumed; staging can be freed
 ```
@@ -219,7 +254,8 @@ const readback = scratch.readback({
 
 对 host-copy retention 路径，第一次成功读取会 materialize 并存储 operation-owned host bytes，释放 GPU staging，并返回 owned copy。之后的 `toBytes()`、`toArray()` 和 layout-view 读取从 retained bytes 克隆结果，不会重新 staging GPU work。即使 source resource 后续推进 epoch，retained result 仍代表已 materialize 的那份 epoch。
 
-Zero-copy 或 mapped view 必须以 lease 表达，因为 mapped range 在 unmap 后失效:
+Mapped-view lease 是 follow-up boundary，本契约尚未实现。未来 zero-copy 或
+mapped view 必须以 lease 表达，因为 mapped range 在 unmap 后失效:
 
 ```ts
 const lease = await readback.map()
@@ -245,7 +281,7 @@ readback.dispose()
 少数情况下，如果 staging copy 点必须放进 command graph 的特定位置，使用 `ReadbackCommand`:
 
 ```ts
-const readParticles = runtime.readbackCommand({
+const readParticles = await runtime.readbackCommand({
     label: 'read particle positions',
     source: {
         resource: particlePositions,
@@ -262,7 +298,7 @@ const submitted = runtime.submission()
 const values = await readParticles.result({ after: submitted }).toArray()
 ```
 
-buffer-only `ReadbackCommand` ordered-staging 路径现已实现。它验证显式 source epoch，记录 read-only submission ledger entry，并在声明的 step 把数据复制到 runtime-owned staging。`result({ after })` 返回与该次 submitted work 精确关联的 operation；materialization 只映射已有 staging buffer，不会再次提交 copy。它仍是逃生口，不是默认 readback 路径。直接 texture readback、mapped lease 与 staging budget policy 仍属于未来工作。
+buffer-only `ReadbackCommand` ordered-staging 路径现已实现。它的 Promise-only factory 会在返回前确认可复用 staging slot。它验证显式 source epoch，记录 read-only submission ledger entry，并在声明的 step 把数据复制到 runtime-owned staging。`result({ after })` 返回与该次 submitted work 精确关联的 operation；materialization 只映射已有 staging buffer，不会再次提交 copy。它仍是逃生口，不是默认 readback 路径。直接 texture readback 与 mapped lease 仍属于未来工作；有限 staging budget 已是 runtime policy。
 
 Queue timeline segmentation 会跨 queue-side upload 保留该声明 staging point。upload 前的 readback 会先 submit staging-copy segment，再执行 queue write; readback 前的 upload 会先执行 queue write，再 submit staging-copy segment。由 upload 分隔的多个 ordered readback 各自保留不同 staging buffer、captured epoch 与 producer provenance，同时共享一个 aggregate `SubmittedWork` completion handle。
 
@@ -483,39 +519,54 @@ Query diagnostic 应携带 query-set id、type、requested range、pass 或 comm
 
 ## Retention、预算与诊断
 
-Readback retention 是 runtime policy，不是隐藏 garbage collection。默认策略应保守:
+Readback retention 是显式 ownership，不是隐藏 garbage collection。已实现的
+runtime policy 有限且保守:
 
 - operation 保留到 consumed、cancelled、disposed 或 failed
-- pending operation 过旧时在开发期告警
-- ready operation 长时间未消费时在开发期告警
-- staging budget 超限时 fail fast 或发出高严重度诊断
-- 除非 operation 显式声明 evictable，否则绝不静默淘汰 readback result
+- pending-operation 或 staging-byte capacity 超限时，在 native allocation 前失败
+- retained host bytes 与 GPU staging bytes 分开计数
+- 绝不静默淘汰 readback result
+- operation/incident history 与 current facts 分别保持有界
 
 配置形状示例:
 
 ```ts
 const runtime = await ScratchRuntime.create({
     readback: {
-        staleAfterSubmissions: 3,
-        staleAfterMs: 250,
         maxPendingOperations: 16,
         maxStagingBytes: 64 * 1024 * 1024,
-        onBudgetExceeded: 'throw',
     },
 })
 ```
 
-使用 `09-diagnostics-validation` 共享 envelope 的候选 readback diagnostic codes:
+Stale-operation warning、automatic eviction 与 mapped-view lease budget 是
+follow-up policy，不是已实现 budget contract 上的 alias 或 optional flag。
+
+使用 `09-diagnostics-validation` 共享 envelope 的稳定 readback provenance
+codes 包括:
 
 ```ts
 type ReadbackDiagnosticCode =
-    | 'SCRATCH_READBACK_STALE_PENDING'
-    | 'SCRATCH_READBACK_READY_UNCONSUMED'
     | 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED'
+    | 'SCRATCH_READBACK_STAGING_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_STAGING_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_STAGING_SCOPE_FAILED'
+    | 'SCRATCH_READBACK_COPY_ISSUE_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_INTERNAL_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_MAPPING_SCOPE_FAILED'
+    | 'SCRATCH_READBACK_MAPPING_REJECTED'
+    | 'SCRATCH_READBACK_MAPPED_RANGE_FAILED'
+    | 'SCRATCH_READBACK_HOST_COPY_FAILED'
+    | 'SCRATCH_READBACK_CLEANUP_FAILED'
+    | 'SCRATCH_READBACK_UNMAP_FAILED'
+    | 'SCRATCH_READBACK_STAGING_DESTROY_FAILED'
+    | 'SCRATCH_READBACK_IN_PROGRESS'
     | 'SCRATCH_READBACK_CANCELLED'
-    | 'SCRATCH_READBACK_SOURCE_DISPOSED_BEFORE_COPY'
-    | 'SCRATCH_READBACK_RUNTIME_DISPOSED'
-    | 'SCRATCH_READBACK_LEASE_NOT_RELEASED'
+    | 'SCRATCH_READBACK_OPERATION_DISPOSED'
+    | 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE'
+    | 'SCRATCH_READBACK_SOURCE_EPOCH_STALE'
 ```
 
 每条 readback diagnostic 都应携带足够上下文，使 agent 或人无需解析 prose 也能修复问题:

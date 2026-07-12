@@ -189,8 +189,17 @@ ADR-034 accepts the target contract. Implementation must still prove that
 ordered staging is acknowledged before submission, direct staging is
 acknowledged before copy issue, mapping uses a buffer-specific barrier, terminal
 lifecycle races release every owner exactly once, schema-v3 evidence remains
-bounded, and no native staging handle becomes public. Keep this item open until
-the executable audit, stress evidence, and headed-browser matrix are complete.
+bounded, and no native staging handle becomes public.
+
+The TypeScript implementation and fake-GPU suites now cover both acknowledged
+allocation boundaries, one shared scoped `mapAsync()` transaction, fixed-order
+simultaneous outcomes, one materialization owner, consume/retain concurrency,
+ordered sequential reuse, device-loss/cancel/dispose races, structured
+mapped-range/host-copy/cleanup failures, immutable submitted links, and finite
+current facts. Public and compatibility typechecks pass without a native
+staging field or synchronous ordered factory. Keep this item open until the
+20,000/5,000-cycle stress evidence, benchmark, native-call audit, headed-browser
+matrix, and final source-parity review are complete.
 
 ## Update Rules
 

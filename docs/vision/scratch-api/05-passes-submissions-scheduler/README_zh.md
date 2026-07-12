@@ -1,7 +1,7 @@
 # Passes, Submissions 与 Scheduler
 
 状态: Vision draft
-日期: 2026-07-11
+日期: 2026-07-12
 
 ## 决策
 
@@ -100,6 +100,44 @@ Submission 职责:
 - 只记录该 plan 最终选中的 commands
 - 提交 command buffers
 - 返回 `SubmittedWork`
+
+### Ordered Readback Preparation 与 Links
+
+无论 builder 是否包含 readback，`SubmissionBuilder.submit()` 都保持同步。
+因此 ordered readback preparation 必须在 hot submission call 之前完成:
+
+```ts
+const readbackCommand = await runtime.createReadbackCommand(descriptor)
+const submitted = runtime.submission().readback(readbackCommand).submit()
+const bytes = await readbackCommand.result({ after: submitted }).toBytes()
+```
+
+Promise-only factory 会校验 immutable command descriptor，并确认一个可复用
+staging allocation。Submission preflight 随后在 encoder creation 前 claim 该
+slot。同一 command 的第二次并发使用会在 encoder 或 queue effect 前结构化
+失败；成功 materialization 会把 slot 归还，以供顺序复用。Submission
+encoding 与 replay 期间不发生 staging allocation。
+
+每个 ordered step 产生一个冻结且可序列化的 link:
+
+```ts
+type SubmittedReadbackLink = Readonly<{
+    commandId: string
+    operationId: string
+    stepIndex: number
+    sourceResourceId: string
+    allocationVersion: number
+    contentEpoch: number
+    stagingAllocationOperationId: string
+}>
+```
+
+`SubmittedWork.readbacks` 保存 links，不保存 mutable operations、command
+payloads、mapped bytes 或 native buffers。`SubmittedWork.done` 只覆盖实际
+replay 的 queue work；它不等待 `mapAsync()`、mapped-range access、host
+copy、retention、cancellation 或 cleanup。原生 completion rejection 会变成
+`SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED`，但不会改写关联 readback
+operation 的 mapping outcome。
 
 ### 构造与提交之间的 Resize
 

@@ -93,6 +93,38 @@ const evidence = runtime.diagnostics.exportEvidence()
 
 `runtime.diagnostics` 暴露当前 resource facts、有界 operation/incident history 与显式临时 deep capture。logical footprint evidence 不是 physical VRAM。
 
+## Scratch Readback
+
+Direct readback 在请求 bytes 前保持同步。第一次 materialization 会先确认一个
+ephemeral staging allocation，之后才允许 copy 或 queue 使用:
+
+```js
+const direct = runtime.createReadback({ source: resultBuffer })
+const directBytes = await direct.toBytes()
+```
+
+Ordered readback command 持有一个已确认的可复用 staging slot，因此 factory
+只能返回 Promise，而 `submit()` 保持同步:
+
+```js
+const ordered = await runtime.createReadbackCommand({
+    source: {
+        resource: resultBuffer,
+        contentEpoch: resultBuffer.contentEpoch,
+    },
+    whenMissing: 'throw',
+})
+const submitted = runtime.createSubmission().readback(ordered).submit()
+const orderedBytes = await ordered.result({ after: submitted }).toBytes()
+await submitted.done
+```
+
+`SubmittedWork.done` 只覆盖已 replay 的 queue work，不覆盖 mapping 或 host
+copy。Runtime options `maxPendingOperations` 与 `maxStagingBytes` 限制当前
+readback ownership。Mapping validation 使用结构化 code
+`SCRATCH_READBACK_MAPPING_VALIDATION_FAILED`；native message prose 只是
+evidence，不是 classifier。
+
 ## 最小示例
 
 下面的代码在 canvas 上渲染一个硬编码三角形。

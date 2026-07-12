@@ -1,7 +1,7 @@
 # Runtime And Surface
 
 Status: Vision draft
-Date: 2026-06-30
+Date: 2026-07-12
 
 ## Decision
 
@@ -41,6 +41,7 @@ const surface = scratch.surface(canvas, {
 - submission scheduler defaults
 - device-loss state
 - current GPU operation facts and bounded diagnostic evidence
+- current readback command/operation ownership and finite staging budgets
 
 `Surface` owns:
 
@@ -117,6 +118,44 @@ or device loss cancels the transaction and installs no current pipeline fact.
 Current pipeline facts scale with live pipelines; historical operations remain
 in the bounded recorder. Pipeline creation does not add work or waits to
 `SubmissionBuilder.submit()`.
+
+## Readback Ownership And Budgets
+
+Readback ownership belongs to the runtime, not to a global queue helper or a
+resource convenience method. Runtime creation accepts only the implemented
+finite policy:
+
+```ts
+const runtime = await ScratchRuntime.create({
+    readback: {
+        maxPendingOperations: 16,
+        maxStagingBytes: 64 * 1024 * 1024,
+    },
+})
+```
+
+`runtime.readbackPolicy` is a frozen normalized snapshot. The runtime fact
+graph reports current readback commands, active or retained operations,
+current/peak staging bytes, current/peak retained host bytes, and active
+mappings. These are current ownership facts and do not grow with runtime age.
+GPU staging bytes are logical Scratch allocation facts, not physical residency
+or free-VRAM measurements; retained host bytes are counted separately.
+
+Creating a direct `ReadbackOperation` is synchronous because it allocates
+nothing. Its first materialization reserves budget and acknowledges one
+ephemeral staging buffer before encoder or queue use. Ordered factories are
+Promise-only because their reusable staging slot must be acknowledged before a
+`ReadbackCommand` becomes visible:
+
+```ts
+const command = await runtime.createReadbackCommand(descriptor)
+const alias = await runtime.readbackCommand(descriptor)
+```
+
+There is no synchronous ordered factory, pending wrapper, lazy submit-time
+allocation, hidden retry, or native staging handle on the public objects.
+`SubmissionBuilder.submit()` remains synchronous and never waits for mapping or
+host-copy completion.
 
 ## Device Loss
 
