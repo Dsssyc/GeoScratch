@@ -80,4 +80,41 @@ describe('scratch readback staging and mapping documentation', () => {
             expect(source).to.match(/const\s+readback\s*=\s*await\s+runtime\.createReadbackCommand\(/)
         }
     })
+
+    it('publishes reproducible stress, benchmark, and headed-browser evidence', () => {
+
+        const performance = read(
+            'docs',
+            'review',
+            'scratch-readback-staging-mapping-performance.md'
+        )
+        const stress = read('tests', 'stress', 'scratch-readback-staging-mapping.mjs')
+        const benchmark = read('tests', 'benchmarks', 'scratch-readback-staging-mapping.mjs')
+        const browser = read('tests', 'browser', 'scratch-readback-staging-mapping.mjs')
+
+        for (const marker of [
+            '20,000 direct operations',
+            '5,000 ordered reuses',
+            'direct-mapping-history-disabled',
+            'ordered-factory-history-disabled',
+            'submission-no-readback-history-disabled',
+            'Chrome 150.0.7871.115',
+            '11-page regression matrix',
+        ]) {
+            expect(performance).to.include(marker)
+        }
+        expect(stress).to.include('20_000')
+        expect(stress).to.include('5_000')
+        expect(benchmark).to.include("profile('direct-mapping-deep-capture'")
+        expect(benchmark).to.include("profile('submission-no-readback-history-disabled'")
+        for (const example of [
+            'scratch_computeReadback',
+            'externalImageUpload',
+            'submissionOrder',
+            'textureResize',
+        ]) {
+            expect(browser).to.include(`name: '${example}'`)
+        }
+        expect(browser).to.include("headless = process.env.SCRATCH_READBACK_BROWSER_HEADLESS === '1'")
+    })
 })

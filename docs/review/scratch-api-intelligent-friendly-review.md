@@ -185,7 +185,7 @@ Coverage check for this pass:
 
 ### Readback Staging And Mapping Provenance
 
-ADR-034 accepts the target contract. Implementation must still prove that
+ADR-034 accepts the target contract. Completion evidence must prove that
 ordered staging is acknowledged before submission, direct staging is
 acknowledged before copy issue, mapping uses a buffer-specific barrier, terminal
 lifecycle races release every owner exactly once, schema-v3 evidence remains
@@ -197,9 +197,11 @@ simultaneous outcomes, one materialization owner, consume/retain concurrency,
 ordered sequential reuse, device-loss/cancel/dispose races, structured
 mapped-range/host-copy/cleanup failures, immutable submitted links, and finite
 current facts. Public and compatibility typechecks pass without a native
-staging field or synchronous ordered factory. Keep this item open until the
-20,000/5,000-cycle stress evidence, benchmark, native-call audit, headed-browser
-matrix, and final source-parity review are complete.
+staging field or synchronous ordered factory. The 20,000/5,000-cycle stress
+runner, seven-profile benchmark, exact native-call audit, real WebGPU readback
+probe, and headed 11-page browser matrix are now complete. Keep this item open
+only until the final old-source behavior parity review and strict re-review are
+recorded.
 
 ## Update Rules
 
