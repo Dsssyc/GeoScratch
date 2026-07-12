@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted. ADR-034 supersedes staging allocation timing and unrestricted
+cross-submission reuse; the ordered-copy and provenance decisions remain active.
 
 ## Date
 

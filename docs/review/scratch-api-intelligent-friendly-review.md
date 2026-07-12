@@ -183,7 +183,14 @@ Coverage check for this pass:
 
 ## Current Review Items
 
-None. The current intelligent-friendly scratch API review queue is complete. Add new items here when a later pass finds a sharper design risk.
+### Readback Staging And Mapping Provenance
+
+ADR-034 accepts the target contract. Implementation must still prove that
+ordered staging is acknowledged before submission, direct staging is
+acknowledged before copy issue, mapping uses a buffer-specific barrier, terminal
+lifecycle races release every owner exactly once, schema-v3 evidence remains
+bounded, and no native staging handle becomes public. Keep this item open until
+the executable audit, stress evidence, and headed-browser matrix are complete.
 
 ## Update Rules
 
