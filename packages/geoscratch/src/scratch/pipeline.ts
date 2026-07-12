@@ -555,8 +555,8 @@ function throwPipelineCreationFailure(
     const related = [
         plan.runtime.subject,
         plan.program.subject,
-        ...plan.bindLayouts.map(layout => layout.subject),
         { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+        ...plan.bindLayouts.map(layout => layout.subject),
     ]
     const incident = controller.recordIncident({
         kind: 'pipeline-failure',
@@ -577,6 +577,9 @@ function throwPipelineCreationFailure(
             : {}),
         outcomes,
     })
+    const retainedOutcomes = incident.kind === 'pipeline-failure'
+        ? incident.outcomes ?? []
+        : []
 
     throwScratchDiagnostic({
         code: diagnosticCode,
@@ -584,16 +587,21 @@ function throwPipelineCreationFailure(
         phase: single?.diagnosticCode === 'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED'
             ? 'runtime'
             : 'pipeline',
-        subject: plan.subject,
-        related: [ ...related, incident.subject ],
+        subject: incident.subject,
+        related: [
+            ...incident.related,
+            { kind: 'Incident', id: incident.id, incidentKind: incident.kind },
+        ],
         message: `${plan.pipelineKind === 'render' ? 'Render' : 'Compute'} pipeline creation did not reach acknowledged ready state.`,
         expected: { pipeline: 'all native, compilation, scope, and lifecycle outcomes successful' },
         actual: {
             operationId: operation.id,
             pipelineId: plan.id,
             failureCount: outcomes.length,
-            failureStages: outcomes.map(outcome => outcome.stage),
-            diagnosticCodes: outcomes.map(outcome => outcome.diagnosticCode),
+            retainedFailureCount: retainedOutcomes.length,
+            omittedFailureCount: outcomes.length - retainedOutcomes.length,
+            failureStages: retainedOutcomes.map(outcome => outcome.stage),
+            diagnosticCodes: retainedOutcomes.map(outcome => outcome.diagnosticCode),
         },
     }, {
         ...(failures[0].cause !== undefined ? { cause: failures[0].cause } : {}),

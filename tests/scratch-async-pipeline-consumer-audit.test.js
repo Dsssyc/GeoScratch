@@ -14,6 +14,7 @@ const pipelineFamilies = [
         intentionalPromiseFiles: new Set([
             'tests/scratch-async-pipeline-contract.test.js',
             'tests/scratch-compute-pipeline-async.test.js',
+            'tests/scratch-pipeline-lifecycle-bounds.test.js',
             'tests/scratch-render-pipeline-async.test.js',
             'tests/types/public-api.ts',
         ]),
@@ -31,6 +32,7 @@ const pipelineFamilies = [
         intentionalPromiseFiles: new Set([
             'tests/scratch-async-pipeline-contract.test.js',
             'tests/scratch-compute-pipeline-async.test.js',
+            'tests/scratch-pipeline-lifecycle-bounds.test.js',
             'tests/types/public-api.ts',
         ]),
         legacyFiles: new Set([

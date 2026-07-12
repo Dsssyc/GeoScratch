@@ -5,6 +5,9 @@ import type {
     PipelineKind,
 } from './pipeline-compilation.js'
 
+const MAX_INCIDENT_RELATED_SUBJECTS = 64
+const MAX_INCIDENT_OUTCOMES = 64
+
 export type ScratchJsonPrimitive = string | number | boolean | null
 export type ScratchJsonValue =
     | ScratchJsonPrimitive
@@ -365,7 +368,23 @@ export function createGpuIncidentReport(
 
     assertIncidentTarget(input)
     const subject = input.subject ?? createIncidentSubject(input)
-    const related = input.related ?? createIncidentRelatedSubjects(input)
+    const completeRelated = input.related ?? createIncidentRelatedSubjects(input)
+    const related = completeRelated.slice(0, MAX_INCIDENT_RELATED_SUBJECTS)
+    const outcomes = input.target.kind === 'pipeline' && input.outcomes !== undefined
+        ? input.outcomes.slice(0, MAX_INCIDENT_OUTCOMES)
+        : undefined
+    const omittedEvidenceItems = Math.max(
+        0,
+        completeRelated.length - related.length
+    ) + Math.max(
+        0,
+        (input.outcomes?.length ?? 0) - (outcomes?.length ?? 0)
+    )
+    const evidence = {
+        ...input.evidence,
+        complete: input.evidence.complete && omittedEvidenceItems === 0,
+        omittedRecords: input.evidence.omittedRecords + omittedEvidenceItems,
+    }
     const report: Record<string, unknown> = {
         version: 2,
         sequence: input.sequence,
@@ -376,10 +395,10 @@ export function createGpuIncidentReport(
         attribution: input.attribution,
         runtimeId: input.runtimeId,
         target: cloneJsonValue(input.target),
-        subject: cloneJsonValue(subject),
-        related: cloneJsonValue(related),
+        subject: cloneJsonValue(subject, new Set<object>(), true),
+        related: cloneJsonValue(related, new Set<object>(), true),
         recentOperations: cloneJsonValue(input.recentOperations),
-        evidence: cloneJsonValue(input.evidence),
+        evidence: cloneJsonValue(evidence),
     }
 
     copyJsonDefined(report, input, [
@@ -396,8 +415,10 @@ export function createGpuIncidentReport(
             'currentPipelines',
             'failureStage',
             'pipelineErrorReason',
-            'outcomes',
         ])
+        if (outcomes !== undefined) {
+            report.outcomes = cloneJsonValue(outcomes, new Set<object>(), true)
+        }
         if (input.compilationReport !== undefined) {
             report.compilationReport = normalizeCompilationReportEvidence(
                 input.compilationReport,
