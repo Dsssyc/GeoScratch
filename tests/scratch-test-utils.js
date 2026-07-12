@@ -154,6 +154,7 @@ export function createFakeGpu(options = {}) {
     const nextMapOutcomes = []
     const queueCompletionRequests = []
     const nextQueueCompletionOutcomes = []
+    let shouldDetachNextMappedRange = false
     const compilationRequests = []
     const pipelineRequests = []
     const nextCompilationOutcomes = []
@@ -287,6 +288,9 @@ export function createFakeGpu(options = {}) {
         },
         rejectQueueCompletion(index, error = new Error('fake queue completion failure')) {
             settleQueueCompletionRequest(index, { kind: 'reject', error })
+        },
+        detachNextMappedRange() {
+            shouldDetachNextMappedRange = true
         },
         get mapRequests() {
             return mapRequests
@@ -611,7 +615,12 @@ export function createFakeGpu(options = {}) {
                 getMappedRange(offset = 0, size = data.byteLength - offset) {
                     applyNativeFailure('getMappedRange')
                     calls.mappedRanges.push({ buffer: this, offset, size })
-                    return data.buffer.slice(offset, offset + size)
+                    const range = data.buffer.slice(offset, offset + size)
+                    if (shouldDetachNextMappedRange) {
+                        shouldDetachNextMappedRange = false
+                        structuredClone(range, { transfer: [ range ] })
+                    }
+                    return range
                 },
                 unmap() {
                     applyNativeFailure('unmap')

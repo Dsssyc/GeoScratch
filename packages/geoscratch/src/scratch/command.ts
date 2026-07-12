@@ -15,6 +15,7 @@ import {
 import {
     allocateReadbackStaging,
     readbackStagingBuffer,
+    recordReadbackStagingRelease,
     releaseReadbackStaging,
     resetReadbackStaging,
 } from './readback-staging.js'
@@ -29,7 +30,11 @@ import type { ComputePipeline, RenderPipeline } from './pipeline.js'
 import type { LayoutArtifact, LayoutUploadView } from './layout-codec.js'
 import type { ProgramBufferLayoutRequirement } from './program.js'
 import type { ReadbackOperation, ReadbackRange, ReadbackRetentionPolicy } from './readback.js'
-import type { ReadbackStagingSlot } from './readback-staging.js'
+import type {
+    ReadbackStagingCleanupFailure,
+    ReadbackStagingCleanupResult,
+    ReadbackStagingSlot,
+} from './readback-staging.js'
 import type { Resource } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { ScratchReadbackCommandState } from './runtime-diagnostics.js'
@@ -1775,6 +1780,9 @@ const readbackCommandClaimToken = Symbol('ReadbackCommandClaim')
 const readbackCommandStates = new WeakMap<ReadbackCommand, ReadbackCommandPrivateState>()
 const readbackCommandClaimStates = new WeakMap<ReadbackCommandClaim, ReadbackCommandClaimPrivateState>()
 const readbackCommandResults = new WeakMap<ReadbackCommand, WeakMap<SubmittedWork, ReadbackOperation>>()
+const emptyReadbackStagingCleanupResult: ReadbackStagingCleanupResult = Object.freeze({
+    failures: Object.freeze([]),
+})
 
 export class ReadbackCommand {
 
@@ -2073,27 +2081,38 @@ export function markReadbackCommandClaimMapping(claim: ReadbackCommandClaim): vo
 export function releaseReadbackCommandClaim(
     claim: ReadbackCommandClaim,
     options: Readonly<{ unmap: boolean, gpuUseComplete: boolean }>
-): void {
+): ReadbackStagingCleanupResult {
 
     const state = readbackCommandClaimStateFor(claim)
-    if (state.status === 'released' || state.status === 'releasing') return
+    if (state.status === 'released' || state.status === 'releasing') {
+        return emptyReadbackStagingCleanupResult
+    }
     const wasSubmitted = state.done !== undefined
     state.status = 'releasing'
     const commandState = readbackCommandStateFor(state.command)
     commandState.state = 'releasing'
     updateRuntimeReadbackCommand(state.command.runtime, state.command.id, { state: 'releasing' })
-    resetReadbackStaging(commandState.slot, options.unmap)
+    const resetCleanup = resetReadbackStaging(commandState.slot, options.unmap)
     if (!state.operationAdopted) {
         releaseReservedRuntimeReadbackOperationFact(state.command.runtime, state.operationId)
     }
     if (options.gpuUseComplete || !wasSubmitted) {
-        finishReadbackCommandClaim(claim, true)
-        return
+        const finishCleanup = finishReadbackCommandClaim(
+            claim,
+            resetCleanup.failures.length === 0,
+            false
+        )
+        return recordReadbackCommandClaimRelease(
+            state,
+            options.unmap,
+            [ ...resetCleanup.failures, ...finishCleanup.failures ]
+        )
     }
     void state.done!.then(
-        () => finishReadbackCommandClaim(claim, true),
-        () => finishReadbackCommandClaim(claim, false)
+        () => finishReadbackCommandClaim(claim, resetCleanup.failures.length === 0, true),
+        () => finishReadbackCommandClaim(claim, false, true)
     )
+    return recordReadbackCommandClaimRelease(state, options.unmap, resetCleanup.failures)
 }
 
 export function registerReadbackCommandResult(
@@ -2154,16 +2173,22 @@ function assertActiveReadbackCommandClaim(claim: ReadbackCommandClaim): Readback
     return state
 }
 
-function finishReadbackCommandClaim(claim: ReadbackCommandClaim, reusable: boolean): void {
+function finishReadbackCommandClaim(
+    claim: ReadbackCommandClaim,
+    reusable: boolean,
+    recordPhysicalIncident: boolean
+): ReadbackStagingCleanupResult {
 
     const state = readbackCommandClaimStateFor(claim)
-    if (state.status === 'released') return
+    if (state.status === 'released') return emptyReadbackStagingCleanupResult
     state.status = 'released'
     const command = state.command
     const commandState = readbackCommandStateFor(command)
     if (commandState.activeClaim === claim) commandState.activeClaim = undefined
     if (!reusable) {
-        releaseReadbackStaging(commandState.slot)
+        const cleanup = releaseReadbackStaging(commandState.slot, {
+            recordIncident: recordPhysicalIncident,
+        })
         if (commandState.disposeRequested) {
             commandState.state = 'disposed'
             unregisterRuntimeReadbackCommand(command.runtime, command)
@@ -2171,22 +2196,56 @@ function finishReadbackCommandClaim(claim: ReadbackCommandClaim, reusable: boole
             commandState.state = 'failed'
             updateRuntimeReadbackCommand(command.runtime, command.id, { state: 'failed' })
         }
-        return
+        return cleanup
     }
     if (commandState.disposeRequested) {
-        finalizeReadbackCommandDisposal(command)
-        return
+        return finalizeReadbackCommandDisposal(command, recordPhysicalIncident)
     }
     commandState.state = 'idle'
     updateRuntimeReadbackCommand(command.runtime, command.id, { state: 'idle' })
+    return emptyReadbackStagingCleanupResult
 }
 
-function finalizeReadbackCommandDisposal(command: ReadbackCommand): void {
+function finalizeReadbackCommandDisposal(
+    command: ReadbackCommand,
+    recordIncident = true
+): ReadbackStagingCleanupResult {
 
     const state = readbackCommandStateFor(command)
-    releaseReadbackStaging(state.slot)
+    const cleanup = releaseReadbackStaging(state.slot, { recordIncident })
     state.state = 'disposed'
     unregisterRuntimeReadbackCommand(command.runtime, command)
+    return cleanup
+}
+
+function recordReadbackCommandClaimRelease(
+    state: ReadbackCommandClaimPrivateState,
+    unmapRequested: boolean,
+    failures: readonly ReadbackStagingCleanupFailure[]
+): ReadbackStagingCleanupResult {
+
+    const command = state.command
+    const commandState = readbackCommandStateFor(command)
+    return recordReadbackStagingRelease({
+        runtime: command.runtime,
+        target: {
+            kind: 'readback',
+            readbackId: state.operationId,
+            path: 'ordered',
+            sourceResourceId: state.sourceResourceId,
+            allocationVersion: state.allocationVersion,
+            contentEpoch: state.contentEpoch,
+            byteLength: command.range.byteLength,
+            commandId: command.id,
+            submissionId: state.submissionId,
+            stepIndex: state.stepIndex,
+        },
+        byteLength: command.range.byteLength,
+        allocationOperationId: state.stagingAllocationOperationId,
+        failures,
+        unmapRequested,
+        destroyRequested: commandState.slot.isReleased,
+    })
 }
 
 function readbackCommandFact(command: ReadbackCommand) {

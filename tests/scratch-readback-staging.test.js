@@ -14,6 +14,14 @@ async function settleMicrotasks() {
     for (let index = 0; index < 16; index++) await Promise.resolve()
 }
 
+async function settlePendingErrorScopes(fake) {
+
+    for (const [index, pending] of fake.errors.pendingPops.entries()) {
+        if (!pending.settled) fake.errors.settlePop(index)
+    }
+    await settleMicrotasks()
+}
+
 async function rejectedDiagnostic(promise) {
 
     try {
@@ -75,6 +83,8 @@ describe('scratch acknowledged readback staging', () => {
         expect(fake.calls.queueSubmissions).to.have.length(submissionCount)
 
         fake.errors.settlePop(2)
+        await settleMicrotasks()
+        await settlePendingErrorScopes(fake)
         expect(await materialization).to.deep.equal(new Uint8Array(16))
         expect(fake.calls.commandEncoders).to.have.length(encoderCount + 1)
         expect(fake.calls.queueSubmissions).to.have.length(submissionCount + 1)
@@ -83,7 +93,10 @@ describe('scratch acknowledged readback staging', () => {
         expect(readback).not.to.have.property('stagingBuffer')
         expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
         expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
-        expect(runtime.diagnostics.operations({ readbackId: readback.id }).at(-1)).to.deep.include({
+        expect(runtime.diagnostics.operations({
+            readbackId: readback.id,
+            kind: 'readback-staging-allocation',
+        }).at(-1)).to.deep.include({
             kind: 'readback-staging-allocation',
             status: 'succeeded',
         })
@@ -342,11 +355,15 @@ describe('scratch acknowledged readback staging', () => {
         expect(fake.calls.commandEncoders).to.have.length(encoderCount)
         expect(fake.calls.buffers).to.have.length(factoryBufferCount)
 
-        await firstOperation.toBytes()
+        const firstMaterialization = firstOperation.toBytes()
+        await settlePendingErrorScopes(fake)
+        await firstMaterialization
         expect(command.state).to.equal('idle')
         const secondSubmitted = runtime.submission().readback(command).submit()
         const secondOperation = command.result({ after: secondSubmitted })
-        await secondOperation.toBytes()
+        const secondMaterialization = secondOperation.toBytes()
+        await settlePendingErrorScopes(fake)
+        await secondMaterialization
 
         expect(fake.calls.buffers).to.have.length(factoryBufferCount)
         expect(fake.calls.maps.filter(call => call.buffer === stagingBuffer)).to.have.length(2)

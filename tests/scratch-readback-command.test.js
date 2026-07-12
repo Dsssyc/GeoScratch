@@ -609,7 +609,7 @@ describe('scratch ReadbackCommand', () => {
         fake.readbacks.rejectNextMap(new Error('map failed'))
 
         await expectScratchDiagnostic(() => operation.toBytes(), {
-            code: 'SCRATCH_READBACK_MAP_FAILED',
+            code: 'SCRATCH_READBACK_MAPPING_REJECTED',
             severity: 'error',
             phase: 'readback',
         })

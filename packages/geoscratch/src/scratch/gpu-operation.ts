@@ -270,6 +270,7 @@ export type ScratchReadbackFailureStage =
     | 'host-copy'
     | 'cleanup'
     | 'budget'
+    | 'lifecycle-recheck'
 
 export type ScratchGpuIncidentFailureStage =
     | ScratchGpuPipelineFailureStage

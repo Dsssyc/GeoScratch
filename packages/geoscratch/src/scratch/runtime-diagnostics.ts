@@ -19,6 +19,7 @@ import type {
     ScratchGpuIncidentFailureStage,
     ScratchGpuIncidentOutcome,
     ScratchGpuIncidentReport,
+    ScratchGpuCommandOperationTarget,
     ScratchGpuOperationRecord,
     ScratchGpuOperationTarget,
     ScratchGpuPipelineOperationRecord,
@@ -761,6 +762,57 @@ export class ScratchRuntimeDiagnosticsController {
             this.linkResourceOperation(operation.target.resourceId, operation.id)
         }
 
+        return record
+    }
+
+    recordReadbackStagingRelease(input: Readonly<{
+        target: ScratchGpuCommandOperationTarget | ScratchGpuReadbackOperationTarget
+        descriptorSummary: Record<string, unknown>
+        status: 'succeeded' | 'failed'
+        nativeErrorCategory?: GpuNativeErrorCategory
+    }>): ScratchGpuOperationRecord {
+
+        assertGpuOperationTarget('readback-staging-release', input.target)
+        const sequence = ++this.#operationSequence
+        const settledAtMs = nowMs()
+        const record = createGpuOperationRecord({
+            sequence,
+            id: `${this.#owner.id}/gpu-operation-${sequence}`,
+            kind: 'readback-staging-release',
+            status: input.status,
+            runtimeId: this.#owner.id,
+            target: freezeEvidence({ ...input.target }),
+            descriptor: createGpuDescriptorEvidence(input.descriptorSummary),
+            ...(input.nativeErrorCategory !== undefined
+                ? { nativeErrorCategory: input.nativeErrorCategory }
+                : {}),
+            startedAtMs: settledAtMs,
+            settledAtMs,
+        })
+
+        this.#recordOperation(record)
+        const needsStack = [ ...this.#captures ].some(capture => {
+            const state = captureStateFor(capture)
+            return state.isActive && state.options.includeStacks
+        })
+        const stack = needsStack ? captureStack() : undefined
+        for (const capture of [ ...this.#captures ]) {
+            acceptCaptureInstantOperation(capture, record, stack)
+        }
+
+        const next = {
+            ...this.#aggregates,
+            readbackOperationAttempts: this.#aggregates.readbackOperationAttempts + 1,
+            successfulReadbackOperations: this.#aggregates.successfulReadbackOperations +
+                (input.status === 'succeeded' ? 1 : 0),
+            failedReadbackOperations: this.#aggregates.failedReadbackOperations +
+                (input.status === 'failed' ? 1 : 0),
+        }
+        if (input.nativeErrorCategory === 'native-exception') next.nativeFailures++
+        if (input.nativeErrorCategory === 'scope-failure') next.scopeFailures++
+        if (input.nativeErrorCategory === 'validation') next.validationFailures++
+        if (input.nativeErrorCategory === 'out-of-memory') next.outOfMemoryFailures++
+        this.#aggregates = next
         return record
     }
 

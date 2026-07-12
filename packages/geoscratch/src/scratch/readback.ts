@@ -1,6 +1,14 @@
 import { UUID } from '../core/utils/uuid.js'
 import { ScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
+import { serializeNativeGpuError } from './gpu-operation.js'
 import { createLayoutReadbackView } from './layout-codec.js'
+import {
+    beginReadbackMapping,
+    cancelReadbackMapping,
+    completeReadbackMapping,
+    failReadbackMapping,
+    recordReadbackCleanupFailure,
+} from './readback-mapping.js'
 import {
     adoptRuntimeReadbackOperation,
     registerRuntimeReadbackOperation,
@@ -12,17 +20,19 @@ import {
     readbackStagingBuffer,
     releaseReadbackStaging,
 } from './readback-staging.js'
-import { describeValue, getGlobalConstant } from './type-utils.js'
+import { diagnosticsControllerFor } from './runtime-diagnostics.js'
+import { describeValue } from './type-utils.js'
 import type { BufferResource } from './buffer.js'
 import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchReadbackFailureStage } from './gpu-operation.js'
 import type { LayoutArtifact, LayoutReadbackView } from './layout-codec.js'
-import type { ReadbackStagingSlot } from './readback-staging.js'
+import type { ReadbackMappingTransaction } from './readback-mapping.js'
+import type { ReadbackStagingCleanupResult, ReadbackStagingSlot } from './readback-staging.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { ScratchRuntimeReadbackOperationFact } from './runtime-diagnostics.js'
 import type { SubmittedResourceEpoch, SubmittedWork } from './submission.js'
 
 const BUFFER_USAGE_COPY_SRC = 0x4
-const MAP_MODE_READ = getGlobalConstant('GPUMapMode', 'READ', 0x1)
 const readbackOperationToken = Symbol('ReadbackOperation')
 
 export type ReadbackRange = {
@@ -68,7 +78,10 @@ export type ScheduledReadbackOperationDescriptor = ReadbackOperationDescriptor &
 export type ScheduledReadbackStagingOwner = Readonly<{
     buffer: GPUBuffer
     markMapping(): void
-    release(options: Readonly<{ unmap: boolean, gpuUseComplete: boolean }>): void
+    release(options: Readonly<{
+        unmap: boolean
+        gpuUseComplete: boolean
+    }>): ReadbackStagingCleanupResult
 }>
 
 export type TypedArrayConstructor<T extends ArrayBufferView = ArrayBufferView> = {
@@ -113,6 +126,9 @@ type ReadbackOperationPrivateState = {
     stepIndex: number | undefined
     stagingAllocationOperationId: string | undefined
     mappingCompleted: boolean
+    materialization: Promise<Uint8Array> | undefined
+    lifecycleSubscribers: Set<(state: 'cancelled' | 'disposed') => void>
+    failureCode: string | undefined
 }
 
 const directReadbackStaging = new WeakMap<ReadbackOperation, ReadbackStagingSlot>()
@@ -166,6 +182,9 @@ export class ReadbackOperation {
             stepIndex: construction.stepIndex,
             stagingAllocationOperationId: construction.stagingAllocationOperationId,
             mappingCompleted: false,
+            materialization: undefined,
+            lifecycleSubscribers: new Set(),
+            failureCode: undefined,
         }
         readbackOperationStates.set(this, state)
         state.source = normalizeSource(this, descriptor.source)
@@ -348,11 +367,12 @@ export class ReadbackOperation {
         if (this.state === 'consumed' || this.state === 'disposed') return
 
         this._clearRetainedBytes()
-        this._releaseStagingBuffer(true)
         const state = readbackStateFor(this)
         state.isCancelled = true
         if (reason !== undefined) state.cancelReason = reason
         this._setState('cancelled')
+        publishReadbackLifecycle(this, 'cancelled')
+        this._releaseStagingBuffer(true)
         this._unregister()
     }
 
@@ -361,23 +381,56 @@ export class ReadbackOperation {
         if (this.state === 'disposed') return
 
         this._clearRetainedBytes()
-        this._releaseStagingBuffer(true)
         readbackStateFor(this).isDisposed = true
         this._setState('disposed')
+        publishReadbackLifecycle(this, 'disposed')
+        this._releaseStagingBuffer(true)
         this._unregister()
     }
 
     async _readBytes(): Promise<Uint8Array> {
 
         this._assertReadableLifecycle()
-
-        const retainedBytes = readbackStateFor(this).retainedBytes
+        const state = readbackStateFor(this)
+        const retainedBytes = state.retainedBytes
         if (retainedBytes !== undefined) {
             return cloneBytes(retainedBytes)
         }
 
+        if (state.materialization !== undefined) {
+            if (this.retain === 'until-dispose') {
+                return cloneBytes(await state.materialization)
+            }
+            throwScratchDiagnostic({
+                code: 'SCRATCH_READBACK_IN_PROGRESS',
+                severity: 'error',
+                phase: 'readback',
+                subject: this.subject,
+                related: [ this.source.subject ],
+                message: 'ReadbackOperation already has a consume-on-read materialization owner.',
+                expected: { materializationOwners: 1 },
+                actual: readbackDiagnosticActual(this, { materializationOwners: 1 }),
+            })
+        }
+
+        const materialization = this._materializeBytes()
+        state.materialization = materialization
+        try {
+            const bytes = await materialization
+            return this.retain === 'until-dispose' ? cloneBytes(bytes) : bytes
+        } finally {
+            if (state.materialization === materialization) state.materialization = undefined
+        }
+    }
+
+    async _materializeBytes(): Promise<Uint8Array> {
+
+        let mappingTransaction: ReadbackMappingTransaction | undefined
+        let failureStage: ScratchReadbackFailureStage = 'lifecycle-recheck'
+
         try {
             const isScheduled = scheduledReadbackOperations.has(this)
+            failureStage = isScheduled ? 'mapping' : 'staging-allocation'
             this._assertBeforeMaterialization()
 
             if (!isScheduled) {
@@ -399,6 +452,7 @@ export class ReadbackOperation {
                 })
 
                 this._assertBeforeMaterialization()
+                failureStage = 'copy-issue'
                 const stagingBuffer = readbackStagingBuffer(slot)
 
                 const encoderDescriptor: GPUCommandEncoderDescriptor = {}
@@ -420,14 +474,66 @@ export class ReadbackOperation {
             this._assertReadableLifecycle()
             scheduledReadbackStaging.get(this)?.markMapping()
             this._setState('mapping', { isMapping: true })
+            failureStage = 'mapping'
             const stagingBuffer = this._stagingBuffer()
-            await stagingBuffer.mapAsync(MAP_MODE_READ, 0, this.range.byteLength)
+            const mapping = await beginReadbackMapping({
+                runtime: this.runtime,
+                target: readbackTarget(this),
+                buffer: stagingBuffer,
+                byteLength: this.range.byteLength,
+                ...(this.label !== undefined ? { label: `${this.label} mapping` } : {}),
+                lifecycleState: () => readbackLifecycleState(this),
+                subscribeLifecycle: listener => subscribeReadbackLifecycle(this, listener),
+                onOperation: operationId => this._updateFact({ lastMappingOperationId: operationId }),
+            })
+            if (mapping.status === 'cancelled') {
+                this._assertReadableLifecycle()
+                throw new TypeError('Cancelled readback mapping remained readable.')
+            }
+            mappingTransaction = mapping.transaction
             readbackStateFor(this).mappingCompleted = true
-            this._assertReadableLifecycle()
-            const mapped = stagingBuffer.getMappedRange(0, this.range.byteLength)
-            const bytes = new Uint8Array(mapped.slice(0))
+            try {
+                this._assertReadableLifecycle()
+            } catch (error) {
+                cancelReadbackMapping(mappingTransaction)
+                mappingTransaction = undefined
+                throw error
+            }
+            failureStage = 'mapped-range'
+            let mapped: ArrayBuffer
+            try {
+                mapped = stagingBuffer.getMappedRange(0, this.range.byteLength)
+            } catch (cause) {
+                const transaction = mappingTransaction
+                mappingTransaction = undefined
+                return failReadbackMapping(transaction, {
+                    stage: 'mapped-range',
+                    code: 'SCRATCH_READBACK_MAPPED_RANGE_FAILED',
+                    cause,
+                })
+            }
+            failureStage = 'host-copy'
+            let bytes: Uint8Array
+            try {
+                bytes = new Uint8Array(mapped.slice(0))
+            } catch (cause) {
+                const transaction = mappingTransaction
+                mappingTransaction = undefined
+                return failReadbackMapping(transaction, {
+                    stage: 'host-copy',
+                    code: 'SCRATCH_READBACK_HOST_COPY_FAILED',
+                    cause,
+                })
+            }
 
-            this._releaseStagingBuffer(true)
+            failureStage = 'cleanup'
+            const cleanup = this._releaseStagingBuffer(true)
+            if (cleanup !== undefined && cleanup.failures.length > 0) {
+                recordReadbackCleanupFailure(mappingTransaction, cleanup)
+            } else {
+                completeReadbackMapping(mappingTransaction)
+            }
+            mappingTransaction = undefined
 
             if (this.retain === 'until-dispose') {
                 const state = readbackStateFor(this)
@@ -439,7 +545,7 @@ export class ReadbackOperation {
                     stagingBytes: 0,
                     retainedHostBytes: bytes.byteLength,
                 })
-                return cloneBytes(bytes)
+                return bytes
             }
 
             this._clearRetainedBytes()
@@ -447,9 +553,14 @@ export class ReadbackOperation {
             this._unregister()
             return bytes
         } catch (error: unknown) {
+            if (mappingTransaction !== undefined) {
+                cancelReadbackMapping(mappingTransaction)
+                mappingTransaction = undefined
+            }
             if (error instanceof ScratchDiagnosticError) {
                 this._releaseStagingBuffer(true)
                 if (this.state !== 'cancelled' && this.state !== 'disposed') {
+                    readbackStateFor(this).failureCode = error.diagnostic.code
                     this._clearRetainedBytes()
                     this._setState('failed', {
                         isMapping: false,
@@ -461,6 +572,8 @@ export class ReadbackOperation {
                 throw error
             }
 
+            const failureCode = unexpectedReadbackFailureCode(failureStage)
+            readbackStateFor(this).failureCode = failureCode
             this._setState('failed', {
                 isMapping: false,
                 stagingBytes: 0,
@@ -472,15 +585,32 @@ export class ReadbackOperation {
             this._clearRetainedBytes()
             this._releaseStagingBuffer(true)
             this._unregister()
+            const nativeError = serializeNativeGpuError(error)
+            const controller = diagnosticsControllerFor(this.runtime)
+            const incident = controller.recordIncident({
+                kind: 'readback-failure',
+                diagnosticCode: failureCode,
+                nativeErrorCategory: 'native-exception',
+                attribution: 'exact-operation',
+                target: readbackTarget(this),
+                failureStage,
+                nativeError,
+                outcomes: [ Object.freeze({
+                    stage: failureStage,
+                    diagnosticCode: failureCode,
+                    nativeErrorCategory: 'native-exception',
+                    nativeError,
+                }) ],
+            })
             throwScratchDiagnostic({
-                code: 'SCRATCH_READBACK_MAP_FAILED',
+                code: failureCode,
                 severity: 'error',
                 phase: 'readback',
                 subject: this.subject,
-                related: [ this.source.subject ],
-                message: 'ReadbackOperation failed while copying or mapping staging data.',
-                actual,
-            })
+                related: [ this.source.subject, incident.subject ],
+                message: unexpectedReadbackFailureMessage(failureStage),
+                actual: { ...actual, failureStage, nativeError },
+            }, { cause: error, incident })
         }
     }
 
@@ -526,12 +656,12 @@ export class ReadbackOperation {
 
         if (this.state === 'failed') {
             throwScratchDiagnostic({
-                code: 'SCRATCH_READBACK_MAP_FAILED',
+                code: readbackStateFor(this).failureCode ?? 'SCRATCH_READBACK_FAILED',
                 severity: 'error',
                 phase: 'readback',
                 subject: this.subject,
                 related: [ this.source.subject ],
-                message: 'ReadbackOperation has already failed.',
+                message: 'ReadbackOperation failed during an earlier materialization attempt.',
                 actual: readbackDiagnosticActual(this),
             })
         }
@@ -554,25 +684,26 @@ export class ReadbackOperation {
         this._updateFact({ retainedHostBytes: 0 })
     }
 
-    _releaseStagingBuffer(unmap = false) {
+    _releaseStagingBuffer(unmap = false): ReadbackStagingCleanupResult | undefined {
 
         const slot = directReadbackStaging.get(this)
         if (slot !== undefined) {
             directReadbackStaging.delete(this)
-            releaseReadbackStaging(slot, unmap)
+            const cleanup = releaseReadbackStaging(slot, { unmap })
             this._updateFact({ stagingBytes: 0, isMapping: false })
-            return
+            return cleanup
         }
 
         const owner = scheduledReadbackStaging.get(this)
-        if (owner === undefined) return
+        if (owner === undefined) return undefined
 
         scheduledReadbackStaging.delete(this)
-        owner.release({
+        const cleanup = owner.release({
             unmap,
             gpuUseComplete: readbackStateFor(this).mappingCompleted,
         })
         this._updateFact({ stagingBytes: 0, isMapping: false })
+        return cleanup
     }
 
     _stagingBuffer(): GPUBuffer {
@@ -612,6 +743,60 @@ function readbackStateFor(operation: ReadbackOperation): ReadbackOperationPrivat
     const state = readbackOperationStates.get(operation)
     if (state === undefined) throw new TypeError('ReadbackOperation is not Scratch-owned.')
     return state
+}
+
+function readbackLifecycleState(operation: ReadbackOperation): 'active' | 'cancelled' | 'disposed' {
+
+    if (operation.isDisposed || operation.state === 'disposed') return 'disposed'
+    if (operation.isCancelled || operation.state === 'cancelled') return 'cancelled'
+    return 'active'
+}
+
+function subscribeReadbackLifecycle(
+    operation: ReadbackOperation,
+    listener: (state: 'cancelled' | 'disposed') => void
+): () => void {
+
+    const state = readbackLifecycleState(operation)
+    if (state !== 'active') {
+        listener(state)
+        return () => {}
+    }
+    const subscribers = readbackStateFor(operation).lifecycleSubscribers
+    subscribers.add(listener)
+    return () => subscribers.delete(listener)
+}
+
+function publishReadbackLifecycle(
+    operation: ReadbackOperation,
+    lifecycle: 'cancelled' | 'disposed'
+): void {
+
+    const subscribers = readbackStateFor(operation).lifecycleSubscribers
+    for (const subscriber of [ ...subscribers ]) subscriber(lifecycle)
+    subscribers.clear()
+}
+
+function unexpectedReadbackFailureCode(stage: ScratchReadbackFailureStage): string {
+
+    if (stage === 'staging-allocation') return 'SCRATCH_READBACK_STAGING_NATIVE_FAILED'
+    if (stage === 'copy-issue') return 'SCRATCH_READBACK_COPY_ISSUE_FAILED'
+    if (stage === 'mapping') return 'SCRATCH_READBACK_MAPPING_NATIVE_FAILED'
+    if (stage === 'mapped-range') return 'SCRATCH_READBACK_MAPPED_RANGE_FAILED'
+    if (stage === 'host-copy') return 'SCRATCH_READBACK_HOST_COPY_FAILED'
+    if (stage === 'cleanup') return 'SCRATCH_READBACK_CLEANUP_FAILED'
+    return 'SCRATCH_READBACK_FAILED'
+}
+
+function unexpectedReadbackFailureMessage(stage: ScratchReadbackFailureStage): string {
+
+    if (stage === 'staging-allocation') return 'Readback staging allocation failed unexpectedly.'
+    if (stage === 'copy-issue') return 'Readback copy issue failed before mapping.'
+    if (stage === 'mapping') return 'Readback mapping failed unexpectedly.'
+    if (stage === 'mapped-range') return 'Readback mapped-range access failed unexpectedly.'
+    if (stage === 'host-copy') return 'Readback host copy failed unexpectedly.'
+    if (stage === 'cleanup') return 'Readback staging cleanup failed unexpectedly.'
+    return 'Readback materialization failed unexpectedly.'
 }
 
 const scheduledReadbackOperations = new WeakSet<ReadbackOperation>()

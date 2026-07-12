@@ -11,7 +11,9 @@ import type { BufferResource } from './buffer.js'
 import type {
     GpuAttributionConfidence,
     GpuNativeErrorCategory,
+    ScratchGpuIncidentReport,
     ScratchGpuCommandOperationTarget,
+    ScratchGpuOperationRecord,
     ScratchGpuReadbackOperationTarget,
 } from './gpu-operation.js'
 import type { ScopedNativeAllocationFailureKind, ScopedNativeAllocationOutcome } from './native-allocation.js'
@@ -45,7 +47,32 @@ type ReadbackStagingSlotState = {
     isReleased: boolean
 }
 
+export type ReadbackStagingCleanupFailure = Readonly<{
+    kind: 'unmap' | 'destroy'
+    cause: unknown
+}>
+
+export type ReadbackStagingCleanupResult = Readonly<{
+    failures: readonly ReadbackStagingCleanupFailure[]
+    releaseOperation?: ScratchGpuOperationRecord
+    incident?: ScratchGpuIncidentReport
+}>
+
+export type ReadbackStagingReleaseRecordInput = Readonly<{
+    runtime: ScratchRuntime
+    target: ReadbackStagingTarget
+    byteLength: number
+    allocationOperationId: string
+    failures: readonly ReadbackStagingCleanupFailure[]
+    unmapRequested: boolean
+    destroyRequested: boolean
+    recordIncident?: boolean
+}>
+
 const readbackStagingSlotStates = new WeakMap<ReadbackStagingSlot, ReadbackStagingSlotState>()
+const emptyReadbackStagingCleanupResult: ReadbackStagingCleanupResult = Object.freeze({
+    failures: Object.freeze([]),
+})
 
 export class ReadbackStagingSlot {
 
@@ -155,39 +182,126 @@ export function readbackStagingBuffer(slot: ReadbackStagingSlot): GPUBuffer {
     return state.buffer
 }
 
-export function releaseReadbackStaging(slot: ReadbackStagingSlot, unmap = false): void {
+export function releaseReadbackStaging(
+    slot: ReadbackStagingSlot,
+    options: Readonly<{ unmap?: boolean, recordIncident?: boolean }> = {}
+): ReadbackStagingCleanupResult {
 
     const state = stagingStateFor(slot)
-    if (state.isReleased) return
+    if (state.isReleased) return emptyReadbackStagingCleanupResult
     state.isReleased = true
+    const failures: ReadbackStagingCleanupFailure[] = []
+    const unmap = options.unmap === true
 
     if (unmap && typeof state.buffer.unmap === 'function') {
         try {
             state.buffer.unmap()
-        } catch {
-            // Mapping cleanup receives structured evidence in the mapping transaction phase.
+        } catch (cause) {
+            failures.push(Object.freeze({ kind: 'unmap', cause }))
         }
     }
     if (typeof state.buffer.destroy === 'function') {
         try {
             state.buffer.destroy()
-        } catch {
-            // Staging release remains idempotent even when native cleanup throws.
+        } catch (cause) {
+            failures.push(Object.freeze({ kind: 'destroy', cause }))
         }
     }
     state.reservation.release()
+    return recordReadbackStagingRelease({
+        runtime: state.runtime,
+        target: state.target,
+        byteLength: state.byteLength,
+        allocationOperationId: state.allocationOperationId,
+        failures,
+        unmapRequested: unmap,
+        destroyRequested: true,
+        ...(options.recordIncident !== undefined
+            ? { recordIncident: options.recordIncident }
+            : {}),
+    })
 }
 
-export function resetReadbackStaging(slot: ReadbackStagingSlot, unmap = false): void {
+export function resetReadbackStaging(
+    slot: ReadbackStagingSlot,
+    unmap = false
+): ReadbackStagingCleanupResult {
 
     const state = stagingStateFor(slot)
     if (state.isReleased) throw new TypeError(`Readback staging slot ${state.id} has been released.`)
-    if (!unmap || typeof state.buffer.unmap !== 'function') return
+    if (!unmap || typeof state.buffer.unmap !== 'function') {
+        return emptyReadbackStagingCleanupResult
+    }
     try {
         state.buffer.unmap()
-    } catch {
-        // Mapping cleanup receives structured evidence in the mapping transaction phase.
+        return emptyReadbackStagingCleanupResult
+    } catch (cause) {
+        return freezeReadbackStagingCleanupResult([
+            Object.freeze({ kind: 'unmap', cause }),
+        ])
     }
+}
+
+export function recordReadbackStagingRelease(
+    input: ReadbackStagingReleaseRecordInput
+): ReadbackStagingCleanupResult {
+
+    const failures = Object.freeze([ ...input.failures ])
+    const controller = diagnosticsControllerFor(input.runtime)
+    const releaseOperation = controller.recordReadbackStagingRelease({
+        target: input.target,
+        descriptorSummary: {
+            byteLength: input.byteLength,
+            allocationOperationId: input.allocationOperationId,
+            unmapRequested: input.unmapRequested,
+            destroyRequested: input.destroyRequested,
+            cleanupFailureCount: failures.length,
+            cleanupFailureKinds: failures.map(failure => failure.kind),
+        },
+        status: failures.length === 0 ? 'succeeded' : 'failed',
+        ...(failures.length > 0 ? { nativeErrorCategory: 'native-exception' } : {}),
+    })
+    let incident: ScratchGpuIncidentReport | undefined
+    if (failures.length > 0 && input.recordIncident !== false) {
+        incident = controller.recordIncident({
+            kind: 'readback-failure',
+            diagnosticCode: 'SCRATCH_READBACK_CLEANUP_FAILED',
+            nativeErrorCategory: 'native-exception',
+            attribution: 'exact-operation',
+            target: input.target,
+            operationId: releaseOperation.id,
+            triggerOperation: releaseOperation,
+            failureStage: 'cleanup',
+            nativeError: serializeNativeGpuError(failures[0].cause),
+            outcomes: failures.map(failure => Object.freeze({
+                stage: 'cleanup' as const,
+                diagnosticCode: readbackCleanupFailureCode(failure.kind),
+                nativeErrorCategory: 'native-exception' as const,
+                nativeError: serializeNativeGpuError(failure.cause),
+            })),
+        })
+    }
+    return freezeReadbackStagingCleanupResult(failures, releaseOperation, incident)
+}
+
+function readbackCleanupFailureCode(kind: ReadbackStagingCleanupFailure['kind']): string {
+
+    return kind === 'unmap'
+        ? 'SCRATCH_READBACK_UNMAP_FAILED'
+        : 'SCRATCH_READBACK_STAGING_DESTROY_FAILED'
+}
+
+function freezeReadbackStagingCleanupResult(
+    failures: readonly ReadbackStagingCleanupFailure[],
+    releaseOperation?: ScratchGpuOperationRecord,
+    incident?: ScratchGpuIncidentReport
+): ReadbackStagingCleanupResult {
+
+    return Object.freeze({
+        failures: Object.freeze([ ...failures ]),
+        ...(releaseOperation !== undefined ? { releaseOperation } : {}),
+        ...(incident !== undefined ? { incident } : {}),
+    })
 }
 
 function constructReadbackStagingSlot(state: ReadbackStagingSlotState): ReadbackStagingSlot {

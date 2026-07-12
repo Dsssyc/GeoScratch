@@ -399,7 +399,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         }
 
         const diagnostic = await expectScratchDiagnostic(() => readback.toBytes(), {
-            code: 'SCRATCH_READBACK_MAP_FAILED',
+            code: 'SCRATCH_READBACK_MAPPING_REJECTED',
             severity: 'error',
             phase: 'readback',
         })
@@ -407,12 +407,11 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         expect(readback.state).to.equal('failed')
         expect(readback.isResultRetained).to.equal(false)
         expect(readback.retainedByteLength).to.equal(undefined)
-        expect(readback.stagingBuffer).to.equal(undefined)
+        expect(readback).not.to.have.property('stagingBuffer')
         expect(diagnostic.actual).to.deep.include({
-            state: 'failed',
-            retain: 'until-dispose',
-            sourceId: source.id,
+            readbackId: readback.id,
         })
+        expect(diagnostic.actual.operationId).to.be.a('string')
     })
 
     it('rejects invalid retain policies with structured diagnostics', async() => {
