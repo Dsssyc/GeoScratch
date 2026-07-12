@@ -11,8 +11,11 @@ import {
 import { runtimePipelineSnapshot } from './pipeline-ownership.js'
 import { Program } from './program.js'
 import { QuerySetResource } from './query-set.js'
-import { ReadbackOperation } from './readback.js'
-import { normalizeScratchReadbackPolicy } from './readback-ownership.js'
+import { createReadbackOperation, ReadbackOperation } from './readback.js'
+import {
+    normalizeScratchReadbackPolicy,
+    runtimeReadbackOperationSnapshot,
+} from './readback-ownership.js'
 import {
     registerRuntimeDiagnostics,
     retainDeviceLostInfo,
@@ -501,7 +504,7 @@ export class ScratchRuntime {
     createReadback(descriptor: ReadbackOperationDescriptor) {
 
         this.assertActive()
-        return new ReadbackOperation(this, descriptor)
+        return createReadbackOperation(this, descriptor)
     }
 
     readback(descriptor: ReadbackOperationDescriptor) {
@@ -530,6 +533,10 @@ export class ScratchRuntime {
 
         for (const pipeline of runtimePipelineSnapshot(this)) {
             pipeline.dispose()
+        }
+
+        for (const readback of runtimeReadbackOperationSnapshot(this)) {
+            readback.dispose()
         }
 
         for (const resource of [ ...this._resources ]) {
