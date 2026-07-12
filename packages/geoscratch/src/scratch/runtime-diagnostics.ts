@@ -24,6 +24,7 @@ import type {
     ScratchGpuPipelineOperationRecord,
     ScratchGpuPipelineOperationTarget,
     ScratchGpuPressureEvidence,
+    ScratchGpuReadbackOperationTarget,
     ScratchGpuResourceOperationTarget,
     ScratchPipelineNativeLabelEvidence,
     ScratchNativeGpuErrorFacts,
@@ -46,7 +47,7 @@ const diagnosticCaptureToken = Symbol('ScratchDiagnosticCapture')
 
 export type ScratchPendingGpuOperationKind = Exclude<
     GpuOperationKind,
-    'resource-disposal' | 'pipeline-disposal'
+    'resource-disposal' | 'pipeline-disposal' | 'readback-staging-release'
 >
 
 export type ScratchRuntimeDiagnosticsOptions = Readonly<{
@@ -112,7 +113,7 @@ export type ScratchRuntimePipelineRegistration = Readonly<{
 }>
 
 export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
-    version: 2
+    version: 3
     runtime: Readonly<{
         id: string
         label?: string
@@ -151,6 +152,10 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
         failedPipelineCreations: number
         cancelledPipelineCreations: number
         pipelineDisposals: number
+        readbackOperationAttempts: number
+        successfulReadbackOperations: number
+        failedReadbackOperations: number
+        cancelledReadbackOperations: number
         uncapturedErrors: number
         deviceLosses: number
     }>
@@ -161,7 +166,7 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
 }>
 
 export type ScratchRuntimeDiagnosticsEvidence = Readonly<{
-    version: 2
+    version: 3
     snapshot: ScratchRuntimeDiagnosticsSnapshot
     operations: readonly ScratchGpuOperationRecord[]
     incidents: readonly ScratchGpuIncidentReport[]
@@ -171,6 +176,8 @@ export type ScratchGpuOperationQuery = Readonly<{
     operationId?: string
     resourceId?: string
     pipelineId?: string
+    commandId?: string
+    readbackId?: string
     targetKind?: ScratchGpuOperationTarget['kind']
     kind?: GpuOperationKind
     status?: GpuOperationStatus
@@ -183,7 +190,9 @@ export type ScratchGpuIncidentQuery = Readonly<{
     operationId?: string
     resourceId?: string
     pipelineId?: string
-    targetKind?: 'resource' | 'pipeline' | 'runtime'
+    commandId?: string
+    readbackId?: string
+    targetKind?: 'resource' | 'pipeline' | 'command' | 'readback' | 'runtime'
     kind?: ScratchGpuIncidentKind
     sequenceFrom?: number
     sequenceTo?: number
@@ -213,7 +222,7 @@ export type ScratchDiagnosticCaptureStopReason =
     | 'runtime-disposed'
 
 export type ScratchDiagnosticCaptureReport = Readonly<{
-    version: 2
+    version: 3
     id: string
     runtimeId: string
     stopReason: ScratchDiagnosticCaptureStopReason
@@ -431,6 +440,10 @@ export class ScratchRuntimeDiagnosticsController {
         failedPipelineCreations: 0,
         cancelledPipelineCreations: 0,
         pipelineDisposals: 0,
+        readbackOperationAttempts: 0,
+        successfulReadbackOperations: 0,
+        failedReadbackOperations: 0,
+        cancelledReadbackOperations: 0,
         uncapturedErrors: 0,
         deviceLosses: 0,
     }
@@ -488,7 +501,7 @@ export class ScratchRuntimeDiagnosticsController {
             .map(operation => pendingFact(operation))
 
         return freezeEvidence({
-            version: 2,
+            version: 3,
             runtime: {
                 id: this.#owner.id,
                 ...(this.#owner.label !== undefined ? { label: boundedLabel(this.#owner.label) } : {}),
@@ -549,7 +562,7 @@ export class ScratchRuntimeDiagnosticsController {
     exportEvidence(): ScratchRuntimeDiagnosticsEvidence {
 
         return freezeEvidence({
-            version: 2,
+            version: 3,
             snapshot: this.snapshot(),
             operations: this.operations(),
             incidents: this.incidents(),
@@ -569,7 +582,7 @@ export class ScratchRuntimeDiagnosticsController {
         const needsStack = activeCaptureStates.some(state => state.options.includeStacks)
         const needsFullDescriptor = activeCaptureStates.some(state => state.options.includeDescriptors)
         const target = freezeEvidence({ ...input.target })
-        const targetId = target.kind === 'resource' ? target.resourceId : target.pipelineId
+        const targetId = operationTargetId(target)
         const nativeLabel = boundedGpuOperationNativeLabel(input.nativeLabel, targetId)
         const operation: ScratchPendingGpuOperation = Object.freeze({
             id,
@@ -595,10 +608,15 @@ export class ScratchRuntimeDiagnosticsController {
                 ...this.#aggregates,
                 allocationAttempts: this.#aggregates.allocationAttempts + 1,
             }
-        } else {
+        } else if (target.kind === 'pipeline') {
             this.#aggregates = {
                 ...this.#aggregates,
                 pipelineCreationAttempts: this.#aggregates.pipelineCreationAttempts + 1,
+            }
+        } else {
+            this.#aggregates = {
+                ...this.#aggregates,
+                readbackOperationAttempts: this.#aggregates.readbackOperationAttempts + 1,
             }
         }
         if (kind === 'texture-replacement' && target.kind === 'resource') {
@@ -691,18 +709,18 @@ export class ScratchRuntimeDiagnosticsController {
         const currentResources = target.kind === 'pipeline'
             ? []
             : this.#largestResourceFacts(this.#options.contributorLimit)
-        const currentPipelines = target.kind === 'resource'
-            ? []
-            : [ ...this.#pipelineFacts.values() ]
+        const currentPipelines = target.kind === 'pipeline' || target.kind === 'runtime'
+            ? [ ...this.#pipelineFacts.values() ]
                 .sort((left, right) => left.id.localeCompare(right.id))
                 .slice(0, this.#options.contributorLimit)
+            : []
         const localOmissions = Math.max(0, this.#pendingOperations.size - pendingOperations.length) +
             (target.kind === 'pipeline'
                 ? 0
                 : Math.max(0, this.#resourceFacts.size - currentResources.length)) +
-            (target.kind === 'resource'
-                ? 0
-                : Math.max(0, this.#pipelineFacts.size - currentPipelines.length))
+            (target.kind === 'pipeline' || target.kind === 'runtime'
+                ? Math.max(0, this.#pipelineFacts.size - currentPipelines.length)
+                : 0)
         const report = createGpuIncidentReport({
             sequence,
             id,
@@ -1120,10 +1138,14 @@ export class ScratchRuntimeDiagnosticsController {
         if (operation.target.kind === 'resource') {
             if (completion.status === 'succeeded') next.successfulAllocations++
             if (completion.status === 'cancelled') next.cancelledAllocations++
-        } else {
+        } else if (operation.target.kind === 'pipeline') {
             if (completion.status === 'succeeded') next.successfulPipelineCreations++
             if (completion.status === 'failed') next.failedPipelineCreations++
             if (completion.status === 'cancelled') next.cancelledPipelineCreations++
+        } else {
+            if (completion.status === 'succeeded') next.successfulReadbackOperations++
+            if (completion.status === 'failed') next.failedReadbackOperations++
+            if (completion.status === 'cancelled') next.cancelledReadbackOperations++
         }
         if (completion.nativeErrorCategory === 'validation') next.validationFailures++
         if (completion.nativeErrorCategory === 'out-of-memory') next.outOfMemoryFailures++
@@ -1417,7 +1439,7 @@ function stopCapture(
     if (state.timer !== undefined) clearTimeout(state.timer)
     state.timer = undefined
     state.report = freezeEvidence({
-        version: 2,
+        version: 3,
         id: state.id,
         runtimeId: state.runtimeId,
         stopReason: reason,
@@ -1538,7 +1560,9 @@ function assertPendingGpuOperationKind(
         kind === 'texture-allocation' ||
         kind === 'texture-replacement' ||
         kind === 'render-pipeline-creation' ||
-        kind === 'compute-pipeline-creation'
+        kind === 'compute-pipeline-creation' ||
+        kind === 'readback-staging-allocation' ||
+        kind === 'readback-mapping'
     ) return
     throw new TypeError(`GPU operation ${String(kind)} cannot be pending.`)
 }
@@ -1697,6 +1721,14 @@ function matchesOperationQuery(
         (query.pipelineId === undefined || (
             record.target.kind === 'pipeline' && record.target.pipelineId === query.pipelineId
         )) &&
+        (query.commandId === undefined || (
+            record.target.kind === 'command' && record.target.commandId === query.commandId
+        ) || (
+            record.target.kind === 'readback' && record.target.commandId === query.commandId
+        )) &&
+        (query.readbackId === undefined || (
+            record.target.kind === 'readback' && record.target.readbackId === query.readbackId
+        )) &&
         (query.kind === undefined || record.kind === query.kind) &&
         (query.status === undefined || record.status === query.status) &&
         (query.sequenceFrom === undefined || record.sequence >= query.sequenceFrom) &&
@@ -1717,6 +1749,14 @@ function matchesIncidentQuery(
         (query.pipelineId === undefined || (
             report.target.kind === 'pipeline' && report.target.pipelineId === query.pipelineId
         )) &&
+        (query.commandId === undefined || (
+            report.target.kind === 'command' && report.target.commandId === query.commandId
+        ) || (
+            report.target.kind === 'readback' && report.target.commandId === query.commandId
+        )) &&
+        (query.readbackId === undefined || (
+            report.target.kind === 'readback' && report.target.readbackId === query.readbackId
+        )) &&
         (query.kind === undefined || report.kind === query.kind) &&
         (query.sequenceFrom === undefined || report.sequence >= query.sequenceFrom) &&
         (query.sequenceTo === undefined || report.sequence <= query.sequenceTo)
@@ -1736,6 +1776,16 @@ function captureStack(): string {
 function nowMs(): number {
 
     return globalThis.performance?.now() ?? Date.now()
+}
+
+function operationTargetId(target: ScratchGpuOperationTarget): string {
+
+    switch (target.kind) {
+        case 'resource': return target.resourceId
+        case 'pipeline': return target.pipelineId
+        case 'command': return target.commandId
+        case 'readback': return target.readbackId
+    }
 }
 
 function freezeEvidence<T>(value: T): T {

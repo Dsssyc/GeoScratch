@@ -22,6 +22,9 @@ export type GpuOperationKind =
     | 'render-pipeline-creation'
     | 'compute-pipeline-creation'
     | 'pipeline-disposal'
+    | 'readback-staging-allocation'
+    | 'readback-mapping'
+    | 'readback-staging-release'
 
 export type GpuOperationStatus =
     | 'pending'
@@ -68,9 +71,30 @@ export type ScratchGpuPipelineOperationTarget = Readonly<{
     programSourceHash: string
 }>
 
+export type ScratchGpuCommandOperationTarget = Readonly<{
+    kind: 'command'
+    commandId: string
+    commandKind: 'readback'
+}>
+
+export type ScratchGpuReadbackOperationTarget = Readonly<{
+    kind: 'readback'
+    readbackId: string
+    path: 'direct' | 'ordered'
+    sourceResourceId: string
+    allocationVersion: number
+    contentEpoch: number
+    byteLength: number
+    commandId?: string
+    submissionId?: string
+    stepIndex?: number
+}>
+
 export type ScratchGpuOperationTarget =
     | ScratchGpuResourceOperationTarget
     | ScratchGpuPipelineOperationTarget
+    | ScratchGpuCommandOperationTarget
+    | ScratchGpuReadbackOperationTarget
 
 export type ScratchGpuRuntimeIncidentTarget = Readonly<{
     kind: 'runtime'
@@ -93,7 +117,7 @@ export type ScratchPipelineNativeLabelEvidence = Readonly<{
 }>
 
 type ScratchGpuOperationRecordBase = Readonly<{
-    version: 2
+    version: 3
     sequence: number
     id: string
     kind: GpuOperationKind
@@ -123,9 +147,25 @@ export type ScratchGpuPipelineOperationRecord = ScratchGpuOperationRecordBase & 
     kind: 'render-pipeline-creation' | 'compute-pipeline-creation' | 'pipeline-disposal'
 }>
 
+export type ScratchGpuCommandOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
+    target: ScratchGpuCommandOperationTarget
+    kind: 'readback-staging-allocation' | 'readback-staging-release'
+    nativeLabels?: never
+    compilationReport?: never
+}>
+
+export type ScratchGpuReadbackOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
+    target: ScratchGpuReadbackOperationTarget
+    kind: 'readback-staging-allocation' | 'readback-mapping' | 'readback-staging-release'
+    nativeLabels?: never
+    compilationReport?: never
+}>
+
 export type ScratchGpuOperationRecord =
     | ScratchGpuResourceOperationRecord
     | ScratchGpuPipelineOperationRecord
+    | ScratchGpuCommandOperationRecord
+    | ScratchGpuReadbackOperationRecord
 
 export type ScratchGpuOperationRecordInput = Readonly<{
     sequence: number
@@ -208,17 +248,32 @@ export type ScratchGpuIncidentEvidenceCompleteness = Readonly<{
 export type ScratchGpuIncidentKind =
     | 'allocation-failure'
     | 'pipeline-failure'
+    | 'readback-failure'
     | 'uncaptured-error'
     | 'device-loss'
     | 'capture-degraded'
 
-export type ScratchGpuIncidentFailureStage =
+export type ScratchGpuPipelineFailureStage =
     | 'supporting-object-creation'
     | 'compilation-info'
     | 'shader-compilation'
     | 'pipeline-creation'
     | 'scope-settlement'
     | 'lifecycle-recheck'
+
+export type ScratchReadbackFailureStage =
+    | 'staging-allocation'
+    | 'copy-issue'
+    | 'queue-completion'
+    | 'mapping'
+    | 'mapped-range'
+    | 'host-copy'
+    | 'cleanup'
+    | 'budget'
+
+export type ScratchGpuIncidentFailureStage =
+    | ScratchGpuPipelineFailureStage
+    | ScratchReadbackFailureStage
 
 export type ScratchGpuIncidentOutcome = Readonly<{
     stage: ScratchGpuIncidentFailureStage
@@ -241,7 +296,7 @@ export type ScratchGpuIncidentPipelineFact = Readonly<{
 }>
 
 type ScratchGpuIncidentReportBase = Readonly<{
-    version: 2
+    version: 3
     sequence: number
     id: string
     kind: ScratchGpuIncidentKind
@@ -271,11 +326,21 @@ export type ScratchGpuResourceIncidentReport = ScratchGpuIncidentReportBase & Re
 export type ScratchGpuPipelineIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
     target: ScratchGpuPipelineOperationTarget
     kind: 'pipeline-failure'
-    failureStage: ScratchGpuIncidentFailureStage
+    failureStage: ScratchGpuPipelineFailureStage
     pipelineErrorReason?: GPUPipelineErrorReason
     compilationReport?: PipelineCompilationReport
     outcomes?: readonly ScratchGpuIncidentOutcome[]
     pressure?: never
+}>
+
+export type ScratchGpuReadbackIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
+    target: ScratchGpuCommandOperationTarget | ScratchGpuReadbackOperationTarget
+    kind: 'readback-failure'
+    failureStage: ScratchReadbackFailureStage
+    outcomes?: readonly ScratchGpuIncidentOutcome[]
+    pressure?: never
+    compilationReport?: never
+    pipelineErrorReason?: never
 }>
 
 export type ScratchGpuRuntimeIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
@@ -287,6 +352,7 @@ export type ScratchGpuRuntimeIncidentReport = ScratchGpuIncidentReportBase & Rea
 export type ScratchGpuIncidentReport =
     | ScratchGpuResourceIncidentReport
     | ScratchGpuPipelineIncidentReport
+    | ScratchGpuReadbackIncidentReport
     | ScratchGpuRuntimeIncidentReport
 
 export type ScratchGpuIncidentReportInput = Readonly<{
@@ -322,7 +388,7 @@ export function createGpuOperationRecord(
 
     assertGpuOperationTarget(input.kind, input.target)
     const record: Record<string, unknown> = {
-        version: 2,
+        version: 3,
         sequence: input.sequence,
         id: input.id,
         kind: input.kind,
@@ -332,9 +398,7 @@ export function createGpuOperationRecord(
         descriptor: cloneJsonValue(input.descriptor),
     }
 
-    const targetId = input.target.kind === 'resource'
-        ? input.target.resourceId
-        : input.target.pipelineId
+    const targetId = operationTargetId(input.target)
     const nativeLabel = boundedGpuOperationNativeLabel(input.nativeLabel, targetId)
     if (nativeLabel !== undefined) record.nativeLabel = nativeLabel
 
@@ -372,7 +436,11 @@ export function createGpuIncidentReport(
     const subject = input.subject ?? createIncidentSubject(input)
     const completeRelated = input.related ?? createIncidentRelatedSubjects(input)
     const related = completeRelated.slice(0, MAX_INCIDENT_RELATED_SUBJECTS)
-    const outcomes = input.target.kind === 'pipeline' && input.outcomes !== undefined
+    const outcomes = (
+        input.target.kind === 'pipeline' ||
+        input.target.kind === 'command' ||
+        input.target.kind === 'readback'
+    ) && input.outcomes !== undefined
         ? input.outcomes.slice(0, MAX_INCIDENT_OUTCOMES)
         : undefined
     const omittedEvidenceItems = Math.max(
@@ -388,7 +456,7 @@ export function createGpuIncidentReport(
         omittedRecords: input.evidence.omittedRecords + omittedEvidenceItems,
     }
     const report: Record<string, unknown> = {
-        version: 2,
+        version: 3,
         sequence: input.sequence,
         id: input.id,
         kind: input.kind,
@@ -426,6 +494,12 @@ export function createGpuIncidentReport(
                 input.compilationReport,
                 input.target
             )
+        }
+    }
+    if (input.target.kind === 'command' || input.target.kind === 'readback') {
+        copyJsonDefined(report, input, [ 'failureStage' ])
+        if (outcomes !== undefined) {
+            report.outcomes = cloneJsonValue(outcomes, new Set<object>(), true)
         }
     }
     if (input.target.kind === 'runtime') {
@@ -552,6 +626,17 @@ function createIncidentRelatedSubjects(input: ScratchGpuIncidentReportInput): Di
         })
         related.push({ kind: 'Program', id: input.target.programId })
     }
+    if (input.target.kind === 'command') {
+        related.push({
+            kind: 'Command',
+            id: input.target.commandId,
+            commandKind: input.target.commandKind,
+        })
+    }
+    if (input.target.kind === 'readback') {
+        related.push({ kind: 'ReadbackOperation', id: input.target.readbackId })
+        related.push({ kind: 'Resource', id: input.target.sourceResourceId })
+    }
     if (input.operationId !== undefined) {
         related.push({
             kind: 'GpuOperation',
@@ -572,6 +657,16 @@ function createIncidentSubject(input: ScratchGpuIncidentReportInput): Diagnostic
             id: input.target.pipelineId,
             pipelineKind: input.target.pipelineKind,
         }
+    }
+    if (input.target.kind === 'command') {
+        return {
+            kind: 'Command',
+            id: input.target.commandId,
+            commandKind: input.target.commandKind,
+        }
+    }
+    if (input.target.kind === 'readback') {
+        return { kind: 'ReadbackOperation', id: input.target.readbackId }
     }
     return {
         kind: 'Incident',
@@ -611,20 +706,40 @@ export function assertGpuOperationTarget(
     if (kind === 'pipeline-disposal' && target.kind !== 'pipeline') {
         throw new TypeError(`GPU operation ${kind} has an incompatible ${target.kind} target.`)
     }
+    if ((kind === 'readback-staging-allocation' || kind === 'readback-staging-release') && (
+        target.kind !== 'command' && target.kind !== 'readback'
+    )) {
+        throw new TypeError(`GPU operation ${kind} requires a command or readback target.`)
+    }
+    if (kind === 'readback-mapping' && target.kind !== 'readback') {
+        throw new TypeError(`GPU operation ${kind} requires a readback target.`)
+    }
 }
 
 function assertIncidentTarget(input: ScratchGpuIncidentReportInput): void {
 
-    const expectedTargetKind = input.kind === 'allocation-failure'
-        ? 'resource'
+    const compatible = input.kind === 'allocation-failure'
+        ? input.target.kind === 'resource'
         : input.kind === 'pipeline-failure'
-            ? 'pipeline'
-            : 'runtime'
-    if (input.target.kind !== expectedTargetKind) {
+            ? input.target.kind === 'pipeline'
+            : input.kind === 'readback-failure'
+                ? input.target.kind === 'command' || input.target.kind === 'readback'
+                : input.target.kind === 'runtime'
+    if (!compatible) {
         throw new TypeError(`GPU incident ${input.kind} has an incompatible ${input.target.kind} target.`)
     }
-    if (input.kind === 'pipeline-failure' && input.failureStage === undefined) {
-        throw new TypeError('Pipeline failure incidents require a failureStage.')
+    if ((input.kind === 'pipeline-failure' || input.kind === 'readback-failure') && input.failureStage === undefined) {
+        throw new TypeError(`${input.kind} incidents require a failureStage.`)
+    }
+}
+
+function operationTargetId(target: ScratchGpuOperationTarget): string {
+
+    switch (target.kind) {
+        case 'resource': return target.resourceId
+        case 'pipeline': return target.pipelineId
+        case 'command': return target.commandId
+        case 'readback': return target.readbackId
     }
 }
 

@@ -2,7 +2,7 @@ import { createPipelineNativeErrorSerializer } from './pipeline-native-error.js'
 import { createPipelineCompilationReport } from './pipeline-compilation.js'
 import type {
     GpuNativeErrorCategory,
-    ScratchGpuIncidentFailureStage,
+    ScratchGpuPipelineFailureStage,
     ScratchGpuIncidentOutcome,
 } from './gpu-operation.js'
 import type {
@@ -32,7 +32,9 @@ export type PipelineCreationIssueInput = Readonly<{
 }>
 
 export type PipelineCreationObservedFailure = Readonly<{
-    outcome: ScratchGpuIncidentOutcome
+    outcome: Omit<ScratchGpuIncidentOutcome, 'stage'> & Readonly<{
+        stage: ScratchGpuPipelineFailureStage
+    }>
     cause?: unknown
 }>
 
@@ -62,7 +64,7 @@ type PendingScopeObservation = Readonly<{
     observation: Promise<PromiseObservation<GPUError | null>>
 }>
 
-const stageOrder: Record<ScratchGpuIncidentFailureStage, number> = {
+const stageOrder: Record<ScratchGpuPipelineFailureStage, number> = {
     'supporting-object-creation': 0,
     'compilation-info': 1,
     'shader-compilation': 2,
@@ -83,7 +85,7 @@ export function issuePipelineCreation(
     let shaderModule: GPUShaderModule | undefined
     let pipelineLayout: GPUPipelineLayout | undefined
     let synchronousFailure: Readonly<{
-        stage: ScratchGpuIncidentFailureStage
+        stage: ScratchGpuPipelineFailureStage
         cause: unknown
     }> | undefined
     let compilation = notIssued<GPUCompilationInfo>()
@@ -121,7 +123,7 @@ export function issuePipelineCreation(
     }
 
     if (outOfMemoryPushed && internalPushed && validationPushed) {
-        let stage: ScratchGpuIncidentFailureStage = 'supporting-object-creation'
+        let stage: ScratchGpuPipelineFailureStage = 'supporting-object-creation'
         try {
             shaderModule = device.createShaderModule({
                 label: input.nativeLabels.shaderModule,
@@ -191,7 +193,7 @@ function settlePipelineCreationIssue(input: {
     shaderModule?: GPUShaderModule
     pipelineLayout?: GPUPipelineLayout
     synchronousFailure?: Readonly<{
-        stage: ScratchGpuIncidentFailureStage
+        stage: ScratchGpuPipelineFailureStage
         cause: unknown
     }>
     boundaryFailures: readonly unknown[]
@@ -377,7 +379,7 @@ function notIssued<T>(): Promise<PromiseObservation<T>> {
 
 function observedFailure(
     serializeNativeError: ReturnType<typeof createPipelineNativeErrorSerializer>,
-    stage: ScratchGpuIncidentFailureStage,
+    stage: ScratchGpuPipelineFailureStage,
     diagnosticCode: string,
     nativeErrorCategory: GpuNativeErrorCategory,
     cause?: unknown,

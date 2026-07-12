@@ -94,7 +94,7 @@ describe('scratch async pipeline public contract', () => {
     })
 })
 
-describe('scratch GPU provenance schema v2 contract', () => {
+describe('scratch GPU provenance schema v3 contract', () => {
 
     it('encodes a resource operation through an explicit resource target', () => {
 
@@ -118,7 +118,7 @@ describe('scratch GPU provenance schema v2 contract', () => {
             },
         })
 
-        expect(record.version).to.equal(2)
+        expect(record.version).to.equal(3)
         expect(record.target).to.deep.equal({
             kind: 'resource',
             resourceId: 'buffer-1',
@@ -157,7 +157,7 @@ describe('scratch GPU provenance schema v2 contract', () => {
             },
         })
 
-        expect(record.version).to.equal(2)
+        expect(record.version).to.equal(3)
         expect(record.target.kind).to.equal('pipeline')
         expect(record.target).not.to.have.any.keys(
             'resourceId',
@@ -218,7 +218,7 @@ describe('scratch GPU provenance schema v2 contract', () => {
             },
         })
 
-        expect(report.version).to.equal(2)
+        expect(report.version).to.equal(3)
         expect(report.target).to.deep.equal(operation.target)
         expect(report.failureStage).to.equal('pipeline-creation')
         expect(report).not.to.have.property('pressure')
@@ -258,6 +258,20 @@ describe('scratch GPU provenance schema v2 contract', () => {
             pipelineId: 'compute-pipeline-1',
             pipelineKind: 'compute',
         }
+        const commandTarget = {
+            kind: 'command',
+            commandId: 'readback-command-1',
+            commandKind: 'readback',
+        }
+        const readbackTarget = {
+            kind: 'readback',
+            readbackId: 'readback-1',
+            path: 'direct',
+            sourceResourceId: 'buffer-1',
+            allocationVersion: 1,
+            contentEpoch: 0,
+            byteLength: 16,
+        }
         const cases = [
             [ 'buffer-allocation', textureTarget, 'requires a BufferResource target' ],
             [ 'texture-allocation', bufferTarget, 'requires a TextureResource target' ],
@@ -266,6 +280,9 @@ describe('scratch GPU provenance schema v2 contract', () => {
             [ 'render-pipeline-creation', computeTarget, 'requires a render pipeline target' ],
             [ 'compute-pipeline-creation', renderTarget, 'requires a compute pipeline target' ],
             [ 'pipeline-disposal', textureTarget, 'incompatible resource target' ],
+            [ 'readback-staging-allocation', bufferTarget, 'requires a command or readback target' ],
+            [ 'readback-staging-release', renderTarget, 'requires a command or readback target' ],
+            [ 'readback-mapping', commandTarget, 'requires a readback target' ],
         ]
         for (const [ kind, target, expected ] of cases) {
             expect(() => createGpuOperationRecord({
@@ -300,6 +317,43 @@ describe('scratch GPU provenance schema v2 contract', () => {
                 omittedRecords: 0,
             },
         })).to.throw(TypeError, 'incompatible runtime target')
+
+        expect(() => createGpuIncidentReport({
+            sequence: 2,
+            id: 'mismatched-readback-incident',
+            kind: 'readback-failure',
+            diagnosticCode: 'SCRATCH_READBACK_MAP_FAILED',
+            nativeErrorCategory: 'validation',
+            attribution: 'exact-operation',
+            runtimeId: 'runtime-1',
+            target: renderTarget,
+            recentOperations: [],
+            failureStage: 'mapping',
+            evidence: {
+                complete: true,
+                overwrittenOperations: 0,
+                overwrittenIncidents: 0,
+                omittedRecords: 0,
+            },
+        })).to.throw(TypeError, 'incompatible pipeline target')
+
+        expect(() => createGpuIncidentReport({
+            sequence: 3,
+            id: 'missing-readback-stage',
+            kind: 'readback-failure',
+            diagnosticCode: 'SCRATCH_READBACK_MAP_FAILED',
+            nativeErrorCategory: 'validation',
+            attribution: 'exact-operation',
+            runtimeId: 'runtime-1',
+            target: readbackTarget,
+            recentOperations: [],
+            evidence: {
+                complete: true,
+                overwrittenOperations: 0,
+                overwrittenIncidents: 0,
+                omittedRecords: 0,
+            },
+        })).to.throw(TypeError, 'require a failureStage')
     })
 
     it('rejects mismatched pending targets before mutating controller state', async() => {
@@ -544,7 +598,7 @@ describe('scratch GPU provenance schema v2 contract', () => {
         })
 
         const pendingSnapshot = runtime.diagnostics.snapshot()
-        expect(pendingSnapshot.version).to.equal(2)
+        expect(pendingSnapshot.version).to.equal(3)
         expect(pendingSnapshot.pendingOperations[0].target).to.deep.equal(target)
 
         const record = controller.completeOperation(pending, {
@@ -559,7 +613,7 @@ describe('scratch GPU provenance schema v2 contract', () => {
         const snapshot = runtime.diagnostics.snapshot()
         const evidence = runtime.diagnostics.exportEvidence()
         const captureReport = capture.stop()
-        expect(snapshot.version).to.equal(2)
+        expect(snapshot.version).to.equal(3)
         expect(snapshot.pipelines).to.deep.equal([ {
             id: target.pipelineId,
             label: 'current pipeline',
@@ -571,8 +625,8 @@ describe('scratch GPU provenance schema v2 contract', () => {
             lastCreationOperationId: record.id,
             compilation: { errorCount: 0, warningCount: 0, infoCount: 0 },
         } ])
-        expect(evidence.version).to.equal(2)
-        expect(captureReport.version).to.equal(2)
+        expect(evidence.version).to.equal(3)
+        expect(captureReport.version).to.equal(3)
         expect(runtime.diagnostics.operations({
             targetKind: 'pipeline',
             pipelineId: target.pipelineId,

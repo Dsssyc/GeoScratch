@@ -95,8 +95,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         sequenceFrom: 1,
     })
     const currentPipelineFacts: readonly scr.ScratchRuntimePipelineFact[] = diagnosticsSnapshot.pipelines
-    const evidenceSchemaVersion: 2 = diagnosticsEvidence.version
-    const snapshotSchemaVersion: 2 = diagnosticsSnapshot.version
+    const evidenceSchemaVersion: 3 = diagnosticsEvidence.version
+    const snapshotSchemaVersion: 3 = diagnosticsSnapshot.version
     const compatPipelineCompilationReport: scratchCompat.PipelineCompilationReport = typedPipelineCompilationReport
     const compilationMessageSourceRedacted: boolean | undefined =
         typedPipelineCompilationReport.messages[0]?.sourceExcerptRedacted
