@@ -12,6 +12,8 @@ const pipelineFamilies = [
         createMethod: 'createRenderPipeline',
         aliasMethod: 'renderPipeline',
         intentionalPromiseFiles: new Set([
+            'tests/benchmarks/scratch-async-pipeline-creation.mjs',
+            'tests/browser/scratch-async-pipeline-creation.mjs',
             'tests/scratch-async-pipeline-contract.test.js',
             'tests/scratch-compute-pipeline-async.test.js',
             'tests/scratch-pipeline-lifecycle-bounds.test.js',
@@ -30,6 +32,8 @@ const pipelineFamilies = [
         createMethod: 'createComputePipeline',
         aliasMethod: 'computePipeline',
         intentionalPromiseFiles: new Set([
+            'tests/benchmarks/scratch-async-pipeline-creation.mjs',
+            'tests/browser/scratch-async-pipeline-creation.mjs',
             'tests/scratch-async-pipeline-contract.test.js',
             'tests/scratch-compute-pipeline-async.test.js',
             'tests/scratch-pipeline-lifecycle-bounds.test.js',

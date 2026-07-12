@@ -7,6 +7,9 @@ import {
     diagnosticsControllerFor,
 } from '../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
 import {
+    runtimePipelineCount,
+} from '../packages/geoscratch/dist/scratch/pipeline-ownership.js'
+import {
     serializedEvidenceBytes,
 } from '../packages/geoscratch/dist/scratch/gpu-operation.js'
 import {
@@ -24,6 +27,23 @@ fn csMain() {
 `
 
 describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
+
+    it('keeps runtime pipeline ownership outside the public mutable object surface', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const pipeline = await runtime.createComputePipeline({
+            program: createComputeProgram(runtime),
+        })
+
+        expect(runtime).not.to.have.property('_pipelines')
+        expect(runtime).not.to.have.property('_registerPipeline')
+        expect(runtime).not.to.have.property('_unregisterPipeline')
+        expect(runtime.diagnostics.snapshot().pipelines).to.have.length(1)
+
+        pipeline.dispose()
+        expect(runtime.diagnostics.snapshot().pipelines).to.have.length(0)
+    })
 
     it('keeps pending, live, disposed, and retained facts bounded under sustained churn', async() => {
 
@@ -57,12 +77,12 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
             const live = runtime.diagnostics.snapshot()
             expect(live.pendingOperations).to.have.length(0)
             expect(live.pipelines).to.have.length(1)
-            expect(runtime._pipelines.size).to.equal(1)
+            expect(runtimePipelineCount(runtime)).to.equal(1)
             expect(controller.lifecycleSubscriberCount).to.equal(0)
 
             pipeline.dispose()
             expect(runtime.diagnostics.snapshot().pipelines).to.have.length(0)
-            expect(runtime._pipelines.size).to.equal(0)
+            expect(runtimePipelineCount(runtime)).to.equal(0)
         }
 
         const snapshot = runtime.diagnostics.snapshot()
@@ -101,6 +121,8 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         const exportedJson = JSON.stringify(runtime.diagnostics.exportEvidence())
 
         expect(fake.calls.asyncPipelineRequests[0].descriptor.label).to.equal(`${label}${suffix}`)
+        expect(pipeline.label).to.equal(label)
+        expect(pipeline.subject.label.length).to.be.at.most(256)
         expect(operation.nativeLabel.length).to.be.at.most(256)
         expect(operation.nativeLabel.endsWith(suffix)).to.equal(true)
         expect(operation.nativeLabels.pipeline.value.length).to.be.at.most(256)
@@ -110,6 +132,26 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
 
         pipeline.dispose()
         expect(runtime.diagnostics.snapshot().pipelines).to.have.length(0)
+    })
+
+    it('bounds pipeline labels in deterministic local-validation diagnostics', async() => {
+
+        const { gpu, calls } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const label = `invalid-local-pipeline-${'l'.repeat(100_000)}`
+        const error = await rejectedDiagnostic(runtime.createRenderPipeline({
+            label,
+            program: createRenderProgram(runtime),
+            targets: [],
+        }))
+        const diagnosticJson = JSON.stringify(error.diagnostic)
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH')
+        expect(error.diagnostic.subject.label.length).to.be.at.most(256)
+        expect(diagnosticJson).not.to.include(label)
+        expect(calls.shaderModules).to.have.length(0)
+        expect(calls.pipelineLayouts).to.have.length(0)
+        expect(calls.asyncPipelineRequests).to.have.length(0)
     })
 
     it('bounds returned pipeline diagnostics and incidents without retaining WGSL', async() => {

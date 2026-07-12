@@ -98,6 +98,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const evidenceSchemaVersion: 2 = diagnosticsEvidence.version
     const snapshotSchemaVersion: 2 = diagnosticsSnapshot.version
     const compatPipelineCompilationReport: scratchCompat.PipelineCompilationReport = typedPipelineCompilationReport
+    const compilationMessageSourceRedacted: boolean | undefined =
+        typedPipelineCompilationReport.messages[0]?.sourceExcerptRedacted
+    const nativeErrorSourceRedacted: boolean | undefined =
+        incidentRecords[0]?.nativeError?.sourceExcerptRedacted
+    const deviceLostInfo: scr.ScratchDeviceLostInfo | undefined = runtime.deviceLostInfo
+    const compatDeviceLostInfo: scratchCompat.ScratchDeviceLostInfo | undefined = deviceLostInfo
+    const nativeDeviceLossMessageOmitted: true | undefined =
+        compatDeviceLostInfo?.nativeMessageOmitted
     const diagnosticCapture: scr.ScratchDiagnosticCapture = diagnostics.capture({
         maxOperations: 8,
         maxDurationMs: 100,
@@ -114,8 +122,16 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     runtime.isDisposed = false
     // @ts-expect-error Runtime device-loss state is read-only
     runtime.isDeviceLost = false
+    // @ts-expect-error Retained runtime device-loss facts are read-only
+    runtime.deviceLostInfo = undefined
     // @ts-expect-error Runtime diagnostics are read-only
     runtime.diagnostics = compatDiagnostics
+    // @ts-expect-error Runtime pipeline ownership is package-internal
+    runtime._pipelines
+    // @ts-expect-error Runtime pipeline registration is package-internal
+    runtime._registerPipeline
+    // @ts-expect-error Runtime pipeline unregistration is package-internal
+    runtime._unregisterPipeline
     // @ts-expect-error Runtime diagnostics cannot be externally constructed
     new scr.ScratchRuntimeDiagnostics()
     // @ts-expect-error Capture sessions cannot be externally constructed

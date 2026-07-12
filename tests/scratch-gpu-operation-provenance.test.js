@@ -160,6 +160,15 @@ describe('scratch GPU operation provenance facts', () => {
         expect(serializeNativeGpuError('plain failure')).to.deep.equal({
             message: 'plain failure',
         })
+        expect(serializeNativeGpuError({
+            reason: 'unknown',
+            message: '[native device-loss message omitted]',
+            nativeMessageOmitted: true,
+        })).to.deep.equal({
+            reason: 'unknown',
+            message: '[native device-loss message omitted]',
+            nativeMessageOmitted: true,
+        })
     })
 })
 

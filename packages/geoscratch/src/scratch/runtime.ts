@@ -5,16 +5,16 @@ import { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, 
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import {
-    ComputePipeline,
     createComputePipeline as createScratchComputePipeline,
     createRenderPipeline as createScratchRenderPipeline,
-    RenderPipeline,
 } from './pipeline.js'
+import { runtimePipelineSnapshot } from './pipeline-ownership.js'
 import { Program } from './program.js'
 import { QuerySetResource } from './query-set.js'
 import { ReadbackOperation } from './readback.js'
 import {
     registerRuntimeDiagnostics,
+    retainDeviceLostInfo,
     ScratchRuntimeDiagnosticsController,
 } from './runtime-diagnostics.js'
 import { SamplerResource } from './sampler.js'
@@ -25,9 +25,13 @@ import type { BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './bi
 import type { BufferResourceDescriptor } from './buffer.js'
 import type { BeginOcclusionQueryCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
 import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchGpuPipelineOperationRecord } from './gpu-operation.js'
 import type { ComputePassSpecDescriptor, RenderPassSpecDescriptor } from './pass.js'
-import type { ComputePipelineDescriptor, RenderPipelineDescriptor } from './pipeline.js'
+import type {
+    ComputePipeline,
+    ComputePipelineDescriptor,
+    RenderPipeline,
+    RenderPipelineDescriptor,
+} from './pipeline.js'
 import type { ProgramDescriptor } from './program.js'
 import type { QuerySetResourceDescriptor } from './query-set.js'
 import type { ReadbackOperationDescriptor } from './readback.js'
@@ -35,6 +39,7 @@ import type { Resource } from './resource.js'
 import type {
     ScratchRuntimeDiagnostics,
     ScratchRuntimeDiagnosticsOptions,
+    ScratchDeviceLostInfo,
 } from './runtime-diagnostics.js'
 import type { SamplerResourceDescriptor } from './sampler.js'
 import type { SubmissionBuilderOptions } from './submission.js'
@@ -73,7 +78,6 @@ export interface ScratchRuntime {
     readonly diagnostics: ScratchRuntimeDiagnostics
     _resources: Set<Resource>
     _surfaces: Set<Surface>
-    _pipelines: Set<RenderPipeline | ComputePipeline>
 }
 
 export class ScratchRuntime {
@@ -81,7 +85,7 @@ export class ScratchRuntime {
     #diagnosticsController: ScratchRuntimeDiagnosticsController
     #isDisposed = false
     #isDeviceLost = false
-    #deviceLostInfo: GPUDeviceLostInfo | undefined
+    #deviceLostInfo: ScratchDeviceLostInfo | undefined
 
     private constructor(token: symbol, options: ScratchRuntimeConstructorOptions) {
 
@@ -113,7 +117,6 @@ export class ScratchRuntime {
         })
         this._resources = new Set()
         this._surfaces = new Set()
-        this._pipelines = new Set()
         this.#diagnosticsController = new ScratchRuntimeDiagnosticsController(
             this,
             options.device,
@@ -130,7 +133,7 @@ export class ScratchRuntime {
         if (options.device.lost && typeof options.device.lost.then === 'function') {
             options.device.lost.then((info) => {
                 this.#isDeviceLost = true
-                this.#deviceLostInfo = info
+                this.#deviceLostInfo = retainDeviceLostInfo(info)
                 this.#diagnosticsController.recordDeviceLoss(info)
             })
         }
@@ -146,7 +149,7 @@ export class ScratchRuntime {
         return this.#isDeviceLost
     }
 
-    get deviceLostInfo(): GPUDeviceLostInfo | undefined {
+    get deviceLostInfo(): ScratchDeviceLostInfo | undefined {
 
         return this.#deviceLostInfo
     }
@@ -516,7 +519,7 @@ export class ScratchRuntime {
             surface.dispose()
         }
 
-        for (const pipeline of [ ...this._pipelines ]) {
+        for (const pipeline of runtimePipelineSnapshot(this)) {
             pipeline.dispose()
         }
 
@@ -542,24 +545,6 @@ export class ScratchRuntime {
 
         this._resources.delete(resource)
         this.#diagnosticsController.unregisterResource(resource)
-    }
-
-    _registerPipeline(
-        pipeline: RenderPipeline | ComputePipeline,
-        creationOperation: ScratchGpuPipelineOperationRecord
-    ): void {
-
-        this.#diagnosticsController.registerPipeline({
-            ...(pipeline.label !== undefined ? { label: pipeline.label } : {}),
-            creationOperation,
-        })
-        this._pipelines.add(pipeline)
-    }
-
-    _unregisterPipeline(pipeline: RenderPipeline | ComputePipeline): void {
-
-        if (!this._pipelines.delete(pipeline)) return
-        this.#diagnosticsController.unregisterPipeline(pipeline.id)
     }
 
     _registerSurface(surface: Surface): void {

@@ -8,6 +8,8 @@ Keep ordinary example assets beside the example that owns them. Use relative ass
 
 Scratch examples must `await` persistent buffer and texture creation. A changed `TextureResource.resize()` must also be awaited before the example relies on the replacement allocation; the same-size path returns an already-resolved promise. This is the only public allocation contract: examples must not add synchronous compatibility helpers or reach into library source.
 
+Scratch examples must also `await` render and compute pipeline creation. A pipeline wrapper is ready only after native async creation, compilation information, supporting-object scopes, and lifecycle checks settle successfully. Examples must not add immediate native fallbacks, lazy first-use compilation, or command/submission waits. Similarly named top-level renderer calls in explicitly legacy examples are a separate API and must not be silently converted by adding `await`.
+
 Runtime allocation diagnostics are available through the read-only `runtime.diagnostics` facade. Examples that need machine-readable evidence should publish a bounded `runtime.diagnostics.exportEvidence()` result or selected immutable facts rather than copying browser console text or retaining native GPU handles.
 
 `submissionOrder/` is the deterministic queue-ordering proof. It must report `document.body.dataset.status === "passed"` and `document.body.dataset.result === "11"` in a WebGPU-capable browser.

@@ -151,6 +151,8 @@ export type ScratchNativeGpuErrorFacts = Readonly<{
     message: string
     reason?: string
     truncated?: boolean
+    sourceExcerptRedacted?: boolean
+    nativeMessageOmitted?: boolean
 }>
 
 export type ScratchGpuIncidentPendingOperation = Readonly<{
@@ -472,10 +474,12 @@ export function serializeNativeGpuError(error: unknown): ScratchNativeGpuErrorFa
     let name: string | undefined
     let message: string
     let reason: string | undefined
+    let nativeMessageOmitted = false
 
     if (error !== null && (typeof error === 'object' || typeof error === 'function')) {
         name = readStringProperty(error, 'name')
         reason = readStringProperty(error, 'reason')
+        nativeMessageOmitted = readBooleanProperty(error, 'nativeMessageOmitted') === true
         message = readStringProperty(error, 'message') ?? safeString(error)
     } else {
         message = safeString(error)
@@ -489,6 +493,7 @@ export function serializeNativeGpuError(error: unknown): ScratchNativeGpuErrorFa
         ...(boundedName !== undefined ? { name: boundedName } : {}),
         message: boundedMessage,
         ...(boundedReason !== undefined ? { reason: boundedReason } : {}),
+        ...(nativeMessageOmitted ? { nativeMessageOmitted: true } : {}),
         ...(
             boundedName !== name || boundedMessage !== message || boundedReason !== reason
                 ? { truncated: true }
@@ -694,6 +699,16 @@ function readStringProperty(value: object, key: string): string | undefined {
     try {
         const property = (value as Record<string, unknown>)[key]
         return typeof property === 'string' ? property : undefined
+    } catch {
+        return undefined
+    }
+}
+
+function readBooleanProperty(value: object, key: string): boolean | undefined {
+
+    try {
+        const property = (value as Record<string, unknown>)[key]
+        return typeof property === 'boolean' ? property : undefined
     } catch {
         return undefined
     }

@@ -275,7 +275,23 @@ type RuntimeDiagnosticsOwner = {
     label?: string
     isDisposed: boolean
     isDeviceLost: boolean
-    deviceLostInfo: GPUDeviceLostInfo | undefined
+    deviceLostInfo: ScratchDeviceLostInfo | undefined
+}
+
+export type ScratchDeviceLostInfo = Readonly<{
+    reason: GPUDeviceLostReason
+    message: '[native device-loss message omitted]'
+    nativeMessageOmitted: true
+}>
+
+export function retainDeviceLostInfo(info: GPUDeviceLostInfo): ScratchDeviceLostInfo {
+
+    const serialized = serializeNativeGpuError(info)
+    return Object.freeze({
+        reason: (serialized.reason ?? 'unknown') as GPUDeviceLostReason,
+        message: '[native device-loss message omitted]',
+        nativeMessageOmitted: true,
+    })
 }
 
 export type ScratchRuntimeLifecycleChange =
@@ -737,6 +753,8 @@ export class ScratchRuntimeDiagnosticsController {
         this.#publishLifecycleChange(Object.freeze({ kind: 'device-lost', info }))
         if (this.#deviceLossIncident !== undefined) return this.#deviceLossIncident
 
+        const retainedInfo = this.#owner.deviceLostInfo ?? retainDeviceLostInfo(info)
+
         this.#aggregates = {
             ...this.#aggregates,
             deviceLosses: this.#aggregates.deviceLosses + 1,
@@ -749,7 +767,11 @@ export class ScratchRuntimeDiagnosticsController {
                 : 'SCRATCH_RUNTIME_DEVICE_LOST',
             nativeErrorCategory: 'device-lost',
             attribution: hasTemporalEvidence ? 'temporal-correlation' : 'unknown',
-            nativeError: serializeNativeGpuError(info),
+            nativeError: Object.freeze({
+                message: retainedInfo.message,
+                reason: retainedInfo.reason,
+                nativeMessageOmitted: true,
+            }),
         })
         return this.#deviceLossIncident
     }

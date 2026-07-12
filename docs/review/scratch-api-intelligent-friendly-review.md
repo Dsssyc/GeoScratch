@@ -153,6 +153,34 @@ Coverage check for this pass:
 - Execution/resource/producer ledger consistency: covered by the eight-row audit in `docs/review/scratch-readiness-policy-execution-audit.md`.
 - Copy, Readback, and Resolve remain `throw`-only rather than inheriting undefined skip semantics: covered by `04-pipelines-commands` and ADR-028.
 
+### Async Pipeline Acknowledgement And Compilation Provenance
+
+Resolved in ADR-033 and the bilingual `01-runtime-surface`,
+`04-pipelines-commands`, `08-programs-codecs`, and
+`09-diagnostics-validation` modules: render and compute pipeline factories now
+return ordinary Promises and use only native async pipeline creation. Scratch
+publishes no pending wrapper and does not move compilation into command or
+submission work.
+
+Compilation information, the async pipeline result, supporting-object error
+scopes, and lifecycle rechecks remain independent outcomes. A real Chrome
+invalid-WGSL probe produced supporting-object validation, shader compilation,
+and async pipeline validation evidence together. Scratch records all three and
+does not select a primary cause from settlement order. Native message prose is
+bounded and source-sanitized evidence only; `sourceExcerptRedacted` records
+when Program-derived text was removed, while stable diagnostic codes come from
+structural fields and transaction stages.
+
+Coverage check for this pass:
+
+- Promise-only render/compute factories and closed constructors: covered by ADR-033, public TypeScript tests, and render/compute transaction suites.
+- Exact async native lowering, balanced validation/internal/OOM scopes, and pop-before-await ordering: covered by `pipeline-creation.ts` and controllable fake-GPU tests.
+- Bounded UTF-16 compilation mapping without WGSL retention: covered by compilation/redaction tests, source-free incident/capture stress, and real Chrome invalid-WGSL evidence.
+- Pending/current/disposed facts, private runtime ownership, and lifecycle subscriber cleanup: covered by the 64-cycle stress test and 5000-cycle benchmark.
+- Submission hot-path exclusion: covered by the source audit and `scratch-async-pipeline-creation-docs.test.js`.
+- Legacy top-level renderer calls remain classified rather than silently rewritten: covered by the AST consumer audit and async-pipeline audit.
+- Real render/compute success, structured failure, zero uncaptured errors, and 11 nonblank regression examples: covered by the headed Chrome verifier.
+
 ## Current Review Items
 
 None. The current intelligent-friendly scratch API review queue is complete. Add new items here when a later pass finds a sharper design risk.

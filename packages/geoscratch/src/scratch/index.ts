@@ -45,6 +45,7 @@ export type {
 export { ScratchRuntime } from './runtime.js'
 export { ScratchDiagnosticCapture, ScratchRuntimeDiagnostics } from './runtime-diagnostics.js'
 export type {
+    ScratchDeviceLostInfo,
     ScratchDiagnosticCaptureOptions,
     ScratchDiagnosticCaptureReport,
     ScratchDiagnosticCaptureStopReason,

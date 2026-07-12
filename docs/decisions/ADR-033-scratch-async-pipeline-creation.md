@@ -222,11 +222,47 @@ The report contains:
 - bounded messages in native order.
 
 Each retained message contains its native index and type, bounded localized
-text, native combined offset/length/line/column facts, and module-relative
-coordinates only when derivable. Unknown native locations remain explicitly
-unknown. A location on a separator inserted between Program modules has no
-module mapping. Scratch never invents precision and never parses message prose
-into a stable code.
+text, `messageTruncated`, `sourceExcerptRedacted`, native combined
+offset/length/line/column facts, and module-relative coordinates only when
+derivable. Unknown native locations remain explicitly unknown. A location on a
+separator inserted between Program modules has no module mapping. Scratch never
+invents precision and never parses message prose into a stable code.
+
+Native message prose is implementation-defined and can itself quote WGSL.
+Before any message enters the report, Scratch replaces exact Program
+identifier/numeric-literal tokens of at least three UTF-16 code units and every
+exact contiguous Program-source span of at least eight UTF-16 code units with a
+fixed redaction marker. Tokenization follows the WGSL lexical forms, including
+Unicode `XID_Start`/`XID_Continue` identifiers and every decimal/hexadecimal
+integer and floating-point form, including leading-dot literals.
+`sourceExcerptRedacted` makes this loss explicit.
+Membership is tracked in a source-size-independent Bloom workspace capped at
+32 KiB. Hash collisions may conservatively redact unrelated prose, but cannot
+allow an inserted Program token or span to pass through. The workspace is
+created lazily, shared across one report or native-error settlement, and is
+discarded rather than retained as evidence.
+`messageTruncated` remains specific to the 4096-unit bound, including a
+post-redaction expansion that reaches that bound. This sanitization is data
+minimization against the captured Program snapshot; it does not classify the
+message or derive a diagnostic code from prose. Incidental overlaps shorter
+than these explicit thresholds are not classified as retained source excerpts.
+The same sanitizer covers the retained `name`, `message`, and `reason` strings
+inside pipeline, supporting-scope, structural, and lifecycle native-error
+facts; those facts expose `sourceExcerptRedacted` when applicable. The original
+native object may remain the transient `ScratchDiagnosticError.cause`, but it is
+not copied into operation, incident, capture, snapshot, or exported evidence.
+
+A runtime-wide device-loss event has no single Program snapshot against which
+native prose can be sanitized. Scratch therefore does not retain that native
+message at all: `runtime.deviceLostInfo` and the global `device-loss` incident
+retain the structural reason, the fixed
+`[native device-loss message omitted]` marker, and
+`nativeMessageOmitted: true`. A pipeline transaction already in flight observes
+the original `GPUDeviceLostInfo` only through its temporary lifecycle
+subscription, applies its own Program-source sanitizer, and may expose the raw
+object only as the rejected diagnostic's `cause`. The native
+`GPUDevice.lost` Promise remains governed by WebGPU and is outside Scratch's
+retained evidence model.
 
 The report-version-1 limits are:
 
@@ -240,10 +276,11 @@ in module-index order and messages in native order; mandatory fixed report
 metadata is retained first. `moduleCount`, `retainedModuleCount`,
 `omittedModuleCount`, and the equivalent message counts preserve evidence
 completeness. A valid Program is never rejected merely because diagnostic
-evidence needs truncation. Complete WGSL source and source excerpts are
-forbidden in default history, incidents, exported evidence, and deep descriptor
-capture. Hashes and bounded module spans correlate a report with the
-caller-owned Program snapshot without copying source into the ledger.
+evidence needs truncation. Complete WGSL source and source excerpts are forbidden
+in default history, incidents, exported evidence, and deep descriptor capture
+under the deterministic definition above. Hashes and bounded module spans
+correlate a report with the caller-owned Program snapshot without copying source
+into the ledger.
 
 Every successful pipeline wrapper owns the complete bounded report. The
 matching successful operation record retains that same frozen report and

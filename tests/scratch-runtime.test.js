@@ -140,7 +140,8 @@ describe('ScratchRuntime', () => {
         expect(runtime.isDeviceLost).to.equal(true)
         expect(runtime.deviceLostInfo).to.deep.equal({
             reason: 'unknown',
-            message: 'test loss',
+            message: '[native device-loss message omitted]',
+            nativeMessageOmitted: true,
         })
     })
 })

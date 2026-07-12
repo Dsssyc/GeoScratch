@@ -98,56 +98,61 @@ const evidence = runtime.diagnostics.exportEvidence()
 下面的代码在 canvas 上渲染一个硬编码三角形。
 
 ```js
-import * as scr from 'geoscratch'
+import { ScratchRuntime } from 'geoscratch'
 
-scr.StartDash().then(() => main(document.getElementById('GPUFrame')))
+const canvas = document.getElementById('GPUFrame')
 
-function main(canvas) {
-    const screen = scr.screen({ canvas })
+main().catch(console.error)
 
-    const shaderCode = `
-    const pos = array<vec2f, 3>(
-        vec2f(-0.5, -0.5),
-        vec2f(0.0, 0.5),
-        vec2f(0.5, -0.5),
-    );
+async function main() {
+    const runtime = await ScratchRuntime.create({ label: 'triangle runtime' })
+    const surface = runtime.createSurface(canvas, { format: 'preferred' })
+    const program = runtime.createProgram({
+        modules: [ `
+            @vertex
+            fn vsMain(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
+                let positions = array(
+                    vec2f(0.0, 0.58),
+                    vec2f(-0.58, -0.48),
+                    vec2f(0.58, -0.48)
+                );
+                return vec4f(positions[index], 0.0, 1.0);
+            }
 
-    @vertex
-    fn vMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
-        return vec4f(pos[vertexIndex], 0.0, 1.0);
-    }
-
-    @fragment
-    fn fMain() -> @location(0) vec4f {
-        return vec4f(128.0, 218.0, 197.0, 255.0) / 255.0;
-    }
-    `
-
-    const triangleBinding = scr.binding({
-        range: () => [ 3 ],
+            @fragment
+            fn fsMain() -> @location(0) vec4f {
+                return vec4f(0.12, 0.72, 0.58, 1.0);
+            }
+        ` ],
+        entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+    })
+    const pipeline = await runtime.createRenderPipeline({
+        program,
+        targets: [ { format: surface.format } ],
+    })
+    const pass = runtime.createRenderPass({
+        color: [ {
+            target: surface,
+            load: 'clear',
+            store: 'store',
+            clear: [ 0.03, 0.05, 0.08, 1 ],
+        } ],
+    })
+    const draw = runtime.createDrawCommand({
+        pipeline,
+        count: { vertexCount: 3 },
+        resources: { read: [], write: [] },
+        whenMissing: 'throw',
     })
 
-    const trianglePipeline = scr.renderPipeline({
-        shader: {
-            module: scr.shader({ codeFunc: () => shaderCode }),
-        },
-    })
-
-    const trianglePass = scr.renderPass({
-        colorAttachments: [ { colorResource: screen } ],
-    }).add(trianglePipeline, triangleBinding)
-
-    scr.director.addStage({
-        name: 'HelloTriangle',
-        items: [ trianglePass ],
-    })
-
-    function animate() {
-        scr.director.tick()
-        requestAnimationFrame(animate)
+    function render() {
+        runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [ draw ])
+            .submit()
+        requestAnimationFrame(render)
     }
 
-    animate()
+    render()
 }
 ```
 

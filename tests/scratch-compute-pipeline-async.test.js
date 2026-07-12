@@ -215,22 +215,25 @@ describe('ScratchRuntime async compute pipeline creation', () => {
 
         const cases = [
             {
-                code: 'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
+                codes: [
+                    'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
+                    'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
+                ],
                 act: fixture => fixture.runtime.dispose(),
             },
             {
-                code: 'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
+                codes: [ 'SCRATCH_PIPELINE_CREATION_DEVICE_LOST' ],
                 act: async(fixture) => {
                     fixture.errors.loseDevice({ reason: 'unknown', message: 'lost during compute creation' })
                     await settleMicrotasks()
                 },
             },
             {
-                code: 'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED',
+                codes: [ 'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED' ],
                 act: fixture => fixture.program.dispose(),
             },
             {
-                code: 'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED',
+                codes: [ 'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED' ],
                 act: fixture => fixture.bindLayout.dispose(),
             },
         ]
@@ -245,7 +248,11 @@ describe('ScratchRuntime async compute pipeline creation', () => {
             fixture.pipelines.resolvePipeline(0)
 
             const error = await rejectedDiagnostic(promise)
-            expect(error.diagnostic.code).to.equal(testCase.code)
+            expect(error.diagnostic.code).to.equal(testCase.codes.length === 1
+                ? testCase.codes[0]
+                : 'SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES')
+            expect(error.incident.outcomes.map(outcome => outcome.diagnosticCode))
+                .to.deep.equal(testCase.codes)
             expect(error.incident.failureStage).to.equal('lifecycle-recheck')
             assertFailedPipelineFacts(fixture, error, 'cancelled')
         }

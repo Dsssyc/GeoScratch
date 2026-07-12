@@ -154,8 +154,17 @@ compilation location 在确实已知时能够映射回 Program module。
 
 最终 pipeline compilation report 保留 combined/per-module hash、module span、
 计数与有界 native messages。default history、incident、exported evidence 与
-deep descriptor capture 都不保留完整 WGSL 或 source excerpt。Native message
-prose 是 localized text，绝不被解析为稳定 code。未知位置或 separator location
+deep descriptor capture 都不保留完整 WGSL 或 source excerpt。由于
+implementation-defined native prose 可能回显 WGSL，保留前会替换至少三个
+UTF-16 code unit 的精确 Program identifier/numeric literal，以及至少八个
+UTF-16 code unit 的连续 Program source span。Token recognition 对齐 WGSL
+Unicode-XID identifier 与完整 decimal/hexadecimal numeric-literal grammar，
+包括 leading-dot float；每条 message 通过
+`sourceExcerptRedacted` 明示这种损失。惰性 Bloom workspace 上限为 32 KiB，
+因此不会随 Program source size 扩张；hash collision 只允许保守地多清洗，
+不能让已插入的 token 或 span 漏出。Native prose 绝不被解析为稳定 code。
+相同规则也会清洗保留的 pipeline/scope/lifecycle native-error string；原始
+native object 只能作为瞬时 error cause 保留。未知位置或 separator location
 保持 unmapped。这些 evidence 不会把 source ownership 从 Program 移到
 Pipeline，Program 也不会获得具体 resource 或 submission state。
 

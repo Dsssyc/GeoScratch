@@ -35,6 +35,11 @@ describe('scratch async pipeline creation documentation', () => {
             expect(adr).to.include(contract)
         }
         expect(adr).to.match(/Complete WGSL source and source excerpts\s+are forbidden/)
+        expect(adr).to.include('sourceExcerptRedacted')
+        expect(adr).to.include('eight UTF-16 code units')
+        expect(adr).to.include('XID_Start')
+        expect(adr).to.include('leading-dot literals')
+        expect(adr).to.include('lifecycle native-error')
     })
 
     it('keeps English and Chinese vision modules on the same target contract', () => {
@@ -72,6 +77,9 @@ describe('scratch async pipeline creation documentation', () => {
         ].includes(name))).to.deep.equal([])
         expect(runtime).not.to.include('new RenderPipeline(')
         expect(runtime).not.to.include('new ComputePipeline(')
+        expect(runtime).not.to.include('_pipelines')
+        expect(runtime).not.to.include('_registerPipeline')
+        expect(runtime).not.to.include('_unregisterPipeline')
     })
 
     it('keeps compilation and pipeline work out of submission source', () => {
@@ -90,6 +98,60 @@ describe('scratch async pipeline creation documentation', () => {
         ]) {
             expect(submission).not.to.include(forbidden)
         }
+    })
+
+    it('publishes the async public example, audit, and reproducible evidence', () => {
+
+        for (const readmeName of [ 'README.md', 'README_zh.md' ]) {
+            const readme = read(readmeName)
+            expect(readme).to.include('const runtime = await ScratchRuntime.create(')
+            expect(readme).to.include('const pipeline = await runtime.createRenderPipeline(')
+            expect(readme).not.to.include('scr.renderPipeline(')
+        }
+        expect(read('examples', 'README.md')).to.include(
+            'Scratch examples must also `await` render and compute pipeline creation.'
+        )
+
+        const audit = read(
+            'docs',
+            'review',
+            'scratch-async-pipeline-creation-audit.md'
+        )
+        for (const contract of [
+            'Status: Complete',
+            'Native Scratch Pipeline Call Inventory',
+            'Public Factory And Constructor Inventory',
+            'Consumer And Legacy Inventory',
+            'Old-To-New Functional Parity',
+            'Official Specification Review',
+        ]) {
+            expect(audit).to.include(contract)
+        }
+
+        const performance = read(
+            'docs',
+            'review',
+            'scratch-async-pipeline-creation-performance.md'
+        )
+        for (const contract of [
+            'Status: Complete',
+            'CPU issue',
+            'async settlement',
+            'render',
+            'compute',
+            'empty',
+            'populated',
+            'cache-dependent',
+            'lifecycle subscribers',
+            'no universal overhead percentage',
+        ]) {
+            expect(performance.toLowerCase()).to.include(contract.toLowerCase())
+        }
+
+        expect(read('tests', 'benchmarks', 'scratch-async-pipeline-creation.mjs'))
+            .to.include('verifyBenchmarkResult')
+        expect(read('tests', 'browser', 'scratch-async-pipeline-creation.mjs'))
+            .to.include('analyzeScreenshotPixels')
     })
 })
 

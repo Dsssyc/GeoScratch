@@ -1,12 +1,31 @@
 import { expect } from 'chai'
 import {
+    createPipelineSourceRedactionIndex,
     createPipelineCompilationReport,
     hashPipelineSource,
+    sanitizePipelineEvidenceText,
     snapshotPipelineSource,
 } from '../packages/geoscratch/dist/scratch/pipeline-compilation.js'
 import { serializedEvidenceBytes } from '../packages/geoscratch/dist/scratch/gpu-operation.js'
 
 describe('scratch pipeline source snapshots', () => {
+
+    it('bounds source-redaction workspace independently of Program source size', () => {
+
+        const source = Array.from(
+            { length: 20_000 },
+            (_, index) => `fn privateKernel${index}() { let value${index} = ${index}u; }`
+        ).join('\n')
+        const index = createPipelineSourceRedactionIndex(source)
+        const excerpt = 'privateKernel19999() { let value19999 = 19999u; }'
+        const sanitized = sanitizePipelineEvidenceText(`failure near ${excerpt}`, index)
+
+        expect(index.storageBytes).to.be.at.most(32 * 1_024)
+        expect(index).not.to.have.property('ngrams')
+        expect(index).not.to.have.property('tokens')
+        expect(sanitized.sourceExcerptRedacted).to.equal(true)
+        expect(sanitized.message).not.to.include(excerpt)
+    })
 
     it('copies modules and combines them with exactly one LF separator', () => {
 
@@ -343,6 +362,80 @@ describe('scratch pipeline compilation location mapping', () => {
         expect(report.retainedEvidenceBytes).to.equal(serializedEvidenceBytes(report))
         expect(report.retainedEvidenceBytes).to.be.at.most(64 * 1024)
         expect(JSON.stringify(report)).not.to.include(sourceSentinel)
+    })
+
+    it('redacts exact Program excerpts from implementation-defined native prose', () => {
+
+        const sourceSentinel = 'privateKernelSentinel = 0x5A17u;'
+        const sourceSnapshot = snapshotPipelineSource({
+            id: 'program-native-prose-redaction-1',
+            modules: [ `@compute @workgroup_size(1)\nfn main() {\n    let ${sourceSentinel}\n    let foo = 1u;\n}` ],
+        })
+        const nativeMessage = `compiler context: let ${sourceSentinel} expected expression`
+        const report = createPipelineCompilationReport({
+            pipelineId: 'pipeline-native-prose-redaction-1',
+            pipelineKind: 'compute',
+            sourceSnapshot,
+            compilationInfo: {
+                messages: [
+                    compilationMessage('error', nativeMessage, 48, 4, 3, 9),
+                    compilationMessage('warning', 'foo '.repeat(2_000), 0, 0, 0, 0),
+                ],
+            },
+        })
+
+        expect(report.messages[0].message).not.to.include(sourceSentinel)
+        expect(report.messages[0].message).to.include('compiler context:')
+        expect(report.messages[0].sourceExcerptRedacted).to.equal(true)
+        expect(report.messages[0].messageTruncated).to.equal(false)
+        expect(report.messages[1].message.length).to.be.at.most(4_096)
+        expect(report.messages[1].messageTruncated).to.equal(true)
+        expect(report.messages[1].sourceExcerptRedacted).to.equal(true)
+        expect(JSON.stringify(report)).not.to.include(sourceSentinel)
+    })
+
+    it('redacts every short WGSL identifier and numeric literal form', () => {
+
+        const tokens = [
+            'Δέλτα',
+            'réflex',
+            '朝焼け',
+            '𐐀a',
+            '_abc',
+            '.5f',
+            '01.',
+            '1e3',
+            '42u',
+            '0x3f',
+            '0X.3',
+            '0x1p0',
+        ]
+        expect(tokens.every(token => token.length >= 3 && token.length < 8)).to.equal(true)
+        const sourceSnapshot = snapshotPipelineSource({
+            id: 'program-wgsl-token-redaction-1',
+            modules: [ tokens.join(' ') ],
+        })
+        const report = createPipelineCompilationReport({
+            pipelineId: 'pipeline-wgsl-token-redaction-1',
+            pipelineKind: 'compute',
+            sourceSnapshot,
+            compilationInfo: {
+                messages: tokens.map(token => compilationMessage(
+                    'error',
+                    `driver echoed ${token}`,
+                    0,
+                    0,
+                    0,
+                    0
+                )),
+            },
+        })
+
+        expect(report.messages).to.have.length(tokens.length)
+        for (const [ index, token ] of tokens.entries()) {
+            expect(report.messages[index].sourceExcerptRedacted, token).to.equal(true)
+            expect(report.messages[index].message, token).not.to.include(token)
+        }
     })
 
     it('rejects malformed source snapshots and compilation information structurally', () => {

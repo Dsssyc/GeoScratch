@@ -1,10 +1,11 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { serializeNativeGpuError } from './gpu-operation.js'
 import {
     issuePipelineCreation,
 } from './pipeline-creation.js'
 import { snapshotPipelineSource } from './pipeline-compilation.js'
+import { createPipelineNativeErrorSerializer } from './pipeline-native-error.js'
+import { registerRuntimePipeline, unregisterRuntimePipeline } from './pipeline-ownership.js'
 import { describeValue } from './type-utils.js'
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
@@ -106,7 +107,7 @@ export class RenderPipeline {
             id: this.id,
             pipelineKind: 'render',
         }
-        if (this.label !== undefined) subject.label = this.label
+        if (this.label !== undefined) subject.label = boundedPipelineDiagnosticLabel(this.label)
 
         return subject
     }
@@ -156,7 +157,7 @@ export class RenderPipeline {
         const state = renderPipelineStateFor(this)
         if (state.isDisposed) return
         state.isDisposed = true
-        this.runtime._unregisterPipeline(this)
+        unregisterRuntimePipeline(this.runtime, this)
     }
 }
 
@@ -219,7 +220,7 @@ export async function createRenderPipeline(
         fullDescriptor: descriptorEvidence.full,
         nativeLabel: nativeLabels.pipeline,
     })
-    const issue = await issuePipelineCreation({
+    const observedIssue = await observePipelineDeviceLoss(controller, () => issuePipelineCreation({
         runtime,
         pipelineId: plan.id,
         pipelineKind: 'render',
@@ -246,8 +247,12 @@ export async function createRenderPipeline(
             if (plan.multisample !== undefined) nativeDescriptor.multisample = plan.multisample
             return nativeDescriptor
         },
-    })
-    const failures = [ ...issue.failures, ...pipelineLifecycleFailures(plan) ]
+    }))
+    const issue = observedIssue.result
+    const failures = [
+        ...issue.failures,
+        ...pipelineLifecycleFailures(plan, observedIssue.deviceLostInfo),
+    ]
     if (
         failures.length > 0 ||
         issue.shaderModule === undefined ||
@@ -287,7 +292,7 @@ export async function createRenderPipeline(
         gpuPipeline: issue.nativePipeline as GPURenderPipeline,
         compilationReport: creationRecord.compilationReport!,
     })
-    runtime._registerPipeline(pipeline, creationRecord)
+    registerRuntimePipeline(runtime, pipeline, creationRecord)
     return pipeline
 }
 
@@ -317,7 +322,9 @@ function prepareRenderPipeline(
         kind: 'Pipeline',
         id,
         pipelineKind: 'render',
-        ...(input.label !== undefined ? { label: input.label } : {}),
+        ...(input.label !== undefined
+            ? { label: boundedPipelineDiagnosticLabel(input.label) }
+            : {}),
     })
     const context: PipelineValidationContext & { pipelineKind: 'render' } = {
         runtime,
@@ -459,27 +466,31 @@ function nativeLabelEvidence(labels: PipelineNativeLabels): ScratchPipelineNativ
     })
 }
 
-function pipelineLifecycleFailures(plan: PipelineCreationPlan): PipelineCreationObservedFailure[] {
+function pipelineLifecycleFailures(
+    plan: PipelineCreationPlan,
+    observedDeviceLostInfo?: GPUDeviceLostInfo
+): PipelineCreationObservedFailure[] {
 
+    const failures: PipelineCreationObservedFailure[] = []
+    const serializeNativeError = createPipelineNativeErrorSerializer(plan.sourceSnapshot)
     if (plan.runtime.isDisposed) {
-        return [ lifecycleFailure(
+        failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
             'none',
             plan.runtime.subject
-        ) ]
+        ))
     }
 
-    const failures: PipelineCreationObservedFailure[] = []
     if (plan.runtime.isDeviceLost) {
-        failures.push(lifecycleFailure(
+        failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
             'device-lost',
             plan.runtime.subject,
-            plan.runtime.deviceLostInfo
+            observedDeviceLostInfo ?? plan.runtime.deviceLostInfo
         ))
     }
     if (plan.program.isDisposed) {
-        failures.push(lifecycleFailure(
+        failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED',
             'none',
             plan.program.subject
@@ -487,7 +498,7 @@ function pipelineLifecycleFailures(plan: PipelineCreationPlan): PipelineCreation
     }
     for (const layout of plan.bindLayouts) {
         if (!layout.isDisposed) continue
-        failures.push(lifecycleFailure(
+        failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED',
             'none',
             layout.subject
@@ -496,7 +507,30 @@ function pipelineLifecycleFailures(plan: PipelineCreationPlan): PipelineCreation
     return failures
 }
 
+async function observePipelineDeviceLoss<T>(
+    controller: ReturnType<typeof diagnosticsControllerFor>,
+    issue: () => Promise<T>
+): Promise<Readonly<{ result: T, deviceLostInfo?: GPUDeviceLostInfo }>> {
+
+    let deviceLostInfo: GPUDeviceLostInfo | undefined
+    const unsubscribe = controller.subscribeLifecycle(change => {
+        if (change.kind === 'device-lost' && deviceLostInfo === undefined) {
+            deviceLostInfo = change.info
+        }
+    })
+    try {
+        const result = await issue()
+        return Object.freeze({
+            result,
+            ...(deviceLostInfo !== undefined ? { deviceLostInfo } : {}),
+        })
+    } finally {
+        unsubscribe()
+    }
+}
+
 function lifecycleFailure(
+    serializeNativeError: ReturnType<typeof createPipelineNativeErrorSerializer>,
     diagnosticCode: string,
     nativeErrorCategory: GpuNativeErrorCategory,
     subject: DiagnosticSubject,
@@ -509,7 +543,7 @@ function lifecycleFailure(
             diagnosticCode,
             nativeErrorCategory,
             subject,
-            ...(cause !== undefined ? { nativeError: serializeNativeGpuError(cause) } : {}),
+            ...(cause !== undefined ? { nativeError: serializeNativeError(cause) } : {}),
         }),
         ...(cause !== undefined ? { cause } : {}),
     })
@@ -526,12 +560,13 @@ function throwPipelineCreationFailure(
     const failures = [ ...observedFailures ]
     if (failures.length === 0) {
         const cause = new TypeError('Pipeline creation settled without every required native result.')
+        const serializeNativeError = createPipelineNativeErrorSerializer(plan.sourceSnapshot)
         failures.push(Object.freeze({
             outcome: Object.freeze({
                 stage: 'pipeline-creation',
                 diagnosticCode: 'SCRATCH_PIPELINE_CREATION_NATIVE_FAILED',
                 nativeErrorCategory: 'native-exception',
-                nativeError: serializeNativeGpuError(cause),
+                nativeError: serializeNativeError(cause),
             }),
             cause,
         }))
@@ -761,7 +796,7 @@ export class ComputePipeline {
             id: this.id,
             pipelineKind: 'compute',
         }
-        if (this.label !== undefined) subject.label = this.label
+        if (this.label !== undefined) subject.label = boundedPipelineDiagnosticLabel(this.label)
 
         return subject
     }
@@ -811,7 +846,7 @@ export class ComputePipeline {
         const state = computePipelineStateFor(this)
         if (state.isDisposed) return
         state.isDisposed = true
-        this.runtime._unregisterPipeline(this)
+        unregisterRuntimePipeline(this.runtime, this)
     }
 }
 
@@ -851,7 +886,7 @@ export async function createComputePipeline(
         fullDescriptor: descriptorEvidence.full,
         nativeLabel: nativeLabels.pipeline,
     })
-    const issue = await issuePipelineCreation({
+    const observedIssue = await observePipelineDeviceLoss(controller, () => issuePipelineCreation({
         runtime,
         pipelineId: plan.id,
         pipelineKind: 'compute',
@@ -870,8 +905,12 @@ export async function createComputePipeline(
                 compute,
             }
         },
-    })
-    const failures = [ ...issue.failures, ...pipelineLifecycleFailures(plan) ]
+    }))
+    const issue = observedIssue.result
+    const failures = [
+        ...issue.failures,
+        ...pipelineLifecycleFailures(plan, observedIssue.deviceLostInfo),
+    ]
     if (
         failures.length > 0 ||
         issue.shaderModule === undefined ||
@@ -911,7 +950,7 @@ export async function createComputePipeline(
         gpuPipeline: issue.nativePipeline as GPUComputePipeline,
         compilationReport: creationRecord.compilationReport!,
     })
-    runtime._registerPipeline(pipeline, creationRecord)
+    registerRuntimePipeline(runtime, pipeline, creationRecord)
     return pipeline
 }
 
@@ -941,7 +980,9 @@ function prepareComputePipeline(
         kind: 'Pipeline',
         id,
         pipelineKind: 'compute',
-        ...(input.label !== undefined ? { label: input.label } : {}),
+        ...(input.label !== undefined
+            ? { label: boundedPipelineDiagnosticLabel(input.label) }
+            : {}),
     })
     const context: PipelineValidationContext & { pipelineKind: 'compute' } = {
         runtime,
@@ -1346,4 +1387,27 @@ function throwMissingEntryPoint(pipeline: PipelineValidationContext, stage: 'ver
         expected: { stage, entryPoint: 'string' },
         actual: { entryPoint: undefined },
     })
+}
+
+function boundedPipelineDiagnosticLabel(label: string): string {
+
+    const maxLength = 256
+    if (label.length <= maxLength) return label
+    let end = maxLength - 3
+    if (
+        end > 0 &&
+        isHighSurrogate(label.charCodeAt(end - 1)) &&
+        isLowSurrogate(label.charCodeAt(end))
+    ) end--
+    return `${label.slice(0, end)}...`
+}
+
+function isHighSurrogate(value: number): boolean {
+
+    return value >= 0xD800 && value <= 0xDBFF
+}
+
+function isLowSurrogate(value: number): boolean {
+
+    return value >= 0xDC00 && value <= 0xDFFF
 }

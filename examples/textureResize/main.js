@@ -248,7 +248,10 @@ async function main() {
     const evidence = runtime.diagnostics.exportEvidence()
     const serializedEvidence = JSON.stringify(evidence)
     const textureOperations = evidence.operations
-        .filter(operation => operation.resourceId === texture.id)
+        .filter(operation => (
+            operation.target.kind === 'resource' &&
+            operation.target.resourceId === texture.id
+        ))
     const initialAllocationOperation = textureOperations
         .find(operation => operation.kind === 'texture-allocation')
     const replacementOperation = textureOperations
@@ -280,9 +283,9 @@ async function main() {
                 .every(access => access.allocationVersion === allocationVersionAfterResize),
         allocationDiagnosticsSucceeded:
             initialAllocationOperation?.status === 'succeeded' &&
-            initialAllocationOperation.allocationVersion === initialAllocationVersion &&
+            initialAllocationOperation.target.allocationVersion === initialAllocationVersion &&
             replacementOperation?.status === 'succeeded' &&
-            replacementOperation.allocationVersion === allocationVersionAfterResize,
+            replacementOperation.target.allocationVersion === allocationVersionAfterResize,
         diagnosticEvidenceSerializable:
             JSON.stringify(JSON.parse(serializedEvidence)) === serializedEvidence,
         diagnosticEvidenceCompact:

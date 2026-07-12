@@ -5,6 +5,26 @@ export const PIPELINE_COMPILATION_MAX_MESSAGES = 64
 export const PIPELINE_COMPILATION_MAX_MESSAGE_LENGTH = 4_096
 export const PIPELINE_COMPILATION_MAX_EVIDENCE_BYTES = 64 * 1024
 
+const PIPELINE_COMPILATION_SOURCE_EXCERPT_LENGTH = 8
+const PIPELINE_COMPILATION_SOURCE_REDACTION = '[WGSL excerpt redacted]'
+const PIPELINE_SOURCE_REDACTION_MAX_WORKSPACE_BYTES = 32 * 1024
+const PIPELINE_SOURCE_REDACTION_MIN_WORKSPACE_BYTES = 128
+const PIPELINE_SOURCE_REDACTION_HASH_COUNT = 3
+const PIPELINE_SOURCE_NGRAM_DOMAIN = 0x6e677261
+const PIPELINE_SOURCE_TOKEN_DOMAIN = 0x746f6b65
+const WGSL_IDENTIFIER_PATTERN = String.raw`(?:[_\p{XID_Start}][\p{XID_Continue}]+|\p{XID_Start})`
+const WGSL_DECIMAL_INTEGER_PATTERN = String.raw`(?:0[iu]?|[1-9][0-9]*[iu]?)`
+const WGSL_HEXADECIMAL_INTEGER_PATTERN = String.raw`(?:0[xX][0-9A-Fa-f]+[iu]?)`
+const WGSL_DECIMAL_FLOAT_PATTERN = String.raw`(?:0[fh]|[1-9][0-9]*[fh]|[0-9]*\.[0-9]+(?:[eE][+-]?[0-9]+)?[fh]?|[0-9]+\.[0-9]*(?:[eE][+-]?[0-9]+)?[fh]?|[0-9]+[eE][+-]?[0-9]+[fh]?)`
+const WGSL_HEXADECIMAL_FLOAT_PATTERN = String.raw`(?:0[xX][0-9A-Fa-f]*\.[0-9A-Fa-f]+(?:[pP][+-]?[0-9]+[fh]?)?|0[xX][0-9A-Fa-f]+\.[0-9A-Fa-f]*(?:[pP][+-]?[0-9]+[fh]?)?|0[xX][0-9A-Fa-f]+[pP][+-]?[0-9]+[fh]?)`
+const WGSL_SOURCE_TOKEN_PATTERN = new RegExp([
+    WGSL_HEXADECIMAL_FLOAT_PATTERN,
+    WGSL_HEXADECIMAL_INTEGER_PATTERN,
+    WGSL_DECIMAL_FLOAT_PATTERN,
+    WGSL_DECIMAL_INTEGER_PATTERN,
+    WGSL_IDENTIFIER_PATTERN,
+].join('|'), 'gu')
+
 export type PipelineCompilationModuleFact = Readonly<{
     index: number
     hash: string
@@ -35,6 +55,7 @@ export type PipelineCompilationMessage = Readonly<{
     type: GPUCompilationMessageType
     message: string
     messageTruncated: boolean
+    sourceExcerptRedacted: boolean
     locationKind: 'unknown' | 'module' | 'separator' | 'unmapped'
     nativeLocation: PipelineCompilationNativeLocation
     moduleLocation?: PipelineCompilationModuleLocation
@@ -82,6 +103,14 @@ export type PipelineCompilationReportDescriptor = Readonly<{
     pipelineKind: PipelineKind
     sourceSnapshot: PipelineSourceSnapshot
     compilationInfo: GPUCompilationInfo
+}>
+
+export type PipelineSourceRedactionIndex = Readonly<{
+    storageBytes: number
+    ngramCount: number
+    tokenCount: number
+    hasNgram(value: string): boolean
+    hasToken(value: string): boolean
 }>
 
 export function snapshotPipelineSource(program: {
@@ -169,6 +198,7 @@ export function createPipelineCompilationReport(
         snapshot === null ||
         typeof snapshot !== 'object' ||
         typeof snapshot.programId !== 'string' ||
+        typeof snapshot.combinedSource !== 'string' ||
         typeof snapshot.combinedSourceHash !== 'string' ||
         !Array.isArray(snapshot.moduleFacts) ||
         !Array.isArray(snapshot.modules) ||
@@ -179,6 +209,7 @@ export function createPipelineCompilationReport(
     }
     const nativeMessages = compilationMessages(descriptor.compilationInfo)
     const retainedMessages: PipelineCompilationMessage[] = []
+    let sourceRedactionIndex: PipelineSourceRedactionIndex | undefined
     let errorCount = 0
     let warningCount = 0
     let infoCount = 0
@@ -189,7 +220,13 @@ export function createPipelineCompilationReport(
         else if (native.type === 'warning') warningCount++
         else infoCount++
         if (retainedMessages.length < PIPELINE_COMPILATION_MAX_MESSAGES) {
-            retainedMessages.push(mapCompilationMessage(snapshot, native, nativeIndex))
+            sourceRedactionIndex ??= createPipelineSourceRedactionIndex(snapshot.combinedSource)
+            retainedMessages.push(mapCompilationMessage(
+                snapshot,
+                native,
+                nativeIndex,
+                sourceRedactionIndex
+            ))
         }
     }
 
@@ -308,10 +345,14 @@ function compilationLocationInteger(value: unknown, name: string): number {
 function mapCompilationMessage(
     snapshot: PipelineSourceSnapshot,
     native: NativeCompilationMessageFacts,
-    nativeIndex: number
+    nativeIndex: number,
+    sourceRedactionIndex: PipelineSourceRedactionIndex
 ): PipelineCompilationMessage {
 
-    const message = boundString(native.message, PIPELINE_COMPILATION_MAX_MESSAGE_LENGTH)
+    const sanitizedMessage = sanitizePipelineEvidenceText(
+        native.message,
+        sourceRedactionIndex
+    )
     const nativeLocation = {
         offset: native.offset,
         length: native.length,
@@ -327,8 +368,9 @@ function mapCompilationMessage(
         return {
             nativeIndex,
             type: native.type,
-            message,
-            messageTruncated: message !== native.message,
+            message: sanitizedMessage.message,
+            messageTruncated: sanitizedMessage.truncated,
+            sourceExcerptRedacted: sanitizedMessage.sourceExcerptRedacted,
             locationKind: 'unknown',
             nativeLocation,
         }
@@ -342,8 +384,9 @@ function mapCompilationMessage(
         return {
             nativeIndex,
             type: native.type,
-            message,
-            messageTruncated: message !== native.message,
+            message: sanitizedMessage.message,
+            messageTruncated: sanitizedMessage.truncated,
+            sourceExcerptRedacted: sanitizedMessage.sourceExcerptRedacted,
             locationKind: 'module',
             nativeLocation,
             moduleLocation: {
@@ -359,8 +402,9 @@ function mapCompilationMessage(
     return {
         nativeIndex,
         type: native.type,
-        message,
-        messageTruncated: message !== native.message,
+        message: sanitizedMessage.message,
+        messageTruncated: sanitizedMessage.truncated,
+        sourceExcerptRedacted: sanitizedMessage.sourceExcerptRedacted,
         locationKind: hasSortedNumber(snapshot.separatorOffsets, native.offset)
             ? 'separator'
             : 'unmapped',
@@ -458,11 +502,202 @@ function normalizeCompilationMessageEvidence(
         type: input?.type === 'error' || input?.type === 'warning' ? input.type : 'info',
         message,
         messageTruncated: input?.messageTruncated === true || message !== originalMessage,
+        sourceExcerptRedacted: input?.sourceExcerptRedacted === true,
         locationKind,
         nativeLocation: normalizeNativeLocation(input?.nativeLocation),
         ...(locationKind === 'module' && input.moduleLocation !== undefined
             ? { moduleLocation: normalizeModuleLocation(input.moduleLocation) }
             : {}),
+    }
+}
+
+export function sanitizePipelineEvidenceText(
+    message: string,
+    sourceIndex: PipelineSourceRedactionIndex,
+    maxLength = PIPELINE_COMPILATION_MAX_MESSAGE_LENGTH
+): Readonly<{
+    message: string
+    truncated: boolean
+    sourceExcerptRedacted: boolean
+}> {
+
+    const boundedMessage = boundString(message, maxLength)
+    const sourceSafeMessage = redactPipelineSourceExcerpts(boundedMessage, sourceIndex)
+    const boundedSourceSafeMessage = boundString(
+        sourceSafeMessage.message,
+        maxLength
+    )
+    return {
+        message: boundedSourceSafeMessage,
+        truncated: boundedMessage !== message || boundedSourceSafeMessage !== sourceSafeMessage.message,
+        sourceExcerptRedacted: sourceSafeMessage.redacted,
+    }
+}
+
+function redactPipelineSourceExcerpts(
+    message: string,
+    sourceIndex: PipelineSourceRedactionIndex
+): Readonly<{ message: string, redacted: boolean }> {
+
+    if (message.length === 0 || (sourceIndex.ngramCount === 0 && sourceIndex.tokenCount === 0)) {
+        return { message, redacted: false }
+    }
+
+    const covered = new Uint8Array(message.length)
+    markSourceNgrams(message, sourceIndex, covered)
+    markSourceTokens(message, sourceIndex, covered)
+    preserveSurrogatePairs(message, covered)
+
+    if (!covered.some(Boolean)) return { message, redacted: false }
+
+    let redacted = ''
+    for (let index = 0; index < message.length;) {
+        if (covered[index] === 0) {
+            redacted += message[index]
+            index++
+            continue
+        }
+        while (index < message.length && covered[index] !== 0) index++
+        redacted += PIPELINE_COMPILATION_SOURCE_REDACTION
+    }
+    return { message: redacted, redacted: true }
+}
+
+export function createPipelineSourceRedactionIndex(source: string): PipelineSourceRedactionIndex {
+
+    const length = PIPELINE_COMPILATION_SOURCE_EXCERPT_LENGTH
+    const filter = new Uint8Array(sourceRedactionWorkspaceBytes(source.length))
+    const ngramCount = Math.max(0, source.length - length + 1)
+    if (source.length >= length) {
+        for (let index = 0; index <= source.length - length; index++) {
+            addBloomRange(filter, source, index, length, PIPELINE_SOURCE_NGRAM_DOMAIN)
+        }
+    }
+    let tokenCount = 0
+    for (const match of source.matchAll(WGSL_SOURCE_TOKEN_PATTERN)) {
+        if (match[0].length < 3) continue
+        tokenCount++
+        addBloomRange(
+            filter,
+            match[0],
+            0,
+            match[0].length,
+            PIPELINE_SOURCE_TOKEN_DOMAIN
+        )
+    }
+    return Object.freeze({
+        storageBytes: filter.byteLength,
+        ngramCount,
+        tokenCount,
+        hasNgram: (value: string) => hasBloomValue(
+            filter,
+            value,
+            PIPELINE_SOURCE_NGRAM_DOMAIN
+        ),
+        hasToken: (value: string) => hasBloomValue(
+            filter,
+            value,
+            PIPELINE_SOURCE_TOKEN_DOMAIN
+        ),
+    })
+}
+
+function markSourceNgrams(
+    message: string,
+    sourceIndex: PipelineSourceRedactionIndex,
+    covered: Uint8Array
+): void {
+
+    const length = PIPELINE_COMPILATION_SOURCE_EXCERPT_LENGTH
+    if (message.length < length || sourceIndex.ngramCount === 0) return
+
+    for (let index = 0; index <= message.length - length; index++) {
+        if (!sourceIndex.hasNgram(message.slice(index, index + length))) continue
+        covered.fill(1, index, index + length)
+    }
+}
+
+function markSourceTokens(
+    message: string,
+    sourceIndex: PipelineSourceRedactionIndex,
+    covered: Uint8Array
+): void {
+
+    if (sourceIndex.tokenCount === 0) return
+    for (const match of message.matchAll(WGSL_SOURCE_TOKEN_PATTERN)) {
+        const token = match[0]
+        if (token.length < 3 || !sourceIndex.hasToken(token)) continue
+        covered.fill(1, match.index, match.index + token.length)
+    }
+}
+
+function sourceRedactionWorkspaceBytes(sourceLength: number): number {
+
+    const target = Math.min(
+        PIPELINE_SOURCE_REDACTION_MAX_WORKSPACE_BYTES,
+        Math.max(PIPELINE_SOURCE_REDACTION_MIN_WORKSPACE_BYTES, sourceLength * 2)
+    )
+    let bytes = PIPELINE_SOURCE_REDACTION_MIN_WORKSPACE_BYTES
+    while (bytes < target) bytes *= 2
+    return bytes
+}
+
+function addBloomRange(
+    filter: Uint8Array,
+    value: string,
+    start: number,
+    length: number,
+    domain: number
+): void {
+
+    const [ first, second ] = bloomHashes(value, start, length, domain)
+    const bitMask = filter.byteLength * 8 - 1
+    for (let index = 0; index < PIPELINE_SOURCE_REDACTION_HASH_COUNT; index++) {
+        const bit = (first + Math.imul(index, second)) & bitMask
+        filter[bit >>> 3] |= 1 << (bit & 7)
+    }
+}
+
+function hasBloomValue(filter: Uint8Array, value: string, domain: number): boolean {
+
+    const [ first, second ] = bloomHashes(value, 0, value.length, domain)
+    const bitMask = filter.byteLength * 8 - 1
+    for (let index = 0; index < PIPELINE_SOURCE_REDACTION_HASH_COUNT; index++) {
+        const bit = (first + Math.imul(index, second)) & bitMask
+        if ((filter[bit >>> 3] & (1 << (bit & 7))) === 0) return false
+    }
+    return true
+}
+
+function bloomHashes(
+    value: string,
+    start: number,
+    length: number,
+    domain: number
+): readonly [ number, number ] {
+
+    let first = (0x811c9dc5 ^ domain) >>> 0
+    let second = (0x9e3779b9 ^ domain) >>> 0
+    const end = start + length
+    for (let index = start; index < end; index++) {
+        const codeUnit = value.charCodeAt(index)
+        first = Math.imul(first ^ codeUnit, 0x01000193) >>> 0
+        second = Math.imul(second ^ codeUnit, 0x85ebca6b) >>> 0
+    }
+    return [ first, second | 1 ]
+}
+
+function preserveSurrogatePairs(value: string, covered: Uint8Array): void {
+
+    for (let index = 0; index < value.length - 1; index++) {
+        if (
+            isHighSurrogate(value.charCodeAt(index)) &&
+            isLowSurrogate(value.charCodeAt(index + 1)) &&
+            covered[index] !== covered[index + 1]
+        ) {
+            covered[index] = 1
+            covered[index + 1] = 1
+        }
     }
 }
 

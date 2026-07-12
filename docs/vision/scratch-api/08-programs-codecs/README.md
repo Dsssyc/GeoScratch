@@ -156,10 +156,20 @@ mapped back to a Program module when the location is actually known.
 The resulting pipeline compilation report retains combined and per-module
 hashes, module spans, counts, and bounded native messages. It does not retain
 complete WGSL or source excerpts in default history, incidents, exported
-evidence, or deep descriptor capture. Native message prose is localized and is
-never parsed into a stable code. Unknown or separator locations remain
-unmapped. This evidence does not move source ownership from Program to
-Pipeline, and Program does not gain concrete resources or submission state.
+evidence, or deep descriptor capture. Because implementation-defined native
+prose can quote WGSL, exact Program identifiers/numeric literals of at least
+three UTF-16 code units and exact contiguous Program spans of at least eight
+UTF-16 code units are replaced before retention. Token recognition follows the
+WGSL Unicode-XID identifier and complete decimal/hexadecimal numeric-literal
+grammar, including leading-dot floats; each message reports
+`sourceExcerptRedacted`. A lazy Bloom workspace capped at 32 KiB makes this
+check independent of Program source size; collisions may over-redact but cannot
+leak an inserted token or span. Native prose is never parsed into a stable code.
+The same rule sanitizes retained pipeline/scope/lifecycle native-error strings;
+an original native object can remain only as a transient error cause. Unknown
+or separator locations remain unmapped. This evidence does not move source
+ownership from Program to Pipeline, and Program does not gain concrete resources
+or submission state.
 
 ## Authoring And Runtime Boundary
 

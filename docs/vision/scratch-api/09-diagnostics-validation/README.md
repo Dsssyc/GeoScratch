@@ -494,7 +494,22 @@ It retains at most 64 native messages, at most 4096 UTF-16 code units per
 message, and at most 64 KiB of serialized compilation evidence. Counts and
 omission fields remain even when evidence is truncated. Native order is
 preserved; native prose is not parsed; zero-valued unknown locations and
-separator locations are not assigned invented module coordinates.
+separator locations are not assigned invented module coordinates. Before
+retention, exact Program identifiers/numeric literals of at least three UTF-16
+code units and exact contiguous Program spans of at least eight UTF-16 code
+units are replaced. Tokenization follows WGSL Unicode-XID identifiers and its
+complete decimal/hexadecimal integer and float lexical forms, including
+leading-dot floats. `sourceExcerptRedacted` distinguishes that sanitization
+from `messageTruncated`. Retained pipeline, supporting-scope, structural, and
+lifecycle native-error strings use the same source sanitizer; the original
+native object is allowed only as a transient diagnostic cause. The sanitizer
+uses one lazy Bloom workspace capped at 32 KiB per report or native-error
+settlement. Collisions can only cause conservative over-redaction. A global
+device-loss event has no unique Program context, so Scratch permanently omits
+its native message instead: `runtime.deviceLostInfo` and the runtime incident
+retain the structural reason, a fixed omission marker, and
+`nativeMessageOmitted: true`. An in-flight pipeline may use the original info
+only through a temporary lifecycle subscription and diagnostic cause.
 
 Stable pipeline creation failure codes are
 `SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`,

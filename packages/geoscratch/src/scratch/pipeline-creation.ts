@@ -1,4 +1,4 @@
-import { serializeNativeGpuError } from './gpu-operation.js'
+import { createPipelineNativeErrorSerializer } from './pipeline-native-error.js'
 import { createPipelineCompilationReport } from './pipeline-compilation.js'
 import type {
     GpuNativeErrorCategory,
@@ -201,11 +201,12 @@ function settlePipelineCreationIssue(input: {
 }): PipelineCreationIssueResult {
 
     const failures: PipelineCreationObservedFailure[] = []
+    const serializeNativeError = createPipelineNativeErrorSerializer(input.input.sourceSnapshot)
     let compilationReport: PipelineCompilationReport | undefined
     let nativePipeline: GPURenderPipeline | GPUComputePipeline | undefined
 
     if (input.synchronousFailure !== undefined) {
-        failures.push(observedFailure(
+        failures.push(observedFailure(serializeNativeError,
             input.synchronousFailure.stage,
             'SCRATCH_PIPELINE_CREATION_NATIVE_FAILED',
             'native-exception',
@@ -213,7 +214,7 @@ function settlePipelineCreationIssue(input: {
         ))
     }
     for (const cause of input.boundaryFailures) {
-        failures.push(observedFailure(
+        failures.push(observedFailure(serializeNativeError,
             'scope-settlement',
             'SCRATCH_PIPELINE_CREATION_SCOPE_FAILED',
             'scope-failure',
@@ -230,14 +231,14 @@ function settlePipelineCreationIssue(input: {
                 compilationInfo: input.compilation.value,
             })
             if (compilationReport.errorCount > 0) {
-                failures.push(observedFailure(
+                failures.push(observedFailure(serializeNativeError,
                     'shader-compilation',
                     'SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED',
                     'none'
                 ))
             }
         } catch (cause) {
-            failures.push(observedFailure(
+            failures.push(observedFailure(serializeNativeError,
                 'compilation-info',
                 'SCRATCH_PIPELINE_CREATION_SCOPE_FAILED',
                 'scope-failure',
@@ -245,7 +246,7 @@ function settlePipelineCreationIssue(input: {
             ))
         }
     } else if (input.compilation.status === 'rejected' || input.compilation.status === 'invalid') {
-        failures.push(observedFailure(
+        failures.push(observedFailure(serializeNativeError,
             'compilation-info',
             'SCRATCH_PIPELINE_CREATION_SCOPE_FAILED',
             'scope-failure',
@@ -256,7 +257,7 @@ function settlePipelineCreationIssue(input: {
     if (input.pipeline.status === 'fulfilled') {
         if (isNativePipeline(input.pipeline.value)) nativePipeline = input.pipeline.value
         else {
-            failures.push(observedFailure(
+            failures.push(observedFailure(serializeNativeError,
                 'pipeline-creation',
                 'SCRATCH_PIPELINE_CREATION_NATIVE_FAILED',
                 'native-exception',
@@ -265,7 +266,7 @@ function settlePipelineCreationIssue(input: {
         }
     } else if (input.pipeline.status === 'rejected') {
         const reason = pipelineErrorReason(input.pipeline.reason)
-        failures.push(observedFailure(
+        failures.push(observedFailure(serializeNativeError,
             'pipeline-creation',
             reason === 'validation'
                 ? 'SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED'
@@ -277,7 +278,7 @@ function settlePipelineCreationIssue(input: {
             reason
         ))
     } else if (input.pipeline.status === 'invalid') {
-        failures.push(observedFailure(
+        failures.push(observedFailure(serializeNativeError,
             'pipeline-creation',
             'SCRATCH_PIPELINE_CREATION_NATIVE_FAILED',
             'native-exception',
@@ -290,7 +291,7 @@ function settlePipelineCreationIssue(input: {
         if (observation.status === 'fulfilled') {
             if (observation.value === null) continue
             if (!isGpuError(observation.value)) {
-                failures.push(observedFailure(
+                failures.push(observedFailure(serializeNativeError,
                     'scope-settlement',
                     'SCRATCH_PIPELINE_CREATION_SCOPE_FAILED',
                     'scope-failure',
@@ -298,14 +299,14 @@ function settlePipelineCreationIssue(input: {
                 ))
                 continue
             }
-            failures.push(observedFailure(
+            failures.push(observedFailure(serializeNativeError,
                 'supporting-object-creation',
                 'SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED',
                 scope.filter,
                 observation.value
             ))
         } else if (observation.status === 'rejected' || observation.status === 'invalid') {
-            failures.push(observedFailure(
+            failures.push(observedFailure(serializeNativeError,
                 'scope-settlement',
                 'SCRATCH_PIPELINE_CREATION_SCOPE_FAILED',
                 'scope-failure',
@@ -375,6 +376,7 @@ function notIssued<T>(): Promise<PromiseObservation<T>> {
 }
 
 function observedFailure(
+    serializeNativeError: ReturnType<typeof createPipelineNativeErrorSerializer>,
     stage: ScratchGpuIncidentFailureStage,
     diagnosticCode: string,
     nativeErrorCategory: GpuNativeErrorCategory,
@@ -388,7 +390,7 @@ function observedFailure(
             diagnosticCode,
             nativeErrorCategory,
             ...(pipelineErrorReason !== undefined ? { pipelineErrorReason } : {}),
-            ...(cause !== undefined ? { nativeError: serializeNativeGpuError(cause) } : {}),
+            ...(cause !== undefined ? { nativeError: serializeNativeError(cause) } : {}),
         }),
         ...(cause !== undefined ? { cause } : {}),
     })
@@ -397,12 +399,17 @@ function observedFailure(
 function pipelineErrorReason(error: unknown): GPUPipelineErrorReason | undefined {
 
     if (!isObjectLike(error)) return undefined
+    let name: unknown
+    let message: unknown
     let reason: unknown
     try {
+        name = (error as { name?: unknown }).name
+        message = (error as { message?: unknown }).message
         reason = (error as { reason?: unknown }).reason
     } catch {
         return undefined
     }
+    if (name !== 'GPUPipelineError' || typeof message !== 'string') return undefined
     return reason === 'validation' || reason === 'internal' ? reason : undefined
 }
 

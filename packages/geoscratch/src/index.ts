@@ -87,6 +87,7 @@ export type {
     ScratchDiagnosticCaptureOptions,
     ScratchDiagnosticCaptureReport,
     ScratchDiagnosticCaptureStopReason,
+    ScratchDeviceLostInfo,
     ScratchDiagnosticReport,
     ScratchGpuIncidentEvidenceCompleteness,
     ScratchGpuIncidentFailureStage,

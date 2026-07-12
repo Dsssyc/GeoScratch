@@ -212,6 +212,61 @@ describe('ScratchRuntime async render pipeline creation', () => {
         }
     })
 
+    it('does not promote a reason-shaped rejection into GPUPipelineError facts', async() => {
+
+        const fixture = await createRenderFixture()
+        const forged = { reason: 'validation' }
+        fixture.pipelines.rejectNextPipeline('render', forged)
+
+        const error = await rejectedDiagnostic(
+            fixture.runtime.createRenderPipeline(fixture.descriptor)
+        )
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_NATIVE_FAILED')
+        expect(error.incident.nativeErrorCategory).to.equal('native-exception')
+        expect(error.incident).not.to.have.property('pipelineErrorReason')
+        assertFailedPipelineFacts(fixture, error, 'failed')
+    })
+
+    it('source-sanitizes native pipeline error facts without changing the transient cause', async() => {
+
+        const fixture = await createRenderFixture()
+        const sourceExcerpt = 'fn vsMain(@builtin(vertex_index) vertexIndex: u32)'
+        const nativeError = createFakePipelineError(
+            'validation',
+            `pipeline rejected near ${sourceExcerpt}`
+        )
+        fixture.pipelines.rejectNextPipeline('render', nativeError)
+
+        const error = await rejectedDiagnostic(
+            fixture.runtime.createRenderPipeline(fixture.descriptor)
+        )
+        const incidentJson = JSON.stringify(error.incident)
+
+        expect(error.cause).to.equal(nativeError)
+        expect(incidentJson).not.to.include(sourceExcerpt)
+        expect(error.incident.nativeError.sourceExcerptRedacted).to.equal(true)
+        expect(error.incident.outcomes[0].nativeError.sourceExcerptRedacted).to.equal(true)
+        assertFailedPipelineFacts(fixture, error, 'failed')
+
+        const scopeFixture = await createRenderFixture()
+        const scopeError = new Error(`scope message ${sourceExcerpt}`)
+        scopeError.name = `GPUValidationError ${sourceExcerpt}`
+        scopeError.reason = `scope reason ${sourceExcerpt}`
+        scopeFixture.errors.failNext('createShaderModule', 'validation', scopeError)
+
+        const scopeFailure = await rejectedDiagnostic(
+            scopeFixture.runtime.createRenderPipeline(scopeFixture.descriptor)
+        )
+        const scopeFacts = scopeFailure.incident.nativeError
+        expect(JSON.stringify(scopeFailure.incident)).not.to.include(sourceExcerpt)
+        expect(scopeFacts.sourceExcerptRedacted).to.equal(true)
+        expect(scopeFacts.name).not.to.include(sourceExcerpt)
+        expect(scopeFacts.message).not.to.include(sourceExcerpt)
+        expect(scopeFacts.reason).not.to.include(sourceExcerpt)
+        assertFailedPipelineFacts(scopeFixture, scopeFailure, 'failed')
+    })
+
     it('classifies validation, internal, and OOM support-object scope errors', async() => {
 
         const cases = [
@@ -357,22 +412,25 @@ describe('ScratchRuntime async render pipeline creation', () => {
 
         const cases = [
             {
-                code: 'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
+                codes: [
+                    'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
+                    'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
+                ],
                 act: fixture => fixture.runtime.dispose(),
             },
             {
-                code: 'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
+                codes: [ 'SCRATCH_PIPELINE_CREATION_DEVICE_LOST' ],
                 act: async(fixture) => {
                     fixture.errors.loseDevice({ reason: 'unknown', message: 'lost during pipeline creation' })
                     await settleMicrotasks()
                 },
             },
             {
-                code: 'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED',
+                codes: [ 'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED' ],
                 act: fixture => fixture.program.dispose(),
             },
             {
-                code: 'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED',
+                codes: [ 'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED' ],
                 act: fixture => fixture.bindLayout.dispose(),
             },
         ]
@@ -387,10 +445,92 @@ describe('ScratchRuntime async render pipeline creation', () => {
             fixture.pipelines.resolvePipeline(0)
 
             const error = await rejectedDiagnostic(promise)
-            expect(error.diagnostic.code).to.equal(testCase.code)
+            expect(error.diagnostic.code).to.equal(testCase.codes.length === 1
+                ? testCase.codes[0]
+                : 'SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES')
+            expect(error.incident.outcomes.map(outcome => outcome.diagnosticCode))
+                .to.deep.equal(testCase.codes)
             expect(error.incident.failureStage).to.equal('lifecycle-recheck')
             expect(error.incident.outcomes[0].subject).to.be.an('object')
             assertFailedPipelineFacts(fixture, error, 'cancelled')
+        }
+    })
+
+    it('retains every simultaneous lifecycle failure after native settlement', async() => {
+
+        const fixture = await createRenderFixture({
+            deferCompilationInfo: true,
+            deferAsyncPipelines: true,
+        })
+        const promise = fixture.runtime.createRenderPipeline(fixture.descriptor)
+
+        fixture.program.dispose()
+        fixture.bindLayout.dispose()
+        const sourceExcerpt = 'fn fsMain() -> @location(0) vec4f'
+        fixture.errors.loseDevice({
+            reason: 'unknown',
+            message: `lost with disposed dependencies near ${sourceExcerpt}`,
+        })
+        await settleMicrotasks()
+        fixture.runtime.dispose()
+        fixture.pipelines.resolveCompilation(0, { messages: [] })
+        fixture.pipelines.resolvePipeline(0)
+
+        const error = await rejectedDiagnostic(promise)
+        expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES')
+        expect(error.incident.outcomes.map(outcome => outcome.diagnosticCode)).to.deep.equal([
+            'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
+            'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
+            'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED',
+            'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED',
+        ])
+        expect(error.incident.outcomes.every(
+            outcome => outcome.stage === 'lifecycle-recheck'
+        )).to.equal(true)
+        expect(JSON.stringify(error.incident)).not.to.include(sourceExcerpt)
+        expect(error.incident.outcomes[1].nativeError.sourceExcerptRedacted).to.equal(true)
+        assertFailedPipelineFacts(fixture, error, 'cancelled')
+    })
+
+    it('keeps device-loss source text transient across runtime and pipeline evidence', async() => {
+
+        const fixture = await createRenderFixture({
+            deferCompilationInfo: true,
+            deferAsyncPipelines: true,
+        })
+        const promise = fixture.runtime.createRenderPipeline(fixture.descriptor)
+        const sourceExcerpt = 'fn fsMain() -> @location(0) vec4f'
+        const nativeInfo = {
+            reason: 'unknown',
+            message: `device lost near ${sourceExcerpt}`,
+        }
+
+        fixture.errors.loseDevice(nativeInfo)
+        await settleMicrotasks()
+        fixture.pipelines.resolveCompilation(0, { messages: [] })
+        fixture.pipelines.resolvePipeline(0)
+
+        const error = await rejectedDiagnostic(promise)
+        const runtimeIncident = fixture.runtime.diagnostics.incidents({ kind: 'device-loss' })[0]
+        expect(error.cause).to.equal(nativeInfo)
+        expect(error.incident.outcomes[0].nativeError.sourceExcerptRedacted).to.equal(true)
+        expect(fixture.runtime.deviceLostInfo).to.deep.equal({
+            reason: 'unknown',
+            message: '[native device-loss message omitted]',
+            nativeMessageOmitted: true,
+        })
+        expect(runtimeIncident.nativeError).to.deep.include({
+            reason: 'unknown',
+            message: '[native device-loss message omitted]',
+            nativeMessageOmitted: true,
+        })
+        expect(JSON.stringify(fixture.runtime.deviceLostInfo)).not.to.include(sourceExcerpt)
+        expect(JSON.stringify(runtimeIncident)).not.to.include(sourceExcerpt)
+
+        try {
+            fixture.runtime.assertActive()
+        } catch (runtimeError) {
+            expect(JSON.stringify(runtimeError.diagnostic)).not.to.include(sourceExcerpt)
         }
     })
 

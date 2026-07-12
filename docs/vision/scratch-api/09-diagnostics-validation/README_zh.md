@@ -493,7 +493,20 @@ allocation pressure。
 保留 64 条 native message，每条最多 4096 个 UTF-16 code unit，全部 serialized
 compilation evidence 最多 64 KiB。即使 evidence 被截断，计数与 omission field
 仍然存在。Native order 保持不变；不解析 native prose；值为零的未知位置与
-separator location 不会被赋予虚构的 module coordinate。
+separator location 不会被赋予虚构的 module coordinate。保留前会替换至少
+三个 UTF-16 code unit 的精确 Program identifier/numeric literal，以及至少
+八个 UTF-16 code unit 的连续 Program source span。Tokenization 对齐 WGSL
+Unicode-XID identifier 以及完整 decimal/hexadecimal integer/float lexical
+forms，包括 leading-dot float。`sourceExcerptRedacted`
+用于区分这种清洗与 `messageTruncated`。保留的 pipeline、supporting-scope、
+structural 与 lifecycle native-error string 使用相同 source sanitizer；原始
+native object 只允许作为瞬时 diagnostic cause。每个 report 或 native-error
+settlement 只惰性建立一个不超过 32 KiB 的 Bloom workspace；collision 只能
+导致保守地多清洗。全局 device-loss 没有唯一 Program context，因此 Scratch
+永久省略其 native message：`runtime.deviceLostInfo` 与 runtime incident 只保留
+structural reason、固定 omission marker 和 `nativeMessageOmitted: true`。
+in-flight pipeline 只能通过临时 lifecycle subscription 与 diagnostic cause
+使用原始 info。
 
 稳定 pipeline creation failure code 为
 `SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`、
