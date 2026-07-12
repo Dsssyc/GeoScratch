@@ -294,4 +294,124 @@ describe('scratch acknowledged readback staging', () => {
         })
         expect(bytes).to.deep.equal(new Uint8Array(new Uint32Array([ 1, 2, 3, 4 ]).buffer))
     })
+
+    it('acknowledges one ordered slot before exposure and reuses it only sequentially', async () => {
+
+        const fake = createFakeGpu({ deferErrorScopePops: true })
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const source = await createSourceWithDeferredScopes(fake, runtime)
+        advanceResourceContentEpochForTest(source)
+        const bufferCount = fake.calls.buffers.length
+        let factorySettled = false
+        const creation = runtime.createReadbackCommand({
+            label: 'reusable ordered staging',
+            source: { resource: source, contentEpoch: 1 },
+            whenMissing: 'throw',
+        }).then(command => {
+            factorySettled = true
+            return command
+        })
+
+        expect(creation).to.be.instanceOf(Promise)
+        expect(fake.calls.buffers).to.have.length(bufferCount + 1)
+        expect(runtime.diagnostics.snapshot().readbackCommands).to.deep.equal([])
+        expect(runtime.diagnostics.snapshot().pendingOperations[0].target).to.deep.include({
+            kind: 'command',
+            commandKind: 'readback',
+        })
+        fake.errors.settlePop(3)
+        await settleMicrotasks()
+        expect(factorySettled).to.equal(false)
+        fake.errors.settlePop(2)
+        const command = await creation
+        const stagingBuffer = fake.calls.buffers.at(-1)
+        const factoryBufferCount = fake.calls.buffers.length
+        const allocationOperationId = runtime.diagnostics.snapshot()
+            .readbackCommands[0].stagingAllocationOperationId
+
+        expect(command.state).to.equal('idle')
+        expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(16)
+        const firstSubmitted = runtime.submission().readback(command).submit()
+        const firstOperation = command.result({ after: firstSubmitted })
+        const encoderCount = fake.calls.commandEncoders.length
+
+        const busy = await rejectedDiagnostic(Promise.resolve().then(
+            () => runtime.submission().readback(command).submit()
+        ))
+        expect(busy.diagnostic.code).to.equal('SCRATCH_READBACK_COMMAND_BUSY')
+        expect(fake.calls.commandEncoders).to.have.length(encoderCount)
+        expect(fake.calls.buffers).to.have.length(factoryBufferCount)
+
+        await firstOperation.toBytes()
+        expect(command.state).to.equal('idle')
+        const secondSubmitted = runtime.submission().readback(command).submit()
+        const secondOperation = command.result({ after: secondSubmitted })
+        await secondOperation.toBytes()
+
+        expect(fake.calls.buffers).to.have.length(factoryBufferCount)
+        expect(fake.calls.maps.filter(call => call.buffer === stagingBuffer)).to.have.length(2)
+        expect(firstSubmitted.readbacks[0].operationId).to.equal(firstOperation.id)
+        expect(secondSubmitted.readbacks[0].operationId).to.equal(secondOperation.id)
+        expect(firstOperation.id).not.to.equal(secondOperation.id)
+        expect(firstSubmitted.readbacks[0].stagingAllocationOperationId).to.equal(allocationOperationId)
+        expect(secondSubmitted.readbacks[0].stagingAllocationOperationId).to.equal(allocationOperationId)
+        expect(stagingBuffer.destroyed).to.equal(false)
+
+        command.dispose()
+        expect(command.state).to.equal('disposed')
+        expect(stagingBuffer.destroyed).to.equal(true)
+        expect(runtime.diagnostics.snapshot().readbackCommands).to.deep.equal([])
+        expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
+    })
+
+    it('rejects ordered allocation before command registration and submission effects', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const source = await createSource(runtime)
+        const nativeError = Object.assign(new Error('ordered staging validation'), {
+            name: 'GPUValidationError',
+        })
+        const encoderCount = fake.calls.commandEncoders.length
+        fake.errors.failNext('createBuffer', 'validation', nativeError)
+
+        const error = await rejectedDiagnostic(runtime.createReadbackCommand({
+            source: { resource: source, contentEpoch: 0 },
+            whenMissing: 'throw',
+        }))
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_VALIDATION_FAILED')
+        expect(error.incident.target).to.deep.include({ kind: 'command', commandKind: 'readback' })
+        expect(runtime.diagnostics.snapshot().readbackCommands).to.deep.equal([])
+        expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
+        expect(fake.calls.commandEncoders).to.have.length(encoderCount)
+        expect(fake.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('defers busy command disposal until its submitted operation releases the slot', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const source = await createSource(runtime)
+        advanceResourceContentEpochForTest(source)
+        const command = await runtime.createReadbackCommand({
+            source: { resource: source, contentEpoch: 1 },
+            whenMissing: 'throw',
+        })
+        const stagingBuffer = fake.calls.buffers.at(-1)
+        const submitted = runtime.submission().readback(command).submit()
+        const operation = command.result({ after: submitted })
+
+        command.dispose()
+        expect(command.isDisposed).to.equal(true)
+        expect(command.state).to.equal('releasing')
+        expect(stagingBuffer.destroyed).to.equal(false)
+
+        expect(await operation.toBytes()).to.deep.equal(new Uint8Array(16))
+        expect(command.state).to.equal('disposed')
+        expect(stagingBuffer.destroyed).to.equal(true)
+        expect(fake.calls.bufferDestroys.filter(call => call.buffer === stagingBuffer)).to.have.length(1)
+        expect(runtime.diagnostics.snapshot().readbackCommands).to.deep.equal([])
+        expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
+    })
 })

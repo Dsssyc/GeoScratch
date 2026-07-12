@@ -214,7 +214,7 @@ async function main() {
         size: surface.size,
         whenMissing: 'throw',
     })
-    const readback = runtime.createReadbackCommand({
+    const readback = await runtime.createReadbackCommand({
         label: 'read exact resized texture bytes',
         source: { resource: readbackBuffer, contentEpoch: 1 },
         sourceOffset: 0,

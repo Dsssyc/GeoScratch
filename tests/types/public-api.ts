@@ -1133,8 +1133,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         whenMissing: 'throw',
     }
     const compatReadbackCommandDescriptor: scratchCompat.ReadbackCommandDescriptor = readbackCommandDescriptor
-    const readbackCommand: scr.ReadbackCommand = runtime.createReadbackCommand(readbackCommandDescriptor)
-    const readbackCommandAlias: scratchCompat.ReadbackCommand = runtime.readbackCommand(compatReadbackCommandDescriptor)
+    const readbackCommandPromise: Promise<scr.ReadbackCommand> = runtime.createReadbackCommand(readbackCommandDescriptor)
+    const readbackCommandAliasPromise: Promise<scratchCompat.ReadbackCommand> = runtime.readbackCommand(compatReadbackCommandDescriptor)
+    const readbackCommand: scr.ReadbackCommand = await readbackCommandPromise
+    const readbackCommandAlias: scratchCompat.ReadbackCommand = await readbackCommandAliasPromise
     const orderedSubmitted: scr.SubmittedWork = runtime.submission()
         .readback(readbackCommand)
         .readback(readbackCommandAlias)
@@ -1144,6 +1146,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const orderedReadback: scr.ReadbackOperation = readbackCommand.result(readbackCommandResultOptions)
     const compatOrderedReadback: scratchCompat.ReadbackOperation = readbackCommandAlias.result(compatReadbackCommandResultOptions)
     const readbackStepKind: scr.SubmissionStepKind = 'readback'
+    const submittedReadbackLinks: readonly scr.SubmittedReadbackLink[] = orderedSubmitted.readbacks
+    const compatSubmittedReadbackLinks: readonly scratchCompat.SubmittedReadbackLink[] = submittedReadbackLinks
     const readbackRetention: scr.ReadbackRetentionPolicy = 'until-dispose'
     const compatReadbackRetention: scratchCompat.ReadbackRetentionPolicy = 'consume-on-read'
     const readbackDescriptor: scr.ReadbackOperationDescriptor = {

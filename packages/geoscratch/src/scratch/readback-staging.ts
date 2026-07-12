@@ -178,6 +178,18 @@ export function releaseReadbackStaging(slot: ReadbackStagingSlot, unmap = false)
     state.reservation.release()
 }
 
+export function resetReadbackStaging(slot: ReadbackStagingSlot, unmap = false): void {
+
+    const state = stagingStateFor(slot)
+    if (state.isReleased) throw new TypeError(`Readback staging slot ${state.id} has been released.`)
+    if (!unmap || typeof state.buffer.unmap !== 'function') return
+    try {
+        state.buffer.unmap()
+    } catch {
+        // Mapping cleanup receives structured evidence in the mapping transaction phase.
+    }
+}
+
 function constructReadbackStagingSlot(state: ReadbackStagingSlotState): ReadbackStagingSlot {
 
     const Constructor = ReadbackStagingSlot as unknown as new (token: symbol) => ReadbackStagingSlot

@@ -517,7 +517,7 @@ describe('scratch submission queue order', () => {
         const fixture = await createOrderingFixture()
         const firstExternal = await createExternalImageUpload(fixture.runtime, 'external before copy and readback')
         const secondExternal = await createExternalImageUpload(fixture.runtime, 'external before compute and render')
-        const readback = fixture.runtime.createReadbackCommand({
+        const readback = await fixture.runtime.createReadbackCommand({
             source: { resource: fixture.copySource, contentEpoch: 1 },
             whenMissing: 'throw',
         })
@@ -780,12 +780,12 @@ describe('scratch submission queue order', () => {
     it('releases submitted and unreplayed readback staging after a later external upload fails', async() => {
 
         const fixture = await createOrderingFixture()
-        const firstReadback = fixture.runtime.createReadbackCommand({
+        const firstReadback = await fixture.runtime.createReadbackCommand({
             label: 'submitted readback before failed external upload',
             source: { resource: fixture.copySource, contentEpoch: 1 },
             whenMissing: 'throw',
         })
-        const laterReadback = fixture.runtime.createReadbackCommand({
+        const laterReadback = await fixture.runtime.createReadbackCommand({
             label: 'unreplayed readback after failed external upload',
             source: { resource: fixture.copySource, contentEpoch: 1 },
             whenMissing: 'throw',
@@ -796,6 +796,7 @@ describe('scratch submission queue order', () => {
             throw cause
         }
         const bufferCountBeforeSubmit = fixture.calls.buffers.length
+        const stagingBuffers = fixture.calls.buffers.slice(-2)
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .readback(firstReadback)
             .upload(failed.command)
@@ -807,15 +808,16 @@ describe('scratch submission queue order', () => {
         } catch (error) {
             caught = error
         }
-        const stagingBuffers = fixture.calls.buffers.slice(bufferCountBeforeSubmit)
+        const buffersCreatedBySubmit = fixture.calls.buffers.slice(bufferCountBeforeSubmit)
 
         expect(caught).to.be.instanceOf(ScratchDiagnosticError)
         expect(caught.diagnostic.code).to.equal('SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED')
         expect(timelineTypes(fixture.calls)).to.deep.equal([ 'submit' ])
-        expect(stagingBuffers).to.have.length(2)
+        expect(buffersCreatedBySubmit).to.deep.equal([])
         expect(fixture.calls.submittedWorkDoneRegistrations).to.have.length(1)
         await Promise.resolve()
-        expect(stagingBuffers.map(buffer => buffer.destroyed)).to.deep.equal([ true, true ])
+        expect([ firstReadback.state, laterReadback.state ]).to.deep.equal([ 'idle', 'idle' ])
+        expect(stagingBuffers.map(buffer => buffer.destroyed)).to.deep.equal([ false, false ])
     })
 
     it('does not create an empty segment between consecutive uploads', async() => {
@@ -1287,7 +1289,7 @@ describe('scratch submission queue order', () => {
         })
         initialUpload.execute(fake.queue)
         fake.calls.queueTimeline.length = 0
-        const readback = runtime.createReadbackCommand({
+        const readback = await runtime.createReadbackCommand({
             label: 'read before later upload',
             source: { resource: source, contentEpoch: 1 },
             whenMissing: 'throw',
@@ -1323,7 +1325,7 @@ describe('scratch submission queue order', () => {
             target: source,
             data: new Uint32Array([ 3, 4 ]),
         })
-        const readback = runtime.createReadbackCommand({
+        const readback = await runtime.createReadbackCommand({
             label: 'read uploaded bytes',
             source: { resource: source, contentEpoch: 1 },
             whenMissing: 'throw',
@@ -1356,7 +1358,7 @@ describe('scratch submission queue order', () => {
             target: source,
             data: new Uint32Array([ 1, 2 ]),
         })
-        const firstReadback = runtime.createReadbackCommand({
+        const firstReadback = await runtime.createReadbackCommand({
             label: 'epoch one readback',
             source: { resource: source, contentEpoch: 1 },
             whenMissing: 'throw',
@@ -1366,7 +1368,7 @@ describe('scratch submission queue order', () => {
             target: source,
             data: new Uint32Array([ 7, 8 ]),
         })
-        const secondReadback = runtime.createReadbackCommand({
+        const secondReadback = await runtime.createReadbackCommand({
             label: 'epoch two readback',
             source: { resource: source, contentEpoch: 2 },
             whenMissing: 'throw',
@@ -1388,7 +1390,12 @@ describe('scratch submission queue order', () => {
         ])
         expect(submitted.commandBuffers).to.have.length(2)
         expect(firstOperation).to.not.equal(secondOperation)
-        expect(firstOperation.stagingBuffer).to.not.equal(secondOperation.stagingBuffer)
+        expect(submitted.readbacks.map(link => link.operationId)).to.deep.equal([
+            firstOperation.id,
+            secondOperation.id,
+        ])
+        expect(submitted.readbacks[0].stagingAllocationOperationId)
+            .not.to.equal(submitted.readbacks[1].stagingAllocationOperationId)
         expect([ firstOperation.contentEpoch, secondOperation.contentEpoch ]).to.deep.equal([ 1, 2 ])
         expect([
             firstOperation.producerEpoch?.contentEpoch,

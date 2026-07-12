@@ -94,7 +94,7 @@ async function main() {
         },
         whenMissing: 'throw',
     })
-    const readback = runtime.createReadbackCommand({
+    const readback = await runtime.createReadbackCommand({
         label: 'read ordered result',
         source: { resource: value, contentEpoch: 4 },
         whenMissing: 'throw',

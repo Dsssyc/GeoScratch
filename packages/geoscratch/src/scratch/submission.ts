@@ -1,7 +1,15 @@
 import { UUID } from '../core/utils/uuid.js'
 import {
+    claimReadbackCommand,
     commitUploadCommandLogicalWrite,
+    encodeReadbackCommandClaim,
+    markReadbackCommandClaimAdopted,
+    markReadbackCommandClaimMapping,
+    markReadbackCommandClaimSubmitted,
+    readbackCommandClaimBuffer,
     registerReadbackCommandResult,
+    releaseReadbackCommandClaim,
+    updateReadbackCommandClaimProvenance,
     uploadCommandHasContentEffect,
     validateUploadCommandQueueAction,
     writeUploadCommandQueueAction,
@@ -12,12 +20,13 @@ import {
     createScratchDiagnosticReport,
     throwScratchDiagnostic,
 } from './diagnostics.js'
+import { serializeNativeGpuError } from './gpu-operation.js'
 import { validateRenderPassAttachments } from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
-import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
+import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
@@ -58,6 +67,16 @@ export type SubmittedResourceEpoch = {
     allocationVersion: number
     producedBy: SubmissionAccessOrigin
 }
+
+export type SubmittedReadbackLink = Readonly<{
+    commandId: string
+    operationId: string
+    stepIndex: number
+    sourceResourceId: string
+    allocationVersion: number
+    contentEpoch: number
+    stagingAllocationOperationId: string
+}>
 
 export type SubmissionMissingResource = {
     resourceId: string
@@ -189,7 +208,7 @@ type ExecutableCommand = DrawCommand | DispatchCommand
 
 type PendingReadback = {
     command: ReadbackCommand
-    stagingBuffer: GPUBuffer
+    claim: ReadbackCommandClaim
     stepIndex: number
     contentEpoch: number
     allocationVersion: number
@@ -439,6 +458,7 @@ export class SubmissionBuilder {
         const queueTimeline: PreparedQueueAction[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
         const pendingReadbacks: PendingReadback[] = []
+        const readbackClaims = new Map<number, ReadbackCommandClaim>()
         const commandBufferReadbacks = new Map<GPUCommandBuffer, PendingReadback[]>()
         const resourceSnapshots = new Map<Resource, ResourceContentSnapshot>()
         const querySlotSnapshots = new Map<QuerySetResource, Map<number, QuerySlotContentSnapshot>>()
@@ -447,6 +467,19 @@ export class SubmissionBuilder {
         let segmentResources = new Set<Resource>()
         let segmentQuerySlots = new Map<QuerySetResource, Set<number>>()
         let segmentReadbacks: PendingReadback[] = []
+
+        try {
+            for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
+                if (step.kind !== 'readback') continue
+                readbackClaims.set(stepIndex, claimReadbackCommand(step.command, {
+                    submissionId: submittedId,
+                    stepIndex,
+                }))
+            }
+        } catch (cause) {
+            releaseUnsubmittedReadbackClaims(readbackClaims.values())
+            throw cause
+        }
 
         const trackSegmentResourceWrite = (resource: Resource) => {
 
@@ -541,9 +574,16 @@ export class SubmissionBuilder {
                     const encoder = getEncoder()
                     const origin = commandAccessOrigin(stepIndex, 'readback', step.command)
                     const readAccess = captureResourceAccess(step.command.source.resource, 'read', origin)
+                    const claim = readbackClaims.get(stepIndex)
+                    if (claim === undefined) throw new TypeError(`Readback step ${stepIndex} has no staging claim.`)
+                    updateReadbackCommandClaimProvenance(claim, {
+                        contentEpoch: readAccess.contentEpochBefore,
+                        allocationVersion: step.command.source.resource.allocationVersion,
+                    })
+                    encodeReadbackCommandClaim(claim, encoder)
                     const pendingReadback = {
                         command: step.command,
-                        stagingBuffer: step.command.encode(encoder),
+                        claim,
                         stepIndex,
                         contentEpoch: readAccess.contentEpochBefore,
                         allocationVersion: step.command.source.resource.allocationVersion,
@@ -631,6 +671,9 @@ export class SubmissionBuilder {
             }
 
             finishEncoderSegment()
+        } catch (cause) {
+            releaseUnsubmittedReadbackClaims(readbackClaims.values())
+            throw cause
         } finally {
             restorePreparedContentState(resourceSnapshots, querySlotSnapshots)
         }
@@ -661,15 +704,36 @@ export class SubmissionBuilder {
             throw cause
         }
 
+        let nativeDone: Promise<unknown>
+        try {
+            nativeDone = queueTimeline.length === 0
+                ? Promise.resolve()
+                : createDonePromise(this.runtime.queue)
+        } catch (cause) {
+            releaseFailedSubmissionReadbacks(this.runtime.queue, pendingReadbacks, submittedReadbacks, cause)
+            throw cause
+        }
+        const readbackLinks = freezeSubmittedReadbackLinks(pendingReadbacks.map(pending => ({
+            commandId: pending.claim.commandId,
+            operationId: pending.claim.operationId,
+            stepIndex: pending.claim.stepIndex,
+            sourceResourceId: pending.claim.sourceResourceId,
+            allocationVersion: pending.claim.allocationVersion,
+            contentEpoch: pending.claim.contentEpoch,
+            stagingAllocationOperationId: pending.claim.stagingAllocationOperationId,
+        })))
+        const done = createSubmittedWorkDone(this.runtime, submittedId, nativeDone, readbackLinks)
+        for (const pending of pendingReadbacks) {
+            markReadbackCommandClaimSubmitted(pending.claim, done)
+        }
         const submitted = new SubmittedWork(this.runtime, {
             id: submittedId,
             commandBuffers,
             report: resolvedPlan.report,
             resourceAccesses,
             executionOutcomes: resolvedPlan.executionOutcomes,
-            done: queueTimeline.length === 0
-                ? Promise.resolve()
-                : createDonePromise(this.runtime.queue),
+            readbacks: readbackLinks,
+            done,
         })
         for (const pending of pendingReadbacks) {
             const producerEpoch = findReadbackProducerEpoch(submitted, pending)
@@ -680,10 +744,19 @@ export class SubmissionBuilder {
                 after: submitted,
                 range: pending.command.range,
                 retain: pending.command.retain,
-                stagingBuffer: pending.stagingBuffer,
+                id: pending.claim.operationId,
+                commandId: pending.claim.commandId,
+                stepIndex: pending.claim.stepIndex,
+                stagingAllocationOperationId: pending.claim.stagingAllocationOperationId,
+                staging: {
+                    buffer: readbackCommandClaimBuffer(pending.claim),
+                    markMapping: () => markReadbackCommandClaimMapping(pending.claim),
+                    release: options => releaseReadbackCommandClaim(pending.claim, options),
+                },
                 contentEpoch: pending.contentEpoch,
                 allocationVersion: pending.allocationVersion,
             })
+            markReadbackCommandClaimAdopted(pending.claim)
             registerReadbackCommandResult(pending.command, submitted, operation)
         }
 
@@ -1979,6 +2052,7 @@ export class SubmittedWork {
     resourceAccesses: readonly SubmissionResourceAccess[]
     producerEpochs: readonly SubmittedResourceEpoch[]
     readonly executionOutcomes: readonly SubmissionExecutionOutcome[]
+    readonly readbacks: readonly SubmittedReadbackLink[]
     done: Promise<unknown>
 
     constructor(runtime: ScratchRuntime, options: {
@@ -1987,6 +2061,7 @@ export class SubmittedWork {
         report?: ScratchDiagnosticReport
         resourceAccesses?: SubmissionResourceAccess[]
         executionOutcomes?: SubmissionExecutionOutcome[]
+        readbacks?: readonly SubmittedReadbackLink[]
         done?: Promise<unknown>
     } = {}) {
 
@@ -1998,11 +2073,10 @@ export class SubmittedWork {
         this.resourceAccesses = freezeResourceAccesses(options.resourceAccesses ?? [])
         this.producerEpochs = freezeProducerEpochs(createProducerEpochs(this.resourceAccesses))
         this.executionOutcomes = freezeExecutionOutcomes(options.executionOutcomes ?? [])
-        Object.defineProperty(this, 'executionOutcomes', {
-            value: this.executionOutcomes,
-            enumerable: true,
-            configurable: false,
-            writable: false,
+        this.readbacks = freezeSubmittedReadbackLinks(options.readbacks ?? [])
+        Object.defineProperties(this, {
+            executionOutcomes: immutableSubmittedProperty(this.executionOutcomes),
+            readbacks: immutableSubmittedProperty(this.readbacks),
         })
         this.done = options.done ?? Promise.resolve()
     }
@@ -2183,6 +2257,23 @@ function freezeProducerEpochs(producerEpochs: SubmittedResourceEpoch[]): readonl
         subject: freezeDiagnosticSubject(producerEpoch.subject),
         producedBy: Object.freeze({ ...producerEpoch.producedBy }) as SubmissionAccessOrigin,
     } as SubmittedResourceEpoch)))
+}
+
+function freezeSubmittedReadbackLinks(
+    readbacks: readonly SubmittedReadbackLink[]
+): readonly SubmittedReadbackLink[] {
+
+    return Object.freeze(readbacks.map(link => Object.freeze({ ...link })))
+}
+
+function immutableSubmittedProperty(value: unknown): PropertyDescriptor {
+
+    return {
+        value,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+    }
 }
 
 function freezeExecutionOutcomes(outcomes: SubmissionExecutionOutcome[]): readonly SubmissionExecutionOutcome[] {
@@ -2758,44 +2849,68 @@ function createDonePromise(queue: GPUQueue): Promise<unknown> {
     return Promise.resolve()
 }
 
+function createSubmittedWorkDone(
+    runtime: ScratchRuntime,
+    submissionId: string,
+    nativeDone: Promise<unknown>,
+    readbacks: readonly SubmittedReadbackLink[]
+): Promise<unknown> {
+
+    return Promise.resolve(nativeDone).catch((cause: unknown) => {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            severity: 'error',
+            phase: 'submission',
+            subject: { kind: 'Submission', id: submissionId },
+            related: [
+                runtime.subject,
+                ...readbacks.flatMap(link => [
+                    { kind: 'Command', id: link.commandId, commandKind: 'readback' },
+                    { kind: 'ReadbackOperation', id: link.operationId },
+                    { kind: 'Resource', id: link.sourceResourceId },
+                ]),
+            ],
+            message: 'Submitted queue work did not complete successfully.',
+            actual: {
+                submissionId,
+                readbacks,
+                nativeError: serializeNativeGpuError(cause),
+            },
+        }, { cause })
+    })
+}
+
 function releaseFailedSubmissionReadbacks(
     queue: GPUQueue,
     pendingReadbacks: readonly PendingReadback[],
-    submittedReadbacks: ReadonlySet<PendingReadback>
+    submittedReadbacks: ReadonlySet<PendingReadback>,
+    barrierFailure?: unknown
 ): void {
 
-    const submitted: PendingReadback[] = []
+    let done: Promise<unknown> | undefined
     for (const pending of pendingReadbacks) {
-        if (submittedReadbacks.has(pending)) {
-            submitted.push(pending)
-        } else {
-            destroyPendingReadbackStaging(pending)
+        if (!submittedReadbacks.has(pending)) {
+            releaseReadbackCommandClaim(pending.claim, { unmap: false, gpuUseComplete: true })
+            continue
         }
-    }
-    if (submitted.length === 0) return
-
-    let done: Promise<unknown>
-    try {
-        done = createDonePromise(queue)
-    } catch {
-        for (const pending of submitted) destroyPendingReadbackStaging(pending)
-        return
-    }
-
-    void done.then(
-        () => {
-            for (const pending of submitted) destroyPendingReadbackStaging(pending)
-        },
-        () => {
-            for (const pending of submitted) destroyPendingReadbackStaging(pending)
+        if (done === undefined) {
+            if (barrierFailure !== undefined) done = Promise.reject(barrierFailure)
+            else {
+                try {
+                    done = createDonePromise(queue)
+                } catch (cause) {
+                    done = Promise.reject(cause)
+                }
+            }
         }
-    )
+        markReadbackCommandClaimSubmitted(pending.claim, done)
+        releaseReadbackCommandClaim(pending.claim, { unmap: false, gpuUseComplete: false })
+    }
 }
 
-function destroyPendingReadbackStaging(pending: PendingReadback): void {
+function releaseUnsubmittedReadbackClaims(claims: Iterable<ReadbackCommandClaim>): void {
 
-    if (typeof pending.stagingBuffer.destroy !== 'function') return
-    try {
-        pending.stagingBuffer.destroy()
-    } catch {}
+    for (const claim of claims) {
+        releaseReadbackCommandClaim(claim, { unmap: false, gpuUseComplete: true })
+    }
 }

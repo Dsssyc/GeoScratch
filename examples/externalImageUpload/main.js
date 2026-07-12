@@ -119,7 +119,7 @@ async function main() {
         size: copySize,
         whenMissing: 'throw',
     })
-    const readback = runtime.createReadbackCommand({
+    const readback = await runtime.createReadbackCommand({
         label: 'read exact external upload bytes',
         source: { resource: readbackBuffer, contentEpoch: 1 },
         sourceOffset: 0,

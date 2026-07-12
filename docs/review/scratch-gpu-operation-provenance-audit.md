@@ -30,7 +30,7 @@ covered by this goal.
 | 13 | Pressure evidence is Scratch-owned logical footprint, never exact VRAM. | Snapshot and incidents use `currentScratchLogicalFootprintBytes`, peak, counts, bounded contributors, create/replace/dispose churn, and explicit caveats. | Logical buffer/texture footprint helpers, 3D mip-depth handling, disposal records, and pressure aggregation in `runtime-diagnostics.ts`. | Tests assert every caveat, disposal churn, exact 3D versus array mip bytes, and absence of physical-memory/root-cause fields. | Browser output reports serialized evidence bytes only, not GPU residency. | ADR-032; Vision 02 and 09; performance report. | Complete |
 | 14 | Public TypeScript and emitted JavaScript agree on async allocation, immutable runtime native ownership, and diagnostics. | Main and `geoscratch/scratch` entrypoints export Promise factories, read-only runtime device/queue/lifecycle facts, diagnostics facade/capture/evidence types, operation/incident facts, and no sync compatibility API. | TypeScript source entrypoints and generated declarations. | `tests/types/public-api.ts`, strict TypeScript 6 and TypeScript 5.9 WebGPU checks, runtime immutability tests, constructor tests, and package build prove parity. | Browser imports the built package and exercises the public API. | ADR-032; AGENTS; READMEs. | Complete |
 | 15 | The 0.x migration is a clean cut with every consumer explicitly awaiting required allocation or replacement completion. | No sync overload, alias, flag, wrapper, duplicate class, or thenable control operation exists. | Runtime/resource APIs and migrated tests/examples/docs. | Full tests, source scans, example-structure tests, production Vite build, and absence checks prove no compatibility route or top-level-await build break. | All seven required migrated examples pass in Chrome. | ADR-032; README set; examples README; all changed vision modules. | Complete |
-| 16 | Every native buffer/texture creation call is classified without presenting deferred work as covered. | The inventory below uses only the required categories and keeps raw/legacy and staging boundaries explicit. | Seventeen call sites under `packages/geoscratch/src/`. | `scratch-gpu-operation-provenance-docs.test.js` scans source, requires all 17 current path/line facts, and checks 3 covered, 2 internal deferred, and 12 raw-native rows. | Covered public paths pass Chrome; deferred/raw paths are not claimed by this browser proof. | ADR-032 implementation and follow-up boundaries; this inventory. | Complete |
+| 16 | Every native buffer/texture creation call is classified without presenting deferred work as covered. | The inventory below uses only the required categories and keeps raw/legacy and staging boundaries explicit. | Sixteen call sites under `packages/geoscratch/src/`. | `scratch-gpu-operation-provenance-docs.test.js` scans source, requires all 16 current path/line facts, and checks 3 ADR-032 covered, 1 acknowledged readback-staging, and 12 raw-native rows. | Covered public paths pass Chrome; raw paths are not claimed by this browser proof. | ADR-032, ADR-034, and this inventory. | Complete |
 | 17 | Performance decisions use measured issue, settlement, overwrite, capture, stack, promise/record, retention, and browser evidence. | Recorder/capture options remain explicit; per-submission scopes stay deferred. | Benchmark and browser verifier scripts under `tests/benchmarks/` and `tests/browser/`. | Five-round Node profiles, 20k-cycle retention run, source-level promise/record inventory, exact allocation-only total timing, and per-round structural benchmark self-checks without machine-specific timing thresholds. | Chrome 64-allocation probe gates diagnostics/error facts; the seven-example matrix gates status, console/page/request failures, and canvas pixels. | Performance report; ADR-032. | Complete |
 | 18 | Agent-facing evidence is a bounded causal slice, not a raw full log or mutable runtime view. | `exportEvidence()` freezes one snapshot plus retained bounded operations/incidents; ID/kind/resource/status/sequence queries select smaller slices. | Evidence export, immutable factories, filtering, and serialization in `runtime-diagnostics.ts` and `gpu-operation.ts`. | Tests JSON-round-trip exported evidence, prove immutability and no native handles, and query exact operation/incident facts. | `textureResize` round-trips export evidence and publishes compact/settled diagnostics facts. | ADR-032; Vision 09; READMEs. | Complete |
 | 19 | Scope ownership remains exact under concurrency, outer application scopes, and out-of-order settlement. | One synchronous issue boundary pushes OOM then validation, issues once, and pops validation then OOM before awaiting. | `issueScopedNativeAllocation()` and `popScope()` in `native-allocation.ts`. | Fake GPU stack tests cover concurrent calls on one/two runtimes, application outer scope, filter ownership, out-of-order pops, dual-error structural failure, and zero remaining depth. | Chrome probe acknowledges 72 allocation operations with no leaked warning/error. | ADR-032; Vision 09. | Complete |
@@ -53,35 +53,35 @@ device calls and are excluded. Every actual `device.createBuffer()` and
 | ID | Native call site | Native object | Classification | Fact |
 | --- | --- | --- | --- | --- |
 | N1 | `packages/geoscratch/src/scratch/buffer.ts:127` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
-| N2 | `packages/geoscratch/src/scratch/command.ts:1806` | Buffer | Internal deferred allocation | `ReadbackCommand` staging allocation during encoding; follow-up scope. |
-| N3 | `packages/geoscratch/src/scratch/readback.ts:227` | Buffer | Internal deferred allocation | Direct `ReadbackOperation` staging allocation; follow-up scope. |
-| N4 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:4674` | Buffer | Raw native escape hatch | Legacy/vendored uniform-buffer utility outside Scratch operation provenance. |
-| N5 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5073` | Buffer | Raw native escape hatch | Legacy/vendored generic vertex-buffer utility. |
-| N6 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5098` | Buffer | Raw native escape hatch | Legacy/vendored index-buffer utility. |
-| N7 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4537` | Buffer | Raw native escape hatch | Legacy binding utility generic vertex-buffer path. |
-| N8 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4562` | Buffer | Raw native escape hatch | Legacy binding utility index-buffer path. |
-| N9 | `packages/geoscratch/src/gpu/director/director.js:195` | Buffer | Raw native escape hatch | Legacy director persistent buffer creation. |
-| N10 | `packages/geoscratch/src/gpu/director/director.js:371` | Buffer | Raw native escape hatch | Legacy director temporary texture-copy staging buffer. |
-| N11 | `packages/geoscratch/src/scratch/texture.ts:225` | Texture | Covered by this goal | Public persistent texture replacement transaction. |
-| N12 | `packages/geoscratch/src/scratch/texture.ts:315` | Texture | Covered by this goal | Public persistent initial texture transaction. |
-| N13 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5352` | Texture | Raw native escape hatch | Legacy/vendored texture-from-source utility. |
-| N14 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4767` | Texture | Raw native escape hatch | Legacy binding texture-from-source utility. |
-| N15 | `packages/geoscratch/src/gpu/director/director.js:341` | Texture | Raw native escape hatch | Legacy director intermediate image texture. |
-| N16 | `packages/geoscratch/src/gpu/director/director.js:382` | Texture | Raw native escape hatch | Legacy director parsed image texture. |
-| N17 | `packages/geoscratch/src/gpu/director/director.js:412` | Texture | Raw native escape hatch | Legacy director size-based texture creation. |
+| N2 | `packages/geoscratch/src/scratch/readback-staging.ts:115` | Buffer | Acknowledged readback staging | Shared direct and ordered staging allocation transaction covered by ADR-034. |
+| N3 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:4674` | Buffer | Raw native escape hatch | Legacy/vendored uniform-buffer utility outside Scratch operation provenance. |
+| N4 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5073` | Buffer | Raw native escape hatch | Legacy/vendored generic vertex-buffer utility. |
+| N5 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5098` | Buffer | Raw native escape hatch | Legacy/vendored index-buffer utility. |
+| N6 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4537` | Buffer | Raw native escape hatch | Legacy binding utility generic vertex-buffer path. |
+| N7 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4562` | Buffer | Raw native escape hatch | Legacy binding utility index-buffer path. |
+| N8 | `packages/geoscratch/src/gpu/director/director.js:195` | Buffer | Raw native escape hatch | Legacy director persistent buffer creation. |
+| N9 | `packages/geoscratch/src/gpu/director/director.js:371` | Buffer | Raw native escape hatch | Legacy director temporary texture-copy staging buffer. |
+| N10 | `packages/geoscratch/src/scratch/texture.ts:225` | Texture | Covered by this goal | Public persistent texture replacement transaction. |
+| N11 | `packages/geoscratch/src/scratch/texture.ts:315` | Texture | Covered by this goal | Public persistent initial texture transaction. |
+| N12 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5352` | Texture | Raw native escape hatch | Legacy/vendored texture-from-source utility. |
+| N13 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4767` | Texture | Raw native escape hatch | Legacy binding texture-from-source utility. |
+| N14 | `packages/geoscratch/src/gpu/director/director.js:341` | Texture | Raw native escape hatch | Legacy director intermediate image texture. |
+| N15 | `packages/geoscratch/src/gpu/director/director.js:382` | Texture | Raw native escape hatch | Legacy director parsed image texture. |
+| N16 | `packages/geoscratch/src/gpu/director/director.js:412` | Texture | Raw native escape hatch | Legacy director size-based texture creation. |
 
 Inventory totals:
 
 - Covered by this goal: 3
 - Deterministically prevented before native call: 0
-- Internal deferred allocation: 2
+- Acknowledged readback staging: 1
+- Internal deferred allocation: 0
 - Raw native escape hatch: 12
 - Unresolved defect: 0
 
 The 12 raw rows are factual legacy/native boundaries, not a claim that their
-errors are attributed by Scratch. The two staging rows remain explicit follow-up
-work. Neither group weakens or bypasses the one canonical public persistent
-Scratch allocation path implemented by this goal.
+errors are attributed by Scratch. ADR-034 replaces both former deferred
+readback call sites with one acknowledged transaction. Neither category weakens
+or bypasses the canonical public persistent Scratch allocation paths.
 
 ## Audit Boundary
 

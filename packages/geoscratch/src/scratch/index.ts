@@ -190,6 +190,7 @@ export type {
     SubmissionExecutionOutcome,
     SubmissionMissingResource,
     SubmissionPassExecutionOutcome,
+    SubmittedReadbackLink,
     SubmissionResourceAccess,
     SubmissionResourceAccessKind,
     SubmissionStepKind,

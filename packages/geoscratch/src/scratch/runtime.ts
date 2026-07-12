@@ -1,7 +1,19 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BindLayout, BindSet } from './binding.js'
 import { BufferResource, createBufferResource } from './buffer.js'
-import { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+import {
+    BeginOcclusionQueryCommand,
+    CopyCommand,
+    createReadbackCommand as createScratchReadbackCommand,
+    DispatchCommand,
+    DrawCommand,
+    EndOcclusionQueryCommand,
+    ExternalImageUploadCommand,
+    ReadbackCommand,
+    ResolveQuerySetCommand,
+    TextureUploadCommand,
+    UploadCommand,
+} from './command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import {
@@ -14,6 +26,7 @@ import { QuerySetResource } from './query-set.js'
 import { createReadbackOperation, ReadbackOperation } from './readback.js'
 import {
     normalizeScratchReadbackPolicy,
+    runtimeReadbackCommandSnapshot,
     runtimeReadbackOperationSnapshot,
 } from './readback-ownership.js'
 import {
@@ -145,6 +158,12 @@ export class ScratchRuntime {
                 this.#isDeviceLost = true
                 this.#deviceLostInfo = retainDeviceLostInfo(info)
                 this.#diagnosticsController.recordDeviceLoss(info)
+                for (const readback of runtimeReadbackOperationSnapshot(this)) {
+                    readback.cancel('device-lost')
+                }
+                for (const command of runtimeReadbackCommandSnapshot(this)) {
+                    command.dispose()
+                }
             })
         }
     }
@@ -435,13 +454,13 @@ export class ScratchRuntime {
         return this.createCopyCommand(descriptor)
     }
 
-    createReadbackCommand(descriptor: ReadbackCommandDescriptor) {
+    async createReadbackCommand(descriptor: ReadbackCommandDescriptor): Promise<ReadbackCommand> {
 
         this.assertActive()
-        return new ReadbackCommand(this, descriptor)
+        return createScratchReadbackCommand(this, descriptor)
     }
 
-    readbackCommand(descriptor: ReadbackCommandDescriptor) {
+    readbackCommand(descriptor: ReadbackCommandDescriptor): Promise<ReadbackCommand> {
 
         return this.createReadbackCommand(descriptor)
     }
@@ -526,6 +545,7 @@ export class ScratchRuntime {
     dispose() {
 
         if (this.isDisposed) return
+        this.#isDisposed = true
 
         for (const surface of [ ...this._surfaces ]) {
             surface.dispose()
@@ -539,11 +559,14 @@ export class ScratchRuntime {
             readback.dispose()
         }
 
+        for (const command of runtimeReadbackCommandSnapshot(this)) {
+            command.dispose()
+        }
+
         for (const resource of [ ...this._resources ]) {
             resource.dispose()
         }
 
-        this.#isDisposed = true
         this.#diagnosticsController.dispose()
 
         if (this.device && typeof this.device.destroy === 'function') {

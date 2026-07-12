@@ -2,6 +2,7 @@ import { UUID } from '../core/utils/uuid.js'
 import { ScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
 import { createLayoutReadbackView } from './layout-codec.js'
 import {
+    adoptRuntimeReadbackOperation,
     registerRuntimeReadbackOperation,
     unregisterRuntimeReadbackOperation,
     updateRuntimeReadbackOperation,
@@ -53,12 +54,22 @@ export type ReadbackOperationDescriptor = {
 }
 
 export type ScheduledReadbackOperationDescriptor = ReadbackOperationDescriptor & {
+    id: string
     after: SubmittedWork
-    stagingBuffer: GPUBuffer
+    commandId: string
+    stepIndex: number
+    stagingAllocationOperationId: string
+    staging: ScheduledReadbackStagingOwner
     contentEpoch: number
     allocationVersion: number
     producerEpoch?: SubmittedResourceEpoch
 }
+
+export type ScheduledReadbackStagingOwner = Readonly<{
+    buffer: GPUBuffer
+    markMapping(): void
+    release(options: Readonly<{ unmap: boolean, gpuUseComplete: boolean }>): void
+}>
 
 export type TypedArrayConstructor<T extends ArrayBufferView = ArrayBufferView> = {
     readonly BYTES_PER_ELEMENT: number
@@ -72,7 +83,11 @@ type ReadbackOperationConstruction = Readonly<{
     contentEpoch?: number
     allocationVersion?: number
     producerEpoch?: SubmittedResourceEpoch
-    stagingBuffer?: GPUBuffer
+    commandId?: string
+    stepIndex?: number
+    stagingAllocationOperationId?: string
+    staging?: ScheduledReadbackStagingOwner
+    factReserved?: boolean
 }>
 
 type ReadbackOperationPrivateState = {
@@ -94,10 +109,14 @@ type ReadbackOperationPrivateState = {
     isDisposed: boolean
     isCancelled: boolean
     cancelReason: string | undefined
+    commandId: string | undefined
+    stepIndex: number | undefined
+    stagingAllocationOperationId: string | undefined
+    mappingCompleted: boolean
 }
 
 const directReadbackStaging = new WeakMap<ReadbackOperation, ReadbackStagingSlot>()
-const scheduledReadbackStaging = new WeakMap<ReadbackOperation, GPUBuffer>()
+const scheduledReadbackStaging = new WeakMap<ReadbackOperation, ScheduledReadbackStagingOwner>()
 const readbackOperationPaths = new WeakMap<ReadbackOperation, 'direct' | 'ordered'>()
 const registeredReadbackOperations = new WeakSet<ReadbackOperation>()
 const readbackOperationStates = new WeakMap<ReadbackOperation, ReadbackOperationPrivateState>()
@@ -143,6 +162,10 @@ export class ReadbackOperation {
             isDisposed: false,
             isCancelled: false,
             cancelReason: undefined,
+            commandId: construction.commandId,
+            stepIndex: construction.stepIndex,
+            stagingAllocationOperationId: construction.stagingAllocationOperationId,
+            mappingCompleted: false,
         }
         readbackOperationStates.set(this, state)
         state.source = normalizeSource(this, descriptor.source)
@@ -156,11 +179,12 @@ export class ReadbackOperation {
         state.retain = normalizeRetentionPolicy(this, descriptor.retain)
         if (construction.path === 'direct') assertReadbackSourceCurrent(this)
         readbackOperationPaths.set(this, construction.path)
-        if (construction.stagingBuffer !== undefined) {
-            scheduledReadbackStaging.set(this, construction.stagingBuffer)
+        if (construction.staging !== undefined) {
+            scheduledReadbackStaging.set(this, construction.staging)
             state.state = 'submitted'
         }
-        registerRuntimeReadbackOperation(this.runtime, this, readbackFact(this))
+        if (construction.factReserved) adoptRuntimeReadbackOperation(this.runtime, this)
+        else registerRuntimeReadbackOperation(this.runtime, this, readbackFact(this))
         registeredReadbackOperations.add(this)
         Object.preventExtensions(this)
     }
@@ -394,9 +418,11 @@ export class ReadbackOperation {
             }
 
             this._assertReadableLifecycle()
+            scheduledReadbackStaging.get(this)?.markMapping()
             this._setState('mapping', { isMapping: true })
             const stagingBuffer = this._stagingBuffer()
             await stagingBuffer.mapAsync(MAP_MODE_READ, 0, this.range.byteLength)
+            readbackStateFor(this).mappingCompleted = true
             this._assertReadableLifecycle()
             const mapped = stagingBuffer.getMappedRange(0, this.range.byteLength)
             const bytes = new Uint8Array(mapped.slice(0))
@@ -538,20 +564,14 @@ export class ReadbackOperation {
             return
         }
 
-        const stagingBuffer = scheduledReadbackStaging.get(this)
-        if (stagingBuffer === undefined) return
+        const owner = scheduledReadbackStaging.get(this)
+        if (owner === undefined) return
 
         scheduledReadbackStaging.delete(this)
-        if (unmap && typeof stagingBuffer.unmap === 'function') {
-            try {
-                stagingBuffer.unmap()
-            } catch {}
-        }
-        if (typeof stagingBuffer.destroy === 'function') {
-            try {
-                stagingBuffer.destroy()
-            } catch {}
-        }
+        owner.release({
+            unmap,
+            gpuUseComplete: readbackStateFor(this).mappingCompleted,
+        })
         this._updateFact({ stagingBytes: 0, isMapping: false })
     }
 
@@ -559,8 +579,8 @@ export class ReadbackOperation {
 
         const slot = directReadbackStaging.get(this)
         if (slot !== undefined) return readbackStagingBuffer(slot)
-        const stagingBuffer = scheduledReadbackStaging.get(this)
-        if (stagingBuffer !== undefined) return stagingBuffer
+        const owner = scheduledReadbackStaging.get(this)
+        if (owner !== undefined) return owner.buffer
         throw new TypeError(`Readback operation ${this.id} does not own staging.`)
     }
 
@@ -601,13 +621,28 @@ export function createScheduledReadbackOperation(
     descriptor: ScheduledReadbackOperationDescriptor
 ): ReadbackOperation {
 
-    const { stagingBuffer, contentEpoch, allocationVersion, producerEpoch, ...operationDescriptor } = descriptor
+    const {
+        id,
+        commandId,
+        stepIndex,
+        stagingAllocationOperationId,
+        staging,
+        contentEpoch,
+        allocationVersion,
+        producerEpoch,
+        ...operationDescriptor
+    } = descriptor
     const operation = constructReadbackOperation(runtime, operationDescriptor, {
         path: 'ordered',
+        id,
+        commandId,
+        stepIndex,
+        stagingAllocationOperationId,
+        staging,
+        factReserved: true,
         contentEpoch,
         allocationVersion,
         ...(producerEpoch !== undefined ? { producerEpoch } : {}),
-        stagingBuffer,
     })
     scheduledReadbackOperations.add(operation)
 
@@ -639,6 +674,7 @@ function constructReadbackOperation(
 
 function readbackTarget(operation: ReadbackOperation) {
 
+    const state = readbackStateFor(operation)
     return {
         kind: 'readback' as const,
         readbackId: operation.id,
@@ -647,13 +683,16 @@ function readbackTarget(operation: ReadbackOperation) {
         allocationVersion: operation.allocationVersion,
         contentEpoch: operation.contentEpoch,
         byteLength: operation.range.byteLength,
+        ...(state.commandId !== undefined ? { commandId: state.commandId } : {}),
         ...(operation.after !== undefined ? { submissionId: operation.after.id } : {}),
+        ...(state.stepIndex !== undefined ? { stepIndex: state.stepIndex } : {}),
     }
 }
 
 function readbackFact(operation: ReadbackOperation): ScratchRuntimeReadbackOperationFact {
 
     const path = readbackOperationPaths.get(operation) ?? 'direct'
+    const state = readbackStateFor(operation)
     return {
         id: operation.id,
         ...(operation.label !== undefined ? { label: operation.label } : {}),
@@ -667,7 +706,12 @@ function readbackFact(operation: ReadbackOperation): ScratchRuntimeReadbackOpera
         stagingBytes: scheduledReadbackStaging.has(operation) ? operation.range.byteLength : 0,
         retainedHostBytes: operation.retainedByteLength ?? 0,
         isMapping: operation.state === 'mapping',
+        ...(state.commandId !== undefined ? { commandId: state.commandId } : {}),
         ...(operation.after !== undefined ? { submissionId: operation.after.id } : {}),
+        ...(state.stepIndex !== undefined ? { stepIndex: state.stepIndex } : {}),
+        ...(state.stagingAllocationOperationId !== undefined
+            ? { lastStagingOperationId: state.stagingAllocationOperationId }
+            : {}),
     }
 }
 

@@ -1,8 +1,12 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
+import type { ReadbackCommand } from './command.js'
 import type { ReadbackOperation } from './readback.js'
 import type { ScratchRuntime } from './runtime.js'
-import type { ScratchRuntimeReadbackOperationFact } from './runtime-diagnostics.js'
+import type {
+    ScratchRuntimeReadbackCommandFact,
+    ScratchRuntimeReadbackOperationFact,
+} from './runtime-diagnostics.js'
 
 export type ScratchReadbackOptions = Readonly<{
     maxPendingOperations?: number
@@ -16,7 +20,50 @@ export type ScratchReadbackPolicy = Readonly<{
 
 const DEFAULT_MAX_PENDING_OPERATIONS = 16
 const DEFAULT_MAX_STAGING_BYTES = 64 * 1024 * 1024
+const runtimeReadbackCommands = new WeakMap<ScratchRuntime, Set<ReadbackCommand>>()
 const runtimeReadbackOperations = new WeakMap<ScratchRuntime, Set<ReadbackOperation>>()
+
+export function registerRuntimeReadbackCommand(
+    runtime: ScratchRuntime,
+    command: ReadbackCommand,
+    fact: ScratchRuntimeReadbackCommandFact
+): void {
+
+    const commands = runtimeReadbackCommandSet(runtime)
+    if (commands.has(command)) {
+        throw new TypeError(`Readback command ${command.id} is already owned by its runtime.`)
+    }
+    diagnosticsControllerFor(runtime).registerReadbackCommand(fact)
+    commands.add(command)
+}
+
+export function updateRuntimeReadbackCommand(
+    runtime: ScratchRuntime,
+    commandId: string,
+    update: Partial<Omit<ScratchRuntimeReadbackCommandFact, 'id'>>
+): void {
+
+    diagnosticsControllerFor(runtime).updateReadbackCommand(commandId, update)
+}
+
+export function unregisterRuntimeReadbackCommand(
+    runtime: ScratchRuntime,
+    command: ReadbackCommand
+): void {
+
+    runtimeReadbackCommands.get(runtime)?.delete(command)
+    diagnosticsControllerFor(runtime).unregisterReadbackCommand(command.id)
+}
+
+export function runtimeReadbackCommandSnapshot(runtime: ScratchRuntime): readonly ReadbackCommand[] {
+
+    return Object.freeze([ ...(runtimeReadbackCommands.get(runtime) ?? []) ])
+}
+
+export function runtimeReadbackCommandCount(runtime: ScratchRuntime): number {
+
+    return runtimeReadbackCommands.get(runtime)?.size ?? 0
+}
 
 export function registerRuntimeReadbackOperation(
     runtime: ScratchRuntime,
@@ -29,6 +76,43 @@ export function registerRuntimeReadbackOperation(
         throw new TypeError(`Readback operation ${operation.id} is already owned by its runtime.`)
     }
     diagnosticsControllerFor(runtime).registerReadbackOperation(fact)
+    operations.add(operation)
+}
+
+export function reserveRuntimeReadbackOperationFact(
+    runtime: ScratchRuntime,
+    fact: ScratchRuntimeReadbackOperationFact
+): void {
+
+    diagnosticsControllerFor(runtime).registerReadbackOperation(fact)
+}
+
+export function updateReservedRuntimeReadbackOperationFact(
+    runtime: ScratchRuntime,
+    readbackId: string,
+    update: Partial<Omit<ScratchRuntimeReadbackOperationFact, 'id'>>
+): void {
+
+    diagnosticsControllerFor(runtime).updateReadbackOperation(readbackId, update)
+}
+
+export function releaseReservedRuntimeReadbackOperationFact(
+    runtime: ScratchRuntime,
+    readbackId: string
+): void {
+
+    diagnosticsControllerFor(runtime).unregisterReadbackOperation(readbackId)
+}
+
+export function adoptRuntimeReadbackOperation(
+    runtime: ScratchRuntime,
+    operation: ReadbackOperation
+): void {
+
+    const operations = runtimeReadbackOperationSet(runtime)
+    if (operations.has(operation)) {
+        throw new TypeError(`Readback operation ${operation.id} is already owned by its runtime.`)
+    }
     operations.add(operation)
 }
 
@@ -128,4 +212,14 @@ function runtimeReadbackOperationSet(runtime: ScratchRuntime): Set<ReadbackOpera
         runtimeReadbackOperations.set(runtime, operations)
     }
     return operations
+}
+
+function runtimeReadbackCommandSet(runtime: ScratchRuntime): Set<ReadbackCommand> {
+
+    let commands = runtimeReadbackCommands.get(runtime)
+    if (commands === undefined) {
+        commands = new Set()
+        runtimeReadbackCommands.set(runtime, commands)
+    }
+    return commands
 }
