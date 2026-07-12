@@ -1864,7 +1864,6 @@ export class ReadbackCommand {
 
     result(options: ReadbackCommandResultOptions): ReadbackOperation {
 
-        this._assertNotDisposed()
         this.runtime.assertActive()
         const after = options?.after
         if (!after || after.runtime !== this.runtime || typeof after.done?.then !== 'function') {

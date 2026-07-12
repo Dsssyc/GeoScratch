@@ -211,10 +211,132 @@ describe('scratch acknowledged readback staging', () => {
         const error = await rejectedDiagnostic(readback.toBytes())
 
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED')
+        expect(error.diagnostic.related.map(subject => subject.id)).to.include(source.id)
+        expect(error.incident.related.map(subject => subject.id)).to.include(source.id)
+        expect(error.incident).to.deep.include({
+            kind: 'readback-failure',
+            failureStage: 'budget',
+        })
         expect(fake.calls.buffers).to.have.length(bufferCount)
         expect(fake.calls.commandEncoders).to.have.length(encoderCount)
         expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
         expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
+    })
+
+    it('fails direct pending-operation budget before staging allocation', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({
+            gpu: fake.gpu,
+            readback: { maxPendingOperations: 1, maxStagingBytes: 64 },
+        })
+        const source = await createSource(runtime)
+        const first = runtime.createReadback({ source })
+        const bufferCount = fake.calls.buffers.length
+
+        const error = await rejectedDiagnostic(Promise.resolve().then(
+            () => runtime.createReadback({ source })
+        ))
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED')
+        expect(error.diagnostic.subject.kind).to.equal('ReadbackOperation')
+        expect(error.diagnostic.related.map(subject => subject.id)).to.include(source.id)
+        expect(error.incident).to.deep.include({
+            kind: 'readback-failure',
+            attribution: 'exact-operation',
+            failureStage: 'budget',
+        })
+        expect(error.incident.target).to.deep.include({
+            kind: 'readback',
+            path: 'direct',
+            sourceResourceId: source.id,
+        })
+        expect(fake.calls.buffers).to.have.length(bufferCount)
+        expect(runtime.diagnostics.snapshot().readbacks.map(fact => fact.id)).to.deep.equal([ first.id ])
+
+        first.dispose()
+        expect(runtime.diagnostics.snapshot().readbacks).to.deep.equal([])
+    })
+
+    it('fails ordered pending-operation budget before encoder or queue effects', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({
+            gpu: fake.gpu,
+            readback: { maxPendingOperations: 1, maxStagingBytes: 64 },
+        })
+        const source = await createSource(runtime)
+        advanceResourceContentEpochForTest(source)
+        const command = await runtime.createReadbackCommand({
+            source: { resource: source, contentEpoch: 1 },
+            whenMissing: 'throw',
+        })
+        const blocker = runtime.createReadback({ source })
+        const bufferCount = fake.calls.buffers.length
+        const encoderCount = fake.calls.commandEncoders.length
+        const submissionCount = fake.calls.queueSubmissions.length
+
+        const error = await rejectedDiagnostic(Promise.resolve().then(
+            () => runtime.submission().readback(command).submit()
+        ))
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED')
+        expect(error.incident).to.deep.include({
+            kind: 'readback-failure',
+            attribution: 'exact-operation',
+            failureStage: 'budget',
+        })
+        expect(error.incident.target).to.deep.include({
+            kind: 'readback',
+            path: 'ordered',
+            commandId: command.id,
+            sourceResourceId: source.id,
+            stepIndex: 0,
+        })
+        expect(command.state).to.equal('idle')
+        expect(fake.calls.buffers).to.have.length(bufferCount)
+        expect(fake.calls.commandEncoders).to.have.length(encoderCount)
+        expect(fake.calls.queueSubmissions).to.have.length(submissionCount)
+
+        blocker.dispose()
+        command.dispose()
+        expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
+    })
+
+    it('rejects ordered staging budget with source provenance before factory visibility', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({
+            gpu: fake.gpu,
+            readback: { maxPendingOperations: 1, maxStagingBytes: 8 },
+        })
+        const source = await createSource(runtime)
+        const bufferCount = fake.calls.buffers.length
+        const encoderCount = fake.calls.commandEncoders.length
+
+        const error = await rejectedDiagnostic(runtime.createReadbackCommand({
+            label: 'ordered budget failure',
+            source: { resource: source, contentEpoch: source.contentEpoch },
+            whenMissing: 'throw',
+        }))
+
+        expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED')
+        expect(error.diagnostic.related.map(subject => subject.id)).to.include(source.id)
+        expect(error.incident).to.deep.include({
+            kind: 'readback-failure',
+            attribution: 'exact-operation',
+            failureStage: 'budget',
+        })
+        expect(error.incident.target).to.deep.include({
+            kind: 'command',
+            commandKind: 'readback',
+        })
+        expect(error.incident.related.map(subject => subject.id)).to.include(source.id)
+        expect(fake.calls.buffers).to.have.length(bufferCount)
+        expect(fake.calls.commandEncoders).to.have.length(encoderCount)
+        expect(runtime.diagnostics.snapshot().readbackCommands).to.deep.equal([])
+        expect(runtime.diagnostics.snapshot().pendingOperations).to.deep.equal([])
+        expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
     })
 
     it('rechecks source epoch after staging acknowledgement and before copy issue', async () => {

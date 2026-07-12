@@ -134,7 +134,7 @@ export async function allocateReadbackStaging(
     try {
         reservation = controller.reserveReadbackStaging(operation.id, byteLength)
     } catch (cause) {
-        return throwReadbackStagingBudgetFailure(runtime, operation, cause)
+        return throwReadbackStagingBudgetFailure(runtime, operation, source, cause)
     }
 
     let outcome = await issueScopedNativeAllocation(
@@ -153,7 +153,7 @@ export async function allocateReadbackStaging(
     }
     if (!outcome.ok) {
         reservation.release()
-        return throwReadbackStagingAllocationFailure(runtime, operation, outcome)
+        return throwReadbackStagingAllocationFailure(runtime, operation, source, outcome)
     }
 
     const record = controller.completeOperation(operation, { status: 'succeeded' })
@@ -327,6 +327,7 @@ function stagingTargetId(target: ReadbackStagingTarget): string {
 function throwReadbackStagingBudgetFailure(
     runtime: ScratchRuntime,
     operation: ScratchPendingGpuOperation,
+    source: BufferResource,
     cause: unknown
 ): never {
 
@@ -341,6 +342,12 @@ function throwReadbackStagingBudgetFailure(
         operationId: operation.id,
         triggerOperation: record,
         failureStage: 'budget',
+        related: [
+            runtime.subject,
+            stagingTargetSubject(operation.target),
+            source.subject,
+            gpuOperationSubject(operation),
+        ],
     })
     const actual = cause instanceof ScratchDiagnosticError
         ? cause.diagnostic.actual
@@ -350,7 +357,7 @@ function throwReadbackStagingBudgetFailure(
         severity: 'error',
         phase: 'readback',
         subject: gpuOperationSubject(operation),
-        related: [ runtime.subject, stagingTargetSubject(operation.target) ],
+        related: [ runtime.subject, stagingTargetSubject(operation.target), source.subject ],
         message: 'ScratchRuntime readback staging budget is exhausted.',
         ...(actual !== undefined ? { actual } : {}),
     }, { cause, incident })
@@ -359,6 +366,7 @@ function throwReadbackStagingBudgetFailure(
 function throwReadbackStagingAllocationFailure(
     runtime: ScratchRuntime,
     operation: ScratchPendingGpuOperation,
+    source: BufferResource,
     outcome: Extract<ScopedNativeAllocationOutcome<GPUBuffer>, { ok: false }>
 ): never {
 
@@ -382,6 +390,12 @@ function throwReadbackStagingAllocationFailure(
         failureStage: isLifecycleFailure(outcome.kind)
             ? 'lifecycle-recheck'
             : 'staging-allocation',
+        related: [
+            runtime.subject,
+            stagingTargetSubject(operation.target),
+            source.subject,
+            gpuOperationSubject(operation),
+        ],
         ...(outcome.cause !== undefined
             ? { nativeError: serializeNativeGpuError(outcome.cause) }
             : outcome.deviceLostInfo !== undefined
@@ -396,7 +410,12 @@ function throwReadbackStagingAllocationFailure(
             ? 'runtime'
             : 'readback',
         subject: gpuOperationSubject(operation),
-        related: [ runtime.subject, stagingTargetSubject(operation.target), incident.subject ],
+        related: [
+            runtime.subject,
+            stagingTargetSubject(operation.target),
+            source.subject,
+            incident.subject,
+        ],
         message: stagingFailureMessage(outcome.kind),
         actual: {
             operationId: operation.id,

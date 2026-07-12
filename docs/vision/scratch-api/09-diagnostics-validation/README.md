@@ -108,7 +108,7 @@ Examples:
 
 - bind-layout mismatch: subject is the `BindLayoutEntry`; related includes the `Program` and `ShaderBinding`.
 - read-before-write: subject is the reading `Command`; related includes the resource and last known writer.
-- readback budget exceeded: subject is the `ReadbackOperation`; related includes the runtime budget policy and source resource.
+- readback pending-operation budget exceeded: subject is the affected `ReadbackOperation`; staging-allocation budget failures retain the exact GPU operation and command/readback target. Both identify the runtime policy and source provenance structurally.
 
 ## Diagnostic Reports
 
@@ -537,6 +537,12 @@ loss, and lifecycle outcomes are retained in fixed transaction order. A native
 message is bounded evidence, never the classifier. Cleanup outcomes distinguish
 `unmap` from staging `destroy`; `destroyRequested` does not claim that a native
 destroy call which threw actually completed.
+
+A rejected `SubmittedWork.done` records one command-targeted readback incident
+per immutable readback link at `queue-completion`. Its attribution is
+`enclosing-operation-family`, because one queue completion Promise cannot prove
+which linked command caused the rejection. It does not rewrite a linked
+operation's independent mapping result.
 
 The always-current fact graph reports readback commands, active/retained
 operations, current/peak staging bytes, current/peak retained host bytes, and

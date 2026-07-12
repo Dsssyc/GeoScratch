@@ -24,6 +24,7 @@ import { serializeNativeGpuError } from './gpu-operation.js'
 import { validateRenderPassAttachments } from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
+import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
@@ -2857,6 +2858,12 @@ function createSubmittedWorkDone(
 ): Promise<unknown> {
 
     return Promise.resolve(nativeDone).catch((cause: unknown) => {
+        const incident = recordReadbackQueueCompletionIncidents(
+            runtime,
+            submissionId,
+            readbacks,
+            cause
+        )[0]
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
             severity: 'error',
@@ -2876,8 +2883,47 @@ function createSubmittedWorkDone(
                 readbacks,
                 nativeError: serializeNativeGpuError(cause),
             },
-        }, { cause })
+        }, {
+            cause,
+            ...(incident !== undefined ? { incident } : {}),
+        })
     })
+}
+
+function recordReadbackQueueCompletionIncidents(
+    runtime: ScratchRuntime,
+    submissionId: string,
+    readbacks: readonly SubmittedReadbackLink[],
+    cause: unknown
+) {
+
+    const controller = diagnosticsControllerFor(runtime)
+    const nativeError = serializeNativeGpuError(cause)
+    return readbacks.map(link => controller.recordIncident({
+        kind: 'readback-failure',
+        diagnosticCode: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+        nativeErrorCategory: 'native-exception',
+        attribution: 'enclosing-operation-family',
+        target: {
+            kind: 'command',
+            commandId: link.commandId,
+            commandKind: 'readback',
+        },
+        related: [
+            runtime.subject,
+            { kind: 'Submission', id: submissionId },
+            { kind: 'ReadbackOperation', id: link.operationId },
+            { kind: 'Resource', id: link.sourceResourceId },
+        ],
+        nativeError,
+        failureStage: 'queue-completion',
+        outcomes: [ Object.freeze({
+            stage: 'queue-completion' as const,
+            diagnosticCode: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            nativeErrorCategory: 'native-exception' as const,
+            nativeError,
+        }) ],
+    }))
 }
 
 function releaseFailedSubmissionReadbacks(

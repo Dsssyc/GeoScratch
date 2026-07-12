@@ -34,6 +34,7 @@ describe('scratch readback staging and mapping documentation', () => {
             'readback-staging-release',
             'SCRATCH_READBACK_MAPPING_VALIDATION_FAILED',
             'SCRATCH_READBACK_CLEANUP_FAILED',
+            'enclosing-operation-family',
         ]) {
             expect(joined).to.include(marker)
         }
@@ -47,6 +48,9 @@ describe('scratch readback staging and mapping documentation', () => {
             expect(transfers).to.include('const readParticles = await runtime.readbackCommand({')
             expect(transfers).to.include("retain: 'consume-on-read'")
             expect(transfers).not.to.include('staging-budget policy remain future work')
+            expect(transfers).to.include('maxPendingOperations')
+            expect(transfers).to.include('maxStagingBytes')
+            expect(transfers).to.match(/historical\s+result lookup/)
             expect(diagnostics).to.include('version 3')
             expect(diagnostics).to.include("| { kind: 'command'; commandId: string; commandKind: 'readback' }")
             expect(diagnostics).to.include("| 'lifecycle-recheck'")
@@ -116,5 +120,27 @@ describe('scratch readback staging and mapping documentation', () => {
             expect(browser).to.include(`name: '${example}'`)
         }
         expect(browser).to.include("headless = process.env.SCRATCH_READBACK_BROWSER_HEADLESS === '1'")
+    })
+
+    it('keeps the fixed-baseline final parity audit reproducible without requiring Git history in npm test', () => {
+
+        const audit = read('docs', 'review', 'scratch-readback-final-parity-audit.md')
+        const runner = read('tests', 'audits', 'scratch-readback-final-parity.mjs')
+
+        for (const marker of [
+            '20bb393df570ff1914a6789e9bd422d59ddfecc8',
+            'f3e73062bb352009a2118bf9960de062b1296ebe',
+            'preserved JavaScript behavior checks: 12/12',
+            'preserved Goal-start TypeScript behavior checks: 16/16',
+            'explicit ADR-034 replacements: 10/10',
+            'could incidentally retry',
+            'intentionally not part of default `npm test`',
+        ]) {
+            expect(audit).to.include(marker)
+        }
+        expect(runner).to.include("const jsBaseline = '20bb393df570ff1914a6789e9bd422d59ddfecc8'")
+        expect(runner).to.include("const goalBaseline = 'f3e73062bb352009a2118bf9960de062b1296ebe'")
+        expect(runner).to.include('assertAncestor(goalBaseline)')
+        expect(runner).to.include("'ReadbackStagingSlot', 'ReadbackMappingTransaction', 'ReadbackCommandClaim'")
     })
 })

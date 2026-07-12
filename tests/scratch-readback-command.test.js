@@ -641,6 +641,37 @@ describe('scratch ReadbackCommand', () => {
         )
     })
 
+    it('keeps an exact submitted result retrievable after command disposal', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
+        const upload = runtime.createUploadCommand({
+            target: source,
+            data: new Uint32Array([ 1, 2, 3, 4 ]),
+        })
+        const command = await runtime.createReadbackCommand({
+            source: { resource: source, contentEpoch: 1 },
+            whenMissing: 'throw',
+        })
+        const stagingBuffer = fake.calls.buffers.at(-1)
+        const submitted = runtime.submission().upload(upload).readback(command).submit()
+
+        command.dispose()
+        expect(command.state).to.equal('releasing')
+        const operation = command.result({ after: submitted })
+        expect(Array.from(await operation.toArray(Uint32Array))).to.deep.equal([ 1, 2, 3, 4 ])
+
+        expect(command.state).to.equal('disposed')
+        expect(stagingBuffer.destroyed).to.equal(true)
+        expect(runtime.diagnostics.snapshot().readbackCommands).to.deep.equal([])
+        expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
+        await expectScratchDiagnostic(() => runtime.submission().readback(command).submit(), {
+            code: 'SCRATCH_COMMAND_DISPOSED',
+            phase: 'command',
+        })
+    })
+
     it('wraps queue completion rejection without rewriting the linked readback', async () => {
 
         const fake = createFakeGpu()
@@ -678,9 +709,87 @@ describe('scratch ReadbackCommand', () => {
             operation.id,
             source.id,
         ])
+        const incident = runtime.diagnostics.incidents({ commandId: command.id })
+            .find(candidate => candidate.failureStage === 'queue-completion')
+        expect(caught.incident).to.equal(incident)
+        expect(incident).to.deep.include({
+            kind: 'readback-failure',
+            diagnosticCode: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            nativeErrorCategory: 'native-exception',
+            attribution: 'enclosing-operation-family',
+            failureStage: 'queue-completion',
+        })
+        expect(incident.target).to.deep.equal({
+            kind: 'command',
+            commandId: command.id,
+            commandKind: 'readback',
+        })
+        expect(incident.related.map(subject => subject.id)).to.include.members([
+            runtime.id,
+            submitted.id,
+            operation.id,
+            source.id,
+        ])
+        expect(incident.outcomes).to.deep.equal([ {
+            stage: 'queue-completion',
+            diagnosticCode: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            nativeErrorCategory: 'native-exception',
+            nativeError: {
+                name: 'Error',
+                message: nativeFailure.message,
+            },
+        } ])
         expect(submitted.readbacks[0].operationId).to.equal(operation.id)
         expect(submitted.executionOutcomes).to.deep.equal([])
         expect(Array.from(await operation.toArray(Uint32Array))).to.deep.equal([ 1, 2, 3, 4 ])
         expect(command.state).to.equal('idle')
+    })
+
+    it('records enclosing-family queue completion evidence for every linked readback', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
+        const upload = runtime.createUploadCommand({
+            target: source,
+            data: new Uint32Array([ 1, 2, 3, 4 ]),
+        })
+        const commands = await Promise.all([ 'first', 'second' ].map(label =>
+            runtime.createReadbackCommand({
+                label,
+                source: { resource: source, contentEpoch: 1 },
+                whenMissing: 'throw',
+            })
+        ))
+        fake.readbacks.rejectNextQueueCompletion(new Error('multi-readback queue completion failure'))
+        const submitted = runtime.submission()
+            .upload(upload)
+            .readback(commands[0])
+            .readback(commands[1])
+            .submit()
+        const operations = commands.map(command => command.result({ after: submitted }))
+
+        await expectScratchDiagnostic(() => submitted.done, {
+            code: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            phase: 'submission',
+        })
+
+        const incidents = runtime.diagnostics.incidents()
+            .filter(incident => incident.failureStage === 'queue-completion')
+        expect(incidents).to.have.length(2)
+        expect(incidents.map(incident => incident.target.commandId).sort()).to.deep.equal(
+            commands.map(command => command.id).sort()
+        )
+        for (const [ index, command ] of commands.entries()) {
+            const incident = incidents.find(candidate => candidate.target.commandId === command.id)
+            expect(incident.attribution).to.equal('enclosing-operation-family')
+            expect(incident.related.map(subject => subject.id)).to.include.members([
+                submitted.id,
+                operations[index].id,
+                source.id,
+            ])
+        }
+
+        runtime.dispose()
     })
 })

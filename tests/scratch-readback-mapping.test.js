@@ -266,6 +266,10 @@ describe('scratch readback mapping transaction', () => {
 
             if (lifecycle === 'cancel') operation.cancel('not needed')
             else operation.dispose()
+            const cancellingSnapshot = runtime.diagnostics.snapshot()
+            expect(cancellingSnapshot.pendingOperations.map(pending => pending.kind))
+                .to.include('readback-mapping')
+            expect(cancellingSnapshot.readbackMemory.activeMappings).to.equal(1)
             const error = await rejectedDiagnostic(materialization)
 
             expect(error.diagnostic.code).to.equal(
@@ -280,6 +284,23 @@ describe('scratch readback mapping transaction', () => {
             expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
         })
     }
+
+    it('keeps runtime-disposed mapping active until the native transaction settles', async () => {
+
+        const { fake, runtime, operation } = await createDirectReadback({ deferMaps: true })
+        const materialization = operation.toBytes()
+        await settleMicrotasks()
+
+        runtime.dispose()
+        expect(runtime.diagnostics.snapshot().readbackMemory.activeMappings).to.equal(1)
+
+        const error = await rejectedDiagnostic(materialization)
+        const snapshot = runtime.diagnostics.snapshot()
+        expect(error.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
+        expect(snapshot.pendingOperations).to.deep.equal([])
+        expect(snapshot.readbackMemory.activeMappings).to.equal(0)
+        expect(snapshot.readbackMemory.peakActiveMappings).to.equal(1)
+    })
 
     it('shares one materialization for concurrent retained readers and returns owned clones', async () => {
 

@@ -143,8 +143,8 @@ describe('scratch readback runtime facts', () => {
             submissionId: 'submission-1',
             stepIndex: 3,
         } ])
-        expect(snapshot.readbackMemory.activeMappings).to.equal(1)
-        expect(snapshot.readbackMemory.peakActiveMappings).to.equal(1)
+        expect(snapshot.readbackMemory.activeMappings).to.equal(0)
+        expect(snapshot.readbackMemory.peakActiveMappings).to.equal(0)
         expect(JSON.stringify(snapshot)).not.to.include('GPUBuffer')
         expect(Object.isFrozen(snapshot.readbackCommands[0])).to.equal(true)
         expect(Object.isFrozen(snapshot.readbacks[0])).to.equal(true)
@@ -163,7 +163,7 @@ describe('scratch readback runtime facts', () => {
         const controller = diagnosticsControllerFor(runtime)
         controller.registerReadbackOperation(operationFact('operation-1'))
 
-        await expectScratchDiagnostic(
+        const pendingDiagnostic = await expectScratchDiagnostic(
             () => controller.registerReadbackOperation(operationFact('operation-2')),
             {
                 code: 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED',
@@ -171,6 +171,28 @@ describe('scratch readback runtime facts', () => {
                 phase: 'readback',
             }
         )
+        const pendingIncident = runtime.diagnostics.incidents({ readbackId: 'operation-2' }).at(-1)
+        expect(pendingDiagnostic.subject).to.deep.include({
+            kind: 'ReadbackOperation',
+            id: 'operation-2',
+        })
+        expect(pendingDiagnostic.actual).to.deep.include({
+            currentPendingOperations: 1,
+            requested: 1,
+            readbackId: 'operation-2',
+        })
+        expect(pendingIncident).to.deep.include({
+            kind: 'readback-failure',
+            diagnosticCode: 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED',
+            attribution: 'exact-operation',
+            failureStage: 'budget',
+        })
+        expect(pendingIncident.target).to.deep.include({
+            kind: 'readback',
+            readbackId: 'operation-2',
+            path: 'direct',
+            sourceResourceId: 'buffer-1',
+        })
         const reservation = controller.reserveReadbackStaging('reservation-1', 12)
         await expectScratchDiagnostic(
             () => controller.reserveReadbackStaging('reservation-2', 8),

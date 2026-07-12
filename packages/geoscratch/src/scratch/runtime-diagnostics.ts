@@ -693,6 +693,10 @@ export class ScratchRuntimeDiagnosticsController {
         })
 
         this.#pendingOperations.set(id, operation)
+        if (kind === 'readback-mapping') {
+            this.#activeMappings++
+            this.#peakActiveMappings = Math.max(this.#peakActiveMappings, this.#activeMappings)
+        }
         if (target.kind === 'resource') {
             this.#aggregates = {
                 ...this.#aggregates,
@@ -748,6 +752,7 @@ export class ScratchRuntimeDiagnosticsController {
         const record = createGpuOperationRecord(baseInput)
 
         this.#pendingOperations.delete(operation.id)
+        if (operation.kind === 'readback-mapping') this.#activeMappings--
         if (operation.target.kind === 'resource') {
             this.#clearPendingReplacement(operation.target.resourceId, operation.id)
         }
@@ -1055,7 +1060,7 @@ export class ScratchRuntimeDiagnosticsController {
             throw new TypeError(`Readback operation ${fact.id} is already registered.`)
         }
         if (this.#readbackFacts.size >= this.#readbackPolicy.maxPendingOperations) {
-            this.#throwReadbackBudget('pending-operations', 1)
+            this.#throwReadbackBudget('pending-operations', 1, fact)
         }
         this.#readbackFacts.set(fact.id, readbackOperationFact(fact))
         this.#recalculateReadbackOperationMemory()
@@ -1222,7 +1227,6 @@ export class ScratchRuntimeDiagnosticsController {
         this.#readbackStagingReservations.clear()
         this.#currentReadbackStagingBytes = 0
         this.#currentRetainedHostBytes = 0
-        this.#activeMappings = 0
     }
 
     #publishLifecycleChange(change: ScratchRuntimeLifecycleChange): void {
@@ -1482,19 +1486,53 @@ export class ScratchRuntimeDiagnosticsController {
             this.#peakRetainedHostBytes,
             this.#currentRetainedHostBytes
         )
-        this.#activeMappings = [ ...this.#readbackFacts.values() ]
-            .filter(fact => fact.isMapping).length
-        this.#peakActiveMappings = Math.max(this.#peakActiveMappings, this.#activeMappings)
     }
 
-    #throwReadbackBudget(kind: 'pending-operations' | 'staging-bytes', requested: number): never {
+    #throwReadbackBudget(
+        kind: 'pending-operations' | 'staging-bytes',
+        requested: number,
+        fact?: ScratchRuntimeReadbackOperationFact
+    ): never {
 
         const isPending = kind === 'pending-operations'
+        const target = isPending && fact !== undefined
+            ? readbackTargetFromFact(fact)
+            : undefined
+        const incident = target === undefined
+            ? undefined
+            : this.recordIncident({
+                kind: 'readback-failure',
+                diagnosticCode: 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED',
+                nativeErrorCategory: 'none',
+                attribution: 'exact-operation',
+                target,
+                failureStage: 'budget',
+            })
+        const subject: DiagnosticSubject = fact === undefined
+            ? this.#runtimeSubject()
+            : {
+                kind: 'ReadbackOperation',
+                id: fact.id,
+                ...(fact.label !== undefined ? { label: boundedLabel(fact.label) } : {}),
+            }
+        const related: DiagnosticSubject[] = fact === undefined
+            ? []
+            : [
+                this.#runtimeSubject(),
+                { kind: 'Resource', id: fact.sourceResourceId },
+                ...(fact.commandId !== undefined
+                    ? [ { kind: 'Command' as const, id: fact.commandId, commandKind: 'readback' } ]
+                    : []),
+                ...(fact.submissionId !== undefined
+                    ? [ { kind: 'Submission' as const, id: fact.submissionId } ]
+                    : []),
+            ]
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED',
             severity: 'error',
             phase: 'readback',
-            subject: this.#runtimeSubject(),
+            subject,
+            ...(related.length > 0 ? { related } : {}),
             message: isPending
                 ? 'ScratchRuntime readback pending-operation budget is exhausted.'
                 : 'ScratchRuntime readback staging-byte budget is exhausted.',
@@ -1502,9 +1540,13 @@ export class ScratchRuntimeDiagnosticsController {
                 ? { maxPendingOperations: this.#readbackPolicy.maxPendingOperations }
                 : { maxStagingBytes: this.#readbackPolicy.maxStagingBytes },
             actual: isPending
-                ? { currentPendingOperations: this.#readbackFacts.size, requested }
+                ? {
+                    currentPendingOperations: this.#readbackFacts.size,
+                    requested,
+                    ...(fact !== undefined ? { readbackId: fact.id } : {}),
+                }
                 : { currentStagingBytes: this.#currentReadbackStagingBytes, requested },
-        })
+        }, { ...(incident !== undefined ? { incident } : {}) })
     }
 
     #setPendingReplacement(resourceId: string, operationId: string): void {
@@ -1533,6 +1575,24 @@ export class ScratchRuntimeDiagnosticsController {
             ...(this.#owner.label !== undefined ? { label: boundedLabel(this.#owner.label) } : {}),
         }
     }
+}
+
+function readbackTargetFromFact(
+    fact: ScratchRuntimeReadbackOperationFact
+): ScratchGpuReadbackOperationTarget {
+
+    return Object.freeze({
+        kind: 'readback',
+        readbackId: fact.id,
+        path: fact.path,
+        sourceResourceId: fact.sourceResourceId,
+        allocationVersion: fact.allocationVersion,
+        contentEpoch: fact.contentEpoch,
+        byteLength: fact.byteLength,
+        ...(fact.commandId !== undefined ? { commandId: fact.commandId } : {}),
+        ...(fact.submissionId !== undefined ? { submissionId: fact.submissionId } : {}),
+        ...(fact.stepIndex !== undefined ? { stepIndex: fact.stepIndex } : {}),
+    })
 }
 
 export function registerRuntimeDiagnostics(

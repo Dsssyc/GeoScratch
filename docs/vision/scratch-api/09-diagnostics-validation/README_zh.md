@@ -108,7 +108,7 @@ type DiagnosticSubject =
 
 - bind-layout mismatch: subject 是 `BindLayoutEntry`; related 包含 `Program` 与 `ShaderBinding`。
 - read-before-write: subject 是读取的 `Command`; related 包含 resource 和最后已知 writer。
-- readback budget exceeded: subject 是 `ReadbackOperation`; related 包含 runtime budget policy 与 source resource。
+- readback pending-operation budget exceeded: subject 是受影响的 `ReadbackOperation`；staging-allocation budget failure 保留精确的 GPU operation 与 command/readback target。两者都以结构化字段标识 runtime policy 与 source provenance。
 
 ## Diagnostic Reports
 
@@ -536,6 +536,12 @@ map Promise、validation、internal、OOM、scope settlement、device loss 与
 lifecycle outcome 按固定 transaction 顺序独立保留。Native message 是有界
 evidence，绝不是 classifier。Cleanup outcome 区分 `unmap` 与 staging
 `destroy`；`destroyRequested` 不会声称一次抛错的 native destroy 已完成。
+
+被 reject 的 `SubmittedWork.done` 会为每个 immutable readback link 记录一个
+command-targeted、位于 `queue-completion` 阶段的 readback incident。它的归因是
+`enclosing-operation-family`，因为一个 queue completion Promise 无法证明是哪一个
+linked command 导致 rejection；它也不会改写 linked operation 独立的 mapping
+result。
 
 Always-current fact graph 报告 readback commands、active/retained operations、
 current/peak staging bytes、current/peak retained host bytes 与 active

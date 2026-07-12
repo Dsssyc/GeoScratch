@@ -179,9 +179,13 @@ transaction，但在两个不同的显式边界确认 allocation:
   slot，之后在 copy encoding 前重新检查 source allocation/content epochs；
 - ordered `ReadbackCommand` 在 Promise-only factory resolve 前持有一个已确认
   的可复用 slot，因此同步 submission 不会分配它；
-- 两条路径都在 native allocation 前预留 `maxPendingOperations` 与
-  `maxStagingBytes` capacity，并在 success、failure、cancellation、disposal、
-  runtime loss 与 device loss 的每条路径精确释放 reservation。
+- direct operation 在创建时预留 `maxPendingOperations` capacity，在
+  materialization 分配 staging 前预留 `maxStagingBytes` capacity；
+- ordered factory 在分配可复用 slot 前预留 `maxStagingBytes` capacity；每次同步
+  submission 则在 encoder 或 queue effect 前 claim slot 时预留
+  `maxPendingOperations` capacity；
+- 每个成功取得的 reservation 都会在 success、failure、cancellation、
+  disposal、runtime loss 与 device loss 路径中精确释放一次。
 
 Mapping 在 validation、internal 与 out-of-memory error scope 下只调用一次
 `mapAsync(GPUMapMode.READ, 0, byteLength)`。所有已 push scope 都在第一次
@@ -299,6 +303,10 @@ const values = await readParticles.result({ after: submitted }).toArray()
 ```
 
 buffer-only `ReadbackCommand` ordered-staging 路径现已实现。它的 Promise-only factory 会在返回前确认可复用 staging slot。它验证显式 source epoch，记录 read-only submission ledger entry，并在声明的 step 把数据复制到 runtime-owned staging。`result({ after })` 返回与该次 submitted work 精确关联的 operation；materialization 只映射已有 staging buffer，不会再次提交 copy。它仍是逃生口，不是默认 readback 路径。直接 texture readback 与 mapped lease 仍属于未来工作；有限 staging budget 已是 runtime policy。
+
+Command disposal 会阻止新的 submission 与 reuse，但在 runtime 仍 active 时不会
+抹掉 historical result lookup。已经关联到 `SubmittedWork` 的 operation 仍可通过
+`result({ after })` 取得，并沿正常 cleanup 路径释放或销毁 busy slot。
 
 Queue timeline segmentation 会跨 queue-side upload 保留该声明 staging point。upload 前的 readback 会先 submit staging-copy segment，再执行 queue write; readback 前的 upload 会先执行 queue write，再 submit staging-copy segment。由 upload 分隔的多个 ordered readback 各自保留不同 staging buffer、captured epoch 与 producer provenance，同时共享一个 aggregate `SubmittedWork` completion handle。
 

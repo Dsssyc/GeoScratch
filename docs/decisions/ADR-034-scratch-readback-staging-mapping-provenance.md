@@ -60,7 +60,7 @@ const alias = await runtime.readbackCommand(descriptor)
 ```
 
 Each factory validates and snapshots the descriptor, allocates the command ID,
-reserves readback budget, and issues one staging-buffer allocation transaction.
+reserves staging-byte budget, and issues one staging-buffer allocation transaction.
 The transaction pushes out-of-memory then validation scopes, creates exactly
 one `MAP_READ | COPY_DST` buffer, pops validation then out-of-memory, retains
 both pop Promises before the first await, and observes lifecycle/device loss in
@@ -79,7 +79,10 @@ slot, and another submission using the command fails before encoder creation or
 queue effects while that slot is claimed, submitted, mapping, or releasing.
 Successful host-copy materialization returns the slot to idle. Command disposal
 destroys an idle slot immediately and marks a busy slot for destruction after
-its current cleanup owner releases it.
+its current cleanup owner releases it. While the runtime remains active,
+`result({ after })` remains a historical exact-pair lookup after command
+disposal, so the already-created operation cannot become unreachable before it
+releases that busy slot. Disposal still blocks submission and future reuse.
 
 This supersedes ADR-026 only for allocation timing and unrestricted
 cross-submission reuse. ADR-026's explicit source epoch, exact ordered copy,
@@ -98,6 +101,12 @@ If allocation or a post-settlement lifecycle check fails, no copy is encoded or
 submitted. The candidate is destroyed and every reservation/subscription is
 released exactly once. Once the copy has been submitted, Scratch does not claim
 rollback of GPU work.
+
+The direct operation reserves one pending-operation slot when it is created.
+Its first materialization reserves staging-byte capacity before native allocation.
+These are separate ownership boundaries: no staging bytes are charged before
+materialization, and no native allocation occurs before both applicable checks
+have succeeded.
 
 A direct operation with `after: SubmittedWork` does not await `after.done`
 before issuing its copy. The prior submission's queue actions have already been
@@ -149,6 +158,11 @@ For `retain: 'consume-on-read'`, the first caller owns materialization. Competin
 calls fail deterministically with a structured in-progress diagnostic and never
 issue another allocation, copy, or map. Reads after success continue to fail as
 already consumed.
+
+A failed materialization is also terminal. Later reads report the stable first
+failure code without silently allocating, copying, or mapping again. This
+replaces the old direct JavaScript path's incidental retry after `failed`, which
+could no longer preserve one failure transaction or its captured provenance.
 
 `cancel()` and `dispose()` preserve their terminal state while a map is pending.
 Scratch may call `unmap()` to cancel native mapping. The resulting expected map
@@ -237,10 +251,13 @@ full descriptor, source bytes, mapped bytes, command payload, or
 ### Readback budget
 
 Runtime readback policy includes finite `maxPendingOperations` and
-`maxStagingBytes` limits. Pending-operation and staging-byte capacity is
-reserved before native allocation. Exceeding either limit fails before a native
-call with `SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED`. Every outcome releases its
-reservation exactly once.
+`maxStagingBytes` limits. A direct operation reserves pending capacity when it
+is created and staging capacity before its first native allocation. An ordered
+command reserves staging capacity in its Promise-only factory; each submission
+reserves pending capacity while claiming the command, before encoder or queue
+effects. Exceeding either limit fails before the native work governed by that
+reservation with `SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED`. Every successful
+reservation is released exactly once.
 
 GPU staging bytes are Scratch logical allocation facts, not physical residency,
 free VRAM, driver padding, or total process/system memory. Retained host bytes

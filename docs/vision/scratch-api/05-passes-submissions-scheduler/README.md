@@ -139,7 +139,10 @@ payloads, mapped bytes, or native buffers. `SubmittedWork.done` covers only the
 queue work actually replayed. It does not wait for `mapAsync()`, mapped-range
 access, host copy, retention, cancellation, or cleanup. A native completion
 rejection becomes `SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED` without
-rewriting the linked readback operation's mapping outcome.
+rewriting the linked readback operation's mapping outcome. Each immutable link
+also produces a `readback-failure` incident at `queue-completion` with
+`enclosing-operation-family` attribution: the completion barrier identifies
+the replayed submission family, not one proven causal command.
 
 ### Resize Between Construction And Submission
 

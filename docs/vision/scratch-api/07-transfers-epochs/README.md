@@ -180,9 +180,14 @@ transaction, but acknowledge allocation at different explicit boundaries:
   encoding;
 - ordered `ReadbackCommand` owns one acknowledged reusable slot before the
   Promise-only factory resolves, so synchronous submission never allocates it;
-- both reserve `maxPendingOperations` and `maxStagingBytes` capacity before the
-  native allocation and release every reservation on success, failure,
-  cancellation, disposal, runtime loss, and device loss.
+- a direct operation reserves `maxPendingOperations` capacity when created and
+  `maxStagingBytes` capacity before materialization allocates staging;
+- an ordered factory reserves `maxStagingBytes` capacity before allocating its
+  reusable slot, while each synchronous submission reserves
+  `maxPendingOperations` capacity when it claims that slot, before encoder or
+  queue effects;
+- every successful reservation is released exactly once across success,
+  failure, cancellation, disposal, runtime loss, and device loss.
 
 Mapping issues exactly one `mapAsync(GPUMapMode.READ, 0, byteLength)` under
 validation, internal, and out-of-memory error scopes. Every pushed scope is
@@ -302,6 +307,11 @@ const values = await readParticles.result({ after: submitted }).toArray()
 ```
 
 The buffer-only `ReadbackCommand` ordered-staging path is implemented. Its Promise-only factory acknowledges the reusable staging slot before returning. It validates the explicit source epoch, records a read-only submission ledger entry, and copies into runtime-owned staging at the declared step. `result({ after })` returns the operation associated with that exact submitted work; materialization maps the existing staging buffer and does not submit a second copy. This remains an escape hatch, not the default readback path. Direct texture readback and mapped leases remain future work; finite staging budgets are implemented runtime policy.
+
+Command disposal blocks new submission and reuse, but does not erase historical
+result lookup while the runtime remains active. An operation already linked to
+`SubmittedWork` stays retrievable through `result({ after })`, then releases or
+destroys the busy slot through its normal cleanup path.
 
 Queue timeline segmentation preserves that declared staging point across queue-side uploads. A readback before an upload submits its staging-copy segment before the queue write; an upload before a readback performs the queue write before submitting the staging-copy segment. Multiple ordered readbacks separated by an upload keep distinct staging buffers, captured epochs, and producer provenance while sharing one aggregate `SubmittedWork` completion handle.
 
