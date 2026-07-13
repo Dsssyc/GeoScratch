@@ -25,6 +25,7 @@ import { validateRenderPassAttachments } from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
+import { setQuerySlotContentState } from './query-set.js'
 import {
     beginSubmissionNativeObservation,
     compareSubmissionNativeStages,
@@ -96,6 +97,27 @@ export type SubmittedReadbackLink = Readonly<{
     contentEpoch: number
     stagingAllocationOperationId: string
 }>
+
+export type SubmittedPotentialWrite =
+    | Readonly<{
+        kind: 'resource'
+        resourceId: string
+        resourceKind: string
+        label?: string
+        subject: DiagnosticSubject
+        allocationVersion: number
+        contentEpoch: number
+    }>
+    | Readonly<{
+        kind: 'query-slot'
+        querySetId: string
+        queryType: string
+        label?: string
+        subject: DiagnosticSubject
+        index: number
+        allocationVersion: number
+        contentEpoch: number
+    }>
 
 export type SubmissionMissingResource = {
     resourceId: string
@@ -258,6 +280,20 @@ type PreparedQuerySlotContentEffect = {
 }
 
 type PreparedQueueEffect = PreparedResourceContentEffect | PreparedQuerySlotContentEffect
+
+type SubmissionPotentialWrite =
+    | Readonly<{
+        kind: 'resource'
+        resource: Resource
+        allocationVersion: number
+        contentEpoch: number
+    }>
+    | Readonly<{
+        kind: 'query-slot'
+        querySet: QuerySetResource
+        index: number
+        contentEpoch: number
+    }>
 
 type PreparedQueueAction =
     | {
@@ -843,6 +879,8 @@ export class SubmissionBuilder {
             contentEpoch: pending.claim.contentEpoch,
             stagingAllocationOperationId: pending.claim.stagingAllocationOperationId,
         })))
+        const potentialWrites = snapshotSubmissionPotentialWrites(queueTimeline)
+        const potentialWriteFacts = freezeSubmittedPotentialWriteFacts(potentialWrites)
         const nativeOutcome = nativeObservation.outcome
         const effectfulWorkReservation = nativeIssuePlan.length === 0
             ? undefined
@@ -853,6 +891,7 @@ export class SubmissionBuilder {
             nativeDone,
             nativeObservation.settlement,
             readbackLinks,
+            potentialWrites,
             effectfulWorkReservation
         )
         for (const pending of pendingReadbacks) {
@@ -865,6 +904,7 @@ export class SubmissionBuilder {
             resourceAccesses,
             executionOutcomes: resolvedPlan.executionOutcomes,
             readbacks: readbackLinks,
+            potentialWrites: potentialWriteFacts,
             nativeOutcome,
             done,
         })
@@ -1417,6 +1457,10 @@ function validateResolveReadiness(
     for (const slot of command.source.slots) {
         const simulated = simulatedQuerySlotState(querySlots, command.source.querySet, slot.index)
 
+        if (simulated.state === 'indeterminate') {
+            throwQuerySlotIndeterminateDiagnostic(builder, stepIndex, command, slot, simulated)
+        }
+
         if (command.whenMissing === 'throw' && simulated.state !== 'ready') {
             throwQuerySlotNotReadyDiagnostic(builder, stepIndex, command, slot, simulated)
         }
@@ -1501,6 +1545,7 @@ function resolveRenderReadiness(
     diagnostics: ScratchDiagnostic[]
 ): ResolvedPassCommands<RenderCommand> {
 
+    assertNoIndeterminateRenderAttachmentLoads(builder, step, stepIndex, readiness)
     const commands: RenderCommand[] = []
     const commandOutcomes: SubmissionCommandExecutionOutcome[] = []
     for (const [commandIndex, command] of step.commands.entries()) {
@@ -1552,6 +1597,54 @@ function resolveRenderReadiness(
     }
 
     return { disposition: 'execute', commands, commandOutcomes }
+}
+
+function assertNoIndeterminateRenderAttachmentLoads(
+    builder: SubmissionBuilder,
+    step: RenderStep,
+    stepIndex: number,
+    readiness: ReadinessSimulation
+): void {
+
+    for (const [ attachmentIndex, attachment ] of step.passSpec.color.entries()) {
+        if (attachment.load !== 'load' || !(attachment.target instanceof TextureResource)) continue
+        const simulated = simulatedResourceState(readiness, attachment.target)
+        if (simulated.state === 'indeterminate') {
+            throwIndeterminateAttachmentLoadDiagnostic(
+                builder,
+                step,
+                stepIndex,
+                attachment.target,
+                simulated,
+                `color:${attachmentIndex}`
+            )
+        }
+    }
+
+    const depth = step.passSpec.depth
+    if (depth === undefined) return
+    const simulated = simulatedResourceState(readiness, depth.target)
+    if (simulated.state !== 'indeterminate') return
+    if (depth.depthLoad === 'load') {
+        throwIndeterminateAttachmentLoadDiagnostic(
+            builder,
+            step,
+            stepIndex,
+            depth.target,
+            simulated,
+            'depth'
+        )
+    }
+    if (depth.stencilLoad === 'load') {
+        throwIndeterminateAttachmentLoadDiagnostic(
+            builder,
+            step,
+            stepIndex,
+            depth.target,
+            simulated,
+            'stencil'
+        )
+    }
 }
 
 function appendPassExecutionOutcomes(
@@ -1643,6 +1736,16 @@ function resolveExecutableCommand<Command extends ExecutableCommand>(
         visited.add(command)
         visitedIds.add(command.id)
         attemptedCommands.push(command)
+
+        assertNoIndeterminateResourceReads(
+            builder,
+            stepIndex,
+            command,
+            command.resources.read,
+            readiness,
+            passSpec,
+            { requestedCommand, attemptedCommands, attempts }
+        )
 
         const missingRequirements = collectMissingReadRequirements(command.resources.read, readiness)
         attempts.push({
@@ -1801,6 +1904,33 @@ function collectMissingReadRequirements(
             simulated: simulatedResourceState(readiness, readRequirement.resource),
         }))
         .filter(({ simulated }) => simulated.state !== 'ready')
+}
+
+function assertNoIndeterminateResourceReads(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    command: ReadCommand,
+    readRequirements: readonly CommandResourceReadDescriptor[],
+    readiness: ReadinessSimulation,
+    passSpec?: RenderPassSpec | ComputePassSpec,
+    context?: CommandExecutionDiagnosticContext,
+    role?: string
+): void {
+
+    for (const readRequirement of readRequirements) {
+        const simulated = simulatedResourceState(readiness, readRequirement.resource)
+        if (simulated.state !== 'indeterminate') continue
+        throwIndeterminateResourceReadDiagnostic(
+            builder,
+            stepIndex,
+            command,
+            readRequirement,
+            simulated,
+            passSpec,
+            role,
+            context
+        )
+    }
 }
 
 function createMissingResourceFact(missing: MissingReadRequirement, role?: string): SubmissionMissingResource {
@@ -2108,6 +2238,16 @@ function validateThrowOnlyCommandReadiness(
     role?: string
 ): void {
 
+    assertNoIndeterminateResourceReads(
+        builder,
+        stepIndex,
+        command,
+        readRequirements,
+        readiness,
+        undefined,
+        undefined,
+        role
+    )
     const missing = collectMissingReadRequirements(readRequirements, readiness)
 
     if (missing.length > 0) {
@@ -2260,6 +2400,46 @@ function throwQuerySlotNotReadyDiagnostic(
     })
 }
 
+function throwQuerySlotIndeterminateDiagnostic(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    command: ResolveQuerySetCommand,
+    slot: QuerySetSlotReadDescriptor,
+    simulated: QuerySlotSimulationState
+): never {
+
+    const querySet = command.source.querySet
+    throwScratchDiagnostic({
+        code: 'SCRATCH_QUERY_SLOT_CONTENT_INDETERMINATE',
+        severity: 'error',
+        phase: 'query',
+        subject: command.subject,
+        related: [ querySet.subject, builder.subject ],
+        message: 'ResolveQuerySetCommand cannot read a query slot whose current content is indeterminate.',
+        expected: {
+            slotState: 'ready',
+            recovery: 'explicit later query producer before this resolve',
+        },
+        actual: {
+            submissionId: builder.id,
+            stepIndex,
+            commandId: command.id,
+            commandKind: command.commandKind,
+            access: 'read',
+            role: 'source',
+            querySetId: querySet.id,
+            queryType: querySet.type,
+            slotIndex: slot.index,
+            requiredContentEpoch: slot.contentEpoch,
+            simulatedContentEpoch: simulated.contentEpoch,
+            currentContentEpoch: querySet.slotContentEpochs[slot.index] ?? 0,
+            simulatedSlotState: simulated.state,
+            whenMissing: command.whenMissing,
+            validation: builder.validation,
+        },
+    })
+}
+
 function createQuerySlotEpochDiagnostic(
     builder: SubmissionBuilder,
     stepIndex: number,
@@ -2359,6 +2539,90 @@ function throwCommandResourceNotReadyDiagnostic(
     })
 }
 
+function throwIndeterminateResourceReadDiagnostic(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    command: ReadCommand,
+    readRequirement: CommandResourceReadDescriptor,
+    simulated: ResourceSimulationState,
+    passSpec?: RenderPassSpec | ComputePassSpec,
+    role?: string,
+    context?: CommandExecutionDiagnosticContext
+): never {
+
+    const resource = readRequirement.resource
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_RESOURCE_CONTENT_INDETERMINATE',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [
+            resource.subject,
+            ...(context?.attemptedCommands.map(attempted => attempted.subject) ?? []),
+            passSpec?.subject,
+            builder.subject,
+        ].filter(isDefined),
+        message: 'Command cannot read resource content that a failed submission left indeterminate.',
+        expected: {
+            resourceState: 'ready',
+            recovery: 'explicit later content producer before this read',
+        },
+        actual: {
+            stepIndex,
+            ...(passSpec !== undefined ? { passId: passSpec.id } : {}),
+            commandId: command.id,
+            commandKind: command.commandKind,
+            access: 'read',
+            ...(role !== undefined ? { role } : {}),
+            resourceId: resource.id,
+            resourceKind: resource.resourceKind,
+            resourceState: simulated.state,
+            contentEpoch: simulated.contentEpoch,
+            requiredContentEpoch: readRequirement.contentEpoch,
+            currentContentEpoch: resource.contentEpoch,
+            allocationVersion: resource.allocationVersion,
+            whenMissing: command.whenMissing,
+            validation: builder.validation,
+        },
+    })
+}
+
+function throwIndeterminateAttachmentLoadDiagnostic(
+    builder: SubmissionBuilder,
+    step: RenderStep,
+    stepIndex: number,
+    target: TextureResource,
+    simulated: ResourceSimulationState,
+    attachmentRole: string
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PASS_ATTACHMENT_CONTENT_INDETERMINATE',
+        severity: 'error',
+        phase: 'submission',
+        subject: step.passSpec.subject,
+        related: [ target.subject, builder.subject ],
+        message: 'Render pass load cannot consume indeterminate persistent attachment content.',
+        expected: {
+            attachmentState: 'ready',
+            recovery: 'clear or explicitly produce the attachment before loading it',
+        },
+        actual: {
+            stepIndex,
+            passId: step.passSpec.id,
+            passKind: step.passSpec.passKind,
+            attachmentRole,
+            resourceId: target.id,
+            resourceKind: target.resourceKind,
+            resourceState: simulated.state,
+            contentEpoch: simulated.contentEpoch,
+            currentContentEpoch: target.contentEpoch,
+            allocationVersion: target.allocationVersion,
+            validation: builder.validation,
+        },
+    })
+}
+
 function createCommandReadEpochDiagnostic(
     builder: SubmissionBuilder,
     stepIndex: number,
@@ -2426,6 +2690,7 @@ export class SubmittedWork {
     #producerEpochs: readonly SubmittedResourceEpoch[]
     #executionOutcomes: readonly SubmissionExecutionOutcome[]
     #readbacks: readonly SubmittedReadbackLink[]
+    #potentialWrites: readonly SubmittedPotentialWrite[]
     #nativeOutcome: Promise<ScratchSubmissionNativeOutcome>
     #done: Promise<unknown>
 
@@ -2455,6 +2720,7 @@ export class SubmittedWork {
         this.#producerEpochs = freezeProducerEpochs(createProducerEpochs(this.#resourceAccesses))
         this.#executionOutcomes = freezeExecutionOutcomes(options.executionOutcomes)
         this.#readbacks = freezeSubmittedReadbackLinks(options.readbacks)
+        this.#potentialWrites = freezeSubmittedPotentialWriteFacts(options.potentialWrites)
         this.#nativeOutcome = options.nativeOutcome
         this.#done = options.done
         Object.preventExtensions(this)
@@ -2478,6 +2744,10 @@ export class SubmittedWork {
         return this.#executionOutcomes
     }
     get readbacks(): readonly ReadonlySubmittedFact<SubmittedReadbackLink>[] { return this.#readbacks }
+    get potentialWrites(): readonly ReadonlySubmittedFact<SubmittedPotentialWrite>[] {
+
+        return this.#potentialWrites
+    }
     get nativeOutcome(): Promise<ScratchSubmissionNativeOutcome> { return this.#nativeOutcome }
     get done(): Promise<unknown> { return this.#done }
 
@@ -2497,6 +2767,7 @@ type SubmittedWorkOptions = Readonly<{
     resourceAccesses: SubmissionResourceAccess[]
     executionOutcomes: SubmissionExecutionOutcome[]
     readbacks: readonly SubmittedReadbackLink[]
+    potentialWrites: readonly SubmittedPotentialWrite[]
     nativeOutcome: Promise<ScratchSubmissionNativeOutcome>
     done: Promise<unknown>
 }>
@@ -2692,6 +2963,41 @@ function freezeSubmittedReadbackLinks(
 ): readonly SubmittedReadbackLink[] {
 
     return Object.freeze(readbacks.map(link => Object.freeze({ ...link })))
+}
+
+function freezeSubmittedPotentialWriteFacts(
+    writes: readonly (SubmissionPotentialWrite | SubmittedPotentialWrite)[]
+): readonly SubmittedPotentialWrite[] {
+
+    return Object.freeze(writes.map(write => {
+        if (write.kind === 'resource' && 'resource' in write) {
+            return Object.freeze({
+                kind: 'resource' as const,
+                resourceId: write.resource.id,
+                resourceKind: write.resource.resourceKind,
+                ...(write.resource.label !== undefined ? { label: write.resource.label } : {}),
+                subject: freezeDiagnosticSubject(write.resource.subject),
+                allocationVersion: write.allocationVersion,
+                contentEpoch: write.contentEpoch,
+            })
+        }
+        if (write.kind === 'query-slot' && 'querySet' in write) {
+            return Object.freeze({
+                kind: 'query-slot' as const,
+                querySetId: write.querySet.id,
+                queryType: write.querySet.type,
+                ...(write.querySet.label !== undefined ? { label: write.querySet.label } : {}),
+                subject: freezeDiagnosticSubject(write.querySet.subject),
+                index: write.index,
+                allocationVersion: write.querySet.allocationVersion,
+                contentEpoch: write.contentEpoch,
+            })
+        }
+        return Object.freeze({
+            ...write,
+            subject: freezeDiagnosticSubject(write.subject),
+        } as SubmittedPotentialWrite)
+    }))
 }
 
 function freezeExecutionOutcomes(outcomes: SubmissionExecutionOutcome[]): readonly SubmissionExecutionOutcome[] {
@@ -3308,6 +3614,85 @@ function applyPreparedQueueEffects(effects: readonly PreparedQueueEffect[]): voi
     }
 }
 
+function snapshotSubmissionPotentialWrites(
+    queueTimeline: readonly PreparedQueueAction[]
+): readonly SubmissionPotentialWrite[] {
+
+    const resourceWrites = new Map<Resource, SubmissionPotentialWrite & { kind: 'resource' }>()
+    const querySlotWrites = new Map<string, SubmissionPotentialWrite & { kind: 'query-slot' }>()
+    for (const action of queueTimeline) {
+        for (const effect of action.effects) {
+            if (effect.kind === 'resource-content') {
+                resourceWrites.set(effect.resource, Object.freeze({
+                    kind: 'resource',
+                    resource: effect.resource,
+                    allocationVersion: effect.resource.allocationVersion,
+                    contentEpoch: effect.contentEpoch,
+                }))
+                continue
+            }
+            querySlotWrites.set(querySlotKey(effect.querySet, effect.index), Object.freeze({
+                kind: 'query-slot',
+                querySet: effect.querySet,
+                index: effect.index,
+                contentEpoch: effect.contentEpoch,
+            }))
+        }
+    }
+
+    return Object.freeze([
+        ...resourceWrites.values(),
+        ...querySlotWrites.values(),
+    ])
+}
+
+function observeSubmissionPotentialWriteFailures(
+    nativeSettlement: Promise<SubmissionNativeSettlement>,
+    queueCompletion: Promise<SubmissionQueueCompletionOutcome>,
+    potentialWrites: readonly SubmissionPotentialWrite[]
+): void {
+
+    void nativeSettlement.then(settlement => {
+        if (settlement.primaryFailure !== undefined) {
+            markSubmissionPotentialWritesIndeterminate(potentialWrites)
+        }
+    })
+    void queueCompletion.then(completion => {
+        if (completion.status === 'failed') {
+            markSubmissionPotentialWritesIndeterminate(potentialWrites)
+        }
+    })
+}
+
+function markSubmissionPotentialWritesIndeterminate(
+    potentialWrites: readonly SubmissionPotentialWrite[]
+): void {
+
+    for (const write of potentialWrites) {
+        if (write.kind === 'resource') {
+            if (
+                write.resource.isDisposed ||
+                write.resource.allocationVersion !== write.allocationVersion ||
+                write.resource.contentEpoch !== write.contentEpoch ||
+                write.resource.state === 'indeterminate'
+            ) continue
+            setResourceContentState(write.resource, 'indeterminate', write.contentEpoch)
+            continue
+        }
+        if (
+            write.querySet.isDisposed ||
+            write.querySet.slotContentEpochs[write.index] !== write.contentEpoch ||
+            write.querySet.slotStates[write.index] === 'indeterminate'
+        ) continue
+        setQuerySlotContentState(
+            write.querySet,
+            write.index,
+            'indeterminate',
+            write.contentEpoch
+        )
+    }
+}
+
 function createDonePromise(queue: GPUQueue): Promise<unknown> {
 
     if (queue && typeof queue.onSubmittedWorkDone === 'function') {
@@ -3323,6 +3708,7 @@ function createSubmittedWorkDone(
     nativeDone: Promise<unknown>,
     nativeSettlement: Promise<SubmissionNativeSettlement>,
     readbacks: readonly SubmittedReadbackLink[],
+    potentialWrites: readonly SubmissionPotentialWrite[],
     reservation?: ScratchEffectfulSubmittedWorkReservation
 ): Promise<unknown> {
 
@@ -3331,6 +3717,11 @@ function createSubmittedWorkDone(
         submissionId,
         nativeDone,
         readbacks
+    )
+    observeSubmissionPotentialWriteFailures(
+        nativeSettlement,
+        queueCompletion,
+        potentialWrites
     )
     const done = Promise.all([ nativeSettlement, queueCompletion ]).then(([ settlement, completion ]) => {
         const primary = selectSubmissionDoneFailure(submissionId, settlement, completion)

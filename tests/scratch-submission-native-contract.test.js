@@ -131,6 +131,7 @@ describe('scratch submission native contract', () => {
             producerEpochs: submitted.producerEpochs,
             executionOutcomes: submitted.executionOutcomes,
             readbacks: submitted.readbacks,
+            potentialWrites: submitted.potentialWrites,
             nativeOutcome: submitted.nativeOutcome,
             done: submitted.done,
         }
@@ -153,6 +154,7 @@ describe('scratch submission native contract', () => {
             submitted.producerEpochs,
             submitted.executionOutcomes,
             submitted.readbacks,
+            submitted.potentialWrites,
         ]) {
             expect(Object.isFrozen(value)).to.equal(true)
         }

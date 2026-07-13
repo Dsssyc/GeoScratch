@@ -5,7 +5,18 @@ import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type QuerySetType = 'timestamp' | 'occlusion'
-export type QuerySetSlotState = 'empty' | 'ready'
+export type QuerySetSlotState = 'empty' | 'ready' | 'indeterminate'
+
+export function setQuerySlotContentState(
+    querySet: QuerySetResource,
+    index: number,
+    state: QuerySetSlotState,
+    contentEpoch: number
+): void {
+
+    querySet.slotStates[index] = state
+    querySet.slotContentEpochs[index] = contentEpoch
+}
 
 const QUERY_SET_TYPES = new Set<QuerySetType>([ 'timestamp', 'occlusion' ])
 

@@ -196,6 +196,7 @@ export type {
 export { SubmissionBuilder, SubmittedWork } from './submission.js'
 export type {
     RenderCommand,
+    SubmittedPotentialWrite,
     SubmittedResourceEpoch,
     SubmissionBuilderOptions,
     SubmissionCommandExecutionOutcome,

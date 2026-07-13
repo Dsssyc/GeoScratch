@@ -196,6 +196,7 @@ export type {
     SubmissionMissingResource,
     SubmissionPassExecutionOutcome,
     SubmittedReadbackLink,
+    SubmittedPotentialWrite,
     SubmittedResourceEpoch,
     SubmissionResourceAccess,
     SubmissionResourceAccessKind,

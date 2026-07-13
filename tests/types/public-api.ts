@@ -1094,6 +1094,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).upload(externalImageUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
     const nativeOutcome: Promise<scr.ScratchSubmissionNativeOutcome> = submitted.nativeOutcome
     const compatNativeOutcome: Promise<scratchCompat.ScratchSubmissionNativeOutcome> = nativeOutcome
+    const indeterminateResourceState: scr.ResourceState = 'indeterminate'
+    const indeterminateQuerySlotState: scr.QuerySetSlotState = 'indeterminate'
+    const potentialWrites: readonly scr.SubmittedPotentialWrite[] = submitted.potentialWrites
     // @ts-expect-error SubmittedWork construction is package-private
     new scr.SubmittedWork(runtime)
     // @ts-expect-error SubmittedWork reports expose readonly diagnostic arrays
@@ -1108,6 +1111,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     submitted.executionOutcomes[0]!.status = 'executed'
     // @ts-expect-error SubmittedWork readback links are deeply readonly
     submitted.readbacks[0]!.operationId = 'forged'
+    // @ts-expect-error SubmittedWork potential-write facts are deeply readonly
+    submitted.potentialWrites[0]!.contentEpoch = 999
     const resourceAccesses: readonly scr.SubmissionResourceAccess[] = submitted.resourceAccesses
     const producerEpochs: readonly scr.SubmittedResourceEpoch[] = submitted.producerEpochs
     const diagnosticSubject: scr.DiagnosticSubject = storageInput.subject
