@@ -281,6 +281,8 @@ describe('scratch submission native contract', () => {
         })
         expect(bounded.nativeOutcome.locations).to.have.length(64)
         expect(bounded.nativeOutcome.outcomes).to.have.length(64)
+        expect(bounded.nativeOutcome.omittedLocationCount).to.equal(16)
+        expect(bounded.nativeOutcome.omittedOutcomeCount).to.equal(16)
     })
 
     it('versions runtime snapshots and exported evidence together', async () => {

@@ -135,6 +135,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         maxEvidenceBytes: 4096,
         includeStacks: true,
         includeDescriptors: true,
+        nativeSubmissionDetail: 'step',
     })
     const diagnosticCaptureReport: scr.ScratchDiagnosticCaptureReport = diagnosticCapture.stop()
     // @ts-expect-error Runtime native device ownership is read-only

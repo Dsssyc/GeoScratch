@@ -1,0 +1,624 @@
+import {
+    createSubmissionNativeOutcome,
+    serializeNativeGpuError,
+} from './gpu-operation.js'
+import { diagnosticsControllerFor } from './runtime-diagnostics.js'
+import type {
+    GpuNativeErrorCategory,
+    ScratchSubmissionNativeLocation,
+    ScratchSubmissionNativeOutcome,
+    ScratchSubmissionNativeOutcomeFact,
+    ScratchSubmissionNativeOutcomeMode,
+    ScratchSubmissionNativeStage,
+} from './gpu-operation.js'
+import type {
+    ScratchPendingGpuOperation,
+    ScratchRuntimeLifecycleChange,
+    ScratchSubmissionNativeObservationReservation,
+} from './runtime-diagnostics.js'
+import type { ScratchRuntime } from './runtime.js'
+
+type ScopeFilter = 'validation' | 'internal' | 'out-of-memory'
+
+export type SubmissionNativeIssue = Readonly<{
+    stage: ScratchSubmissionNativeStage
+    location: ScratchSubmissionNativeLocation
+}>
+
+export type BeginSubmissionNativeObservationInput = Readonly<{
+    runtime: ScratchRuntime
+    submissionId: string
+    effectful: boolean
+    plan: readonly SubmissionNativeIssue[]
+}>
+
+export type SubmissionNativeObservation = Readonly<{
+    mode: ScratchSubmissionNativeOutcomeMode
+    outcome: Promise<ScratchSubmissionNativeOutcome>
+    issue<T>(
+        stage: ScratchSubmissionNativeStage,
+        location: ScratchSubmissionNativeLocation,
+        issue: () => T
+    ): T
+    finish(): void
+}>
+
+type SubmissionObservedFailure = Readonly<{
+    fact: ScratchSubmissionNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
+    cause?: unknown
+}>
+
+type ScopePromiseObservation =
+    | Readonly<{ status: 'fulfilled', value: GPUError | null }>
+    | Readonly<{ status: 'rejected', reason: unknown }>
+    | Readonly<{ status: 'invalid', reason: TypeError }>
+
+type PendingScopeObservation = Readonly<{
+    filter: ScopeFilter
+    observation: Promise<ScopePromiseObservation>
+}>
+
+type ScopeBundle = {
+    stage: ScratchSubmissionNativeStage
+    location: ScratchSubmissionNativeLocation
+    boundaryFailures: unknown[]
+    pushed: ScopeFilter[]
+    observations: PendingScopeObservation[]
+    isClosed: boolean
+}
+
+type ObservationState = {
+    input: BeginSubmissionNativeObservationInput
+    mode: ScratchSubmissionNativeOutcomeMode
+    operation: ScratchPendingGpuOperation
+    reservation?: ScratchSubmissionNativeObservationReservation
+    planKeys: Set<string>
+    issuedKeys: Set<string>
+    issuedLocations: ScratchSubmissionNativeLocation[]
+    issuedLocationKeys: Set<string>
+    bundles: ScopeBundle[]
+    synchronousFailures: SubmissionObservedFailure[]
+    summaryBundle?: ScopeBundle
+    lifecycleFailure?: SubmissionObservedFailure
+    unsubscribeLifecycle: () => void
+    isFinished: boolean
+}
+
+export function beginSubmissionNativeObservation(
+    input: BeginSubmissionNativeObservationInput
+): SubmissionNativeObservation {
+
+    input.runtime.assertActive()
+    assertObservationInput(input)
+    const controller = diagnosticsControllerFor(input.runtime)
+    const mode = controller.submissionNativeObservationMode()
+    const summaryLocation = submissionLocation(input.submissionId)
+
+    if (!input.effectful) {
+        return createEffectFreeObservation(input.submissionId, mode)
+    }
+
+    const target = Object.freeze({
+        kind: 'submission' as const,
+        submissionId: input.submissionId,
+    })
+    const reservation = mode === 'off'
+        ? undefined
+        : controller.reserveSubmissionNativeObservation(target)
+    let operation: ScratchPendingGpuOperation
+    try {
+        operation = controller.beginOperation({
+            kind: 'submission-native-observation',
+            target,
+            descriptorSummary: {
+                mode,
+                issueCount: input.plan.length,
+            },
+            fullDescriptor: {
+                mode,
+                plan: input.plan,
+            },
+            nativeLabel: `scratch:${input.submissionId}`,
+        })
+    } catch (error) {
+        reservation?.release()
+        throw error
+    }
+
+    const state: ObservationState = {
+        input: Object.freeze({
+            ...input,
+            plan: Object.freeze(input.plan.map(item => Object.freeze({
+                stage: item.stage,
+                location: Object.freeze({ ...item.location }),
+            }))),
+        }),
+        mode,
+        operation,
+        ...(reservation !== undefined ? { reservation } : {}),
+        planKeys: new Set(input.plan.map(issueKey)),
+        issuedKeys: new Set(),
+        issuedLocations: [],
+        issuedLocationKeys: new Set(),
+        bundles: [],
+        synchronousFailures: [],
+        unsubscribeLifecycle: () => {},
+        isFinished: false,
+    }
+
+    if (mode !== 'off') {
+        state.unsubscribeLifecycle = controller.subscribeLifecycle(change => {
+            state.lifecycleFailure = lifecycleFailure(input.runtime, input.submissionId, change)
+        })
+    }
+    if (mode === 'summary') {
+        const bundle = openScopeBundle(
+            input.runtime.device,
+            'scope-settlement',
+            summaryLocation
+        )
+        state.summaryBundle = bundle
+        state.bundles.push(bundle)
+    }
+
+    let resolveOutcome!: (outcome: ScratchSubmissionNativeOutcome) => void
+    const outcome = new Promise<ScratchSubmissionNativeOutcome>(resolve => {
+        resolveOutcome = resolve
+    })
+    const observation: SubmissionNativeObservation = Object.freeze({
+        mode,
+        outcome,
+        issue<T>(
+            stage: ScratchSubmissionNativeStage,
+            location: ScratchSubmissionNativeLocation,
+            issue: () => T
+        ): T {
+
+            if (state.isFinished) {
+                throw new TypeError('Submission native observation is already finished.')
+            }
+            const key = issueKey({ stage, location })
+            if (!state.planKeys.has(key)) {
+                throw new TypeError('Submission native issue is not present in the snapshotted plan.')
+            }
+            if (state.issuedKeys.has(key)) {
+                throw new TypeError('Submission native issue was already executed.')
+            }
+            state.issuedKeys.add(key)
+            retainIssuedLocation(state, location)
+
+            const bundle = mode === 'detailed'
+                ? openScopeBundle(input.runtime.device, stage, location)
+                : undefined
+            if (bundle !== undefined) state.bundles.push(bundle)
+            try {
+                return issue()
+            } catch (cause) {
+                state.synchronousFailures.push(observedFailure(
+                    stage,
+                    location,
+                    'native-exception',
+                    'SCRATCH_SUBMISSION_NATIVE_EXCEPTION',
+                    cause
+                ))
+                throw cause
+            } finally {
+                if (bundle !== undefined) closeScopeBundle(input.runtime.device, bundle)
+            }
+        },
+        finish() {
+
+            if (state.isFinished) return
+            state.isFinished = true
+            if (state.summaryBundle !== undefined) {
+                closeScopeBundle(input.runtime.device, state.summaryBundle)
+            }
+            void settleObservation(state).then(resolveOutcome)
+        },
+    })
+
+    return observation
+}
+
+function createEffectFreeObservation(
+    submissionId: string,
+    mode: ScratchSubmissionNativeOutcomeMode
+): SubmissionNativeObservation {
+
+    const outcome = Promise.resolve(createSubmissionNativeOutcome(submissionId, {
+        mode,
+        status: 'no-native-work',
+        locations: [],
+        outcomes: [],
+    }))
+    let isFinished = false
+    return Object.freeze({
+        mode,
+        outcome,
+        issue<T>(
+            _stage: ScratchSubmissionNativeStage,
+            _location: ScratchSubmissionNativeLocation,
+            issue: () => T
+        ): T {
+
+            if (isFinished) throw new TypeError('Submission native observation is already finished.')
+            return issue()
+        },
+        finish() {
+
+            isFinished = true
+        },
+    })
+}
+
+async function settleObservation(
+    state: ObservationState
+): Promise<ScratchSubmissionNativeOutcome> {
+
+    const controller = diagnosticsControllerFor(state.input.runtime)
+    try {
+        const scopedFailures = (await Promise.all(
+            state.bundles.map(settleScopeBundle)
+        )).flat()
+        const failures = [
+            ...state.synchronousFailures,
+            ...scopedFailures,
+            ...(state.lifecycleFailure !== undefined ? [ state.lifecycleFailure ] : []),
+        ]
+        const publicOutcome = createPublicOutcome(state, failures)
+        const primary = failures[0]
+        const record = controller.completeOperation(state.operation, {
+            status: primary === undefined ? 'succeeded' : 'failed',
+            ...(primary !== undefined
+                ? { nativeErrorCategory: primary.fact.nativeErrorCategory }
+                : {}),
+            nativeOutcome: {
+                mode: publicOutcome.mode,
+                status: publicOutcome.status,
+                locations: publicOutcome.locations,
+                outcomes: publicOutcome.outcomes,
+                omittedLocationCount: publicOutcome.omittedLocationCount,
+                omittedOutcomeCount: publicOutcome.omittedOutcomeCount,
+            },
+        })
+
+        if (primary !== undefined) {
+            controller.recordIncident({
+                kind: 'submission-failure',
+                diagnosticCode: primary.fact.diagnosticCode,
+                nativeErrorCategory: primary.fact.nativeErrorCategory,
+                attribution: state.mode === 'summary'
+                    ? 'enclosing-operation-family'
+                    : 'exact-operation',
+                target: state.operation.target,
+                operationId: state.operation.id,
+                triggerOperation: record,
+                failureStage: primary.fact.stage,
+                ...(primary.fact.nativeError !== undefined
+                    ? { nativeError: primary.fact.nativeError }
+                    : {}),
+                outcomes: failures.map(failure => ({
+                    stage: failure.fact.stage,
+                    diagnosticCode: failure.fact.diagnosticCode,
+                    nativeErrorCategory: failure.fact.nativeErrorCategory,
+                    location: failure.fact.location,
+                    ...(failure.fact.nativeError !== undefined
+                        ? { nativeError: failure.fact.nativeError }
+                        : {}),
+                })),
+            })
+        }
+        return publicOutcome
+    } catch (cause) {
+        if (state.mode === 'off') {
+            return createSubmissionNativeOutcome(state.input.submissionId, {
+                mode: 'off',
+                status: 'unobserved',
+                locations: [ submissionLocation(state.input.submissionId) ],
+                outcomes: [],
+            })
+        }
+        const fallback = observedFailure(
+            'scope-settlement',
+            submissionLocation(state.input.submissionId),
+            'scope-failure',
+            'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_FAILED',
+            cause
+        )
+        return createSubmissionNativeOutcome(state.input.submissionId, {
+            mode: state.mode,
+            status: 'observation-failed',
+            locations: [ fallback.fact.location ],
+            outcomes: [ fallback.fact ],
+        })
+    } finally {
+        state.unsubscribeLifecycle()
+        state.reservation?.release()
+    }
+}
+
+function createPublicOutcome(
+    state: ObservationState,
+    failures: readonly SubmissionObservedFailure[]
+): ScratchSubmissionNativeOutcome {
+
+    if (state.mode === 'off') {
+        return createSubmissionNativeOutcome(state.input.submissionId, {
+            mode: 'off',
+            status: 'unobserved',
+            locations: [ submissionLocation(state.input.submissionId) ],
+            outcomes: [],
+        })
+    }
+    const observationFailed = failures.some(failure =>
+        failure.fact.nativeErrorCategory === 'scope-failure' ||
+        failure.fact.nativeErrorCategory === 'device-lost' ||
+        failure.fact.nativeErrorCategory === 'none'
+    )
+    const locations = state.mode === 'summary'
+        ? failures.length === 0
+            ? [ submissionLocation(state.input.submissionId) ]
+            : state.issuedLocations.length > 0
+                ? state.issuedLocations
+                : [ submissionLocation(state.input.submissionId) ]
+        : state.issuedLocations
+    return createSubmissionNativeOutcome(state.input.submissionId, {
+        mode: state.mode,
+        status: failures.length === 0
+            ? 'observed-succeeded'
+            : observationFailed
+                ? 'observation-failed'
+                : 'observed-failed',
+        locations,
+        outcomes: failures.map(failure => failure.fact),
+    })
+}
+
+function assertObservationInput(input: BeginSubmissionNativeObservationInput): void {
+
+    if (typeof input.submissionId !== 'string' || input.submissionId.length === 0) {
+        throw new TypeError('Submission native observation requires a submissionId.')
+    }
+    if (typeof input.effectful !== 'boolean') {
+        throw new TypeError('Submission native observation effectful must be boolean.')
+    }
+    if (!Array.isArray(input.plan)) {
+        throw new TypeError('Submission native observation plan must be an array.')
+    }
+    if (!input.effectful && input.plan.length !== 0) {
+        throw new TypeError('Effect-free submission native observation must have an empty plan.')
+    }
+    if (input.effectful && input.plan.length === 0) {
+        throw new TypeError('Effectful submission native observation requires a non-empty plan.')
+    }
+
+    const keys = new Set<string>()
+    for (const issue of input.plan) {
+        createSubmissionNativeOutcome(input.submissionId, {
+            mode: 'detailed',
+            status: 'observed-failed',
+            locations: [ issue.location ],
+            outcomes: [ {
+                stage: issue.stage,
+                location: issue.location,
+                nativeErrorCategory: 'scope-failure',
+            } ],
+        })
+        const key = issueKey(issue)
+        if (keys.has(key)) {
+            throw new TypeError('Submission native observation plan contains a duplicate issue.')
+        }
+        keys.add(key)
+    }
+}
+
+function openScopeBundle(
+    device: GPUDevice,
+    stage: ScratchSubmissionNativeStage,
+    location: ScratchSubmissionNativeLocation
+): ScopeBundle {
+
+    const bundle: ScopeBundle = {
+        stage,
+        location,
+        boundaryFailures: [],
+        pushed: [],
+        observations: [],
+        isClosed: false,
+    }
+    if (
+        device === undefined ||
+        typeof device.pushErrorScope !== 'function' ||
+        typeof device.popErrorScope !== 'function'
+    ) {
+        bundle.boundaryFailures.push(
+            new TypeError('GPUDevice error-scope methods are unavailable.')
+        )
+        return bundle
+    }
+
+    for (const filter of [ 'out-of-memory', 'internal', 'validation' ] as const) {
+        try {
+            device.pushErrorScope(filter)
+            bundle.pushed.push(filter)
+        } catch (cause) {
+            bundle.boundaryFailures.push(cause)
+        }
+    }
+    return bundle
+}
+
+function closeScopeBundle(device: GPUDevice, bundle: ScopeBundle): void {
+
+    if (bundle.isClosed) return
+    bundle.isClosed = true
+    for (const filter of [ ...bundle.pushed ].reverse()) {
+        bundle.observations.push({
+            filter,
+            observation: popScope(device),
+        })
+    }
+}
+
+async function settleScopeBundle(
+    bundle: ScopeBundle
+): Promise<SubmissionObservedFailure[]> {
+
+    const failures = bundle.boundaryFailures.map(cause => observedFailure(
+        'scope-settlement',
+        bundle.location,
+        'scope-failure',
+        'SCRATCH_SUBMISSION_NATIVE_SCOPE_FAILED',
+        cause
+    ))
+    const observations = await Promise.all(
+        bundle.observations.map(observation => observation.observation)
+    )
+
+    for (const [ index, observation ] of observations.entries()) {
+        const filter = bundle.observations[index].filter
+        if (observation.status === 'rejected' || observation.status === 'invalid') {
+            failures.push(observedFailure(
+                'scope-settlement',
+                bundle.location,
+                'scope-failure',
+                'SCRATCH_SUBMISSION_NATIVE_SCOPE_FAILED',
+                observation.reason
+            ))
+            continue
+        }
+        if (observation.value === null) continue
+        if (!isGpuError(observation.value)) {
+            failures.push(observedFailure(
+                'scope-settlement',
+                bundle.location,
+                'scope-failure',
+                'SCRATCH_SUBMISSION_NATIVE_SCOPE_FAILED',
+                new TypeError(`The ${filter} error scope resolved with an invalid value.`)
+            ))
+            continue
+        }
+        failures.push(observedFailure(
+            bundle.stage,
+            bundle.location,
+            filter,
+            diagnosticCodeForCategory(filter),
+            observation.value
+        ))
+    }
+    return failures
+}
+
+function popScope(device: GPUDevice): Promise<ScopePromiseObservation> {
+
+    let value: unknown
+    try {
+        value = device.popErrorScope()
+    } catch (reason) {
+        return Promise.resolve(Object.freeze({ status: 'rejected', reason }))
+    }
+    if (!isObjectLike(value) || typeof (value as { then?: unknown }).then !== 'function') {
+        return Promise.resolve(Object.freeze({
+            status: 'invalid',
+            reason: new TypeError('GPUDevice.popErrorScope() did not return a Promise.'),
+        }))
+    }
+    return Promise.resolve(value as PromiseLike<GPUError | null>).then(
+        result => Object.freeze({ status: 'fulfilled', value: result }),
+        reason => Object.freeze({ status: 'rejected', reason })
+    )
+}
+
+function lifecycleFailure(
+    runtime: ScratchRuntime,
+    submissionId: string,
+    change: ScratchRuntimeLifecycleChange
+): SubmissionObservedFailure {
+
+    const location = submissionLocation(submissionId)
+    if (change.kind === 'device-lost') {
+        return observedFailure(
+            'lifecycle-recheck',
+            location,
+            'device-lost',
+            'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+            runtime.deviceLostInfo
+        )
+    }
+    return observedFailure(
+        'lifecycle-recheck',
+        location,
+        'none',
+        'SCRATCH_RUNTIME_DISPOSED'
+    )
+}
+
+function observedFailure(
+    stage: ScratchSubmissionNativeStage,
+    location: ScratchSubmissionNativeLocation,
+    nativeErrorCategory: GpuNativeErrorCategory,
+    diagnosticCode: string,
+    cause?: unknown
+): SubmissionObservedFailure {
+
+    return Object.freeze({
+        fact: Object.freeze({
+            stage,
+            location: Object.freeze({ ...location }),
+            nativeErrorCategory,
+            diagnosticCode,
+            ...(cause !== undefined
+                ? { nativeError: serializeNativeGpuError(cause) }
+                : {}),
+        }),
+        ...(cause !== undefined ? { cause } : {}),
+    })
+}
+
+function retainIssuedLocation(
+    state: ObservationState,
+    location: ScratchSubmissionNativeLocation
+): void {
+
+    const key = locationKey(location)
+    if (state.issuedLocationKeys.has(key)) return
+    state.issuedLocationKeys.add(key)
+    state.issuedLocations.push(Object.freeze({ ...location }) as ScratchSubmissionNativeLocation)
+}
+
+function submissionLocation(submissionId: string): ScratchSubmissionNativeLocation {
+
+    return Object.freeze({ kind: 'submission', submissionId })
+}
+
+function issueKey(issue: SubmissionNativeIssue): string {
+
+    return `${issue.stage}:${locationKey(issue.location)}`
+}
+
+function locationKey(location: ScratchSubmissionNativeLocation): string {
+
+    return JSON.stringify(location)
+}
+
+function diagnosticCodeForCategory(category: ScopeFilter): string {
+
+    if (category === 'validation') return 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED'
+    if (category === 'internal') return 'SCRATCH_SUBMISSION_NATIVE_INTERNAL_FAILED'
+    return 'SCRATCH_SUBMISSION_NATIVE_OUT_OF_MEMORY'
+}
+
+function isGpuError(value: unknown): value is GPUError {
+
+    if (!isObjectLike(value)) return false
+    try {
+        return typeof (value as { message?: unknown }).message === 'string'
+    } catch {
+        return false
+    }
+}
+
+function isObjectLike(value: unknown): value is object {
+
+    return value !== null && (typeof value === 'object' || typeof value === 'function')
+}

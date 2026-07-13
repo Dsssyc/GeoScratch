@@ -191,6 +191,8 @@ export type ScratchSubmissionNativeOutcome = Readonly<{
     status: ScratchSubmissionNativeOutcomeStatus
     locations: readonly ScratchSubmissionNativeLocation[]
     outcomes: readonly ScratchSubmissionNativeOutcomeFact[]
+    omittedLocationCount: number
+    omittedOutcomeCount: number
 }>
 
 export type ScratchSubmissionNativeOutcomeInput = Readonly<{
@@ -198,6 +200,8 @@ export type ScratchSubmissionNativeOutcomeInput = Readonly<{
     status: ScratchSubmissionNativeOutcomeStatus
     locations: readonly ScratchSubmissionNativeLocation[]
     outcomes: readonly ScratchSubmissionNativeOutcomeFact[]
+    omittedLocationCount?: number
+    omittedOutcomeCount?: number
 }>
 
 export type ScratchGpuRuntimeIncidentTarget = Readonly<{
@@ -580,6 +584,8 @@ export function createSubmissionNativeOutcome(
 
     assertNonEmptyString(submissionId, 'submissionId')
     assertSubmissionNativeOutcomeStatus(input.mode, input.status)
+    assertNonNegativeInteger(input.omittedLocationCount ?? 0, 'omittedLocationCount')
+    assertNonNegativeInteger(input.omittedOutcomeCount ?? 0, 'omittedOutcomeCount')
     const locations: ScratchSubmissionNativeLocation[] = input.locations
         .slice(0, MAX_SUBMISSION_NATIVE_LOCATIONS)
         .map(location => {
@@ -610,6 +616,10 @@ export function createSubmissionNativeOutcome(
         status: input.status,
         locations,
         outcomes,
+        omittedLocationCount: (input.omittedLocationCount ?? 0) +
+            Math.max(0, input.locations.length - locations.length),
+        omittedOutcomeCount: (input.omittedOutcomeCount ?? 0) +
+            Math.max(0, input.outcomes.length - outcomes.length),
     })
 }
 
