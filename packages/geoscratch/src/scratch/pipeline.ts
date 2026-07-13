@@ -1331,6 +1331,37 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
                 actual: { visibility: entry.visibility },
             })
         }
+
+        if (
+            (entry.type === 'uniform' || entry.type === 'read-storage' || entry.type === 'storage') &&
+            entry.hasDynamicOffset !== requirement.hasDynamicOffset
+        ) {
+            throwProgramLayoutMismatch(pipeline, requirement, {
+                related: [
+                    pipeline.program.subject,
+                    pipeline.subject,
+                    bindLayout.subject,
+                    bindLayout.entrySubject(entry),
+                ],
+                actual: { hasDynamicOffset: entry.hasDynamicOffset },
+            })
+        }
+
+        if (
+            (entry.type === 'uniform' || entry.type === 'read-storage' || entry.type === 'storage') &&
+            entry.minBindingSize !== 0 &&
+            entry.minBindingSize < requirement.layout.byteLength
+        ) {
+            throwProgramLayoutMismatch(pipeline, requirement, {
+                related: [
+                    pipeline.program.subject,
+                    pipeline.subject,
+                    bindLayout.subject,
+                    bindLayout.entrySubject(entry),
+                ],
+                actual: { minBindingSize: entry.minBindingSize },
+            })
+        }
     }
 }
 

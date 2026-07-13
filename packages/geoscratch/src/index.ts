@@ -51,7 +51,7 @@ export type {
     BufferCopyCommandSourceDescriptor,
     BufferToBufferCopyCommandDescriptor,
     BufferToTextureCopyCommandDescriptor,
-    CommandDynamicOffsets,
+    CommandBindSetInvocation,
     CommandReadinessDescriptor,
     CommandResourceAccessDescriptor,
     CommandResourceReadDescriptor,

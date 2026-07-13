@@ -99,7 +99,7 @@ async function createUniformFixture(format = 'bgra8unorm') {
     })
     const draw = runtime.createDrawCommand({
         pipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         count: { vertexCount: 3 },
         resources: {
             read: [ readResource(uniformBuffer, 1) ],
@@ -335,7 +335,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         try {
             fixtureA.runtime.createDrawCommand({
                 pipeline: fixtureA.pipeline,
-                bindSets: [ fixtureB.bindSet ],
+                bindSets: [ { set: fixtureB.bindSet } ],
                 count: { vertexCount: 3 },
                 resources: {
                     read: [ readResource(fixtureA.uniformBuffer, 1) ],
@@ -372,7 +372,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         try {
             fixtureA.runtime.createDrawCommand({
                 pipeline: fixtureA.pipeline,
-                bindSets: [ fixtureA.bindSet ],
+                bindSets: [ { set: fixtureA.bindSet } ],
                 count: { vertexCount: 3 },
                 resources: {
                     read: [ readResource(fixtureA.uniformBuffer, 1) ],
@@ -438,7 +438,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         try {
             fixture.runtime.createDrawCommand({
                 pipeline: fixture.pipeline,
-                bindSets: [ otherSet ],
+                bindSets: [ { set: otherSet } ],
                 count: { vertexCount: 3 },
                 resources: {
                     read: [ readResource(otherBuffer) ],

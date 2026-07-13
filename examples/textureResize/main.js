@@ -162,7 +162,7 @@ async function main() {
     const draw = runtime.createDrawCommand({
         label: 'draw resized texture',
         pipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         count: { vertexCount: 6 },
         resources: {
             read: [ { resource: texture, contentEpoch: 2 } ],

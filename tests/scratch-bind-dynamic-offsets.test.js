@@ -150,6 +150,13 @@ function createUploads(runtime, buffers) {
     }))
 }
 
+function bindSetInvocation(set, dynamicOffsets) {
+
+    return dynamicOffsets === undefined
+        ? { set }
+        : { set, dynamicOffsets }
+}
+
 async function createRenderFixture(entries = [ dynamicUniformEntry() ]) {
 
     const fixture = await createRuntimeFixture()
@@ -246,7 +253,7 @@ function createDrawCommand(fixture, overrides = {}) {
 
     return fixture.runtime.createDrawCommand({
         pipeline: fixture.pipeline,
-        bindSets: [ fixture.bindSet ],
+        bindSets: [ bindSetInvocation(fixture.bindSet) ],
         count: { vertexCount: 3 },
         resources: {
             read: fixture.buffers.map(buffer => readResource(buffer, 1)),
@@ -261,10 +268,10 @@ function createDispatchCommand(fixture, overrides = {}) {
 
     return fixture.runtime.createDispatchCommand({
         pipeline: fixture.pipeline,
-        bindSets: [ fixture.bindSet ],
+        bindSets: [ bindSetInvocation(fixture.bindSet) ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ readResource(fixture.buffers[0], 1) ],
+            read: fixture.buffers.map(buffer => readResource(buffer, 1)),
             write: [ fixture.buffers[fixture.buffers.length - 1] ],
         },
         whenMissing: 'throw',
@@ -434,7 +441,7 @@ describe('scratch dynamic buffer bind offsets', () => {
 
         const fixture = await createRenderFixture()
         const draw = createDrawCommand(fixture, {
-            dynamicOffsets: { 0: [ 256 ] },
+            bindSets: [ bindSetInvocation(fixture.bindSet, { uniforms: 256 }) ],
         })
         const submitted = submitRender(fixture, [ draw ])
 
@@ -452,7 +459,10 @@ describe('scratch dynamic buffer bind offsets', () => {
 
         const fixture = await createComputeFixture()
         const dispatch = createDispatchCommand(fixture, {
-            dynamicOffsets: { 1: [ 256, 512 ] },
+            bindSets: [ bindSetInvocation(fixture.bindSet, {
+                inputValues: 256,
+                outputValues: 512,
+            }) ],
         })
         const submitted = submitCompute(fixture, [ dispatch ])
 
@@ -466,7 +476,7 @@ describe('scratch dynamic buffer bind offsets', () => {
         await submitted.done
     })
 
-    it('interprets dynamic offsets by bind entry index order', async() => {
+    it('normalizes named dynamic offsets to native binding-index order', async() => {
 
         const entries = [
             dynamicUniformEntry({
@@ -483,7 +493,10 @@ describe('scratch dynamic buffer bind offsets', () => {
         const fixture = await createRenderFixture(entries)
         fixture.device.limits.minStorageBufferOffsetAlignment = 128
         const draw = createDrawCommand(fixture, {
-            dynamicOffsets: { 0: [ 128, 256 ] },
+            bindSets: [ bindSetInvocation(fixture.bindSet, {
+                uniforms: 256,
+                inputValues: 128,
+            }) ],
         })
         const submitted = submitRender(fixture, [ draw ])
 
@@ -494,6 +507,33 @@ describe('scratch dynamic buffer bind offsets', () => {
             dynamicOffsets: [ 128, 256 ],
         })
 
+        await submitted.done
+    })
+
+    it('snapshots and freezes the public BindSet invocation at Command construction', async() => {
+
+        const fixture = await createRenderFixture()
+        const suppliedOffsets = { uniforms: 256 }
+        const suppliedInvocation = bindSetInvocation(fixture.bindSet, suppliedOffsets)
+        const draw = createDrawCommand(fixture, {
+            bindSets: [ suppliedInvocation ],
+        })
+
+        suppliedOffsets.uniforms = 512
+
+        expect(draw.bindSets[0]).to.not.equal(suppliedInvocation)
+        expect(draw.bindSets[0].dynamicOffsets).to.deep.equal({ uniforms: 256 })
+        expect(Object.isFrozen(draw.bindSets)).to.equal(true)
+        expect(Object.isFrozen(draw.bindSets[0])).to.equal(true)
+        expect(Object.isFrozen(draw.bindSets[0].dynamicOffsets)).to.equal(true)
+
+        const submitted = submitRender(fixture, [ draw ])
+        expect(fixture.calls.renderPasses[0].actions).to.deep.include({
+            type: 'setBindGroup',
+            group: 0,
+            bindGroup: fixture.calls.bindGroups[0],
+            dynamicOffsets: [ 256 ],
+        })
         await submitted.done
     })
 
@@ -517,16 +557,15 @@ describe('scratch dynamic buffer bind offsets', () => {
         expect(diagnostic.related.map(subject => subject.kind)).to.include.members([ 'Command', 'BindSet', 'BindLayout' ])
         expect(diagnostic.expected).to.deep.equal({
             group: 0,
-            count: 1,
-            bindings: [ 0 ],
+            names: [ 'uniforms' ],
         })
         expect(diagnostic.actual).to.deep.equal({
             group: 0,
-            offsets: undefined,
+            names: [],
         })
     })
 
-    it('rejects extra dynamic offsets for a non-dynamic bind set', async() => {
+    it('rejects extra named offsets for a non-dynamic bind set', async() => {
 
         const fixture = await createRenderFixture([
             {
@@ -538,7 +577,7 @@ describe('scratch dynamic buffer bind offsets', () => {
         ])
         const diagnostic = expectDiagnostic(() => {
             createDrawCommand(fixture, {
-                dynamicOffsets: { 0: [ 0 ] },
+                bindSets: [ bindSetInvocation(fixture.bindSet, { uniforms: 0 }) ],
             })
         }, {
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
@@ -549,49 +588,23 @@ describe('scratch dynamic buffer bind offsets', () => {
         expect(diagnostic.subject).to.deep.equal(fixture.bindSet.subject)
         expect(diagnostic.expected).to.deep.equal({
             group: 0,
-            count: 0,
-            bindings: [],
+            names: [],
         })
         expect(diagnostic.actual).to.deep.equal({
             group: 0,
-            count: 1,
-            offsets: [ 0 ],
+            names: [ 'uniforms' ],
         })
     })
 
-    it('rejects dynamic offsets for a bind group not used by the command', async() => {
-
-        const fixture = await createRenderFixture()
-        const diagnostic = expectDiagnostic(() => {
-            createDrawCommand(fixture, {
-                dynamicOffsets: {
-                    0: [ 256 ],
-                    2: [ 256 ],
-                },
-            })
-        }, {
-            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
-            severity: 'error',
-            phase: 'binding',
-        })
-
-        expect(diagnostic.subject).to.deep.equal({
-            ...fixture.pipeline.subject,
-        })
-        expect(diagnostic.expected).to.deep.equal({
-            groups: [ 0 ],
-        })
-        expect(diagnostic.actual).to.deep.equal({
-            group: 2,
-        })
-    })
-
-    it('rejects wrong dynamic offset counts with structured diagnostics', async() => {
+    it('rejects missing and extra dynamic binding names together', async() => {
 
         const fixture = await createComputeFixture()
         const diagnostic = expectDiagnostic(() => {
             createDispatchCommand(fixture, {
-                dynamicOffsets: { 1: [ 256 ] },
+                bindSets: [ bindSetInvocation(fixture.bindSet, {
+                    inputValues: 256,
+                    otherValues: 512,
+                }) ],
             })
         }, {
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
@@ -599,32 +612,48 @@ describe('scratch dynamic buffer bind offsets', () => {
             phase: 'binding',
         })
 
-        expect(diagnostic.subject).to.deep.equal({
-            kind: 'BindLayoutEntry',
-            group: 1,
-            binding: 0,
-            name: 'inputValues',
-        })
+        expect(diagnostic.subject).to.deep.equal(fixture.bindSet.subject)
         expect(diagnostic.expected).to.deep.equal({
             group: 1,
-            count: 2,
-            bindings: [ 0, 1 ],
+            names: [ 'inputValues', 'outputValues' ],
         })
         expect(diagnostic.actual).to.deep.equal({
             group: 1,
-            count: 1,
-            offsets: [ 256 ],
+            names: [ 'inputValues', 'otherValues' ],
+            missing: [ 'outputValues' ],
+            extra: [ 'otherValues' ],
         })
     })
 
-    it('rejects negative, fractional, and non-number dynamic offsets', async() => {
+    it('requires an explicit zero for every dynamic binding', async() => {
 
-        const cases = [ -1, 1.5, '256' ]
+        const fixture = await createComputeFixture()
+        const dispatch = createDispatchCommand(fixture, {
+            bindSets: [ bindSetInvocation(fixture.bindSet, {
+                inputValues: 0,
+                outputValues: 256,
+            }) ],
+        })
+        const submitted = submitCompute(fixture, [ dispatch ])
+
+        expect(fixture.calls.computePasses[0].actions).to.deep.include({
+            type: 'setBindGroup',
+            group: 1,
+            bindGroup: fixture.calls.bindGroups[0],
+            dynamicOffsets: [ 0, 256 ],
+        })
+
+        await submitted.done
+    })
+
+    it('rejects negative, fractional, non-finite, non-number, and out-of-range offsets', async() => {
+
+        const cases = [ -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, '256', 0x1_0000_0000 ]
         for (const offset of cases) {
             const fixture = await createRenderFixture()
             const diagnostic = expectDiagnostic(() => {
                 createDrawCommand(fixture, {
-                    dynamicOffsets: { 0: [ offset ] },
+                    bindSets: [ bindSetInvocation(fixture.bindSet, { uniforms: offset }) ],
                 })
             }, {
                 code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
@@ -639,12 +668,12 @@ describe('scratch dynamic buffer bind offsets', () => {
                 name: 'uniforms',
             })
             expect(diagnostic.expected).to.deep.equal({
-                offset: 'non-negative integer',
+                offset: 'uint32',
             })
             expect(diagnostic.actual).to.deep.equal({
                 group: 0,
                 binding: 0,
-                index: 0,
+                name: 'uniforms',
                 offset,
             })
         }
@@ -655,7 +684,7 @@ describe('scratch dynamic buffer bind offsets', () => {
         const fixture = await createRenderFixture()
         const diagnostic = expectDiagnostic(() => {
             createDrawCommand(fixture, {
-                dynamicOffsets: { 0: [ 128 ] },
+                bindSets: [ bindSetInvocation(fixture.bindSet, { uniforms: 128 }) ],
             })
         }, {
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_UNALIGNED',
@@ -675,8 +704,9 @@ describe('scratch dynamic buffer bind offsets', () => {
         expect(diagnostic.actual).to.deep.equal({
             group: 0,
             binding: 0,
-            index: 0,
+            name: 'uniforms',
             offset: 128,
+            effectiveOffset: 128,
         })
     })
 
@@ -685,7 +715,10 @@ describe('scratch dynamic buffer bind offsets', () => {
         const fixture = await createComputeFixture()
         const diagnostic = expectDiagnostic(() => {
             createDispatchCommand(fixture, {
-                dynamicOffsets: { 1: [ 128, 256 ] },
+                bindSets: [ bindSetInvocation(fixture.bindSet, {
+                    inputValues: 128,
+                    outputValues: 256,
+                }) ],
             })
         }, {
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_UNALIGNED',
@@ -705,8 +738,86 @@ describe('scratch dynamic buffer bind offsets', () => {
         expect(diagnostic.actual).to.deep.equal({
             group: 1,
             binding: 0,
-            index: 0,
+            name: 'inputValues',
             offset: 128,
+            effectiveOffset: 128,
+        })
+    })
+
+    it('rejects an effective buffer range that exceeds the parent allocation', async() => {
+
+        const fixture = await createRenderFixture()
+        const diagnostic = expectDiagnostic(() => {
+            createDrawCommand(fixture, {
+                bindSets: [ bindSetInvocation(fixture.bindSet, { uniforms: 2048 }) ],
+            })
+        }, {
+            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_OUT_OF_BOUNDS',
+            severity: 'error',
+            phase: 'binding',
+        })
+
+        expect(diagnostic.expected).to.deep.equal({
+            bufferSize: 2048,
+            effectiveEnd: '<= bufferSize',
+        })
+        expect(diagnostic.actual).to.deep.equal({
+            group: 0,
+            binding: 0,
+            name: 'uniforms',
+            regionOffset: 0,
+            dynamicOffset: 2048,
+            effectiveOffset: 2048,
+            effectiveSize: 16,
+            effectiveEnd: 2064,
+        })
+    })
+
+    it('rejects raw ordered arrays and the removed descriptor-level field', async() => {
+
+        const fixture = await createRenderFixture()
+        const rawArrayDiagnostic = expectDiagnostic(() => {
+            createDrawCommand(fixture, {
+                bindSets: [ {
+                    set: fixture.bindSet,
+                    dynamicOffsets: [ 256 ],
+                } ],
+            })
+        }, {
+            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+            severity: 'error',
+            phase: 'binding',
+        })
+        const removedFieldDiagnostic = expectDiagnostic(() => {
+            createDrawCommand(fixture, {
+                bindSets: [ bindSetInvocation(fixture.bindSet, { uniforms: 256 }) ],
+                dynamicOffsets: { 0: [ 256 ] },
+            })
+        }, {
+            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+            severity: 'error',
+            phase: 'binding',
+        })
+
+        expect(rawArrayDiagnostic.actual).to.deep.include({ dynamicOffsets: 'array' })
+        expect(removedFieldDiagnostic.actual).to.have.property('dynamicOffsets')
+    })
+
+    it('rejects the removed bare BindSet invocation shape', async() => {
+
+        const fixture = await createRenderFixture()
+        const diagnostic = expectDiagnostic(() => {
+            createDrawCommand(fixture, {
+                bindSets: [ fixture.bindSet ],
+            })
+        }, {
+            code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'pipeline',
+        })
+
+        expect(diagnostic.expected).to.deep.equal({
+            invocation: '{ set: BindSet, dynamicOffsets?: Record<string, number> }',
         })
     })
 
@@ -714,10 +825,10 @@ describe('scratch dynamic buffer bind offsets', () => {
 
         const fixture = await createRenderFixture()
         const firstDraw = createDrawCommand(fixture, {
-            dynamicOffsets: { 0: [ 256 ] },
+            bindSets: [ bindSetInvocation(fixture.bindSet, { uniforms: 256 }) ],
         })
         const secondDraw = createDrawCommand(fixture, {
-            dynamicOffsets: { 0: [ 512 ] },
+            bindSets: [ bindSetInvocation(fixture.bindSet, { uniforms: 512 }) ],
         })
         const submitted = submitRender(fixture, [ firstDraw, secondDraw ])
         const bindActions = fixture.calls.renderPasses[0].actions

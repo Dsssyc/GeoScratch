@@ -90,7 +90,7 @@ async function createComputeFixture() {
     const dispatch = runtime.createDispatchCommand({
         label: 'dispatch double compute',
         pipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         count: { workgroups: [ 1, 1, 1 ] },
         resources: {
             read: [ readResource(input, 1) ],

@@ -101,7 +101,7 @@ async function main() {
     const draw = runtime.createDrawCommand({
         label: 'draw scratch uniform triangle',
         pipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         count: { vertexCount: 3 },
         resources: {
             read: [

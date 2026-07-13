@@ -617,9 +617,9 @@ describe('scratch native indexed and indirect execution', () => {
             resources: { read: [ readResource(indexBuffer) ], write: [] },
             whenMissing: 'throw',
         })
-        fixture.runtime.createDrawCommand({
+        const boundDraw = fixture.runtime.createDrawCommand({
             pipeline: boundPipeline,
-            bindSets: [ bindSet ],
+            bindSets: [ { set: bindSet } ],
             count: { vertexCount: 3 },
             resources: { read: [ readResource(boundBuffer) ], write: [] },
             whenMissing: 'throw',
@@ -634,7 +634,7 @@ describe('scratch native indexed and indirect execution', () => {
         expect(() => { indexedDraw.indexBuffer = undefined }).to.throw(TypeError)
         expect(() => { bindSet.bindings.clear() }).to.throw(TypeError)
         expect(() => { Map.prototype.clear.call(bindSet.bindings) }).to.throw(TypeError)
-        expect(() => { Map.prototype.set.call(draw.dynamicOffsets, 0, [ 4 ]) }).to.throw(TypeError)
+        expect(() => { boundDraw.bindSets[0].set = bindSet }).to.throw(TypeError)
         draw.dispose()
         expect(draw.isDisposed).to.equal(true)
         expect(() => { draw.isDisposed = false }).to.throw(TypeError)

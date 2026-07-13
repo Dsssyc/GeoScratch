@@ -508,6 +508,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         name: 'uniforms',
         type: 'uniform',
         visibility: [ 'vertex', 'fragment' ],
+        hasDynamicOffset: false,
         layout: codec.artifact,
     }
     const compatProgramBufferRequirement: scratchCompat.ProgramBufferLayoutRequirement = programBufferRequirement
@@ -610,8 +611,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         visibility: [ 'vertex' ],
         hasDynamicOffset: true,
     }
-    const compatDynamicDispatchOffsets: scratchCompat.DispatchCommandDescriptor['dynamicOffsets'] = {
-        3: [ 256, 512 ],
+    const compatDynamicInvocation: scratchCompat.CommandBindSetInvocation = {
+        set: dynamicStorageSet,
+        dynamicOffsets: {
+            dynamicInputValues: 256,
+            dynamicOutputValues: 512,
+        },
     }
     const textureLayout: scr.BindLayout = await runtime.createBindLayout({
         label: 'typed texture layout',
@@ -855,7 +860,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     new scr.ScratchRenderPipeline(runtime, { program, targets: [ { format: surface.format } ] })
     const draw: scr.DrawCommand = runtime.createDrawCommand({
         pipeline: scratchPipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         vertexBuffers: [
             { slot: 0, region: vertexRegion },
         ],
@@ -873,7 +878,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatDrawReadiness: scratchCompat.CommandReadinessDescriptor<scratchCompat.DrawCommand> = drawReadiness
     const fallbackDraw: scr.DrawCommand = runtime.createDrawCommand({
         pipeline: scratchPipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         vertexBuffers: [
             { slot: 0, region: vertexRegion },
         ],
@@ -1102,7 +1107,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const dispatch: scr.DispatchCommand = runtime.createDispatchCommand({
         pipeline: computePipeline,
-        bindSets: [ storageSet ],
+        bindSets: [ { set: storageSet } ],
         count: { workgroups: [ 1 ] },
         resources: {
             read: [ storageInputRead ],
@@ -1117,7 +1122,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatDispatchReadiness: scratchCompat.CommandReadinessDescriptor<scratchCompat.DispatchCommand> = dispatchReadiness
     const fallbackDispatch: scr.DispatchCommand = runtime.createDispatchCommand({
         pipeline: computePipeline,
-        bindSets: [ storageSet ],
+        bindSets: [ { set: storageSet } ],
         count: { workgroups: [ 1 ] },
         resources: {
             read: [ storageInputRead ],
@@ -1159,7 +1164,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const indirectDispatch: scr.DispatchCommand = runtime.createDispatchCommand({
         pipeline: computePipeline,
-        bindSets: [ storageSet ],
+        bindSets: [ { set: storageSet } ],
         count: dispatchCount,
         resources: {
             read: [ storageInputRead, indirectRead ],
@@ -1169,27 +1174,29 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const dynamicDispatch: scr.DispatchCommand = runtime.createDispatchCommand({
         pipeline: dynamicComputePipeline,
-        bindSets: [ dynamicStorageSet ],
+        bindSets: [ {
+            set: dynamicStorageSet,
+            dynamicOffsets: {
+                dynamicInputValues: 256,
+                dynamicOutputValues: 512,
+            },
+        } ],
         count: { workgroups: [ 1 ] },
         resources: {
             read: [ storageInputRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',
-        dynamicOffsets: {
-            3: [ 256, 512 ],
-        },
     })
     const compatDynamicDispatchDescriptor: scratchCompat.DispatchCommandDescriptor = {
         pipeline: dynamicComputePipeline,
-        bindSets: [ dynamicStorageSet ],
+        bindSets: [ compatDynamicInvocation ],
         count: { workgroups: [ 1 ] },
         resources: {
             read: [ compatStorageInputRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',
-        dynamicOffsets: compatDynamicDispatchOffsets,
     }
     const compatDynamicDispatch: scratchCompat.DispatchCommand = runtime.createDispatchCommand(compatDynamicDispatchDescriptor)
     const computePass: scr.ComputePassSpec = runtime.createComputePass({

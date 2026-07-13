@@ -289,7 +289,7 @@ async function main() {
     const sampleDraw = runtime.createDrawCommand({
         label: 'draw preserved checker region',
         pipeline: samplePipeline,
-        bindSets: [ sampleSet ],
+        bindSets: [ { set: sampleSet } ],
         count: { vertexCount: 6 },
         resources: {
             read: [ { resource: offscreenTexture, contentEpoch: 1 } ],

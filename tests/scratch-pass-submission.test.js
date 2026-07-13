@@ -243,6 +243,95 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         await submitted.done
     })
 
+    it('supports native-renderable 2d-array and 3d attachment views', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const arrayTexture = await runtime.createTexture({
+            size: [ 8, 8, 2 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const volumeTexture = await runtime.createTexture({
+            dimension: '3d',
+            size: [ 8, 8, 4 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const arrayPass = runtime.createRenderPass({
+            color: [ {
+                target: arrayTexture.view({
+                    dimension: '2d-array',
+                    baseArrayLayer: 1,
+                    arrayLayerCount: 1,
+                }),
+            } ],
+        })
+        const volumePass = runtime.createRenderPass({
+            color: [ {
+                target: volumeTexture.view({ dimension: '3d' }),
+                depthSlice: 2,
+            } ],
+        })
+
+        const arrayWork = runtime.submission().render(arrayPass).submit()
+        const volumeWork = runtime.submission().render(volumePass).submit()
+
+        expect(fake.calls.renderPasses[0].descriptor.colorAttachments[0]).to.deep.equal({
+            view: fake.calls.textureViews[0],
+            loadOp: 'clear',
+            storeOp: 'store',
+        })
+        expect(fake.calls.textureViews[0].descriptor).to.deep.include({
+            dimension: '2d-array',
+            baseArrayLayer: 1,
+            arrayLayerCount: 1,
+        })
+        expect(fake.calls.renderPasses[1].descriptor.colorAttachments[0]).to.deep.equal({
+            view: fake.calls.textureViews[1],
+            loadOp: 'clear',
+            storeOp: 'store',
+            depthSlice: 2,
+        })
+        expect(fake.calls.textureViews[1].descriptor.dimension).to.equal('3d')
+
+        await Promise.all([ arrayWork.done, volumeWork.done ])
+    })
+
+    it('requires a current in-range depthSlice only for 3d color attachments', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const volumeTexture = await runtime.createTexture({
+            dimension: '3d',
+            size: [ 8, 8, 4 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const twoDTexture = await runtime.createTexture({
+            size: [ 8, 8 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+
+        for (const descriptor of [
+            { target: volumeTexture.view({ dimension: '3d' }) },
+            { target: volumeTexture.view({ dimension: '3d' }), depthSlice: 4 },
+            { target: twoDTexture.view(), depthSlice: 0 },
+        ]) {
+            await expectScratchDiagnostic(() => runtime.createRenderPass({
+                color: [ descriptor ],
+            }), {
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        expect(fake.calls.textureViews).to.have.length(0)
+    })
+
     it('keeps compatibility render attachments valid after array-layer growth', async() => {
 
         const fixture = await createRenderTargetScene()

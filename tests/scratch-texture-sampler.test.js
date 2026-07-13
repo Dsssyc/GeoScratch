@@ -461,7 +461,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         })
         const draw = fixture.runtime.createDrawCommand({
             pipeline,
-            bindSets: [ fixture.bindSet ],
+            bindSets: [ { set: fixture.bindSet } ],
             count: { vertexCount: 3 },
             resources: {
                 read: [ { resource: fixture.texture, contentEpoch: 1 } ],
@@ -553,7 +553,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         })
         const dispatch = fixture.runtime.createDispatchCommand({
             pipeline,
-            bindSets: [ bindSet ],
+            bindSets: [ { set: bindSet } ],
             count: { workgroups: [ 1 ] },
             resources: {
                 read: [ { resource: fixture.texture, contentEpoch: 1 } ],

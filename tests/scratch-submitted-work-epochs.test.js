@@ -160,7 +160,7 @@ async function createCompute(runtime, input, output, readContentEpoch = input.co
     const dispatch = runtime.createDispatchCommand({
         label: 'dispatch values',
         pipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         count: { workgroups: [ 1 ] },
         resources: {
             read: [ readResource(input, readContentEpoch) ],

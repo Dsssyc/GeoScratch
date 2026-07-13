@@ -46,6 +46,20 @@ function createParticleCodec(name = 'Particle') {
     })
 }
 
+function createAbiMismatchCodec(name = 'WideParticle') {
+
+    return layoutCodec({
+        label: `${name} buffer`,
+        name,
+        fields: [
+            { name: 'position', type: 'vec4f' },
+            { name: 'mass', type: 'f32' },
+        ],
+    }, {
+        usage: [ 'storage', 'readback' ],
+    })
+}
+
 async function createRuntimeFixture() {
 
     const fake = createFakeGpu()
@@ -67,6 +81,7 @@ function createRequirement(codec, overrides = {}) {
         name: 'particles',
         type: 'storage',
         visibility: [ 'compute' ],
+        hasDynamicOffset: false,
         layout: codec.artifact,
         ...overrides,
     }
@@ -200,9 +215,13 @@ describe('scratch Program buffer layout requirements', () => {
                 name: 'particles',
                 type: 'storage',
                 visibility: [ 'compute' ],
+                hasDynamicOffset: false,
                 layout: codec.artifact,
             },
         ])
+        expect(Object.isFrozen(program.layoutRequirements)).to.equal(true)
+        expect(Object.isFrozen(program.layoutRequirements[0])).to.equal(true)
+        expect(Object.isFrozen(program.layoutRequirements[0].visibility)).to.equal(true)
         expect(program.bindSets).to.equal(undefined)
         expect(program.resources).to.equal(undefined)
         expect(program.drawCount).to.equal(undefined)
@@ -275,6 +294,16 @@ describe('scratch Program buffer layout requirements', () => {
                 overrides: { visibility: [ 'compute', 'task' ] },
                 expected: { visibility: [ 'vertex', 'fragment', 'compute' ] },
                 actual: { visibility: [ 'compute', 'task' ] },
+            },
+            {
+                overrides: { hasDynamicOffset: undefined },
+                expected: { hasDynamicOffset: 'boolean' },
+                actual: { hasDynamicOffset: undefined },
+            },
+            {
+                overrides: { hasDynamicOffset: 0 },
+                expected: { hasDynamicOffset: 'boolean' },
+                actual: { hasDynamicOffset: 0 },
             },
         ]
 
@@ -368,6 +397,9 @@ describe('scratch Program buffer layout requirements', () => {
             name: 'particles',
             type: 'storage',
             visibility: [ 'compute' ],
+            hasDynamicOffset: false,
+            abiByteLength: codec.artifact.byteLength,
+            minBindingSize: `0 or >= ${codec.artifact.byteLength}`,
             abiHash: codec.artifact.abiHash,
             schemaHash: codec.artifact.schemaHash,
         })
@@ -434,6 +466,58 @@ describe('scratch Program buffer layout requirements', () => {
         }
     })
 
+    it('rejects pipeline creation when the dynamic-offset contract differs', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const codec = createParticleCodec()
+        const program = createProgram(runtime, codec)
+        const bindLayout = await createBindLayout(runtime, {
+            hasDynamicOffset: true,
+        })
+        const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
+            await runtime.createComputePipeline({
+                program,
+                bindLayouts: [ bindLayout ],
+            })
+        })
+
+        expect(diagnostic.expected).to.deep.include({ hasDynamicOffset: false })
+        expect(diagnostic.actual).to.deep.equal({ hasDynamicOffset: true })
+    })
+
+    it('enforces the Program ABI lower bound only for nonzero minBindingSize', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const codec = createParticleCodec()
+        const program = createProgram(runtime, codec)
+        const deferredLayout = await createBindLayout(runtime, {
+            minBindingSize: 0,
+        })
+        const tooSmallLayout = await createBindLayout(runtime, {
+            minBindingSize: codec.artifact.byteLength - 4,
+        })
+
+        const pipeline = await runtime.createComputePipeline({
+            program,
+            bindLayouts: [ deferredLayout ],
+        })
+        const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
+            await runtime.createComputePipeline({
+                program,
+                bindLayouts: [ tooSmallLayout ],
+            })
+        })
+
+        expect(pipeline).to.be.instanceOf(ScratchComputePipeline)
+        expect(diagnostic.expected).to.deep.include({
+            abiByteLength: codec.artifact.byteLength,
+            minBindingSize: `0 or >= ${codec.artifact.byteLength}`,
+        })
+        expect(diagnostic.actual).to.deep.equal({
+            minBindingSize: codec.artifact.byteLength - 4,
+        })
+    })
+
     it('accepts draw and dispatch commands with matching bind sets and buffer layouts', async() => {
 
         const { runtime } = await createRuntimeFixture()
@@ -465,7 +549,7 @@ describe('scratch Program buffer layout requirements', () => {
 
         const draw = runtime.createDrawCommand({
             pipeline: renderPipeline,
-            bindSets: [ renderSet ],
+            bindSets: [ { set: renderSet } ],
             count: { vertexCount: 3 },
             resources: {
                 read: [ readResource(renderSet.bindings.get('particles').resource.buffer) ],
@@ -475,11 +559,11 @@ describe('scratch Program buffer layout requirements', () => {
         })
         const dispatch = runtime.createDispatchCommand({
             pipeline: computePipeline,
-            bindSets: [ computeSet ],
+            bindSets: [ { set: computeSet } ],
             count: { workgroups: [ 1 ] },
             resources: {
-                read: [],
-                write: [],
+                read: [ readResource(computeSet.bindings.get('particles').resource.buffer) ],
+                write: [ computeSet.bindings.get('particles').resource.buffer ],
             },
             whenMissing: 'throw',
         })
@@ -566,7 +650,7 @@ describe('scratch Program buffer layout requirements', () => {
         const drawDiagnostic = expectProgramLayoutDiagnostic(() => {
             runtime.createDrawCommand({
                 pipeline: renderPipeline,
-                bindSets: [ renderSet ],
+                bindSets: [ { set: renderSet } ],
                 count: { vertexCount: 3 },
                 resources: {
                     read: [ readResource(renderSet.bindings.get('particles').resource.buffer) ],
@@ -578,11 +662,11 @@ describe('scratch Program buffer layout requirements', () => {
         const dispatchDiagnostic = expectProgramLayoutDiagnostic(() => {
             runtime.createDispatchCommand({
                 pipeline: computePipeline,
-                bindSets: [ computeSet ],
+                bindSets: [ { set: computeSet } ],
                 count: { workgroups: [ 1 ] },
                 resources: {
-                    read: [],
-                    write: [],
+                    read: [ readResource(computeSet.bindings.get('particles').resource.buffer) ],
+                    write: [ computeSet.bindings.get('particles').resource.buffer ],
                 },
                 whenMissing: 'throw',
             })
@@ -626,7 +710,7 @@ describe('scratch Program buffer layout requirements', () => {
         const drawDiagnostic = expectProgramLayoutDiagnostic(() => {
             runtime.createDrawCommand({
                 pipeline: renderPipeline,
-                bindSets: [ renderSet ],
+                bindSets: [ { set: renderSet } ],
                 count: { vertexCount: 3 },
                 resources: {
                     read: [ readResource(renderSet.bindings.get('particles').resource.buffer) ],
@@ -638,11 +722,11 @@ describe('scratch Program buffer layout requirements', () => {
         const dispatchDiagnostic = expectProgramLayoutDiagnostic(() => {
             runtime.createDispatchCommand({
                 pipeline: computePipeline,
-                bindSets: [ computeSet ],
+                bindSets: [ { set: computeSet } ],
                 count: { workgroups: [ 1 ] },
                 resources: {
-                    read: [],
-                    write: [],
+                    read: [ readResource(computeSet.bindings.get('particles').resource.buffer) ],
+                    write: [ computeSet.bindings.get('particles').resource.buffer ],
                 },
                 whenMissing: 'throw',
             })
@@ -662,5 +746,39 @@ describe('scratch Program buffer layout requirements', () => {
         })
         expect(drawDiagnostic.actual.difference.path).to.match(/^schema/)
         expect(dispatchDiagnostic.actual.difference.path).to.match(/^schema/)
+    })
+
+    it('reports ABI incompatibility before exact schema incompatibility', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const expectedCodec = createParticleCodec()
+        const actualCodec = createAbiMismatchCodec()
+        const bindLayout = await createBindLayout(runtime)
+        const pipeline = await runtime.createComputePipeline({
+            program: createProgram(runtime, expectedCodec),
+            bindLayouts: [ bindLayout ],
+        })
+        const bindSet = await runtime.createBindSet(bindLayout, {
+            particles: await createLayoutBuffer(runtime, actualCodec),
+        })
+
+        const diagnostic = expectProgramLayoutDiagnostic(() => {
+            runtime.createDispatchCommand({
+                pipeline,
+                bindSets: [ { set: bindSet } ],
+                count: { workgroups: [ 1 ] },
+                resources: {
+                    read: [ readResource(bindSet.bindings.get('particles').resource.buffer) ],
+                    write: [ bindSet.bindings.get('particles').resource.buffer ],
+                },
+                whenMissing: 'throw',
+            })
+        })
+
+        expect(diagnostic.actual).to.deep.include({
+            abiHash: actualCodec.artifact.abiHash,
+            schemaHash: actualCodec.artifact.schemaHash,
+        })
+        expect(diagnostic.actual.difference.path).to.match(/^abi/)
     })
 })

@@ -1,7 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { advanceQuerySlotContentEpoch, QuerySetResource } from './query-set.js'
-import { TextureResource, TextureViewSpec, createNativeTextureView, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
+import { TextureResource, TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -35,6 +35,7 @@ export type RenderPassColorAttachmentSpec = {
     load?: GPULoadOp
     store?: GPUStoreOp
     clear?: GPUColor
+    depthSlice?: number
     viewDescriptor?: GPUTextureViewDescriptor
 }
 
@@ -60,6 +61,11 @@ export type ComputePassSpecDescriptor = {
     label?: string
     timestampWrites?: TimestampWritesSpec
 }
+
+export type RenderPassNativeAttachments = Readonly<{
+    color: readonly (GPUTextureView | undefined)[]
+    depth?: GPUTextureView
+}>
 
 type RenderAttachmentExtent = {
     subject: DiagnosticSubject
@@ -148,34 +154,6 @@ export class RenderPassSpec {
         this.runtime.assertActive()
     }
 
-    createRenderPassDescriptor(): GPURenderPassDescriptor {
-
-        this.assertUsable()
-        this.occlusionQuerySet?.assertUsable()
-
-        const descriptor: GPURenderPassDescriptor = {
-            colorAttachments: this.color.map((attachment) => {
-                const target = attachment.target
-                target.assertUsable()
-
-                const colorAttachment: GPURenderPassColorAttachment = {
-                    view: createColorAttachmentView(attachment),
-                    loadOp: attachment.load ?? 'clear',
-                    storeOp: attachment.store ?? 'store',
-                }
-                if (attachment.clear !== undefined) colorAttachment.clearValue = attachment.clear
-
-                return colorAttachment
-            }),
-        }
-        if (this.label !== undefined) descriptor.label = this.label
-        if (this.depth !== undefined) descriptor.depthStencilAttachment = createDepthStencilAttachmentDescriptor(this.depth)
-        if (this.timestampWrites !== undefined) descriptor.timestampWrites = createTimestampWritesDescriptor(this.timestampWrites)
-        if (this.occlusionQuerySet !== undefined) descriptor.occlusionQuerySet = this.occlusionQuerySet.gpuQuerySet
-
-        return descriptor
-    }
-
     hasEncoderSideEffects(): boolean {
 
         return this.color.length > 0 || this.depth !== undefined || this.timestampWrites !== undefined
@@ -190,6 +168,46 @@ export class RenderPassSpec {
 
         this.isDisposed = true
     }
+}
+
+export function createRenderPassDescriptor(
+    pass: RenderPassSpec,
+    nativeAttachments: RenderPassNativeAttachments
+): GPURenderPassDescriptor {
+
+    pass.assertUsable()
+    pass.occlusionQuerySet?.assertUsable()
+    if (nativeAttachments.color.length !== pass.color.length) {
+        throw new TypeError('RenderPass native color attachment count does not match its PassSpec.')
+    }
+
+    const descriptor: GPURenderPassDescriptor = {
+        colorAttachments: pass.color.map((attachment, index) => {
+            const target = attachment.target
+            target.assertUsable()
+
+            const colorAttachment: GPURenderPassColorAttachment = {
+                view: createColorAttachmentView(attachment, nativeAttachments.color[index]),
+                loadOp: attachment.load ?? 'clear',
+                storeOp: attachment.store ?? 'store',
+            }
+            if (attachment.clear !== undefined) colorAttachment.clearValue = attachment.clear
+            if (attachment.depthSlice !== undefined) colorAttachment.depthSlice = attachment.depthSlice
+
+            return colorAttachment
+        }),
+    }
+    if (pass.label !== undefined) descriptor.label = pass.label
+    if (pass.depth !== undefined) {
+        descriptor.depthStencilAttachment = createDepthStencilAttachmentDescriptor(
+            pass.depth,
+            nativeAttachments.depth
+        )
+    }
+    if (pass.timestampWrites !== undefined) descriptor.timestampWrites = createTimestampWritesDescriptor(pass.timestampWrites)
+    if (pass.occlusionQuerySet !== undefined) descriptor.occlusionQuerySet = pass.occlusionQuerySet.gpuQuerySet
+
+    return descriptor
 }
 
 export interface ComputePassSpec {
@@ -473,6 +491,8 @@ function normalizeColorAttachment(
             store: attachment.store ?? 'store',
         }
         if (attachment.clear !== undefined) normalized.clear = attachment.clear
+        const depthSlice = normalizeColorAttachmentDepthSlice(pass, target, attachment.depthSlice)
+        if (depthSlice !== undefined) normalized.depthSlice = depthSlice
         return normalized
     }
 
@@ -513,19 +533,82 @@ function normalizeColorAttachment(
         store: attachment.store ?? 'store',
     }
     if (attachment.clear !== undefined) normalized.clear = attachment.clear
+    if (attachment.depthSlice !== undefined) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject: target.subject,
+            related: [ pass.subject ],
+            message: 'Surface color attachments cannot select a 3D depth slice.',
+            expected: { depthSlice: undefined },
+            actual: { depthSlice: attachment.depthSlice },
+        })
+    }
     if (attachment.viewDescriptor !== undefined) normalized.viewDescriptor = attachment.viewDescriptor
 
     return normalized
 }
 
-function createColorAttachmentView(attachment: RenderPassColorAttachmentSpec): GPUTextureView {
+function createColorAttachmentView(
+    attachment: RenderPassColorAttachmentSpec,
+    persistentView: GPUTextureView | undefined
+): GPUTextureView {
 
     const target = attachment.target
     if (isTextureViewSpec(target)) {
-        return createNativeTextureView(target)
+        if (persistentView === undefined) {
+            throw new TypeError('Persistent render color attachment has no submission-scoped native view.')
+        }
+        return persistentView
     }
 
     return target.getCurrentTexture().createView(attachment.viewDescriptor)
+}
+
+function normalizeColorAttachmentDepthSlice(
+    pass: RenderPassSpec,
+    view: TextureViewSpec,
+    depthSlice: unknown
+): number | undefined {
+
+    if (view.descriptor.dimension !== '3d') {
+        if (depthSlice === undefined) return undefined
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject: view.subject,
+            related: [ pass.subject ],
+            message: 'Only 3D color attachment views accept depthSlice.',
+            expected: { depthSlice: undefined },
+            actual: { depthSlice },
+        })
+    }
+
+    const mipDepth = Math.max(
+        1,
+        Math.floor(view.texture.depthOrArrayLayers / (2 ** view.descriptor.baseMipLevel))
+    )
+    if (
+        typeof depthSlice !== 'number' ||
+        !Number.isInteger(depthSlice) ||
+        depthSlice < 0 ||
+        depthSlice >= mipDepth
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject: view.subject,
+            related: [ pass.subject ],
+            message: '3D color attachment depthSlice must select the current mip extent.',
+            expected: { depthSlice: `integer in [0, ${mipDepth})` },
+            actual: { depthSlice, mipDepth },
+        })
+    }
+
+    return depthSlice
 }
 
 function normalizeDepthStencilAttachment(
@@ -634,11 +717,15 @@ function normalizeStencilClearValue(
 }
 
 function createDepthStencilAttachmentDescriptor(
-    attachment: RenderPassDepthStencilAttachmentSpec
+    attachment: RenderPassDepthStencilAttachmentSpec,
+    nativeView: GPUTextureView | undefined
 ): GPURenderPassDepthStencilAttachment {
 
+    if (nativeView === undefined) {
+        throw new TypeError('Persistent render depth attachment has no submission-scoped native view.')
+    }
     const descriptor: GPURenderPassDepthStencilAttachment = {
-        view: createNativeTextureView(attachment.target),
+        view: nativeView,
     }
     if (attachment.depthLoad !== undefined) descriptor.depthLoadOp = attachment.depthLoad
     if (attachment.depthStore !== undefined) descriptor.depthStoreOp = attachment.depthStore
@@ -685,9 +772,15 @@ function validateRenderAttachmentView(
     view.texture.assertRuntime(pass.runtime)
     const prepared = prepareTextureViewSpecDescriptor(view)
     if (
-        prepared.dimension !== '2d' ||
+        !(
+            prepared.dimension === '2d' ||
+            prepared.dimension === '2d-array' ||
+            prepared.dimension === '3d'
+        ) ||
         prepared.mipLevelCount !== 1 ||
-        prepared.arrayLayerCount !== 1
+        prepared.arrayLayerCount !== 1 ||
+        prepared.aspect !== 'all' ||
+        prepared.swizzle !== 'rgba'
     ) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
@@ -695,12 +788,14 @@ function validateRenderAttachmentView(
             phase: 'resource',
             subject: view.subject,
             related: [ pass.subject ],
-            message: 'Render attachment views must select exactly one 2D mip-level array layer.',
+            message: 'Render attachment view does not satisfy the WebGPU renderable-view contract.',
             expected: {
                 viewDescriptor: {
-                    dimension: '2d',
+                    dimension: [ '2d', '2d-array', '3d' ],
                     mipLevelCount: 1,
                     arrayLayerCount: 1,
+                    aspect: 'all',
+                    swizzle: 'rgba',
                 },
             },
             actual: { viewDescriptor: prepared },

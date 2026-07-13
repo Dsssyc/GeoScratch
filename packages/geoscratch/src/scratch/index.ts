@@ -177,7 +177,7 @@ export { ComputePipeline, RenderPipeline } from './pipeline.js'
 export { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 export type {
     BeginOcclusionQueryCommandDescriptor,
-    CommandDynamicOffsets,
+    CommandBindSetInvocation,
     CommandReadinessDescriptor,
     CommandResourceAccessDescriptor,
     CommandResourceReadDescriptor,

@@ -215,7 +215,7 @@ async function main() {
         const sampleDraw = runtime.createDrawCommand({
             label: 'draw render to texture sampled quad',
             pipeline: samplePipeline,
-            bindSets: [ sampleBindSet ],
+            bindSets: [ { set: sampleBindSet } ],
             count: { vertexCount: 6 },
             resources: {
                 read: [

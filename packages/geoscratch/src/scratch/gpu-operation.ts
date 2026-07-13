@@ -185,6 +185,7 @@ export type ScratchSubmissionNativeOutcomeStatus =
 
 export type ScratchSubmissionNativeStage =
     | 'encoder-create'
+    | 'attachment-view'
     | 'pass-begin'
     | 'command-encode'
     | 'pass-end'
@@ -217,6 +218,17 @@ export type ScratchSubmissionNativeLocation =
         stepIndex: number
         passId: string
         passKind: 'render' | 'compute'
+    }>
+    | Readonly<{
+        kind: 'render-attachment'
+        submissionId: string
+        stepIndex: number
+        passId: string
+        attachmentKind: 'color' | 'depth-stencil'
+        attachmentIndex: number
+        viewSpecHash: string
+        resourceId: string
+        allocationVersion: number
     }>
     | Readonly<{
         kind: 'standalone-command'
@@ -1318,6 +1330,17 @@ function assertSubmissionNativeLocation(
             assertNonEmptyString(location.passId, 'passId')
             assertPassKind(location.passKind)
             return
+        case 'render-attachment':
+            assertNonNegativeInteger(location.stepIndex, 'stepIndex')
+            assertNonEmptyString(location.passId, 'passId')
+            if (location.attachmentKind !== 'color' && location.attachmentKind !== 'depth-stencil') {
+                throw new TypeError(`Unsupported render attachment kind: ${String(location.attachmentKind)}`)
+            }
+            assertNonNegativeInteger(location.attachmentIndex, 'attachmentIndex')
+            assertNonEmptyString(location.viewSpecHash, 'viewSpecHash')
+            assertNonEmptyString(location.resourceId, 'resourceId')
+            assertNonNegativeInteger(location.allocationVersion, 'allocationVersion')
+            return
         case 'standalone-command':
             assertNonNegativeInteger(location.stepIndex, 'stepIndex')
             assertNonEmptyString(location.commandId, 'commandId')
@@ -1343,6 +1366,7 @@ function assertSubmissionNativeStage(value: unknown): asserts value is ScratchSu
 
     if (
         value === 'encoder-create' ||
+        value === 'attachment-view' ||
         value === 'pass-begin' ||
         value === 'command-encode' ||
         value === 'pass-end' ||

@@ -13,21 +13,22 @@ export type ProgramEntryPoints = {
     compute?: string
 }
 
-export type ProgramBufferLayoutRequirement = {
+export type ProgramBufferLayoutRequirement = Readonly<{
     group: number
     binding: number
     name?: string
     type: 'uniform' | 'read-storage' | 'storage'
-    visibility?: BindVisibility[]
+    visibility?: readonly BindVisibility[]
+    hasDynamicOffset: boolean
     layout: LayoutArtifact
-}
+}>
 
 export type ProgramDescriptor = {
     label?: string
     modules: string[]
     entryPoints?: ProgramEntryPoints
     requiredFeatures?: Iterable<GPUFeatureName>
-    layoutRequirements?: ProgramBufferLayoutRequirement[]
+    layoutRequirements?: readonly ProgramBufferLayoutRequirement[]
 }
 
 export interface Program {
@@ -37,7 +38,7 @@ export interface Program {
     modules: string[]
     entryPoints: ProgramEntryPoints
     requiredFeatures: GPUFeatureName[]
-    layoutRequirements: ProgramBufferLayoutRequirement[]
+    layoutRequirements: readonly ProgramBufferLayoutRequirement[]
     isDisposed: boolean
 }
 
@@ -133,6 +134,9 @@ export function programLayoutRequirementExpected(requirement: ProgramBufferLayou
         ...(requirement.name !== undefined ? { name: requirement.name } : {}),
         type: requirement.type,
         ...(requirement.visibility !== undefined ? { visibility: requirement.visibility } : {}),
+        hasDynamicOffset: requirement.hasDynamicOffset,
+        abiByteLength: requirement.layout.byteLength,
+        minBindingSize: `0 or >= ${requirement.layout.byteLength}`,
         abiHash: requirement.layout.abiHash,
         schemaHash: requirement.layout.schemaHash,
     }
@@ -195,9 +199,9 @@ function normalizeRequiredFeatures(requiredFeatures: Iterable<GPUFeatureName> | 
     return [ ...requiredFeatures ]
 }
 
-function normalizeLayoutRequirements(program: Program, layoutRequirements: unknown): ProgramBufferLayoutRequirement[] {
+function normalizeLayoutRequirements(program: Program, layoutRequirements: unknown): readonly ProgramBufferLayoutRequirement[] {
 
-    if (layoutRequirements === undefined) return []
+    if (layoutRequirements === undefined) return Object.freeze([])
 
     if (!Array.isArray(layoutRequirements)) {
         throwScratchDiagnostic({
@@ -212,7 +216,7 @@ function normalizeLayoutRequirements(program: Program, layoutRequirements: unkno
     }
 
     const seen = new Set<string>()
-    return layoutRequirements.map((requirement) => {
+    const normalized = layoutRequirements.map((requirement) => {
         const normalized = normalizeLayoutRequirement(program, requirement)
         const key = `${normalized.group}:${normalized.binding}`
         if (seen.has(key)) {
@@ -231,6 +235,7 @@ function normalizeLayoutRequirements(program: Program, layoutRequirements: unkno
 
         return normalized
     })
+    return Object.freeze(normalized)
 }
 
 function normalizeLayoutRequirement(program: Program, requirement: unknown): ProgramBufferLayoutRequirement {
@@ -247,6 +252,7 @@ function normalizeLayoutRequirement(program: Program, requirement: unknown): Pro
     const name = requirement.name
     const type = requirement.type
     const visibility = requirement.visibility
+    const hasDynamicOffset = requirement.hasDynamicOffset
     const layout = requirement.layout
     const subjectInput = {
         group,
@@ -284,6 +290,13 @@ function normalizeLayoutRequirement(program: Program, requirement: unknown): Pro
 
     const normalizedVisibility = normalizeLayoutRequirementVisibility(program, subjectInput, visibility)
 
+    if (typeof hasDynamicOffset !== 'boolean') {
+        throwLayoutRequirementDiagnostic(program, subjectInput, {
+            expected: { hasDynamicOffset: 'boolean' },
+            actual: { hasDynamicOffset },
+        })
+    }
+
     if (!isLayoutArtifact(layout)) {
         throwLayoutRequirementDiagnostic(program, subjectInput, {
             expected: { layout: 'LayoutArtifact' },
@@ -294,20 +307,21 @@ function normalizeLayoutRequirement(program: Program, requirement: unknown): Pro
     const normalized: ProgramBufferLayoutRequirement = {
         group,
         binding,
+        ...(name !== undefined ? { name } : {}),
         type,
+        ...(normalizedVisibility !== undefined ? { visibility: normalizedVisibility } : {}),
+        hasDynamicOffset,
         layout,
     }
-    if (name !== undefined) normalized.name = name
-    if (normalizedVisibility !== undefined) normalized.visibility = normalizedVisibility
 
-    return normalized
+    return Object.freeze(normalized)
 }
 
 function normalizeLayoutRequirementVisibility(
     program: Program,
     subjectInput: { group: unknown, binding: unknown, name: unknown },
     visibility: unknown
-): BindVisibility[] | undefined {
+): readonly BindVisibility[] | undefined {
 
     if (visibility === undefined) return undefined
 
@@ -327,7 +341,7 @@ function normalizeLayoutRequirementVisibility(
         }
     }
 
-    return [ ...visibility ]
+    return Object.freeze([ ...visibility ])
 }
 
 function isProgramBufferLayoutRequirementType(type: unknown): type is ProgramBufferLayoutRequirement['type'] {

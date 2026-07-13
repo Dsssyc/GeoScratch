@@ -7,6 +7,7 @@ import {
     isLayoutArtifact,
     isLayoutUploadView,
     layoutArtifactSubject,
+    layoutArtifactsAbiCompatible,
     layoutArtifactsSchemaCompatible,
 } from './layout-codec.js'
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
@@ -182,7 +183,10 @@ export type DrawIndexBufferBinding = {
     format: GPUIndexFormat
 }
 
-export type CommandDynamicOffsets = Record<number, number[]>
+export type CommandBindSetInvocation = Readonly<{
+    set: BindSet
+    dynamicOffsets?: Readonly<Record<string, number>>
+}>
 
 export type NormalizedDrawVertexBufferBinding = DrawVertexBufferBinding
 
@@ -225,8 +229,7 @@ export type CommandResourceAccessDescriptor = {
 type DrawCommandDescriptorBase = {
     label?: string
     pipeline: RenderPipeline
-    bindSets?: BindSet[]
-    dynamicOffsets?: CommandDynamicOffsets
+    bindSets?: CommandBindSetInvocation[]
     vertexBuffers?: DrawVertexBufferBinding[]
     resources: CommandResourceAccessDescriptor
 }
@@ -417,8 +420,7 @@ type StrictIndirectDispatchCount = IndirectCommandCount & {
 type DispatchCommandDescriptorBase = {
     label?: string
     pipeline: ComputePipeline
-    bindSets?: BindSet[]
-    dynamicOffsets?: CommandDynamicOffsets
+    bindSets?: CommandBindSetInvocation[]
     count: StrictStaticDispatchCount | StrictIndirectDispatchCount
     resources: CommandResourceAccessDescriptor
 }
@@ -567,8 +569,7 @@ export interface DrawCommand {
     readonly label?: string
     readonly commandKind: 'draw'
     readonly pipeline: RenderPipeline
-    readonly bindSets: readonly BindSet[]
-    readonly dynamicOffsets: ReadonlyMap<number, readonly number[]>
+    readonly bindSets: readonly CommandBindSetInvocation[]
     readonly vertexBuffers: readonly Readonly<NormalizedDrawVertexBufferBinding>[]
     readonly indexBuffer?: Readonly<NormalizedDrawIndexBufferBinding>
     readonly count: Readonly<StaticDrawCount> | Readonly<StaticIndexedDrawCount> | Readonly<NormalizedIndirectCommandCount>
@@ -610,8 +611,8 @@ export class DrawCommand {
         if (descriptor.label !== undefined) mutable.label = descriptor.label
         mutable.commandKind = 'draw'
         mutable.pipeline = pipeline
-        mutable.bindSets = normalizeBindSets(this, descriptor.bindSets)
-        mutable.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
+        rejectRemovedCommandDynamicOffsets(this, descriptor)
+        mutable.bindSets = normalizeBindSetInvocations(this, descriptor.bindSets)
         mutable.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
         const indexBuffer = normalizeIndexBuffer(this, descriptor.indexBuffer)
         if (indexBuffer !== undefined) mutable.indexBuffer = indexBuffer
@@ -619,6 +620,7 @@ export class DrawCommand {
         this.#producesDeclaredWrites = drawCountProducesDeclaredWrites(mutable.count)
         mutable.resources = normalizeResourceAccess(this, descriptor.resources)
         validateDrawFixedFunctionReads(this)
+        validateBoundResourceAccess(this)
         const readiness = normalizeReadinessContract(this, descriptor.whenMissing, descriptor.fallback)
         mutable.whenMissing = readiness.whenMissing
         if (readiness.fallback !== undefined) mutable.fallback = readiness.fallback
@@ -683,8 +685,8 @@ export class DrawCommand {
 
         this.runtime.assertActive()
         this.pipeline.assertUsable()
-        for (const bindSet of this.bindSets) {
-            bindSet.assertUsable()
+        for (const invocation of this.bindSets) {
+            invocation.set.assertUsable()
         }
         for (const binding of this.vertexBuffers) {
             binding.region.assertUsable()
@@ -725,8 +727,8 @@ export class DrawCommand {
         this.assertUsable()
 
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
-        for (const bindSet of this.bindSets) {
-            setBindGroupWithDynamicOffsets(this, passEncoder, bindSet)
+        for (const invocation of this.bindSets) {
+            setBindGroupWithDynamicOffsets(this, passEncoder, invocation)
         }
         for (const binding of this.vertexBuffers) {
             passEncoder.setVertexBuffer(
@@ -1040,8 +1042,7 @@ export interface DispatchCommand {
     readonly label?: string
     readonly commandKind: 'dispatch'
     readonly pipeline: ComputePipeline
-    readonly bindSets: readonly BindSet[]
-    readonly dynamicOffsets: ReadonlyMap<number, readonly number[]>
+    readonly bindSets: readonly CommandBindSetInvocation[]
     readonly count: Readonly<{ workgroups: readonly [number, number, number] }> | Readonly<NormalizedIndirectCommandCount>
     readonly resources: CommandResourceAccessDescriptor
     readonly whenMissing: ResourceReadinessPolicy
@@ -1078,12 +1079,13 @@ export class DispatchCommand {
         if (descriptor.label !== undefined) mutable.label = descriptor.label
         mutable.commandKind = 'dispatch'
         mutable.pipeline = pipeline
-        mutable.bindSets = normalizeBindSets(this, descriptor.bindSets)
-        mutable.dynamicOffsets = normalizeDynamicOffsets(this, descriptor.dynamicOffsets)
+        rejectRemovedCommandDynamicOffsets(this, descriptor)
+        mutable.bindSets = normalizeBindSetInvocations(this, descriptor.bindSets)
         mutable.count = normalizeDispatchCount(this, descriptor.count)
         this.#producesDeclaredWrites = dispatchCountProducesDeclaredWrites(mutable.count)
         mutable.resources = normalizeResourceAccess(this, descriptor.resources)
         validateDispatchFixedFunctionReads(this)
+        validateBoundResourceAccess(this)
         const readiness = normalizeReadinessContract(this, descriptor.whenMissing, descriptor.fallback)
         mutable.whenMissing = readiness.whenMissing
         if (readiness.fallback !== undefined) mutable.fallback = readiness.fallback
@@ -1148,8 +1150,8 @@ export class DispatchCommand {
 
         this.runtime.assertActive()
         this.pipeline.assertUsable()
-        for (const bindSet of this.bindSets) {
-            bindSet.assertUsable()
+        for (const invocation of this.bindSets) {
+            invocation.set.assertUsable()
         }
         if ('indirect' in this.count) this.count.indirect.assertUsable()
         for (const resource of [
@@ -1186,8 +1188,8 @@ export class DispatchCommand {
         this.assertUsable()
 
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
-        for (const bindSet of this.bindSets) {
-            setBindGroupWithDynamicOffsets(this, passEncoder, bindSet)
+        for (const invocation of this.bindSets) {
+            setBindGroupWithDynamicOffsets(this, passEncoder, invocation)
         }
         if ('indirect' in this.count) {
             passEncoder.dispatchWorkgroupsIndirect(
@@ -1230,6 +1232,7 @@ function dispatchCountProducesDeclaredWrites(count: DispatchCommand['count']): b
 
 function lockDrawCommandContract(command: DrawCommand): void {
 
+    for (const invocation of command.bindSets) Object.freeze(invocation)
     Object.freeze(command.bindSets)
     for (const binding of command.vertexBuffers) Object.freeze(binding)
     Object.freeze(command.vertexBuffers)
@@ -1242,7 +1245,6 @@ function lockDrawCommandContract(command: DrawCommand): void {
         'commandKind',
         'pipeline',
         'bindSets',
-        'dynamicOffsets',
         'vertexBuffers',
         'indexBuffer',
         'count',
@@ -1255,6 +1257,7 @@ function lockDrawCommandContract(command: DrawCommand): void {
 
 function lockDispatchCommandContract(command: DispatchCommand): void {
 
+    for (const invocation of command.bindSets) Object.freeze(invocation)
     Object.freeze(command.bindSets)
     if ('workgroups' in command.count) Object.freeze(command.count.workgroups)
     Object.freeze(command.count)
@@ -1265,7 +1268,6 @@ function lockDispatchCommandContract(command: DispatchCommand): void {
         'commandKind',
         'pipeline',
         'bindSets',
-        'dynamicOffsets',
         'count',
         'resources',
         'whenMissing',
@@ -2927,7 +2929,42 @@ function throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason
     })
 }
 
-function normalizeBindSets(command: DrawCommand | DispatchCommand, bindSets: BindSet[] = []): BindSet[] {
+type DynamicOffsetCommand = DrawCommand | DispatchCommand
+type DynamicBufferBindLayoutEntry = Extract<
+    NormalizedBindLayoutEntry,
+    { type: 'uniform' | 'read-storage' | 'storage' }
+> & {
+    type: 'uniform' | 'read-storage' | 'storage'
+    hasDynamicOffset: true
+}
+
+const commandNativeDynamicOffsets = new WeakMap<DynamicOffsetCommand, ReadonlyMap<number, readonly number[]>>()
+
+function rejectRemovedCommandDynamicOffsets(command: DynamicOffsetCommand, descriptor: unknown): void {
+
+    if (!isRecord(descriptor) || !Object.prototype.hasOwnProperty.call(descriptor, 'dynamicOffsets')) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+        severity: 'error',
+        phase: 'binding',
+        subject: command.subject,
+        related: [ command.pipeline.subject ],
+        message: 'Dynamic offsets belong to each Command BindSet invocation.',
+        expected: {
+            bindSets: [ {
+                set: 'BindSet',
+                dynamicOffsets: 'Record<string, number>',
+            } ],
+        },
+        actual: { dynamicOffsets: describeValue(descriptor.dynamicOffsets) },
+    })
+}
+
+function normalizeBindSetInvocations(
+    command: DynamicOffsetCommand,
+    bindSets: CommandBindSetInvocation[] = []
+): CommandBindSetInvocation[] {
 
     if (!Array.isArray(bindSets)) {
         throwScratchDiagnostic({
@@ -2936,13 +2973,31 @@ function normalizeBindSets(command: DrawCommand | DispatchCommand, bindSets: Bin
             phase: 'pipeline',
             subject: command.pipeline.subject,
             related: [ command.subject ],
-            message: 'Command bindSets must be an array.',
-            expected: { bindSets: 'BindSet[]' },
-            actual: { bindSets },
+            message: 'Command bindSets must be an array of BindSet invocations.',
+            expected: { bindSets: 'CommandBindSetInvocation[]' },
+            actual: { bindSets: describeValue(bindSets) },
         })
     }
 
-    for (const bindSet of bindSets) {
+    const groups = new Set<number>()
+    const nativeOffsets = new Map<number, readonly number[]>()
+    const normalized = bindSets.map((invocation): CommandBindSetInvocation => {
+        if (!isRecord(invocation) || !('set' in invocation)) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
+                severity: 'error',
+                phase: 'pipeline',
+                subject: command.pipeline.subject,
+                related: [ command.subject ],
+                message: 'Command bindSets must contain explicit BindSet invocation objects.',
+                expected: {
+                    invocation: '{ set: BindSet, dynamicOffsets?: Record<string, number> }',
+                },
+                actual: { invocation: describeValue(invocation) },
+            })
+        }
+
+        const bindSet = invocation.set
         if (!bindSet || typeof bindSet.assertRuntime !== 'function') {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
@@ -2950,15 +3005,15 @@ function normalizeBindSets(command: DrawCommand | DispatchCommand, bindSets: Bin
                 phase: 'pipeline',
                 subject: command.pipeline.subject,
                 related: [ command.subject ],
-                message: 'Command bindSets must contain BindSet objects.',
-                expected: { bindSet: 'BindSet' },
-                actual: { bindSet: bindSet === undefined || bindSet === null ? String(bindSet) : typeof bindSet },
+                message: 'Command BindSet invocation requires a BindSet.',
+                expected: { set: 'BindSet' },
+                actual: { set: describeValue(bindSet) },
             })
         }
 
         bindSet.assertRuntime(command.runtime)
-
-        const expectedLayout = command.pipeline.bindLayoutsByGroup.get(bindSet.layout.group)
+        const group = bindSet.layout.group
+        const expectedLayout = command.pipeline.bindLayoutsByGroup.get(group)
         if (expectedLayout !== bindSet.layout) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
@@ -2971,146 +3026,109 @@ function normalizeBindSets(command: DrawCommand | DispatchCommand, bindSets: Bin
                     bindSet.layout.subject,
                 ],
                 message: 'Command BindSet layout is not part of its Pipeline layout.',
-                expected: { group: bindSet.layout.group, layoutId: expectedLayout?.id },
-                actual: { group: bindSet.layout.group, layoutId: bindSet.layout.id },
+                expected: { group, layoutId: expectedLayout?.id },
+                actual: { group, layoutId: bindSet.layout.id },
             })
         }
-    }
 
-    return [ ...bindSets ]
-}
-
-type DynamicOffsetCommand = DrawCommand | DispatchCommand
-type DynamicBufferBindLayoutEntry = Extract<
-    NormalizedBindLayoutEntry,
-    { type: 'uniform' | 'read-storage' | 'storage' }
-> & {
-    type: 'uniform' | 'read-storage' | 'storage'
-    hasDynamicOffset: true
-}
-
-function normalizeDynamicOffsets(
-    command: DynamicOffsetCommand,
-    dynamicOffsets: CommandDynamicOffsets | undefined
-): ReadonlyMap<number, readonly number[]> {
-
-    const suppliedOffsets = normalizeDynamicOffsetRecord(command, dynamicOffsets)
-    const bindSetGroups = command.bindSets.map(bindSet => bindSet.layout.group)
-
-    for (const group of suppliedOffsets.keys()) {
-        if (!bindSetGroups.includes(group)) {
+        if (groups.has(group)) {
             throwScratchDiagnostic({
-                code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+                code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
                 severity: 'error',
-                phase: 'binding',
+                phase: 'pipeline',
                 subject: command.pipeline.subject,
-                related: [ command.subject ],
-                message: 'Command dynamic offsets reference a bind group not used by this command.',
-                expected: { groups: bindSetGroups },
-                actual: { group },
+                related: [ command.subject, bindSet.subject ],
+                message: 'Command BindSet invocations must use each bind group at most once.',
+                expected: { uniqueGroup: group },
+                actual: { duplicateGroup: group },
             })
         }
-    }
+        groups.add(group)
 
-    const normalized = new Map<number, number[]>()
-    for (const bindSet of command.bindSets) {
-        const entries = dynamicBufferEntries(bindSet)
-        const group = bindSet.layout.group
-        const offsets = suppliedOffsets.get(group)
+        const offsets = normalizeInvocationDynamicOffsets(command, bindSet, invocation.dynamicOffsets)
+        if (offsets.native.length > 0) nativeOffsets.set(group, offsets.native)
 
-        if (entries.length === 0) {
-            if (offsets !== undefined && offsets.length > 0) {
-                throwDynamicOffsetCountDiagnostic(command, bindSet, [], offsets, bindSet.subject)
-            }
-            continue
-        }
+        const result: {
+            set: BindSet
+            dynamicOffsets?: Readonly<Record<string, number>>
+        } = { set: bindSet }
+        if (offsets.public !== undefined) result.dynamicOffsets = offsets.public
+        return result
+    })
 
-        if (offsets === undefined) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_BIND_DYNAMIC_OFFSET_MISSING',
-                severity: 'error',
-                phase: 'binding',
-                subject: bindSet.layout.entrySubject(entries[0]),
-                related: dynamicOffsetRelatedSubjects(command, bindSet, entries[0]),
-                message: 'Command is missing dynamic offsets required by its BindLayout.',
-                expected: dynamicOffsetExpected(group, entries),
-                actual: {
-                    group,
-                    offsets: undefined,
-                },
-            })
-        }
-
-        if (offsets.length !== entries.length) {
-            throwDynamicOffsetCountDiagnostic(command, bindSet, entries, offsets, bindSet.layout.entrySubject(entries[0]))
-        }
-
-        const normalizedOffsets = offsets.map((offset, index) => {
-            const entry = entries[index]
-            validateDynamicOffsetValue(command, bindSet, entry, offset, index)
-            return offset
-        })
-
-        normalized.set(group, normalizedOffsets)
-    }
-
-    for (const offsets of normalized.values()) Object.freeze(offsets)
-    return readonlyMapSnapshot(normalized)
+    commandNativeDynamicOffsets.set(command, readonlyMapSnapshot(nativeOffsets))
+    return normalized
 }
 
-function normalizeDynamicOffsetRecord(
+function normalizeInvocationDynamicOffsets(
     command: DynamicOffsetCommand,
-    dynamicOffsets: CommandDynamicOffsets | undefined
-): Map<number, number[]> {
+    bindSet: BindSet,
+    supplied: unknown
+): Readonly<{
+    public: Readonly<Record<string, number>> | undefined
+    native: readonly number[]
+}> {
 
-    const normalized = new Map<number, number[]>()
-    if (dynamicOffsets === undefined) return normalized
-
-    if (!dynamicOffsets || typeof dynamicOffsets !== 'object' || Array.isArray(dynamicOffsets)) {
+    const entries = dynamicBufferEntries(bindSet)
+    if (supplied !== undefined && (!isRecord(supplied) || Array.isArray(supplied))) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
             severity: 'error',
             phase: 'binding',
-            subject: command.subject,
-            related: [ command.pipeline.subject ],
-            message: 'Command dynamicOffsets must be an object keyed by bind group.',
-            expected: { dynamicOffsets: 'Record<number, number[]>' },
-            actual: { dynamicOffsets: describeValue(dynamicOffsets) },
+            subject: bindSet.subject,
+            related: [ command.subject, bindSet.layout.subject ],
+            message: 'BindSet invocation dynamicOffsets must be keyed by binding name.',
+            expected: { dynamicOffsets: 'Record<string, number>' },
+            actual: { dynamicOffsets: Array.isArray(supplied) ? 'array' : describeValue(supplied) },
         })
     }
 
-    for (const [ key, offsets ] of Object.entries(dynamicOffsets)) {
-        const group = Number(key)
-        if (!Number.isInteger(group) || group < 0 || String(group) !== key) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
-                severity: 'error',
-                phase: 'binding',
-                subject: command.subject,
-                related: [ command.pipeline.subject ],
-                message: 'Command dynamic offset groups must be non-negative integers.',
-                expected: { group: 'non-negative integer' },
-                actual: { group: key },
-            })
-        }
+    const record = supplied as Record<string, unknown> | undefined
+    const expectedNames = entries.map(entry => entry.name)
+    const actualNames = record === undefined ? [] : Object.keys(record).sort()
+    const missing = expectedNames.filter(name => !actualNames.includes(name))
+    const extra = actualNames.filter(name => !expectedNames.includes(name))
 
-        if (!Array.isArray(offsets)) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
-                severity: 'error',
-                phase: 'binding',
-                subject: command.subject,
-                related: [ command.pipeline.subject ],
-                message: 'Command dynamic offsets for a bind group must be an array.',
-                expected: { offsets: 'number[]' },
-                actual: { group, offsets: describeValue(offsets) },
-            })
-        }
-
-        normalized.set(group, [ ...offsets ])
+    if (missing.length > 0 || extra.length > 0) {
+        const onlyMissing = missing.length > 0 && extra.length === 0
+        throwScratchDiagnostic({
+            code: onlyMissing
+                ? 'SCRATCH_BIND_DYNAMIC_OFFSET_MISSING'
+                : 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+            severity: 'error',
+            phase: 'binding',
+            subject: onlyMissing
+                ? bindSet.layout.entrySubject(entries.find(entry => entry.name === missing[0]))
+                : bindSet.subject,
+            related: dynamicOffsetRelatedSubjects(
+                command,
+                bindSet,
+                entries.find(entry => entry.name === missing[0])
+            ),
+            message: 'BindSet invocation dynamic offsets must exactly cover its dynamic buffer entries.',
+            expected: { group: bindSet.layout.group, names: expectedNames },
+            actual: {
+                group: bindSet.layout.group,
+                names: actualNames,
+                ...(!onlyMissing && missing.length > 0 ? { missing } : {}),
+                ...(!onlyMissing && extra.length > 0 && missing.length > 0 ? { extra } : {}),
+            },
+        })
     }
 
-    return normalized
+    const normalizedRecord: Record<string, number> = {}
+    const native = entries.map((entry) => {
+        const offset = record![entry.name]
+        validateDynamicOffsetValue(command, bindSet, entry, offset)
+        normalizedRecord[entry.name] = offset as number
+        return offset as number
+    })
+
+    Object.freeze(native)
+    return Object.freeze({
+        public: supplied === undefined ? undefined : Object.freeze(normalizedRecord),
+        native,
+    })
 }
 
 function dynamicBufferEntries(bindSet: BindSet): DynamicBufferBindLayoutEntry[] {
@@ -3123,58 +3141,56 @@ function dynamicBufferEntries(bindSet: BindSet): DynamicBufferBindLayoutEntry[] 
         .sort((a, b) => a.binding - b.binding)
 }
 
-function throwDynamicOffsetCountDiagnostic(
-    command: DynamicOffsetCommand,
-    bindSet: BindSet,
-    entries: DynamicBufferBindLayoutEntry[],
-    offsets: number[],
-    subject: DiagnosticSubject
-): never {
-
-    throwScratchDiagnostic({
-        code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
-        severity: 'error',
-        phase: 'binding',
-        subject,
-        related: dynamicOffsetRelatedSubjects(command, bindSet, entries[0]),
-        message: 'Command dynamic offset count does not match its BindLayout dynamic buffer entries.',
-        expected: dynamicOffsetExpected(bindSet.layout.group, entries),
-        actual: {
-            group: bindSet.layout.group,
-            count: offsets.length,
-            offsets,
-        },
-    })
-}
-
 function validateDynamicOffsetValue(
     command: DynamicOffsetCommand,
     bindSet: BindSet,
     entry: DynamicBufferBindLayoutEntry,
-    offset: unknown,
-    index: number
+    offset: unknown
 ): void {
 
-    if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0) {
+    if (
+        typeof offset !== 'number' ||
+        !Number.isFinite(offset) ||
+        !Number.isInteger(offset) ||
+        offset < 0 ||
+        offset > GPU_SIZE_32_MAX
+    ) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
             severity: 'error',
             phase: 'binding',
             subject: bindSet.layout.entrySubject(entry),
             related: dynamicOffsetRelatedSubjects(command, bindSet, entry),
-            message: 'Command dynamic offsets must be non-negative integers.',
-            expected: { offset: 'non-negative integer' },
+            message: 'Command dynamic offsets must be WebGPU uint32 values.',
+            expected: { offset: 'uint32' },
             actual: {
                 group: bindSet.layout.group,
                 binding: entry.binding,
-                index,
+                name: entry.name,
                 offset,
             },
         })
     }
 
+    const binding = bindSet.bindings.get(entry.name)
+    if (binding === undefined || !isBufferRegion(binding.resource)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
+            severity: 'error',
+            phase: 'binding',
+            subject: bindSet.layout.entrySubject(entry),
+            related: dynamicOffsetRelatedSubjects(command, bindSet, entry),
+            message: 'Dynamic buffer entry does not resolve to a BufferRegion.',
+            expected: { resource: 'BufferRegion' },
+            actual: { resource: describeValue(binding?.resource) },
+        })
+    }
+
+    const region = binding.resource
+    const effectiveOffset = region.offset + offset
+    const effectiveEnd = effectiveOffset + region.size
     const alignment = dynamicOffsetAlignment(command, entry)
-    if (offset % alignment !== 0) {
+    if (effectiveOffset % alignment !== 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_UNALIGNED',
             severity: 'error',
@@ -3186,8 +3202,38 @@ function validateDynamicOffsetValue(
             actual: {
                 group: bindSet.layout.group,
                 binding: entry.binding,
-                index,
+                name: entry.name,
                 offset,
+                effectiveOffset,
+            },
+        })
+    }
+
+    if (
+        !Number.isSafeInteger(effectiveOffset) ||
+        !Number.isSafeInteger(effectiveEnd) ||
+        effectiveEnd > region.buffer.size
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_OUT_OF_BOUNDS',
+            severity: 'error',
+            phase: 'binding',
+            subject: bindSet.layout.entrySubject(entry),
+            related: dynamicOffsetRelatedSubjects(command, bindSet, entry),
+            message: 'Dynamic buffer offset moves the bound region outside its parent allocation.',
+            expected: {
+                bufferSize: region.buffer.size,
+                effectiveEnd: '<= bufferSize',
+            },
+            actual: {
+                group: bindSet.layout.group,
+                binding: entry.binding,
+                name: entry.name,
+                regionOffset: region.offset,
+                dynamicOffset: offset,
+                effectiveOffset,
+                effectiveSize: region.size,
+                effectiveEnd,
             },
         })
     }
@@ -3203,15 +3249,6 @@ function dynamicOffsetAlignment(command: DynamicOffsetCommand, entry: DynamicBuf
     if (Number.isInteger(alignment) && alignment > 0) return alignment
 
     return 256
-}
-
-function dynamicOffsetExpected(group: number, entries: DynamicBufferBindLayoutEntry[]) {
-
-    return {
-        group,
-        count: entries.length,
-        bindings: entries.map(entry => entry.binding),
-    }
 }
 
 function dynamicOffsetRelatedSubjects(
@@ -3233,10 +3270,11 @@ function dynamicOffsetRelatedSubjects(
 function setBindGroupWithDynamicOffsets(
     command: DynamicOffsetCommand,
     passEncoder: GPURenderPassEncoder | GPUComputePassEncoder,
-    bindSet: BindSet
+    invocation: CommandBindSetInvocation
 ): void {
 
-    const dynamicOffsets = command.dynamicOffsets.get(bindSet.layout.group)
+    const bindSet = invocation.set
+    const dynamicOffsets = commandNativeDynamicOffsets.get(command)?.get(bindSet.layout.group)
     if (dynamicOffsets !== undefined) {
         passEncoder.setBindGroup(bindSet.layout.group, preparedBindGroupFor(bindSet), dynamicOffsets)
         return
@@ -3248,14 +3286,15 @@ function setBindGroupWithDynamicOffsets(
 function validateProgramLayoutRequirementsForCommand(command: DrawCommand | DispatchCommand): void {
 
     for (const requirement of command.pipeline.program.layoutRequirements) {
-        const bindSet = command.bindSets.find(candidate => candidate.layout.group === requirement.group)
-        if (bindSet === undefined) {
+        const invocation = command.bindSets.find(candidate => candidate.set.layout.group === requirement.group)
+        if (invocation === undefined) {
             throwCommandProgramLayoutMismatch(command, requirement, {
                 actual: {
-                    bindSetGroups: command.bindSets.map(candidate => candidate.layout.group),
+                    bindSetGroups: command.bindSets.map(candidate => candidate.set.layout.group),
                 },
             })
         }
+        const bindSet = invocation.set
 
         const binding = [ ...bindSet.bindings.values() ].find(candidate => candidate.entry.binding === requirement.binding)
         if (binding === undefined) {
@@ -3284,6 +3323,24 @@ function validateProgramLayoutRequirementsForCommand(command: DrawCommand | Disp
                 entry: binding.entry,
                 resource: region.subject,
                 actual: { abiHash: undefined, schemaHash: undefined },
+            })
+        }
+
+        if (!layoutArtifactsAbiCompatible(requirement.layout, region.layout)) {
+            throwCommandProgramLayoutMismatch(command, requirement, {
+                bindSet,
+                entry: binding.entry,
+                resource: region.subject,
+                actualLayout: layoutArtifactSubject(region.layout),
+                actual: {
+                    abiHash: region.layout.abiHash,
+                    schemaHash: region.layout.schemaHash,
+                    difference: describeLayoutCompatibilityDifference(
+                        requirement.layout,
+                        region.layout,
+                        'abi'
+                    ),
+                },
             })
         }
 
@@ -3596,6 +3653,85 @@ function validateDispatchFixedFunctionReads(command: DispatchCommand): void {
 
     if ('indirect' in command.count) {
         assertDeclaredCommandRead(command, command.count.indirect.buffer, 'indirect-buffer')
+    }
+}
+
+type BoundResourceAccess = Readonly<{
+    read: boolean
+    write: boolean
+}>
+
+function validateBoundResourceAccess(command: DrawCommand | DispatchCommand): void {
+
+    const declaredReads = new Set(command.resources.read.map(read => read.resource))
+    const declaredWrites = new Set(command.resources.write)
+
+    for (const invocation of command.bindSets) {
+        const bindSet = invocation.set
+        for (const binding of bindSet.bindings.values()) {
+            const access = boundResourceAccess(binding.entry)
+            if (!access.read && !access.write) continue
+
+            const resource = isBufferRegion(binding.resource)
+                ? binding.resource.buffer
+                : 'texture' in binding.resource
+                    ? binding.resource.texture
+                    : undefined
+            if (resource === undefined) continue
+
+            const missingRead = access.read && !declaredReads.has(resource)
+            const missingWrite = access.write && !declaredWrites.has(resource)
+            if (!missingRead && !missingWrite) continue
+
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+                severity: 'error',
+                phase: 'command',
+                subject: bindSet.layout.entrySubject(binding.entry),
+                related: [
+                    command.subject,
+                    command.pipeline.subject,
+                    bindSet.subject,
+                    bindSet.layout.subject,
+                    resource.subject,
+                ],
+                message: 'Command resource declarations do not cover a bound resource access contract.',
+                expected: {
+                    group: bindSet.layout.group,
+                    binding: binding.entry.binding,
+                    name: binding.entry.name,
+                    access,
+                    resourceId: resource.id,
+                },
+                actual: {
+                    missing: {
+                        read: missingRead,
+                        write: missingWrite,
+                    },
+                    declaredReadResourceIds: [ ...declaredReads ].map(candidate => candidate.id),
+                    declaredWriteResourceIds: [ ...declaredWrites ].map(candidate => candidate.id),
+                },
+            })
+        }
+    }
+}
+
+function boundResourceAccess(entry: NormalizedBindLayoutEntry): BoundResourceAccess {
+
+    switch (entry.type) {
+        case 'uniform':
+        case 'read-storage':
+        case 'texture':
+            return { read: true, write: false }
+        case 'storage':
+            return { read: false, write: true }
+        case 'storage-texture':
+            return {
+                read: entry.access === 'read-only' || entry.access === 'read-write',
+                write: entry.access === 'write-only' || entry.access === 'read-write',
+            }
+        case 'sampler':
+            return { read: false, write: false }
     }
 }
 

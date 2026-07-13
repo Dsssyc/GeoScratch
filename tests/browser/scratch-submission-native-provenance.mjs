@@ -365,7 +365,7 @@ async function verifySubmissionTransactions(browser) {
             const draw = runtime.createDrawCommand({
                 label: 'browser delayed validation draw',
                 pipeline,
-                bindSets: [ bindSet ],
+                bindSets: [ { set: bindSet } ],
                 count: { vertexCount: 3 },
                 resources: {
                     read: [ { resource: uniform, contentEpoch: 1 } ],

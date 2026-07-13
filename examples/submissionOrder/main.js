@@ -70,7 +70,7 @@ async function main() {
     const incrementZero = runtime.createDispatchCommand({
         label: 'increment zero',
         pipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         count: { workgroups: [ 1 ] },
         resources: {
             read: [ { resource: value, contentEpoch: 1 } ],
@@ -86,7 +86,7 @@ async function main() {
     const incrementTen = runtime.createDispatchCommand({
         label: 'increment ten',
         pipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         count: { workgroups: [ 1 ] },
         resources: {
             read: [ { resource: value, contentEpoch: 3 } ],

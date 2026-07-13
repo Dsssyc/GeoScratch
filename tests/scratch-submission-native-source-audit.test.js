@@ -9,6 +9,7 @@ const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch')
 const nativeCalls = Object.freeze([
     [ 'GPUDevice.createCommandEncoder', /\b(?:device|this\.runtime\.device)\.createCommandEncoder\(/ ],
     [ 'GPUDevice.createBindGroup', /\b(?:this|bindSet)\.runtime\.device\.createBindGroup\(/ ],
+    [ 'GPUTexture.createView', /\.gpuTexture\.createView\(/ ],
     [ 'GPUCommandEncoder.finish', /\bencoder!?\.finish\(/ ],
     [ 'GPUCommandEncoder.copyBufferToBuffer', /\b(?:commandEncoder|encoder)\.copyBufferToBuffer\(/ ],
     [ 'GPUCommandEncoder.copyTextureToTexture', /\bcommandEncoder\.copyTextureToTexture\(/ ],
@@ -55,12 +56,13 @@ describe('scratch submission native source audit', () => {
         const callSites = scanNativeCallSites(scratchRoot)
         const inventoryRows = audit.match(/^\| N\d+ \|.*\|$/gm) ?? []
 
-        expect(callSites).to.have.length(37)
+        expect(callSites).to.have.length(39)
         expect(countByFile(callSites)).to.deep.equal({
-            'packages/geoscratch/src/scratch/binding.ts': 1,
+            'packages/geoscratch/src/scratch/binding.ts': 2,
             'packages/geoscratch/src/scratch/command.ts': 23,
             'packages/geoscratch/src/scratch/readback.ts': 4,
             'packages/geoscratch/src/scratch/submission.ts': 9,
+            'packages/geoscratch/src/scratch/texture.ts': 1,
         })
         expect(inventoryRows).to.have.length(callSites.length)
         for (const callSite of callSites) {
@@ -92,6 +94,9 @@ describe('scratch submission native source audit', () => {
         expect(submission).to.match(
             /observation\.issue\('command-encode', location, \(\) => \{[\s\S]{0,500}issue\(\)/
         )
+        expect(submission.match(
+            /observation\.issue\(\s*'attachment-view',[\s\S]{0,500}\(\) => createNativeTextureView/g
+        )).to.have.length(2)
 
         for (const nativeCall of [
             'device.createCommandEncoder',
@@ -118,7 +123,7 @@ describe('scratch submission native source audit', () => {
         expect(audit).to.include('direct `execute(queue)` remains explicitly deferred')
         expect(audit).to.include('manual `encode(nativeEncoder)` remains explicitly deferred')
         expect(binding).to.include('() => bindSet.runtime.device.createBindGroup(descriptor)')
-        expect(audit).to.include('BindSet preparation owns persistent bind-group creation')
+        expect(audit).to.include('BindSet preparation owns persistent binding-view and bind-group creation')
         expect(audit).to.match(/independently\s+acknowledged before submission/)
         expect(audit).to.include('raw runtime.device / runtime.queue calls remain outside Scratch provenance')
     })

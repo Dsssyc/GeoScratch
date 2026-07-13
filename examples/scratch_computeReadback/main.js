@@ -88,7 +88,7 @@ async function main() {
     const dispatch = runtime.createDispatchCommand({
         label: 'dispatch scratch compute readback',
         pipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         count: { workgroups: [ 1 ] },
         resources: {
             read: [

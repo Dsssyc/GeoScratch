@@ -125,10 +125,9 @@ async function expectScratchDiagnostic(action, expected) {
 
 describe('scratch occlusion query bracket commands', () => {
 
-    it('creates public begin/end commands and lowers render pass occlusionQuerySet', async() => {
+    it('creates public begin/end commands and retains the pass query set', async() => {
 
         const fixture = await createOcclusionFixture()
-        const descriptor = fixture.pass.createRenderPassDescriptor()
 
         expect(fixture.querySet).to.be.instanceOf(QuerySetResource)
         expect(fixture.querySet.type).to.equal('occlusion')
@@ -144,7 +143,6 @@ describe('scratch occlusion query bracket commands', () => {
         })).to.be.instanceOf(BeginOcclusionQueryCommand)
         expect(fixture.runtime.endOcclusionQueryCommand()).to.be.instanceOf(EndOcclusionQueryCommand)
         expect(fixture.pass.occlusionQuerySet).to.equal(fixture.querySet)
-        expect(descriptor.occlusionQuerySet).to.equal(fixture.querySet.gpuQuerySet)
     })
 
     it('records begin, draw, and end in explicit render command order', async() => {

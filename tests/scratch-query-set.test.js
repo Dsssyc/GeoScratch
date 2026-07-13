@@ -251,14 +251,6 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
     it('lowers render pass timestampWrites', async() => {
 
         const fixture = await createRenderTimestampFixture()
-        const descriptor = fixture.pass.createRenderPassDescriptor()
-
-        expect(descriptor.timestampWrites).to.deep.equal({
-            querySet: fixture.querySet.gpuQuerySet,
-            beginningOfPassWriteIndex: 0,
-            endOfPassWriteIndex: 1,
-        })
-
         const draw = await createRenderCommandFixture(fixture.runtime, fixture.pass)
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .render(fixture.pass, [ draw ])

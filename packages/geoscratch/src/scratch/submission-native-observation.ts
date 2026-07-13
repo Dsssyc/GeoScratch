@@ -1102,6 +1102,7 @@ function readbackObservedFailure(
 
 const submissionNativeStageOrder: readonly ScratchSubmissionNativeStage[] = Object.freeze([
     'encoder-create',
+    'attachment-view',
     'pass-begin',
     'command-encode',
     'pass-end',

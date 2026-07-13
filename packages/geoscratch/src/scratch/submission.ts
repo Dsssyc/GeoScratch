@@ -21,7 +21,7 @@ import {
     throwScratchDiagnostic,
 } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
-import { validateRenderPassAttachments } from './pass.js'
+import { createRenderPassDescriptor, validateRenderPassAttachments } from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
@@ -35,14 +35,15 @@ import {
     beginSubmissionNativeObservation,
     compareSubmissionNativeStages,
 } from './submission-native-observation.js'
-import { TextureResource, isTextureViewSpec } from './texture.js'
+import { TextureResource, createNativeTextureView, isTextureViewSpec } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
-import type { ComputePassSpec, RenderPassSpec } from './pass.js'
+import type { ComputePassSpec, RenderPassNativeAttachments, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
 import type { ContentResource, ResourceState } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
+import type { TextureViewSpec } from './texture.js'
 import type {
     SubmissionNativeIssue,
     SubmissionNativeObservation,
@@ -789,10 +790,19 @@ export class SubmissionBuilder {
                     stepIndex,
                     step.passSpec
                 )
+                const nativeAttachments = issueRenderAttachmentViews(
+                    nativeObservation,
+                    submittedId,
+                    stepIndex,
+                    step.passSpec
+                )
                 const passEncoder = nativeObservation.issue(
                     'pass-begin',
                     passLocation,
-                    () => encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
+                    () => encoder.beginRenderPass(createRenderPassDescriptor(
+                        step.passSpec,
+                        nativeAttachments
+                    ))
                 )
                 let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
                 for (const command of step.commands) {
@@ -1035,6 +1045,35 @@ function createSubmissionNativeIssuePlan(
 
         ensureEncoder()
         const passLocation = submissionPassLocation(submissionId, stepIndex, step.passSpec)
+        if (step.kind === 'render') {
+            for (const [ attachmentIndex, attachment ] of step.passSpec.color.entries()) {
+                if (!isTextureViewSpec(attachment.target)) continue
+                encoding.push({
+                    stage: 'attachment-view',
+                    location: renderAttachmentLocation(
+                        submissionId,
+                        stepIndex,
+                        step.passSpec,
+                        'color',
+                        attachmentIndex,
+                        attachment.target
+                    ),
+                })
+            }
+            if (step.passSpec.depth !== undefined) {
+                encoding.push({
+                    stage: 'attachment-view',
+                    location: renderAttachmentLocation(
+                        submissionId,
+                        stepIndex,
+                        step.passSpec,
+                        'depth-stencil',
+                        0,
+                        step.passSpec.depth.target
+                    ),
+                })
+            }
+        }
         encoding.push({ stage: 'pass-begin', location: passLocation })
         for (const command of step.commands) {
             encoding.push({
@@ -1062,6 +1101,51 @@ function createSubmissionNativeIssuePlan(
             ),
         })),
     ]
+}
+
+function issueRenderAttachmentViews(
+    observation: SubmissionNativeObservation,
+    submissionId: string,
+    stepIndex: number,
+    passSpec: RenderPassSpec
+): RenderPassNativeAttachments {
+
+    const color = passSpec.color.map((attachment, attachmentIndex) => {
+        if (!isTextureViewSpec(attachment.target)) return undefined
+        return observation.issue(
+            'attachment-view',
+            renderAttachmentLocation(
+                submissionId,
+                stepIndex,
+                passSpec,
+                'color',
+                attachmentIndex,
+                attachment.target
+            ),
+            () => createNativeTextureView(attachment.target as TextureViewSpec)
+        )
+    })
+    Object.freeze(color)
+
+    const depth = passSpec.depth === undefined
+        ? undefined
+        : observation.issue(
+            'attachment-view',
+            renderAttachmentLocation(
+                submissionId,
+                stepIndex,
+                passSpec,
+                'depth-stencil',
+                0,
+                passSpec.depth.target
+            ),
+            () => createNativeTextureView(passSpec.depth!.target)
+        )
+
+    return Object.freeze({
+        color,
+        ...(depth !== undefined ? { depth } : {}),
+    })
 }
 
 function issueStandaloneCommandEncoding(
@@ -1151,6 +1235,28 @@ function submissionPassLocation(
         stepIndex,
         passId: passSpec.id,
         passKind: passSpec.passKind,
+    }
+}
+
+function renderAttachmentLocation(
+    submissionId: string,
+    stepIndex: number,
+    passSpec: RenderPassSpec,
+    attachmentKind: 'color' | 'depth-stencil',
+    attachmentIndex: number,
+    view: TextureViewSpec
+): ScratchSubmissionNativeLocation {
+
+    return {
+        kind: 'render-attachment',
+        submissionId,
+        stepIndex,
+        passId: passSpec.id,
+        attachmentKind,
+        attachmentIndex,
+        viewSpecHash: view.hash,
+        resourceId: view.texture.id,
+        allocationVersion: view.texture.allocationVersion,
     }
 }
 

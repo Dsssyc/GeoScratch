@@ -184,7 +184,7 @@ async function main() {
     const draw = runtime.createDrawCommand({
         label: 'draw sampled external upload',
         pipeline,
-        bindSets: [ bindSet ],
+        bindSets: [ { set: bindSet } ],
         count: { vertexCount: 6 },
         resources: {
             read: [ { resource: uploadedTexture, contentEpoch: 1 } ],

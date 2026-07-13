@@ -170,7 +170,7 @@ async function main() {
         const produceArguments = runtime.createDispatchCommand({
             label: 'write indirect draw arguments',
             pipeline: argumentPipeline,
-            bindSets: [ argumentSet ],
+            bindSets: [ { set: argumentSet } ],
             count: { indirect: dispatchArguments },
             resources: {
                 read: [ { resource: dispatchArguments, contentEpoch: dispatchEpoch } ],

@@ -106,9 +106,10 @@ async function createRenderFixture() {
         resources: { read: [], write: [] },
         whenMissing: 'throw',
     })
+    const targetView = target.view()
     const pass = runtime.createRenderPass({
         label: 'native observation render pass',
-        color: [ { target: target.view(), load: 'clear', store: 'store' } ],
+        color: [ { target: targetView, load: 'clear', store: 'store' } ],
     })
     fake.calls.errorScopes.length = 0
     fake.calls.nativeTimeline.length = 0
@@ -131,6 +132,17 @@ async function createRenderFixture() {
             stepIndex: 0,
             passId: pass.id,
             passKind: 'render',
+        }),
+        attachmentLocation: submissionId => ({
+            kind: 'render-attachment',
+            submissionId,
+            stepIndex: 0,
+            passId: pass.id,
+            attachmentKind: 'color',
+            attachmentIndex: 0,
+            viewSpecHash: targetView.hash,
+            resourceId: target.id,
+            allocationVersion: target.allocationVersion,
         }),
     }
 }
@@ -214,6 +226,19 @@ async function createTextureUploadFixture(external = false) {
 }
 
 describe('scratch submission native integration', () => {
+
+    it('creates persistent attachment views per submission without caching', async () => {
+
+        const fixture = await createRenderFixture()
+        const first = fixture.submit()
+        await first.done
+        const firstView = fixture.calls.textureViews[0]
+        const second = fixture.submit()
+        await second.done
+
+        expect(fixture.calls.textureViews).to.have.length(2)
+        expect(fixture.calls.textureViews[1]).not.to.equal(firstView)
+    })
 
     it('keeps one summary bundle around actual multi-step encoding and queue replay', async () => {
 
@@ -351,6 +376,12 @@ describe('scratch submission native integration', () => {
                 location: (_fixture, submissionId) => ({
                     kind: 'queue-action', submissionId, actionIndex: 1, actionKind: 'command-buffer',
                 }),
+            },
+            {
+                method: 'createTextureView',
+                stage: 'attachment-view',
+                create: createRenderFixture,
+                location: (fixture, submissionId) => fixture.attachmentLocation(submissionId),
             },
             {
                 method: 'beginRenderPass',
