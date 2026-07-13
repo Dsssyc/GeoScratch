@@ -65,6 +65,49 @@ silently combined.
 The English/Chinese edits were treated as one contract in every row. No
 one-language fragment was retained independently.
 
+## Divergent Remote Reference Adjudication / 分叉远端引用裁决
+
+After local branch cleanup, every remaining local and remote-tracking reference
+was compared with `dev-feature`. `main`, `origin/main`, `origin/dev-feature`, and
+`unaLoo/main` contain no commit that is absent from `dev-feature`. The sole
+divergent reference is `unaLoo/dev` at
+`e4133c4f5ce952244601937a2a28e0ba4d861466`. Compared with the audited
+`dev-feature` checkpoint `a6422d5fb51babff0b62ee62971ad53cdce686c1`, it has
+17 commits from February-March 2025 that are absent from `dev-feature`, while
+that checkpoint has 200 commits absent from the old branch.
+
+Those 17 commits are not a second valid implementation line:
+
+- the final old tree mixes TypeScript, JavaScript, and hand-written declaration
+  files under the obsolete root `src/` layout, moves the prior implementation to
+  `old_js_src/`, and still points package metadata at missing `src/scratch.js`
+  and `src/scratch.d.ts` entrypoints;
+- `npm test` exits with `No test files found`; its `.ts` files under `test/` are
+  log-driven browser probes rather than Mocha assertions;
+- a strict no-emit TypeScript check fails at `vec3i.ts` because the literal
+  `vec3ii` is outside its declared `NumericType` union;
+- `npm run build` fails before module transformation because `index.html`
+  retains unresolved Git conflict markers;
+- an AST comparison of the final public `src/scratch.ts` against the current
+  package entrypoint finds 84 of 86 old public names retained. The only absent
+  names are `MapRef` and `mRef`;
+- `MapRef` is coupled to legacy `StorageBuffer.registerMapRange()`, misspells
+  `length` as `lenght`, reports invalid ranges through `console.error` without
+  halting, and hides queue write plus staging-map read operations behind
+  callbacks. That contract conflicts with the accepted explicit transfer,
+  readback lifecycle, resource ownership, and structured-diagnostic model;
+- the two terrain commits are debugging experiments: they disable Flow inside
+  the combined DEM page, change terrain constants and output appearance, add a
+  global key listener, and flatten line elevation. They do not preserve the
+  accepted separate DEM Layer and Flow Layer examples and have no executable
+  regression evidence.
+
+Therefore no commit or file from `unaLoo/dev` was merged. Its already-retained
+public capabilities remain on the current package paths, while its two unique
+public names and terrain experiments were explicitly rejected as unvalidated,
+architecturally superseded work. The remote-tracking reference was inspected but
+not deleted or pushed; remote mutation is outside this local consolidation.
+
 ## Executable Evidence / 可执行证据
 
 - Verified feature head: `724 passing`.
@@ -122,4 +165,6 @@ The merged tree retains every locked Goal result:
 approved high-level repository guidance. No competing local implementation or
 accepted vision delta remains. The nine-file vision patch was a stale rollback,
 not mergeable work, and was discarded only after its contents, failures, and
-contract conflicts were classified here.
+contract conflicts were classified here. The only divergent remote-tracking
+reference was also classified and contains no accepted implementation that must
+be recovered into `dev-feature`.

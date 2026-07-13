@@ -247,6 +247,13 @@ describe('scratch submission native outcome documentation', () => {
             '635 passing / 7 failing',
             'byte-for-byte identical',
             'Rejected as a stale rollback',
+            'unaLoo/dev',
+            'e4133c4',
+            '17 commits',
+            'MapRef',
+            'No test files found',
+            'unresolved Git conflict markers',
+            'not deleted or pushed',
         ]) {
             expect(integration, marker).to.include(marker)
         }
