@@ -57,7 +57,7 @@ async function createTextureFixture({ features = [] } = {}) {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
+    const bindSet = await runtime.createBindSet(bindLayout, {
         colorTexture: texture.view(),
         colorSampler: sampler,
     }, {
@@ -114,12 +114,13 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             label: `checker texture [scratch:${fixture.texture.id}]`,
         })
 
+        const nativeViewCount = fixture.calls.textureViews.length
         const firstView = fixture.texture.view()
         const secondView = fixture.texture.view()
 
         expect(firstView).not.to.equal(secondView)
         expect(firstView.hash).to.equal(secondView.hash)
-        expect(fixture.calls.textureViews).to.have.length(0)
+        expect(fixture.calls.textureViews).to.have.length(nativeViewCount)
 
         expect(fixture.sampler.descriptor).to.deep.equal({
             label: 'nearest sampler',
@@ -202,11 +203,8 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             ],
         })
 
-        const bindGroup = fixture.bindSet.getBindGroup()
-
         expect(fixture.calls.bindGroups).to.have.length(1)
         expect(fixture.calls.textureViews[0].descriptor).to.deep.include({ dimension: '2d' })
-        expect(fixture.calls.bindGroups[0]).to.equal(bindGroup)
         expect(fixture.calls.bindGroups[0].descriptor.entries).to.deep.equal([
             {
                 binding: 0,
@@ -222,10 +220,12 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
     it('keeps a default 2d binding valid after array-layer growth on core devices', async() => {
 
         const fixture = await createTextureFixture({ features: [ 'core-features-and-limits' ] })
-        const firstBindGroup = fixture.bindSet.getBindGroup()
+        const firstBindGroup = fixture.calls.bindGroups[0]
 
         await fixture.texture.resize([ 2, 2, 3 ])
-        const secondBindGroup = fixture.bindSet.getBindGroup()
+        expect(fixture.bindSet.preparationState).to.equal('stale')
+        await fixture.bindSet.prepare()
+        const secondBindGroup = fixture.calls.bindGroups[1]
 
         expect(secondBindGroup).to.not.equal(firstBindGroup)
         expect(fixture.calls.textureViews.map(view => view.descriptor.dimension)).to.deep.equal([ '2d', '2d' ])
@@ -236,14 +236,13 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
     it('rejects a derived binding-dimension change on compatibility devices', async() => {
 
         const fixture = await createTextureFixture()
-        fixture.bindSet.getBindGroup()
         const bindGroupCount = fixture.calls.bindGroups.length
         const viewCount = fixture.calls.textureViews.length
 
         await fixture.texture.resize([ 2, 2, 3 ])
 
         try {
-            fixture.bindSet.getBindGroup()
+            await fixture.bindSet.prepare()
             throw new Error('expected compatibility binding dimension validation to fail')
         } catch (error) {
             expect(error).to.be.instanceOf(ScratchDiagnosticError)
@@ -262,7 +261,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
-            size: [ 2, 2 ],
+            size: [ 2, 2, 3 ],
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
             textureBindingViewDimension: '2d-array',
@@ -277,13 +276,14 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
                 viewDimension: '2d-array',
             } ],
         })
-        const bindSet = runtime.createBindSet(layout, {
+        const bindSet = await runtime.createBindSet(layout, {
             arrayTexture: texture.view({ dimension: '2d-array' }),
         })
-        const firstBindGroup = bindSet.getBindGroup()
+        const firstBindGroup = fake.calls.bindGroups[0]
 
-        await texture.resize([ 2, 2, 3 ])
-        const secondBindGroup = bindSet.getBindGroup()
+        await texture.resize([ 4, 2, 3 ])
+        await bindSet.prepare()
+        const secondBindGroup = fake.calls.bindGroups[1]
 
         expect(secondBindGroup).to.not.equal(firstBindGroup)
         expect(fake.calls.textureViews.map(view => view.descriptor.dimension)).to.deep.equal([ '2d-array', '2d-array' ])
@@ -309,17 +309,16 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
                 viewDimension: 'cube',
             } ],
         })
-        const bindSet = runtime.createBindSet(layout, {
+        const bindSet = await runtime.createBindSet(layout, {
             cubeTexture: texture.view({ dimension: 'cube' }),
         })
-        bindSet.getBindGroup()
         const bindGroupCount = fake.calls.bindGroups.length
         const viewCount = fake.calls.textureViews.length
 
         await texture.resize([ 2, 2, 5 ])
 
         try {
-            bindSet.getBindGroup()
+            await bindSet.prepare()
             throw new Error('expected current cube view validation to fail')
         } catch (error) {
             expect(error).to.be.instanceOf(ScratchDiagnosticError)
@@ -423,7 +422,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         expect(fixture.calls.queueSubmissions).to.have.length(0)
     })
 
-    it('rebuilds the texture bind group used by a persistent draw command', async() => {
+    it('requires explicit preparation before a persistent draw can use a replacement texture', async() => {
 
         const fixture = await createTextureFixture()
         const canvas = createFakeCanvas()
@@ -480,27 +479,45 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
                 },
             ],
         })
-        const previousBindGroup = fixture.bindSet.getBindGroup()
+        const previousBindGroup = fixture.calls.bindGroups[0]
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.upload)
             .render(pass, [ draw ])
 
         await fixture.texture.resize([ 4, 4 ])
         const replacementTexture = fixture.texture.gpuTexture
-        const submitted = builder.submit()
+        try {
+            builder.submit()
+            throw new Error('expected stale bind set submission to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_BIND_SET_STALE',
+                severity: 'error',
+                phase: 'binding',
+            })
+        }
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.bindGroups).to.have.length(1)
+
+        await fixture.bindSet.prepare()
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+            .render(pass, [ draw ])
+            .submit()
         const bindGroupAction = fixture.calls.renderPasses[0].actions
             .find(action => action.type === 'setBindGroup')
 
         expect(bindGroupAction.bindGroup).to.not.equal(previousBindGroup)
         expect(bindGroupAction.bindGroup.descriptor.entries[0].resource.texture)
             .to.equal(replacementTexture)
-        expect(fixture.bindSet.getBindGroup()).to.equal(bindGroupAction.bindGroup)
+        expect(fixture.calls.bindGroups[1]).to.equal(bindGroupAction.bindGroup)
         expect(fixture.calls.bindGroups).to.have.length(2)
 
         await submitted.done
     })
 
-    it('rebuilds the texture bind group used by a persistent dispatch command', async() => {
+    it('requires explicit preparation before a persistent dispatch can use a replacement texture', async() => {
 
         const fixture = await createTextureFixture()
         const bindLayout = await fixture.runtime.createBindLayout({
@@ -514,7 +531,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
                 },
             ],
         })
-        const bindSet = fixture.runtime.createBindSet(bindLayout, {
+        const bindSet = await fixture.runtime.createBindSet(bindLayout, {
             colorTexture: fixture.texture.view(),
         })
         const program = fixture.runtime.createProgram({
@@ -545,22 +562,40 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             whenMissing: 'throw',
         })
         const pass = fixture.runtime.createComputePass()
-        const previousBindGroup = bindSet.getBindGroup()
+        const previousBindGroup = fixture.calls.bindGroups[1]
         const builder = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.upload)
             .compute(pass, [ dispatch ])
 
         await fixture.texture.resize([ 4, 4 ])
         const replacementTexture = fixture.texture.gpuTexture
-        const submitted = builder.submit()
+        try {
+            builder.submit()
+            throw new Error('expected stale bind set submission to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_BIND_SET_STALE',
+                severity: 'error',
+                phase: 'binding',
+            })
+        }
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.bindGroups).to.have.length(2)
+
+        await bindSet.prepare()
+        const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+            .upload(fixture.upload)
+            .compute(pass, [ dispatch ])
+            .submit()
         const bindGroupAction = fixture.calls.computePasses[0].actions
             .find(action => action.type === 'setBindGroup')
 
         expect(bindGroupAction.bindGroup).to.not.equal(previousBindGroup)
         expect(bindGroupAction.bindGroup.descriptor.entries[0].resource.texture)
             .to.equal(replacementTexture)
-        expect(bindSet.getBindGroup()).to.equal(bindGroupAction.bindGroup)
-        expect(fixture.calls.bindGroups).to.have.length(2)
+        expect(fixture.calls.bindGroups[2]).to.equal(bindGroupAction.bindGroup)
+        expect(fixture.calls.bindGroups).to.have.length(3)
 
         await submitted.done
     })
@@ -623,7 +658,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const fixtureB = await createTextureFixture()
 
         try {
-            fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
+            await fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
                 colorTexture: fixtureA.sampler,
                 colorSampler: fixtureA.sampler,
             })
@@ -638,7 +673,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         }
 
         try {
-            fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
+            await fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
                 colorTexture: fixtureB.texture.view(),
                 colorSampler: fixtureA.sampler,
             })
@@ -655,7 +690,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         fixtureA.sampler.dispose()
 
         try {
-            fixtureA.bindSet.getBindGroup()
+            await fixtureA.bindSet.prepare()
             throw new Error('expected disposed sampler to fail')
         } catch (error) {
             expect(error).to.be.instanceOf(ScratchDiagnosticError)
@@ -674,7 +709,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const replacementSampler = await fixtureA.runtime.createSampler()
 
         try {
-            fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
+            await fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
                 colorTexture: unbindableTexture.view(),
                 colorSampler: replacementSampler,
             })

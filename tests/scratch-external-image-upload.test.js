@@ -62,20 +62,6 @@ function expectDiagnostic(action, code, reason) {
     return caught
 }
 
-async function expectAsyncDiagnostic(action, code) {
-
-    let caught
-    try {
-        await action()
-    } catch (error) {
-        caught = error
-    }
-
-    expect(caught).to.be.instanceOf(ScratchDiagnosticError)
-    expect(caught.diagnostic).to.include({ code, severity: 'error' })
-    return caught
-}
-
 describe('scratch external image upload', () => {
 
     it('exports the command from both public entrypoints and normalizes native defaults', async() => {
@@ -480,12 +466,17 @@ describe('scratch external image upload', () => {
         }
 
         const dimensionFixture = await createFixture()
-        await expectAsyncDiagnostic(async () => await dimensionFixture.runtime.createTexture({
+        dimensionFixture.target = await dimensionFixture.runtime.createTexture({
             size: [ 8, 8 ],
             dimension: '3d',
             format: 'rgba8unorm',
             usage: externalUploadUsage(),
-        }), 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
+        })
+        expectDiagnostic(
+            () => createCommand(dimensionFixture),
+            'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
+            'target-dimension'
+        )
 
         const fixture = await createFixture()
         for (const [ descriptor, reason ] of [

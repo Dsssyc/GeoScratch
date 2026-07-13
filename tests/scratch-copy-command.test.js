@@ -73,8 +73,8 @@ async function createCopyFixture() {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
-        targetUniforms: target.region({ offset: 8, size: 16 }),
+    const bindSet = await runtime.createBindSet(bindLayout, {
+        targetUniforms: target.region(),
     }, {
         label: 'copy target bind set',
     })
@@ -573,7 +573,7 @@ describe('scratch CopyCommand', () => {
     it('does not rebuild BindSet only because a copied-to buffer contentEpoch changes', async() => {
 
         const fixture = await createCopyFixture()
-        const firstBindGroup = fixture.bindSet.getBindGroup()
+        const firstBindGroup = fixture.calls.bindGroups[0]
 
         expect(fixture.bindSet).to.be.instanceOf(BindSet)
         expect(fixture.calls.bindGroups).to.have.length(1)
@@ -585,9 +585,8 @@ describe('scratch CopyCommand', () => {
 
         expect(fixture.target.contentEpoch).to.equal(1)
 
-        const secondBindGroup = fixture.bindSet.getBindGroup()
-
-        expect(secondBindGroup).to.equal(firstBindGroup)
+        await fixture.bindSet.prepare()
+        expect(fixture.calls.bindGroups[0]).to.equal(firstBindGroup)
         expect(fixture.calls.bindGroups).to.have.length(1)
 
         await submitted.done

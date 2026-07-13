@@ -442,10 +442,10 @@ describe('scratch depth/stencil render attachments', () => {
                 },
             ],
         })
-        const bindSet = fixture.runtime.createBindSet(bindLayout, {
+        const bindSet = await fixture.runtime.createBindSet(bindLayout, {
             depthTexture: fixture.depthView,
         })
-        const firstBindGroup = bindSet.getBindGroup()
+        const firstBindGroup = fixture.calls.bindGroups[0]
 
         expect(bindSet).to.be.instanceOf(BindSet)
         expect(fixture.calls.bindGroups).to.have.length(1)
@@ -455,7 +455,8 @@ describe('scratch depth/stencil render attachments', () => {
             .submit()
 
         expect(fixture.depthTarget.contentEpoch).to.equal(1)
-        expect(bindSet.getBindGroup()).to.equal(firstBindGroup)
+        await bindSet.prepare()
+        expect(fixture.calls.bindGroups[0]).to.equal(firstBindGroup)
         expect(fixture.calls.bindGroups).to.have.length(1)
 
         await submitted.done

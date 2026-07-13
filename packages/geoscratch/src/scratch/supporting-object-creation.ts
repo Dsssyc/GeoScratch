@@ -22,6 +22,11 @@ export type SupportingObjectCreationOutcome<T> = Readonly<{
     failures: readonly SupportingObjectObservedFailure[]
 }>
 
+export type SupportingObjectCreationAttempt<T> = Readonly<{
+    candidate?: T
+    settlement: Promise<SupportingObjectCreationOutcome<T>>
+}>
+
 type ScopeFilter = 'validation' | 'internal' | 'out-of-memory'
 
 type PromiseObservation<T> =
@@ -47,6 +52,14 @@ export function issueSupportingObjectCreation<T>(
     runtime: ScratchRuntime,
     issue: () => T
 ): Promise<SupportingObjectCreationOutcome<T>> {
+
+    return beginSupportingObjectCreation(runtime, issue).settlement
+}
+
+export function beginSupportingObjectCreation<T>(
+    runtime: ScratchRuntime,
+    issue: () => T
+): SupportingObjectCreationAttempt<T> {
 
     const device = runtime.device
     const boundaryFailures: SupportingObjectObservedFailure[] = []
@@ -98,7 +111,7 @@ export function issueSupportingObjectCreation<T>(
         .map(filter => popScope(device, filter))
     const scopes = Promise.all(pendingScopes)
 
-    return Promise.race([
+    const settlement = Promise.race([
         scopes.then(observations => ({ kind: 'scopes-settled' as const, observations })),
         lifecycle,
     ]).then(settlement => {
@@ -134,6 +147,11 @@ export function issueSupportingObjectCreation<T>(
             failures: Object.freeze(failures),
         })
     }).finally(unsubscribeLifecycle)
+
+    return Object.freeze({
+        ...(candidate !== undefined ? { candidate } : {}),
+        settlement,
+    })
 }
 
 export function recheckSupportingObjectLifecycle<T>(

@@ -1,23 +1,41 @@
 import { UUID } from '../core/utils/uuid.js'
 import {
     registerBindLayoutOwnership,
+    registerBindSetOwnership,
     unregisterBindLayoutOwnership,
+    unregisterBindSetOwnership,
 } from './binding-ownership.js'
 import { BufferRegion, isBufferRegion } from './buffer.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { ScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
+import { serializeNativeGpuError } from './gpu-operation.js'
 import { createScratchNativeLabel } from './native-allocation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { SamplerResource } from './sampler.js'
 import { throwSupportingObjectCreationFailure } from './supporting-object-failure.js'
 import {
+    beginSupportingObjectCreation,
     issueSupportingObjectCreation,
     recheckSupportingObjectLifecycle,
 } from './supporting-object-creation.js'
-import { TextureViewSpec, createNativeTextureView, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
+import { TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
 import { describeValue, getGlobalConstant, isRecord } from './type-utils.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import type { DiagnosticSubject } from './diagnostics.js'
+import type {
+    GpuNativeErrorCategory,
+    ScratchGpuBindSetPreparationStage,
+    ScratchGpuIncidentOutcome,
+} from './gpu-operation.js'
+import type {
+    ScratchPendingGpuOperation,
+} from './runtime-diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
+import type {
+    SupportingObjectCreationAttempt,
+    SupportingObjectCreationOutcome,
+    SupportingObjectFailureKind,
+    SupportingObjectObservedFailure,
+} from './supporting-object-creation.js'
 
 const SHADER_STAGE_FLAGS = {
     vertex: 0x1,
@@ -28,6 +46,7 @@ const SHADER_STAGE_FLAGS = {
 const BUFFER_USAGE_UNIFORM = 0x40
 const BUFFER_USAGE_STORAGE = 0x80
 const TEXTURE_USAGE_TEXTURE_BINDING = getGlobalConstant('GPUTextureUsage', 'TEXTURE_BINDING', 0x4)
+const TEXTURE_USAGE_STORAGE_BINDING = getGlobalConstant('GPUTextureUsage', 'STORAGE_BINDING', 0x8)
 
 const BUFFER_BINDING_TYPES = new Set<BufferBindingType>([ 'uniform', 'read-storage', 'storage' ])
 const TEXTURE_SAMPLE_TYPES = new Set<GPUTextureSampleType>([ 'float', 'unfilterable-float', 'depth', 'sint', 'uint' ])
@@ -107,6 +126,71 @@ const TIER_2_READ_WRITE_STORAGE_TEXTURE_FORMATS = [
 ] as const satisfies readonly GPUTextureFormat[]
 
 const STORAGE_TEXTURE_FORMAT_CAPABILITIES = createStorageTextureFormatCapabilities()
+const FILTERABLE_FLOAT_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'r8unorm',
+    'r8snorm',
+    'rg8unorm',
+    'rg8snorm',
+    'rgba8unorm',
+    'rgba8unorm-srgb',
+    'rgba8snorm',
+    'bgra8unorm',
+    'bgra8unorm-srgb',
+    'r16float',
+    'rg16float',
+    'rgba16float',
+    'rgb10a2unorm',
+    'rg11b10ufloat',
+    'rgb9e5ufloat',
+])
+const UNFILTERABLE_FLOAT_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    ...FILTERABLE_FLOAT_TEXTURE_FORMATS,
+    'r16unorm',
+    'r16snorm',
+    'rg16unorm',
+    'rg16snorm',
+    'rgba16unorm',
+    'rgba16snorm',
+    'r32float',
+    'rg32float',
+    'rgba32float',
+])
+const FLOAT32_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'r32float',
+    'rg32float',
+    'rgba32float',
+])
+const UINT_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'r8uint',
+    'rg8uint',
+    'rgba8uint',
+    'r16uint',
+    'rg16uint',
+    'rgba16uint',
+    'r32uint',
+    'rg32uint',
+    'rgba32uint',
+    'rgb10a2uint',
+    'stencil8',
+])
+const SINT_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'r8sint',
+    'rg8sint',
+    'rgba8sint',
+    'r16sint',
+    'rg16sint',
+    'rgba16sint',
+    'r32sint',
+    'rg32sint',
+    'rgba32sint',
+])
+const DEPTH_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'depth16unorm',
+    'depth24plus',
+    'depth24plus-stencil8',
+    'depth32float',
+    'depth32float-stencil8',
+])
 const WEBGPU_BUFFER_BINDING_TYPES = {
     uniform: 'uniform',
     'read-storage': 'read-only-storage',
@@ -118,12 +202,21 @@ const REQUIRED_BUFFER_USAGE = {
     storage: BUFFER_USAGE_STORAGE,
 } satisfies Record<BufferBindingType, GPUBufferUsageFlags>
 const bindLayoutToken = Symbol('BindLayout')
+const bindSetToken = Symbol('BindSet')
 const bindLayoutStates = new WeakMap<BindLayout, { isDisposed: boolean }>()
+const bindSetStates = new WeakMap<BindSet, BindSetInternalState>()
 const BIND_LAYOUT_ALLOCATION_CODES = Object.freeze({
     validation: 'SCRATCH_BIND_LAYOUT_ALLOCATION_VALIDATION_FAILED',
     internal: 'SCRATCH_BIND_LAYOUT_ALLOCATION_INTERNAL_FAILED',
     outOfMemory: 'SCRATCH_BIND_LAYOUT_ALLOCATION_OUT_OF_MEMORY',
     nativeException: 'SCRATCH_BIND_LAYOUT_ALLOCATION_NATIVE_FAILED',
+})
+const BIND_SET_PREPARATION_CODES = Object.freeze({
+    validation: 'SCRATCH_BIND_SET_PREPARATION_VALIDATION_FAILED',
+    internal: 'SCRATCH_BIND_SET_PREPARATION_INTERNAL_FAILED',
+    outOfMemory: 'SCRATCH_BIND_SET_PREPARATION_OUT_OF_MEMORY',
+    nativeException: 'SCRATCH_BIND_SET_PREPARATION_NATIVE_FAILED',
+    scopeFailure: 'SCRATCH_BIND_SET_PREPARATION_SCOPE_FAILED',
 })
 
 export type BindVisibility = 'vertex' | 'fragment' | 'compute'
@@ -251,10 +344,66 @@ export type BindSetOptions = {
     label?: string
 }
 
-type NormalizedBindSetBinding = {
+export type BindSetPreparationState = 'preparing' | 'prepared' | 'stale' | 'disposed'
+
+type NormalizedBindSetBinding = Readonly<{
     readonly entry: NormalizedBindLayoutEntry
     readonly resource: BufferRegion | TextureViewSpec | SamplerResource
+}>
+
+type BindSetPreparationSnapshot = Readonly<{
+    signature: string
+    hash: string
+    facts: readonly Readonly<Record<string, unknown>>[]
+}>
+
+type PreparedBindSetCandidate = Readonly<{
+    snapshot: BindSetPreparationSnapshot
+    gpuBindGroup: GPUBindGroup
+    textureViews: readonly GPUTextureView[]
+}>
+
+type InFlightBindSetPreparation = Readonly<{
+    snapshot: BindSetPreparationSnapshot
+    operation: ScratchPendingGpuOperation
+    promise: Promise<void>
+}>
+
+type BindSetInternalState = {
+    isDisposed: boolean
+    isRegistered: boolean
+    prepareGeneration: number
+    committed: PreparedBindSetCandidate | undefined
+    inFlight: InFlightBindSetPreparation | undefined
+    cachedPreparedPromise: Promise<void> | undefined
+    lastPreparationOperationId?: string
+    lastIncidentId?: string
 }
+
+type NativePreparationIssue = Readonly<{
+    sequence: number
+    kind: 'texture-view' | 'bind-group'
+    subject: DiagnosticSubject
+    attempt: SupportingObjectCreationAttempt<GPUTextureView | GPUBindGroup>
+}>
+
+type TextureViewPreparationCandidate = Readonly<{
+    key: string
+    view: TextureViewSpec
+    bindings: readonly NormalizedBindSetBinding[]
+}>
+
+type BindSetPreparationFailure = Readonly<{
+    stage: ScratchGpuBindSetPreparationStage
+    issueSequence: number
+    scopeOrder: number
+    kind: SupportingObjectFailureKind | 'snapshot-drift' | 'bind-set-disposed' |
+        'bind-layout-disposed' | 'bound-resource-disposed'
+    code: string
+    nativeErrorCategory: GpuNativeErrorCategory
+    subject: DiagnosticSubject
+    cause?: unknown
+}>
 
 type ScratchBindingSupportedLimits = GPUSupportedLimits & Readonly<{
     maxStorageBuffersInVertexStage?: number
@@ -462,19 +611,27 @@ export async function createBindLayout(
 }
 
 export interface BindSet {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    layout: BindLayout
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly layout: BindLayout
     readonly bindings: ReadonlyMap<string, NormalizedBindSetBinding>
-    gpuBindGroup?: GPUBindGroup
-    boundAllocationVersions: Map<string, number>
-    isDisposed: boolean
 }
 
 export class BindSet {
 
-    constructor(runtime: ScratchRuntime, layout: BindLayout, bindings: BindSetBindings, options: BindSetOptions = {}) {
+    private constructor(
+        token: symbol,
+        runtime: ScratchRuntime,
+        id: string,
+        layout: BindLayout,
+        bindings: BindSetBindings,
+        options: BindSetOptions
+    ) {
+
+        if (token !== bindSetToken || new.target !== BindSet) {
+            throw new TypeError('BindSet must be created by ScratchRuntime.createBindSet().')
+        }
 
         runtime.assertActive()
 
@@ -491,10 +648,36 @@ export class BindSet {
         }
 
         layout.assertRuntime(runtime)
+        if (!isRecord(options) || (
+            options.label !== undefined && typeof options.label !== 'string'
+        )) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_BIND_SET_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'binding',
+                subject: bindSetSubject(id),
+                message: 'BindSet options require an optional string label.',
+                expected: { label: 'string' },
+                actual: { label: isRecord(options) ? options.label : describeValue(options) },
+            })
+        }
 
-        this.runtime = runtime
-        this.id = `scratch-bind-set-${UUID()}`
-        this.layout = layout
+        bindSetStates.set(this, {
+            isDisposed: false,
+            isRegistered: false,
+            prepareGeneration: 0,
+            committed: undefined,
+            inFlight: undefined,
+            cachedPreparedPromise: undefined,
+        })
+        Object.defineProperties(this, {
+            runtime: immutableEnumerableProperty(runtime),
+            id: immutableEnumerableProperty(id),
+            layout: immutableEnumerableProperty(layout),
+            ...(options.label !== undefined
+                ? { label: immutableEnumerableProperty(options.label) }
+                : {}),
+        })
         const normalizedBindings = lockNormalizedBindings(normalizeBindings(this, bindings))
         Object.defineProperty(this, 'bindings', {
             value: normalizedBindings,
@@ -502,9 +685,50 @@ export class BindSet {
             configurable: false,
             writable: false,
         })
-        this.isDisposed = false
-        if (options.label !== undefined) this.label = options.label
-        this.boundAllocationVersions = new Map()
+        Object.preventExtensions(this)
+    }
+
+    get isDisposed(): boolean {
+
+        return bindSetStateFor(this).isDisposed
+    }
+
+    get preparationState(): BindSetPreparationState {
+
+        const state = bindSetStateFor(this)
+        if (state.isDisposed) return 'disposed'
+        if (state.inFlight !== undefined) return 'preparing'
+        if (
+            state.committed !== undefined &&
+            bindSetDependenciesCurrent(this) &&
+            captureBindSetSnapshot(this).signature === state.committed.snapshot.signature
+        ) return 'prepared'
+        return 'stale'
+    }
+
+    get prepareGeneration(): number {
+
+        return bindSetStateFor(this).prepareGeneration
+    }
+
+    get preparedSnapshotHash(): string | undefined {
+
+        return bindSetStateFor(this).committed?.snapshot.hash
+    }
+
+    get inFlightOperationId(): string | undefined {
+
+        return bindSetStateFor(this).inFlight?.operation.id
+    }
+
+    get lastPreparationOperationId(): string | undefined {
+
+        return bindSetStateFor(this).lastPreparationOperationId
+    }
+
+    get lastIncidentId(): string | undefined {
+
+        return bindSetStateFor(this).lastIncidentId
     }
 
     get subject(): DiagnosticSubject {
@@ -556,56 +780,897 @@ export class BindSet {
         for (const binding of this.bindings.values()) {
             validateBindingResource(this, binding.entry, binding.resource)
         }
+        this.assertPrepared()
     }
 
-    getBindGroup(): GPUBindGroup {
+    assertPrepared(): void {
 
-        this.assertUsable()
-
-        if (!this.gpuBindGroup || this.hasStaleAllocationVersions()) {
-            const descriptor: GPUBindGroupDescriptor = {
-                layout: this.layout.gpuBindGroupLayout,
-                entries: this.layout.entries.map((entry) => {
-                    const binding = this.bindings.get(entry.name)
-
-                    return {
-                        binding: entry.binding,
-                        resource: createBindingResource(binding!),
-                    }
-                }),
-            }
-            if (this.label !== undefined) descriptor.label = this.label
-
-            this.gpuBindGroup = this.runtime.device.createBindGroup(descriptor)
-            this.boundAllocationVersions = new Map(
-                [ ...this.bindings.values() ].map(binding => [
-                    bindingResourceId(binding.resource),
-                    bindingAllocationVersion(binding.resource),
-                ])
-            )
+        const state = this.preparationState
+        if (state !== 'prepared') {
+            throwScratchDiagnostic({
+                code: state === 'preparing'
+                    ? 'SCRATCH_BIND_SET_PREPARING'
+                    : state === 'disposed'
+                        ? 'SCRATCH_BIND_DISPOSED'
+                        : 'SCRATCH_BIND_SET_STALE',
+                severity: 'error',
+                phase: 'binding',
+                subject: this.subject,
+                related: [ this.layout.subject ],
+                message: state === 'preparing'
+                    ? 'BindSet preparation is still pending.'
+                    : state === 'disposed'
+                        ? 'BindSet has been disposed.'
+                        : 'BindSet allocation snapshot is stale and requires explicit preparation.',
+                expected: { preparationState: 'prepared' },
+                actual: {
+                    preparationState: state,
+                    prepareGeneration: this.prepareGeneration,
+                    preparedSnapshotHash: this.preparedSnapshotHash,
+                    inFlightOperationId: this.inFlightOperationId,
+                },
+            })
         }
-
-        return this.gpuBindGroup
     }
 
-    hasStaleAllocationVersions(): boolean {
+    prepare(): Promise<void> {
 
-        for (const binding of this.bindings.values()) {
-            if (
-                this.boundAllocationVersions.get(bindingResourceId(binding.resource)) !==
-                bindingAllocationVersion(binding.resource)
-            ) {
-                return true
+        const state = bindSetStateFor(this)
+        if (state.isDisposed) return rejectedBindSetDiagnostic({
+            code: 'SCRATCH_BIND_DISPOSED',
+            severity: 'error',
+            phase: 'binding',
+            subject: this.subject,
+            message: 'BindSet has been disposed.',
+        })
+
+        const snapshot = captureBindSetSnapshot(this)
+        if (state.inFlight !== undefined) {
+            if (state.inFlight.snapshot.signature === snapshot.signature) {
+                return state.inFlight.promise
             }
+            return rejectedBindSetDiagnostic({
+                code: 'SCRATCH_BIND_SET_PREPARATION_CONFLICT',
+                severity: 'error',
+                phase: 'binding',
+                subject: this.subject,
+                related: [ this.layout.subject ],
+                message: 'BindSet preparation already owns a different allocation snapshot.',
+                expected: {
+                    snapshotHash: state.inFlight.snapshot.hash,
+                    operationId: state.inFlight.operation.id,
+                },
+                actual: { snapshotHash: snapshot.hash },
+            })
         }
 
-        return false
+        if (
+            state.committed !== undefined &&
+            state.committed.snapshot.signature === snapshot.signature &&
+            bindSetDependenciesCurrent(this)
+        ) {
+            return state.cachedPreparedPromise!
+        }
+
+        return beginBindSetPreparation(this, snapshot)
     }
 
     dispose(): void {
 
-        this.isDisposed = true
+        const state = bindSetStateFor(this)
+        if (state.isDisposed) return
+        state.isDisposed = true
+        state.committed = undefined
+        state.cachedPreparedPromise = undefined
+        if (state.isRegistered) {
+            state.isRegistered = false
+            unregisterBindSetOwnership(this)
+            diagnosticsControllerFor(this.runtime).unregisterBindSet(this)
+        }
     }
+}
+
+export async function createBindSet(
+    runtime: ScratchRuntime,
+    layout: BindLayout,
+    bindings: BindSetBindings,
+    options: BindSetOptions = {}
+): Promise<BindSet> {
+
+    runtime.assertActive()
+    const bindSet = constructBindSet(
+        runtime,
+        `scratch-bind-set-${UUID()}`,
+        layout,
+        bindings,
+        options
+    )
+
+    try {
+        await bindSet.prepare()
+        bindSet.assertUsable()
+        registerBindSetOwnership(bindSet)
+        diagnosticsControllerFor(runtime).registerBindSet(bindSet)
+        bindSetStateFor(bindSet).isRegistered = true
+        return bindSet
+    } catch (cause) {
+        bindSet.dispose()
+        throw cause
+    }
+}
+
+export function preparedBindGroupFor(bindSet: BindSet): GPUBindGroup {
+
+    bindSet.assertUsable()
+    const candidate = bindSetStateFor(bindSet).committed
+    if (candidate === undefined) throw new TypeError('Prepared BindSet candidate is unavailable.')
+    return candidate.gpuBindGroup
+}
+
+function constructBindSet(
+    runtime: ScratchRuntime,
+    id: string,
+    layout: BindLayout,
+    bindings: BindSetBindings,
+    options: BindSetOptions
+): BindSet {
+
+    const Constructor = BindSet as unknown as new (
+        token: symbol,
+        runtime: ScratchRuntime,
+        id: string,
+        layout: BindLayout,
+        bindings: BindSetBindings,
+        options: BindSetOptions
+    ) => BindSet
+    return new Constructor(bindSetToken, runtime, id, layout, bindings, options)
+}
+
+function bindSetStateFor(bindSet: BindSet): BindSetInternalState {
+
+    const state = bindSetStates.get(bindSet)
+    if (state === undefined) throw new TypeError('BindSet state is unavailable.')
+    return state
+}
+
+function beginBindSetPreparation(
+    bindSet: BindSet,
+    snapshot: BindSetPreparationSnapshot
+): Promise<void> {
+
+    const state = bindSetStateFor(bindSet)
+    state.committed = undefined
+    state.cachedPreparedPromise = undefined
+    const nativeLabel = createScratchNativeLabel(bindSet.label, bindSet.id)
+    const controller = diagnosticsControllerFor(bindSet.runtime)
+    const operation = controller.beginOperation({
+        kind: 'bind-set-preparation',
+        target: {
+            kind: 'bind-set',
+            bindSetId: bindSet.id,
+            bindLayoutId: bindSet.layout.id,
+            preparationState: 'preparing',
+            generation: state.prepareGeneration,
+            snapshotHash: snapshot.hash,
+            preparationStage: state.prepareGeneration === 0
+                ? 'descriptor-validation'
+                : 'retry',
+        },
+        descriptorSummary: {
+            bindLayoutId: bindSet.layout.id,
+            bindingCount: bindSet.bindings.size,
+            textureViewCount: uniqueTextureViewCount(bindSet),
+            retry: state.prepareGeneration > 0,
+            snapshotHash: snapshot.hash,
+        },
+        fullDescriptor: {
+            bindLayoutId: bindSet.layout.id,
+            bindings: snapshot.facts,
+            snapshotHash: snapshot.hash,
+        },
+        nativeLabel,
+    })
+
+    let resolvePromise!: () => void
+    let rejectPromise!: (cause: unknown) => void
+    const promise = new Promise<void>((resolve, reject) => {
+        resolvePromise = resolve
+        rejectPromise = reject
+    })
+    const inFlight = Object.freeze({ snapshot, operation, promise })
+    state.inFlight = inFlight
+
+    void executeBindSetPreparation(bindSet, inFlight, nativeLabel).then(
+        () => {
+            if (state.inFlight === inFlight) state.inFlight = undefined
+            if (!state.isDisposed && state.committed !== undefined) {
+                state.cachedPreparedPromise = promise
+            }
+            resolvePromise()
+        },
+        cause => {
+            if (state.inFlight === inFlight) state.inFlight = undefined
+            rejectPromise(cause)
+        }
+    )
+    return promise
+}
+
+async function executeBindSetPreparation(
+    bindSet: BindSet,
+    inFlight: InFlightBindSetPreparation,
+    nativeLabel: string
+): Promise<void> {
+
+    try {
+        bindSet.runtime.assertActive()
+        bindSet.layout.assertUsable()
+        for (const binding of bindingsInNativeOrder(bindSet)) {
+            validateBindingResource(bindSet, binding.entry, binding.resource)
+        }
+    } catch (cause) {
+        return failBindSetPreflight(bindSet, inFlight, cause)
+    }
+
+    const viewCandidates = new Map<string, GPUTextureView>()
+    const issues: NativePreparationIssue[] = []
+    let issueSequence = 0
+
+    for (const candidate of textureViewPreparationCandidates(bindSet)) {
+        const binding = candidate.bindings[0]!
+        const viewLabel = bindSetTextureViewLabel(bindSet, binding)
+        const descriptor = Object.freeze({
+            ...prepareTextureViewSpecDescriptor(candidate.view, true),
+            label: viewLabel,
+        }) satisfies GPUTextureViewDescriptor
+        const attempt = beginSupportingObjectCreation<GPUTextureView>(
+            bindSet.runtime,
+            () => candidate.view.texture.gpuTexture.createView(descriptor)
+        )
+        if (attempt.candidate !== undefined) {
+            viewCandidates.set(candidate.key, attempt.candidate)
+        }
+        issues.push(Object.freeze({
+            sequence: issueSequence++,
+            kind: 'texture-view',
+            subject: bindSetTextureViewCandidateSubject(bindSet, candidate),
+            attempt,
+        }))
+    }
+
+    const entries: GPUBindGroupEntry[] = []
+    let entriesComplete = true
+    for (const binding of bindingsInNativeOrder(bindSet)) {
+        const resource = nativeBindingResource(binding, viewCandidates)
+        if (resource === undefined) {
+            entriesComplete = false
+            continue
+        }
+        entries.push(Object.freeze({
+            binding: binding.entry.binding,
+            resource,
+        }))
+    }
+    Object.freeze(entries)
+
+    let bindGroupIssue: NativePreparationIssue | undefined
+    if (entriesComplete) {
+        const descriptor = Object.freeze({
+            label: nativeLabel,
+            layout: bindSet.layout.gpuBindGroupLayout,
+            entries,
+        }) satisfies GPUBindGroupDescriptor
+        const attempt = beginSupportingObjectCreation<GPUBindGroup>(
+            bindSet.runtime,
+            () => bindSet.runtime.device.createBindGroup(descriptor)
+        )
+        bindGroupIssue = Object.freeze({
+            sequence: issueSequence,
+            kind: 'bind-group',
+            subject: bindSet.subject,
+            attempt,
+        })
+        issues.push(bindGroupIssue)
+    }
+
+    const outcomes = await Promise.all(issues.map(issue => issue.attempt.settlement))
+    const nativeFailures = nativePreparationFailures(issues, outcomes)
+    if (nativeFailures.length > 0) {
+        return failBindSetPreparation(bindSet, inFlight, nativeFailures)
+    }
+
+    const lifecycleFailure = bindSetLifecycleFailure(bindSet)
+    if (lifecycleFailure !== undefined) {
+        return failBindSetPreparation(bindSet, inFlight, [ lifecycleFailure ])
+    }
+
+    const currentSnapshot = captureBindSetSnapshot(bindSet)
+    if (currentSnapshot.signature !== inFlight.snapshot.signature) {
+        return failBindSetPreparation(bindSet, inFlight, [ Object.freeze({
+            stage: 'snapshot-recheck',
+            issueSequence: Number.MAX_SAFE_INTEGER,
+            scopeOrder: 0,
+            kind: 'snapshot-drift',
+            code: 'SCRATCH_BIND_SET_PREPARATION_SNAPSHOT_DRIFT',
+            nativeErrorCategory: 'none',
+            subject: bindSet.subject,
+        }) ])
+    }
+
+    const gpuBindGroup = bindGroupIssue?.attempt.candidate
+    if (gpuBindGroup === undefined) {
+        return failBindSetPreparation(bindSet, inFlight, [ Object.freeze({
+            stage: 'native-issue',
+            issueSequence: issueSequence,
+            scopeOrder: 0,
+            kind: 'native-exception',
+            code: BIND_SET_PREPARATION_CODES.nativeException,
+            nativeErrorCategory: 'native-exception',
+            subject: bindSet.subject,
+            cause: new TypeError('BindSet preparation produced no native bind-group candidate.'),
+        }) ])
+    }
+
+    const state = bindSetStateFor(bindSet)
+    const textureViews = Object.freeze([ ...viewCandidates.values() ])
+    state.committed = Object.freeze({
+        snapshot: inFlight.snapshot,
+        gpuBindGroup,
+        textureViews,
+    })
+    state.prepareGeneration++
+    state.lastPreparationOperationId = inFlight.operation.id
+    diagnosticsControllerFor(bindSet.runtime).completeOperation(inFlight.operation, {
+        status: 'succeeded',
+        bindSetTarget: bindSetOperationTarget(bindSet, inFlight.snapshot, 'commit', 'prepared'),
+    })
+}
+
+function nativePreparationFailures(
+    issues: readonly NativePreparationIssue[],
+    outcomes: readonly SupportingObjectCreationOutcome<GPUTextureView | GPUBindGroup>[]
+): BindSetPreparationFailure[] {
+
+    const failures: BindSetPreparationFailure[] = []
+    for (let index = 0; index < issues.length; index++) {
+        const issue = issues[index]!
+        const outcome = outcomes[index]!
+        for (const failure of outcome.failures) {
+            if (failure.kind === 'runtime-disposed' || failure.kind === 'device-lost') continue
+            failures.push(preparationFailureForNativeIssue(issue, failure))
+        }
+        if (outcome.candidate === undefined && outcome.failures.length === 0) {
+            failures.push(preparationFailureForNativeIssue(issue, {
+                kind: 'native-exception',
+                cause: new TypeError('Native preparation issue produced no candidate.'),
+            }))
+        }
+    }
+
+    return failures.sort(comparePreparationFailures)
+}
+
+function preparationFailureForNativeIssue(
+    issue: NativePreparationIssue,
+    failure: SupportingObjectObservedFailure
+): BindSetPreparationFailure {
+
+    return Object.freeze({
+        stage: failure.kind === 'native-exception'
+            ? 'synchronous-native-throw'
+            : issue.kind === 'texture-view'
+                ? 'texture-view-acknowledgement'
+                : 'bind-group-acknowledgement',
+        issueSequence: issue.sequence,
+        scopeOrder: supportingFailureScopeOrder(failure.kind),
+        kind: failure.kind,
+        code: bindSetPreparationFailureCode(failure.kind),
+        nativeErrorCategory: supportingFailureNativeCategory(failure.kind),
+        subject: issue.subject,
+        ...(failure.cause !== undefined ? { cause: failure.cause } : {}),
+    })
+}
+
+function bindSetLifecycleFailure(bindSet: BindSet): BindSetPreparationFailure | undefined {
+
+    if (bindSet.runtime.isDisposed) {
+        return lifecyclePreparationFailure(
+            bindSet,
+            'runtime-disposed',
+            'SCRATCH_RUNTIME_DISPOSED',
+            bindSet.runtime.subject
+        )
+    }
+    if (bindSet.runtime.isDeviceLost) {
+        return lifecyclePreparationFailure(
+            bindSet,
+            'device-lost',
+            'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+            bindSet.runtime.subject
+        )
+    }
+    if (bindSet.isDisposed) {
+        return lifecyclePreparationFailure(
+            bindSet,
+            'bind-set-disposed',
+            'SCRATCH_BIND_DISPOSED',
+            bindSet.subject
+        )
+    }
+    if (bindSet.layout.isDisposed) {
+        return lifecyclePreparationFailure(
+            bindSet,
+            'bind-layout-disposed',
+            'SCRATCH_BIND_DISPOSED',
+            bindSet.layout.subject
+        )
+    }
+    for (const binding of bindingsInNativeOrder(bindSet)) {
+        if (!bindingResourceDisposed(binding.resource)) continue
+        return lifecyclePreparationFailure(
+            bindSet,
+            'bound-resource-disposed',
+            'SCRATCH_RESOURCE_DISPOSED',
+            bindingResourceSubject(binding.resource)
+        )
+    }
+    return undefined
+}
+
+function lifecyclePreparationFailure(
+    bindSet: BindSet,
+    kind: BindSetPreparationFailure['kind'],
+    code: string,
+    subject: DiagnosticSubject
+): BindSetPreparationFailure {
+
+    return Object.freeze({
+        stage: 'lifecycle-recheck',
+        issueSequence: Number.MAX_SAFE_INTEGER,
+        scopeOrder: lifecycleFailureOrder(kind),
+        kind,
+        code,
+        nativeErrorCategory: kind === 'device-lost' ? 'device-lost' : 'none',
+        subject,
+    })
+}
+
+function failBindSetPreflight(
+    bindSet: BindSet,
+    inFlight: InFlightBindSetPreparation,
+    cause: unknown
+): never {
+
+    const diagnosticError = cause instanceof ScratchDiagnosticError ? cause : undefined
+    const code = diagnosticError?.diagnostic.code ?? BIND_SET_PREPARATION_CODES.nativeException
+    const failure = Object.freeze({
+        stage: 'descriptor-validation' as const,
+        issueSequence: -1,
+        scopeOrder: 0,
+        kind: 'validation' as const,
+        code,
+        nativeErrorCategory: 'none' as const,
+        subject: diagnosticError?.diagnostic.subject ?? bindSet.subject,
+        ...(cause !== undefined ? { cause } : {}),
+    })
+
+    return failBindSetPreparation(bindSet, inFlight, [ failure ], diagnosticError)
+}
+
+function failBindSetPreparation(
+    bindSet: BindSet,
+    inFlight: InFlightBindSetPreparation,
+    failures: readonly BindSetPreparationFailure[],
+    sourceDiagnostic?: ScratchDiagnosticError
+): never {
+
+    const ordered = [ ...failures ].sort(comparePreparationFailures)
+    const primary = ordered[0]!
+    const controller = diagnosticsControllerFor(bindSet.runtime)
+    const state = bindSetStateFor(bindSet)
+    state.committed = undefined
+    state.cachedPreparedPromise = undefined
+    const cancelled = primary.stage === 'lifecycle-recheck' || primary.stage === 'snapshot-recheck'
+    const record = controller.completeOperation(inFlight.operation, {
+        status: cancelled ? 'cancelled' : 'failed',
+        nativeErrorCategory: primary.nativeErrorCategory,
+        bindSetTarget: bindSetOperationTarget(
+            bindSet,
+            inFlight.snapshot,
+            primary.stage === 'snapshot-recheck' ? 'snapshot-recheck' : primary.stage,
+            state.isDisposed ? 'disposed' : 'stale'
+        ),
+    })
+    const outcomes = Object.freeze(ordered.map(preparationIncidentOutcome))
+    const incident = controller.recordIncident({
+        kind: 'supporting-object-failure',
+        diagnosticCode: primary.code,
+        nativeErrorCategory: primary.nativeErrorCategory,
+        attribution: 'exact-operation',
+        target: record.target,
+        operationId: record.id,
+        triggerOperation: record,
+        related: [ bindSet.subject, bindSet.layout.subject, ...ordered.map(failure => failure.subject) ],
+        ...(primary.cause !== undefined
+            ? { nativeError: serializeNativeGpuError(primary.cause) }
+            : {}),
+        failureStage: primary.stage,
+        outcomes,
+    })
+    state.lastIncidentId = incident.id
+
+    if (sourceDiagnostic !== undefined) {
+        throw new ScratchDiagnosticError(
+            sourceDiagnostic.diagnostic,
+            sourceDiagnostic.report,
+            { cause: sourceDiagnostic, incident }
+        )
+    }
+
+    throwScratchDiagnostic({
+        code: primary.code,
+        severity: 'error',
+        phase: primary.stage === 'lifecycle-recheck' ? 'runtime' : 'binding',
+        subject: { kind: 'GpuOperation', id: record.id, operationKind: record.kind },
+        related: [ bindSet.subject, bindSet.layout.subject, primary.subject, incident.subject ],
+        message: bindSetPreparationFailureMessage(primary),
+        actual: {
+            operationId: record.id,
+            snapshotHash: inFlight.snapshot.hash,
+            failures: outcomes,
+        },
+    }, {
+        ...(primary.cause !== undefined ? { cause: primary.cause } : {}),
+        incident,
+    })
+}
+
+function preparationIncidentOutcome(
+    failure: BindSetPreparationFailure
+): ScratchGpuIncidentOutcome {
+
+    return Object.freeze({
+        stage: failure.stage,
+        diagnosticCode: failure.code,
+        nativeErrorCategory: failure.nativeErrorCategory,
+        subject: failure.subject,
+        ...(failure.cause !== undefined
+            ? { nativeError: serializeNativeGpuError(failure.cause) }
+            : {}),
+    })
+}
+
+function bindSetOperationTarget(
+    bindSet: BindSet,
+    snapshot: BindSetPreparationSnapshot,
+    stage: ScratchGpuBindSetPreparationStage,
+    preparationState: BindSetPreparationState
+) {
+
+    return Object.freeze({
+        kind: 'bind-set' as const,
+        bindSetId: bindSet.id,
+        bindLayoutId: bindSet.layout.id,
+        preparationState,
+        generation: bindSet.prepareGeneration,
+        snapshotHash: snapshot.hash,
+        preparationStage: stage,
+    })
+}
+
+function captureBindSetSnapshot(bindSet: BindSet): BindSetPreparationSnapshot {
+
+    const facts = bindingsInNativeOrder(bindSet).map(binding => {
+        const entry = binding.entry
+        const resource = binding.resource
+        const base = {
+            name: entry.name,
+            binding: entry.binding,
+            entry: canonicalizeSnapshotValue(entry),
+        }
+        if (isBufferRegion(resource)) {
+            return Object.freeze({
+                ...base,
+                resourceKind: 'buffer-region',
+                resourceId: resource.buffer.id,
+                allocationVersion: resource.buffer.allocationVersion,
+                offset: resource.offset,
+                size: resource.size,
+                abiHash: resource.layout?.abiHash ?? null,
+                schemaHash: resource.layout?.schemaHash ?? null,
+            })
+        }
+        if (isTextureViewSpec(resource)) {
+            return Object.freeze({
+                ...base,
+                resourceKind: 'texture-view',
+                resourceId: resource.texture.id,
+                allocationVersion: resource.texture.allocationVersion,
+                viewHash: resource.hash,
+                descriptor: canonicalizeSnapshotValue(resource.descriptor),
+            })
+        }
+        if (resource instanceof SamplerResource) {
+            return Object.freeze({
+                ...base,
+                resourceKind: 'sampler',
+                resourceId: resource.id,
+                allocationVersion: resource.allocationVersion,
+            })
+        }
+        return Object.freeze({
+            ...base,
+            resourceKind: 'invalid',
+            value: describeValue(resource),
+        })
+    })
+    Object.freeze(facts)
+    const signature = JSON.stringify({
+        bindLayoutId: bindSet.layout.id,
+        bindLayoutGroup: bindSet.layout.group,
+        bindLayoutAcknowledged: true,
+        bindings: facts,
+    })
+
+    return Object.freeze({
+        signature,
+        hash: `bind-set-snapshot-${fnv1a64(signature)}`,
+        facts,
+    })
+}
+
+function canonicalizeSnapshotValue(value: unknown): unknown {
+
+    if (Array.isArray(value)) return value.map(canonicalizeSnapshotValue)
+    if (!isRecord(value)) return value
+    return Object.keys(value).sort().reduce<Record<string, unknown>>((result, key) => {
+        result[key] = canonicalizeSnapshotValue(value[key])
+        return result
+    }, {})
+}
+
+function bindingsInNativeOrder(bindSet: BindSet): NormalizedBindSetBinding[] {
+
+    return [ ...bindSet.bindings.values() ]
+        .sort((left, right) => left.entry.binding - right.entry.binding)
+}
+
+function nativeBindingResource(
+    binding: NormalizedBindSetBinding,
+    views: ReadonlyMap<string, GPUTextureView>
+): GPUBindingResource | undefined {
+
+    const resource = binding.resource
+    if (isBufferRegion(resource)) {
+        return Object.freeze({
+            buffer: resource.buffer.gpuBuffer,
+            offset: resource.offset,
+            size: resource.size,
+        })
+    }
+    if (isTextureViewSpec(resource)) return views.get(textureViewCandidateKey(resource))
+    if (resource instanceof SamplerResource) return resource.gpuSampler
+    return undefined
+}
+
+function textureViewCandidateKey(view: TextureViewSpec): string {
+
+    return JSON.stringify({
+        resourceId: view.texture.id,
+        allocationVersion: view.texture.allocationVersion,
+        hash: view.hash,
+        descriptor: canonicalizeSnapshotValue(view.descriptor),
+    })
+}
+
+function textureViewPreparationCandidates(
+    bindSet: BindSet
+): readonly TextureViewPreparationCandidate[] {
+
+    const candidates = new Map<string, {
+        view: TextureViewSpec
+        bindings: NormalizedBindSetBinding[]
+    }>()
+    for (const binding of bindingsInNativeOrder(bindSet)) {
+        if (!isTextureViewSpec(binding.resource)) continue
+        const key = textureViewCandidateKey(binding.resource)
+        const candidate = candidates.get(key)
+        if (candidate === undefined) {
+            candidates.set(key, {
+                view: binding.resource,
+                bindings: [ binding ],
+            })
+        } else {
+            candidate.bindings.push(binding)
+        }
+    }
+
+    return Object.freeze([ ...candidates ].map(([ key, candidate ]) => Object.freeze({
+        key,
+        view: candidate.view,
+        bindings: Object.freeze([ ...candidate.bindings ]),
+    })))
+}
+
+function bindSetTextureViewCandidateSubject(
+    bindSet: BindSet,
+    candidate: TextureViewPreparationCandidate
+): DiagnosticSubject {
+
+    const bindingLimit = 8
+    const bindings = Object.freeze(candidate.bindings.slice(0, bindingLimit).map(binding => Object.freeze({
+        group: bindSet.layout.group,
+        binding: binding.entry.binding,
+        name: binding.entry.name,
+    })))
+    return {
+        kind: 'BindSetTextureViewCandidate',
+        bindSetId: bindSet.id,
+        bindLayoutId: bindSet.layout.id,
+        group: bindSet.layout.group,
+        resourceId: candidate.view.texture.id,
+        allocationVersion: candidate.view.texture.allocationVersion,
+        viewSpecHash: candidate.view.hash,
+        bindings,
+        omittedBindingCount: candidate.bindings.length - bindings.length,
+    }
+}
+
+function bindSetTextureViewLabel(
+    bindSet: BindSet,
+    binding: NormalizedBindSetBinding
+): string {
+
+    const view = binding.resource as TextureViewSpec
+    const prefix = bindSet.label === undefined ? 'BindSet texture view' : `${bindSet.label} texture view`
+    return createScratchNativeLabel(
+        `${prefix} ${binding.entry.binding}:${binding.entry.name} ${view.hash}`,
+        bindSet.id
+    )
+}
+
+function uniqueTextureViewCount(bindSet: BindSet): number {
+
+    return new Set([ ...bindSet.bindings.values() ]
+        .filter(binding => isTextureViewSpec(binding.resource))
+        .map(binding => textureViewCandidateKey(binding.resource as TextureViewSpec))).size
+}
+
+function bindSetDependenciesCurrent(bindSet: BindSet): boolean {
+
+    if (
+        bindSet.runtime.isDisposed ||
+        bindSet.runtime.isDeviceLost ||
+        bindSet.layout.isDisposed
+    ) return false
+    return [ ...bindSet.bindings.values() ]
+        .every(binding => !bindingResourceDisposed(binding.resource))
+}
+
+function bindingResourceDisposed(resource: BufferRegion | TextureViewSpec | SamplerResource): boolean {
+
+    if (isBufferRegion(resource)) return resource.buffer.isDisposed
+    if (isTextureViewSpec(resource)) return resource.texture.isDisposed
+    return resource instanceof SamplerResource ? resource.isDisposed : true
+}
+
+function bindingResourceSubject(
+    resource: BufferRegion | TextureViewSpec | SamplerResource
+): DiagnosticSubject {
+
+    return resource.subject
+}
+
+function comparePreparationFailures(
+    left: BindSetPreparationFailure,
+    right: BindSetPreparationFailure
+): number {
+
+    const stageOrder: Record<ScratchGpuBindSetPreparationStage, number> = {
+        'descriptor-validation': 0,
+        'native-issue': 1,
+        'synchronous-native-throw': 1,
+        'texture-view-acknowledgement': 2,
+        'bind-group-acknowledgement': 2,
+        'lifecycle-recheck': 3,
+        'snapshot-recheck': 4,
+        commit: 5,
+        cancellation: 6,
+        retry: 7,
+    }
+    return stageOrder[left.stage] - stageOrder[right.stage] ||
+        left.issueSequence - right.issueSequence ||
+        left.scopeOrder - right.scopeOrder
+}
+
+function supportingFailureScopeOrder(kind: SupportingObjectFailureKind): number {
+
+    if (kind === 'native-exception') return 0
+    if (kind === 'scope-failure') return 1
+    if (kind === 'validation') return 2
+    if (kind === 'internal') return 3
+    if (kind === 'out-of-memory') return 4
+    return 5
+}
+
+function lifecycleFailureOrder(kind: BindSetPreparationFailure['kind']): number {
+
+    if (kind === 'runtime-disposed') return 0
+    if (kind === 'device-lost') return 1
+    if (kind === 'bind-set-disposed') return 2
+    if (kind === 'bind-layout-disposed') return 3
+    return 4
+}
+
+function bindSetPreparationFailureCode(kind: SupportingObjectFailureKind): string {
+
+    if (kind === 'validation') return BIND_SET_PREPARATION_CODES.validation
+    if (kind === 'internal') return BIND_SET_PREPARATION_CODES.internal
+    if (kind === 'out-of-memory') return BIND_SET_PREPARATION_CODES.outOfMemory
+    if (kind === 'scope-failure') return BIND_SET_PREPARATION_CODES.scopeFailure
+    if (kind === 'runtime-disposed') return 'SCRATCH_RUNTIME_DISPOSED'
+    if (kind === 'device-lost') return 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION'
+    return BIND_SET_PREPARATION_CODES.nativeException
+}
+
+function supportingFailureNativeCategory(
+    kind: SupportingObjectFailureKind
+): GpuNativeErrorCategory {
+
+    if (
+        kind === 'validation' ||
+        kind === 'internal' ||
+        kind === 'out-of-memory' ||
+        kind === 'scope-failure' ||
+        kind === 'device-lost'
+    ) return kind
+    if (kind === 'runtime-disposed') return 'none'
+    return 'native-exception'
+}
+
+function bindSetPreparationFailureMessage(failure: BindSetPreparationFailure): string {
+
+    if (failure.kind === 'snapshot-drift') {
+        return 'BindSet allocation snapshot changed while preparation was pending.'
+    }
+    if (failure.stage === 'lifecycle-recheck') {
+        return 'BindSet preparation was cancelled by a lifecycle change.'
+    }
+    if (failure.kind === 'validation') return 'BindSet preparation failed native validation.'
+    if (failure.kind === 'internal') return 'BindSet preparation observed a native internal error.'
+    if (failure.kind === 'out-of-memory') return 'BindSet preparation observed native out-of-memory.'
+    if (failure.kind === 'scope-failure') return 'BindSet preparation error scopes failed to settle.'
+    return 'BindSet preparation failed during native candidate creation.'
+}
+
+function rejectedBindSetDiagnostic(
+    input: Parameters<typeof throwScratchDiagnostic>[0]
+): Promise<never> {
+
+    try {
+        throwScratchDiagnostic(input)
+    } catch (cause) {
+        return Promise.reject(cause)
+    }
+}
+
+function bindSetSubject(id: string, label?: string): DiagnosticSubject {
+
+    return {
+        kind: 'BindSet',
+        id,
+        ...(label !== undefined ? { label } : {}),
+    }
+}
+
+function fnv1a64(value: string): string {
+
+    let hash = 0xcbf29ce484222325n
+    for (let index = 0; index < value.length; index++) {
+        hash ^= BigInt(value.charCodeAt(index))
+        hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+    }
+    return hash.toString(16).padStart(16, '0')
 }
 
 function lockNormalizedBindings(
@@ -614,20 +1679,6 @@ function lockNormalizedBindings(
 
     for (const binding of bindings.values()) Object.freeze(binding)
     return readonlyMapSnapshot(bindings)
-}
-
-function bindingResourceId(resource: BufferRegion | TextureViewSpec | SamplerResource): string {
-
-    if (isBufferRegion(resource)) return resource.buffer.id
-    if (isTextureViewSpec(resource)) return resource.texture.id
-    return resource.id
-}
-
-function bindingAllocationVersion(resource: BufferRegion | TextureViewSpec | SamplerResource): number {
-
-    if (isBufferRegion(resource)) return resource.buffer.allocationVersion
-    if (isTextureViewSpec(resource)) return resource.texture.allocationVersion
-    return resource.allocationVersion
 }
 
 type BindLayoutDiagnosticContext = Readonly<{
@@ -947,7 +1998,6 @@ function normalizeBindings(bindSet: BindSet, bindings: BindSetBindings): Map<str
             })
         }
 
-        validateBindingResource(bindSet, entry, resource)
         normalized.set(entry.name, { entry, resource })
     }
 
@@ -961,22 +2011,9 @@ function validateBindingResource(bindSet: BindSet, entry: NormalizedBindLayoutEn
         return
     }
 
-    if (entry.type === 'texture') {
+    if (entry.type === 'texture' || entry.type === 'storage-texture') {
         validateTextureResource(bindSet, entry, resource)
         return
-    }
-
-    if (entry.type === 'storage-texture') {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
-            severity: 'error',
-            phase: 'binding',
-            subject: bindSet.layout.entrySubject(entry),
-            related: [ bindSet.subject ],
-            message: 'Storage-texture BindSet preparation is not yet available.',
-            expected: { preparation: 'Phase 5 storage-texture binding support' },
-            actual: { type: entry.type },
-        })
     }
 
     if (entry.type === 'sampler') {
@@ -1022,11 +2059,55 @@ function validateBufferResource(
             actual: { usage: resource.buffer.usage },
         })
     }
+
+    if (resource.size === 0) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_RESOURCE_RANGE_INVALID',
+            expected: { size: 'positive byte length' },
+            actual: { size: resource.size },
+        })
+    }
+    if (resource.size < entry.minBindingSize) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_MIN_BINDING_SIZE_UNSATISFIED',
+            expected: { minBindingSize: entry.minBindingSize },
+            actual: { size: resource.size },
+        })
+    }
+
+    const uniform = entry.type === 'uniform'
+    const alignment = uniform
+        ? bindSet.runtime.deviceLimits.minUniformBufferOffsetAlignment
+        : bindSet.runtime.deviceLimits.minStorageBufferOffsetAlignment
+    const maximumSize = uniform
+        ? bindSet.runtime.deviceLimits.maxUniformBufferBindingSize
+        : bindSet.runtime.deviceLimits.maxStorageBufferBindingSize
+    if (resource.offset % alignment !== 0) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_RESOURCE_OFFSET_UNALIGNED',
+            expected: { offsetAlignment: alignment },
+            actual: { offset: resource.offset },
+        })
+    }
+    if (resource.size > maximumSize) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_RESOURCE_SIZE_LIMIT_EXCEEDED',
+            expected: { maximumSize },
+            actual: { size: resource.size },
+        })
+    }
+    if (!uniform && resource.size % 4 !== 0) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_RESOURCE_RANGE_INVALID',
+            expected: { sizeMultiple: 4 },
+            actual: { size: resource.size },
+        })
+    }
 }
 
 function validateTextureResource(
     bindSet: BindSet,
-    entry: NormalizedTextureBindLayoutEntry,
+    entry: NormalizedTextureBindLayoutEntry | NormalizedStorageTextureBindLayoutEntry,
     resource: unknown
 ) {
 
@@ -1046,7 +2127,11 @@ function validateTextureResource(
     resource.texture.assertRuntime(bindSet.runtime)
     resource.assertUsable()
 
-    if ((resource.texture.usage & TEXTURE_USAGE_TEXTURE_BINDING) === 0) {
+    const descriptor = prepareTextureViewSpecDescriptor(resource, true)
+    const requiredUsage = entry.type === 'texture'
+        ? TEXTURE_USAGE_TEXTURE_BINDING
+        : TEXTURE_USAGE_STORAGE_BINDING
+    if ((descriptor.usage & requiredUsage) === 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_USAGE_MISSING',
             severity: 'error',
@@ -1054,22 +2139,85 @@ function validateTextureResource(
             subject: resource.subject,
             related: [ bindSet.layout.entrySubject(entry), bindSet.subject ],
             message: 'Texture binding requires a texture created with compatible usage.',
-            expected: { usage: 'GPUTextureUsage.TEXTURE_BINDING' },
-            actual: { usage: resource.texture.usage },
+            expected: {
+                usage: entry.type === 'texture'
+                    ? 'GPUTextureUsage.TEXTURE_BINDING'
+                    : 'GPUTextureUsage.STORAGE_BINDING',
+            },
+            actual: {
+                usage: descriptor.usage,
+                textureUsage: resource.texture.usage,
+            },
         })
     }
 
-    const descriptor = prepareTextureViewSpecDescriptor(resource, true)
-    if (descriptor.dimension !== (entry.viewDimension ?? '2d')) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
-            severity: 'error',
-            phase: 'binding',
-            subject: bindSet.layout.entrySubject(entry),
-            related: [ bindSet.subject, resource.subject ],
-            message: 'TextureViewSpec dimension must match its BindLayout entry.',
-            expected: { viewDimension: entry.viewDimension ?? '2d' },
+    if (descriptor.dimension !== entry.viewDimension) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            expected: { viewDimension: entry.viewDimension },
             actual: { viewDimension: descriptor.dimension },
+        })
+    }
+    if (!bindSet.runtime.deviceFeatures.has('core-features-and-limits')) {
+        const arrayLayerCount = resource.texture.dimension === '2d'
+            ? resource.texture.depthOrArrayLayers
+            : 1
+        if (descriptor.baseArrayLayer !== 0 || descriptor.arrayLayerCount !== arrayLayerCount) {
+            throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+                code: 'SCRATCH_BIND_TEXTURE_COMPATIBILITY_MODE_MISMATCH',
+                expected: { baseArrayLayer: 0, arrayLayerCount },
+                actual: {
+                    baseArrayLayer: descriptor.baseArrayLayer,
+                    arrayLayerCount: descriptor.arrayLayerCount,
+                },
+            })
+        }
+    }
+
+    if (entry.type === 'texture') {
+        const multisampled = resource.texture.sampleCount > 1
+        if (multisampled !== entry.multisampled) {
+            throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+                expected: { multisampled: entry.multisampled },
+                actual: {
+                    multisampled,
+                    sampleCount: resource.texture.sampleCount,
+                },
+            })
+        }
+        if (!textureSampleTypeCompatible(bindSet.runtime, resource, entry.sampleType)) {
+            throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+                code: 'SCRATCH_BIND_TEXTURE_SAMPLE_TYPE_MISMATCH',
+                expected: { sampleType: entry.sampleType },
+                actual: {
+                    format: descriptor.format,
+                    aspect: descriptor.aspect,
+                    compatibleSampleTypes: textureViewSampleTypes(bindSet.runtime, resource),
+                },
+            })
+        }
+        return
+    }
+
+    if (
+        descriptor.format !== entry.format ||
+        descriptor.mipLevelCount !== 1 ||
+        descriptor.swizzle !== 'rgba' ||
+        resource.texture.sampleCount !== 1
+    ) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_STORAGE_TEXTURE_VIEW_MISMATCH',
+            expected: {
+                format: entry.format,
+                mipLevelCount: 1,
+                swizzle: 'rgba',
+                sampleCount: 1,
+            },
+            actual: {
+                format: descriptor.format,
+                mipLevelCount: descriptor.mipLevelCount,
+                swizzle: descriptor.swizzle,
+                sampleCount: resource.texture.sampleCount,
+            },
         })
     }
 }
@@ -1094,6 +2242,87 @@ function validateSamplerResource(
     }
 
     resource.assertRuntime(bindSet.runtime)
+    const descriptor = resource.descriptor as Readonly<{
+        magFilter?: GPUFilterMode
+        minFilter?: GPUFilterMode
+        mipmapFilter?: GPUMipmapFilterMode
+        compare?: GPUCompareFunction
+    }>
+    const isComparison = descriptor.compare !== undefined
+    const isFiltering = descriptor.magFilter === 'linear' ||
+        descriptor.minFilter === 'linear' ||
+        descriptor.mipmapFilter === 'linear'
+    const compatible = entry.samplerType === 'comparison'
+        ? isComparison
+        : entry.samplerType === 'non-filtering'
+            ? !isComparison && !isFiltering
+            : !isComparison
+    if (!compatible) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_SAMPLER_TYPE_MISMATCH',
+            expected: { samplerType: entry.samplerType },
+            actual: { isComparison, isFiltering },
+        })
+    }
+}
+
+function textureSampleTypeCompatible(
+    runtime: ScratchRuntime,
+    view: TextureViewSpec,
+    sampleType: GPUTextureSampleType
+): boolean {
+
+    return textureViewSampleTypes(runtime, view).includes(sampleType)
+}
+
+function textureViewSampleTypes(
+    runtime: ScratchRuntime,
+    view: TextureViewSpec
+): GPUTextureSampleType[] {
+
+    const format = view.descriptor.format
+    const aspect = view.descriptor.aspect
+    if (
+        aspect === 'stencil-only' ||
+        (format === 'stencil8' && aspect === 'all')
+    ) return [ 'uint' ]
+    if (DEPTH_TEXTURE_FORMATS.has(format)) return [ 'depth', 'unfilterable-float' ]
+    if (UINT_TEXTURE_FORMATS.has(format)) return [ 'uint' ]
+    if (SINT_TEXTURE_FORMATS.has(format)) return [ 'sint' ]
+
+    const packedOrCompressed = format === 'rgb9e5ufloat' ||
+        /^(bc\d|etc2-|eac-|astc-)/.test(format)
+    const filterable = FILTERABLE_FLOAT_TEXTURE_FORMATS.has(format) ||
+        packedOrCompressed ||
+        (FLOAT32_TEXTURE_FORMATS.has(format) && runtime.deviceFeatures.has('float32-filterable'))
+    const unfilterable = UNFILTERABLE_FLOAT_TEXTURE_FORMATS.has(format) || packedOrCompressed
+    return [
+        ...(filterable ? [ 'float' as const ] : []),
+        ...(unfilterable ? [ 'unfilterable-float' as const ] : []),
+    ]
+}
+
+function throwBindingCompatibilityDiagnostic(
+    bindSet: BindSet,
+    entry: NormalizedBindLayoutEntry,
+    resourceSubject: DiagnosticSubject,
+    input: Readonly<{
+        code?: string
+        expected: unknown
+        actual: unknown
+    }>
+): never {
+
+    throwScratchDiagnostic({
+        code: input.code ?? 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
+        severity: 'error',
+        phase: 'binding',
+        subject: bindSet.layout.entrySubject(entry),
+        related: [ bindSet.subject, resourceSubject ],
+        message: 'BindSet resource is incompatible with its BindLayout entry.',
+        expected: input.expected,
+        actual: input.actual,
+    })
 }
 
 function lowerBindLayoutEntry(entry: NormalizedBindLayoutEntry): GPUBindGroupLayoutEntry {
@@ -1138,41 +2367,6 @@ function lowerBindLayoutEntry(entry: NormalizedBindLayoutEntry): GPUBindGroupLay
     }
 
     return lowered
-}
-
-function createBindingResource(binding: NormalizedBindSetBinding): GPUBindingResource {
-
-    const resource = binding.resource
-
-    if (isBufferRegion(resource)) {
-        return {
-            buffer: resource.buffer.gpuBuffer,
-            offset: resource.offset,
-            size: resource.size,
-        }
-    }
-
-    if (isTextureViewSpec(resource) && binding.entry.type === 'texture') {
-        return createNativeTextureView(resource, true)
-    }
-
-    if (resource instanceof SamplerResource) {
-        return resource.gpuSampler
-    }
-
-    throwScratchDiagnostic({
-        code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
-        severity: 'error',
-        phase: 'binding',
-        subject: {
-            kind: 'BindLayoutEntry',
-            binding: binding.entry.binding,
-            name: binding.entry.name,
-        },
-        message: 'BindSet resource type does not match its BindLayout entry.',
-        expected: { type: binding.entry.type },
-        actual: { resource: describeValue(resource) },
-    })
 }
 
 function bindLayoutSubject(id: string, label?: string): DiagnosticSubject {

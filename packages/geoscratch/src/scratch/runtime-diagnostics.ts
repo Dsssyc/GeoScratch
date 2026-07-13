@@ -20,6 +20,7 @@ import type {
     ScratchGpuIncidentFailureStage,
     ScratchGpuIncidentOutcome,
     ScratchGpuIncidentReport,
+    ScratchGpuBindSetOperationTarget,
     ScratchGpuBindLayoutOperationTarget,
     ScratchGpuCommandOperationTarget,
     ScratchGpuOperationRecord,
@@ -39,7 +40,12 @@ import type {
     ScratchSubmissionNativeOutcomeStatus,
     ScratchSubmissionNativeStage,
 } from './gpu-operation.js'
-import type { BindLayout, NormalizedBindLayoutEntry } from './binding.js'
+import type {
+    BindLayout,
+    BindSet,
+    BindSetPreparationState,
+    NormalizedBindLayoutEntry,
+} from './binding.js'
 import type { ScratchReadbackNativeOutcomeInput } from './gpu-operation.js'
 import type { PipelineCompilationReport, PipelineKind } from './pipeline-compilation.js'
 import type { ScratchReadbackPolicy } from './readback-ownership.js'
@@ -159,6 +165,18 @@ export type ScratchRuntimeBindLayoutFact = Readonly<{
     lastAllocationOperationId: string
 }>
 
+export type ScratchRuntimeBindSetFact = Readonly<{
+    id: string
+    label?: string
+    bindLayoutId: string
+    preparationState: BindSetPreparationState
+    prepareGeneration: number
+    preparedSnapshotHash?: string
+    inFlightOperationId?: string
+    lastPreparationOperationId?: string
+    lastIncidentId?: string
+}>
+
 export type ScratchReadbackCommandState =
     | 'allocating'
     | 'idle'
@@ -217,6 +235,7 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
     }>
     resources: readonly ScratchRuntimeResourceFact[]
     bindLayouts: readonly ScratchRuntimeBindLayoutFact[]
+    bindSets: readonly ScratchRuntimeBindSetFact[]
     pipelines: readonly ScratchRuntimePipelineFact[]
     readbackCommands: readonly ScratchRuntimeReadbackCommandFact[]
     readbacks: readonly ScratchRuntimeReadbackOperationFact[]
@@ -393,6 +412,7 @@ export type ScratchGpuOperationCompletion = Readonly<{
     nativeLabels?: ScratchPipelineNativeLabelEvidence
     compilationReport?: PipelineCompilationReport
     nativeOutcome?: ScratchSubmissionNativeOutcomeInput | ScratchReadbackNativeOutcomeInput
+    bindSetTarget?: ScratchGpuBindSetOperationTarget
 }>
 
 export type ScratchSubmissionNativeObservationReservation = Readonly<{
@@ -558,6 +578,7 @@ export class ScratchRuntimeDiagnosticsController {
     #facade: ScratchRuntimeDiagnostics
     #resourceFacts = new Map<string, ScratchRuntimeResourceFact>()
     #bindLayoutFacts = new Map<string, ScratchRuntimeBindLayoutFact>()
+    #bindSets = new Map<string, BindSet>()
     #pipelineFacts = new Map<string, ScratchRuntimePipelineFact>()
     #readbackCommandFacts = new Map<string, ScratchRuntimeReadbackCommandFact>()
     #readbackFacts = new Map<string, ScratchRuntimeReadbackOperationFact>()
@@ -832,6 +853,9 @@ export class ScratchRuntimeDiagnosticsController {
             .sort((left, right) => left.id.localeCompare(right.id))
         const bindLayouts = [ ...this.#bindLayoutFacts.values() ]
             .sort((left, right) => left.id.localeCompare(right.id))
+        const bindSets = [ ...this.#bindSets.values() ]
+            .sort((left, right) => left.id.localeCompare(right.id))
+            .map(bindSetRuntimeFact)
         const pipelines = [ ...this.#pipelineFacts.values() ]
             .sort((left, right) => left.id.localeCompare(right.id))
         const readbackCommands = [ ...this.#readbackCommandFacts.values() ]
@@ -852,6 +876,7 @@ export class ScratchRuntimeDiagnosticsController {
             },
             resources,
             bindLayouts,
+            bindSets,
             pipelines,
             readbackCommands,
             readbacks,
@@ -969,7 +994,11 @@ export class ScratchRuntimeDiagnosticsController {
             this.#activeMappings++
             this.#peakActiveMappings = Math.max(this.#peakActiveMappings, this.#activeMappings)
         }
-        if (target.kind === 'resource' || target.kind === 'bind-layout') {
+        if (
+            target.kind === 'resource' ||
+            target.kind === 'bind-layout' ||
+            target.kind === 'bind-set'
+        ) {
             this.#aggregates = {
                 ...this.#aggregates,
                 allocationAttempts: this.#aggregates.allocationAttempts + 1,
@@ -1000,6 +1029,7 @@ export class ScratchRuntimeDiagnosticsController {
         if (this.#pendingOperations.get(operation.id) !== operation) {
             throw new TypeError(`GPU operation ${operation.id} is not pending on this runtime.`)
         }
+        const target = validatedCompletionTarget(operation, completion.bindSetTarget)
 
         const baseInput = {
             sequence: operation.sequence,
@@ -1007,7 +1037,7 @@ export class ScratchRuntimeDiagnosticsController {
             kind: operation.kind,
             status: completion.status,
             runtimeId: operation.runtimeId,
-            target: operation.target,
+            target,
             descriptor: operation.descriptor,
             ...(operation.nativeLabel !== undefined ? { nativeLabel: operation.nativeLabel } : {}),
             ...(completion.nativeErrorCategory !== undefined
@@ -1519,6 +1549,19 @@ export class ScratchRuntimeDiagnosticsController {
         this.#bindLayoutFacts.delete(layout.id)
     }
 
+    registerBindSet(bindSet: BindSet): void {
+
+        if (this.#bindSets.has(bindSet.id)) {
+            throw new TypeError(`BindSet ${bindSet.id} is already registered.`)
+        }
+        this.#bindSets.set(bindSet.id, bindSet)
+    }
+
+    unregisterBindSet(bindSet: BindSet): void {
+
+        this.#bindSets.delete(bindSet.id)
+    }
+
     dispose(): void {
 
         if (this.#isDisposed) return
@@ -1530,6 +1573,7 @@ export class ScratchRuntimeDiagnosticsController {
         for (const capture of [ ...this.#captures ]) stopCapture(capture, 'runtime-disposed')
         this.#readbackCommandFacts.clear()
         this.#bindLayoutFacts.clear()
+        this.#bindSets.clear()
         this.#readbackFacts.clear()
         this.#readbackStagingReservations.clear()
         this.#submissionNativeObservationReservations.clear()
@@ -1689,7 +1733,11 @@ export class ScratchRuntimeDiagnosticsController {
     ): void {
 
         const next = { ...this.#aggregates }
-        if (operation.target.kind === 'resource' || operation.target.kind === 'bind-layout') {
+        if (
+            operation.target.kind === 'resource' ||
+            operation.target.kind === 'bind-layout' ||
+            operation.target.kind === 'bind-set'
+        ) {
             if (completion.status === 'succeeded') next.successfulAllocations++
             if (completion.status === 'cancelled') next.cancelledAllocations++
         } else if (operation.target.kind === 'pipeline') {
@@ -2264,6 +2312,29 @@ function throwSubmissionNativePolicyOption(
     })
 }
 
+function bindSetRuntimeFact(bindSet: BindSet): ScratchRuntimeBindSetFact {
+
+    return Object.freeze({
+        id: bindSet.id,
+        ...(bindSet.label !== undefined ? { label: boundedLabel(bindSet.label) } : {}),
+        bindLayoutId: bindSet.layout.id,
+        preparationState: bindSet.preparationState,
+        prepareGeneration: bindSet.prepareGeneration,
+        ...(bindSet.preparedSnapshotHash !== undefined
+            ? { preparedSnapshotHash: bindSet.preparedSnapshotHash }
+            : {}),
+        ...(bindSet.inFlightOperationId !== undefined
+            ? { inFlightOperationId: bindSet.inFlightOperationId }
+            : {}),
+        ...(bindSet.lastPreparationOperationId !== undefined
+            ? { lastPreparationOperationId: bindSet.lastPreparationOperationId }
+            : {}),
+        ...(bindSet.lastIncidentId !== undefined
+            ? { lastIncidentId: bindSet.lastIncidentId }
+            : {}),
+    })
+}
+
 function pendingFact(operation: ScratchPendingGpuOperation): ScratchPendingGpuOperationFact {
 
     return Object.freeze({
@@ -2693,6 +2764,25 @@ function operationTargetId(target: ScratchGpuOperationTarget): string {
         case 'readback': return target.readbackId
         case 'submission': return target.submissionId
     }
+}
+
+function validatedCompletionTarget(
+    operation: ScratchPendingGpuOperation,
+    bindSetTarget: ScratchGpuBindSetOperationTarget | undefined
+): ScratchGpuOperationTarget {
+
+    if (bindSetTarget === undefined) return operation.target
+    if (operation.kind !== 'bind-set-preparation' || operation.target.kind !== 'bind-set') {
+        throw new TypeError('Only bind-set preparation operations may replace their completion target.')
+    }
+    if (
+        bindSetTarget.bindSetId !== operation.target.bindSetId ||
+        bindSetTarget.bindLayoutId !== operation.target.bindLayoutId ||
+        bindSetTarget.snapshotHash !== operation.target.snapshotHash
+    ) {
+        throw new TypeError('BindSet completion target must preserve operation identity and snapshot.')
+    }
+    return bindSetTarget
 }
 
 function freezeEvidence<T>(value: T): T {

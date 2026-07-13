@@ -1,6 +1,9 @@
 import { UUID } from '../core/utils/uuid.js'
-import { BindSet, createBindLayout as createScratchBindLayout } from './binding.js'
-import { runtimeBindLayoutSnapshot } from './binding-ownership.js'
+import {
+    createBindLayout as createScratchBindLayout,
+    createBindSet as createScratchBindSet,
+} from './binding.js'
+import { runtimeBindLayoutSnapshot, runtimeBindSetSnapshot } from './binding-ownership.js'
 import { BufferResource, createBufferResource } from './buffer.js'
 import {
     BeginOcclusionQueryCommand,
@@ -353,13 +356,21 @@ export class ScratchRuntime {
         return this.createBindLayout(descriptor)
     }
 
-    createBindSet(layout: BindLayout, bindings: BindSetBindings, options?: BindSetOptions) {
+    async createBindSet(
+        layout: BindLayout,
+        bindings: BindSetBindings,
+        options?: BindSetOptions
+    ): Promise<import('./binding.js').BindSet> {
 
         this.assertActive()
-        return new BindSet(this, layout, bindings, options)
+        return createScratchBindSet(this, layout, bindings, options)
     }
 
-    bindSet(layout: BindLayout, bindings: BindSetBindings, options?: BindSetOptions) {
+    bindSet(
+        layout: BindLayout,
+        bindings: BindSetBindings,
+        options?: BindSetOptions
+    ): Promise<import('./binding.js').BindSet> {
 
         return this.createBindSet(layout, bindings, options)
     }
@@ -562,6 +573,10 @@ export class ScratchRuntime {
 
         for (const pipeline of runtimePipelineSnapshot(this)) {
             pipeline.dispose()
+        }
+
+        for (const bindSet of runtimeBindSetSnapshot(this)) {
+            bindSet.dispose()
         }
 
         for (const layout of runtimeBindLayoutSnapshot(this)) {

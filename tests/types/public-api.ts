@@ -549,11 +549,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     bindLayout.group = 1
     // @ts-expect-error acknowledged BindLayout entries cannot be replaced
     bindLayout.entries = []
-    const bindSet: scr.BindSet = runtime.createBindSet(bindLayout, {
+    const bindSetPromise: Promise<scr.BindSet> = runtime.createBindSet(bindLayout, {
         uniforms: uniformRegion,
     }, {
         label: 'typed bind set',
     })
+    const bindSet: scr.BindSet = await bindSetPromise
     const storageLayout: scr.BindLayout = await runtime.createBindLayout({
         label: 'typed storage layout',
         group: 1,
@@ -572,7 +573,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             },
         ],
     })
-    const storageSet: scr.BindSet = runtime.createBindSet(storageLayout, {
+    const storageSet: scr.BindSet = await runtime.createBindSet(storageLayout, {
         inputValues: storageInputRegion,
         outputValues: storageOutputRegion,
     })
@@ -598,7 +599,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             },
         ],
     })
-    const dynamicStorageSet: scr.BindSet = runtime.createBindSet(dynamicStorageLayout, {
+    const dynamicStorageSet: scr.BindSet = await runtime.createBindSet(dynamicStorageLayout, {
         dynamicInputValues: storageInputRegion,
         dynamicOutputValues: storageOutputRegion,
     })
@@ -633,7 +634,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             },
         ],
     })
-    const textureSet: scr.BindSet = runtime.createBindSet(textureLayout, {
+    const textureSet: scr.BindSet = await runtime.createBindSet(textureLayout, {
         colorTexture: defaultTextureViewSpec,
         colorSampler: scratchSampler,
     })

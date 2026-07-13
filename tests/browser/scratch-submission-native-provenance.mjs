@@ -309,7 +309,9 @@ async function verifySubmissionTransactions(browser) {
                     visibility: [ 'vertex' ],
                 } ],
             })
-            const bindSet = runtime.createBindSet(bindLayout, { uniforms: uniform }, {
+            const bindSet = await runtime.createBindSet(bindLayout, {
+                uniforms: uniform.region(),
+            }, {
                 label: 'browser undersized uniform set',
             })
             const source = `

@@ -456,10 +456,10 @@ describe('scratch Program buffer layout requirements', () => {
             program: computeProgram,
             bindLayouts: [ computeLayout ],
         })
-        const renderSet = runtime.createBindSet(renderLayout, {
+        const renderSet = await runtime.createBindSet(renderLayout, {
             particles: await createLayoutBuffer(runtime, renderCodec),
         })
-        const computeSet = runtime.createBindSet(computeLayout, {
+        const computeSet = await runtime.createBindSet(computeLayout, {
             particles: await createLayoutBuffer(runtime, computeCodec),
         })
 
@@ -556,10 +556,10 @@ describe('scratch Program buffer layout requirements', () => {
             program: createProgram(runtime, codec),
             bindLayouts: [ computeLayout ],
         })
-        const renderSet = runtime.createBindSet(renderLayout, {
+        const renderSet = await runtime.createBindSet(renderLayout, {
             particles: await createRawBuffer(runtime),
         })
-        const computeSet = runtime.createBindSet(computeLayout, {
+        const computeSet = await runtime.createBindSet(computeLayout, {
             particles: await createRawBuffer(runtime),
         })
 
@@ -616,10 +616,10 @@ describe('scratch Program buffer layout requirements', () => {
             program: createProgram(runtime, codec),
             bindLayouts: [ computeLayout ],
         })
-        const renderSet = runtime.createBindSet(renderLayout, {
+        const renderSet = await runtime.createBindSet(renderLayout, {
             particles: await createLayoutBuffer(runtime, otherCodec),
         })
-        const computeSet = runtime.createBindSet(computeLayout, {
+        const computeSet = await runtime.createBindSet(computeLayout, {
             particles: await createLayoutBuffer(runtime, otherCodec),
         })
 

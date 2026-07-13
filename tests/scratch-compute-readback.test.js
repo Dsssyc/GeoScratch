@@ -68,7 +68,7 @@ async function createComputeFixture() {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
+    const bindSet = await runtime.createBindSet(bindLayout, {
         inputValues: input.region(),
         outputValues: output.region(),
     }, {
@@ -162,10 +162,8 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
             ],
         })
 
-        const bindGroup = fixture.bindSet.getBindGroup()
-
         expect(fixture.calls.bindGroups[0].descriptor).to.deep.equal({
-            label: 'compute storage set',
+            label: `compute storage set [scratch:${fixture.bindSet.id}]`,
             layout: fixture.bindLayout.gpuBindGroupLayout,
             entries: [
                 {
@@ -178,7 +176,8 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
                 },
             ],
         })
-        expect(fixture.bindSet.getBindGroup()).to.equal(bindGroup)
+        await fixture.bindSet.prepare()
+        expect(fixture.calls.bindGroups).to.have.length(1)
     })
 
     it('builds a compute pipeline from a Program compute entry point', async() => {
@@ -215,7 +214,11 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
         expect(fixture.output.contentEpoch).to.equal(1)
         expect(fixture.calls.computePasses[0].actions).to.deep.equal([
             { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
-            { type: 'setBindGroup', group: 0, bindGroup: fixture.bindSet.getBindGroup() },
+            {
+                type: 'setBindGroup',
+                group: 0,
+                bindGroup: fixture.calls.bindGroups[0],
+            },
             {
                 type: 'dispatchWorkgroups',
                 call: { x: 1, y: 1, z: 1 },

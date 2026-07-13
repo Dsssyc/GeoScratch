@@ -164,7 +164,7 @@ async function createRenderFixture(entries = [ dynamicUniformEntry() ]) {
         entries,
     })
     const { bindings, buffers } = await createBufferBindings(fixture.runtime, entries)
-    const bindSet = fixture.runtime.createBindSet(bindLayout, bindings, {
+    const bindSet = await fixture.runtime.createBindSet(bindLayout, bindings, {
         label: 'dynamic render bind set',
     })
     const program = fixture.runtime.createProgram({
@@ -212,7 +212,7 @@ async function createComputeFixture(entries = [ dynamicReadStorageEntry(), dynam
         entries,
     })
     const { bindings, buffers } = await createBufferBindings(fixture.runtime, entries)
-    const bindSet = fixture.runtime.createBindSet(bindLayout, bindings, {
+    const bindSet = await fixture.runtime.createBindSet(bindLayout, bindings, {
         label: 'dynamic compute bind set',
     })
     const program = fixture.runtime.createProgram({
@@ -441,7 +441,7 @@ describe('scratch dynamic buffer bind offsets', () => {
         expect(fixture.calls.renderPasses[0].actions).to.deep.include({
             type: 'setBindGroup',
             group: 0,
-            bindGroup: fixture.bindSet.getBindGroup(),
+            bindGroup: fixture.calls.bindGroups[0],
             dynamicOffsets: [ 256 ],
         })
 
@@ -459,7 +459,7 @@ describe('scratch dynamic buffer bind offsets', () => {
         expect(fixture.calls.computePasses[0].actions).to.deep.include({
             type: 'setBindGroup',
             group: 1,
-            bindGroup: fixture.bindSet.getBindGroup(),
+            bindGroup: fixture.calls.bindGroups[0],
             dynamicOffsets: [ 256, 512 ],
         })
 
@@ -490,7 +490,7 @@ describe('scratch dynamic buffer bind offsets', () => {
         expect(fixture.calls.renderPasses[0].actions).to.deep.include({
             type: 'setBindGroup',
             group: 0,
-            bindGroup: fixture.bindSet.getBindGroup(),
+            bindGroup: fixture.calls.bindGroups[0],
             dynamicOffsets: [ 128, 256 ],
         })
 
@@ -728,13 +728,13 @@ describe('scratch dynamic buffer bind offsets', () => {
             {
                 type: 'setBindGroup',
                 group: 0,
-                bindGroup: fixture.bindSet.getBindGroup(),
+                bindGroup: fixture.calls.bindGroups[0],
                 dynamicOffsets: [ 256 ],
             },
             {
                 type: 'setBindGroup',
                 group: 0,
-                bindGroup: fixture.bindSet.getBindGroup(),
+                bindGroup: fixture.calls.bindGroups[0],
                 dynamicOffsets: [ 512 ],
             },
         ])

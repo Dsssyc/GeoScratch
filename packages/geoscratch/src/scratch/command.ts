@@ -1,5 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferRegion, BufferResource, isBufferRegion } from './buffer.js'
+import { preparedBindGroupFor } from './binding.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
     describeLayoutCompatibilityDifference,
@@ -3237,11 +3238,11 @@ function setBindGroupWithDynamicOffsets(
 
     const dynamicOffsets = command.dynamicOffsets.get(bindSet.layout.group)
     if (dynamicOffsets !== undefined) {
-        passEncoder.setBindGroup(bindSet.layout.group, bindSet.getBindGroup(), dynamicOffsets)
+        passEncoder.setBindGroup(bindSet.layout.group, preparedBindGroupFor(bindSet), dynamicOffsets)
         return
     }
 
-    passEncoder.setBindGroup(bindSet.layout.group, bindSet.getBindGroup())
+    passEncoder.setBindGroup(bindSet.layout.group, preparedBindGroupFor(bindSet))
 }
 
 function validateProgramLayoutRequirementsForCommand(command: DrawCommand | DispatchCommand): void {

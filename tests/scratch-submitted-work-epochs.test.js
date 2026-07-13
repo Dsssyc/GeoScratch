@@ -137,7 +137,7 @@ async function createCompute(runtime, input, output, readContentEpoch = input.co
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
+    const bindSet = await runtime.createBindSet(bindLayout, {
         inputValues: input.region(),
         outputValues: output.region(),
     })

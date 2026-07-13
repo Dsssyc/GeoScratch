@@ -8,7 +8,7 @@ const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch')
 
 const nativeCalls = Object.freeze([
     [ 'GPUDevice.createCommandEncoder', /\b(?:device|this\.runtime\.device)\.createCommandEncoder\(/ ],
-    [ 'GPUDevice.createBindGroup', /\bthis\.runtime\.device\.createBindGroup\(/ ],
+    [ 'GPUDevice.createBindGroup', /\b(?:this|bindSet)\.runtime\.device\.createBindGroup\(/ ],
     [ 'GPUCommandEncoder.finish', /\bencoder!?\.finish\(/ ],
     [ 'GPUCommandEncoder.copyBufferToBuffer', /\b(?:commandEncoder|encoder)\.copyBufferToBuffer\(/ ],
     [ 'GPUCommandEncoder.copyTextureToTexture', /\bcommandEncoder\.copyTextureToTexture\(/ ],
@@ -45,7 +45,7 @@ function read(...parts) {
 
 describe('scratch submission native source audit', () => {
 
-    it('inventories every current encoder, pass, queue, and enclosed lazy call site', () => {
+    it('inventories every current encoder, pass, queue, and persistent binding call site', () => {
 
         const audit = read(
             'docs',
@@ -104,7 +104,7 @@ describe('scratch submission native source audit', () => {
         }
     })
 
-    it('records the shared direct escape paths and lazy bind group boundary honestly', () => {
+    it('records direct escape paths and the acknowledged BindSet preparation boundary honestly', () => {
 
         const audit = read(
             'docs',
@@ -117,9 +117,9 @@ describe('scratch submission native source audit', () => {
         expect(command.match(/writeUploadCommandQueueAction\(this, queue\)/g)).to.have.length(3)
         expect(audit).to.include('direct `execute(queue)` remains explicitly deferred')
         expect(audit).to.include('manual `encode(nativeEncoder)` remains explicitly deferred')
-        expect(binding).to.include('this.runtime.device.createBindGroup(descriptor)')
-        expect(audit).to.include('lazy bind-group creation is enclosed when reached from command encoding')
-        expect(audit).to.include('not independently acknowledged')
+        expect(binding).to.include('() => bindSet.runtime.device.createBindGroup(descriptor)')
+        expect(audit).to.include('BindSet preparation owns persistent bind-group creation')
+        expect(audit).to.match(/independently\s+acknowledged before submission/)
         expect(audit).to.include('raw runtime.device / runtime.queue calls remain outside Scratch provenance')
     })
 

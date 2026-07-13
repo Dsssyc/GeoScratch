@@ -232,4 +232,101 @@ describe('scratch logical resource views', () => {
         texture.dispose()
         expectDiagnostic(() => view.assertUsable(), 'SCRATCH_RESOURCE_DISPOSED')
     })
+
+    it('rejects stencil formats for one-dimensional and three-dimensional textures', async() => {
+
+        const { runtime, calls } = await createRuntimeFixture()
+        for (const [ dimension, size ] of [
+            [ '1d', [ 4 ] ],
+            [ '3d', [ 4, 4, 4 ] ],
+        ]) {
+            const before = calls.textures.length
+            await expectRejectedDiagnostic(runtime.createTexture({
+                dimension,
+                size,
+                format: 'stencil8',
+                usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+            }), 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
+            expect(calls.textures).to.have.length(before)
+        }
+    })
+
+    it('rejects mipmapped and render-attachment one-dimensional textures', async() => {
+
+        const { runtime, calls } = await createRuntimeFixture()
+        const cases = [
+            {
+                dimension: '1d',
+                size: [ 4 ],
+                mipLevelCount: 2,
+                format: 'rgba8unorm',
+                usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+            },
+            {
+                dimension: '1d',
+                size: [ 4 ],
+                format: 'rgba8unorm',
+                usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+            },
+        ]
+
+        for (const descriptor of cases) {
+            const before = calls.textures.length
+            await expectRejectedDiagnostic(
+                runtime.createTexture(descriptor),
+                'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+            )
+            expect(calls.textures).to.have.length(before)
+        }
+    })
+
+    it('treats three-dimensional texture depth as one view array layer', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const texture = await runtime.createTexture({
+            dimension: '3d',
+            size: [ 4, 4, 4 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+
+        expectDiagnostic(
+            () => texture.view({ baseArrayLayer: 1 }),
+            'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+        )
+    })
+
+    it('materializes depth-stencil aspect-specific view formats', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const texture = await runtime.createTexture({
+            size: [ 4, 4 ],
+            format: 'depth24plus-stencil8',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+
+        const depth = texture.view({ aspect: 'depth-only' })
+        const stencil = texture.view({ aspect: 'stencil-only' })
+
+        expect(depth.descriptor.format).to.equal('depth24plus')
+        expect(stencil.descriptor.format).to.equal('stencil8')
+        expectDiagnostic(() => texture.view({
+            aspect: 'stencil-only',
+            format: 'depth24plus-stencil8',
+        }), 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
+    })
 })
+
+async function expectRejectedDiagnostic(promise, code) {
+
+    let caught
+    try {
+        await promise
+    } catch (error) {
+        caught = error
+    }
+
+    expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+    expect(caught.diagnostic.code).to.equal(code)
+    return caught.diagnostic
+}

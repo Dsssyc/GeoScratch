@@ -530,7 +530,7 @@ describe('scratch texture resize', () => {
         expect(fixture.calls.textureViews).to.have.length(viewCount)
     })
 
-    it('invalidates cached views and lazily rebuilds one bind group', async() => {
+    it('keeps no-op resize prepared and explicitly repairs a changed allocation', async() => {
 
         const fixture = await createFixture()
         const sampler = await fixture.runtime.createSampler()
@@ -552,26 +552,30 @@ describe('scratch texture resize', () => {
             ],
         })
         const viewSpec = fixture.texture.view()
-        const bindSet = fixture.runtime.createBindSet(layout, {
+        const bindSet = await fixture.runtime.createBindSet(layout, {
             texture: viewSpec,
             sampler,
         })
-        const oldBindGroup = bindSet.getBindGroup()
+        const oldBindGroup = fixture.calls.bindGroups[0]
         const oldView = fixture.calls.textureViews[0]
 
         await fixture.texture.resize({ width: 8, height: 8, depthOrArrayLayers: 1 })
 
-        expect(bindSet.getBindGroup()).to.equal(oldBindGroup)
+        expect(bindSet.preparationState).to.equal('prepared')
+        await bindSet.prepare()
+        expect(fixture.calls.bindGroups[0]).to.equal(oldBindGroup)
+        expect(fixture.calls.textureViews[0]).to.equal(oldView)
         expect(fixture.calls.bindGroups).to.have.length(1)
 
         await fixture.texture.resize([ 16, 8 ])
 
-        const newBindGroup = bindSet.getBindGroup()
+        expect(bindSet.preparationState).to.equal('stale')
+        await bindSet.prepare()
+        const newBindGroup = fixture.calls.bindGroups[1]
         const newView = fixture.calls.textureViews[1]
         expect(newView).to.not.equal(oldView)
         expect(newView.texture).to.equal(fixture.texture.gpuTexture)
         expect(newBindGroup).to.not.equal(oldBindGroup)
-        expect(bindSet.getBindGroup()).to.equal(newBindGroup)
         expect(fixture.calls.bindGroups).to.have.length(2)
     })
 

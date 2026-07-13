@@ -381,6 +381,56 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
         })).to.deep.equal({ bytes: 0, known: false })
     })
 
+    it('preserves BindSet identity when a preparation completion advances its stage', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const controller = diagnosticsControllerFor(runtime)
+        const target = {
+            kind: 'bind-set',
+            bindSetId: 'bind-set-1',
+            bindLayoutId: 'bind-layout-1',
+            preparationState: 'preparing',
+            generation: 0,
+            snapshotHash: 'bind-set-snapshot-1',
+            preparationStage: 'native-issue',
+        }
+        const operation = controller.beginOperation({
+            kind: 'bind-set-preparation',
+            target,
+            descriptorSummary: { bindingCount: 1 },
+        })
+
+        expect(() => controller.completeOperation(operation, {
+            status: 'succeeded',
+            bindSetTarget: {
+                ...target,
+                bindSetId: 'forged-bind-set',
+                preparationState: 'prepared',
+                generation: 1,
+                preparationStage: 'commit',
+            },
+        })).to.throw(TypeError, 'must preserve operation identity and snapshot')
+        expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(1)
+
+        const record = controller.completeOperation(operation, {
+            status: 'succeeded',
+            bindSetTarget: {
+                ...target,
+                preparationState: 'prepared',
+                generation: 1,
+                preparationStage: 'commit',
+            },
+        })
+        expect(record.target).to.deep.equal({
+            ...target,
+            preparationState: 'prepared',
+            generation: 1,
+            preparationStage: 'commit',
+        })
+        expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
+    })
+
     it('bounds operation records, evidence bytes, and monotonic sequence facts', async () => {
 
         const { gpu } = createFakeGpu()

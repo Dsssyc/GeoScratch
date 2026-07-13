@@ -97,12 +97,13 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
+    const bindSet = await runtime.createBindSet(bindLayout, {
         colorTexture: renderView,
         colorSampler: sampler,
     }, {
         label: 'sample offscreen set',
     })
+    fake.calls.textureViews.length = 0
     const program = runtime.createProgram({
         modules: [ triangleWgsl ],
         entryPoints: {
@@ -362,7 +363,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('does not rebuild BindSet only because a rendered texture contentEpoch changes', async() => {
 
         const fixture = await createRenderTargetScene()
-        const firstBindGroup = fixture.bindSet.getBindGroup()
+        const firstBindGroup = fixture.calls.bindGroups[0]
 
         expect(fixture.bindSet).to.be.instanceOf(BindSet)
         expect(fixture.calls.bindGroups).to.have.length(1)
@@ -374,9 +375,8 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(fixture.renderTarget.contentEpoch).to.equal(1)
         expect(fixture.renderTarget.state).to.equal('ready')
 
-        const secondBindGroup = fixture.bindSet.getBindGroup()
-
-        expect(secondBindGroup).to.equal(firstBindGroup)
+        await fixture.bindSet.prepare()
+        expect(fixture.calls.bindGroups[0]).to.equal(firstBindGroup)
         expect(fixture.calls.bindGroups).to.have.length(1)
 
         await submitted.done

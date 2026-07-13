@@ -28,7 +28,7 @@ import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
 const GPU_TEXTURE_USAGE_STORAGE_BINDING = getGlobalConstant('GPUTextureUsage', 'STORAGE_BINDING', 0x8)
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
 const GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'TRANSIENT_ATTACHMENT', 0x20)
-const TEXTURE_DIMENSIONS = new Set<GPUTextureDimension>([ '2d' ])
+const TEXTURE_DIMENSIONS = new Set<GPUTextureDimension>([ '1d', '2d', '3d' ])
 const TEXTURE_BINDING_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([
     '1d',
     '2d',
@@ -752,14 +752,17 @@ function normalizeTextureViewSpecDescriptor(
         })
     }
 
-    const format = descriptor.format === undefined ? texture.format : descriptor.format
+    const aspect = descriptor.aspect === undefined ? 'all' : descriptor.aspect
+    const defaultFormat = textureViewAspectFormat(texture.format, aspect)
+    const format = descriptor.format === undefined
+        ? defaultFormat ?? texture.format
+        : descriptor.format
     const dimension = descriptor.dimension === undefined
-        ? texture.depthOrArrayLayers === 1 ? '2d' : '2d-array'
+        ? defaultTextureViewDimension(texture)
         : descriptor.dimension
     const usage = descriptor.usage === undefined || descriptor.usage === 0
         ? texture.usage
         : descriptor.usage
-    const aspect = descriptor.aspect === undefined ? 'all' : descriptor.aspect
     const baseMipLevel = descriptor.baseMipLevel === undefined ? 0 : descriptor.baseMipLevel
     const mipLevelCount = descriptor.mipLevelCount === undefined
         ? typeof baseMipLevel === 'number' ? texture.mipLevelCount - baseMipLevel : Number.NaN
@@ -798,13 +801,16 @@ function validateNormalizedTextureViewDescriptor(
 ): void {
 
     const textureDescriptor = texture.descriptor as NormalizedTextureDescriptor
-    const allowedFormats = new Set<GPUTextureFormat>([
-        texture.format,
-        ...textureDescriptor.viewFormats,
-    ])
+    const aspectFormat = textureViewAspectFormat(texture.format, descriptor.aspect)
+    const allowedFormats = descriptor.aspect === 'all'
+        ? new Set<GPUTextureFormat>([ texture.format, ...textureDescriptor.viewFormats ])
+        : aspectFormat === undefined
+            ? new Set<GPUTextureFormat>()
+            : new Set<GPUTextureFormat>([ aspectFormat ])
     if (!allowedFormats.has(descriptor.format)) {
         throwTextureViewDescriptorDiagnostic(texture, actual, {
             format: [ ...allowedFormats ],
+            aspect: descriptor.aspect,
         })
     }
     if (
@@ -869,7 +875,7 @@ export function prepareTextureBindingViewDescriptor(
 
     const prepared = prepareTextureViewDescriptor(texture, descriptor)
     const dimension = prepared.dimension === undefined
-        ? texture.depthOrArrayLayers === 1 ? '2d' : '2d-array'
+        ? defaultTextureViewDimension(texture)
         : prepared.dimension
     const requiredDimension = currentTextureBindingViewDimension(texture)
 
@@ -907,8 +913,11 @@ function validateTextureViewDescriptor(
         : descriptor.mipLevelCount
     const baseArrayLayer = descriptor.baseArrayLayer === undefined ? 0 : descriptor.baseArrayLayer
     const dimension = descriptor.dimension === undefined
-        ? texture.depthOrArrayLayers === 1 ? '2d' : '2d-array'
+        ? defaultTextureViewDimension(texture)
         : descriptor.dimension
+    const textureArrayLayerCount = texture.dimension === '2d'
+        ? texture.depthOrArrayLayers
+        : 1
 
     if (
         !Number.isInteger(baseMipLevel) || baseMipLevel < 0 ||
@@ -920,7 +929,7 @@ function validateTextureViewDescriptor(
         throwTextureViewDescriptorDiagnostic(texture, actual, {
             baseMipLevel: `integer in [0, ${texture.mipLevelCount - 1}]`,
             mipLevelCount: `positive integer within ${texture.mipLevelCount} mip levels`,
-            baseArrayLayer: `integer in [0, ${texture.depthOrArrayLayers - 1}]`,
+            baseArrayLayer: `integer in [0, ${textureArrayLayerCount - 1}]`,
             dimension: [ ...TEXTURE_BINDING_VIEW_DIMENSIONS ],
         })
     }
@@ -931,27 +940,30 @@ function validateTextureViewDescriptor(
     if (
         !Number.isInteger(arrayLayerCount) ||
         arrayLayerCount <= 0 ||
-        baseArrayLayer + arrayLayerCount > texture.depthOrArrayLayers
+        baseArrayLayer + arrayLayerCount > textureArrayLayerCount
     ) {
         throwTextureViewDescriptorDiagnostic(texture, actual, {
-            arrayLayerCount: `positive integer within ${texture.depthOrArrayLayers} array layers`,
+            arrayLayerCount: `positive integer within ${textureArrayLayerCount} array layers`,
         })
     }
 
-    const validDimension =
-        dimension !== '1d' &&
-        dimension !== '3d' &&
-        (dimension !== '2d' || arrayLayerCount === 1) &&
-        (dimension !== 'cube' || (
+    const validDimension = (
+        (dimension === '1d' && texture.dimension === '1d' && arrayLayerCount === 1) ||
+        (dimension === '2d' && texture.dimension === '2d' && arrayLayerCount === 1) ||
+        (dimension === '2d-array' && texture.dimension === '2d') ||
+        (dimension === 'cube' && (
+            texture.dimension === '2d' &&
             arrayLayerCount === 6 &&
             texture.width === texture.height
-        )) &&
-        (dimension !== 'cube-array' || (
+        )) ||
+        (dimension === 'cube-array' && (
+            texture.dimension === '2d' &&
             arrayLayerCount % 6 === 0 &&
             texture.width === texture.height &&
             texture.runtime.deviceFeatures.has('core-features-and-limits')
-        )) &&
-        (texture.sampleCount === 1 || dimension === '2d')
+        )) ||
+        (dimension === '3d' && texture.dimension === '3d' && arrayLayerCount === 1)
+    ) && (texture.sampleCount === 1 || dimension === '2d')
 
     if (!validDimension) {
         throwTextureViewDescriptorDiagnostic(texture, actual, {
@@ -960,6 +972,8 @@ function validateTextureViewDescriptor(
                 '2d-array': 'one or more array layers',
                 cube: 'six layers on a square texture',
                 'cube-array': 'a positive multiple of six layers on a square texture with core-features-and-limits',
+                '1d': 'a one-dimensional texture with one array layer',
+                '3d': 'a three-dimensional texture with one array layer',
             },
         })
     }
@@ -976,6 +990,15 @@ function currentTextureBindingViewDimension(
     ).textureBindingViewDimension
     if (declared !== undefined) return declared
 
+    if (texture.dimension === '1d') return '1d'
+    if (texture.dimension === '3d') return '3d'
+    return texture.depthOrArrayLayers === 1 ? '2d' : '2d-array'
+}
+
+function defaultTextureViewDimension(texture: TextureResource): GPUTextureViewDimension {
+
+    if (texture.dimension === '1d') return '1d'
+    if (texture.dimension === '3d') return '3d'
     return texture.depthOrArrayLayers === 1 ? '2d' : '2d-array'
 }
 
@@ -991,6 +1014,23 @@ function defaultTextureViewArrayLayerCount(
     }
 
     return 1
+}
+
+function textureViewAspectFormat(
+    format: GPUTextureFormat,
+    aspect: unknown
+): GPUTextureFormat | undefined {
+
+    if (aspect === 'all') return format
+    if (aspect === 'depth-only') {
+        if (format === 'depth24plus-stencil8') return 'depth24plus'
+        if (format === 'depth32float-stencil8') return 'depth32float'
+        return DEPTH_TEXTURE_FORMATS.has(format) ? format : undefined
+    }
+    if (aspect === 'stencil-only') {
+        return STENCIL_TEXTURE_FORMATS.has(format) ? 'stencil8' : undefined
+    }
+    return undefined
 }
 
 function throwTextureViewDescriptorDiagnostic(
@@ -1069,26 +1109,74 @@ function validateTextureAllocationDescriptor(
     actual: unknown
 ): void {
 
-    const maxTextureDimension2D = runtime.deviceLimits?.maxTextureDimension2D
-    const maxTextureArrayLayers = runtime.deviceLimits?.maxTextureArrayLayers
+    const limits = runtime.deviceLimits
+    const maxTextureDimension1D = limits?.maxTextureDimension1D
+    const maxTextureDimension2D = limits?.maxTextureDimension2D
+    const maxTextureDimension3D = limits?.maxTextureDimension3D
+    const maxTextureArrayLayers = limits?.maxTextureArrayLayers
 
-    if (
-        (typeof maxTextureDimension2D === 'number' &&
-            (size.width > maxTextureDimension2D || size.height > maxTextureDimension2D)) ||
+    if (descriptor.dimension === '1d' && (
+        size.height !== 1 ||
+        size.depthOrArrayLayers !== 1 ||
+        descriptor.mipLevelCount !== 1 ||
+        descriptor.sampleCount !== 1 ||
+        (descriptor.usage & GPU_TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0 ||
+        DEPTH_TEXTURE_FORMATS.has(descriptor.format) ||
+        STENCIL_TEXTURE_FORMATS.has(descriptor.format) ||
+        textureFormatIsCompressed(descriptor.format) ||
+        (typeof maxTextureDimension1D === 'number' && size.width > maxTextureDimension1D)
+    )) {
+        throwTextureDescriptorDiagnostic(runtime.subject, actual, {
+            dimension: '1d',
+            width: `positive integer <= ${String(maxTextureDimension1D)}`,
+            height: 1,
+            depthOrArrayLayers: 1,
+            mipLevelCount: 1,
+            sampleCount: 1,
+            usage: 'excludes RENDER_ATTACHMENT',
+            format: 'non-compressed color format',
+        })
+    }
+    if (descriptor.dimension === '2d' && (
+        (typeof maxTextureDimension2D === 'number' && (
+            size.width > maxTextureDimension2D || size.height > maxTextureDimension2D
+        )) ||
         (typeof maxTextureArrayLayers === 'number' &&
             size.depthOrArrayLayers > maxTextureArrayLayers)
-    ) {
+    )) {
         throwTextureDescriptorDiagnostic(runtime.subject, actual, {
             width: `positive integer <= ${String(maxTextureDimension2D)}`,
             height: `positive integer <= ${String(maxTextureDimension2D)}`,
             depthOrArrayLayers: `positive integer <= ${String(maxTextureArrayLayers)}`,
         })
     }
+    if (descriptor.dimension === '3d' && (
+        descriptor.sampleCount !== 1 ||
+        DEPTH_TEXTURE_FORMATS.has(descriptor.format) ||
+        STENCIL_TEXTURE_FORMATS.has(descriptor.format) ||
+        !textureFormatSupports3D(runtime, descriptor.format) ||
+        (typeof maxTextureDimension3D === 'number' && (
+            size.width > maxTextureDimension3D ||
+            size.height > maxTextureDimension3D ||
+            size.depthOrArrayLayers > maxTextureDimension3D
+        ))
+    )) {
+        throwTextureDescriptorDiagnostic(runtime.subject, actual, {
+            dimension: '3d',
+            extent: `positive integers <= ${String(maxTextureDimension3D)}`,
+            sampleCount: 1,
+            format: 'color format with 3d capability',
+        })
+    }
 
-    const maxMipLevelCount = Math.floor(Math.log2(Math.max(size.width, size.height))) + 1
+    const maxMipLevelCount = Math.floor(Math.log2(Math.max(
+        size.width,
+        size.height,
+        descriptor.dimension === '3d' ? size.depthOrArrayLayers : 1
+    ))) + 1
     if (descriptor.mipLevelCount > maxMipLevelCount) {
         throwTextureDescriptorDiagnostic(runtime.subject, actual, {
-            mipLevelCount: `<= ${maxMipLevelCount} for the requested 2D extent`,
+            mipLevelCount: `<= ${maxMipLevelCount} for the requested texture extent`,
         })
     }
 
@@ -1188,6 +1276,24 @@ function textureFormatBlockSize(format: GPUTextureFormat): { width: number, heig
     return { width: 1, height: 1 }
 }
 
+function textureFormatIsCompressed(format: GPUTextureFormat): boolean {
+
+    const block = textureFormatBlockSize(format)
+    return block.width > 1 || block.height > 1
+}
+
+function textureFormatSupports3D(runtime: ScratchRuntime, format: GPUTextureFormat): boolean {
+
+    if (/^bc[1-7]-/.test(format)) {
+        return runtime.deviceFeatures.has('texture-compression-bc-sliced-3d')
+    }
+    if (/^astc-/.test(format)) {
+        return runtime.deviceFeatures.has('texture-compression-astc-sliced-3d')
+    }
+    if (/^(etc2|eac)-/.test(format)) return false
+    return true
+}
+
 function sameTextureSize(left: NormalizedTextureSize, right: NormalizedTextureSize): boolean {
 
     return left.width === right.width &&
@@ -1222,7 +1328,7 @@ function throwTextureDescriptorDiagnostic(
         severity: 'error',
         phase: 'resource',
         subject,
-        message: 'TextureResource requires a valid 2D texture descriptor and extent.',
+        message: 'TextureResource requires a valid texture descriptor and extent.',
         expected,
         actual,
     })

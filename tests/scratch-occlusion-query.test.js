@@ -102,7 +102,7 @@ async function createOcclusionFixture() {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
+    const bindSet = await runtime.createBindSet(bindLayout, {
         visibilityUniforms: destination.region(),
     }, {
         label: 'visibility destination bind set',
@@ -260,7 +260,7 @@ describe('scratch occlusion query bracket commands', () => {
     it('does not rebuild BindSet only because a resolved occlusion buffer contentEpoch changes', async() => {
 
         const fixture = await createOcclusionFixture()
-        const firstBindGroup = fixture.bindSet.getBindGroup()
+        const firstBindGroup = fixture.calls.bindGroups[0]
 
         expect(fixture.bindSet).to.be.instanceOf(BindSet)
         expect(fixture.calls.bindGroups).to.have.length(1)
@@ -271,7 +271,8 @@ describe('scratch occlusion query bracket commands', () => {
             .submit()
 
         expect(fixture.destination.contentEpoch).to.equal(1)
-        expect(fixture.bindSet.getBindGroup()).to.equal(firstBindGroup)
+        await fixture.bindSet.prepare()
+        expect(fixture.calls.bindGroups[0]).to.equal(firstBindGroup)
         expect(fixture.calls.bindGroups).to.have.length(1)
 
         await submitted.done

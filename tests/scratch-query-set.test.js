@@ -78,7 +78,7 @@ async function createQueryFixture() {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
+    const bindSet = await runtime.createBindSet(bindLayout, {
         timingUniforms: destination.region(),
     }, {
         label: 'query destination bind set',
@@ -355,7 +355,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
     it('does not rebuild BindSet only because a resolved buffer contentEpoch changes', async() => {
 
         const fixture = await createQueryFixture()
-        const firstBindGroup = fixture.bindSet.getBindGroup()
+        const firstBindGroup = fixture.calls.bindGroups[0]
 
         expect(fixture.bindSet).to.be.instanceOf(BindSet)
         expect(fixture.calls.bindGroups).to.have.length(1)
@@ -367,9 +367,8 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
 
         expect(fixture.destination.contentEpoch).to.equal(1)
 
-        const secondBindGroup = fixture.bindSet.getBindGroup()
-
-        expect(secondBindGroup).to.equal(firstBindGroup)
+        await fixture.bindSet.prepare()
+        expect(fixture.calls.bindGroups[0]).to.equal(firstBindGroup)
         expect(fixture.calls.bindGroups).to.have.length(1)
 
         await submitted.done

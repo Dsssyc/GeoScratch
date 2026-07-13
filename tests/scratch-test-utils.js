@@ -584,7 +584,9 @@ export function createFakeGpu(options = {}) {
             maxStorageBufferBindingSize: 134_217_728,
             maxColorAttachments: 8,
             maxComputeWorkgroupsPerDimension: 65_535,
+            maxTextureDimension1D: 8192,
             maxTextureDimension2D: 8192,
+            maxTextureDimension3D: 2048,
             maxTextureArrayLayers: 256,
             minUniformBufferOffsetAlignment: 256,
             minStorageBufferOffsetAlignment: 256,
@@ -732,10 +734,12 @@ export function createFakeGpu(options = {}) {
                 writes: [],
                 destroyed: false,
                 createView(viewDescriptor = {}) {
+                    const invalid = issueNativeMethod('createTextureView')
                     const view = {
                         type: 'textureView',
                         texture: this,
                         descriptor: viewDescriptor,
+                        invalid,
                     }
                     this.views.push(view)
                     calls.textureViews.push(view)
@@ -848,7 +852,9 @@ export function createFakeGpu(options = {}) {
             maxStorageBufferBindingSize: 134_217_728,
             maxColorAttachments: 8,
             maxComputeWorkgroupsPerDimension: 65_535,
+            maxTextureDimension1D: 8192,
             maxTextureDimension2D: 8192,
+            maxTextureDimension3D: 2048,
             maxTextureArrayLayers: 256,
             minUniformBufferOffsetAlignment: 256,
             minStorageBufferOffsetAlignment: 256,

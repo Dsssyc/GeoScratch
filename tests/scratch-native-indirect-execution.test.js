@@ -596,7 +596,9 @@ describe('scratch native indexed and indirect execution', () => {
                 visibility: [ 'vertex' ],
             } ],
         })
-        const bindSet = fixture.runtime.createBindSet(bindLayout, { input: boundBuffer.region() })
+        const bindSet = await fixture.runtime.createBindSet(bindLayout, {
+            input: boundBuffer.region(),
+        })
         const boundPipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
             bindLayouts: [ bindLayout ],

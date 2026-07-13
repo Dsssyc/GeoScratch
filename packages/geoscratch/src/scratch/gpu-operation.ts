@@ -123,7 +123,7 @@ export type ScratchGpuBindSetOperationTarget = Readonly<{
     kind: 'bind-set'
     bindSetId: string
     bindLayoutId: string
-    preparationState: 'pending'
+    preparationState: 'preparing' | 'prepared' | 'stale' | 'disposed'
     generation: number
     snapshotHash: string
     preparationStage: ScratchGpuBindSetPreparationStage
@@ -536,6 +536,7 @@ export type ScratchSupportingObjectFailureStage =
     | 'native-issue'
     | 'scope-settlement'
     | 'lifecycle-recheck'
+    | ScratchGpuBindSetPreparationStage
 
 export type ScratchGpuIncidentFailureStage =
     | ScratchGpuPipelineFailureStage

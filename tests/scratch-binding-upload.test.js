@@ -79,7 +79,7 @@ async function createUniformFixture(format = 'bgra8unorm') {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
+    const bindSet = await runtime.createBindSet(bindLayout, {
         uniforms: uniformBuffer.region(),
     }, {
         label: 'triangle uniforms set',
@@ -141,7 +141,7 @@ async function createUniformFixture(format = 'bgra8unorm') {
 
 describe('scratch BindLayout, BindSet, and UploadCommand', () => {
 
-    it('creates explicit uniform bind layouts and bind sets with allocation-version caching', async() => {
+    it('creates acknowledged uniform bind sets and explicitly repairs allocation staleness', async() => {
 
         const fixture = await createUniformFixture()
 
@@ -171,16 +171,17 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
             ],
         })
 
-        const firstBindGroup = fixture.bindSet.getBindGroup()
-        const secondBindGroup = fixture.bindSet.getBindGroup()
+        const firstBindGroup = fixture.calls.bindGroups[0]
+        const initialGeneration = fixture.bindSet.prepareGeneration
+        await fixture.bindSet.prepare()
         advanceResourceContentEpochForTest(fixture.uniformBuffer)
-        const afterContentChange = fixture.bindSet.getBindGroup()
+        await fixture.bindSet.prepare()
 
-        expect(firstBindGroup).to.equal(secondBindGroup)
-        expect(afterContentChange).to.equal(firstBindGroup)
         expect(fixture.calls.bindGroups).to.have.length(1)
+        expect(fixture.calls.bindGroups[0]).to.equal(firstBindGroup)
+        expect(fixture.bindSet.prepareGeneration).to.equal(initialGeneration)
         expect(fixture.calls.bindGroups[0].descriptor).to.deep.equal({
-            label: 'triangle uniforms set',
+            label: `triangle uniforms set [scratch:${fixture.bindSet.id}]`,
             layout: fixture.bindLayout.gpuBindGroupLayout,
             entries: [
                 {
@@ -195,10 +196,13 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         })
 
         replaceResourceAllocationForTest(fixture.uniformBuffer)
-        const afterAllocationChange = fixture.bindSet.getBindGroup()
+        expect(fixture.bindSet.preparationState).to.equal('stale')
+        await fixture.bindSet.prepare()
+        const afterAllocationChange = fixture.calls.bindGroups[1]
 
         expect(afterAllocationChange).not.to.equal(firstBindGroup)
         expect(fixture.calls.bindGroups).to.have.length(2)
+        expect(fixture.bindSet.prepareGeneration).to.equal(initialGeneration + 1)
     })
 
     it('uploads uniform data explicitly and encodes bind groups before draw', async() => {
@@ -227,7 +231,11 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         })
         expect(fixture.calls.renderPasses[0].actions).to.deep.equal([
             { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
-            { type: 'setBindGroup', group: 0, bindGroup: fixture.bindSet.getBindGroup() },
+            {
+                type: 'setBindGroup',
+                group: 0,
+                bindGroup: fixture.calls.bindGroups[0],
+            },
             {
                 type: 'draw',
                 call: {
@@ -248,7 +256,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         const fixture = await createUniformFixture()
 
         try {
-            fixture.runtime.createBindSet(fixture.bindLayout, {}, {
+            await fixture.runtime.createBindSet(fixture.bindLayout, {}, {
                 label: 'missing uniforms',
             })
             throw new Error('expected missing bind slot to fail')
@@ -268,7 +276,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         }
 
         try {
-            fixture.runtime.createBindSet(fixture.bindLayout, {
+            await fixture.runtime.createBindSet(fixture.bindLayout, {
                 uniforms: fixture.uniformBuffer.region(),
                 extra: fixture.uniformBuffer.region(),
             })
@@ -311,7 +319,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         }
 
         try {
-            fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
+            await fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
                 uniforms: fixtureB.uniformBuffer.region(),
             })
             throw new Error('expected wrong-runtime resource binding to fail')
@@ -348,7 +356,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         fixtureA.uniformBuffer.dispose()
 
         try {
-            fixtureA.bindSet.getBindGroup()
+            await fixtureA.bindSet.prepare()
             throw new Error('expected disposed bound resource to fail')
         } catch (error) {
             expect(error).to.be.instanceOf(ScratchDiagnosticError)
@@ -423,7 +431,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_UNIFORM,
         })
-        const otherSet = fixture.runtime.createBindSet(otherLayout, {
+        const otherSet = await fixture.runtime.createBindSet(otherLayout, {
             otherUniforms: otherBuffer.region(),
         })
 
