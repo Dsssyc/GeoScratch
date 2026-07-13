@@ -25,7 +25,7 @@ describe('scratch readback provenance contract', () => {
 
         const { runtime, source } = await createRuntimeAndSource()
         const descriptor = {
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: source.region(), contentEpoch: 1 },
             whenMissing: 'throw',
         }
 
@@ -45,14 +45,14 @@ describe('scratch readback provenance contract', () => {
             {
                 Wrapper: scr.ReadbackCommand,
                 descriptor: {
-                    source: { resource: source, contentEpoch: 0 },
+                    source: { region: source.region(), contentEpoch: 0 },
                     whenMissing: 'throw',
                 },
                 code: 'SCRATCH_READBACK_COMMAND_CONSTRUCTOR_PRIVATE',
             },
             {
                 Wrapper: scr.ReadbackOperation,
-                descriptor: { source },
+                descriptor: { source: source.region() },
                 code: 'SCRATCH_READBACK_OPERATION_CONSTRUCTOR_PRIVATE',
             },
         ]
@@ -74,12 +74,12 @@ describe('scratch readback provenance contract', () => {
 
         const { runtime, source } = await createRuntimeAndSource()
         const upload = runtime.createUploadCommand({
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 1, 2, 3, 4 ]),
         })
         const command = await runtime.createReadbackCommand({
             label: 'readback contract command',
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const submitted = runtime.submission().upload(upload).readback(command).submit()

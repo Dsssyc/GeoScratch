@@ -34,7 +34,7 @@ function createUpload(runtime, target, values = [ 1, 2, 3, 4 ]) {
 
     return runtime.createUploadCommand({
         label: `upload ${target.label}`,
-        target,
+        target: target.region(),
         data: new Float32Array(values),
     })
 }
@@ -82,11 +82,11 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         const { runtime } = await createRuntimeFixture()
         const source = await createReadableBuffer(runtime, 'produced source')
         const submitted = submitUpload(runtime, source)
+        const sourceRegion = source.region()
         const readback = runtime.createReadback({
             label: 'read produced source',
-            source,
+            source: sourceRegion,
             after: submitted,
-            range: { offset: 0, byteLength: 16 },
         })
 
         expect(readback).to.be.instanceOf(ReadbackOperation)
@@ -104,10 +104,10 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         const fenceTarget = await createReadableBuffer(runtime, 'fence target')
         source.gpuBuffer.data.set(new Uint8Array([ 1, 2, 3, 4 ]))
         const submitted = submitUpload(runtime, fenceTarget)
+        const sourceRegion = source.region({ size: 4 })
         const readback = runtime.createReadback({
-            source,
+            source: sourceRegion,
             after: submitted,
-            range: { offset: 0, byteLength: 4 },
         })
         const bytes = await readback.toBytes()
 
@@ -122,18 +122,18 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         const source = await createReadableBuffer(runtime, 'stale creation source')
         const first = submitUpload(runtime, source, [ 1, 2, 3, 4 ])
         submitUpload(runtime, source, [ 5, 6, 7, 8 ])
+        const sourceRegion = source.region()
 
         const diagnostic = await expectDiagnostic(() => runtime.createReadback({
-            source,
+            source: sourceRegion,
             after: first,
-            range: { offset: 0, byteLength: 16 },
         }), {
             code: 'SCRATCH_READBACK_SOURCE_EPOCH_STALE',
             severity: 'error',
             phase: 'readback',
         })
 
-        expect(diagnostic.related).to.deep.equal([ source.subject, first.subject ])
+        expect(diagnostic.related).to.deep.equal([ sourceRegion.subject, first.subject ])
         expect(diagnostic.expected).to.deep.equal({ contentEpoch: 1 })
         expect(diagnostic.actual).to.deep.include({ contentEpoch: 2 })
     })
@@ -143,10 +143,10 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         const { runtime, calls } = await createRuntimeFixture()
         const source = await createReadableBuffer(runtime, 'stale consume source')
         const submitted = submitUpload(runtime, source, [ 1, 2, 3, 4 ])
+        const sourceRegion = source.region()
         const readback = runtime.createReadback({
-            source,
+            source: sourceRegion,
             after: submitted,
-            range: { offset: 0, byteLength: 16 },
         })
         const copyCount = calls.copies.length
         const queueSubmissionCount = calls.queueSubmissions.length
@@ -159,7 +159,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
             phase: 'readback',
         })
 
-        expect(diagnostic.related).to.deep.equal([ source.subject, submitted.subject ])
+        expect(diagnostic.related).to.deep.equal([ sourceRegion.subject, submitted.subject ])
         expect(diagnostic.expected).to.deep.equal({ contentEpoch: 1 })
         expect(diagnostic.actual).to.deep.include({ contentEpoch: 2 })
         expect(calls.copies).to.have.length(copyCount)
@@ -172,10 +172,10 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         const { runtime, calls } = await createRuntimeFixture()
         const source = await createReadableBuffer(runtime, 'stale allocation source')
         const submitted = submitUpload(runtime, source)
+        const sourceRegion = source.region()
         const readback = runtime.createReadback({
-            source,
+            source: sourceRegion,
             after: submitted,
-            range: { offset: 0, byteLength: 16 },
         })
         const copyCount = calls.copies.length
         const queueSubmissionCount = calls.queueSubmissions.length
@@ -188,7 +188,7 @@ describe('scratch ReadbackOperation epoch provenance', () => {
             phase: 'readback',
         })
 
-        expect(diagnostic.related).to.deep.equal([ source.subject, submitted.subject ])
+        expect(diagnostic.related).to.deep.equal([ sourceRegion.subject, submitted.subject ])
         expect(diagnostic.expected).to.deep.equal({ allocationVersion: 1 })
         expect(diagnostic.actual).to.deep.include({ allocationVersion: 2 })
         expect(calls.copies).to.have.length(copyCount)
@@ -217,8 +217,8 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         })
         const copy = runtime.createCopyCommand({
             source: { resource: texture, contentEpoch: 1 },
-            target: source,
-            targetLayout: { offset: 0, bytesPerRow: 256, rowsPerImage: 2 },
+            target: source.region(),
+            targetLayout: { bytesPerRow: 256, rowsPerImage: 2 },
             size: { width: 2, height: 2 },
             whenMissing: 'throw',
         })
@@ -226,17 +226,17 @@ describe('scratch ReadbackOperation epoch provenance', () => {
             .upload(upload)
             .copy(copy)
             .submit()
+        const sourceRegion = source.region({ size: 16 })
         const readback = runtime.createReadback({
-            source,
+            source: sourceRegion,
             after: submitted,
-            range: { offset: 0, byteLength: 16 },
         })
 
         await texture.resize([ 4, 4 ])
         const bytes = await readback.toBytes()
 
         expect(bytes).to.have.length(16)
-        expect(readback.source).to.equal(source)
+        expect(readback.source).to.equal(sourceRegion)
         expect(readback.allocationVersion).to.equal(1)
         expect(readback.contentEpoch).to.equal(1)
         expect(texture.allocationVersion).to.equal(2)
@@ -250,18 +250,18 @@ describe('scratch ReadbackOperation epoch provenance', () => {
         const submitted = submitUpload(runtime, source)
 
         replaceResourceAllocationForTest(source)
+        const sourceRegion = source.region()
 
         const diagnostic = await expectDiagnostic(() => runtime.createReadback({
-            source,
+            source: sourceRegion,
             after: submitted,
-            range: { offset: 0, byteLength: 16 },
         }), {
             code: 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE',
             severity: 'error',
             phase: 'readback',
         })
 
-        expect(diagnostic.related).to.deep.equal([ source.subject, submitted.subject ])
+        expect(diagnostic.related).to.deep.equal([ sourceRegion.subject, submitted.subject ])
         expect(diagnostic.expected).to.deep.equal({ allocationVersion: 1 })
         expect(diagnostic.actual).to.deep.include({ allocationVersion: 2 })
     })
@@ -279,21 +279,18 @@ describe('scratch ReadbackOperation epoch provenance', () => {
             label: 'layout producer source',
             size: uploadView.byteLength,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
-            layout: codec.artifact,
-            elementCount: values.length,
         })
+        const sourceRegion = source.region({ layout: codec.artifact })
         const upload = runtime.createUploadCommand({
-            target: source,
+            target: sourceRegion,
             data: uploadView,
-            layout: codec.artifact,
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
             .upload(upload)
             .submit()
         const readback = runtime.createReadback({
-            source,
+            source: sourceRegion,
             after: submitted,
-            range: { offset: 0, byteLength: uploadView.byteLength },
         })
         const view = await readback.toLayoutView()
 

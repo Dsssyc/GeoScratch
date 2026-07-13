@@ -30,9 +30,10 @@ function sourceBytes() {
     ])
 }
 
-function copySource(resource, contentEpoch = resource.contentEpoch) {
+function copySource(resource, contentEpoch = resource.contentEpoch, region = {}) {
 
-    return { resource, contentEpoch }
+    if (resource instanceof TextureResource) return { resource, contentEpoch }
+    return { region: resource.region(region), contentEpoch }
 }
 
 async function createCopyFixture() {
@@ -51,17 +52,13 @@ async function createCopyFixture() {
     })
     const upload = runtime.createUploadCommand({
         label: 'upload copy source',
-        target: source,
+        target: (source).region({ offset: 0 }),
         data: sourceBytes(),
-        offset: 0,
     })
     const copy = runtime.createCopyCommand({
         label: 'copy source slice',
-        source: copySource(source, 1),
-        sourceOffset: 4,
-        target,
-        targetOffset: 8,
-        byteLength: 16,
+        source: copySource(source, 1, { offset: 4, size: 16 }),
+        target: target.region({ offset: 8, size: 16 }),
         whenMissing: 'throw',
     })
     const bindLayout = runtime.createBindLayout({
@@ -77,7 +74,7 @@ async function createCopyFixture() {
         ],
     })
     const bindSet = runtime.createBindSet(bindLayout, {
-        targetUniforms: target,
+        targetUniforms: target.region({ offset: 8, size: 16 }),
     }, {
         label: 'copy target bind set',
     })
@@ -138,13 +135,13 @@ async function createBufferToTextureCopyFixture() {
     })
     const upload = runtime.createUploadCommand({
         label: 'upload buffer texture copy source',
-        target: source,
+        target: (source).region(),
         data: new Uint8Array(1024),
     })
     const copy = runtime.createCopyCommand({
         label: 'copy buffer into texture',
-        source: copySource(source, 1),
-        sourceLayout: { offset: 256, bytesPerRow: 256, rowsPerImage: 4 },
+        source: copySource(source, 1, { offset: 256, size: 264 }),
+        sourceLayout: { bytesPerRow: 256, rowsPerImage: 4 },
         target,
         targetOrigin: [ 1, 1 ],
         targetMipLevel: 0,
@@ -184,8 +181,8 @@ async function createTextureToBufferCopyFixture() {
         sourceOrigin: [ 1, 1 ],
         sourceMipLevel: 0,
         sourceAspect: 'all',
-        target,
-        targetLayout: { offset: 128, bytesPerRow: 256, rowsPerImage: 4 },
+        target: target.region({ offset: 128, size: 264 }),
+        targetLayout: { bytesPerRow: 256, rowsPerImage: 4 },
         size: { width: 2, height: 2 },
         whenMissing: 'throw',
     })
@@ -219,14 +216,11 @@ describe('scratch CopyCommand', () => {
         expect(fixture.copy).to.be.instanceOf(CopyCommand)
         expect(fixture.copy.commandKind).to.equal('copy')
         expect(fixture.copy.source).to.deep.equal({
-            resource: fixture.source,
+            region: fixture.source.region({ offset: 4, size: 16 }),
             contentEpoch: 1,
         })
-        expect(fixture.copy.target).to.equal(fixture.target)
+        expect(fixture.copy.target).to.deep.equal(fixture.target.region({ offset: 8, size: 16 }))
         expect(fixture.copy.whenMissing).to.equal('throw')
-        expect(fixture.copy.sourceOffset).to.equal(4)
-        expect(fixture.copy.targetOffset).to.equal(8)
-        expect(fixture.copy.byteLength).to.equal(16)
 
         expect(fixture.calls.queueWrites).to.have.length(1)
         expect(fixture.calls.copies).to.deep.equal([
@@ -314,10 +308,10 @@ describe('scratch CopyCommand', () => {
         expect(fixture.copy.commandKind).to.equal('copy')
         expect(fixture.copy.copyKind).to.equal('buffer-to-texture')
         expect(fixture.copy.source).to.deep.equal({
-            resource: fixture.source,
+            region: fixture.source.region({ offset: 256, size: 264 }),
             contentEpoch: 1,
         })
-        expect(fixture.copy.sourceLayout).to.deep.equal({ offset: 256, bytesPerRow: 256, rowsPerImage: 4 })
+        expect(fixture.copy.sourceLayout).to.deep.equal({ bytesPerRow: 256, rowsPerImage: 4 })
         expect(fixture.copy.target).to.equal(fixture.target)
         expect(fixture.copy.targetOrigin).to.deep.equal({ x: 1, y: 1, z: 0 })
         expect(fixture.copy.targetMipLevel).to.equal(0)
@@ -366,8 +360,8 @@ describe('scratch CopyCommand', () => {
         expect(fixture.copy.sourceOrigin).to.deep.equal({ x: 1, y: 1, z: 0 })
         expect(fixture.copy.sourceMipLevel).to.equal(0)
         expect(fixture.copy.sourceAspect).to.equal('all')
-        expect(fixture.copy.target).to.equal(fixture.target)
-        expect(fixture.copy.targetLayout).to.deep.equal({ offset: 128, bytesPerRow: 256, rowsPerImage: 4 })
+        expect(fixture.copy.target).to.deep.equal(fixture.target.region({ offset: 128, size: 264 }))
+        expect(fixture.copy.targetLayout).to.deep.equal({ bytesPerRow: 256, rowsPerImage: 4 })
         expect(fixture.copy.size).to.deep.equal({ width: 2, height: 2, depthOrArrayLayers: 1 })
 
         expect(fixture.calls.textureBufferCopies).to.deep.equal([
@@ -615,8 +609,7 @@ describe('scratch CopyCommand', () => {
         ]) {
             await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
                 source,
-                target: fixtureA.target,
-                byteLength: 4,
+                target: fixtureA.target.region({ size: 4 }),
                 whenMissing: 'throw',
             }), {
                 code: 'SCRATCH_COMMAND_COPY_SOURCE_INVALID',
@@ -626,9 +619,8 @@ describe('scratch CopyCommand', () => {
         }
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
-            source: copySource(fixtureB.source),
-            target: fixtureA.target,
-            byteLength: 4,
+            source: copySource(fixtureB.source, fixtureB.source.contentEpoch, { size: 4 }),
+            target: fixtureA.target.region({ size: 4 }),
         }), {
             code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
             severity: 'error',
@@ -638,9 +630,8 @@ describe('scratch CopyCommand', () => {
         fixtureA.source.dispose()
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
-            source: copySource(fixtureA.source),
-            target: fixtureA.target,
-            byteLength: 4,
+            source: copySource(fixtureA.source, fixtureA.source.contentEpoch, { size: 4 }),
+            target: fixtureA.target.region({ size: 4 }),
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_DISPOSED',
@@ -657,7 +648,6 @@ describe('scratch CopyCommand', () => {
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
             source: copySource(fixtureA.source),
             target: {},
-            byteLength: 4,
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
@@ -667,8 +657,7 @@ describe('scratch CopyCommand', () => {
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
             source: copySource(fixtureA.source),
-            target: fixtureA.target,
-            byteLength: 4,
+            target: fixtureA.target.region(),
         }), {
             code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
             severity: 'error',
@@ -677,8 +666,7 @@ describe('scratch CopyCommand', () => {
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
             source: copySource(fixtureA.source),
-            target: fixtureA.target,
-            byteLength: 4,
+            target: fixtureA.target.region(),
             whenMissing: 'skip-command',
         }), {
             code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
@@ -688,8 +676,7 @@ describe('scratch CopyCommand', () => {
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
             source: copySource(fixtureA.source),
-            target: fixtureB.target,
-            byteLength: 4,
+            target: fixtureB.target.region(),
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
@@ -705,8 +692,7 @@ describe('scratch CopyCommand', () => {
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createCopyCommand({
             source: copySource(replacementSource),
-            target: fixtureA.target,
-            byteLength: 4,
+            target: fixtureA.target.region(),
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_DISPOSED',
@@ -729,8 +715,7 @@ describe('scratch CopyCommand', () => {
 
         await expectScratchDiagnostic(() => fixture.runtime.createCopyCommand({
             source: copySource(nonCopySource),
-            target: fixture.target,
-            byteLength: 4,
+            target: fixture.target.region({ size: 16 }),
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
@@ -739,9 +724,8 @@ describe('scratch CopyCommand', () => {
         })
 
         await expectScratchDiagnostic(() => fixture.runtime.createCopyCommand({
-            source: copySource(fixture.source),
-            target: nonCopyTarget,
-            byteLength: 4,
+            source: copySource(fixture.source, fixture.source.contentEpoch, { size: 16 }),
+            target: nonCopyTarget.region(),
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
@@ -830,8 +814,8 @@ describe('scratch CopyCommand', () => {
         for (const { runtime, descriptor } of [
             { runtime: bufferToTexture.runtime, descriptor: { source: copySource(nonCopyBufferSource), sourceLayout: { bytesPerRow: 256 }, target: bufferToTexture.target, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
             { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 256 }, target: nonCopyTextureTarget, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
-            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(nonCopyTextureSource), target: textureToBuffer.target, targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
-            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), target: nonCopyBufferTarget, targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(nonCopyTextureSource), target: textureToBuffer.target.region(), targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), target: nonCopyBufferTarget.region(), targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
         ]) {
             await expectScratchDiagnostic(() => runtime.createCopyCommand(descriptor), {
                 code: 'SCRATCH_RESOURCE_USAGE_MISSING',
@@ -842,14 +826,14 @@ describe('scratch CopyCommand', () => {
 
         for (const { runtime, descriptor } of [
             { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 8 }, target: bufferToTexture.target, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
-            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { offset: -4, bytesPerRow: 256 }, target: bufferToTexture.target, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source, bufferToTexture.source.contentEpoch, { offset: 2, size: 1022 }), sourceLayout: { bytesPerRow: 256 }, target: bufferToTexture.target, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
             { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 256, rowsPerImage: 1 }, target: bufferToTexture.target, size: { width: 1, height: 2 }, whenMissing: 'throw' } },
-            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { offset: 900, bytesPerRow: 256, rowsPerImage: 4 }, target: bufferToTexture.target, size: { width: 2, height: 2 }, whenMissing: 'throw' } },
+            { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source, bufferToTexture.source.contentEpoch, { offset: 900, size: 124 }), sourceLayout: { bytesPerRow: 256, rowsPerImage: 4 }, target: bufferToTexture.target, size: { width: 2, height: 2 }, whenMissing: 'throw' } },
             { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 256 }, target: bufferToTexture.target, targetMipLevel: 1, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
             { runtime: bufferToTexture.runtime, descriptor: { source: copySource(bufferToTexture.source), sourceLayout: { bytesPerRow: 256 }, target: bufferToTexture.target, targetAspect: 'depth-only', size: { width: 1, height: 1 }, whenMissing: 'throw' } },
-            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), sourceMipLevel: 1, target: textureToBuffer.target, targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
-            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), sourceAspect: 'stencil-only', target: textureToBuffer.target, targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
-            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), target: textureToBuffer.target, targetLayout: { bytesPerRow: 8 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), sourceMipLevel: 1, target: textureToBuffer.target.region(), targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), sourceAspect: 'stencil-only', target: textureToBuffer.target.region(), targetLayout: { bytesPerRow: 256 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
+            { runtime: textureToBuffer.runtime, descriptor: { source: copySource(textureToBuffer.source), target: textureToBuffer.target.region(), targetLayout: { bytesPerRow: 8 }, size: { width: 1, height: 1 }, whenMissing: 'throw' } },
         ]) {
             await expectScratchDiagnostic(() => runtime.createCopyCommand(descriptor), {
                 code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
@@ -868,15 +852,12 @@ describe('scratch CopyCommand', () => {
         })
 
         for (const descriptor of [
-            { source: copySource(fixture.source), sourceOffset: -4, target: fixture.target, targetOffset: 0, byteLength: 4, whenMissing: 'throw' },
-            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: -4, byteLength: 4, whenMissing: 'throw' },
-            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: 0, byteLength: 0, whenMissing: 'throw' },
-            { source: copySource(fixture.source), sourceOffset: 2, target: fixture.target, targetOffset: 0, byteLength: 4, whenMissing: 'throw' },
-            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: 2, byteLength: 4, whenMissing: 'throw' },
-            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: 0, byteLength: 6, whenMissing: 'throw' },
-            { source: copySource(fixture.source), sourceOffset: 20, target: fixture.target, targetOffset: 0, byteLength: 16, whenMissing: 'throw' },
-            { source: copySource(fixture.source), sourceOffset: 0, target: fixture.target, targetOffset: 20, byteLength: 16, whenMissing: 'throw' },
-            { source: copySource(sameBuffer), sourceOffset: 0, target: sameBuffer, targetOffset: 4, byteLength: 8, whenMissing: 'throw' },
+            { source: copySource(fixture.source, fixture.source.contentEpoch, { offset: 2, size: 4 }), target: fixture.target.region({ size: 4 }), whenMissing: 'throw' },
+            { source: copySource(fixture.source, fixture.source.contentEpoch, { size: 4 }), target: fixture.target.region({ offset: 2, size: 4 }), whenMissing: 'throw' },
+            { source: copySource(fixture.source, fixture.source.contentEpoch, { size: 0 }), target: fixture.target.region({ size: 0 }), whenMissing: 'throw' },
+            { source: copySource(fixture.source, fixture.source.contentEpoch, { size: 6 }), target: fixture.target.region({ size: 6 }), whenMissing: 'throw' },
+            { source: copySource(fixture.source, fixture.source.contentEpoch, { size: 16 }), target: fixture.target.region({ size: 12 }), whenMissing: 'throw' },
+            { source: copySource(sameBuffer, sameBuffer.contentEpoch, { size: 8 }), target: sameBuffer.region({ offset: 4, size: 8 }), whenMissing: 'throw' },
         ]) {
             await expectScratchDiagnostic(() => fixture.runtime.createCopyCommand(descriptor), {
                 code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',

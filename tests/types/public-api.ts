@@ -233,6 +233,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 0x4 | 0x80,
     })
+    const uniformRegion = uniformBuffer.region()
+    const vertexRegion = vertexBuffer.region()
+    const indexRegion = indexBuffer.region({ size: 6 })
+    const indirectRegion = indirectBuffer.region()
+    const storageInputRegion = storageInput.region()
+    const storageOutputRegion = storageOutput.region()
     const uniformRead: scr.CommandResourceReadDescriptor = {
         resource: uniformBuffer,
         contentEpoch: uniformBuffer.contentEpoch,
@@ -258,7 +264,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         contentEpoch: storageInput.contentEpoch,
     }
     const copySource: scr.BufferCopyCommandSourceDescriptor = {
-        resource: storageOutput,
+        region: storageOutputRegion,
         contentEpoch: storageOutput.contentEpoch,
     }
     const genericCopySource: scr.CopyCommandSourceDescriptor = copySource
@@ -322,7 +328,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     new scr.TextureViewSpec()
     // @ts-expect-error TextureViewSpec descriptors are immutable
     normalizedViewDescriptor.baseMipLevel = 1
-    const scratchTextureView: GPUTextureView = scratchTexture.createView()
+    // @ts-expect-error Native texture views are Scratch-owned preparation artifacts
+    scratchTexture.createView()
     await scratchTexture.resize(compatTextureSize)
     // @ts-expect-error TextureResource descriptor is read-only
     scratchTexture.descriptor = scratchTexture.descriptor
@@ -452,13 +459,27 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         label: 'typed scratch layout buffer',
         size: codec.artifact.stride * 2,
         usage: 0x8 | 0x80,
-        layout: codec.artifact,
-        elementCount: 2,
     })
-    const bufferLayout: scr.LayoutArtifact | undefined = layoutBuffer.layout
-    const bufferElementCount: number | undefined = layoutBuffer.elementCount
-    const bufferLayoutByteLength: number | undefined = layoutBuffer.layoutByteLength
-    const bufferLayoutSubject: unknown = layoutBuffer.layoutSubject
+    const layoutBufferRegion = layoutBuffer.region({
+        size: codec.artifact.stride * 2,
+        layout: codec.artifact,
+    })
+    const bufferLayout: scr.LayoutArtifact | undefined = layoutBufferRegion.layout
+    const bufferElementCount: number | undefined = layoutBufferRegion.elementCount
+    // @ts-expect-error BufferResource is a raw byte container
+    layoutBuffer.layout
+    // @ts-expect-error BufferResource has no element interpretation
+    layoutBuffer.elementCount
+    // @ts-expect-error BufferResource has no layout byte length
+    layoutBuffer.layoutByteLength
+    // @ts-expect-error BufferResource has no layout subject
+    layoutBuffer.layoutSubject
+    runtime.createBuffer({
+        size: 16,
+        usage: 0x80,
+        // @ts-expect-error BufferResource descriptors cannot carry a layout
+        layout: codec.artifact,
+    })
     const programBufferRequirement: scr.ProgramBufferLayoutRequirement = {
         group: 0,
         binding: 0,
@@ -496,7 +517,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         ],
     })
     const bindSet: scr.BindSet = runtime.createBindSet(bindLayout, {
-        uniforms: uniformBuffer,
+        uniforms: uniformRegion,
     }, {
         label: 'typed bind set',
     })
@@ -519,8 +540,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         ],
     })
     const storageSet: scr.BindSet = runtime.createBindSet(storageLayout, {
-        inputValues: storageInput,
-        outputValues: storageOutput,
+        inputValues: storageInputRegion,
+        outputValues: storageOutputRegion,
     })
     // @ts-expect-error normalized BindSet bindings are immutable
     storageSet.bindings.clear()
@@ -545,8 +566,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         ],
     })
     const dynamicStorageSet: scr.BindSet = runtime.createBindSet(dynamicStorageLayout, {
-        dynamicInputValues: storageInput,
-        dynamicOutputValues: storageOutput,
+        dynamicInputValues: storageInputRegion,
+        dynamicOutputValues: storageOutputRegion,
     })
     const compatDynamicUniformEntry: scratchCompat.UniformBindLayoutEntry = {
         binding: 0,
@@ -580,19 +601,16 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         ],
     })
     const textureSet: scr.BindSet = runtime.createBindSet(textureLayout, {
-        colorTexture: scratchTexture,
+        colorTexture: defaultTextureViewSpec,
         colorSampler: scratchSampler,
     })
     const upload: scr.UploadCommand = runtime.createUploadCommand({
-        target: uniformBuffer,
+        target: uniformRegion,
         data: new Float32Array([ 1, 0, 0, 1 ]),
-        offset: 0,
     })
     const layoutUpload: scr.UploadCommand = runtime.createUploadCommand({
-        target: layoutBuffer,
+        target: layoutBufferRegion,
         data: uploadView,
-        layout: codec.artifact,
-        offset: 0,
     })
     const uploadLayout: scr.LayoutArtifact | undefined = layoutUpload.layout
     const textureUpload: scr.TextureUploadCommand = runtime.createTextureUploadCommand({
@@ -651,28 +669,22 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const copy: scr.CopyCommand = runtime.createCopyCommand({
         label: 'typed scratch copy',
         source: genericCopySource,
-        sourceOffset: 0,
-        target: storageInput,
-        targetOffset: 0,
-        byteLength: 16,
+        target: storageInputRegion,
         whenMissing: 'throw',
     })
     const texelCopyBufferLayout: scr.TexelCopyBufferLayout = {
-        offset: 0,
         bytesPerRow: 256,
         rowsPerImage: 2,
     }
     const compatTexelCopyBufferLayout: scratchCompat.TexelCopyBufferLayout = texelCopyBufferLayout
     const bufferCopyDescriptor: scr.BufferToBufferCopyCommandDescriptor = {
         source: copySource,
-        target: storageInput,
-        byteLength: 16,
+        target: storageInputRegion,
         whenMissing: 'throw',
     }
     const copyAlias: scr.CopyCommand = runtime.copyCommand({
         source: compatCopySource,
-        target: storageInput,
-        byteLength: 16,
+        target: storageInputRegion,
         whenMissing: 'throw',
     })
     const textureCopyDescriptor: scr.TextureToTextureCopyCommandDescriptor = {
@@ -709,7 +721,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         sourceOrigin: textureCopyOrigin,
         sourceMipLevel: 0,
         sourceAspect: 'all',
-        target: storageInput,
+        target: storageInputRegion,
         targetLayout: texelCopyBufferLayout,
         size: textureCopySize,
         whenMissing: 'throw',
@@ -764,8 +776,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const resolveQueries: scr.ResolveQuerySetCommand = runtime.createResolveQuerySetCommand({
         label: 'typed query resolve',
         source: queryResolveSource,
-        destination: queryDestination,
-        destinationOffset: 0,
+        destination: queryDestination.region({ size: 16 }),
         whenMissing: 'throw',
     })
     const resolveAlias: scr.ResolveQuerySetCommand = runtime.resolveQuerySetCommand({
@@ -775,7 +786,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
                 { index: 0, contentEpoch: 1 },
             ],
         },
-        destination: queryDestination,
+        destination: queryDestination.region({ size: 8 }),
         whenMissing: 'throw',
     })
     const resolveSourceQuerySet: scr.QuerySetResource = resolveQueries.source.querySet
@@ -806,7 +817,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         pipeline: scratchPipeline,
         bindSets: [ bindSet ],
         vertexBuffers: [
-            { slot: 0, buffer: vertexBuffer, offset: 0, size: 24 },
+            { slot: 0, region: vertexRegion },
         ],
         count: { vertexCount: 3 },
         resources: {
@@ -824,7 +835,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         pipeline: scratchPipeline,
         bindSets: [ bindSet ],
         vertexBuffers: [
-            { slot: 0, buffer: vertexBuffer, offset: 0, size: 24 },
+            { slot: 0, region: vertexRegion },
         ],
         count: { vertexCount: 3 },
         resources: {
@@ -850,14 +861,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         fallback: draw,
     })
     const staticIndexedCount: scr.StaticIndexedDrawCount = { indexCount: 3 }
-    const indirectCount: scr.IndirectCommandCount = { indirect: indirectBuffer, offset: 0 }
+    const indirectCount: scr.IndirectCommandCount = { indirect: indirectRegion }
     const drawCount: scr.DrawCount = staticIndexedCount
     const dispatchCount: scr.DispatchCount = indirectCount
     const indexBinding: scr.DrawIndexBufferBinding = {
-        buffer: indexBuffer,
+        region: indexRegion,
         format: 'uint16',
-        offset: 0,
-        size: 6,
     }
     const compatStaticIndexedCount: scratchCompat.StaticIndexedDrawCount = staticIndexedCount
     const compatIndirectCount: scratchCompat.IndirectCommandCount = indirectCount
@@ -960,14 +969,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const textureTargetPass: scr.RenderPassSpec = runtime.createRenderPass({
         color: [ {
-            target: scratchTexture,
+            target: defaultTextureViewSpec,
             load: 'clear',
             store: 'store',
             clear: [ 0, 0, 0, 1 ],
         } ],
     })
     const depthAttachment: scr.RenderPassDepthStencilAttachmentSpec = {
-        target: scratchDepthTexture,
+        target: scratchDepthTexture.view(),
         depthLoad: 'clear',
         depthStore: 'store',
         depthClear: 1,
@@ -975,7 +984,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatDepthAttachment: scratchCompat.RenderPassDepthStencilAttachmentSpec = depthAttachment
     const depthPassDescriptor: scr.RenderPassSpecDescriptor = {
         color: [ {
-            target: scratchTexture,
+            target: defaultTextureViewSpec,
             load: 'clear',
             store: 'store',
         } ],
@@ -983,10 +992,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     }
     const compatDepthPassDescriptor: scratchCompat.RenderPassSpecDescriptor = depthPassDescriptor
     const depthPass: scr.RenderPassSpec = runtime.createRenderPass(depthPassDescriptor)
-    const depthPassTarget: scr.TextureResource | undefined = depthPass.depth?.target
+    const depthPassTarget: scr.TextureViewSpec | undefined = depthPass.depth?.target
     const depthPassLoad: GPULoadOp | undefined = depthPass.depth?.depthLoad
     const compatDepthPass: scratchCompat.RenderPassSpec = runtime.createRenderPass(compatDepthPassDescriptor)
-    const compatDepthPassTarget: scratchCompat.TextureResource | undefined = compatDepthPass.depth?.target
+    const compatDepthPassTarget: scratchCompat.TextureViewSpec | undefined = compatDepthPass.depth?.target
     const compatDepthLoad: GPULoadOp | undefined = compatDepthAttachment.depthLoad
     const computeProgram: scr.Program = runtime.createProgram({
         modules: [
@@ -1257,8 +1266,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatBuilder: scratchCompat.SubmissionBuilder = runtime.createSubmission(compatSubmissionOptions)
     const readbackCommandDescriptor: scr.ReadbackCommandDescriptor = {
         label: 'typed ordered readback',
-        source: { resource: storageOutput, contentEpoch: storageOutput.contentEpoch },
-        range: { offset: 0, byteLength: 16 },
+        source: { region: storageOutputRegion, contentEpoch: storageOutput.contentEpoch },
         retain: 'until-dispose',
         whenMissing: 'throw',
     }
@@ -1281,19 +1289,17 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const readbackRetention: scr.ReadbackRetentionPolicy = 'until-dispose'
     const compatReadbackRetention: scratchCompat.ReadbackRetentionPolicy = 'consume-on-read'
     const readbackDescriptor: scr.ReadbackOperationDescriptor = {
-        source: storageOutput,
+        source: storageOutputRegion,
         after: submitted,
-        range: { offset: 0, byteLength: 16 },
         retain: readbackRetention,
     }
     const compatReadbackDescriptor: scratchCompat.ReadbackOperationDescriptor = {
-        source: storageOutput,
+        source: storageOutputRegion,
         retain: compatReadbackRetention,
     }
     const readback: scr.ReadbackOperation = runtime.createReadback({
-        source: storageOutput,
+        source: storageOutputRegion,
         after: submitted,
-        range: { offset: 0, byteLength: 16 },
         retain: readbackRetention,
     })
     const readbackLayout: scr.LayoutArtifact | undefined = readback.layout
@@ -1324,7 +1330,6 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void textureCopyOrigin
     void textureCopySize
     void compatTextureCopySource
-    void scratchTextureView
     void textureSet
     void textureTargetPass
     void depthAttachment

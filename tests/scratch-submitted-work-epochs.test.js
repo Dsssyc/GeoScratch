@@ -80,9 +80,18 @@ function readResource(resource, contentEpoch = resource.contentEpoch) {
     return { resource, contentEpoch }
 }
 
-function copySource(resource, contentEpoch = resource.contentEpoch) {
+function copySource(resource, contentEpoch = resource.contentEpoch, region = {}) {
 
-    return { resource, contentEpoch }
+    return resource.resourceKind === 'BufferResource'
+        ? { region: resource.region(region), contentEpoch }
+        : { resource, contentEpoch }
+}
+
+function copyDestination(resource, region = {}) {
+
+    return resource.resourceKind === 'BufferResource'
+        ? resource.region(region)
+        : resource
 }
 
 function querySlots(indices, contentEpoch) {
@@ -129,8 +138,8 @@ async function createCompute(runtime, input, output, readContentEpoch = input.co
         ],
     })
     const bindSet = runtime.createBindSet(bindLayout, {
-        inputValues: input,
-        outputValues: output,
+        inputValues: input.region(),
+        outputValues: output.region(),
     })
     const program = runtime.createProgram({
         modules: [
@@ -191,7 +200,7 @@ async function createRender(runtime, target, resources = { read: [], write: [] }
         label: 'draw target',
         color: [
             {
-                target,
+                target: target.view(),
                 load: 'clear',
                 store: 'store',
                 clear: [ 0, 0, 0, 1 ],
@@ -210,7 +219,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const target = await createBuffer(runtime, 'upload target')
         const upload = runtime.createUploadCommand({
             label: 'upload bytes',
-            target,
+            target: target.region(),
             data: new Uint8Array(16),
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -303,8 +312,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const copy = runtime.createCopyCommand({
             label: 'copy bytes',
             source: copySource(source, 1),
-            target,
-            byteLength: 16,
+            target: copyDestination(target),
             whenMissing: 'throw',
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -365,7 +373,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const copy = runtime.createCopyCommand({
             label: 'copy texture',
             source: copySource(source, 1),
-            target,
+            target: copyDestination(target),
             size: { width: 2, height: 2 },
             whenMissing: 'throw',
         })
@@ -419,8 +427,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const copy = runtime.createCopyCommand({
                 label: `copy empty source ${validation}`,
                 source: copySource(source, 0),
-                target,
-                byteLength: 16,
+                target: copyDestination(target),
                 whenMissing: 'throw',
             })
             const builder = runtime.createSubmission({ validation })
@@ -479,7 +486,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const copy = runtime.createCopyCommand({
                 label: `copy empty texture source ${validation}`,
                 source: copySource(source, 0),
-                target,
+                target: copyDestination(target),
                 size: { width: 2, height: 2 },
                 whenMissing: 'throw',
             })
@@ -532,8 +539,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const copy = runtime.createCopyCommand({
                 label: `copy future source ${validation}`,
                 source: copySource(source, 2),
-                target,
-                byteLength: 16,
+                target: copyDestination(target),
                 whenMissing: 'throw',
             })
             const builder = runtime.createSubmission({ validation })
@@ -605,14 +611,13 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             advanceResourceContentEpochForTest(source)
             const upload = runtime.createUploadCommand({
                 label: `refresh copy source ${validation}`,
-                target: source,
+                target: (source).region(),
                 data: new Uint8Array(16),
             })
             const copy = runtime.createCopyCommand({
                 label: `copy stale source ${validation}`,
                 source: copySource(source, 1),
-                target,
-                byteLength: 16,
+                target: copyDestination(target),
                 whenMissing: 'throw',
             })
             const builder = runtime.createSubmission({ validation })
@@ -697,7 +702,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const copy = runtime.createCopyCommand({
                 label: `copy future texture source ${validation}`,
                 source: copySource(source, 2),
-                target,
+                target: copyDestination(target),
                 size: { width: 2, height: 2 },
                 whenMissing: 'throw',
             })
@@ -786,7 +791,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const copy = runtime.createCopyCommand({
                 label: `copy stale texture source ${validation}`,
                 source: copySource(source, 1),
-                target,
+                target: copyDestination(target),
                 size: { width: 2, height: 2 },
                 whenMissing: 'throw',
             })
@@ -858,14 +863,13 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const target = await createBuffer(runtime, 'same submission copy target')
         const upload = runtime.createUploadCommand({
             label: 'produce copy source',
-            target: source,
+            target: (source).region(),
             data: new Uint8Array(16),
         })
         const copy = runtime.createCopyCommand({
             label: 'copy produced source',
             source: copySource(source, 1),
-            target,
-            byteLength: 16,
+            target: copyDestination(target),
             whenMissing: 'throw',
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -940,7 +944,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const copy = runtime.createCopyCommand({
             label: 'copy produced texture source',
             source: copySource(source, 1),
-            target,
+            target: copyDestination(target),
             size: { width: 2, height: 2 },
             whenMissing: 'throw',
         })
@@ -1008,14 +1012,14 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         )
         const upload = runtime.createUploadCommand({
             label: 'produce buffer texture ledger source',
-            target: source,
+            target: source.region({ size: 16 }),
             data: new Uint8Array(16),
         })
         const copy = runtime.createCopyCommand({
             label: 'copy buffer texture ledger',
             source: copySource(source, 1),
             sourceLayout: { bytesPerRow: 256, rowsPerImage: 2 },
-            target,
+            target: copyDestination(target),
             size: { width: 2, height: 2 },
             whenMissing: 'throw',
         })
@@ -1092,7 +1096,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const copy = runtime.createCopyCommand({
             label: 'copy texture buffer ledger',
             source: copySource(source, 1),
-            target,
+            target: copyDestination(target),
             targetLayout: { bytesPerRow: 256, rowsPerImage: 2 },
             size: { width: 2, height: 2 },
             whenMissing: 'throw',
@@ -1164,7 +1168,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const copy = runtime.createCopyCommand({
             label: 'copy rendered texture source',
             source: copySource(source, 1),
-            target,
+            target: copyDestination(target),
             size: { width: 2, height: 2 },
             whenMissing: 'throw',
         })
@@ -1210,7 +1214,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const copy = runtime.createCopyCommand({
             label: 'copy before draw read',
             source: copySource(source, 1),
-            target: copied,
+            target: copyDestination(copied),
             size: { width: 2, height: 2 },
             whenMissing: 'throw',
         })
@@ -1252,15 +1256,13 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const firstCopy = runtime.createCopyCommand({
             label: 'first copy in chain',
             source: copySource(firstSource, 1),
-            target: firstTarget,
-            byteLength: 16,
+            target: copyDestination(firstTarget),
             whenMissing: 'throw',
         })
         const secondCopy = runtime.createCopyCommand({
             label: 'second copy in chain',
             source: copySource(firstTarget, 1),
-            target: secondTarget,
-            byteLength: 16,
+            target: copyDestination(secondTarget),
             whenMissing: 'throw',
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -1300,11 +1302,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         advanceResourceContentEpochForTest(buffer)
         const copy = runtime.createCopyCommand({
             label: 'self non-overlap copy',
-            source: copySource(buffer, 2),
-            sourceOffset: 0,
-            target: buffer,
-            targetOffset: 16,
-            byteLength: 16,
+            source: copySource(buffer, 2, { offset: 0, size: 16 }),
+            target: copyDestination(buffer, { offset: 16, size: 16 }),
             whenMissing: 'throw',
         })
         const builder = runtime.createSubmission({ validation: 'throw' })
@@ -1343,7 +1342,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 querySet,
                 slots: querySlots([ 0, 1 ], 1),
             },
-            destination,
+            destination: destination.region(),
             whenMissing: 'throw',
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -1428,7 +1427,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const output = await createBuffer(runtime, 'failing compute output')
         const upload = runtime.createUploadCommand({
             label: 'simulated upload',
-            target: staged,
+            target: (staged).region(),
             data: new Uint8Array(16),
         })
         const compute = await createCompute(runtime, input, output, 1)
@@ -1530,7 +1529,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             advanceResourceContentEpochForTest(input)
             const upload = runtime.createUploadCommand({
                 label: 'refresh stale input',
-                target: input,
+                target: (input).region(),
                 data: new Uint8Array(16),
             })
             const compute = await createCompute(runtime, input, output, 1)
@@ -1605,7 +1604,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const output = await createBuffer(runtime, 'same submission output')
         const uploadInput = runtime.createUploadCommand({
             label: 'produce dispatch input',
-            target: input,
+            target: (input).region(),
             data: new Uint8Array(16),
         })
         const compute = await createCompute(runtime, input, output, 1)
@@ -1666,7 +1665,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const compute = await createCompute(runtime, input, output, 1)
         const uploadInput = runtime.createUploadCommand({
             label: 'upload compute input',
-            target: input,
+            target: (input).region(),
             data: new Uint8Array(16),
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -1796,7 +1795,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const target = await createTexture(runtime, 'draw render target')
         const uploadInput = runtime.createUploadCommand({
             label: 'upload draw input',
-            target: input,
+            target: (input).region(),
             data: new Uint8Array(16),
         })
         const render = await createRender(runtime, target, {
@@ -1885,13 +1884,12 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const computeOutput = await createBuffer(runtime, 'ordered compute output')
         const renderTarget = await createTexture(runtime, 'ordered render target')
         const upload = runtime.createUploadCommand({
-            target: uploadTarget,
+            target: (uploadTarget).region(),
             data: new Uint8Array(16),
         })
         const copy = runtime.createCopyCommand({
             source: copySource(uploadTarget, 1),
-            target: copyTarget,
-            byteLength: 16,
+            target: copyDestination(copyTarget),
             whenMissing: 'throw',
         })
         const compute = await createCompute(runtime, copyTarget, computeOutput, 1)
@@ -1930,7 +1928,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const { runtime } = await createRuntimeFixture()
         const target = await createBuffer(runtime, 'stable allocation target')
         const upload = runtime.createUploadCommand({
-            target,
+            target: target.region(),
             data: new Uint8Array(16),
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -1988,8 +1986,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         })
         const copy = runtime.createCopyCommand({
             source: copySource(texture, 2),
-            target: readbackBuffer,
-            targetLayout: { offset: 0, bytesPerRow: 256, rowsPerImage: 2 },
+            target: copyDestination(readbackBuffer),
+            targetLayout: { bytesPerRow: 256, rowsPerImage: 2 },
             size: { width: 4, height: 2 },
             whenMissing: 'throw',
         })
@@ -2050,7 +2048,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const { runtime } = await createRuntimeFixture()
         const target = await createBuffer(runtime, 'reported target')
         const upload = runtime.createUploadCommand({
-            target,
+            target: target.region(),
             data: new Uint8Array(16),
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -2073,7 +2071,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const { runtime } = await createRuntimeFixture()
         const target = await createBuffer(runtime, 'immutable target')
         const upload = runtime.createUploadCommand({
-            target,
+            target: target.region(),
             data: new Uint8Array(16),
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })

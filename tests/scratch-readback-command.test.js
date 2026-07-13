@@ -23,11 +23,11 @@ async function createSubmittedReadback(retain = 'consume-on-read', fakeOptions =
     const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
     const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
     const upload = runtime.createUploadCommand({
-        target: source,
+        target: (source).region(),
         data: new Uint32Array([ 1, 2, 3, 4 ]),
     })
     const command = await runtime.createReadbackCommand({
-        source: { resource: source, contentEpoch: 1 },
+        source: { region: (source).region(), contentEpoch: 1 },
         retain,
         whenMissing: 'throw',
     })
@@ -51,10 +51,10 @@ describe('scratch ReadbackCommand', () => {
             size: 16,
             usage: COPY_SRC | COPY_DST,
         })
+        const region = source.region({ offset: 4, size: 8 })
         const descriptor = {
             label: 'ordered readback',
-            source: { resource: source, contentEpoch: source.contentEpoch },
-            range: { offset: 4, byteLength: 8 },
+            source: { region, contentEpoch: source.contentEpoch },
             retain: 'until-dispose',
             whenMissing: 'throw',
         }
@@ -66,8 +66,6 @@ describe('scratch ReadbackCommand', () => {
         const alias = await runtime.readbackCommand({
             label: 'ordered readback alias',
             source: descriptor.source,
-            sourceOffset: 4,
-            byteLength: 8,
             whenMissing: 'throw',
         })
 
@@ -75,8 +73,9 @@ describe('scratch ReadbackCommand', () => {
         expect(alias).to.be.instanceOf(scr.ReadbackCommand)
         expect(command.commandKind).to.equal('readback')
         expect(command.source).to.deep.equal(descriptor.source)
-        expect(command.range).to.deep.equal({ offset: 4, byteLength: 8 })
-        expect(alias.range).to.deep.equal({ offset: 4, byteLength: 8 })
+        expect(command.source.region).to.equal(region)
+        expect(command.source.region).to.include({ offset: 4, size: 8 })
+        expect(alias.source.region).to.equal(region)
         expect(command.retain).to.equal('until-dispose')
         expect(command.whenMissing).to.equal('throw')
     })
@@ -91,13 +90,12 @@ describe('scratch ReadbackCommand', () => {
             usage: COPY_SRC | COPY_DST,
         })
         const upload = runtime.createUploadCommand({
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 11, 22, 33, 44 ]),
         })
         const command = await runtime.createReadbackCommand({
             label: 'ordered readback',
-            source: { resource: source, contentEpoch: source.contentEpoch + 1 },
-            range: { offset: 4, byteLength: 8 },
+            source: { region: (source).region({ offset: 4, size: 8 }), contentEpoch: source.contentEpoch + 1 },
             whenMissing: 'throw',
         })
         const builder = runtime.submission()
@@ -132,7 +130,7 @@ describe('scratch ReadbackCommand', () => {
             usage: 0x1,
         })
 
-        for (const invalidSource of [ source, { resource: texture, contentEpoch: 0 }, { resource: source, contentEpoch: -1 } ]) {
+        for (const invalidSource of [ source, { region: texture, contentEpoch: 0 }, { region: source.region(), contentEpoch: -1 } ]) {
             await expectScratchDiagnostic(() => runtime.createReadbackCommand({
                 source: invalidSource,
                 whenMissing: 'throw',
@@ -144,7 +142,7 @@ describe('scratch ReadbackCommand', () => {
         }
 
         await expectScratchDiagnostic(() => runtime.createReadbackCommand({
-            source: { resource: noCopySource, contentEpoch: 0 },
+            source: { region: (noCopySource).region(), contentEpoch: 0 },
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
@@ -152,35 +150,17 @@ describe('scratch ReadbackCommand', () => {
             phase: 'command',
         })
 
-        for (const range of [
-            { offset: -1, byteLength: 4 },
-            { offset: 0, byteLength: 0 },
-            { offset: 12, byteLength: 8 },
-        ]) {
-            await expectScratchDiagnostic(() => runtime.createReadbackCommand({
-                source: { resource: source, contentEpoch: 0 },
-                range,
-                whenMissing: 'throw',
-            }), {
-                code: 'SCRATCH_READBACK_RANGE_INVALID',
-                severity: 'error',
-                phase: 'command',
-            })
-        }
-
         await expectScratchDiagnostic(() => runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 0 },
-            sourceOffset: 4,
-            range: { offset: 0, byteLength: 8 },
+            source: { region: source.region({ size: 0 }), contentEpoch: 0 },
             whenMissing: 'throw',
         }), {
-            code: 'SCRATCH_READBACK_RANGE_INVALID',
+            code: 'SCRATCH_READBACK_SOURCE_INVALID',
             severity: 'error',
             phase: 'command',
         })
 
         await expectScratchDiagnostic(() => runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 0 },
+            source: { region: (source).region(), contentEpoch: 0 },
             retain: 'forever',
             whenMissing: 'throw',
         }), {
@@ -190,7 +170,7 @@ describe('scratch ReadbackCommand', () => {
         })
 
         await expectScratchDiagnostic(() => runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 0 },
+            source: { region: (source).region(), contentEpoch: 0 },
         }), {
             code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
             severity: 'error',
@@ -206,7 +186,7 @@ describe('scratch ReadbackCommand', () => {
         const runtimeB = await scr.ScratchRuntime.create({ gpu: fakeB.gpu })
         const source = await runtimeA.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const command = await runtimeA.createReadbackCommand({
-            source: { resource: source, contentEpoch: 0 },
+            source: { region: (source).region(), contentEpoch: 0 },
             whenMissing: 'throw',
         })
         const unrelated = runtimeA.submission().submit()
@@ -237,7 +217,7 @@ describe('scratch ReadbackCommand', () => {
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC })
         advanceResourceContentEpochForTest(source)
         const command = await runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
 
@@ -265,15 +245,15 @@ describe('scratch ReadbackCommand', () => {
         const sourceA = await runtimeA.createBuffer({ size: 16, usage: COPY_SRC })
         const sourceB = await runtimeB.createBuffer({ size: 16, usage: COPY_SRC })
         const upload = runtimeA.createUploadCommand({
-            target: await runtimeA.createBuffer({ size: 16, usage: COPY_DST }),
+            target: (await runtimeA.createBuffer({ size: 16, usage: COPY_DST })).region(),
             data: new Uint8Array(16),
         })
         const commandA = await runtimeA.createReadbackCommand({
-            source: { resource: sourceA, contentEpoch: 0 },
+            source: { region: (sourceA).region(), contentEpoch: 0 },
             whenMissing: 'throw',
         })
         const commandB = await runtimeB.createReadbackCommand({
-            source: { resource: sourceB, contentEpoch: 0 },
+            source: { region: (sourceB).region(), contentEpoch: 0 },
             whenMissing: 'throw',
         })
 
@@ -306,7 +286,7 @@ describe('scratch ReadbackCommand', () => {
             const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
             const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC })
             const command = await runtime.createReadbackCommand({
-                source: { resource: source, contentEpoch: 0 },
+                source: { region: (source).region(), contentEpoch: 0 },
                 whenMissing: 'throw',
             })
 
@@ -344,11 +324,11 @@ describe('scratch ReadbackCommand', () => {
                 const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
                 advanceResourceContentEpochForTest(source)
                 const upload = scenario === 'stale'
-                    ? runtime.createUploadCommand({ target: source, data: new Uint8Array(16) })
+                    ? runtime.createUploadCommand({ target: (source).region(), data: new Uint8Array(16) })
                     : undefined
                 const command = await runtime.createReadbackCommand({
                     source: {
-                        resource: source,
+                        region: (source).region(),
                         contentEpoch: scenario === 'future' ? 2 : 1,
                     },
                     whenMissing: 'throw',
@@ -393,7 +373,7 @@ describe('scratch ReadbackCommand', () => {
         const standaloneSource = await standaloneRuntime.createBuffer({ size: 16, usage: COPY_SRC })
         advanceResourceContentEpochForTest(standaloneSource)
         const standaloneCommand = await standaloneRuntime.createReadbackCommand({
-            source: { resource: standaloneSource, contentEpoch: 1 },
+            source: { region: (standaloneSource).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const standalone = standaloneRuntime.submission().readback(standaloneCommand).submit()
@@ -416,11 +396,11 @@ describe('scratch ReadbackCommand', () => {
         const producedRuntime = await scr.ScratchRuntime.create({ gpu: producedFake.gpu })
         const producedSource = await producedRuntime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const upload = producedRuntime.createUploadCommand({
-            target: producedSource,
+            target: (producedSource).region(),
             data: new Uint8Array(16),
         })
         const producedCommand = await producedRuntime.createReadbackCommand({
-            source: { resource: producedSource, contentEpoch: 1 },
+            source: { region: (producedSource).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const produced = producedRuntime.submission()
@@ -448,23 +428,22 @@ describe('scratch ReadbackCommand', () => {
         const laterSource = await runtime.createBuffer({ size: 8, usage: COPY_SRC | COPY_DST })
         const firstUpload = runtime.createUploadCommand({
             label: 'first producer',
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 10, 20 ]),
         })
         const laterSourceUpload = runtime.createUploadCommand({
             label: 'later source producer',
-            target: laterSource,
+            target: (laterSource).region(),
             data: new Uint32Array([ 30, 40 ]),
         })
         const command = await runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const laterCopy = runtime.createCopyCommand({
             label: 'later GPU producer',
-            source: { resource: laterSource, contentEpoch: 1 },
-            target: source,
-            byteLength: 8,
+            source: { region: laterSource.region(), contentEpoch: 1 },
+            target: source.region(),
             whenMissing: 'throw',
         })
         const submitted = runtime.submission()
@@ -557,12 +536,11 @@ describe('scratch ReadbackCommand', () => {
         const source = await runtime.createBuffer({
             size: uploadBytes.byteLength,
             usage: COPY_SRC | COPY_DST,
-            layout: codec.artifact,
-            elementCount: values.length,
         })
-        const upload = runtime.createUploadCommand({ target: source, data: uploadBytes })
+        const region = source.region({ layout: codec.artifact })
+        const upload = runtime.createUploadCommand({ target: region, data: uploadBytes })
         const command = await runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 1 },
+            source: { region, contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const submitted = runtime.submission().upload(upload).readback(command).submit()
@@ -647,11 +625,11 @@ describe('scratch ReadbackCommand', () => {
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const upload = runtime.createUploadCommand({
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 1, 2, 3, 4 ]),
         })
         const command = await runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const stagingBuffer = fake.calls.buffers.at(-1)
@@ -678,11 +656,11 @@ describe('scratch ReadbackCommand', () => {
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const upload = runtime.createUploadCommand({
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 1, 2, 3, 4 ]),
         })
         const command = await runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const nativeFailure = new Error('fake queue completion failure')
@@ -755,13 +733,13 @@ describe('scratch ReadbackCommand', () => {
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const upload = runtime.createUploadCommand({
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 1, 2, 3, 4 ]),
         })
         const commands = await Promise.all([ 'first', 'second' ].map(label =>
             runtime.createReadbackCommand({
                 label,
-                source: { resource: source, contentEpoch: 1 },
+                source: { region: (source).region(), contentEpoch: 1 },
                 whenMissing: 'throw',
             })
         ))

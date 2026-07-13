@@ -1,4 +1,5 @@
 import { UUID } from '../core/utils/uuid.js'
+import { BufferRegion, isBufferRegion } from './buffer.js'
 import { ScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createLayoutReadbackView } from './layout-codec.js'
@@ -40,11 +41,6 @@ import type { ReadbackNativeSettlement } from './submission-native-observation.j
 const BUFFER_USAGE_COPY_SRC = 0x4
 const readbackOperationToken = Symbol('ReadbackOperation')
 
-export type ReadbackRange = {
-    offset?: number
-    byteLength?: number
-}
-
 export type ReadbackState =
     | 'requested'
     | 'scheduled'
@@ -62,9 +58,8 @@ export type ReadbackRetentionPolicy =
 
 export type ReadbackOperationDescriptor = {
     label?: string
-    source: BufferResource
+    source: BufferRegion
     after?: SubmittedWork
-    range?: ReadbackRange
     retain?: ReadbackRetentionPolicy
 }
 
@@ -113,9 +108,8 @@ type ReadbackOperationPrivateState = {
     id: string
     label: string | undefined
     state: ReadbackState
-    source: BufferResource
+    source: BufferRegion
     layout: LayoutArtifact | undefined
-    range: Readonly<{ offset: number, byteLength: number }>
     after: SubmittedWork | undefined
     producerEpoch: SubmittedResourceEpoch | undefined
     contentEpoch: number
@@ -171,7 +165,6 @@ export class ReadbackOperation {
             state: 'requested',
             source: descriptor.source,
             layout: undefined,
-            range: Object.freeze({ offset: 0, byteLength: 0 }),
             after: undefined,
             producerEpoch: undefined,
             contentEpoch: 0,
@@ -194,12 +187,11 @@ export class ReadbackOperation {
         readbackOperationStates.set(this, state)
         state.source = normalizeSource(this, descriptor.source)
         state.layout = state.source.layout
-        state.range = Object.freeze(normalizeRange(this, descriptor.range))
         const after = normalizeAfter(this, descriptor.after)
         state.after = after
-        state.producerEpoch = construction.producerEpoch ?? findSourceProducerEpoch(after, state.source)
-        state.contentEpoch = construction.contentEpoch ?? state.producerEpoch?.contentEpoch ?? state.source.contentEpoch
-        state.allocationVersion = construction.allocationVersion ?? state.producerEpoch?.allocationVersion ?? state.source.allocationVersion
+        state.producerEpoch = construction.producerEpoch ?? findSourceProducerEpoch(after, state.source.buffer)
+        state.contentEpoch = construction.contentEpoch ?? state.producerEpoch?.contentEpoch ?? state.source.buffer.contentEpoch
+        state.allocationVersion = construction.allocationVersion ?? state.producerEpoch?.allocationVersion ?? state.source.buffer.allocationVersion
         state.retain = normalizeRetentionPolicy(this, descriptor.retain)
         if (construction.path === 'direct') assertReadbackSourceCurrent(this)
         readbackOperationPaths.set(this, construction.path)
@@ -233,7 +225,7 @@ export class ReadbackOperation {
         return readbackStateFor(this).state
     }
 
-    get source(): BufferResource {
+    get source(): BufferRegion {
 
         return readbackStateFor(this).source
     }
@@ -241,11 +233,6 @@ export class ReadbackOperation {
     get layout(): LayoutArtifact | undefined {
 
         return readbackStateFor(this).layout
-    }
-
-    get range(): Readonly<{ offset: number, byteLength: number }> {
-
-        return readbackStateFor(this).range
     }
 
     get after(): SubmittedWork | undefined {
@@ -459,8 +446,8 @@ export class ReadbackOperation {
                 const slot = await allocateReadbackStaging({
                     runtime: this.runtime,
                     target: readbackTarget(this),
-                    source: this.source,
-                    byteLength: this.range.byteLength,
+                    source: this.source.buffer,
+                    byteLength: this.source.size,
                     ...(stagingLabel !== undefined ? { label: stagingLabel } : {}),
                 })
                 directReadbackStaging.set(this, slot)
@@ -494,11 +481,11 @@ export class ReadbackOperation {
                         () => device.createCommandEncoder(encoderDescriptor)
                     )
                     nativeObservation.issue('command-encode', () => encoder.copyBufferToBuffer(
-                        this.source.gpuBuffer,
-                        this.range.offset,
+                        this.source.buffer.gpuBuffer,
+                        this.source.offset,
                         stagingBuffer,
                         0,
-                        this.range.byteLength
+                        this.source.size
                     ))
                     const commandBuffer = nativeObservation.issue(
                         'encoder-finish',
@@ -528,7 +515,7 @@ export class ReadbackOperation {
                 runtime: this.runtime,
                 target: readbackTarget(this),
                 buffer: stagingBuffer,
-                byteLength: this.range.byteLength,
+                byteLength: this.source.size,
                 ...(this.label !== undefined ? { label: `${this.label} mapping` } : {}),
                 lifecycleState: () => readbackLifecycleState(this),
                 subscribeLifecycle: listener => subscribeReadbackLifecycle(this, listener),
@@ -550,7 +537,7 @@ export class ReadbackOperation {
             failureStage = 'mapped-range'
             let mapped: ArrayBuffer
             try {
-                mapped = stagingBuffer.getMappedRange(0, this.range.byteLength)
+                mapped = stagingBuffer.getMappedRange(0, this.source.size)
             } catch (cause) {
                 const transaction = mappingTransaction
                 mappingTransaction = undefined
@@ -1012,10 +999,10 @@ function readbackTarget(operation: ReadbackOperation) {
         kind: 'readback' as const,
         readbackId: operation.id,
         path: readbackOperationPaths.get(operation) ?? 'direct',
-        sourceResourceId: operation.source.id,
+        sourceResourceId: operation.source.buffer.id,
         allocationVersion: operation.allocationVersion,
         contentEpoch: operation.contentEpoch,
-        byteLength: operation.range.byteLength,
+        byteLength: operation.source.size,
         ...(state.commandId !== undefined ? { commandId: state.commandId } : {}),
         ...(operation.after !== undefined ? { submissionId: operation.after.id } : {}),
         ...(state.stepIndex !== undefined ? { stepIndex: state.stepIndex } : {}),
@@ -1032,11 +1019,11 @@ function readbackFact(operation: ReadbackOperation): ScratchRuntimeReadbackOpera
         path,
         state: operation.state,
         retain: operation.retain,
-        sourceResourceId: operation.source.id,
+        sourceResourceId: operation.source.buffer.id,
         allocationVersion: operation.allocationVersion,
         contentEpoch: operation.contentEpoch,
-        byteLength: operation.range.byteLength,
-        stagingBytes: scheduledReadbackStaging.has(operation) ? operation.range.byteLength : 0,
+        byteLength: operation.source.size,
+        stagingBytes: scheduledReadbackStaging.has(operation) ? operation.source.size : 0,
         retainedHostBytes: operation.retainedByteLength ?? 0,
         isMapping: operation.state === 'mapping',
         ...(state.commandId !== undefined ? { commandId: state.commandId } : {}),
@@ -1062,7 +1049,7 @@ function findSourceProducerEpoch(after: SubmittedWork | undefined, source: Buffe
 
 function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
 
-    if (operation.source.state === 'indeterminate') {
+    if (operation.source.buffer.state === 'indeterminate') {
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE',
             severity: 'error',
@@ -1072,15 +1059,15 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
             message: 'ReadbackOperation cannot read source content whose current value is indeterminate.',
             expected: { state: 'ready' },
             actual: readbackDiagnosticActual(operation, {
-                state: operation.source.state,
-                contentEpoch: operation.source.contentEpoch,
+                state: operation.source.buffer.state,
+                contentEpoch: operation.source.buffer.contentEpoch,
                 capturedContentEpoch: operation.contentEpoch,
                 recovery: 'explicit later producer before direct readback',
             }),
         })
     }
 
-    if (operation.source.contentEpoch !== operation.contentEpoch) {
+    if (operation.source.buffer.contentEpoch !== operation.contentEpoch) {
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_EPOCH_STALE',
             severity: 'error',
@@ -1090,14 +1077,14 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
             message: 'ReadbackOperation source content epoch no longer matches the captured readback epoch.',
             expected: { contentEpoch: operation.contentEpoch },
             actual: readbackDiagnosticActual(operation, {
-                contentEpoch: operation.source.contentEpoch,
+                contentEpoch: operation.source.buffer.contentEpoch,
                 capturedContentEpoch: operation.contentEpoch,
                 producerEpoch: operation.producerEpoch?.contentEpoch,
             }),
         })
     }
 
-    if (operation.source.allocationVersion !== operation.allocationVersion) {
+    if (operation.source.buffer.allocationVersion !== operation.allocationVersion) {
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE',
             severity: 'error',
@@ -1107,7 +1094,7 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
             message: 'ReadbackOperation source allocation version no longer matches the captured readback allocation.',
             expected: { allocationVersion: operation.allocationVersion },
             actual: readbackDiagnosticActual(operation, {
-                allocationVersion: operation.source.allocationVersion,
+                allocationVersion: operation.source.buffer.allocationVersion,
                 capturedAllocationVersion: operation.allocationVersion,
                 producerAllocationVersion: operation.producerEpoch?.allocationVersion,
             }),
@@ -1123,63 +1110,37 @@ function readbackRelatedSubjects(operation: ReadbackOperation): DiagnosticSubjec
     ].filter((subject): subject is DiagnosticSubject => subject !== undefined)
 }
 
-function normalizeSource(operation: ReadbackOperation, source: BufferResource): BufferResource {
+function normalizeSource(operation: ReadbackOperation, source: BufferRegion): BufferRegion {
 
-    if (!source || typeof source.assertRuntime !== 'function' || !source.gpuBuffer) {
+    if (!isBufferRegion(source) || source.size <= 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_INVALID',
             severity: 'error',
             phase: 'readback',
             subject: operation.subject,
-            message: 'ReadbackOperation requires a BufferResource source.',
-            expected: { source: 'BufferResource' },
+            message: 'ReadbackOperation requires a non-empty BufferRegion source.',
+            expected: { source: 'non-empty BufferRegion' },
             actual: { source: describeValue(source) },
         })
     }
 
-    source.assertRuntime(operation.runtime)
+    source.buffer.assertRuntime(operation.runtime)
+    source.assertUsable()
 
-    if (typeof source.usage === 'number' && (source.usage & BUFFER_USAGE_COPY_SRC) === 0) {
+    if ((source.buffer.usage & BUFFER_USAGE_COPY_SRC) === 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'readback',
             subject: operation.subject,
-            related: [ source.subject ],
+            related: [ source.subject, source.buffer.subject ],
             message: 'ReadbackOperation source must be created with copy source usage.',
             expected: { usage: 'copySrc' },
-            actual: { usage: source.usage },
+            actual: { usage: source.buffer.usage },
         })
     }
 
     return source
-}
-
-function normalizeRange(operation: ReadbackOperation, range?: ReadbackRange) {
-
-    const offset = range?.offset ?? 0
-    const byteLength = range?.byteLength ?? operation.source.size - offset
-
-    if (
-        !Number.isInteger(offset) ||
-        !Number.isInteger(byteLength) ||
-        offset < 0 ||
-        byteLength <= 0 ||
-        offset + byteLength > operation.source.size
-    ) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_READBACK_RANGE_INVALID',
-            severity: 'error',
-            phase: 'readback',
-            subject: operation.subject,
-            related: [ operation.source.subject ],
-            message: 'ReadbackOperation range must fit inside the source buffer.',
-            expected: { offset: 'non-negative integer', byteLength: 'positive byte length within source' },
-            actual: { offset, byteLength, sourceSize: operation.source.size },
-        })
-    }
-
-    return { offset, byteLength }
 }
 
 function normalizeRetentionPolicy(operation: ReadbackOperation, retain: unknown): ReadbackRetentionPolicy {
@@ -1242,8 +1203,11 @@ function readbackDiagnosticActual(
     const result: Record<string, unknown> = {
         state: operation.state,
         retain: operation.retain,
-        sourceId: operation.source.id,
-        range: operation.range,
+        sourceId: operation.source.buffer.id,
+        sourceRegion: {
+            offset: operation.source.offset,
+            size: operation.source.size,
+        },
         contentEpoch: operation.contentEpoch,
         allocationVersion: operation.allocationVersion,
     }
@@ -1255,7 +1219,7 @@ function readbackDiagnosticActual(
         result.retainedByteLength = operation.retainedByteLength
     }
     if (directReadbackStaging.has(operation) || scheduledReadbackStaging.has(operation)) {
-        result.stagingBytes = operation.range.byteLength
+        result.stagingBytes = operation.source.size
     }
     if (operation.cancelReason !== undefined) {
         result.reason = operation.cancelReason

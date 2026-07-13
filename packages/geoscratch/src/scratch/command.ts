@@ -1,5 +1,5 @@
 import { UUID } from '../core/utils/uuid.js'
-import { BufferResource } from './buffer.js'
+import { BufferRegion, BufferResource, isBufferRegion } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
     describeLayoutCompatibilityDifference,
@@ -35,7 +35,7 @@ import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { ComputePipeline, RenderPipeline } from './pipeline.js'
 import type { LayoutArtifact, LayoutUploadView } from './layout-codec.js'
 import type { ProgramBufferLayoutRequirement } from './program.js'
-import type { ReadbackOperation, ReadbackRange, ReadbackRetentionPolicy } from './readback.js'
+import type { ReadbackOperation, ReadbackRetentionPolicy } from './readback.js'
 import type {
     ReadbackStagingCleanupFailure,
     ReadbackStagingCleanupResult,
@@ -144,13 +144,11 @@ export type StaticIndexedDrawCount = {
 }
 
 export type IndirectCommandCount = {
-    indirect: BufferResource
-    offset?: number
+    indirect: BufferRegion
 }
 
 type NormalizedIndirectCommandCount = {
-    indirect: BufferResource
-    offset: number
+    indirect: BufferRegion
 }
 
 export type DrawCount =
@@ -175,29 +173,19 @@ type StrictIndirectDrawCount = IndirectCommandCount & {
 
 export type DrawVertexBufferBinding = {
     slot: number
-    buffer: BufferResource
-    offset?: number
-    size?: number
+    region: BufferRegion
 }
 
 export type DrawIndexBufferBinding = {
-    buffer: BufferResource
+    region: BufferRegion
     format: GPUIndexFormat
-    offset?: number
-    size?: number
 }
 
 export type CommandDynamicOffsets = Record<number, number[]>
 
-export type NormalizedDrawVertexBufferBinding = Omit<DrawVertexBufferBinding, 'size'> & {
-    offset: number
-    size: number | undefined
-}
+export type NormalizedDrawVertexBufferBinding = DrawVertexBufferBinding
 
-export type NormalizedDrawIndexBufferBinding = Omit<DrawIndexBufferBinding, 'offset' | 'size'> & {
-    offset: number
-    size: number | undefined
-}
+export type NormalizedDrawIndexBufferBinding = DrawIndexBufferBinding
 
 export type CommandResourceReadDescriptor = {
     readonly resource: BufferResource | TextureResource
@@ -205,7 +193,7 @@ export type CommandResourceReadDescriptor = {
 }
 
 export type BufferCopyCommandSourceDescriptor = {
-    resource: BufferResource
+    region: BufferRegion
     contentEpoch: number
 }
 
@@ -268,17 +256,13 @@ export type EndOcclusionQueryCommandDescriptor = {
 
 export type UploadCommandDescriptor = {
     label?: string
-    target: BufferResource
+    target: BufferRegion
     data: ArrayBuffer | ArrayBufferView | LayoutUploadView
-    offset?: number
     dataOffset?: number
     size?: number
-    layout?: LayoutArtifact
-    artifact?: LayoutArtifact
 }
 
 export type TexelCopyBufferLayout = {
-    offset?: number
     bytesPerRow: number
     rowsPerImage?: number
 }
@@ -286,10 +270,7 @@ export type TexelCopyBufferLayout = {
 export type BufferToBufferCopyCommandDescriptor = {
     label?: string
     source: BufferCopyCommandSourceDescriptor
-    sourceOffset?: number
-    target: BufferResource
-    targetOffset?: number
-    byteLength: number
+    target: BufferRegion
     whenMissing: 'throw'
 }
 
@@ -337,7 +318,7 @@ export type TextureToBufferCopyCommandDescriptor = {
     sourceOrigin?: TextureCopyOrigin
     sourceMipLevel?: number
     sourceAspect?: GPUTextureAspect
-    target: BufferResource
+    target: BufferRegion
     targetLayout: TexelCopyBufferLayout
     size: TextureCopySize
     whenMissing: 'throw'
@@ -352,9 +333,6 @@ export type CopyCommandDescriptor =
 export type ReadbackCommandDescriptor = {
     label?: string
     source: BufferCopyCommandSourceDescriptor
-    sourceOffset?: number
-    byteLength?: number
-    range?: ReadbackRange
     retain?: ReadbackRetentionPolicy
     whenMissing: 'throw'
 }
@@ -366,8 +344,7 @@ export type ReadbackCommandResultOptions = {
 export type ResolveQuerySetCommandDescriptor = {
     label?: string
     source: ResolveQuerySetSourceDescriptor
-    destination: BufferResource
-    destinationOffset?: number
+    destination: BufferRegion
     whenMissing: 'throw'
 }
 
@@ -709,9 +686,9 @@ export class DrawCommand {
             bindSet.assertUsable()
         }
         for (const binding of this.vertexBuffers) {
-            binding.buffer.assertUsable()
+            binding.region.assertUsable()
         }
-        this.indexBuffer?.buffer.assertUsable()
+        this.indexBuffer?.region.assertUsable()
         if ('indirect' in this.count) this.count.indirect.assertUsable()
         for (const resource of [
             ...this.resources.read.map(read => read.resource),
@@ -751,14 +728,19 @@ export class DrawCommand {
             setBindGroupWithDynamicOffsets(this, passEncoder, bindSet)
         }
         for (const binding of this.vertexBuffers) {
-            passEncoder.setVertexBuffer(binding.slot, binding.buffer.gpuBuffer, binding.offset, binding.size)
+            passEncoder.setVertexBuffer(
+                binding.slot,
+                binding.region.buffer.gpuBuffer,
+                binding.region.offset,
+                binding.region.size
+            )
         }
         if (this.indexBuffer !== undefined) {
             passEncoder.setIndexBuffer(
-                this.indexBuffer.buffer.gpuBuffer,
+                this.indexBuffer.region.buffer.gpuBuffer,
                 this.indexBuffer.format,
-                this.indexBuffer.offset,
-                this.indexBuffer.size
+                this.indexBuffer.region.offset,
+                this.indexBuffer.region.size
             )
         }
         if ('indexCount' in this.count) {
@@ -777,9 +759,9 @@ export class DrawCommand {
                 this.count.firstInstance ?? 0
             )
         } else if (this.indexBuffer === undefined) {
-            passEncoder.drawIndirect(this.count.indirect.gpuBuffer, this.count.offset)
+            passEncoder.drawIndirect(this.count.indirect.buffer.gpuBuffer, this.count.indirect.offset)
         } else {
-            passEncoder.drawIndexedIndirect(this.count.indirect.gpuBuffer, this.count.offset)
+            passEncoder.drawIndexedIndirect(this.count.indirect.buffer.gpuBuffer, this.count.indirect.offset)
         }
         if (this._producesDeclaredWrites) {
             for (const resource of this.resources.write) {
@@ -1207,7 +1189,10 @@ export class DispatchCommand {
             setBindGroupWithDynamicOffsets(this, passEncoder, bindSet)
         }
         if ('indirect' in this.count) {
-            passEncoder.dispatchWorkgroupsIndirect(this.count.indirect.gpuBuffer, this.count.offset)
+            passEncoder.dispatchWorkgroupsIndirect(
+                this.count.indirect.buffer.gpuBuffer,
+                this.count.indirect.offset
+            )
         } else {
             passEncoder.dispatchWorkgroups(
                 this.count.workgroups[0],
@@ -1341,10 +1326,9 @@ export interface UploadCommand {
     label?: string
     commandKind: 'upload'
     uploadKind: 'buffer'
-    target: BufferResource
+    target: BufferRegion
     data: ArrayBuffer | ArrayBufferView
     layout?: LayoutArtifact
-    offset: number
     dataOffset: number
     byteLength: number
     isDisposed: boolean
@@ -1357,17 +1341,17 @@ export class UploadCommand {
         runtime.assertActive()
 
         const target = descriptor.target
-        if (!target || typeof target.assertRuntime !== 'function' || !target.gpuBuffer) {
+        if (!isBufferRegion(target)) {
             throwUploadDiagnostic({
                 runtime,
                 target,
                 data: descriptor.data,
-                offset: descriptor.offset,
                 reason: 'target',
             })
         }
 
-        target.assertRuntime(runtime)
+        target.buffer.assertRuntime(runtime)
+        target.assertUsable()
         const uploadSource = normalizeUploadSource(runtime, descriptor)
 
         this.runtime = runtime
@@ -1377,9 +1361,8 @@ export class UploadCommand {
         this.uploadKind = 'buffer'
         this.target = target
         this.data = uploadSource.data
-        const layout = normalizeUploadLayout(runtime, descriptor.layout ?? descriptor.artifact ?? uploadSource.layout, descriptor)
+        const layout = normalizeUploadLayout(runtime, uploadSource.layout, descriptor)
         if (layout !== undefined) this.layout = layout
-        this.offset = normalizeUploadOffset(runtime, descriptor.offset ?? 0)
         this.dataOffset = normalizeUploadOffset(runtime, descriptor.dataOffset ?? uploadSource.dataOffset)
         const sourceByteLength = descriptor.dataOffset === undefined ? uploadSource.byteLength : undefined
         this.byteLength = normalizeUploadByteLength(runtime, this.data, this.dataOffset, descriptor, sourceByteLength)
@@ -1458,12 +1441,9 @@ export interface CopyCommand {
     commandKind: 'copy'
     copyKind: 'buffer-to-buffer' | 'texture-to-texture' | 'buffer-to-texture' | 'texture-to-buffer'
     source: CopyCommandSourceDescriptor
-    sourceOffset?: number
     sourceLayout?: Required<TexelCopyBufferLayout>
-    target: BufferResource | TextureResource
-    targetOffset?: number
+    target: BufferRegion | TextureResource
     targetLayout?: Required<TexelCopyBufferLayout>
-    byteLength?: number
     sourceOrigin?: { x: number, y: number, z: number }
     targetOrigin?: { x: number, y: number, z: number }
     sourceMipLevel?: number
@@ -1482,7 +1462,8 @@ export class CopyCommand {
         runtime.assertActive()
 
         const source = normalizeCopySource(runtime, descriptor)
-        source.resource.assertRuntime(runtime)
+        const sourceResource = copySourceResource(source)
+        sourceResource.assertRuntime(runtime)
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
@@ -1493,19 +1474,16 @@ export class CopyCommand {
         this.whenMissing = normalizeCopyReadinessPolicy(this, descriptor.whenMissing)
         this.isDisposed = false
 
-        if (source.resource instanceof BufferResource && descriptor.target instanceof BufferResource) {
+        if (isBufferRegionSource(source) && isBufferRegion(descriptor.target)) {
             const bufferDescriptor = descriptor as BufferToBufferCopyCommandDescriptor
-            const target = normalizeBufferCopyTarget(runtime, bufferDescriptor, source.resource)
+            const target = normalizeBufferCopyTarget(runtime, bufferDescriptor, source.region)
 
             this.copyKind = 'buffer-to-buffer'
             this.target = target
-            this.sourceOffset = normalizeCopyOffset(runtime, bufferDescriptor.sourceOffset ?? 0, 'sourceOffset')
-            this.targetOffset = normalizeCopyOffset(runtime, bufferDescriptor.targetOffset ?? 0, 'targetOffset')
-            this.byteLength = normalizeCopyByteLength(runtime, bufferDescriptor.byteLength)
-            validateBufferCopyUsage(runtime, source.resource, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
-            validateBufferCopyUsage(runtime, target, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
+            validateBufferCopyUsage(runtime, source.region.buffer, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
+            validateBufferCopyUsage(runtime, target.buffer, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
             validateBufferCopyRange(this)
-        } else if (source.resource instanceof TextureResource && descriptor.target instanceof TextureResource) {
+        } else if (isTextureCopySource(source) && descriptor.target instanceof TextureResource) {
             const textureDescriptor = descriptor as TextureToTextureCopyCommandDescriptor
             const target = normalizeTextureCopyTarget(runtime, textureDescriptor, source.resource)
 
@@ -1521,21 +1499,21 @@ export class CopyCommand {
             validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
             validateTextureCopyUsage(runtime, target, GPU_TEXTURE_USAGE_COPY_DST, 'target', 'GPUTextureUsage.COPY_DST')
             validateTextureCopyRange(this)
-        } else if (source.resource instanceof BufferResource && descriptor.target instanceof TextureResource) {
+        } else if (isBufferRegionSource(source) && descriptor.target instanceof TextureResource) {
             const bufferToTextureDescriptor = descriptor as BufferToTextureCopyCommandDescriptor
-            const target = normalizeBufferToTextureCopyTarget(runtime, bufferToTextureDescriptor, source.resource)
+            const target = normalizeBufferToTextureCopyTarget(runtime, bufferToTextureDescriptor, source.region.buffer)
 
             this.copyKind = 'buffer-to-texture'
             this.target = target
             this.targetOrigin = normalizeTextureCopyOrigin(runtime, bufferToTextureDescriptor.targetOrigin, 'targetOrigin')
             this.targetMipLevel = normalizeTextureCopyMipLevel(runtime, target, bufferToTextureDescriptor.targetMipLevel ?? 0, 'targetMipLevel')
             this.targetAspect = normalizeTextureCopyAspect(runtime, bufferToTextureDescriptor.targetAspect ?? 'all', 'targetAspect')
-            this.size = normalizeTextureCopySize(runtime, source.resource, target, bufferToTextureDescriptor.size, undefined, this.targetOrigin)
-            this.sourceLayout = normalizeTexelCopyBufferLayout(runtime, source.resource, target, bufferToTextureDescriptor.sourceLayout, this.size, 'sourceLayout')
-            validateBufferCopyUsage(runtime, source.resource, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
+            this.size = normalizeTextureCopySize(runtime, source.region.buffer, target, bufferToTextureDescriptor.size, undefined, this.targetOrigin)
+            this.sourceLayout = normalizeTexelCopyBufferLayout(runtime, source.region, target, bufferToTextureDescriptor.sourceLayout, this.size, 'sourceLayout')
+            validateBufferCopyUsage(runtime, source.region.buffer, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
             validateTextureCopyUsage(runtime, target, GPU_TEXTURE_USAGE_COPY_DST, 'target', 'GPUTextureUsage.COPY_DST')
             validateBufferToTextureCopyRange(this)
-        } else if (source.resource instanceof TextureResource && descriptor.target instanceof BufferResource) {
+        } else if (isTextureCopySource(source) && isBufferRegion(descriptor.target)) {
             const textureToBufferDescriptor = descriptor as TextureToBufferCopyCommandDescriptor
             const target = normalizeTextureToBufferCopyTarget(runtime, textureToBufferDescriptor, source.resource)
 
@@ -1544,15 +1522,15 @@ export class CopyCommand {
             this.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureToBufferDescriptor.sourceOrigin, 'sourceOrigin')
             this.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, source.resource, textureToBufferDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
             this.sourceAspect = normalizeTextureCopyAspect(runtime, textureToBufferDescriptor.sourceAspect ?? 'all', 'sourceAspect')
-            this.size = normalizeTextureCopySize(runtime, source.resource, target, textureToBufferDescriptor.size, this.sourceOrigin, undefined)
+            this.size = normalizeTextureCopySize(runtime, source.resource, target.buffer, textureToBufferDescriptor.size, this.sourceOrigin, undefined)
             this.targetLayout = normalizeTexelCopyBufferLayout(runtime, target, source.resource, textureToBufferDescriptor.targetLayout, this.size, 'targetLayout')
             validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
-            validateBufferCopyUsage(runtime, target, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
+            validateBufferCopyUsage(runtime, target.buffer, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
             validateTextureToBufferCopyRange(this)
         } else {
             throwCopyDiagnostic({
                 runtime,
-                source: source.resource,
+                source: sourceResource,
                 target: descriptor.target,
                 reason: 'target',
             })
@@ -1605,7 +1583,7 @@ export class CopyCommand {
         }
 
         this.runtime.assertActive()
-        this.source.resource.assertUsable()
+        copySourceResource(this.source).assertUsable()
         this.target.assertUsable()
     }
 
@@ -1643,11 +1621,11 @@ export class CopyCommand {
             }
 
             commandEncoder.copyBufferToBuffer(
-                (this.source.resource as BufferResource).gpuBuffer,
-                this.sourceOffset!,
-                (this.target as BufferResource).gpuBuffer,
-                this.targetOffset!,
-                this.byteLength!
+                (this.source as BufferCopyCommandSourceDescriptor).region.buffer.gpuBuffer,
+                (this.source as BufferCopyCommandSourceDescriptor).region.offset,
+                (this.target as BufferRegion).buffer.gpuBuffer,
+                (this.target as BufferRegion).offset,
+                (this.target as BufferRegion).size
             )
         } else if (this.copyKind === 'texture-to-texture') {
             if (!commandEncoder || typeof commandEncoder.copyTextureToTexture !== 'function') {
@@ -1665,7 +1643,7 @@ export class CopyCommand {
 
             commandEncoder.copyTextureToTexture(
                 {
-                    texture: (this.source.resource as TextureResource).gpuTexture,
+                    texture: (this.source as TextureCopyCommandSourceDescriptor).resource.gpuTexture,
                     origin: this.sourceOrigin!,
                     mipLevel: this.sourceMipLevel!,
                     aspect: this.sourceAspect!,
@@ -1694,7 +1672,8 @@ export class CopyCommand {
 
             commandEncoder.copyBufferToTexture(
                 {
-                    buffer: (this.source.resource as BufferResource).gpuBuffer,
+                    buffer: (this.source as BufferCopyCommandSourceDescriptor).region.buffer.gpuBuffer,
+                    offset: (this.source as BufferCopyCommandSourceDescriptor).region.offset,
                     ...this.sourceLayout!,
                 },
                 {
@@ -1721,20 +1700,21 @@ export class CopyCommand {
 
             commandEncoder.copyTextureToBuffer(
                 {
-                    texture: (this.source.resource as TextureResource).gpuTexture,
+                    texture: (this.source as TextureCopyCommandSourceDescriptor).resource.gpuTexture,
                     origin: this.sourceOrigin!,
                     mipLevel: this.sourceMipLevel!,
                     aspect: this.sourceAspect!,
                 },
                 {
-                    buffer: (this.target as BufferResource).gpuBuffer,
+                    buffer: (this.target as BufferRegion).buffer.gpuBuffer,
+                    offset: (this.target as BufferRegion).offset,
                     ...this.targetLayout!,
                 },
                 this.size!
             )
         }
 
-        advanceResourceContentEpoch(this.target)
+        advanceResourceContentEpoch(this.target instanceof TextureResource ? this.target : this.target.buffer)
     }
 
     dispose(): void {
@@ -1746,7 +1726,6 @@ export class CopyCommand {
 type NormalizedReadbackCommandDescriptor = Readonly<{
     label?: string
     source: BufferCopyCommandSourceDescriptor
-    range: Readonly<{ offset: number, byteLength: number }>
     retain: ReadbackRetentionPolicy
     whenMissing: 'throw'
 }>
@@ -1756,7 +1735,6 @@ type ReadbackCommandPrivateState = {
     id: string
     label: string | undefined
     source: BufferCopyCommandSourceDescriptor
-    range: Readonly<{ offset: number, byteLength: number }>
     retain: ReadbackRetentionPolicy
     whenMissing: 'throw'
     slot: ReadbackStagingSlot
@@ -1814,7 +1792,6 @@ export class ReadbackCommand {
             id,
             label: descriptor.label,
             source: descriptor.source,
-            range: descriptor.range,
             retain: descriptor.retain,
             whenMissing: descriptor.whenMissing,
             slot,
@@ -1832,7 +1809,6 @@ export class ReadbackCommand {
     get label(): string | undefined { return readbackCommandStateFor(this).label }
     get commandKind(): 'readback' { return 'readback' }
     get source(): BufferCopyCommandSourceDescriptor { return readbackCommandStateFor(this).source }
-    get range(): Readonly<{ offset: number, byteLength: number }> { return readbackCommandStateFor(this).range }
     get retain(): ReadbackRetentionPolicy { return readbackCommandStateFor(this).retain }
     get whenMissing(): 'throw' { return readbackCommandStateFor(this).whenMissing }
     get state(): ScratchReadbackCommandState { return readbackCommandStateFor(this).state }
@@ -1864,7 +1840,7 @@ export class ReadbackCommand {
 
         this._assertNotDisposed()
         this.runtime.assertActive()
-        this.source.resource.assertUsable()
+        this.source.region.assertUsable()
     }
 
     result(options: ReadbackCommandResultOptions): ReadbackOperation {
@@ -1965,13 +1941,13 @@ export async function createReadbackCommand(
     const slot = await allocateReadbackStaging({
         runtime,
         target: { kind: 'command', commandId: id, commandKind: 'readback' },
-        source: normalized.source.resource,
-        byteLength: normalized.range.byteLength,
+        source: normalized.source.region.buffer,
+        byteLength: normalized.source.region.size,
         ...(stagingLabel !== undefined ? { label: stagingLabel } : {}),
     })
     try {
         runtime.assertActive()
-        normalized.source.resource.assertUsable()
+        normalized.source.region.assertUsable()
         const command = constructReadbackCommand(runtime, id, normalized, slot)
         registerRuntimeReadbackCommand(runtime, command, readbackCommandFact(command))
         return command
@@ -2005,8 +1981,8 @@ export function claimReadbackCommand(
         operationId: `scratch-readback-${UUID()}`,
         submissionId: input.submissionId,
         stepIndex: input.stepIndex,
-        sourceResourceId: command.source.resource.id,
-        allocationVersion: command.source.resource.allocationVersion,
+        sourceResourceId: command.source.region.buffer.id,
+        allocationVersion: command.source.region.buffer.allocationVersion,
         contentEpoch: command.source.contentEpoch,
         stagingAllocationOperationId: commandState.slot.allocationOperationId,
         done: undefined,
@@ -2039,11 +2015,11 @@ export function encodeReadbackCommandClaim(
     const state = assertActiveReadbackCommandClaim(claim)
     const command = state.command
     commandEncoder.copyBufferToBuffer(
-        command.source.resource.gpuBuffer,
-        command.range.offset,
+        command.source.region.buffer.gpuBuffer,
+        command.source.region.offset,
         readbackStagingBuffer(readbackCommandStateFor(command).slot),
         0,
-        command.range.byteLength
+        command.source.region.size
     )
 }
 
@@ -2239,12 +2215,12 @@ function recordReadbackCommandClaimRelease(
             sourceResourceId: state.sourceResourceId,
             allocationVersion: state.allocationVersion,
             contentEpoch: state.contentEpoch,
-            byteLength: command.range.byteLength,
+            byteLength: command.source.region.size,
             commandId: command.id,
             submissionId: state.submissionId,
             stepIndex: state.stepIndex,
         },
-        byteLength: command.range.byteLength,
+        byteLength: command.source.region.size,
         allocationOperationId: state.stagingAllocationOperationId,
         failures,
         unmapRequested,
@@ -2258,10 +2234,10 @@ function readbackCommandFact(command: ReadbackCommand) {
     return {
         id: command.id,
         ...(command.label !== undefined ? { label: command.label } : {}),
-        sourceResourceId: command.source.resource.id,
-        allocationVersion: command.source.resource.allocationVersion,
+        sourceResourceId: command.source.region.buffer.id,
+        allocationVersion: command.source.region.buffer.allocationVersion,
         contentEpoch: command.source.contentEpoch,
-        byteLength: command.range.byteLength,
+        byteLength: command.source.region.size,
         state: state.state,
         stagingAllocationOperationId: state.slot.allocationOperationId,
     }
@@ -2280,8 +2256,8 @@ function readbackCommandClaimFact(claim: ReadbackCommandClaim) {
         sourceResourceId: state.sourceResourceId,
         allocationVersion: state.allocationVersion,
         contentEpoch: state.contentEpoch,
-        byteLength: command.range.byteLength,
-        stagingBytes: command.range.byteLength,
+        byteLength: command.source.region.size,
+        stagingBytes: command.source.region.size,
         retainedHostBytes: 0,
         isMapping: false,
         commandId: command.id,
@@ -2304,7 +2280,6 @@ function normalizeReadbackCommandDescriptor(
     return Object.freeze({
         ...(label !== undefined ? { label } : {}),
         source,
-        range: Object.freeze(normalizeReadbackCommandRange(subject, source, record)),
         retain: normalizeReadbackCommandRetention(subject, source, record.retain),
         whenMissing: normalizeReadbackCommandReadinessPolicy(subject, source, record.whenMissing),
     })
@@ -2317,30 +2292,32 @@ function normalizeReadbackCommandSource(
 ): BufferCopyCommandSourceDescriptor {
 
     if (!isRecord(source)) throwReadbackCommandSourceDiagnostic(runtime, subject, source)
-    const resource = source.resource
+    const region = source.region
     const contentEpoch = source.contentEpoch
     if (
-        !(resource instanceof BufferResource) ||
+        !isBufferRegion(region) ||
         typeof contentEpoch !== 'number' ||
         !Number.isInteger(contentEpoch) ||
         contentEpoch < 0
     ) {
         throwReadbackCommandSourceDiagnostic(runtime, subject, source)
     }
-    resource.assertRuntime(runtime)
-    if ((resource.usage & GPU_BUFFER_USAGE_COPY_SRC) === 0) {
+    region.buffer.assertRuntime(runtime)
+    region.assertUsable()
+    if (region.size <= 0) throwReadbackCommandSourceDiagnostic(runtime, subject, source)
+    if ((region.buffer.usage & GPU_BUFFER_USAGE_COPY_SRC) === 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'command',
             subject,
-            related: [ resource.subject, runtime.subject ],
+            related: [ region.subject, region.buffer.subject, runtime.subject ],
             message: 'ReadbackCommand source requires GPUBufferUsage.COPY_SRC.',
             expected: { usage: 'GPUBufferUsage.COPY_SRC' },
-            actual: { usage: resource.usage },
+            actual: { usage: region.buffer.usage },
         })
     }
-    return Object.freeze({ resource, contentEpoch })
+    return Object.freeze({ region, contentEpoch })
 }
 
 function throwReadbackCommandSourceDiagnostic(
@@ -2355,69 +2332,9 @@ function throwReadbackCommandSourceDiagnostic(
         phase: 'command',
         subject,
         related: [ runtime.subject ],
-        message: 'ReadbackCommand requires an explicit BufferResource source content epoch.',
-        expected: { source: { resource: 'BufferResource', contentEpoch: 'non-negative integer' } },
+        message: 'ReadbackCommand requires an explicit BufferRegion source content epoch.',
+        expected: { source: { region: 'non-empty BufferRegion', contentEpoch: 'non-negative integer' } },
         actual: { source: describeValue(source) },
-    })
-}
-
-function normalizeReadbackCommandRange(
-    subject: DiagnosticSubject,
-    source: BufferCopyCommandSourceDescriptor,
-    descriptor: Record<string, unknown>
-): { offset: number, byteLength: number } {
-
-    const range = descriptor.range
-    if (range !== undefined && !isRecord(range)) {
-        throwReadbackCommandRangeDiagnostic(subject, source, descriptor)
-    }
-    const rangeOffset = isRecord(range) ? range.offset : undefined
-    const rangeByteLength = isRecord(range) ? range.byteLength : undefined
-    const sourceOffset = descriptor.sourceOffset
-    const descriptorByteLength = descriptor.byteLength
-    if (
-        (rangeOffset !== undefined && sourceOffset !== undefined && rangeOffset !== sourceOffset) ||
-        (rangeByteLength !== undefined && descriptorByteLength !== undefined && rangeByteLength !== descriptorByteLength)
-    ) {
-        throwReadbackCommandRangeDiagnostic(subject, source, descriptor)
-    }
-    const offset = rangeOffset ?? sourceOffset ?? 0
-    const defaultByteLength = typeof offset === 'number' ? source.resource.size - offset : Number.NaN
-    const byteLength = rangeByteLength ?? descriptorByteLength ?? defaultByteLength
-    if (
-        typeof offset !== 'number' ||
-        typeof byteLength !== 'number' ||
-        !Number.isInteger(offset) ||
-        !Number.isInteger(byteLength) ||
-        offset < 0 ||
-        byteLength <= 0 ||
-        offset + byteLength > source.resource.size
-    ) {
-        throwReadbackCommandRangeDiagnostic(subject, source, descriptor)
-    }
-    return { offset, byteLength }
-}
-
-function throwReadbackCommandRangeDiagnostic(
-    subject: DiagnosticSubject,
-    source: BufferCopyCommandSourceDescriptor,
-    descriptor: Record<string, unknown>
-): never {
-
-    throwScratchDiagnostic({
-        code: 'SCRATCH_READBACK_RANGE_INVALID',
-        severity: 'error',
-        phase: 'command',
-        subject,
-        related: [ source.resource.subject ],
-        message: 'ReadbackCommand range must fit inside the source buffer.',
-        expected: { offset: 'non-negative integer', byteLength: 'positive byte length within source' },
-        actual: {
-            sourceOffset: descriptor.sourceOffset,
-            byteLength: descriptor.byteLength,
-            range: descriptor.range,
-            sourceSize: source.resource.size,
-        },
     })
 }
 
@@ -2434,7 +2351,7 @@ function normalizeReadbackCommandRetention(
         severity: 'error',
         phase: 'command',
         subject,
-        related: [ source.resource.subject ],
+        related: [ source.region.subject ],
         message: 'ReadbackCommand retain must be consume-on-read or until-dispose.',
         expected: { retain: [ 'consume-on-read', 'until-dispose' ] },
         actual: { retain },
@@ -2453,7 +2370,7 @@ function normalizeReadbackCommandReadinessPolicy(
         severity: 'error',
         phase: 'command',
         subject,
-        related: [ source.resource.subject ],
+        related: [ source.region.subject ],
         message: 'ReadbackCommand requires an explicit throw readiness policy.',
         expected: { whenMissing: [ 'throw' ] },
         actual: { whenMissing },
@@ -2484,8 +2401,7 @@ export interface ResolveQuerySetCommand {
     querySet: QuerySetResource
     firstQuery: number
     queryCount: number
-    destination: BufferResource
-    destinationOffset: number
+    destination: BufferRegion
     whenMissing: 'throw'
     isDisposed: boolean
 }
@@ -2500,7 +2416,7 @@ export class ResolveQuerySetCommand {
         const source = normalizeResolveSource(runtime, normalizedDescriptor.source)
 
         const destination = normalizedDescriptor.destination
-        if (!(destination instanceof BufferResource)) {
+        if (!isBufferRegion(destination)) {
             throwResolveQuerySetDiagnostic({
                 runtime,
                 source: normalizedDescriptor.source,
@@ -2509,16 +2425,15 @@ export class ResolveQuerySetCommand {
                 firstQuery: source.slots[0]?.index,
                 queryCount: source.slots.length,
                 destination,
-                destinationOffset: normalizedDescriptor.destinationOffset,
                 whenMissing: normalizedDescriptor.whenMissing,
                 reason: 'destination',
             })
         }
 
-        destination.assertRuntime(runtime)
-        validateResolveDestinationUsage(runtime, destination)
-        const destinationOffset = normalizeResolveDestinationOffset(runtime, normalizedDescriptor.destinationOffset ?? 0, source)
-        validateResolveReadinessPolicy(runtime, normalizedDescriptor.whenMissing, source, destination, destinationOffset)
+        destination.buffer.assertRuntime(runtime)
+        destination.assertUsable()
+        validateResolveDestinationUsage(runtime, destination.buffer)
+        validateResolveReadinessPolicy(runtime, normalizedDescriptor.whenMissing, source, destination)
 
         this.runtime = runtime
         this.id = `scratch-command-${UUID()}`
@@ -2529,7 +2444,6 @@ export class ResolveQuerySetCommand {
         this.firstQuery = source.slots[0]!.index
         this.queryCount = source.slots.length
         this.destination = destination
-        this.destinationOffset = destinationOffset
         this.whenMissing = normalizedDescriptor.whenMissing
         this.isDisposed = false
 
@@ -2607,10 +2521,10 @@ export class ResolveQuerySetCommand {
             this.querySet.gpuQuerySet,
             this.firstQuery,
             this.queryCount,
-            this.destination.gpuBuffer,
-            this.destinationOffset
+            this.destination.buffer.gpuBuffer,
+            this.destination.offset
         )
-        advanceResourceContentEpoch(this.destination)
+        advanceResourceContentEpoch(this.destination.buffer)
     }
 
     dispose(): void {
@@ -2933,8 +2847,8 @@ export function writeUploadCommandQueueAction(
     switch (command.uploadKind) {
         case 'buffer':
             queue.writeBuffer(
-                command.target.gpuBuffer,
-                command.offset,
+                command.target.buffer.gpuBuffer,
+                command.target.offset,
                 createUploadSource(command.data, command.dataOffset, command.byteLength)
             )
             return
@@ -2969,7 +2883,8 @@ export function commitUploadCommandLogicalWrite(
     command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand
 ): void {
 
-    if (uploadCommandHasContentEffect(command)) advanceResourceContentEpoch(command.target)
+    if (!uploadCommandHasContentEffect(command)) return
+    advanceResourceContentEpoch(command.uploadKind === 'buffer' ? command.target.buffer : command.target)
 }
 
 function assertNeverUploadCommand(command: never): never {
@@ -3349,7 +3264,7 @@ function validateProgramLayoutRequirementsForCommand(command: DrawCommand | Disp
             })
         }
 
-        if (!(binding.resource instanceof BufferResource)) {
+        if (!isBufferRegion(binding.resource)) {
             throwCommandProgramLayoutMismatch(command, requirement, {
                 bindSet,
                 entry: binding.entry,
@@ -3358,28 +3273,28 @@ function validateProgramLayoutRequirementsForCommand(command: DrawCommand | Disp
             })
         }
 
-        const buffer = binding.resource
-        if (buffer.layout === undefined) {
+        const region = binding.resource
+        if (region.layout === undefined) {
             throwCommandProgramLayoutMismatch(command, requirement, {
                 bindSet,
                 entry: binding.entry,
-                resource: buffer.subject,
+                resource: region.subject,
                 actual: { abiHash: undefined, schemaHash: undefined },
             })
         }
 
-        if (!layoutArtifactsSchemaCompatible(requirement.layout, buffer.layout)) {
+        if (!layoutArtifactsSchemaCompatible(requirement.layout, region.layout)) {
             throwCommandProgramLayoutMismatch(command, requirement, {
                 bindSet,
                 entry: binding.entry,
-                resource: buffer.subject,
-                actualLayout: buffer.layoutSubject,
+                resource: region.subject,
+                actualLayout: layoutArtifactSubject(region.layout),
                 actual: {
-                    abiHash: buffer.layout.abiHash,
-                    schemaHash: buffer.layout.schemaHash,
+                    abiHash: region.layout.abiHash,
+                    schemaHash: region.layout.schemaHash,
                     difference: describeLayoutCompatibilityDifference(
                         requirement.layout,
-                        buffer.layout,
+                        region.layout,
                         'schema'
                     ),
                 },
@@ -3469,40 +3384,24 @@ function normalizeVertexBuffers(
         }
         slots.add(binding.slot)
 
-        const buffer = binding.buffer
-        if (!(buffer instanceof BufferResource)) {
+        const region = binding.region
+        if (!isBufferRegion(region)) {
             throwVertexBufferDiagnostic(command, {
-                expected: { buffer: 'BufferResource' },
+                expected: { region: 'BufferRegion' },
                 actual: {
-                    buffer: describeValue(buffer),
+                    region: describeValue(region),
                 },
             })
         }
 
+        const buffer = region.buffer
         buffer.assertRuntime(command.runtime)
-
-        const offset = binding.offset ?? 0
-        if (!Number.isInteger(offset) || offset < 0) {
+        region.assertUsable()
+        if (region.size <= 0) {
             throwVertexBufferDiagnostic(command, {
-                expected: { offset: 'non-negative integer' },
-                actual: { slot: binding.slot, offset },
-                related: [ buffer.subject ],
-            })
-        }
-
-        if (binding.size !== undefined && (!Number.isInteger(binding.size) || binding.size <= 0)) {
-            throwVertexBufferDiagnostic(command, {
-                expected: { size: 'positive integer' },
-                actual: { slot: binding.slot, size: binding.size },
-                related: [ buffer.subject ],
-            })
-        }
-
-        if (offset > buffer.size || (binding.size !== undefined && offset + binding.size > buffer.size)) {
-            throwVertexBufferDiagnostic(command, {
-                expected: { range: 'within BufferResource size' },
-                actual: { slot: binding.slot, offset, size: binding.size, bufferSize: buffer.size },
-                related: [ buffer.subject ],
+                expected: { region: 'non-empty BufferRegion' },
+                actual: { slot: binding.slot, size: region.size },
+                related: [ region.subject, buffer.subject ],
             })
         }
 
@@ -3519,12 +3418,7 @@ function normalizeVertexBuffers(
             })
         }
 
-        const normalized: NormalizedDrawVertexBufferBinding = {
-            slot: binding.slot,
-            buffer,
-            offset,
-            size: binding.size,
-        }
+        const normalized: NormalizedDrawVertexBufferBinding = { slot: binding.slot, region }
 
         return normalized
     })
@@ -3557,15 +3451,17 @@ function normalizeIndexBuffer(
         })
     }
 
-    const buffer = binding.buffer
-    if (!(buffer instanceof BufferResource)) {
+    const region = binding.region
+    if (!isBufferRegion(region)) {
         throwIndexBufferDiagnostic(command, binding, {
-            expected: { buffer: 'BufferResource' },
-            actual: { buffer: describeValue(buffer) },
+            expected: { region: 'BufferRegion' },
+            actual: { region: describeValue(region) },
         })
     }
 
+    const buffer = region.buffer
     buffer.assertRuntime(command.runtime)
+    region.assertUsable()
 
     const format = binding.format
     if (format !== 'uint16' && format !== 'uint32') {
@@ -3579,30 +3475,19 @@ function normalizeIndexBuffer(
     validateIndexFormatForPipeline(command, format, buffer)
 
     const elementByteLength = format === 'uint16' ? 2 : 4
-    const offset = binding.offset ?? 0
-    if (!Number.isInteger(offset) || offset < 0 || offset % elementByteLength !== 0) {
+    if (region.offset % elementByteLength !== 0) {
         throwIndexBufferDiagnostic(command, binding, {
-            expected: { offset: `non-negative integer aligned to ${elementByteLength} bytes` },
-            actual: { offset, format },
-            related: [ buffer.subject ],
+            expected: { regionOffset: `aligned to ${elementByteLength} bytes` },
+            actual: { offset: region.offset, format },
+            related: [ region.subject, buffer.subject ],
         })
     }
 
-    const size = binding.size
-    const effectiveSize = size ?? buffer.size - offset
-    if (!Number.isInteger(effectiveSize) || effectiveSize < 0) {
+    if (region.size % elementByteLength !== 0) {
         throwIndexBufferDiagnostic(command, binding, {
-            expected: { size: 'non-negative integer byte range' },
-            actual: { size, effectiveSize, format },
-            related: [ buffer.subject ],
-        })
-    }
-
-    if (offset > buffer.size || offset + effectiveSize > buffer.size) {
-        throwIndexBufferDiagnostic(command, binding, {
-            expected: { range: 'within BufferResource size' },
-            actual: { offset, size, effectiveSize, bufferSize: buffer.size },
-            related: [ buffer.subject ],
+            expected: { regionSize: `multiple of ${elementByteLength} bytes` },
+            actual: { size: region.size, format },
+            related: [ region.subject, buffer.subject ],
         })
     }
 
@@ -3619,7 +3504,7 @@ function normalizeIndexBuffer(
         })
     }
 
-    return { buffer, format, offset, size }
+    return { region, format }
 }
 
 function normalizeDispatchCount(command: DispatchCommand, count: DispatchCount): { workgroups: [number, number, number] } | NormalizedIndirectCommandCount {
@@ -3691,22 +3576,22 @@ function normalizeResourceAccess(command: DrawCommand | DispatchCommand, resourc
 function validateDrawFixedFunctionReads(command: DrawCommand): void {
 
     for (const binding of command.vertexBuffers) {
-        assertDeclaredCommandRead(command, binding.buffer, 'vertex-buffer', { slot: binding.slot })
+        assertDeclaredCommandRead(command, binding.region.buffer, 'vertex-buffer', { slot: binding.slot })
     }
 
     if (command.indexBuffer !== undefined) {
-        assertDeclaredCommandRead(command, command.indexBuffer.buffer, 'index-buffer')
+        assertDeclaredCommandRead(command, command.indexBuffer.region.buffer, 'index-buffer')
     }
 
     if ('indirect' in command.count) {
-        assertDeclaredCommandRead(command, command.count.indirect, 'indirect-buffer')
+        assertDeclaredCommandRead(command, command.count.indirect.buffer, 'indirect-buffer')
     }
 }
 
 function validateDispatchFixedFunctionReads(command: DispatchCommand): void {
 
     if ('indirect' in command.count) {
-        assertDeclaredCommandRead(command, command.count.indirect, 'indirect-buffer')
+        assertDeclaredCommandRead(command, command.count.indirect.buffer, 'indirect-buffer')
     }
 }
 
@@ -3926,8 +3811,8 @@ function normalizeDrawCount(
     if (indexBuffer !== undefined) {
         throwIndexBufferDiagnostic(command, indexBuffer, {
             expected: { indexBuffer: 'omitted for non-indexed static draw count' },
-            actual: { indexBuffer: indexBuffer.buffer.id, count },
-            related: [ indexBuffer.buffer.subject ],
+            actual: { indexBuffer: indexBuffer.region.buffer.id, count },
+            related: [ indexBuffer.region.subject ],
         })
     }
 
@@ -3971,7 +3856,7 @@ function validateStaticIndexedDrawRange(
 ): void {
 
     const elementByteLength = indexBuffer.format === 'uint16' ? 2 : 4
-    const bindingSize = indexBuffer.size ?? indexBuffer.buffer.size - indexBuffer.offset
+    const bindingSize = indexBuffer.region.size
     const availableIndexCount = Math.floor(bindingSize / elementByteLength)
     const firstIndex = count.firstIndex ?? 0
 
@@ -3987,9 +3872,9 @@ function validateStaticIndexedDrawRange(
             availableIndexCount,
             bindingSize,
             format: indexBuffer.format,
-            offset: indexBuffer.offset,
+            offset: indexBuffer.region.offset,
         },
-        related: [ indexBuffer.buffer.subject ],
+        related: [ indexBuffer.region.subject ],
     })
 }
 
@@ -4023,44 +3908,46 @@ function normalizeIndirectCommandCount(
     operation: 'draw' | 'draw-indexed' | 'dispatch'
 ): NormalizedIndirectCommandCount {
 
-    const buffer = count.indirect
-    if (!(buffer instanceof BufferResource)) {
+    const region = count.indirect
+    if (!isBufferRegion(region)) {
         throwIndirectBufferDiagnostic(command, {
-            expected: { indirect: 'BufferResource' },
+            expected: { indirect: 'BufferRegion' },
             actual: {
                 operation,
-                indirect: describeValue(buffer),
+                indirect: describeValue(region),
                 requiredByteLength,
             },
         })
     }
 
+    const buffer = region.buffer
     buffer.assertRuntime(command.runtime)
+    region.assertUsable()
 
-    const offset = count.offset ?? 0
-    if (!Number.isInteger(offset) || (offset as number) < 0 || (offset as number) % 4 !== 0) {
+    if (region.offset % 4 !== 0) {
         throwIndirectBufferDiagnostic(command, {
-            expected: { offset: 'non-negative integer aligned to 4 bytes' },
+            expected: { regionOffset: 'aligned to 4 bytes' },
             actual: {
                 operation,
-                offset,
+                offset: region.offset,
                 bufferSize: buffer.size,
                 requiredByteLength,
             },
-            related: [ buffer.subject ],
+            related: [ region.subject, buffer.subject ],
         })
     }
 
-    if ((offset as number) + requiredByteLength > buffer.size) {
+    if (region.size < requiredByteLength) {
         throwIndirectBufferDiagnostic(command, {
-            expected: { range: `${requiredByteLength} bytes within BufferResource size` },
+            expected: { regionSize: `at least ${requiredByteLength} bytes` },
             actual: {
                 operation,
-                offset,
+                offset: region.offset,
+                regionSize: region.size,
                 bufferSize: buffer.size,
                 requiredByteLength,
             },
-            related: [ buffer.subject ],
+            related: [ region.subject, buffer.subject ],
         })
     }
 
@@ -4077,7 +3964,7 @@ function normalizeIndirectCommandCount(
         })
     }
 
-    return { indirect: buffer, offset: offset as number }
+    return { indirect: region }
 }
 
 function normalizeUploadSource(runtime: ScratchRuntime, descriptor: UploadCommandDescriptor): NormalizedUploadSource {
@@ -4104,10 +3991,8 @@ function normalizeUploadSource(runtime: ScratchRuntime, descriptor: UploadComman
         runtime,
         target: descriptor.target,
         data,
-        offset: descriptor.offset,
         dataOffset: descriptor.dataOffset,
         size: descriptor.size,
-        layout: descriptor.layout ?? descriptor.artifact,
         reason: 'data',
     })
 }
@@ -4188,7 +4073,6 @@ function normalizeUploadByteLength(
             runtime,
             target: descriptor.target,
             data,
-            offset: descriptor.offset,
             reason: 'data',
         })
     }
@@ -4199,7 +4083,6 @@ function normalizeUploadByteLength(
             runtime,
             target: descriptor.target,
             data,
-            offset: descriptor.offset,
             reason: 'size',
         })
     }
@@ -4214,13 +4097,12 @@ function validateUploadRange(command: UploadCommand) {
     if (
         dataByteLength === undefined ||
         command.dataOffset + command.byteLength > dataByteLength ||
-        command.offset + command.byteLength > command.target.size
+        command.byteLength !== command.target.size
     ) {
         throwUploadDiagnostic({
             runtime: command.runtime,
             target: command.target,
             data: command.data,
-            offset: command.offset,
             dataOffset: command.dataOffset,
             size: command.byteLength,
             reason: 'range',
@@ -4233,16 +4115,31 @@ function validateUploadRange(command: UploadCommand) {
 function validateUploadLayout(command: UploadCommand) {
 
     const targetLayout = command.target.layout
-    if (targetLayout === undefined) return
+    if (targetLayout === undefined) {
+        if (command.layout === undefined) return
+        throwScratchDiagnostic({
+            code: 'SCRATCH_CODEC_SCHEMA_MISMATCH',
+            severity: 'error',
+            phase: 'layout-codec',
+            subject: command.target.subject,
+            related: [ command.subject, layoutArtifactSubject(command.layout) ],
+            message: 'Typed UploadCommand data requires an explicitly interpreted target BufferRegion.',
+            expected: { targetLayout: 'LayoutArtifact on BufferRegion' },
+            actual: {
+                abiHash: command.layout.abiHash,
+                schemaHash: command.layout.schemaHash,
+            },
+        })
+    }
 
     if (command.layout !== undefined && !layoutArtifactsSchemaCompatible(targetLayout, command.layout)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_CODEC_SCHEMA_MISMATCH',
             severity: 'error',
             phase: 'layout-codec',
-            subject: command.target.layoutSubject ?? layoutArtifactSubject(targetLayout),
-            related: [ command.subject, layoutArtifactSubject(command.layout), command.target.subject ],
-            message: 'UploadCommand LayoutArtifact does not match the target BufferResource layout.',
+            subject: command.target.subject,
+            related: [ command.subject, layoutArtifactSubject(command.layout), layoutArtifactSubject(targetLayout) ],
+            message: 'UploadCommand LayoutArtifact does not match the target BufferRegion layout.',
             expected: {
                 abiHash: targetLayout.abiHash,
                 schemaHash: targetLayout.schemaHash,
@@ -4258,24 +4155,6 @@ function validateUploadLayout(command: UploadCommand) {
         })
     }
 
-    const layoutByteLength = command.target.layoutByteLength ?? targetLayout.byteLength
-    const rangeEnd = command.offset + command.byteLength
-    if (rangeEnd > layoutByteLength) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
-            severity: 'error',
-            phase: 'layout-codec',
-            subject: command.target.layoutSubject ?? layoutArtifactSubject(targetLayout),
-            related: [ command.subject, command.target.subject ],
-            message: 'UploadCommand byte range exceeds the target BufferResource layout byte length.',
-            expected: { layoutByteLength },
-            actual: {
-                offset: command.offset,
-                byteLength: command.byteLength,
-                rangeEnd,
-            },
-        })
-    }
 }
 
 function getDataByteLength(data: unknown): number | undefined {
@@ -4341,30 +4220,24 @@ function validateTextureCopyUsage(
 function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDescriptor): CopyCommandSourceDescriptor {
 
     const source = descriptor.source
-    const bufferDescriptor = descriptor as Partial<BufferToBufferCopyCommandDescriptor>
     if (!isRecord(source)) {
         throwCopySourceDiagnostic({
             runtime,
             source,
             target: descriptor.target,
-            sourceOffset: bufferDescriptor.sourceOffset,
-            targetOffset: bufferDescriptor.targetOffset,
-            byteLength: bufferDescriptor.byteLength,
             reason: 'source',
         })
     }
 
-    const resource = source.resource
     const contentEpoch = source.contentEpoch
-    if (!(resource instanceof BufferResource) && !(resource instanceof TextureResource)) {
+    const region = 'region' in source ? source.region : undefined
+    const resource = 'resource' in source ? source.resource : undefined
+    if (!isBufferRegion(region) && !(resource instanceof TextureResource)) {
         throwCopySourceDiagnostic({
             runtime,
             source,
             target: descriptor.target,
-            sourceOffset: bufferDescriptor.sourceOffset,
-            targetOffset: bufferDescriptor.targetOffset,
-            byteLength: bufferDescriptor.byteLength,
-            reason: 'source.resource',
+            reason: 'source.resource-or-region',
         })
     }
 
@@ -4373,14 +4246,33 @@ function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDes
             runtime,
             source,
             target: descriptor.target,
-            sourceOffset: bufferDescriptor.sourceOffset,
-            targetOffset: bufferDescriptor.targetOffset,
-            byteLength: bufferDescriptor.byteLength,
             reason: 'source.contentEpoch',
         })
     }
 
-    return { resource, contentEpoch } as CopyCommandSourceDescriptor
+    if (isBufferRegion(region)) {
+        region.buffer.assertRuntime(runtime)
+        region.assertUsable()
+        return Object.freeze({ region, contentEpoch })
+    }
+    const texture = resource as TextureResource
+    texture.assertRuntime(runtime)
+    return Object.freeze({ resource: texture, contentEpoch })
+}
+
+function isBufferRegionSource(source: CopyCommandSourceDescriptor): source is BufferCopyCommandSourceDescriptor {
+
+    return 'region' in source
+}
+
+function isTextureCopySource(source: CopyCommandSourceDescriptor): source is TextureCopyCommandSourceDescriptor {
+
+    return 'resource' in source
+}
+
+function copySourceResource(source: CopyCommandSourceDescriptor): BufferResource | TextureResource {
+
+    return isBufferRegionSource(source) ? source.region.buffer : source.resource
 }
 
 function normalizeCopyReadinessPolicy(command: CopyCommand, whenMissing: ResourceReadinessPolicy): 'throw' {
@@ -4400,40 +4292,20 @@ function normalizeCopyReadinessPolicy(command: CopyCommand, whenMissing: Resourc
     return 'throw'
 }
 
-function normalizeCopyOffset(runtime: ScratchRuntime, value: number, key: 'sourceOffset' | 'targetOffset'): number {
-
-    if (!Number.isInteger(value) || value < 0 || value % 4 !== 0) {
-        throwCopyDiagnostic({ runtime, [key]: value, reason: key })
-    }
-
-    return value
-}
-
-function normalizeCopyByteLength(runtime: ScratchRuntime, byteLength: number): number {
-
-    if (!Number.isInteger(byteLength) || byteLength <= 0 || byteLength % 4 !== 0) {
-        throwCopyDiagnostic({ runtime, byteLength, reason: 'byteLength' })
-    }
-
-    return byteLength
-}
-
-function normalizeBufferCopyTarget(runtime: ScratchRuntime, descriptor: BufferToBufferCopyCommandDescriptor, source: BufferResource): BufferResource {
+function normalizeBufferCopyTarget(runtime: ScratchRuntime, descriptor: BufferToBufferCopyCommandDescriptor, source: BufferRegion): BufferRegion {
 
     const target = descriptor.target
-    if (!(target instanceof BufferResource)) {
+    if (!isBufferRegion(target)) {
         throwCopyDiagnostic({
             runtime,
             source,
             target,
-            sourceOffset: descriptor.sourceOffset,
-            targetOffset: descriptor.targetOffset,
-            byteLength: descriptor.byteLength,
             reason: 'target',
         })
     }
 
-    target.assertRuntime(runtime)
+    target.buffer.assertRuntime(runtime)
+    target.assertUsable()
     return target
 }
 
@@ -4477,10 +4349,10 @@ function normalizeBufferToTextureCopyTarget(runtime: ScratchRuntime, descriptor:
     return target
 }
 
-function normalizeTextureToBufferCopyTarget(runtime: ScratchRuntime, descriptor: TextureToBufferCopyCommandDescriptor, source: TextureResource): BufferResource {
+function normalizeTextureToBufferCopyTarget(runtime: ScratchRuntime, descriptor: TextureToBufferCopyCommandDescriptor, source: TextureResource): BufferRegion {
 
     const target = descriptor.target
-    if (!(target instanceof BufferResource)) {
+    if (!isBufferRegion(target)) {
         throwCopyDiagnostic({
             runtime,
             source,
@@ -4494,7 +4366,8 @@ function normalizeTextureToBufferCopyTarget(runtime: ScratchRuntime, descriptor:
         })
     }
 
-    target.assertRuntime(runtime)
+    target.buffer.assertRuntime(runtime)
+    target.assertUsable()
     return target
 }
 
@@ -4596,7 +4469,7 @@ function normalizeTextureCopySize(
 
 function normalizeTexelCopyBufferLayout(
     runtime: ScratchRuntime,
-    buffer: BufferResource,
+    region: BufferRegion,
     texture: TextureResource,
     layout: TexelCopyBufferLayout,
     size: { width: number, height: number, depthOrArrayLayers: number },
@@ -4604,77 +4477,81 @@ function normalizeTexelCopyBufferLayout(
 ): Required<TexelCopyBufferLayout> {
 
     if (!isRecord(layout)) {
-        throwCopyDiagnostic({ runtime, source: buffer, target: texture, [key]: layout, size, reason: key })
+        throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: key })
     }
 
     const bytesPerPixel = getTextureBytesPerPixel(texture.format)
     if (bytesPerPixel === undefined) {
-        throwCopyDiagnostic({ runtime, source: buffer, target: texture, [key]: layout, size, reason: 'format' })
+        throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: 'format' })
     }
 
-    const offset = layout.offset ?? 0
     const bytesPerRow = layout.bytesPerRow
     const rowsPerImage = layout.rowsPerImage ?? size.height
 
-    for (const [ field, value ] of Object.entries({ offset, bytesPerRow, rowsPerImage })) {
-        if (!Number.isInteger(value) || value < 0 || (field !== 'offset' && value === 0)) {
-            throwCopyDiagnostic({ runtime, source: buffer, target: texture, [key]: layout, size, reason: field })
+    for (const [ field, value ] of Object.entries({ bytesPerRow, rowsPerImage })) {
+        if (!Number.isInteger(value) || value <= 0) {
+            throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: field })
         }
     }
 
-    if (bytesPerRow % 256 !== 0 || offset % bytesPerPixel !== 0) {
-        throwCopyDiagnostic({ runtime, source: buffer, target: texture, [key]: layout, size, reason: bytesPerRow % 256 !== 0 ? 'bytesPerRow' : 'offset' })
+    if (bytesPerRow % 256 !== 0 || region.offset % bytesPerPixel !== 0) {
+        throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: bytesPerRow % 256 !== 0 ? 'bytesPerRow' : 'regionOffset' })
     }
 
     const rowBytes = size.width * bytesPerPixel
     if (bytesPerRow < rowBytes || rowsPerImage < size.height) {
-        throwCopyDiagnostic({ runtime, source: buffer, target: texture, [key]: layout, size, reason: key })
+        throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: key })
     }
 
     const requiredBytes =
-        offset +
         bytesPerRow * rowsPerImage * (size.depthOrArrayLayers - 1) +
         bytesPerRow * (size.height - 1) +
         rowBytes
 
-    if (requiredBytes > buffer.size) {
-        throwCopyDiagnostic({ runtime, source: buffer, target: texture, [key]: layout, size, reason: 'range' })
+    if (requiredBytes > region.size) {
+        throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: 'range' })
     }
 
-    return { offset, bytesPerRow, rowsPerImage }
+    return { bytesPerRow, rowsPerImage }
 }
 
 function validateBufferCopyRange(command: CopyCommand) {
 
-    const source = command.source.resource as BufferResource
-    const target = command.target as BufferResource
-    const sourceEnd = command.sourceOffset! + command.byteLength!
-    const targetEnd = command.targetOffset! + command.byteLength!
-
-    if (sourceEnd > source.size || targetEnd > target.size) {
-        throwCopyDiagnostic({
-            runtime: command.runtime,
-            source,
-            target,
-            sourceOffset: command.sourceOffset,
-            targetOffset: command.targetOffset,
-            byteLength: command.byteLength,
-            reason: 'range',
-        })
-    }
+    const source = (command.source as BufferCopyCommandSourceDescriptor).region
+    const target = command.target as BufferRegion
+    const sourceEnd = source.offset + source.size
+    const targetEnd = target.offset + target.size
 
     if (
-        source === target &&
-        command.sourceOffset! < targetEnd &&
-        command.targetOffset! < sourceEnd
+        source.size <= 0 ||
+        source.size !== target.size ||
+        source.offset % 4 !== 0 ||
+        target.offset % 4 !== 0 ||
+        source.size % 4 !== 0
     ) {
         throwCopyDiagnostic({
             runtime: command.runtime,
             source,
             target,
-            sourceOffset: command.sourceOffset,
-            targetOffset: command.targetOffset,
-            byteLength: command.byteLength,
+            sourceOffset: source.offset,
+            targetOffset: target.offset,
+            byteLength: source.size,
+            reason: 'range',
+        })
+    }
+
+    if (
+        source.buffer === target.buffer &&
+        source.offset < targetEnd &&
+        target.offset < sourceEnd
+    ) {
+        throwCopyDiagnostic({
+            runtime: command.runtime,
+            source,
+            target,
+            sourceOffset: source.offset,
+            targetOffset: target.offset,
+            byteLength: source.size,
             reason: 'overlap',
         })
     }
@@ -4682,7 +4559,7 @@ function validateBufferCopyRange(command: CopyCommand) {
 
 function validateTextureCopyRange(command: CopyCommand) {
 
-    const source = command.source.resource as TextureResource
+    const source = (command.source as TextureCopyCommandSourceDescriptor).resource
     const target = command.target as TextureResource
     const sourceOrigin = command.sourceOrigin!
     const targetOrigin = command.targetOrigin!
@@ -4730,7 +4607,7 @@ function validateTextureCopyRange(command: CopyCommand) {
 
 function validateBufferToTextureCopyRange(command: CopyCommand) {
 
-    const source = command.source.resource as BufferResource
+    const source = (command.source as BufferCopyCommandSourceDescriptor).region
     const target = command.target as TextureResource
     const targetOrigin = command.targetOrigin!
     const size = command.size!
@@ -4763,8 +4640,8 @@ function validateBufferToTextureCopyRange(command: CopyCommand) {
 
 function validateTextureToBufferCopyRange(command: CopyCommand) {
 
-    const source = command.source.resource as TextureResource
-    const target = command.target as BufferResource
+    const source = (command.source as TextureCopyCommandSourceDescriptor).resource
+    const target = command.target as BufferRegion
     const sourceOrigin = command.sourceOrigin!
     const size = command.size!
     const sourceExtent = textureMipExtent(source, command.sourceMipLevel!)
@@ -4957,7 +4834,7 @@ function normalizeResolveDescriptor(runtime: ScratchRuntime, descriptor: unknown
         throwResolveQuerySetDiagnostic({ runtime, reason: 'descriptor' })
     }
 
-    const legacyInputs = [ 'querySet', 'firstQuery', 'queryCount' ]
+    const legacyInputs = [ 'querySet', 'firstQuery', 'queryCount', 'destinationOffset' ]
         .filter(key => Object.prototype.hasOwnProperty.call(descriptor, key))
 
     if (legacyInputs.length > 0) {
@@ -5046,34 +4923,11 @@ function normalizeResolveQuerySlots(
     return normalized
 }
 
-function normalizeResolveDestinationOffset(
-    runtime: ScratchRuntime,
-    destinationOffset: number,
-    source?: ResolveQuerySetSourceDescriptor
-): number {
-
-    if (!Number.isInteger(destinationOffset) || destinationOffset < 0 || destinationOffset % 256 !== 0) {
-        throwResolveQuerySetDiagnostic({
-            runtime,
-            source,
-            querySet: source?.querySet,
-            slots: source?.slots,
-            firstQuery: source?.slots[0]?.index,
-            queryCount: source?.slots.length,
-            destinationOffset,
-            reason: 'destinationOffset',
-        })
-    }
-
-    return destinationOffset
-}
-
 function validateResolveReadinessPolicy(
     runtime: ScratchRuntime,
     whenMissing: unknown,
     source: ResolveQuerySetSourceDescriptor,
-    destination: BufferResource,
-    destinationOffset: number
+    destination: BufferRegion
 ) {
 
     if (whenMissing === 'throw') return
@@ -5086,7 +4940,6 @@ function validateResolveReadinessPolicy(
         firstQuery: source.slots[0]?.index,
         queryCount: source.slots.length,
         destination,
-        destinationOffset,
         whenMissing,
         reason: 'whenMissing',
     })
@@ -5102,14 +4955,17 @@ function validateResolveQuerySetRange(command: ResolveQuerySetCommand) {
             firstQuery: command.firstQuery,
             queryCount: command.queryCount,
             destination: command.destination,
-            destinationOffset: command.destinationOffset,
+            destinationOffset: command.destination.offset,
             whenMissing: command.whenMissing,
             reason: 'queryRange',
         })
     }
 
     const byteLength = command.queryCount * 8
-    if (command.destinationOffset + byteLength > command.destination.size) {
+    if (
+        command.destination.offset % 256 !== 0 ||
+        command.destination.size !== byteLength
+    ) {
         throwResolveQuerySetDiagnostic({
             runtime: command.runtime,
             querySet: command.querySet,
@@ -5117,7 +4973,7 @@ function validateResolveQuerySetRange(command: ResolveQuerySetCommand) {
             firstQuery: command.firstQuery,
             queryCount: command.queryCount,
             destination: command.destination,
-            destinationOffset: command.destinationOffset,
+            destinationOffset: command.destination.offset,
             whenMissing: command.whenMissing,
             reason: 'destinationRange',
         })
@@ -5148,7 +5004,7 @@ function throwResolveQuerySetDiagnostic({
             diagnosticSubjectOf(querySet),
             diagnosticSubjectOf(destination),
         ].filter(isDefined),
-        message: 'ResolveQuerySetCommand requires an explicit QuerySetResource slot source, BufferResource destination, and valid query and byte ranges.',
+        message: 'ResolveQuerySetCommand requires an explicit QuerySetResource slot source, BufferRegion destination, and valid query and byte ranges.',
         expected: {
             source: {
                 querySet: 'QuerySetResource',
@@ -5158,10 +5014,9 @@ function throwResolveQuerySetDiagnostic({
                 index: 'integer within querySet.count',
                 contentEpoch: 'non-negative integer',
             },
-            destination: 'BufferResource with GPUBufferUsage.QUERY_RESOLVE',
-            destinationOffset: 'non-negative integer aligned to 256 bytes with 8 bytes per query available',
+            destination: 'BufferRegion with GPUBufferUsage.QUERY_RESOLVE, 256-byte aligned offset, and exactly 8 bytes per query',
             whenMissing: 'throw',
-            legacyInputs: 'no top-level querySet, firstQuery, or queryCount fields',
+            legacyInputs: 'no top-level querySet, firstQuery, queryCount, or destinationOffset fields',
         },
         actual: {
             reason,
@@ -6150,7 +6005,7 @@ function throwCountDiagnostic(command: DrawCommand, count: unknown): never {
             count: [
                 '{ vertexCount: GPUSize32, ... }',
                 '{ indexCount: GPUSize32, ... } with indexBuffer',
-                '{ indirect: BufferResource, offset?: GPUSize64 }',
+                '{ indirect: BufferRegion }',
             ],
         },
         actual: { count },
@@ -6227,7 +6082,7 @@ function throwDispatchCountDiagnostic(command: DispatchCommand, count: unknown):
         expected: {
             count: [
                 '{ workgroups: [GPUSize32, GPUSize32?, GPUSize32?] }',
-                '{ indirect: BufferResource, offset?: GPUSize64 }',
+                '{ indirect: BufferRegion }',
             ],
         },
         actual: { count },

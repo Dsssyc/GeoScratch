@@ -78,7 +78,7 @@ async function createUniformFixture(format = 'bgra8unorm') {
         ],
     })
     const bindSet = runtime.createBindSet(bindLayout, {
-        uniforms: uniformBuffer,
+        uniforms: uniformBuffer.region(),
     }, {
         label: 'triangle uniforms set',
     })
@@ -117,9 +117,8 @@ async function createUniformFixture(format = 'bgra8unorm') {
     })
     const upload = runtime.createUploadCommand({
         label: 'upload triangle uniforms',
-        target: uniformBuffer,
+        target: (uniformBuffer).region({ offset: 0 }),
         data: createUniformData(),
-        offset: 0,
     })
 
     return {
@@ -184,6 +183,8 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
                     binding: 0,
                     resource: {
                         buffer: fixture.uniformBuffer.gpuBuffer,
+                        offset: 0,
+                        size: fixture.uniformBuffer.size,
                     },
                 },
             ],
@@ -264,8 +265,8 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
 
         try {
             fixture.runtime.createBindSet(fixture.bindLayout, {
-                uniforms: fixture.uniformBuffer,
-                extra: fixture.uniformBuffer,
+                uniforms: fixture.uniformBuffer.region(),
+                extra: fixture.uniformBuffer.region(),
             })
             throw new Error('expected unknown bind slot to fail')
         } catch (error) {
@@ -307,7 +308,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
 
         try {
             fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
-                uniforms: fixtureB.uniformBuffer,
+                uniforms: fixtureB.uniformBuffer.region(),
             })
             throw new Error('expected wrong-runtime resource binding to fail')
         } catch (error) {
@@ -419,7 +420,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_UNIFORM,
         })
         const otherSet = fixture.runtime.createBindSet(otherLayout, {
-            otherUniforms: otherBuffer,
+            otherUniforms: otherBuffer.region(),
         })
 
         try {
@@ -449,8 +450,8 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         const fixture = await createUniformFixture()
 
         for (const descriptor of [
-            { target: fixture.uniformBuffer, data: createUniformData(), offset: -1 },
-            { target: fixture.uniformBuffer, data: 'not bytes', offset: 0 },
+            { target: fixture.uniformBuffer, data: createUniformData() },
+            { target: fixture.uniformBuffer.region(), data: 'not bytes' },
         ]) {
             try {
                 fixture.runtime.createUploadCommand(descriptor)

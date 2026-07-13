@@ -41,7 +41,7 @@ async function createRenderFixture() {
     })
     const pass = runtime.createRenderPass({
         color: [ {
-            target,
+            target: target.view(),
             load: 'clear',
             store: 'store',
             clear: [ 0, 0, 0, 1 ],
@@ -90,16 +90,14 @@ describe('scratch native indexed and indirect execution', () => {
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
         const upload = fixture.runtime.createUploadCommand({
-            target: indexBuffer,
+            target: (indexBuffer).region(),
             data: new Uint16Array([ 0, 1, 2, 0 ]),
         })
         const draw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
             indexBuffer: {
-                buffer: indexBuffer,
+                region: indexBuffer.region({ size: 8 }),
                 format: 'uint16',
-                offset: 0,
-                size: 7,
             },
             count: {
                 indexCount: 3,
@@ -128,7 +126,7 @@ describe('scratch native indexed and indirect execution', () => {
                 buffer: indexBuffer.gpuBuffer,
                 indexFormat: 'uint16',
                 offset: 0,
-                size: 7,
+                size: 8,
             },
             {
                 type: 'drawIndexed',
@@ -152,12 +150,15 @@ describe('scratch native indexed and indirect execution', () => {
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
         const upload = fixture.runtime.createUploadCommand({
-            target: indexBuffer,
+            target: (indexBuffer).region(),
             data: new Uint32Array([ 9, 0, 1, 2 ]),
         })
         const draw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            indexBuffer: { buffer: indexBuffer, format: 'uint32', offset: 4, size: 12 },
+            indexBuffer: {
+                region: indexBuffer.region({ offset: 4, size: 12 }),
+                format: 'uint32',
+            },
             count: { indexCount: 3 },
             resources: { read: [ readResource(indexBuffer, 1) ], write: [] },
             whenMissing: 'throw',
@@ -193,12 +194,12 @@ describe('scratch native indexed and indirect execution', () => {
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
         const uploadIndices = render.runtime.createUploadCommand({
-            target: indexBuffer,
+            target: (indexBuffer).region(),
             data: new Uint16Array([ 0, 0 ]),
         })
         const indexedDraw = render.runtime.createDrawCommand({
             pipeline: render.pipeline,
-            indexBuffer: { buffer: indexBuffer, format: 'uint16', size: 0 },
+            indexBuffer: { region: indexBuffer.region({ size: 0 }), format: 'uint16' },
             count: { indexCount: 0, instanceCount: 0 },
             resources: { read: [ readResource(indexBuffer, 1) ], write: [ indexedOutput ] },
             whenMissing: 'throw',
@@ -297,7 +298,7 @@ describe('scratch native indexed and indirect execution', () => {
         for (const count of indexCases) {
             await expectDiagnostic(() => render.runtime.createDrawCommand({
                 pipeline: render.pipeline,
-                indexBuffer: { buffer: indexBuffer, format: 'uint16' },
+                indexBuffer: { region: indexBuffer.region(), format: 'uint16' },
                 count,
                 resources: { read: [ readResource(indexBuffer) ], write: [] },
                 whenMissing: 'throw',
@@ -327,7 +328,7 @@ describe('scratch native indexed and indirect execution', () => {
         expect(drawDiagnostic.expected.count).to.deep.equal([
             '{ vertexCount: GPUSize32, ... }',
             '{ indexCount: GPUSize32, ... } with indexBuffer',
-            '{ indirect: BufferResource, offset?: GPUSize64 }',
+            '{ indirect: BufferRegion }',
         ])
         expect(drawDiagnostic.related).to.deep.include(render.pipeline.subject)
 
@@ -341,7 +342,7 @@ describe('scratch native indexed and indirect execution', () => {
         expect(dispatchDiagnostic.message).to.not.include('for this slice')
         expect(dispatchDiagnostic.expected.count).to.deep.equal([
             '{ workgroups: [GPUSize32, GPUSize32?, GPUSize32?] }',
-            '{ indirect: BufferResource, offset?: GPUSize64 }',
+            '{ indirect: BufferRegion }',
         ])
         expect(dispatchDiagnostic.related).to.deep.include(compute.pipeline.subject)
     })
@@ -351,9 +352,9 @@ describe('scratch native indexed and indirect execution', () => {
         const render = await createRenderFixture()
         const indirect = await render.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
         const mixedDrawCounts = [
-            { vertexCount: 3, indirect },
+            { vertexCount: 3, indirect: indirect.region() },
             { vertexCount: 3, indexCount: 3 },
-            { indexCount: 3, indirect },
+            { indexCount: 3, indirect: indirect.region() },
         ]
         for (const count of mixedDrawCounts) {
             await expectDiagnostic(() => render.runtime.createDrawCommand({
@@ -368,7 +369,7 @@ describe('scratch native indexed and indirect execution', () => {
         const dispatchIndirect = await compute.runtime.createBuffer({ size: 12, usage: GPU_BUFFER_USAGE_INDIRECT })
         await expectDiagnostic(() => compute.runtime.createDispatchCommand({
             pipeline: compute.pipeline,
-            count: { workgroups: [ 1 ], indirect: dispatchIndirect },
+            count: { workgroups: [ 1 ], indirect: dispatchIndirect.region() },
             resources: { read: [ readResource(dispatchIndirect) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_COMMAND_COUNT_INVALID')
@@ -388,23 +389,28 @@ describe('scratch native indexed and indirect execution', () => {
 
         const cases = [
             {
-                descriptor: { buffer: valid, format: 'uint8' },
+                descriptor: { region: valid.region(), format: 'uint8' },
+                resource: valid,
                 code: 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID',
             },
             {
-                descriptor: { buffer: valid, format: 'uint32', offset: 2 },
+                descriptor: { region: valid.region({ offset: 2 }), format: 'uint32' },
+                resource: valid,
                 code: 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID',
             },
             {
-                descriptor: { buffer: valid, format: 'uint16', size: 2.5 },
+                descriptor: { region: valid.region({ size: 3 }), format: 'uint16' },
+                resource: valid,
                 code: 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID',
             },
             {
-                descriptor: { buffer: valid, format: 'uint16', offset: 6, size: 4 },
+                descriptor: { region: valid.region({ size: 0 }), format: 'uint16' },
+                resource: valid,
                 code: 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID',
             },
             {
-                descriptor: { buffer: missingUsage, format: 'uint16' },
+                descriptor: { region: missingUsage.region(), format: 'uint16' },
+                resource: missingUsage,
                 code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             },
         ]
@@ -414,15 +420,15 @@ describe('scratch native indexed and indirect execution', () => {
                 pipeline: fixture.pipeline,
                 indexBuffer: testCase.descriptor,
                 count: { indexCount: 3 },
-                resources: { read: [ readResource(testCase.descriptor.buffer) ], write: [] },
+                resources: { read: [ readResource(testCase.resource) ], write: [] },
                 whenMissing: 'throw',
             }), testCase.code)
         }
 
         const indexedRangeDiagnostic = await expectDiagnostic(() => fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            indexBuffer: { buffer: valid, format: 'uint16', size: 3 },
-            count: { indexCount: 2 },
+            indexBuffer: { region: valid.region({ size: 4 }), format: 'uint16' },
+            count: { indexCount: 3 },
             resources: { read: [ readResource(valid) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID')
@@ -431,9 +437,9 @@ describe('scratch native indexed and indirect execution', () => {
         })
         expect(indexedRangeDiagnostic.actual).to.deep.include({
             firstIndex: 0,
-            indexCount: 2,
-            availableIndexCount: 1,
-            bindingSize: 3,
+            indexCount: 3,
+            availableIndexCount: 2,
+            bindingSize: 4,
         })
 
         await expectDiagnostic(() => fixture.runtime.createDrawCommand({
@@ -445,7 +451,7 @@ describe('scratch native indexed and indirect execution', () => {
 
         await expectDiagnostic(() => fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            indexBuffer: { buffer: valid, format: 'uint16' },
+            indexBuffer: { region: valid.region(), format: 'uint16' },
             count: { vertexCount: 3 },
             resources: { read: [ readResource(valid) ], write: [] },
             whenMissing: 'throw',
@@ -455,17 +461,18 @@ describe('scratch native indexed and indirect execution', () => {
         const foreign = await foreignRuntime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
         await expectDiagnostic(() => fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            indexBuffer: { buffer: foreign, format: 'uint16' },
+            indexBuffer: { region: foreign.region(), format: 'uint16' },
             count: { indexCount: 3 },
             resources: { read: [ readResource(foreign) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_RESOURCE_WRONG_RUNTIME')
 
         const disposed = await fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
+        const disposedRegion = disposed.region()
         disposed.dispose()
         await expectDiagnostic(() => fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            indexBuffer: { buffer: disposed, format: 'uint16' },
+            indexBuffer: { region: disposedRegion, format: 'uint16' },
             count: { indexCount: 3 },
             resources: { read: [ readResource(disposed) ], write: [] },
             whenMissing: 'throw',
@@ -486,7 +493,7 @@ describe('scratch native indexed and indirect execution', () => {
         const indexBuffer = await fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
         const diagnostic = await expectDiagnostic(() => fixture.runtime.createDrawCommand({
             pipeline: stripPipeline,
-            indexBuffer: { buffer: indexBuffer, format: 'uint32' },
+            indexBuffer: { region: indexBuffer.region(), format: 'uint32' },
             count: { indexCount: 1 },
             resources: { read: [ readResource(indexBuffer) ], write: [] },
             whenMissing: 'throw',
@@ -520,21 +527,21 @@ describe('scratch native indexed and indirect execution', () => {
             },
             {
                 pipeline: vertexPipeline,
-                count: { indirect },
+                count: { indirect: indirect.region() },
                 resources: { read: [ readResource(indirect) ], write: [] },
                 whenMissing: 'throw',
             },
             {
                 pipeline: vertexPipeline,
-                indexBuffer: { buffer: indexBuffer, format: 'uint16' },
+                indexBuffer: { region: indexBuffer.region(), format: 'uint16' },
                 count: { indexCount: 3 },
                 resources: { read: [ readResource(indexBuffer) ], write: [] },
                 whenMissing: 'throw',
             },
             {
                 pipeline: vertexPipeline,
-                indexBuffer: { buffer: indexBuffer, format: 'uint16' },
-                count: { indirect },
+                indexBuffer: { region: indexBuffer.region(), format: 'uint16' },
+                count: { indirect: indirect.region() },
                 resources: { read: [ readResource(indexBuffer), readResource(indirect) ], write: [] },
                 whenMissing: 'throw',
             },
@@ -589,7 +596,7 @@ describe('scratch native indexed and indirect execution', () => {
                 visibility: [ 'vertex' ],
             } ],
         })
-        const bindSet = fixture.runtime.createBindSet(bindLayout, { input: boundBuffer })
+        const bindSet = fixture.runtime.createBindSet(bindLayout, { input: boundBuffer.region() })
         const boundPipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
             bindLayouts: [ bindLayout ],
@@ -603,7 +610,7 @@ describe('scratch native indexed and indirect execution', () => {
         })
         const indexedDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            indexBuffer: { buffer: indexBuffer, format: 'uint16' },
+            indexBuffer: { region: indexBuffer.region(), format: 'uint16' },
             count: { indexCount: 3 },
             resources: { read: [ readResource(indexBuffer) ], write: [] },
             whenMissing: 'throw',
@@ -618,10 +625,10 @@ describe('scratch native indexed and indirect execution', () => {
 
         expect('indexBuffer' in draw).to.equal(false)
         expect(Object.isExtensible(draw)).to.equal(false)
-        expect(() => { draw.indexBuffer = { buffer: indexBuffer, format: 'uint16' } }).to.throw(TypeError)
-        expect(() => { draw.count = { indirect } }).to.throw(TypeError)
+        expect(() => { draw.indexBuffer = { region: indexBuffer.region(), format: 'uint16' } }).to.throw(TypeError)
+        expect(() => { draw.count = { indirect: indirect.region() } }).to.throw(TypeError)
         expect(() => { draw.resources.read.push(readResource(indirect)) }).to.throw(TypeError)
-        expect(() => { indexedDraw.indexBuffer.buffer = indirect }).to.throw(TypeError)
+        expect(() => { indexedDraw.indexBuffer.region = indirect.region() }).to.throw(TypeError)
         expect(() => { indexedDraw.indexBuffer = undefined }).to.throw(TypeError)
         expect(() => { bindSet.bindings.clear() }).to.throw(TypeError)
         expect(() => { Map.prototype.clear.call(bindSet.bindings) }).to.throw(TypeError)
@@ -638,7 +645,7 @@ describe('scratch native indexed and indirect execution', () => {
             resources: { read: [], write: [] },
             whenMissing: 'throw',
         })
-        expect(() => { dispatch.count = { indirect } }).to.throw(TypeError)
+        expect(() => { dispatch.count = { indirect: indirect.region() } }).to.throw(TypeError)
         expect(() => { dispatch.count.workgroups[0] = 0 }).to.throw(TypeError)
         expect(() => { dispatch.resources.write.push(indirect) }).to.throw(TypeError)
         dispatch.dispose()
@@ -661,27 +668,27 @@ describe('scratch native indexed and indirect execution', () => {
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
         const uploadDrawArguments = fixture.runtime.createUploadCommand({
-            target: drawArguments,
+            target: (drawArguments).region(),
             data: new Uint32Array([ 3, 1, 0, 0 ]),
         })
         const uploadIndexedArguments = fixture.runtime.createUploadCommand({
-            target: indexedArguments,
+            target: (indexedArguments).region(),
             data: new Uint32Array([ 0, 3, 1, 0, 0, 0 ]),
         })
         const uploadIndices = fixture.runtime.createUploadCommand({
-            target: indexBuffer,
+            target: (indexBuffer).region(),
             data: new Uint16Array([ 0, 1, 2, 0 ]),
         })
         const drawIndirect = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            count: { indirect: drawArguments },
+            count: { indirect: drawArguments.region() },
             resources: { read: [ readResource(drawArguments, 1) ], write: [] },
             whenMissing: 'throw',
         })
         const drawIndexedIndirect = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            indexBuffer: { buffer: indexBuffer, format: 'uint16', size: 6 },
-            count: { indirect: indexedArguments, offset: 4 },
+            indexBuffer: { region: indexBuffer.region({ size: 6 }), format: 'uint16' },
+            count: { indirect: indexedArguments.region({ offset: 4 }) },
             resources: {
                 read: [
                     readResource(indexBuffer, 1),
@@ -723,12 +730,12 @@ describe('scratch native indexed and indirect execution', () => {
             usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
         })
         const upload = fixture.runtime.createUploadCommand({
-            target: argumentsBuffer,
+            target: (argumentsBuffer).region(),
             data: new Uint32Array([ 99, 1, 2, 3 ]),
         })
         const dispatch = fixture.runtime.createDispatchCommand({
             pipeline: fixture.pipeline,
-            count: { indirect: argumentsBuffer, offset: 4 },
+            count: { indirect: argumentsBuffer.region({ offset: 4 }) },
             resources: { read: [ readResource(argumentsBuffer, 1) ], write: [] },
             whenMissing: 'throw',
         })
@@ -762,12 +769,12 @@ describe('scratch native indexed and indirect execution', () => {
             usage: GPU_BUFFER_USAGE_STORAGE,
         })
         const upload = fixture.runtime.createUploadCommand({
-            target: argumentsBuffer,
+            target: (argumentsBuffer).region(),
             data: new Uint32Array([ 9, 4, 5, 6 ]),
         })
         const fallback = fixture.runtime.createDispatchCommand({
             pipeline: fixture.pipeline,
-            count: { indirect: argumentsBuffer, offset: 4 },
+            count: { indirect: argumentsBuffer.region({ offset: 4 }) },
             resources: { read: [ readResource(argumentsBuffer, 1) ], write: [ output ] },
             whenMissing: 'throw',
         })
@@ -856,9 +863,9 @@ describe('scratch native indexed and indirect execution', () => {
 
         const drawCases = [
             { count: { indirect: 'buffer' }, code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID' },
-            { count: { indirect: noUsage }, code: 'SCRATCH_RESOURCE_USAGE_MISSING' },
-            { count: { indirect: tooSmallDraw }, code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID' },
-            { count: { indirect: misaligned, offset: 2 }, code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID' },
+            { count: { indirect: noUsage.region() }, code: 'SCRATCH_RESOURCE_USAGE_MISSING' },
+            { count: { indirect: tooSmallDraw.region() }, code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID' },
+            { count: { indirect: misaligned.region({ offset: 2, size: 16 }) }, code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID' },
         ]
         for (const testCase of drawCases) {
             await expectDiagnostic(() => render.runtime.createDrawCommand({
@@ -872,8 +879,8 @@ describe('scratch native indexed and indirect execution', () => {
         const indexBuffer = await render.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
         await expectDiagnostic(() => render.runtime.createDrawCommand({
             pipeline: render.pipeline,
-            indexBuffer: { buffer: indexBuffer, format: 'uint16' },
-            count: { indirect: tooSmallIndexed },
+            indexBuffer: { region: indexBuffer.region(), format: 'uint16' },
+            count: { indirect: tooSmallIndexed.region() },
             resources: { read: [ readResource(indexBuffer), readResource(tooSmallIndexed) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID')
@@ -881,7 +888,7 @@ describe('scratch native indexed and indirect execution', () => {
         const tooSmallDispatch = await compute.runtime.createBuffer({ size: 11, usage: GPU_BUFFER_USAGE_INDIRECT })
         await expectDiagnostic(() => compute.runtime.createDispatchCommand({
             pipeline: compute.pipeline,
-            count: { indirect: tooSmallDispatch },
+            count: { indirect: tooSmallDispatch.region() },
             resources: { read: [ readResource(tooSmallDispatch) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID')
@@ -890,16 +897,17 @@ describe('scratch native indexed and indirect execution', () => {
         const foreign = await foreignRuntime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_INDIRECT })
         await expectDiagnostic(() => render.runtime.createDrawCommand({
             pipeline: render.pipeline,
-            count: { indirect: foreign },
+            count: { indirect: foreign.region() },
             resources: { read: [ readResource(foreign) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_RESOURCE_WRONG_RUNTIME')
 
         const disposed = await render.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_INDIRECT })
+        const disposedRegion = disposed.region()
         disposed.dispose()
         await expectDiagnostic(() => render.runtime.createDrawCommand({
             pipeline: render.pipeline,
-            count: { indirect: disposed },
+            count: { indirect: disposedRegion },
             resources: { read: [ readResource(disposed) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_RESOURCE_DISPOSED')
@@ -925,7 +933,7 @@ describe('scratch native indexed and indirect execution', () => {
                 role: 'vertex-buffer',
                 descriptor: {
                     pipeline: vertexPipeline,
-                    vertexBuffers: [ { slot: 0, buffer: vertex } ],
+                    vertexBuffers: [ { slot: 0, region: vertex.region() } ],
                     count: { vertexCount: 3 },
                     resources: { read: [], write: [] },
                     whenMissing: 'throw',
@@ -935,7 +943,7 @@ describe('scratch native indexed and indirect execution', () => {
                 role: 'index-buffer',
                 descriptor: {
                     pipeline: render.pipeline,
-                    indexBuffer: { buffer: index, format: 'uint16' },
+                    indexBuffer: { region: index.region(), format: 'uint16' },
                     count: { indexCount: 3 },
                     resources: { read: [], write: [] },
                     whenMissing: 'throw',
@@ -945,7 +953,7 @@ describe('scratch native indexed and indirect execution', () => {
                 role: 'indirect-buffer',
                 descriptor: {
                     pipeline: render.pipeline,
-                    count: { indirect },
+                    count: { indirect: indirect.region() },
                     resources: { read: [], write: [] },
                     whenMissing: 'throw',
                 },
@@ -965,7 +973,7 @@ describe('scratch native indexed and indirect execution', () => {
         const dispatchArguments = await compute.runtime.createBuffer({ size: 12, usage: GPU_BUFFER_USAGE_INDIRECT })
         const diagnostic = await expectDiagnostic(() => compute.runtime.createDispatchCommand({
             pipeline: compute.pipeline,
-            count: { indirect: dispatchArguments },
+            count: { indirect: dispatchArguments.region() },
             resources: { read: [], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE')
@@ -1001,7 +1009,7 @@ describe('scratch native indexed and indirect execution', () => {
             usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
         })
         const uploadIndices = fixture.runtime.createUploadCommand({
-            target: indexBuffer,
+            target: (indexBuffer).region(),
             data: new Uint16Array([ 0, 1, 2, 0 ]),
         })
         const produceArguments = fixture.runtime.createDispatchCommand({
@@ -1015,20 +1023,20 @@ describe('scratch native indexed and indirect execution', () => {
         })
         const consumeDispatch = fixture.runtime.createDispatchCommand({
             pipeline: computePipeline,
-            count: { indirect: dispatchArguments },
+            count: { indirect: dispatchArguments.region() },
             resources: { read: [ readResource(dispatchArguments, 1) ], write: [] },
             whenMissing: 'throw',
         })
         const consumeDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            count: { indirect: drawArguments },
+            count: { indirect: drawArguments.region() },
             resources: { read: [ readResource(drawArguments, 1) ], write: [] },
             whenMissing: 'throw',
         })
         const consumeIndexedDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            indexBuffer: { buffer: indexBuffer, format: 'uint16', size: 6 },
-            count: { indirect: indexedArguments },
+            indexBuffer: { region: indexBuffer.region({ size: 6 }), format: 'uint16' },
+            count: { indirect: indexedArguments.region() },
             resources: {
                 read: [
                     readResource(indexBuffer, 1),
@@ -1082,7 +1090,7 @@ describe('scratch native indexed and indirect execution', () => {
         })
         const emptyDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            count: { indirect: emptyIndirect },
+            count: { indirect: emptyIndirect.region() },
             resources: { read: [ readResource(emptyIndirect) ], write: [] },
             whenMissing: 'throw',
         })
@@ -1097,7 +1105,7 @@ describe('scratch native indexed and indirect execution', () => {
         })
         const emptyIndexedDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            indexBuffer: { buffer: emptyIndex, format: 'uint16' },
+            indexBuffer: { region: emptyIndex.region(), format: 'uint16' },
             count: { indexCount: 3 },
             resources: { read: [ readResource(emptyIndex) ], write: [] },
             whenMissing: 'throw',
@@ -1113,14 +1121,14 @@ describe('scratch native indexed and indirect execution', () => {
         })
         fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.runtime.createUploadCommand({
-                target: readyIndirect,
+                target: (readyIndirect).region(),
                 data: new Uint32Array([ 3, 1, 0, 0 ]),
             }))
             .submit()
 
         const futureDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            count: { indirect: readyIndirect },
+            count: { indirect: readyIndirect.region() },
             resources: { read: [ readResource(readyIndirect, 2) ], write: [] },
             whenMissing: 'throw',
         })
@@ -1130,7 +1138,7 @@ describe('scratch native indexed and indirect execution', () => {
 
         const staleDraw = fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
-            count: { indirect: readyIndirect },
+            count: { indirect: readyIndirect.region() },
             resources: { read: [ readResource(readyIndirect, 0) ], write: [] },
             whenMissing: 'throw',
         })

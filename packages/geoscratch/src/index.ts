@@ -78,7 +78,6 @@ export type {
     ReadbackCommandDescriptor,
     ReadbackCommandResultOptions,
     ReadbackOperationDescriptor,
-    ReadbackRange,
     ReadbackRetentionPolicy,
     ReadbackState,
     ComputePassSpecDescriptor,

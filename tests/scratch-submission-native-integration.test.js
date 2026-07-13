@@ -39,21 +39,19 @@ async function createCopyFixture(options = {}) {
     })
     const upload = runtime.createUploadCommand({
         label: 'native observation upload',
-        target: source,
+        target: (source).region(),
         data: new Uint8Array(16),
     })
     const firstCopy = runtime.createCopyCommand({
         label: 'native observation first copy',
-        source: { resource: source, contentEpoch: 1 },
-        target: firstTarget,
-        byteLength: 16,
+        source: { region: source.region(), contentEpoch: 1 },
+        target: firstTarget.region(),
         whenMissing: 'throw',
     })
     const secondCopy = runtime.createCopyCommand({
         label: 'native observation second copy',
-        source: { resource: source, contentEpoch: 1 },
-        target: secondTarget,
-        byteLength: 16,
+        source: { region: source.region(), contentEpoch: 1 },
+        target: secondTarget.region(),
         whenMissing: 'throw',
     })
 
@@ -110,7 +108,7 @@ async function createRenderFixture() {
     })
     const pass = runtime.createRenderPass({
         label: 'native observation render pass',
-        color: [ { target, load: 'clear', store: 'store' } ],
+        color: [ { target: target.view(), load: 'clear', store: 'store' } ],
     })
     fake.calls.errorScopes.length = 0
     fake.calls.nativeTimeline.length = 0

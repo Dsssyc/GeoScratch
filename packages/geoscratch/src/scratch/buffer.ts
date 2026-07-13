@@ -27,10 +27,7 @@ import type { LayoutArtifact } from './layout-codec.js'
 import type { ResourceState, ScratchResourceIdentity } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
-export type BufferResourceDescriptor = GPUBufferDescriptor & {
-    layout?: LayoutArtifact
-    elementCount?: number
-}
+export type BufferResourceDescriptor = GPUBufferDescriptor
 
 export type BufferRegionDescriptor = Readonly<{
     offset?: number
@@ -44,13 +41,16 @@ export type BufferSubregionDescriptor = Readonly<{
     layout?: LayoutArtifact
 }>
 
-type NormalizedBufferResourceDescriptor = BufferResourceDescriptor & {
-    layoutByteLength?: number
-}
+type NormalizedBufferResourceDescriptor = BufferResourceDescriptor
 
 const bufferResourceToken = Symbol('BufferResource')
 const bufferRegionToken = Symbol('BufferRegion')
 const bufferRegions = new WeakSet<BufferRegion>()
+const REMOVED_BUFFER_RESOURCE_DESCRIPTOR_FIELDS = Object.freeze([
+    'layout',
+    'elementCount',
+    'layoutByteLength',
+])
 const BUFFER_ALLOCATION_CODES = Object.freeze({
     validation: 'SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED',
     outOfMemory: 'SCRATCH_BUFFER_ALLOCATION_OUT_OF_MEMORY',
@@ -62,9 +62,6 @@ export class BufferResource extends Resource {
     #gpuBuffer: GPUBuffer
     readonly size: number
     readonly usage: GPUBufferUsageFlags
-    readonly layout?: LayoutArtifact
-    readonly elementCount?: number
-    readonly layoutByteLength?: number
 
     private constructor(
         token: symbol,
@@ -87,9 +84,6 @@ export class BufferResource extends Resource {
 
         this.size = descriptor.size
         this.usage = descriptor.usage
-        if (descriptor.layout !== undefined) this.layout = descriptor.layout
-        if (descriptor.elementCount !== undefined) this.elementCount = descriptor.elementCount
-        if (descriptor.layoutByteLength !== undefined) this.layoutByteLength = descriptor.layoutByteLength
         this.#gpuBuffer = gpuBuffer
         registerResource(this)
         Object.preventExtensions(this)
@@ -132,11 +126,6 @@ export class BufferResource extends Resource {
         super.dispose()
     }
 
-    get layoutSubject(): DiagnosticSubject | undefined {
-
-        if (this.layout === undefined) return undefined
-        return layoutArtifactSubject(this.layout)
-    }
 }
 
 export class BufferRegion {
@@ -538,6 +527,24 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
         })
     }
 
+    const removedFields = REMOVED_BUFFER_RESOURCE_DESCRIPTOR_FIELDS
+        .filter(key => Object.prototype.hasOwnProperty.call(descriptor, key))
+    if (removedFields.length > 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject,
+            message: 'BufferResource is a raw byte container and cannot own layout interpretation.',
+            expected: {
+                descriptor: 'GPUBufferDescriptor without resource-global layout fields',
+                interpretation: 'BufferResource.region({ layout })',
+            },
+            actual: { removedFields },
+            hints: [ 'Move layout interpretation onto an explicit BufferRegion.' ],
+        })
+    }
+
     if (typeof descriptor.size !== 'number' || !Number.isFinite(descriptor.size) || descriptor.size < 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
@@ -574,25 +581,6 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
         })
     }
 
-    const layout = normalizeBufferLayout(runtime, descriptor.layout)
-    const elementCount = normalizeBufferElementCount(runtime, layout, descriptor.elementCount)
-    const layoutByteLength = layout === undefined || elementCount === undefined
-        ? undefined
-        : layout.stride * elementCount
-
-    if (layout !== undefined && layoutByteLength !== undefined && (!Number.isSafeInteger(layoutByteLength) || layoutByteLength > descriptor.size)) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
-            severity: 'error',
-            phase: 'layout-codec',
-            subject: layoutArtifactSubject(layout),
-            related: [ subject ],
-            message: 'BufferResource layout byte length exceeds the GPU buffer size.',
-            expected: { layoutByteLength },
-            actual: { bufferSize: descriptor.size },
-        })
-    }
-
     const normalized: NormalizedBufferResourceDescriptor = {
         size: descriptor.size,
         usage: descriptor.usage,
@@ -600,62 +588,6 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
 
     if (typeof descriptor.label === 'string') normalized.label = descriptor.label
     if (typeof descriptor.mappedAtCreation === 'boolean') normalized.mappedAtCreation = descriptor.mappedAtCreation
-    if (layout !== undefined) normalized.layout = layout
-    if (elementCount !== undefined) normalized.elementCount = elementCount
-    if (layoutByteLength !== undefined) normalized.layoutByteLength = layoutByteLength
-
-    return normalized
-}
-
-function normalizeBufferLayout(runtime: ScratchRuntime, layout: unknown): LayoutArtifact | undefined {
-
-    if (layout === undefined) return undefined
-    if (isLayoutArtifact(layout)) return layout
-
-    throwScratchDiagnostic({
-        code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
-        severity: 'error',
-        phase: 'layout-codec',
-        subject: runtime?.subject ?? { kind: 'ScratchRuntime' },
-        message: 'BufferResource layout must be a LayoutArtifact.',
-        expected: { layout: 'LayoutArtifact' },
-        actual: { layout: describeValue(layout) },
-    })
-}
-
-function normalizeBufferElementCount(
-    runtime: ScratchRuntime,
-    layout: LayoutArtifact | undefined,
-    elementCount: unknown
-): number | undefined {
-
-    if (layout === undefined) {
-        if (elementCount === undefined) return undefined
-
-        throwScratchDiagnostic({
-            code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
-            severity: 'error',
-            phase: 'layout-codec',
-            subject: runtime?.subject ?? { kind: 'ScratchRuntime' },
-            message: 'BufferResource elementCount requires a LayoutArtifact.',
-            expected: { layout: 'LayoutArtifact' },
-            actual: { elementCount },
-        })
-    }
-
-    const normalized = elementCount ?? 1
-    if (typeof normalized !== 'number' || !Number.isInteger(normalized) || normalized <= 0) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
-            severity: 'error',
-            phase: 'layout-codec',
-            subject: layoutArtifactSubject(layout),
-            related: [ runtime?.subject ?? { kind: 'ScratchRuntime' } ],
-            message: 'BufferResource elementCount must be a positive integer.',
-            expected: { elementCount: 'positive integer' },
-            actual: { elementCount: normalized },
-        })
-    }
 
     return normalized
 }

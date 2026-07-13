@@ -78,6 +78,7 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
         magFilter: 'nearest',
         minFilter: 'nearest',
     })
+    const renderView = renderTarget.view()
     const bindLayout = runtime.createBindLayout({
         label: 'sample offscreen layout',
         group: 0,
@@ -97,7 +98,7 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
         ],
     })
     const bindSet = runtime.createBindSet(bindLayout, {
-        colorTexture: renderTarget,
+        colorTexture: renderView,
         colorSampler: sampler,
     }, {
         label: 'sample offscreen set',
@@ -126,7 +127,7 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
         label: 'offscreen pass',
         color: [
             {
-                target: renderTarget,
+                target: renderView,
                 load: 'clear',
                 store: 'store',
                 clear: [ 0.1, 0.2, 0.3, 1 ],
@@ -134,7 +135,7 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
         ],
     })
 
-    return { ...fake, runtime, renderTarget, sampler, bindLayout, bindSet, program, pipeline, draw, pass }
+    return { ...fake, runtime, renderTarget, renderView, sampler, bindLayout, bindSet, program, pipeline, draw, pass }
 }
 
 async function expectScratchDiagnostic(action, expected) {
@@ -210,13 +211,13 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         await submitted.done
     })
 
-    it('lowers TextureResource color attachments into WebGPU render pass descriptors', async() => {
+    it('lowers TextureViewSpec color attachments into WebGPU render pass descriptors', async() => {
 
         const fixture = await createRenderTargetScene()
 
         expect(fixture.renderTarget).to.be.instanceOf(TextureResource)
         expect(fixture.pass.color).to.have.length(1)
-        expect(fixture.pass.color[0].target).to.equal(fixture.renderTarget)
+        expect(fixture.pass.color[0].target).to.equal(fixture.renderView)
         expect(fixture.pass.color[0].format).to.equal('rgba8unorm')
 
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
@@ -225,7 +226,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         expect(fixture.calls.textureViews).to.have.length(1)
         expect(fixture.calls.textureViews[0].texture).to.equal(fixture.renderTarget.gpuTexture)
-        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.include({
             dimension: '2d',
             mipLevelCount: 1,
             arrayLayerCount: 1,
@@ -255,7 +256,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(fixture.pass).to.equal(pass)
         expect(fixture.draw).to.equal(draw)
         expect(fixture.calls.commandEncoders).to.have.length(1)
-        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.include({
             dimension: '2d',
             mipLevelCount: 1,
             arrayLayerCount: 1,
@@ -288,7 +289,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(previousTexture.destroyed).to.equal(true)
         expect(fixture.calls.textureViews).to.have.length(1)
         expect(fixture.calls.textureViews[0].texture).to.equal(replacementTexture)
-        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.include({
             dimension: '2d',
             mipLevelCount: 1,
             arrayLayerCount: 1,
@@ -314,8 +315,12 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         await fixture.renderTarget.resize([ 64, 64, 3 ])
         const pass = fixture.runtime.createRenderPass({
             color: [ {
-                target: fixture.renderTarget,
-                viewDescriptor: { baseArrayLayer: 2 },
+                target: fixture.renderTarget.view({
+                    dimension: '2d',
+                    baseArrayLayer: 2,
+                    mipLevelCount: 1,
+                    arrayLayerCount: 1,
+                }),
             } ],
         })
         await fixture.renderTarget.resize([ 64, 64, 1 ])
@@ -444,7 +449,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         const secondPass = fixture.runtime.createRenderPass({
             color: [
                 {
-                    target: secondTarget,
+                    target: secondTarget.view(),
                     load: 'clear',
                     store: 'store',
                 },
@@ -498,7 +503,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             label: 'future epoch pass',
             color: [
                 {
-                    target: secondTarget,
+                    target: secondTarget.view(),
                     load: 'clear',
                     store: 'store',
                     clear: [ 0, 0, 0, 1 ],
@@ -562,7 +567,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             label: 'stale epoch pass',
             color: [
                 {
-                    target: secondTarget,
+                    target: secondTarget.view(),
                     load: 'clear',
                     store: 'store',
                     clear: [ 0, 0, 0, 1 ],
@@ -688,7 +693,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             fixtureA.runtime.createRenderPass({
                 color: [
                     {
-                        target: fixtureB.renderTarget,
+                        target: fixtureB.renderTarget.view(),
                         load: 'clear',
                         store: 'store',
                     },
@@ -710,7 +715,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             fixtureA.runtime.createRenderPass({
                 color: [
                     {
-                        target: fixtureA.renderTarget,
+                        target: fixtureA.renderTarget.view(),
                         load: 'clear',
                         store: 'store',
                     },
@@ -736,7 +741,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             fixtureB.runtime.createRenderPass({
                 color: [
                     {
-                        target: textureOnlyForSampling,
+                        target: textureOnlyForSampling.view(),
                         load: 'clear',
                         store: 'store',
                     },
@@ -988,7 +993,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             label: 'sample previous pass',
             color: [
                 {
-                    target: secondTarget,
+                    target: secondTarget.view(),
                     load: 'clear',
                     store: 'store',
                     clear: [ 0, 0, 0, 1 ],
@@ -1081,7 +1086,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             label: 'sample ready previous work',
             color: [
                 {
-                    target: secondTarget,
+                    target: secondTarget.view(),
                     load: 'clear',
                     store: 'store',
                     clear: [ 0, 0, 0, 1 ],

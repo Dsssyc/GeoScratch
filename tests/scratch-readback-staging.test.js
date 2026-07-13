@@ -57,7 +57,7 @@ describe('scratch acknowledged readback staging', () => {
         const fake = createFakeGpu({ deferErrorScopePops: true })
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = await createSourceWithDeferredScopes(fake, runtime)
-        const readback = runtime.createReadback({ source })
+        const readback = runtime.createReadback({ source: source.region() })
         const bufferCount = fake.calls.buffers.length
         const encoderCount = fake.calls.commandEncoders.length
         const submissionCount = fake.calls.queueSubmissions.length
@@ -136,7 +136,7 @@ describe('scratch acknowledged readback staging', () => {
             const fake = createFakeGpu()
             const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
             const source = await createSource(runtime)
-            const readback = runtime.createReadback({ source })
+            const readback = runtime.createReadback({ source: source.region() })
             const nativeError = Object.assign(new Error(`fake ${failure.name}`), {
                 name: failure.category === 'out-of-memory'
                     ? 'GPUOutOfMemoryError'
@@ -177,7 +177,7 @@ describe('scratch acknowledged readback staging', () => {
         const fake = createFakeGpu({ deferErrorScopePops: true })
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = await createSourceWithDeferredScopes(fake, runtime)
-        const readback = runtime.createReadback({ source })
+        const readback = runtime.createReadback({ source: source.region() })
         const materialization = readback.toBytes()
         const candidate = fake.calls.buffers.at(-1)
 
@@ -204,7 +204,7 @@ describe('scratch acknowledged readback staging', () => {
             readback: { maxPendingOperations: 1, maxStagingBytes: 8 },
         })
         const source = await createSource(runtime)
-        const readback = runtime.createReadback({ source })
+        const readback = runtime.createReadback({ source: source.region() })
         const bufferCount = fake.calls.buffers.length
         const encoderCount = fake.calls.commandEncoders.length
 
@@ -231,11 +231,11 @@ describe('scratch acknowledged readback staging', () => {
             readback: { maxPendingOperations: 1, maxStagingBytes: 64 },
         })
         const source = await createSource(runtime)
-        const first = runtime.createReadback({ source })
+        const first = runtime.createReadback({ source: source.region() })
         const bufferCount = fake.calls.buffers.length
 
         const error = await rejectedDiagnostic(Promise.resolve().then(
-            () => runtime.createReadback({ source })
+            () => runtime.createReadback({ source: source.region() })
         ))
 
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED')
@@ -268,10 +268,10 @@ describe('scratch acknowledged readback staging', () => {
         const source = await createSource(runtime)
         advanceResourceContentEpochForTest(source)
         const command = await runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
-        const blocker = runtime.createReadback({ source })
+        const blocker = runtime.createReadback({ source: source.region() })
         const bufferCount = fake.calls.buffers.length
         const encoderCount = fake.calls.commandEncoders.length
         const submissionCount = fake.calls.queueSubmissions.length
@@ -316,7 +316,7 @@ describe('scratch acknowledged readback staging', () => {
 
         const error = await rejectedDiagnostic(runtime.createReadbackCommand({
             label: 'ordered budget failure',
-            source: { resource: source, contentEpoch: source.contentEpoch },
+            source: { region: (source).region(), contentEpoch: source.contentEpoch },
             whenMissing: 'throw',
         }))
 
@@ -344,7 +344,7 @@ describe('scratch acknowledged readback staging', () => {
         const fake = createFakeGpu({ deferErrorScopePops: true })
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = await createSourceWithDeferredScopes(fake, runtime)
-        const readback = runtime.createReadback({ source })
+        const readback = runtime.createReadback({ source: source.region() })
         const encoderCount = fake.calls.commandEncoders.length
         const submissionCount = fake.calls.queueSubmissions.length
         const materialization = readback.toBytes()
@@ -369,7 +369,7 @@ describe('scratch acknowledged readback staging', () => {
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = await createSourceWithDeferredScopes(fake, runtime)
         const controller = diagnosticsControllerFor(runtime)
-        const readback = runtime.createReadback({ source })
+        const readback = runtime.createReadback({ source: source.region() })
         const encoderCount = fake.calls.commandEncoders.length
         const materialization = readback.toBytes()
         const candidate = fake.calls.buffers.at(-1)
@@ -399,11 +399,11 @@ describe('scratch acknowledged readback staging', () => {
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
         const source = await createSource(runtime)
         const upload = runtime.createUploadCommand({
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 1, 2, 3, 4 ]),
         })
         const submitted = runtime.submission().upload(upload).submit()
-        const readback = runtime.createReadback({ source, after: submitted })
+        const readback = runtime.createReadback({ source: source.region(), after: submitted })
         let materialized = false
         const materialization = readback.toBytes().then(bytes => {
             materialized = true
@@ -442,7 +442,7 @@ describe('scratch acknowledged readback staging', () => {
         let factorySettled = false
         const creation = runtime.createReadbackCommand({
             label: 'reusable ordered staging',
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         }).then(command => {
             factorySettled = true
@@ -519,7 +519,7 @@ describe('scratch acknowledged readback staging', () => {
         fake.errors.failNext('createBuffer', 'validation', nativeError)
 
         const error = await rejectedDiagnostic(runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 0 },
+            source: { region: (source).region(), contentEpoch: 0 },
             whenMissing: 'throw',
         }))
 
@@ -538,7 +538,7 @@ describe('scratch acknowledged readback staging', () => {
         const source = await createSource(runtime)
         advanceResourceContentEpochForTest(source)
         const command = await runtime.createReadbackCommand({
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const stagingBuffer = fake.calls.buffers.at(-1)

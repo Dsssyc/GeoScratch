@@ -181,7 +181,7 @@ describe('scratch texture resize', () => {
     it('treats normalized same-size resize as a true no-op', async() => {
 
         const fixture = await createFixture()
-        const view = fixture.texture.createView()
+        const view = fixture.texture.view()
         const facts = captureTextureFacts(fixture.texture)
         const createdTextureCount = fixture.calls.textures.length
 
@@ -189,8 +189,9 @@ describe('scratch texture resize', () => {
 
         expectTextureFacts(fixture.texture, facts)
         expect(fixture.calls.textures).to.have.length(createdTextureCount)
-        expect(fixture.texture.createView()).to.equal(view)
-        expect(view.texture.destroyed).to.equal(false)
+        expect(fixture.texture.view().hash).to.equal(view.hash)
+        expect(() => view.assertUsable()).not.to.throw()
+        expect(fixture.texture.gpuTexture.destroyed).to.equal(false)
     })
 
     it('supports width, height, array-layer, and repeated replacements', async() => {
@@ -354,7 +355,7 @@ describe('scratch texture resize', () => {
     it('leaves the old allocation fully installed after synchronous native failure', async() => {
 
         const fixture = await createFixture()
-        const oldView = fixture.texture.createView()
+        const oldView = fixture.texture.view()
         const facts = captureTextureFacts(fixture.texture)
         const nativeError = new RangeError('synthetic allocation failure')
         fixture.device.createTexture = () => {
@@ -369,7 +370,7 @@ describe('scratch texture resize', () => {
         expect(error.cause).to.equal(nativeError)
         expectTextureFacts(fixture.texture, facts)
         expect(fixture.texture.gpuTexture.destroyed).to.equal(false)
-        expect(fixture.texture.createView()).to.equal(oldView)
+        expect(() => oldView.assertUsable()).not.to.throw()
     })
 
     it('rejects disposed, lost-device, disposed-runtime, and missing-native use', async() => {
@@ -513,17 +514,17 @@ describe('scratch texture resize', () => {
     it('revalidates texture view ranges against the current allocation', async() => {
 
         const fixture = await createFixture({ size: [ 8, 8, 3 ] })
-        fixture.texture.createView({ dimension: '2d', baseArrayLayer: 2 })
+        const staleView = fixture.texture.view({ dimension: '2d', baseArrayLayer: 2 })
         const viewCount = fixture.calls.textureViews.length
 
         await fixture.texture.resize([ 8, 8, 1 ])
 
         await expectDiagnostic(
-            () => fixture.texture.createView({ dimension: '2d', baseArrayLayer: 2 }),
+            () => staleView.assertUsable(),
             'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
         )
         await expectDiagnostic(
-            () => fixture.texture.createView({ dimension: 'cube-array', arrayLayerCount: 1n }),
+            () => fixture.texture.view({ dimension: 'cube-array', arrayLayerCount: 1n }),
             'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
         )
         expect(fixture.calls.textureViews).to.have.length(viewCount)
@@ -550,12 +551,13 @@ describe('scratch texture resize', () => {
                 },
             ],
         })
+        const viewSpec = fixture.texture.view()
         const bindSet = fixture.runtime.createBindSet(layout, {
-            texture: fixture.texture,
+            texture: viewSpec,
             sampler,
         })
-        const oldView = fixture.texture.createView()
         const oldBindGroup = bindSet.getBindGroup()
+        const oldView = fixture.calls.textureViews[0]
 
         await fixture.texture.resize({ width: 8, height: 8, depthOrArrayLayers: 1 })
 
@@ -564,8 +566,8 @@ describe('scratch texture resize', () => {
 
         await fixture.texture.resize([ 16, 8 ])
 
-        const newView = fixture.texture.createView()
         const newBindGroup = bindSet.getBindGroup()
+        const newView = fixture.calls.textureViews[1]
         expect(newView).to.not.equal(oldView)
         expect(newView.texture).to.equal(fixture.texture.gpuTexture)
         expect(newBindGroup).to.not.equal(oldBindGroup)

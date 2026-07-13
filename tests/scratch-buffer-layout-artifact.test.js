@@ -55,7 +55,7 @@ function expectDiagnostic(fn, include) {
     return caught.diagnostic
 }
 
-async function expectAsyncDiagnostic(action, include) {
+async function expectRejectedDiagnostic(action, include) {
 
     let caught
     try {
@@ -66,12 +66,13 @@ async function expectAsyncDiagnostic(action, include) {
 
     expect(caught).to.be.instanceOf(ScratchDiagnosticError)
     expect(caught.diagnostic).to.include(include)
+
     return caught.diagnostic
 }
 
-describe('scratch BufferResource layout artifacts', () => {
+describe('scratch BufferRegion layout artifacts', () => {
 
-    it('stores optional LayoutArtifact metadata while raw buffers stay valid', async() => {
+    it('keeps BufferResource raw and stores interpretation only on BufferRegion', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
         const codec = createParticleCodec()
@@ -79,8 +80,6 @@ describe('scratch BufferResource layout artifacts', () => {
             label: 'particles',
             size: codec.artifact.stride * 2,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
-            layout: codec.artifact,
-            elementCount: 2,
         })
         const rawBuffer = await runtime.createBuffer({
             label: 'raw bytes',
@@ -88,14 +87,17 @@ describe('scratch BufferResource layout artifacts', () => {
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })
 
-        expect(buffer.layout).to.equal(codec.artifact)
-        expect(buffer.elementCount).to.equal(2)
-        expect(buffer.layoutByteLength).to.equal(codec.artifact.stride * 2)
-        expect(buffer.layoutSubject).to.deep.equal({
-            kind: 'LayoutArtifact',
+        const region = buffer.region({ layout: codec.artifact })
+
+        expect(region.layout).to.equal(codec.artifact)
+        expect(region.elementCount).to.equal(2)
+        expect(region.subject).to.deep.equal({
+            kind: 'BufferRegion',
+            resourceId: buffer.id,
+            offset: 0,
+            size: codec.artifact.stride * 2,
             abiHash: codec.artifact.abiHash,
             schemaHash: codec.artifact.schemaHash,
-            label: codec.artifact.label,
         })
         expect(buffer.descriptor).to.include({
             label: 'particles',
@@ -107,24 +109,49 @@ describe('scratch BufferResource layout artifacts', () => {
             size: codec.artifact.stride * 2,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
         })
-        expect(rawBuffer.layout).to.equal(undefined)
-        expect(rawBuffer.elementCount).to.equal(undefined)
-        expect(rawBuffer.layoutByteLength).to.equal(undefined)
+        expect(buffer).not.to.have.property('layout')
+        expect(buffer).not.to.have.property('elementCount')
+        expect(rawBuffer.region().layout).to.equal(undefined)
     })
 
-    it('rejects invalid element counts and layout byte lengths with structured diagnostics', async() => {
+    it('rejects removed resource-global layout fields before native allocation', async() => {
+
+        const { runtime, calls } = await createRuntimeFixture()
+        const codec = createParticleCodec()
+
+        for (const descriptor of [
+            { size: 32, usage: GPU_BUFFER_USAGE_STORAGE, layout: codec.artifact },
+            { size: 32, usage: GPU_BUFFER_USAGE_STORAGE, elementCount: 2 },
+            { size: 32, usage: GPU_BUFFER_USAGE_STORAGE, layoutByteLength: 32 },
+        ]) {
+            const diagnostic = await expectRejectedDiagnostic(
+                () => runtime.createBuffer(descriptor),
+                {
+                    code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+                    severity: 'error',
+                    phase: 'resource',
+                }
+            )
+            expect(diagnostic.actual.removedFields).to.deep.equal(
+                Object.keys(descriptor).filter(key => ![ 'size', 'usage' ].includes(key))
+            )
+        }
+
+        expect(calls.buffers).to.have.length(0)
+    })
+
+    it('rejects invalid interpreted ranges with structured diagnostics', async() => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
 
-        const invalidArtifact = await expectAsyncDiagnostic(async () => {
-            await runtime.createBuffer({
-                size: codec.artifact.stride,
-                usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
-                layout: {
-                    ...codec.artifact,
-                    stride: 0,
-                },
+        const buffer = await runtime.createBuffer({
+            size: codec.artifact.stride * 2,
+            usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
+        })
+        const invalidArtifact = expectDiagnostic(() => {
+            buffer.region({
+                layout: { ...codec.artifact, stride: 0 },
             })
         }, {
             code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
@@ -134,47 +161,21 @@ describe('scratch BufferResource layout artifacts', () => {
         expect(invalidArtifact.expected).to.deep.equal({ layout: 'LayoutArtifact' })
         expect(invalidArtifact.actual).to.deep.equal({ layout: 'object' })
 
-        const invalidCount = await expectAsyncDiagnostic(async () => {
-            await runtime.createBuffer({
-                size: codec.artifact.stride,
-                usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
-                layout: codec.artifact,
-                elementCount: 0,
-            })
+        const misaligned = expectDiagnostic(() => {
+            buffer.region({ offset: 4, size: codec.artifact.stride, layout: codec.artifact })
         }, {
-            code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
+            code: 'SCRATCH_BUFFER_REGION_LAYOUT_INVALID',
             severity: 'error',
             phase: 'layout-codec',
         })
-        expect(invalidCount.subject).to.deep.equal({
-            kind: 'LayoutArtifact',
+        expect(misaligned.subject).to.deep.equal({
+            kind: 'BufferRegion',
+            resourceId: buffer.id,
+            offset: 4,
+            size: codec.artifact.stride,
             abiHash: codec.artifact.abiHash,
             schemaHash: codec.artifact.schemaHash,
-            label: codec.artifact.label,
         })
-        expect(invalidCount.expected).to.deep.equal({ elementCount: 'positive integer' })
-        expect(invalidCount.actual).to.deep.equal({ elementCount: 0 })
-
-        const tooSmall = await expectAsyncDiagnostic(async () => {
-            await runtime.createBuffer({
-                size: codec.artifact.stride - 1,
-                usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
-                layout: codec.artifact,
-                elementCount: 1,
-            })
-        }, {
-            code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
-            severity: 'error',
-            phase: 'layout-codec',
-        })
-        expect(tooSmall.subject).to.deep.equal({
-            kind: 'LayoutArtifact',
-            abiHash: codec.artifact.abiHash,
-            schemaHash: codec.artifact.schemaHash,
-            label: codec.artifact.label,
-        })
-        expect(tooSmall.expected).to.deep.equal({ layoutByteLength: codec.artifact.stride })
-        expect(tooSmall.actual).to.deep.equal({ bufferSize: codec.artifact.stride - 1 })
     })
 
     it('uploads LayoutCodec upload views only when the target layout matches', async() => {
@@ -186,11 +187,11 @@ describe('scratch BufferResource layout artifacts', () => {
             label: 'particles',
             size: codec.artifact.stride,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
-            layout: codec.artifact,
         })
+        const target = buffer.region({ layout: codec.artifact })
         const upload = runtime.createUploadCommand({
             label: 'upload particles',
-            target: buffer,
+            target,
             data: uploadView,
         })
 
@@ -204,19 +205,19 @@ describe('scratch BufferResource layout artifacts', () => {
         expect(calls.queueWrites).to.have.length(1)
         expect(Array.from(buffer.gpuBuffer.data.slice(0, uploadView.byteLength))).to.deep.equal(Array.from(uploadView.bytes))
 
-        const offsetUpload = runtime.createUploadCommand({
-            target: buffer,
-            data: uploadView,
+        const rawOffsetUpload = runtime.createUploadCommand({
+            target: buffer.region({ offset: 4, size: uploadView.byteLength - 4 }),
+            data: uploadView.bytes,
             dataOffset: 4,
         })
-        expect(offsetUpload.dataOffset).to.equal(4)
-        expect(offsetUpload.byteLength).to.equal(uploadView.byteLength - 4)
-        expect(offsetUpload.layout).to.equal(codec.artifact)
+        expect(rawOffsetUpload.dataOffset).to.equal(4)
+        expect(rawOffsetUpload.byteLength).to.equal(uploadView.byteLength - 4)
+        expect(rawOffsetUpload.layout).to.equal(undefined)
 
         const mismatchCodec = createParticleCodec('ParticleMismatch')
         const mismatch = expectDiagnostic(() => {
             runtime.createUploadCommand({
-                target: buffer,
+                target,
                 data: mismatchCodec.uploadView(createParticleValues()),
             })
         }, {
@@ -224,7 +225,7 @@ describe('scratch BufferResource layout artifacts', () => {
             severity: 'error',
             phase: 'layout-codec',
         })
-        expect(mismatch.subject).to.deep.equal(buffer.layoutSubject)
+        expect(mismatch.subject).to.deep.equal(target.subject)
         expect(mismatch.expected).to.deep.equal({
             abiHash: codec.artifact.abiHash,
             schemaHash: codec.artifact.schemaHash,
@@ -236,7 +237,7 @@ describe('scratch BufferResource layout artifacts', () => {
         expect(mismatch.evidence).to.have.length(1)
     })
 
-    it('validates uploads against the layout-declared logical byte range', async() => {
+    it('makes the uploaded byte range identical to the target BufferRegion', async() => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
@@ -244,29 +245,20 @@ describe('scratch BufferResource layout artifacts', () => {
             label: 'single particle in a larger allocation',
             size: codec.artifact.stride * 2,
             usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
-            layout: codec.artifact,
-            elementCount: 1,
         })
 
         const diagnostic = expectDiagnostic(() => {
             runtime.createUploadCommand({
-                target: buffer,
+                target: buffer.region({ offset: codec.artifact.stride, size: codec.artifact.stride }),
                 data: new Uint8Array(4),
-                offset: codec.artifact.stride,
             })
         }, {
-            code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
+            code: 'SCRATCH_COMMAND_UPLOAD_RANGE_INVALID',
             severity: 'error',
-            phase: 'layout-codec',
+            phase: 'command',
         })
 
-        expect(diagnostic.subject).to.deep.equal(buffer.layoutSubject)
-        expect(diagnostic.expected).to.deep.equal({ layoutByteLength: codec.artifact.stride })
-        expect(diagnostic.actual).to.deep.equal({
-            offset: codec.artifact.stride,
-            byteLength: 4,
-            rangeEnd: codec.artifact.stride + 4,
-        })
+        expect(diagnostic.actual.reason).to.equal('range')
     })
 
     it('keeps readback byte interpretation explicit through LayoutCodec', async() => {
@@ -282,12 +274,11 @@ describe('scratch BufferResource layout artifacts', () => {
             label: 'readback particles',
             size: bytes.byteLength,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
-            layout: codec.artifact,
-            elementCount: values.length,
         })
+        const source = buffer.region({ layout: codec.artifact })
 
-        expect(buffer.layout.abiHash).to.equal(codec.artifact.abiHash)
-        expect(buffer.layout.schemaHash).to.equal(codec.artifact.schemaHash)
+        expect(source.layout.abiHash).to.equal(codec.artifact.abiHash)
+        expect(source.layout.schemaHash).to.equal(codec.artifact.schemaHash)
 
         const view = codec.createReadbackView(bytes)
 

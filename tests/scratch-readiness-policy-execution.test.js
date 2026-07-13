@@ -76,13 +76,13 @@ async function createRenderSkipPassFixture() {
     const pass = fixture.runtime.createRenderPass({
         label: 'transactional skipped render pass',
         color: [ {
-            target: colorTarget,
+            target: colorTarget.view(),
             load: 'clear',
             store: 'store',
             clear: [ 0.1, 0.2, 0.3, 1 ],
         } ],
         depth: {
-            target: depthTarget,
+            target: depthTarget.view(),
             depthLoad: 'clear',
             depthStore: 'store',
             depthClear: 1,
@@ -516,7 +516,7 @@ describe('scratch readiness policy execution', () => {
             const missing = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
             const pass = fixture.runtime.createRenderPass({
                 color: [ {
-                    target,
+                    target: target.view(),
                     load: 'clear',
                     store: 'store',
                     clear: [ 0, 0, 0, 1 ],
@@ -615,7 +615,7 @@ describe('scratch readiness policy execution', () => {
                     querySet,
                     slots: [ { index, contentEpoch: 1 } ],
                 },
-                destination,
+                destination: destination.region({ size: 8 }),
                 whenMissing: 'throw',
             })
             const builder = fixture.runtime.createSubmission({ validation: 'off' })
@@ -650,7 +650,7 @@ describe('scratch readiness policy execution', () => {
         })
         const downstreamPass = fixture.runtime.createRenderPass({
             color: [ {
-                target: downstreamTarget,
+                target: downstreamTarget.view(),
                 load: 'clear',
                 store: 'store',
                 clear: [ 0, 0, 0, 1 ],

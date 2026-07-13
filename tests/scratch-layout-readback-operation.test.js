@@ -50,13 +50,16 @@ async function createLayoutBackedBuffer(runtime, codec, values, options = {}) {
         label: options.label ?? 'layout readback buffer',
         size,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
+    })
+    const region = buffer.region({
+        offset: 0,
+        size,
         layout: codec.artifact,
-        elementCount: values.length,
     })
 
     buffer.gpuBuffer.data.set(bytes)
 
-    return { buffer, bytes }
+    return { buffer, region, bytes }
 }
 
 async function expectAsyncDiagnostic(fn, include) {
@@ -84,15 +87,15 @@ describe('scratch layout-aware ReadbackOperation', () => {
             createParticleValues(0),
             createParticleValues(10),
         ]
-        const { buffer } = await createLayoutBackedBuffer(runtime, codec, values)
+        const { buffer, region } = await createLayoutBackedBuffer(runtime, codec, values)
 
         const readback = runtime.createReadback({
             label: 'read layout buffer',
-            source: buffer,
+            source: region,
         })
 
         expect(readback).to.be.instanceOf(ReadbackOperation)
-        expect(readback.source).to.equal(buffer)
+        expect(readback.source).to.equal(region)
         expect(readback.layout).to.equal(codec.artifact)
         expect(readback.contentEpoch).to.equal(buffer.contentEpoch)
         expect(readback.allocationVersion).to.equal(buffer.allocationVersion)
@@ -108,8 +111,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
         })
 
         const readback = runtime.createReadback({
-            source: raw,
-            range: { offset: 0, byteLength: 16 },
+            source: (raw).region({ offset: 0, size: 16 }),
         })
 
         expect(readback.layout).to.equal(undefined)
@@ -123,11 +125,10 @@ describe('scratch layout-aware ReadbackOperation', () => {
             createParticleValues(0),
             createParticleValues(10),
         ]
-        const { buffer, bytes } = await createLayoutBackedBuffer(runtime, codec, values)
+        const { buffer, region, bytes } = await createLayoutBackedBuffer(runtime, codec, values)
 
         const readback = runtime.createReadback({
-            source: buffer,
-            range: { offset: 0, byteLength: bytes.byteLength },
+            source: region,
         })
         const view = await readback.toLayoutView()
 
@@ -159,10 +160,10 @@ describe('scratch layout-aware ReadbackOperation', () => {
             createParticleValues(0),
             createParticleValues(10),
         ]
-        const { buffer } = await createLayoutBackedBuffer(runtime, codec, values)
+        const { region } = await createLayoutBackedBuffer(runtime, codec, values)
 
-        const byteReadback = runtime.createReadback({ source: buffer })
-        const viewReadback = runtime.createReadback({ source: buffer })
+        const byteReadback = runtime.createReadback({ source: region })
+        const viewReadback = runtime.createReadback({ source: region })
         const bytes = await byteReadback.toBytes()
         const view = await viewReadback.toLayoutView()
 
@@ -174,9 +175,9 @@ describe('scratch layout-aware ReadbackOperation', () => {
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
         const values = [ createParticleValues(0) ]
-        const { buffer } = await createLayoutBackedBuffer(runtime, codec, values)
+        const { buffer, region } = await createLayoutBackedBuffer(runtime, codec, values)
 
-        const layoutReadback = runtime.createReadback({ source: buffer })
+        const layoutReadback = runtime.createReadback({ source: region })
         await layoutReadback.toLayoutView()
         expect(layoutReadback.state).to.equal('consumed')
 
@@ -186,14 +187,14 @@ describe('scratch layout-aware ReadbackOperation', () => {
             phase: 'readback',
         })
         expect(layoutConsumed.subject).to.deep.equal(layoutReadback.subject)
-        expect(layoutConsumed.related).to.deep.equal([ buffer.subject ])
+        expect(layoutConsumed.related).to.deep.equal([ region.subject ])
         expect(layoutConsumed.actual).to.deep.include({
             state: 'consumed',
             retain: 'consume-on-read',
             sourceId: buffer.id,
         })
 
-        const bytesReadback = runtime.createReadback({ source: buffer })
+        const bytesReadback = runtime.createReadback({ source: region })
         await bytesReadback.toBytes()
 
         const bytesConsumed = await expectAsyncDiagnostic(() => bytesReadback.toLayoutView(), {
@@ -202,7 +203,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
             phase: 'readback',
         })
         expect(bytesConsumed.subject).to.deep.equal(bytesReadback.subject)
-        expect(bytesConsumed.related).to.deep.equal([ buffer.subject ])
+        expect(bytesConsumed.related).to.deep.equal([ region.subject ])
         expect(bytesConsumed.actual).to.deep.include({
             state: 'consumed',
             retain: 'consume-on-read',
@@ -218,7 +219,8 @@ describe('scratch layout-aware ReadbackOperation', () => {
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
         })
-        const readback = runtime.createReadback({ source: raw })
+        const region = raw.region()
+        const readback = runtime.createReadback({ source: region })
 
         const diagnostic = await expectAsyncDiagnostic(() => readback.toLayoutView(), {
             code: 'SCRATCH_READBACK_LAYOUT_MISSING',
@@ -227,7 +229,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
         })
 
         expect(diagnostic.subject).to.deep.equal(readback.subject)
-        expect(diagnostic.related).to.deep.equal([ raw.subject ])
+        expect(diagnostic.related).to.deep.equal([ region.subject ])
         expect(diagnostic.expected).to.deep.equal({ layout: 'LayoutArtifact' })
         expect(diagnostic.actual).to.deep.include({
             state: 'requested',
@@ -237,7 +239,7 @@ describe('scratch layout-aware ReadbackOperation', () => {
         })
     })
 
-    it('rejects layout views whose byte length is not a positive stride multiple', async() => {
+    it('rejects typed regions whose byte length is not a stride multiple', async() => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
@@ -247,25 +249,29 @@ describe('scratch layout-aware ReadbackOperation', () => {
         ]
         const byteLength = codec.artifact.stride + 1
         const { buffer } = await createLayoutBackedBuffer(runtime, codec, values)
-        const readback = runtime.createReadback({
-            source: buffer,
-            range: { offset: 0, byteLength },
-        })
-
-        const diagnostic = await expectAsyncDiagnostic(() => readback.toLayoutView(), {
-            code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
+        const diagnostic = await expectAsyncDiagnostic(() => buffer.region({
+                offset: 0,
+                size: byteLength,
+                layout: codec.artifact,
+            }), {
+            code: 'SCRATCH_BUFFER_REGION_LAYOUT_INVALID',
             severity: 'error',
             phase: 'layout-codec',
         })
 
         expect(diagnostic.subject).to.deep.equal({
-            kind: 'LayoutArtifact',
+            kind: 'BufferRegion',
+            resourceId: buffer.id,
+            offset: 0,
+            size: byteLength,
             abiHash: codec.artifact.abiHash,
             schemaHash: codec.artifact.schemaHash,
-            label: codec.artifact.label,
         })
-        expect(diagnostic.expected).to.deep.equal({ byteLength: `positive multiple of ${codec.artifact.stride}` })
-        expect(diagnostic.actual).to.deep.equal({ byteLength })
+        expect(diagnostic.expected).to.deep.equal({
+            offsetAlignment: codec.artifact.alignment,
+            sizeStride: codec.artifact.stride,
+        })
+        expect(diagnostic.actual).to.deep.equal({ offset: 0, size: byteLength })
     })
 
     it('keeps LayoutCodec createReadbackView working after the helper split', async() => {

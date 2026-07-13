@@ -196,7 +196,6 @@ export type {
 export { ReadbackOperation } from './readback.js'
 export type {
     ReadbackOperationDescriptor,
-    ReadbackRange,
     ReadbackRetentionPolicy,
     ReadbackState,
 } from './readback.js'

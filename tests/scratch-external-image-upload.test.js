@@ -87,7 +87,7 @@ describe('scratch external image upload', () => {
             usage: 0x8,
         })
         const bufferUpload = fixture.runtime.createUploadCommand({
-            target: buffer,
+            target: (buffer).region(),
             data: new Uint8Array(4),
         })
         const textureUpload = fixture.runtime.createTextureUploadCommand({

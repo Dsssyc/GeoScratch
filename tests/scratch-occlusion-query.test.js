@@ -41,10 +41,12 @@ async function createOcclusionFixture() {
         format: 'rgba8unorm',
         usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
     })
+    const destinationRegion = destination.region({ size: 8 })
+    const targetView = target.view()
     const pass = runtime.createRenderPass({
         label: 'visibility pass',
         color: [ {
-            target,
+            target: targetView,
             load: 'clear',
             store: 'store',
             clear: [ 0, 0, 0, 1 ],
@@ -85,8 +87,7 @@ async function createOcclusionFixture() {
             querySet,
             slots: querySlots([ 2 ], 1),
         },
-        destination,
-        destinationOffset: 0,
+        destination: destinationRegion,
         whenMissing: 'throw',
     })
     const bindLayout = runtime.createBindLayout({
@@ -102,12 +103,12 @@ async function createOcclusionFixture() {
         ],
     })
     const bindSet = runtime.createBindSet(bindLayout, {
-        visibilityUniforms: destination,
+        visibilityUniforms: destination.region(),
     }, {
         label: 'visibility destination bind set',
     })
 
-    return { ...fake, runtime, querySet, destination, target, pass, program, pipeline, draw, begin, end, resolve, bindLayout, bindSet }
+    return { ...fake, runtime, querySet, destination, destinationRegion, target, targetView, pass, program, pipeline, draw, begin, end, resolve, bindLayout, bindSet }
 }
 
 async function expectScratchDiagnostic(action, expected) {
@@ -186,9 +187,8 @@ describe('scratch occlusion query bracket commands', () => {
             .submit()
         const readback = fixture.runtime.createReadback({
             label: 'read resolved visibility',
-            source: fixture.destination,
+            source: fixture.destinationRegion,
             after: submitted,
-            range: { offset: 0, byteLength: 8 },
         })
         const bytes = await readback.toBytes()
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -288,7 +288,7 @@ describe('scratch occlusion query bracket commands', () => {
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createRenderPass({
             color: [ {
-                target: fixtureA.target,
+                target: fixtureA.targetView,
                 load: 'clear',
                 store: 'store',
             } ],
@@ -301,7 +301,7 @@ describe('scratch occlusion query bracket commands', () => {
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createRenderPass({
             color: [ {
-                target: fixtureA.target,
+                target: fixtureA.targetView,
                 load: 'clear',
                 store: 'store',
             } ],
@@ -316,7 +316,7 @@ describe('scratch occlusion query bracket commands', () => {
 
         await expectScratchDiagnostic(() => fixtureB.runtime.createRenderPass({
             color: [ {
-                target: fixtureB.target,
+                target: fixtureB.targetView,
                 load: 'clear',
                 store: 'store',
             } ],
@@ -329,7 +329,7 @@ describe('scratch occlusion query bracket commands', () => {
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createRenderPass({
             color: [ {
-                target: fixtureA.target,
+                target: fixtureA.targetView,
                 load: 'clear',
                 store: 'store',
             } ],
@@ -405,7 +405,7 @@ describe('scratch occlusion query bracket commands', () => {
         const fixture = await createOcclusionFixture()
         const passWithoutOcclusion = fixture.runtime.createRenderPass({
             color: [ {
-                target: fixture.target,
+                target: fixture.targetView,
                 load: 'clear',
                 store: 'store',
             } ],

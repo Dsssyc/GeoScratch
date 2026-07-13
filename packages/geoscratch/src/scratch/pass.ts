@@ -1,7 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { advanceQuerySlotContentEpoch, QuerySetResource } from './query-set.js'
-import { TextureResource, prepareTextureViewDescriptor } from './texture.js'
+import { TextureResource, TextureViewSpec, createNativeTextureView, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -30,7 +30,7 @@ export type TimestampWritesSpec = {
 }
 
 export type RenderPassColorAttachmentSpec = {
-    target: Surface | TextureResource
+    target: Surface | TextureViewSpec
     format?: GPUTextureFormat
     load?: GPULoadOp
     store?: GPUStoreOp
@@ -39,8 +39,7 @@ export type RenderPassColorAttachmentSpec = {
 }
 
 export type RenderPassDepthStencilAttachmentSpec = {
-    target: TextureResource
-    viewDescriptor?: GPUTextureViewDescriptor
+    target: TextureViewSpec
     depthLoad?: GPULoadOp
     depthStore?: GPUStoreOp
     depthClear?: number
@@ -449,19 +448,31 @@ function normalizeColorAttachment(
 ): RenderPassColorAttachmentSpec {
 
     const target = attachment?.target
-    if (target instanceof TextureResource) {
-        target.assertRuntime(pass.runtime)
-        validateTextureColorAttachmentUsage(pass, target)
+    if (isTextureViewSpec(target)) {
+        target.texture.assertRuntime(pass.runtime)
+        target.assertUsable()
+        validateTextureColorAttachmentUsage(pass, target.texture)
+        validateRenderAttachmentView(pass, target)
+        if (attachment.viewDescriptor !== undefined) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'resource',
+                subject: target.subject,
+                related: [ pass.subject ],
+                message: 'TextureViewSpec attachment descriptors are fixed by the view spec.',
+                expected: { viewDescriptor: undefined },
+                actual: { viewDescriptor: attachment.viewDescriptor },
+            })
+        }
 
         const normalized: RenderPassColorAttachmentSpec = {
             target,
-            format: attachment.format ?? target.format,
+            format: attachment.format ?? target.descriptor.format,
             load: attachment.load ?? 'clear',
             store: attachment.store ?? 'store',
         }
         if (attachment.clear !== undefined) normalized.clear = attachment.clear
-        if (attachment.viewDescriptor !== undefined) normalized.viewDescriptor = attachment.viewDescriptor
-
         return normalized
     }
 
@@ -471,8 +482,8 @@ function normalizeColorAttachment(
             severity: 'error',
             phase: 'submission',
             subject: pass.subject,
-            message: 'RenderPassSpec color attachment target must be a Surface or TextureResource.',
-            expected: { target: 'Surface or TextureResource' },
+            message: 'RenderPassSpec color attachment target must be a Surface or TextureViewSpec.',
+            expected: { target: 'Surface or TextureViewSpec' },
             actual: { index, target: target === undefined || target === null ? String(target) : typeof target },
         })
     }
@@ -510,8 +521,8 @@ function normalizeColorAttachment(
 function createColorAttachmentView(attachment: RenderPassColorAttachmentSpec): GPUTextureView {
 
     const target = attachment.target
-    if (target instanceof TextureResource) {
-        return target.createView(renderAttachmentViewDescriptor(attachment.viewDescriptor))
+    if (isTextureViewSpec(target)) {
+        return createNativeTextureView(target)
     }
 
     return target.getCurrentTexture().createView(attachment.viewDescriptor)
@@ -525,15 +536,17 @@ function normalizeDepthStencilAttachment(
     if (attachment === undefined) return undefined
 
     const target = attachment?.target
-    if (!(target instanceof TextureResource)) {
+    if (!isTextureViewSpec(target)) {
         throwDepthStencilAttachmentDiagnostic(pass, attachment, 'target')
     }
 
-    target.assertRuntime(pass.runtime)
-    validateTextureDepthStencilAttachmentUsage(pass, target)
+    target.texture.assertRuntime(pass.runtime)
+    target.assertUsable()
+    validateRenderAttachmentView(pass, target)
+    validateTextureDepthStencilAttachmentUsage(pass, target.texture)
 
-    const hasDepth = DEPTH_FORMATS.has(target.format)
-    const hasStencil = STENCIL_FORMATS.has(target.format)
+    const hasDepth = DEPTH_FORMATS.has(target.descriptor.format)
+    const hasStencil = STENCIL_FORMATS.has(target.descriptor.format)
     if (!hasDepth && !hasStencil) {
         throwDepthStencilAttachmentDiagnostic(pass, attachment, 'format')
     }
@@ -560,7 +573,6 @@ function normalizeDepthStencilAttachment(
     const usesStencil = hasStencil && (hasStencilFields || !hasDepth)
     const normalized: RenderPassDepthStencilAttachmentSpec = { target }
 
-    if (attachment.viewDescriptor !== undefined) normalized.viewDescriptor = attachment.viewDescriptor
     if (usesDepth) {
         normalized.depthLoad = normalizeDepthStencilLoadOp(pass, attachment.depthLoad ?? 'clear', attachment, 'depthLoad')
         normalized.depthStore = normalizeDepthStencilStoreOp(pass, attachment.depthStore ?? 'store', attachment, 'depthStore')
@@ -626,7 +638,7 @@ function createDepthStencilAttachmentDescriptor(
 ): GPURenderPassDepthStencilAttachment {
 
     const descriptor: GPURenderPassDepthStencilAttachment = {
-        view: attachment.target.createView(renderAttachmentViewDescriptor(attachment.viewDescriptor)),
+        view: createNativeTextureView(attachment.target),
     }
     if (attachment.depthLoad !== undefined) descriptor.depthLoadOp = attachment.depthLoad
     if (attachment.depthStore !== undefined) descriptor.depthStoreOp = attachment.depthStore
@@ -643,13 +655,9 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
     pass.assertUsable()
     const extents: RenderAttachmentExtent[] = []
     for (const attachment of pass.color) {
-        if (attachment.target instanceof TextureResource) {
-            const descriptor = validateRenderAttachmentView(
-                pass,
-                attachment.target,
-                attachment.viewDescriptor
-            )
-            extents.push(textureRenderAttachmentExtent(attachment.target, descriptor))
+        if (isTextureViewSpec(attachment.target)) {
+            validateRenderAttachmentView(pass, attachment.target)
+            extents.push(textureRenderAttachmentExtent(attachment.target))
             continue
         }
 
@@ -662,12 +670,8 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
         })
     }
     if (pass.depth !== undefined) {
-        const descriptor = validateRenderAttachmentView(
-            pass,
-            pass.depth.target,
-            pass.depth.viewDescriptor
-        )
-        extents.push(textureRenderAttachmentExtent(pass.depth.target, descriptor))
+        validateRenderAttachmentView(pass, pass.depth.target)
+        extents.push(textureRenderAttachmentExtent(pass.depth.target))
     }
 
     validateMatchingRenderAttachmentExtents(pass, extents)
@@ -675,15 +679,11 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
 
 function validateRenderAttachmentView(
     pass: RenderPassSpec,
-    target: TextureResource,
-    descriptor?: GPUTextureViewDescriptor
-): GPUTextureViewDescriptor {
+    view: TextureViewSpec
+): void {
 
-    target.assertRuntime(pass.runtime)
-    const prepared = prepareTextureViewDescriptor(
-        target,
-        renderAttachmentViewDescriptor(descriptor)
-    )
+    view.texture.assertRuntime(pass.runtime)
+    const prepared = prepareTextureViewSpecDescriptor(view)
     if (
         prepared.dimension !== '2d' ||
         prepared.mipLevelCount !== 1 ||
@@ -693,7 +693,7 @@ function validateRenderAttachmentView(
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
-            subject: target.subject,
+            subject: view.subject,
             related: [ pass.subject ],
             message: 'Render attachment views must select exactly one 2D mip-level array layer.',
             expected: {
@@ -707,18 +707,17 @@ function validateRenderAttachmentView(
         })
     }
 
-    return prepared
 }
 
 function textureRenderAttachmentExtent(
-    target: TextureResource,
-    descriptor: GPUTextureViewDescriptor
+    view: TextureViewSpec
 ): RenderAttachmentExtent {
 
-    const baseMipLevel = descriptor.baseMipLevel ?? 0
+    const target = view.texture
+    const baseMipLevel = view.descriptor.baseMipLevel
     const divisor = 2 ** baseMipLevel
     return {
-        subject: target.subject,
+        subject: view.subject,
         width: Math.max(1, Math.floor(target.width / divisor)),
         height: Math.max(1, Math.floor(target.height / divisor)),
         sampleCount: target.sampleCount,
@@ -763,17 +762,6 @@ function validateMatchingRenderAttachmentExtents(
     })
 }
 
-function renderAttachmentViewDescriptor(
-    descriptor?: GPUTextureViewDescriptor
-): GPUTextureViewDescriptor {
-
-    const normalized = { ...descriptor }
-    if (normalized.dimension === undefined) normalized.dimension = '2d'
-    if (normalized.mipLevelCount === undefined) normalized.mipLevelCount = 1
-    if (normalized.arrayLayerCount === undefined) normalized.arrayLayerCount = 1
-    return normalized
-}
-
 function validateTextureDepthStencilAttachmentUsage(pass: RenderPassSpec, texture: TextureResource) {
 
     if ((texture.usage & TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0) return
@@ -806,9 +794,9 @@ function throwDepthStencilAttachmentDiagnostic(
         related: [
             diagnosticSubjectOf(target),
         ].filter(isDefined),
-        message: 'RenderPassSpec depth attachment requires a depth/stencil TextureResource owned by this ScratchRuntime.',
+        message: 'RenderPassSpec depth attachment requires a depth/stencil TextureViewSpec owned by this ScratchRuntime.',
         expected: {
-            target: 'TextureResource with depth/stencil format and GPUTextureUsage.RENDER_ATTACHMENT',
+            target: 'TextureViewSpec with depth/stencil format and GPUTextureUsage.RENDER_ATTACHMENT',
             depthLoad: [ 'clear', 'load' ],
             depthStore: [ 'store', 'discard' ],
             stencilLoad: [ 'clear', 'load' ],
@@ -817,7 +805,7 @@ function throwDepthStencilAttachmentDiagnostic(
         actual: {
             reason,
             target: describeValue(target),
-            format: target instanceof TextureResource ? target.format : undefined,
+            format: isTextureViewSpec(target) ? target.descriptor.format : undefined,
             depthLoad: isRecord(attachment) ? attachment.depthLoad : undefined,
             depthStore: isRecord(attachment) ? attachment.depthStore : undefined,
             depthClear: isRecord(attachment) ? attachment.depthClear : undefined,

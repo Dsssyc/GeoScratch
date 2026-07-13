@@ -118,7 +118,7 @@ async function createBufferBindings(runtime, entries) {
 
     entries.forEach((entry, index) => {
         const buffer = buffers[index]
-        bindings[entry.name] = buffer
+        bindings[entry.name] = buffer.region({ size: 16 })
     })
 
     return { bindings, buffers }
@@ -128,9 +128,8 @@ function createUploads(runtime, buffers) {
 
     return buffers.map((buffer, index) => runtime.createUploadCommand({
         label: `upload ${index}`,
-        target: buffer,
+        target: buffer.region({ size: 16 }),
         data: new Uint8Array(16),
-        offset: 0,
     }))
 }
 

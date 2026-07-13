@@ -52,7 +52,7 @@ device calls and are excluded. Every actual `device.createBuffer()` and
 
 | ID | Native call site | Native object | Classification | Fact |
 | --- | --- | --- | --- | --- |
-| N1 | `packages/geoscratch/src/scratch/buffer.ts:464` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
+| N1 | `packages/geoscratch/src/scratch/buffer.ts:453` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
 | N2 | `packages/geoscratch/src/scratch/readback-staging.ts:142` | Buffer | Acknowledged readback staging | Shared direct and ordered staging allocation transaction covered by ADR-034. |
 | N3 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:4674` | Buffer | Raw native escape hatch | Legacy/vendored uniform-buffer utility outside Scratch operation provenance. |
 | N4 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5073` | Buffer | Raw native escape hatch | Legacy/vendored generic vertex-buffer utility. |
@@ -61,8 +61,8 @@ device calls and are excluded. Every actual `device.createBuffer()` and
 | N7 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4562` | Buffer | Raw native escape hatch | Legacy binding utility index-buffer path. |
 | N8 | `packages/geoscratch/src/gpu/director/director.js:195` | Buffer | Raw native escape hatch | Legacy director persistent buffer creation. |
 | N9 | `packages/geoscratch/src/gpu/director/director.js:371` | Buffer | Raw native escape hatch | Legacy director temporary texture-copy staging buffer. |
-| N10 | `packages/geoscratch/src/scratch/texture.ts:275` | Texture | Covered by this goal | Public persistent texture replacement transaction. |
-| N11 | `packages/geoscratch/src/scratch/texture.ts:460` | Texture | Covered by this goal | Public persistent initial texture transaction. |
+| N10 | `packages/geoscratch/src/scratch/texture.ts:273` | Texture | Covered by this goal | Public persistent texture replacement transaction. |
+| N11 | `packages/geoscratch/src/scratch/texture.ts:452` | Texture | Covered by this goal | Public persistent initial texture transaction. |
 | N12 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5352` | Texture | Raw native escape hatch | Legacy/vendored texture-from-source utility. |
 | N13 | `packages/geoscratch/src/gpu/binding/webgpu-utils.module.js:4767` | Texture | Raw native escape hatch | Legacy binding texture-from-source utility. |
 | N14 | `packages/geoscratch/src/gpu/director/director.js:341` | Texture | Raw native escape hatch | Legacy director intermediate image texture. |

@@ -1,8 +1,8 @@
 import { UUID } from '../core/utils/uuid.js'
-import { BufferResource } from './buffer.js'
+import { BufferRegion, isBufferRegion } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { SamplerResource } from './sampler.js'
-import { TextureResource, prepareTextureBindingViewDescriptor } from './texture.js'
+import { TextureViewSpec, createNativeTextureView, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
 import { describeValue, getGlobalConstant } from './type-utils.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -85,7 +85,7 @@ export type BindLayoutDescriptor = {
     entries: BindLayoutEntry[]
 }
 
-export type BindSetBindings = Record<string, BufferResource | TextureResource | SamplerResource>
+export type BindSetBindings = Record<string, BufferRegion | TextureViewSpec | SamplerResource>
 
 export type BindSetOptions = {
     label?: string
@@ -93,7 +93,7 @@ export type BindSetOptions = {
 
 type NormalizedBindSetBinding = {
     readonly entry: BindLayoutEntry
-    readonly resource: BufferResource | TextureResource | SamplerResource
+    readonly resource: BufferRegion | TextureViewSpec | SamplerResource
 }
 
 export interface BindLayout {
@@ -308,8 +308,8 @@ export class BindSet {
             this.gpuBindGroup = this.runtime.device.createBindGroup(descriptor)
             this.boundAllocationVersions = new Map(
                 [ ...this.bindings.values() ].map(binding => [
-                    binding.resource.id,
-                    binding.resource.allocationVersion,
+                    bindingResourceId(binding.resource),
+                    bindingAllocationVersion(binding.resource),
                 ])
             )
         }
@@ -320,7 +320,10 @@ export class BindSet {
     hasStaleAllocationVersions(): boolean {
 
         for (const binding of this.bindings.values()) {
-            if (this.boundAllocationVersions.get(binding.resource.id) !== binding.resource.allocationVersion) {
+            if (
+                this.boundAllocationVersions.get(bindingResourceId(binding.resource)) !==
+                bindingAllocationVersion(binding.resource)
+            ) {
                 return true
             }
         }
@@ -340,6 +343,20 @@ function lockNormalizedBindings(
 
     for (const binding of bindings.values()) Object.freeze(binding)
     return readonlyMapSnapshot(bindings)
+}
+
+function bindingResourceId(resource: BufferRegion | TextureViewSpec | SamplerResource): string {
+
+    if (isBufferRegion(resource)) return resource.buffer.id
+    if (isTextureViewSpec(resource)) return resource.texture.id
+    return resource.id
+}
+
+function bindingAllocationVersion(resource: BufferRegion | TextureViewSpec | SamplerResource): number {
+
+    if (isBufferRegion(resource)) return resource.buffer.allocationVersion
+    if (isTextureViewSpec(resource)) return resource.texture.allocationVersion
+    return resource.allocationVersion
 }
 
 function normalizeGroup(layout: BindLayout, group: number) {
@@ -541,23 +558,24 @@ function validateBindingResource(bindSet: BindSet, entry: BindLayoutEntry, resou
 
 function validateBufferResource(bindSet: BindSet, entry: BufferBindLayoutEntry, resource: unknown) {
 
-    if (!(resource instanceof BufferResource)) {
+    if (!isBufferRegion(resource)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
             severity: 'error',
             phase: 'binding',
             subject: bindSet.layout.entrySubject(entry),
             related: [ bindSet.subject ],
-            message: 'BindSet buffer entries require BufferResource bindings.',
-            expected: { type: 'BufferResource' },
+            message: 'BindSet buffer entries require BufferRegion bindings.',
+            expected: { type: 'BufferRegion' },
             actual: { resource: describeValue(resource) },
         })
     }
 
-    resource.assertRuntime(bindSet.runtime)
+    resource.buffer.assertRuntime(bindSet.runtime)
+    resource.assertUsable()
 
     const requiredUsage = REQUIRED_BUFFER_USAGE[entry.type]
-    if (typeof resource.usage === 'number' && (resource.usage & requiredUsage) === 0) {
+    if ((resource.buffer.usage & requiredUsage) === 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_USAGE_MISSING',
             severity: 'error',
@@ -566,29 +584,30 @@ function validateBufferResource(bindSet: BindSet, entry: BufferBindLayoutEntry, 
             related: [ bindSet.layout.entrySubject(entry), bindSet.subject ],
             message: 'Buffer binding requires a buffer created with compatible usage.',
             expected: { usage: entry.type },
-            actual: { usage: resource.usage },
+            actual: { usage: resource.buffer.usage },
         })
     }
 }
 
 function validateTextureResource(bindSet: BindSet, entry: TextureBindLayoutEntry, resource: unknown) {
 
-    if (!(resource instanceof TextureResource)) {
+    if (!isTextureViewSpec(resource)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
             severity: 'error',
             phase: 'binding',
             subject: bindSet.layout.entrySubject(entry),
             related: [ bindSet.subject ],
-            message: 'BindSet texture entries require TextureResource bindings.',
-            expected: { type: 'TextureResource' },
+            message: 'BindSet texture entries require TextureViewSpec bindings.',
+            expected: { type: 'TextureViewSpec' },
             actual: { resource: describeValue(resource) },
         })
     }
 
-    resource.assertRuntime(bindSet.runtime)
+    resource.texture.assertRuntime(bindSet.runtime)
+    resource.assertUsable()
 
-    if (typeof resource.usage === 'number' && (resource.usage & TEXTURE_USAGE_TEXTURE_BINDING) === 0) {
+    if ((resource.texture.usage & TEXTURE_USAGE_TEXTURE_BINDING) === 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_USAGE_MISSING',
             severity: 'error',
@@ -597,11 +616,23 @@ function validateTextureResource(bindSet: BindSet, entry: TextureBindLayoutEntry
             related: [ bindSet.layout.entrySubject(entry), bindSet.subject ],
             message: 'Texture binding requires a texture created with compatible usage.',
             expected: { usage: 'GPUTextureUsage.TEXTURE_BINDING' },
-            actual: { usage: resource.usage },
+            actual: { usage: resource.texture.usage },
         })
     }
 
-    prepareTextureBindingViewDescriptor(resource, { dimension: entry.viewDimension ?? '2d' })
+    const descriptor = prepareTextureViewSpecDescriptor(resource, true)
+    if (descriptor.dimension !== (entry.viewDimension ?? '2d')) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
+            severity: 'error',
+            phase: 'binding',
+            subject: bindSet.layout.entrySubject(entry),
+            related: [ bindSet.subject, resource.subject ],
+            message: 'TextureViewSpec dimension must match its BindLayout entry.',
+            expected: { viewDimension: entry.viewDimension ?? '2d' },
+            actual: { viewDimension: descriptor.dimension },
+        })
+    }
 }
 
 function validateSamplerResource(bindSet: BindSet, entry: SamplerBindLayoutEntry, resource: unknown) {
@@ -659,14 +690,16 @@ function createBindingResource(binding: NormalizedBindSetBinding): GPUBindingRes
 
     const resource = binding.resource
 
-    if (resource instanceof BufferResource) {
+    if (isBufferRegion(resource)) {
         return {
-            buffer: resource.gpuBuffer,
+            buffer: resource.buffer.gpuBuffer,
+            offset: resource.offset,
+            size: resource.size,
         }
     }
 
-    if (resource instanceof TextureResource && binding.entry.type === 'texture') {
-        return resource.createView({ dimension: binding.entry.viewDimension ?? '2d' })
+    if (isTextureViewSpec(resource) && binding.entry.type === 'texture') {
+        return createNativeTextureView(resource, true)
     }
 
     if (resource instanceof SamplerResource) {

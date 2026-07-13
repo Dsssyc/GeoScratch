@@ -119,22 +119,24 @@ function createBindLayout(runtime, overrides = {}) {
 
 async function createLayoutBuffer(runtime, codec) {
 
-    return await runtime.createBuffer({
+    const buffer = await runtime.createBuffer({
         label: 'particles',
         size: codec.artifact.stride * 2,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
-        layout: codec.artifact,
-        elementCount: 2,
     })
+
+    return buffer.region({ layout: codec.artifact })
 }
 
 async function createRawBuffer(runtime, size = 32) {
 
-    return await runtime.createBuffer({
+    const buffer = await runtime.createBuffer({
         label: 'raw bytes',
         size,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
     })
+
+    return buffer.region()
 }
 
 function expectDiagnostic(fn, include) {
@@ -463,7 +465,7 @@ describe('scratch Program buffer layout requirements', () => {
             bindSets: [ renderSet ],
             count: { vertexCount: 3 },
             resources: {
-                read: [ readResource(renderSet.bindings.get('particles').resource) ],
+                read: [ readResource(renderSet.bindings.get('particles').resource.buffer) ],
                 write: [],
             },
             whenMissing: 'throw',
@@ -564,7 +566,7 @@ describe('scratch Program buffer layout requirements', () => {
                 bindSets: [ renderSet ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ readResource(renderSet.bindings.get('particles').resource) ],
+                    read: [ readResource(renderSet.bindings.get('particles').resource.buffer) ],
                     write: [],
                 },
                 whenMissing: 'throw',
@@ -624,7 +626,7 @@ describe('scratch Program buffer layout requirements', () => {
                 bindSets: [ renderSet ],
                 count: { vertexCount: 3 },
                 resources: {
-                    read: [ readResource(renderSet.bindings.get('particles').resource) ],
+                    read: [ readResource(renderSet.bindings.get('particles').resource.buffer) ],
                     write: [],
                 },
                 whenMissing: 'throw',

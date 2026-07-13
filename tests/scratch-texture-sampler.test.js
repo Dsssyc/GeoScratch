@@ -58,7 +58,7 @@ async function createTextureFixture({ features = [] } = {}) {
         ],
     })
     const bindSet = runtime.createBindSet(bindLayout, {
-        colorTexture: texture,
+        colorTexture: texture.view(),
         colorSampler: sampler,
     }, {
         label: 'texture sampling set',
@@ -114,11 +114,12 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             label: `checker texture [scratch:${fixture.texture.id}]`,
         })
 
-        const firstView = fixture.texture.createView()
-        const secondView = fixture.texture.createView()
+        const firstView = fixture.texture.view()
+        const secondView = fixture.texture.view()
 
-        expect(firstView).to.equal(secondView)
-        expect(fixture.calls.textureViews).to.have.length(1)
+        expect(firstView).not.to.equal(secondView)
+        expect(firstView.hash).to.equal(secondView.hash)
+        expect(fixture.calls.textureViews).to.have.length(0)
 
         expect(fixture.sampler.descriptor).to.deep.equal({
             label: 'nearest sampler',
@@ -198,7 +199,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const bindGroup = fixture.bindSet.getBindGroup()
 
         expect(fixture.calls.bindGroups).to.have.length(1)
-        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({ dimension: '2d' })
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.include({ dimension: '2d' })
         expect(fixture.calls.bindGroups[0]).to.equal(bindGroup)
         expect(fixture.calls.bindGroups[0].descriptor.entries).to.deep.equal([
             {
@@ -221,10 +222,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const secondBindGroup = fixture.bindSet.getBindGroup()
 
         expect(secondBindGroup).to.not.equal(firstBindGroup)
-        expect(fixture.calls.textureViews.map(view => view.descriptor)).to.deep.equal([
-            { dimension: '2d' },
-            { dimension: '2d' },
-        ])
+        expect(fixture.calls.textureViews.map(view => view.descriptor.dimension)).to.deep.equal([ '2d', '2d' ])
         expect(fixture.calls.textureViews[1].texture).to.equal(fixture.texture.gpuTexture)
         expect(fixture.calls.bindGroups).to.have.length(2)
     })
@@ -273,17 +271,16 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
                 viewDimension: '2d-array',
             } ],
         })
-        const bindSet = runtime.createBindSet(layout, { arrayTexture: texture })
+        const bindSet = runtime.createBindSet(layout, {
+            arrayTexture: texture.view({ dimension: '2d-array' }),
+        })
         const firstBindGroup = bindSet.getBindGroup()
 
         await texture.resize([ 2, 2, 3 ])
         const secondBindGroup = bindSet.getBindGroup()
 
         expect(secondBindGroup).to.not.equal(firstBindGroup)
-        expect(fake.calls.textureViews.map(view => view.descriptor)).to.deep.equal([
-            { dimension: '2d-array' },
-            { dimension: '2d-array' },
-        ])
+        expect(fake.calls.textureViews.map(view => view.descriptor.dimension)).to.deep.equal([ '2d-array', '2d-array' ])
     })
 
     it('revalidates bind-layout view dimensions after array-layer resize', async() => {
@@ -306,7 +303,9 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
                 viewDimension: 'cube',
             } ],
         })
-        const bindSet = runtime.createBindSet(layout, { cubeTexture: texture })
+        const bindSet = runtime.createBindSet(layout, {
+            cubeTexture: texture.view({ dimension: 'cube' }),
+        })
         bindSet.getBindGroup()
         const bindGroupCount = fake.calls.bindGroups.length
         const viewCount = fake.calls.textureViews.length
@@ -510,7 +509,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             ],
         })
         const bindSet = fixture.runtime.createBindSet(bindLayout, {
-            colorTexture: fixture.texture,
+            colorTexture: fixture.texture.view(),
         })
         const program = fixture.runtime.createProgram({
             modules: [
@@ -634,7 +633,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
 
         try {
             fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
-                colorTexture: fixtureB.texture,
+                colorTexture: fixtureB.texture.view(),
                 colorSampler: fixtureA.sampler,
             })
             throw new Error('expected wrong-runtime texture binding to fail')
@@ -670,7 +669,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
 
         try {
             fixtureA.runtime.createBindSet(fixtureA.bindLayout, {
-                colorTexture: unbindableTexture,
+                colorTexture: unbindableTexture.view(),
                 colorSampler: replacementSampler,
             })
             throw new Error('expected missing texture binding usage to fail')

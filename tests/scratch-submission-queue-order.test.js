@@ -62,7 +62,7 @@ async function createBufferUpload(runtime, label, data = new Uint8Array(16)) {
         size: data.byteLength,
         usage: GPU_BUFFER_USAGE_COPY_DST,
     })
-    const command = runtime.createUploadCommand({ label, target, data })
+    const command = runtime.createUploadCommand({ label, target: target.region(), data })
 
     return { target, command }
 }
@@ -124,7 +124,7 @@ async function createRenderWork(runtime) {
     const pass = runtime.createRenderPass({
         label: 'external upload render pass',
         color: [ {
-            target,
+            target: target.view(),
             load: 'clear',
             store: 'store',
             clear: [ 0, 0, 0, 1 ],
@@ -261,21 +261,19 @@ async function createOrderingFixture() {
 
     const firstCopy = runtime.createCopyCommand({
         label: 'queue order first copy',
-        source: { resource: copySource, contentEpoch: 1 },
-        target: firstCopyTarget,
-        byteLength: 16,
+        source: { region: copySource.region(), contentEpoch: 1 },
+        target: firstCopyTarget.region(),
         whenMissing: 'throw',
     })
     const secondCopy = runtime.createCopyCommand({
         label: 'queue order second copy',
-        source: { resource: copySource, contentEpoch: 1 },
-        target: secondCopyTarget,
-        byteLength: 16,
+        source: { region: copySource.region(), contentEpoch: 1 },
+        target: secondCopyTarget.region(),
         whenMissing: 'throw',
     })
     const upload = runtime.createUploadCommand({
         label: 'queue order upload',
-        target: uploadTarget,
+        target: (uploadTarget).region(),
         data: new Uint8Array(16),
     })
     const texture = await createTextureUpload(runtime, 'queue order texture upload')
@@ -519,7 +517,7 @@ describe('scratch submission queue order', () => {
         const firstExternal = await createExternalImageUpload(fixture.runtime, 'external before copy and readback')
         const secondExternal = await createExternalImageUpload(fixture.runtime, 'external before compute and render')
         const readback = await fixture.runtime.createReadbackCommand({
-            source: { resource: fixture.copySource, contentEpoch: 1 },
+            source: { region: (fixture.copySource).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const compute = await createComputeWork(fixture.runtime)
@@ -783,12 +781,12 @@ describe('scratch submission queue order', () => {
         const fixture = await createOrderingFixture()
         const firstReadback = await fixture.runtime.createReadbackCommand({
             label: 'submitted readback before failed external upload',
-            source: { resource: fixture.copySource, contentEpoch: 1 },
+            source: { region: (fixture.copySource).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const laterReadback = await fixture.runtime.createReadbackCommand({
             label: 'unreplayed readback after failed external upload',
-            source: { resource: fixture.copySource, contentEpoch: 1 },
+            source: { region: (fixture.copySource).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const failed = await createExternalImageUpload(fixture.runtime, 'external failure between readbacks')
@@ -875,7 +873,7 @@ describe('scratch submission queue order', () => {
         const pass = fixture.runtime.createRenderPass({
             label: 'queue order render pass',
             color: [ {
-                target,
+                target: target.view(),
                 load: 'clear',
                 store: 'store',
                 clear: [ 0, 0, 0, 1 ],
@@ -930,7 +928,7 @@ describe('scratch submission queue order', () => {
                 querySet,
                 slots: [ { index: 0, contentEpoch: 1 } ],
             },
-            destination,
+            destination: destination.region(),
             whenMissing: 'throw',
         })
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
@@ -1066,7 +1064,7 @@ describe('scratch submission queue order', () => {
         const fixture = await createOrderingFixture()
         const refresh = fixture.runtime.createUploadCommand({
             label: 'refresh before invalid copy',
-            target: fixture.copySource,
+            target: (fixture.copySource).region(),
             data: new Uint8Array(16).fill(5),
         })
 
@@ -1111,7 +1109,7 @@ describe('scratch submission queue order', () => {
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })
         const data = new ArrayBuffer(16)
-        const upload = runtime.createUploadCommand({ target, data })
+        const upload = runtime.createUploadCommand({ target: target.region(), data })
         structuredClone(data, { transfer: [ data ] })
 
         expectScratchDiagnostic(() => runtime.createSubmission({ validation: 'throw' })
@@ -1203,7 +1201,7 @@ describe('scratch submission queue order', () => {
             const refreshBytes = new Uint8Array(16).fill(9)
             const refresh = fixture.runtime.createUploadCommand({
                 label: `${validation} refresh`,
-                target: fixture.copySource,
+                target: (fixture.copySource).region(),
                 data: refreshBytes,
             })
             const submitted = fixture.runtime.createSubmission({ validation })
@@ -1285,18 +1283,18 @@ describe('scratch submission queue order', () => {
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
         })
         const initialUpload = runtime.createUploadCommand({
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 1, 2 ]),
         })
         initialUpload.execute(fake.queue)
         fake.calls.queueTimeline.length = 0
         const readback = await runtime.createReadbackCommand({
             label: 'read before later upload',
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const laterUpload = runtime.createUploadCommand({
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 9, 10 ]),
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -1323,12 +1321,12 @@ describe('scratch submission queue order', () => {
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
         })
         const upload = runtime.createUploadCommand({
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 3, 4 ]),
         })
         const readback = await runtime.createReadbackCommand({
             label: 'read uploaded bytes',
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -1356,22 +1354,22 @@ describe('scratch submission queue order', () => {
         })
         const firstUpload = runtime.createUploadCommand({
             label: 'epoch one upload',
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 1, 2 ]),
         })
         const firstReadback = await runtime.createReadbackCommand({
             label: 'epoch one readback',
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: (source).region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const secondUpload = runtime.createUploadCommand({
             label: 'epoch two upload',
-            target: source,
+            target: (source).region(),
             data: new Uint32Array([ 7, 8 ]),
         })
         const secondReadback = await runtime.createReadbackCommand({
             label: 'epoch two readback',
-            source: { resource: source, contentEpoch: 2 },
+            source: { region: (source).region(), contentEpoch: 2 },
             whenMissing: 'throw',
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })

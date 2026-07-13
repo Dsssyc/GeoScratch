@@ -43,7 +43,7 @@ function settlePendingScopes(fixture) {
 function createUpload(runtime, target, value) {
 
     return runtime.createUploadCommand({
-        target,
+        target: target.region(),
         data: new Uint32Array([ value, value, value, value ]),
     })
 }
@@ -127,9 +127,8 @@ describe('scratch submission content indeterminacy', () => {
             usage: GPU_BUFFER_USAGE_COPY_DST,
         })
         const copy = fixture.runtime.createCopyCommand({
-            source: { resource: target, contentEpoch: 1 },
-            target: copyTarget,
-            byteLength: 16,
+            source: { region: target.region(), contentEpoch: 1 },
+            target: copyTarget.region(),
             whenMissing: 'throw',
         })
         const queueFailure = new Error('later queue submit throws')
@@ -172,7 +171,7 @@ describe('scratch submission content indeterminacy', () => {
         const failed = fixture.runtime.submission()
             .upload(createUpload(fixture.runtime, target, 1))
             .submit()
-        const readback = fixture.runtime.createReadback({ source: target })
+        const readback = fixture.runtime.createReadback({ source: (target).region() })
         settlePendingScopes(fixture)
         await expectScratchDiagnostic(() => failed.done, {
             code: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
@@ -353,9 +352,8 @@ describe('scratch submission content indeterminacy', () => {
             .upload(createUpload(fixture.runtime, source, 7))
             .submit().done
         const copy = fixture.runtime.createCopyCommand({
-            source: { resource: source, contentEpoch: 1 },
-            target,
-            byteLength: 16,
+            source: { region: source.region(), contentEpoch: 1 },
+            target: target.region(),
             whenMissing: 'throw',
         })
         fixture.readbacks.rejectNextQueueCompletion(new Error('copy queue completion rejected'))
@@ -464,7 +462,7 @@ describe('scratch submission content indeterminacy', () => {
             })
             setResourceContentState(source, 'indeterminate', 1)
             const command = await fixture.runtime.createReadbackCommand({
-                source: { resource: source, contentEpoch: 1 },
+                source: { region: (source).region(), contentEpoch: 1 },
                 whenMissing: 'throw',
             })
             const encoderCount = fixture.calls.commandEncoders.length
@@ -493,6 +491,7 @@ describe('scratch submission content indeterminacy', () => {
             usage: GPU_BUFFER_USAGE_QUERY_RESOLVE | GPU_BUFFER_USAGE_COPY_SRC,
         })
         const querySet = fixture.runtime.createQuerySet({ type: 'timestamp', count: 2 })
+        const destinationRegion = destination.region({ size: 8 })
         const pipeline = await createComputePipeline(fixture.runtime)
         const dispatch = fixture.runtime.createDispatchCommand({
             pipeline,
@@ -547,7 +546,7 @@ describe('scratch submission content indeterminacy', () => {
 
         const resolveEpochOne = fixture.runtime.createResolveQuerySetCommand({
             source: { querySet, slots: [ { index: 0, contentEpoch: 1 } ] },
-            destination,
+            destination: destinationRegion,
             whenMissing: 'throw',
         })
         for (const validation of [ 'throw', 'warn', 'off' ]) {
@@ -572,7 +571,7 @@ describe('scratch submission content indeterminacy', () => {
 
         const resolveEpochTwo = fixture.runtime.createResolveQuerySetCommand({
             source: { querySet, slots: [ { index: 0, contentEpoch: 2 } ] },
-            destination,
+            destination: destinationRegion,
             whenMissing: 'throw',
         })
         fixture.fakeOptions.deferErrorScopePops = true
@@ -596,8 +595,9 @@ describe('scratch submission content indeterminacy', () => {
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
         })
         const querySet = fixture.runtime.createQuerySet({ type: 'occlusion', count: 1 })
+        const targetView = target.view()
         const clearPass = fixture.runtime.createRenderPass({
-            color: [ { target, load: 'clear', store: 'store' } ],
+            color: [ { target: targetView, load: 'clear', store: 'store' } ],
             occlusionQuerySet: querySet,
         })
         const begin = fixture.runtime.createBeginOcclusionQueryCommand({ querySet, index: 0 })
@@ -621,7 +621,7 @@ describe('scratch submission content indeterminacy', () => {
         ])
 
         const loadPass = fixture.runtime.createRenderPass({
-            color: [ { target, load: 'load', store: 'store' } ],
+            color: [ { target: targetView, load: 'load', store: 'store' } ],
         })
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const encoderCount = fixture.calls.commandEncoders.length

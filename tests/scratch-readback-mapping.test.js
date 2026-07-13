@@ -34,7 +34,7 @@ async function createDirectReadback(fakeOptions = {}, retain = 'consume-on-read'
     } else {
         source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
     }
-    const operation = runtime.createReadback({ source, retain })
+    const operation = runtime.createReadback({ source: source.region(), retain })
     return { fake, runtime, source, operation }
 }
 
@@ -44,11 +44,11 @@ async function createOrderedReadback(fakeOptions = {}) {
     const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
     const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
     const upload = runtime.createUploadCommand({
-        target: source,
+        target: (source).region(),
         data: new Uint8Array(16),
     })
     const command = await runtime.createReadbackCommand({
-        source: { resource: source, contentEpoch: 1 },
+        source: { region: (source).region(), contentEpoch: 1 },
         whenMissing: 'throw',
     })
     const stagingBuffer = fake.calls.buffers.at(-1)

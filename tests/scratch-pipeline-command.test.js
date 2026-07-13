@@ -230,12 +230,14 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             size: 4,
             usage: GPU_BUFFER_USAGE_VERTEX | GPU_BUFFER_USAGE_COPY_DST,
         })
+        const vertexRegion = vertexBuffer.region()
+        const instanceRegion = instanceBuffer.region()
         const command = runtime.createDrawCommand({
             label: 'draw vertex buffer triangle',
             pipeline,
             vertexBuffers: [
-                { slot: 0, buffer: vertexBuffer },
-                { slot: 1, buffer: instanceBuffer, offset: 0, size: 4 },
+                { slot: 0, region: vertexRegion },
+                { slot: 1, region: instanceRegion },
             ],
             count: { vertexCount: 3, instanceCount: 1 },
             resources: {
@@ -262,8 +264,8 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         command.encode(passEncoder)
 
         expect(command.vertexBuffers).to.deep.equal([
-            { slot: 0, buffer: vertexBuffer, offset: 0, size: undefined },
-            { slot: 1, buffer: instanceBuffer, offset: 0, size: 4 },
+            { slot: 0, region: vertexRegion },
+            { slot: 1, region: instanceRegion },
         ])
         expect(command.resources).to.deep.equal({
             read: [
@@ -274,7 +276,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         })
         expect(calls.drawCalls).to.deep.equal([
             { type: 'setPipeline', pipeline: pipeline.gpuPipeline },
-            { type: 'setVertexBuffer', slot: 0, buffer: vertexBuffer.gpuBuffer, offset: 0, size: undefined },
+            { type: 'setVertexBuffer', slot: 0, buffer: vertexBuffer.gpuBuffer, offset: 0, size: 60 },
             { type: 'setVertexBuffer', slot: 1, buffer: instanceBuffer.gpuBuffer, offset: 0, size: 4 },
             { type: 'draw', vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0 },
         ])
@@ -557,7 +559,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             runtimeA.createDrawCommand({
                 pipeline,
                 vertexBuffers: [
-                    { slot: 0, buffer: foreignBuffer },
+                    { slot: 0, region: foreignBuffer.region() },
                 ],
                 count: { vertexCount: 3 },
                 resources: {
@@ -600,6 +602,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             size: 24,
             usage: GPU_BUFFER_USAGE_VERTEX,
         })
+        const region = buffer.region()
 
         buffer.dispose()
 
@@ -607,7 +610,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             runtime.createDrawCommand({
                 pipeline,
                 vertexBuffers: [
-                    { slot: 0, buffer },
+                    { slot: 0, region },
                 ],
                 count: { vertexCount: 3 },
                 resources: {
@@ -653,7 +656,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             runtime.createDrawCommand({
                 pipeline,
                 vertexBuffers: [
-                    { slot: 0, buffer, offset: -4 },
+                    { slot: 0, region: buffer.region({ size: 0 }) },
                 ],
                 count: { vertexCount: 3 },
                 resources: {
@@ -671,7 +674,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 phase: 'command',
             })
             expect(error.diagnostic.expected).to.deep.include({
-                offset: 'non-negative integer',
+                region: 'non-empty BufferRegion',
             })
         }
     })

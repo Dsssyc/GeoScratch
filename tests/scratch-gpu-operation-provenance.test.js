@@ -345,14 +345,15 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
             label: longResourceLabel,
             size: codec.artifact.stride,
             usage: 1,
-            layout: codec.artifact,
         })
+        const capturedRegion = capturedBuffer.region({ layout: codec.artifact })
         const captureReport = capture.stop()
         expect(calls.buffers[1].descriptor.label).to.equal(
             `${longResourceLabel} [scratch:${capturedBuffer.id}]`
         )
         expect(captureReport.operations[0].descriptor.full.label.length).to.be.at.most(256)
-        expect(captureReport.operations[0].descriptor.full.layout.label.length).to.be.at.most(256)
+        expect(captureReport.operations[0].descriptor.full).not.to.have.property('layout')
+        expect(capturedRegion.layout).to.equal(codec.artifact)
         expect(JSON.stringify(captureReport)).not.to.include(longResourceLabel)
         expect(JSON.stringify(captureReport)).not.to.include(longLayoutLabel)
     })
@@ -1074,7 +1075,7 @@ describe('TextureResource transactional replacement allocation', () => {
         const texture = await initial
         advanceResourceContentEpochForTest(texture)
         const oldTexture = texture.gpuTexture
-        const oldView = texture.createView()
+        const oldView = texture.view()
         const replacement = texture.resize({ width: 8, height: 8 })
 
         expect(replacement).to.be.an.instanceOf(Promise)
@@ -1084,7 +1085,8 @@ describe('TextureResource transactional replacement allocation', () => {
         expect(texture.allocationVersion).to.equal(1)
         expect(texture.contentEpoch).to.equal(1)
         expect(texture.state).to.equal('ready')
-        expect(texture.createView()).to.equal(oldView)
+        expect(() => oldView.assertUsable()).not.to.throw()
+        expect(texture.view().hash).to.equal(oldView.hash)
         expect(oldTexture.destroyed).to.equal(false)
         expect(runtime.diagnostics.snapshot().resources[0].pendingReplacementOperationId).to.be.a('string')
 
@@ -1104,7 +1106,8 @@ describe('TextureResource transactional replacement allocation', () => {
         expect(texture.contentEpoch).to.equal(1)
         expect(texture.state).to.equal('empty')
         expect(oldTexture.destroyed).to.equal(true)
-        expect(texture.createView()).not.to.equal(oldView)
+        expect(() => oldView.assertUsable()).not.to.throw()
+        expect(texture.view().hash).to.equal(oldView.hash)
         expect(runtime.diagnostics.snapshot().resources[0]).not.to.have.property('pendingReplacementOperationId')
         expect(runtime.diagnostics.operations().at(-1)).to.deep.include({
             kind: 'texture-replacement',
@@ -1124,7 +1127,7 @@ describe('TextureResource transactional replacement allocation', () => {
         const texture = await runtime.createTexture(textureDescriptor('rollback'))
         advanceResourceContentEpochForTest(texture)
         const oldTexture = texture.gpuTexture
-        const oldView = texture.createView()
+        const oldView = texture.view()
         const oldDescriptor = texture.descriptor
         const error = Object.assign(new Error('replacement invalid'), { name: 'GPUValidationError' })
         fake.errors.failNext('createTexture', 'validation', error)
@@ -1148,7 +1151,8 @@ describe('TextureResource transactional replacement allocation', () => {
         expect(texture.allocationVersion).to.equal(1)
         expect(texture.contentEpoch).to.equal(1)
         expect(texture.state).to.equal('ready')
-        expect(texture.createView()).to.equal(oldView)
+        expect(() => oldView.assertUsable()).not.to.throw()
+        expect(texture.view().hash).to.equal(oldView.hash)
         expect(oldTexture.destroyed).to.equal(false)
         expect(fake.calls.textures[1].destroyed).to.equal(true)
     })

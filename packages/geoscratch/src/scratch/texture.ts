@@ -121,7 +121,6 @@ export class TextureResource extends Resource {
 
     #gpuTexture: GPUTexture
     #physicalDescriptor: NormalizedTextureDescriptor
-    #viewCache: Map<string, GPUTextureView>
     #pendingReplacement: ScratchPendingGpuOperation | undefined
 
     private constructor(
@@ -148,7 +147,6 @@ export class TextureResource extends Resource {
 
         this.#physicalDescriptor = descriptor
         this.#gpuTexture = gpuTexture
-        this.#viewCache = new Map()
         registerResource(this)
         Object.preventExtensions(this)
     }
@@ -294,24 +292,10 @@ export class TextureResource extends Resource {
         const previousTexture = this.#gpuTexture
         this.#gpuTexture = outcome.candidate
         this.#physicalDescriptor = nextDescriptor
-        this.#viewCache.clear()
         replaceResourceAllocation(this, nextDescriptor)
         this.#pendingReplacement = undefined
         controller.completeOperation(operation, { status: 'succeeded' })
         destroyNativeCandidate(previousTexture)
-    }
-
-    createView(descriptor: TextureViewDescriptor = {}): GPUTextureView {
-
-        this.assertUsable()
-
-        const normalizedDescriptor = prepareTextureViewDescriptor(this, descriptor)
-        const key = JSON.stringify(normalizedDescriptor)
-        if (!this.#viewCache.has(key)) {
-            this.#viewCache.set(key, this.gpuTexture.createView(normalizedDescriptor))
-        }
-
-        return this.#viewCache.get(key)!
     }
 
     view(descriptor: TextureViewDescriptor = {}): TextureViewSpec {
@@ -328,7 +312,6 @@ export class TextureResource extends Resource {
             this.gpuTexture.destroy()
         }
 
-        this.#viewCache.clear()
         super.dispose()
     }
 }
@@ -409,6 +392,15 @@ export function prepareTextureViewSpecDescriptor(
     view.assertUsable()
     if (binding) validateTextureBindingViewDimension(view.texture, view.descriptor)
     return view.descriptor
+}
+
+export function createNativeTextureView(
+    view: TextureViewSpec,
+    binding = false
+): GPUTextureView {
+
+    const descriptor = prepareTextureViewSpecDescriptor(view, binding)
+    return view.texture.gpuTexture.createView(descriptor)
 }
 
 function constructTextureViewSpec(

@@ -48,14 +48,14 @@ async function createQueryFixture() {
         size: 512,
         usage: GPU_BUFFER_USAGE_QUERY_RESOLVE | GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_UNIFORM,
     })
+    const destinationRegion = destination.region({ offset: 256, size: 16 })
     const resolve = runtime.createResolveQuerySetCommand({
         label: 'resolve timing queries',
         source: {
             querySet,
             slots: querySlots([ 1, 2 ], 1),
         },
-        destination,
-        destinationOffset: 256,
+        destination: destinationRegion,
         whenMissing: 'throw',
     })
     const pass = runtime.createComputePass({
@@ -79,12 +79,12 @@ async function createQueryFixture() {
         ],
     })
     const bindSet = runtime.createBindSet(bindLayout, {
-        timingUniforms: destination,
+        timingUniforms: destination.region(),
     }, {
         label: 'query destination bind set',
     })
 
-    return { ...fake, runtime, querySet, destination, resolve, pass, bindLayout, bindSet }
+    return { ...fake, runtime, querySet, destination, destinationRegion, resolve, pass, bindLayout, bindSet }
 }
 
 async function createRenderTimestampFixture() {
@@ -105,7 +105,7 @@ async function createRenderTimestampFixture() {
     const pass = runtime.createRenderPass({
         label: 'render timestamp pass',
         color: [ {
-            target,
+            target: target.view(),
             load: 'clear',
             store: 'store',
             clear: [ 0, 0, 0, 1 ],
@@ -301,10 +301,11 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
             ],
         })
         expect(fixture.resolve.querySet).to.equal(fixture.querySet)
-        expect(fixture.resolve.destination).to.equal(fixture.destination)
+        expect(fixture.resolve.destination).to.equal(fixture.destinationRegion)
         expect(fixture.resolve.firstQuery).to.equal(1)
         expect(fixture.resolve.queryCount).to.equal(2)
-        expect(fixture.resolve.destinationOffset).to.equal(256)
+        expect(fixture.resolve.destination.offset).to.equal(256)
+        expect(fixture.resolve.destination.size).to.equal(16)
         expect(fixture.calls.resolveQueries).to.deep.equal([
             {
                 querySet: fixture.querySet.gpuQuerySet,
@@ -337,15 +338,14 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
             .submit()
         const readback = fixture.runtime.createReadback({
             label: 'read resolved timing',
-            source: fixture.destination,
+            source: fixture.destinationRegion,
             after: submitted,
-            range: { offset: 256, byteLength: 16 },
         })
         const bytes = await readback.toBytes()
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 
         expect(readback).to.be.instanceOf(ReadbackOperation)
-        expect(readback.source).to.equal(fixture.destination)
+        expect(readback.source).to.equal(fixture.destinationRegion)
         expect(readback.contentEpoch).to.equal(1)
         expect(view.getBigUint64(0, true)).to.equal(33n)
         expect(view.getBigUint64(8, true)).to.equal(44n)
@@ -465,7 +465,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                         querySet,
                         slots: [ { index: 0, contentEpoch: requiredContentEpoch } ],
                     },
-                    destination,
+                    destination: destination.region({ size: 8 }),
                     whenMissing: 'throw',
                 })
                 const builder = runtime.createSubmission({ validation })
@@ -647,38 +647,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
             size: 512,
             usage: GPU_BUFFER_USAGE_COPY_SRC,
         })
-
-        const legacyDiagnostic = await expectScratchDiagnostic(() => fixtureA.runtime.createResolveQuerySetCommand({
-            querySet: {},
-            queryCount: 1,
-            destination: fixtureA.destination,
-        }), {
-            code: 'SCRATCH_COMMAND_RESOLVE_QUERY_SET_INVALID',
-            severity: 'error',
-            phase: 'command',
-        })
-        expect(legacyDiagnostic.actual).to.deep.include({
-            reason: 'legacyDescriptor',
-        })
-        expect(legacyDiagnostic.actual.legacyInputs).to.deep.equal([ 'querySet', 'queryCount' ])
-
-        const mixedLegacyDiagnostic = await expectScratchDiagnostic(() => fixtureA.runtime.createResolveQuerySetCommand({
-            source: {
-                querySet: fixtureA.querySet,
-                slots: [ { index: 0, contentEpoch: 0 } ],
-            },
-            firstQuery: 0,
-            destination: fixtureA.destination,
-            whenMissing: 'throw',
-        }), {
-            code: 'SCRATCH_COMMAND_RESOLVE_QUERY_SET_INVALID',
-            severity: 'error',
-            phase: 'command',
-        })
-        expect(mixedLegacyDiagnostic.actual).to.deep.include({
-            reason: 'legacyDescriptor',
-        })
-        expect(mixedLegacyDiagnostic.actual.legacyInputs).to.deep.equal([ 'firstQuery' ])
+        const oneQueryDestination = fixtureA.destination.region({ size: 8 })
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createResolveQuerySetCommand({
             source: {
@@ -698,7 +667,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                 querySet: fixtureB.querySet,
                 slots: [ { index: 0, contentEpoch: 0 } ],
             },
-            destination: fixtureA.destination,
+            destination: oneQueryDestination,
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
@@ -711,7 +680,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                 querySet: fixtureA.querySet,
                 slots: [ { index: 0, contentEpoch: 0 } ],
             },
-            destination: fixtureB.destination,
+            destination: fixtureB.destination.region({ size: 8 }),
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
@@ -724,7 +693,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                 querySet: fixtureA.querySet,
                 slots: [ { index: 0, contentEpoch: 0 } ],
             },
-            destination: nonResolveDestination,
+            destination: nonResolveDestination.region({ size: 8 }),
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
@@ -733,25 +702,25 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         })
 
         for (const descriptor of [
-            { source: { querySet: {}, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: -1, contentEpoch: 0 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 1.5, contentEpoch: 0 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 4, contentEpoch: 0 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: -1 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0.5 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: Number.NaN } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 1, contentEpoch: 0 }, { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 }, { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 }, { index: 2, contentEpoch: 0 } ] }, destination: fixtureA.destination, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination, whenMissing: 'skip-command' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination, destinationOffset: -256, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination, destinationOffset: 1, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 }, { index: 1, contentEpoch: 0 } ] }, destination: fixtureA.destination, destinationOffset: 504, whenMissing: 'throw' },
-            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination, destinationOffset: 512, whenMissing: 'throw' },
+            { source: { querySet: {}, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: -1, contentEpoch: 0 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 1.5, contentEpoch: 0 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 4, contentEpoch: 0 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: -1 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0.5 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: Number.NaN } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 1, contentEpoch: 0 }, { index: 0, contentEpoch: 0 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 }, { index: 0, contentEpoch: 0 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 }, { index: 2, contentEpoch: 0 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: oneQueryDestination },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: oneQueryDestination, whenMissing: 'skip-command' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination.region({ offset: 1, size: 8 }), whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination.region({ size: 16 }), whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 }, { index: 1, contentEpoch: 0 } ] }, destination: oneQueryDestination, whenMissing: 'throw' },
+            { source: { querySet: fixtureA.querySet, slots: [ { index: 0, contentEpoch: 0 } ] }, destination: fixtureA.destination.region({ offset: 512, size: 0 }), whenMissing: 'throw' },
         ]) {
             await expectScratchDiagnostic(() => fixtureA.runtime.createResolveQuerySetCommand(descriptor), {
                 code: 'SCRATCH_COMMAND_RESOLVE_QUERY_SET_INVALID',
@@ -767,7 +736,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                 querySet: fixtureA.querySet,
                 slots: [ { index: 0, contentEpoch: 0 } ],
             },
-            destination: fixtureA.destination,
+            destination: oneQueryDestination,
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_DISPOSED',
@@ -779,6 +748,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
             type: 'timestamp',
             count: 1,
         })
+        const disposedDestinationRegion = fixtureA.destination.region({ size: 8 })
         fixtureA.destination.dispose()
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createResolveQuerySetCommand({
@@ -786,7 +756,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                 querySet: freshQuerySet,
                 slots: [ { index: 0, contentEpoch: 0 } ],
             },
-            destination: fixtureA.destination,
+            destination: disposedDestinationRegion,
             whenMissing: 'throw',
         }), {
             code: 'SCRATCH_RESOURCE_DISPOSED',
@@ -800,9 +770,8 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         const fixtureA = await createQueryFixture()
         const fixtureB = await createQueryFixture()
         const upload = fixtureA.runtime.createUploadCommand({
-            target: fixtureA.destination,
+            target: fixtureA.destination.region({ size: 8 }),
             data: new Uint8Array(8),
-            offset: 0,
         })
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createSubmission({ validation: 'throw' })

@@ -47,7 +47,7 @@ async function createDirectFixture({ diagnostics, deferMaps = false } = {}) {
         usage: COPY_SRC,
     })
     advanceResourceContentEpochForTest(source)
-    const readback = runtime.createReadback({ source })
+    const readback = runtime.createReadback({ source: source.region() })
     fake.calls.errorScopes.length = 0
     fake.calls.nativeTimeline.length = 0
     return { ...fake, fakeOptions, runtime, source, readback }
@@ -67,7 +67,7 @@ async function createOrderedFixture({ diagnostics } = {}) {
     })
     advanceResourceContentEpochForTest(source)
     const command = await runtime.createReadbackCommand({
-        source: { resource: source, contentEpoch: 1 },
+        source: { region: (source).region(), contentEpoch: 1 },
         whenMissing: 'throw',
     })
     fake.calls.errorScopes.length = 0
@@ -355,9 +355,8 @@ describe('scratch readback native outcomes', () => {
         fixture.fakeOptions.deferErrorScopePops = true
         const pendingSubmission = fixture.runtime.submission()
             .copy(fixture.runtime.createCopyCommand({
-                source: { resource: fixture.source, contentEpoch: 1 },
-                target,
-                byteLength: 16,
+                source: { region: fixture.source.region(), contentEpoch: 1 },
+                target: target.region(),
                 whenMissing: 'throw',
             }))
             .submit()

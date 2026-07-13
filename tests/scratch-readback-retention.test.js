@@ -62,12 +62,11 @@ async function createLayoutBuffer(runtime, codec, values) {
         label: 'retained layout source',
         size: bytes.byteLength,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
-        layout: codec.artifact,
-        elementCount: values.length,
     })
+    const region = buffer.region({ layout: codec.artifact })
     buffer.gpuBuffer.data.set(bytes)
 
-    return { buffer, bytes }
+    return { buffer, region, bytes }
 }
 
 async function expectScratchDiagnostic(action, expected) {
@@ -90,8 +89,11 @@ function operationActual(readback) {
     return {
         state: readback.state,
         retain: readback.retain,
-        sourceId: readback.source.id,
-        range: readback.range,
+        sourceId: readback.source.buffer.id,
+        sourceRegion: {
+            offset: readback.source.offset,
+            size: readback.source.size,
+        },
         contentEpoch: readback.contentEpoch,
         allocationVersion: readback.allocationVersion,
     }
@@ -105,8 +107,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const source = await createReadableBuffer(runtime, 'default consume source', 4)
         setBytes(source, [ 1, 2, 3, 4 ])
         const readback = runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
         })
 
         expect(readback.retain).to.equal('consume-on-read')
@@ -135,8 +136,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const source = await createReadableBuffer(runtime, 'retained byte source', 4)
         setBytes(source, [ 4, 3, 2, 1 ])
         const readback = runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
             retain: 'until-dispose',
         })
 
@@ -179,7 +179,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const source = await createReadableBuffer(runtime, 'retained float source', 16)
         setFloats(source, [ 1, 2, 3, 4 ])
         const readback = runtime.createReadback({
-            source,
+            source: source.region(),
             retain: 'until-dispose',
         })
 
@@ -202,9 +202,9 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
             { position: [ 1, 2, 3 ], mass: 4 },
             { position: [ 5, 6, 7 ], mass: 8 },
         ]
-        const { buffer, bytes } = await createLayoutBuffer(runtime, codec, values)
+        const { region, bytes } = await createLayoutBuffer(runtime, codec, values)
         const readback = runtime.createReadback({
-            source: buffer,
+            source: region,
             retain: 'until-dispose',
         })
         const copyCount = calls.copies.length
@@ -226,8 +226,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const source = await createReadableBuffer(runtime, 'retained epoch source', 4)
         setBytes(source, [ 1, 2, 3, 4 ])
         const readback = runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
             retain: 'until-dispose',
         })
 
@@ -247,8 +246,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const { runtime, calls } = await createRuntimeFixture()
         const source = await createReadableBuffer(runtime, 'pre materialization stale source', 4)
         const readback = runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
             retain: 'until-dispose',
         })
         advanceResourceContentEpochForTest(source)
@@ -275,8 +273,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const { runtime, calls } = await createRuntimeFixture()
         const source = await createReadableBuffer(runtime, 'pre materialization allocation source', 4)
         const readback = runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
             retain: 'until-dispose',
         })
         replaceResourceAllocationForTest(source)
@@ -303,8 +300,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const { runtime, calls } = await createRuntimeFixture()
         const source = await createReadableBuffer(runtime, 'cancel pending source', 4)
         const readback = runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
             retain: 'until-dispose',
         })
 
@@ -335,8 +331,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const source = await createReadableBuffer(runtime, 'cancel ready source', 4)
         setBytes(source, [ 1, 1, 1, 1 ])
         const readback = runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
             retain: 'until-dispose',
         })
         await readback.toBytes()
@@ -359,8 +354,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const source = await createReadableBuffer(runtime, 'dispose ready source', 4)
         setBytes(source, [ 2, 2, 2, 2 ])
         const readback = runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
             retain: 'until-dispose',
         })
         await readback.toBytes()
@@ -383,8 +377,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const source = await createReadableBuffer(runtime, 'failed retained source', 4)
         setBytes(source, [ 7, 7, 7, 7 ])
         const readback = runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
             retain: 'until-dispose',
         })
         const createBuffer = device.createBuffer.bind(device)
@@ -420,8 +413,7 @@ describe('scratch ReadbackOperation retention lifecycle', () => {
         const source = await createReadableBuffer(runtime, 'invalid retain source', 4)
 
         const diagnostic = await expectScratchDiagnostic(() => runtime.createReadback({
-            source,
-            range: { offset: 0, byteLength: 4 },
+            source: source.region(),
             retain: 'forever',
         }), {
             code: 'SCRATCH_READBACK_RETAIN_INVALID',

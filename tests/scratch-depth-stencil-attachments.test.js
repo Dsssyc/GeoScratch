@@ -30,6 +30,8 @@ async function createDepthFixture(depthFormat = 'depth24plus') {
         format: depthFormat,
         usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
     })
+    const colorView = colorTarget.view()
+    const depthView = depthTarget.view()
     const program = runtime.createProgram({
         modules: [ triangleWgsl ],
         entryPoints: {
@@ -72,21 +74,21 @@ async function createDepthFixture(depthFormat = 'depth24plus') {
         label: 'depth pass',
         color: [
             {
-                target: colorTarget,
+                target: colorView,
                 load: 'clear',
                 store: 'store',
                 clear: [ 0, 0, 0, 1 ],
             },
         ],
         depth: {
-            target: depthTarget,
+            target: depthView,
             depthLoad: 'clear',
             depthStore: 'store',
             depthClear: 1,
         },
     })
 
-    return { ...fake, runtime, colorTarget, depthTarget, program, depthPipeline, colorOnlyPipeline, draw, colorOnlyDraw, pass }
+    return { ...fake, runtime, colorTarget, depthTarget, colorView, depthView, program, depthPipeline, colorOnlyPipeline, draw, colorOnlyDraw, pass }
 }
 
 function createColorOnlyPass(runtime, colorTarget, label = 'color only pass') {
@@ -95,7 +97,7 @@ function createColorOnlyPass(runtime, colorTarget, label = 'color only pass') {
         label,
         color: [
             {
-                target: colorTarget,
+                target: colorTarget.view(),
                 load: 'clear',
                 store: 'store',
                 clear: [ 0, 0, 0, 1 ],
@@ -138,7 +140,7 @@ describe('scratch depth/stencil render attachments', () => {
         const fixture = await createDepthFixture()
 
         expect(fixture.depthTarget).to.be.instanceOf(TextureResource)
-        expect(fixture.pass.depth.target).to.equal(fixture.depthTarget)
+        expect(fixture.pass.depth.target).to.equal(fixture.depthView)
         expect(fixture.pass.depth.depthLoad).to.equal('clear')
         expect(fixture.pass.depth.depthStore).to.equal('store')
         expect(fixture.pass.depth.depthClear).to.equal(1)
@@ -182,12 +184,12 @@ describe('scratch depth/stencil render attachments', () => {
         expect(fixture.calls.textureViews).to.have.length(2)
         expect(fixture.calls.textureViews[0].texture).to.equal(replacementColorTexture)
         expect(fixture.calls.textureViews[1].texture).to.equal(replacementDepthTexture)
-        expect(fixture.calls.textureViews[0].descriptor).to.deep.equal({
+        expect(fixture.calls.textureViews[0].descriptor).to.deep.include({
             dimension: '2d',
             mipLevelCount: 1,
             arrayLayerCount: 1,
         })
-        expect(fixture.calls.textureViews[1].descriptor).to.deep.equal({
+        expect(fixture.calls.textureViews[1].descriptor).to.deep.include({
             dimension: '2d',
             mipLevelCount: 1,
             arrayLayerCount: 1,
@@ -241,12 +243,12 @@ describe('scratch depth/stencil render attachments', () => {
         })
         const pass = fixture.runtime.createRenderPass({
             color: [ {
-                target: fixture.colorTarget,
+                target: fixture.colorTarget.view(),
                 load: 'clear',
                 store: 'store',
             } ],
             depth: {
-                target: multisampledDepth,
+                target: multisampledDepth.view(),
                 depthLoad: 'clear',
                 depthStore: 'store',
                 depthClear: 1,
@@ -274,13 +276,13 @@ describe('scratch depth/stencil render attachments', () => {
         const pass = fixture.runtime.createRenderPass({
             color: [
                 {
-                    target: fixture.colorTarget,
+                    target: fixture.colorTarget.view(),
                     load: 'clear',
                     store: 'store',
                 },
             ],
             depth: {
-                target: fixture.depthTarget,
+                target: fixture.depthTarget.view(),
                 depthLoad: 'load',
                 depthStore: 'store',
                 stencilLoad: 'load',
@@ -311,7 +313,7 @@ describe('scratch depth/stencil render attachments', () => {
         const fixtureB = await createDepthFixture()
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createRenderPass({
-            color: [ { target: fixtureA.colorTarget } ],
+            color: [ { target: fixtureA.colorTarget.view() } ],
             depth: {},
         }), {
             code: 'SCRATCH_PASS_DEPTH_STENCIL_ATTACHMENT_INVALID',
@@ -320,18 +322,19 @@ describe('scratch depth/stencil render attachments', () => {
         })
 
         await expectScratchDiagnostic(() => fixtureA.runtime.createRenderPass({
-            color: [ { target: fixtureA.colorTarget } ],
-            depth: { target: fixtureB.depthTarget },
+            color: [ { target: fixtureA.colorTarget.view() } ],
+            depth: { target: fixtureB.depthTarget.view() },
         }), {
             code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
             severity: 'error',
             phase: 'resource',
         })
 
+        const disposedDepthView = fixtureA.depthTarget.view()
         fixtureA.depthTarget.dispose()
         await expectScratchDiagnostic(() => fixtureA.runtime.createRenderPass({
-            color: [ { target: fixtureA.colorTarget } ],
-            depth: { target: fixtureA.depthTarget },
+            color: [ { target: fixtureA.colorTarget.view() } ],
+            depth: { target: disposedDepthView },
         }), {
             code: 'SCRATCH_RESOURCE_DISPOSED',
             severity: 'error',
@@ -344,8 +347,8 @@ describe('scratch depth/stencil render attachments', () => {
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
         })
         await expectScratchDiagnostic(() => fixtureB.runtime.createRenderPass({
-            color: [ { target: fixtureB.colorTarget } ],
-            depth: { target: sampledOnlyDepth },
+            color: [ { target: fixtureB.colorTarget.view() } ],
+            depth: { target: sampledOnlyDepth.view() },
         }), {
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
@@ -358,8 +361,8 @@ describe('scratch depth/stencil render attachments', () => {
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
         })
         await expectScratchDiagnostic(() => fixtureB.runtime.createRenderPass({
-            color: [ { target: fixtureB.colorTarget } ],
-            depth: { target: colorTexture },
+            color: [ { target: fixtureB.colorTarget.view() } ],
+            depth: { target: colorTexture.view() },
         }), {
             code: 'SCRATCH_PASS_DEPTH_STENCIL_ATTACHMENT_INVALID',
             severity: 'error',
@@ -440,7 +443,7 @@ describe('scratch depth/stencil render attachments', () => {
             ],
         })
         const bindSet = fixture.runtime.createBindSet(bindLayout, {
-            depthTexture: fixture.depthTarget,
+            depthTexture: fixture.depthView,
         })
         const firstBindGroup = bindSet.getBindGroup()
 

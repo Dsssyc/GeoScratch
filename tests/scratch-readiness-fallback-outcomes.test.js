@@ -48,7 +48,7 @@ async function createRenderFixture() {
     })
     const pass = runtime.createRenderPass({
         color: [ {
-            target,
+            target: target.view(),
             load: 'clear',
             store: 'store',
             clear: [ 0, 0, 0, 1 ],

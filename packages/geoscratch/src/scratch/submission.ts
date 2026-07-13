@@ -35,7 +35,7 @@ import {
     beginSubmissionNativeObservation,
     compareSubmissionNativeStages,
 } from './submission-native-observation.js'
-import { TextureResource } from './texture.js'
+import { TextureResource, isTextureViewSpec } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
@@ -649,13 +649,16 @@ export class SubmissionBuilder {
                     finishEncoderSegment()
                     const effects: PreparedQueueEffect[] = []
                     if (uploadCommandHasContentEffect(step.command)) {
+                        const target = step.command.uploadKind === 'buffer'
+                            ? step.command.target.buffer
+                            : step.command.target
                         const writes = [
-                            captureResourceAccess(step.command.target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
+                            captureResourceAccess(target, 'write', commandAccessOrigin(stepIndex, 'upload', step.command)),
                         ]
-                        captureResourceContentSnapshot(resourceSnapshots, step.command.target)
+                        captureResourceContentSnapshot(resourceSnapshots, target)
                         commitUploadCommandLogicalWrite(step.command)
                         completeResourceAccesses(resourceAccesses, writes)
-                        effects.push(createPreparedResourceContentEffect(step.command.target))
+                        effects.push(createPreparedResourceContentEffect(target))
                     }
                     queueTimeline.push(createPreparedUploadQueueAction(step.command, effects))
                     continue
@@ -663,11 +666,17 @@ export class SubmissionBuilder {
 
                 if (step.kind === 'copy') {
                     const encoder = getEncoder()
-                    trackSegmentResourceWrite(step.command.target)
+                    const source = 'region' in step.command.source
+                        ? step.command.source.region.buffer
+                        : step.command.source.resource
+                    const target = step.command.target instanceof TextureResource
+                        ? step.command.target
+                        : step.command.target.buffer
+                    trackSegmentResourceWrite(target)
                     const origin = commandAccessOrigin(stepIndex, 'copy', step.command)
                     const accesses = [
-                        captureResourceAccess(step.command.source.resource, 'read', origin),
-                        captureResourceAccess(step.command.target, 'write', origin),
+                        captureResourceAccess(source, 'read', origin),
+                        captureResourceAccess(target, 'write', origin),
                     ]
                     issueStandaloneCommandEncoding(
                         nativeObservation,
@@ -684,12 +693,12 @@ export class SubmissionBuilder {
                 if (step.kind === 'readback') {
                     const encoder = getEncoder()
                     const origin = commandAccessOrigin(stepIndex, 'readback', step.command)
-                    const readAccess = captureResourceAccess(step.command.source.resource, 'read', origin)
+                    const readAccess = captureResourceAccess(step.command.source.region.buffer, 'read', origin)
                     const claim = readbackClaims.get(stepIndex)
                     if (claim === undefined) throw new TypeError(`Readback step ${stepIndex} has no staging claim.`)
                     updateReadbackCommandClaimProvenance(claim, {
                         contentEpoch: readAccess.contentEpochBefore,
-                        allocationVersion: step.command.source.resource.allocationVersion,
+                        allocationVersion: step.command.source.region.buffer.allocationVersion,
                     })
                     issueStandaloneCommandEncoding(
                         nativeObservation,
@@ -704,7 +713,7 @@ export class SubmissionBuilder {
                         claim,
                         stepIndex,
                         contentEpoch: readAccess.contentEpochBefore,
-                        allocationVersion: step.command.source.resource.allocationVersion,
+                        allocationVersion: step.command.source.region.buffer.allocationVersion,
                     }
                     pendingReadbacks.push(pendingReadback)
                     segmentReadbacks.push(pendingReadback)
@@ -714,9 +723,9 @@ export class SubmissionBuilder {
 
                 if (step.kind === 'resolve') {
                     const encoder = getEncoder()
-                    trackSegmentResourceWrite(step.command.destination)
+                    trackSegmentResourceWrite(step.command.destination.buffer)
                     const writes = [
-                        captureResourceAccess(step.command.destination, 'write', commandAccessOrigin(stepIndex, 'resolve', step.command)),
+                        captureResourceAccess(step.command.destination.buffer, 'write', commandAccessOrigin(stepIndex, 'resolve', step.command)),
                     ]
                     issueStandaloneCommandEncoding(
                         nativeObservation,
@@ -940,9 +949,8 @@ export class SubmissionBuilder {
             const operation = createScheduledReadbackOperation(this.runtime, {
                 ...(pending.command.label !== undefined ? { label: pending.command.label } : {}),
                 ...(producerEpoch !== undefined ? { producerEpoch } : {}),
-                source: pending.command.source.resource,
+                source: pending.command.source.region,
                 after: submitted,
-                range: pending.command.range,
                 retain: pending.command.retain,
                 id: pending.claim.operationId,
                 commandId: pending.claim.commandId,
@@ -1224,7 +1232,12 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
     for (const [stepIndex, step] of builder.steps.entries()) {
         if (step.kind === 'upload') {
             validateUploadStep(builder, step)
-            if (uploadCommandHasContentEffect(step.command)) markSimulatedReady(readiness, step.command.target)
+            if (uploadCommandHasContentEffect(step.command)) {
+                markSimulatedReady(
+                    readiness,
+                    step.command.uploadKind === 'buffer' ? step.command.target.buffer : step.command.target
+                )
+            }
             steps.push(step)
             continue
         }
@@ -1232,7 +1245,10 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
         if (step.kind === 'copy') {
             validateCopyStep(builder, step)
             validateCopyReadiness(builder, step, stepIndex, readiness, diagnostics)
-            markSimulatedReady(readiness, step.command.target)
+            markSimulatedReady(
+                readiness,
+                step.command.target instanceof TextureResource ? step.command.target : step.command.target.buffer
+            )
             steps.push(step)
             continue
         }
@@ -1248,7 +1264,7 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
         if (step.kind === 'resolve') {
             validateResolveStep(builder, step)
             validateResolveReadiness(builder, step, stepIndex, querySlots, diagnostics)
-            markSimulatedReady(readiness, step.command.destination)
+            markSimulatedReady(readiness, step.command.destination.buffer)
             steps.push(step)
             continue
         }
@@ -1389,7 +1405,11 @@ function validateCopyReadiness(
     diagnostics: ScratchDiagnostic[]
 ): void {
 
-    validateThrowOnlyCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, 'source')
+    const source = step.command.source
+    validateThrowOnlyCommandReadiness(builder, stepIndex, step.command, [ {
+        resource: 'region' in source ? source.region.buffer : source.resource,
+        contentEpoch: source.contentEpoch,
+    } ], readiness, diagnostics, 'source')
 }
 
 function validateReadbackStep(builder: SubmissionBuilder, step: ReadbackStep) {
@@ -1419,7 +1439,10 @@ function validateReadbackReadiness(
     diagnostics: ScratchDiagnostic[]
 ): void {
 
-    validateThrowOnlyCommandReadiness(builder, stepIndex, step.command, [ step.command.source ], readiness, diagnostics, 'source')
+    validateThrowOnlyCommandReadiness(builder, stepIndex, step.command, [ {
+        resource: step.command.source.region.buffer,
+        contentEpoch: step.command.source.contentEpoch,
+    } ], readiness, diagnostics, 'source')
 }
 
 function validateReadbackUniqueness(
@@ -1614,13 +1637,13 @@ function resolveRenderReadiness(
     }
 
     for (const attachment of step.passSpec.color) {
-        if (attachment.target instanceof TextureResource) {
-            markSimulatedReady(readiness, attachment.target)
+        if (isTextureViewSpec(attachment.target)) {
+            markSimulatedReady(readiness, attachment.target.texture)
         }
     }
 
     if (step.passSpec.depth !== undefined) {
-        markSimulatedReady(readiness, step.passSpec.depth.target)
+        markSimulatedReady(readiness, step.passSpec.depth.target.texture)
     }
 
     return { disposition: 'execute', commands, commandOutcomes }
@@ -1634,14 +1657,15 @@ function assertNoIndeterminateRenderAttachmentLoads(
 ): void {
 
     for (const [ attachmentIndex, attachment ] of step.passSpec.color.entries()) {
-        if (attachment.load !== 'load' || !(attachment.target instanceof TextureResource)) continue
-        const simulated = simulatedResourceState(readiness, attachment.target)
+        if (attachment.load !== 'load' || !isTextureViewSpec(attachment.target)) continue
+        const texture = attachment.target.texture
+        const simulated = simulatedResourceState(readiness, texture)
         if (simulated.state === 'indeterminate') {
             throwIndeterminateAttachmentLoadDiagnostic(
                 builder,
                 step,
                 stepIndex,
-                attachment.target,
+                texture,
                 simulated,
                 `color:${attachmentIndex}`
             )
@@ -1650,14 +1674,14 @@ function assertNoIndeterminateRenderAttachmentLoads(
 
     const depth = step.passSpec.depth
     if (depth === undefined) return
-    const simulated = simulatedResourceState(readiness, depth.target)
+    const simulated = simulatedResourceState(readiness, depth.target.texture)
     if (simulated.state !== 'indeterminate') return
     if (depth.depthLoad === 'load') {
         throwIndeterminateAttachmentLoadDiagnostic(
             builder,
             step,
             stepIndex,
-            depth.target,
+            depth.target.texture,
             simulated,
             'depth'
         )
@@ -1667,7 +1691,7 @@ function assertNoIndeterminateRenderAttachmentLoads(
             builder,
             step,
             stepIndex,
-            depth.target,
+            depth.target.texture,
             simulated,
             'stencil'
         )
@@ -2893,15 +2917,15 @@ function captureRenderAttachmentWrites(stepIndex: number, passSpec: RenderPassSp
 
     for (const attachment of passSpec.color) {
         const target = attachment.target
-        if (!(target instanceof TextureResource) || writtenTargets.has(target)) continue
+        if (!isTextureViewSpec(target) || writtenTargets.has(target.texture)) continue
 
-        writes.push(captureResourceAccess(target, 'write', origin))
-        writtenTargets.add(target)
+        writes.push(captureResourceAccess(target.texture, 'write', origin))
+        writtenTargets.add(target.texture)
     }
 
-    if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target)) {
-        writes.push(captureResourceAccess(passSpec.depth.target, 'write', origin))
-        writtenTargets.add(passSpec.depth.target)
+    if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target.texture)) {
+        writes.push(captureResourceAccess(passSpec.depth.target.texture, 'write', origin))
+        writtenTargets.add(passSpec.depth.target.texture)
     }
 
     return writes
@@ -2943,7 +2967,7 @@ function findReadbackProducerEpoch(
     for (let index = submitted.producerEpochs.length - 1; index >= 0; index--) {
         const producerEpoch = submitted.producerEpochs[index]
         if (
-            producerEpoch.resourceId === pending.command.source.resource.id &&
+            producerEpoch.resourceId === pending.command.source.region.buffer.id &&
             producerEpoch.contentEpoch === pending.contentEpoch &&
             producerEpoch.allocationVersion === pending.allocationVersion &&
             producerEpoch.producedBy.stepIndex < pending.stepIndex
@@ -3336,11 +3360,11 @@ function collectRenderAttachmentTargets(passSpec: RenderPassSpec): Map<TextureRe
     const attachmentTargets = new Map<TextureResource, RenderAttachmentKind>()
     for (const attachment of passSpec.color) {
         const target = attachment.target
-        if (target instanceof TextureResource) attachmentTargets.set(target, 'color')
+        if (isTextureViewSpec(target)) attachmentTargets.set(target.texture, 'color')
     }
 
-    if (passSpec.depth !== undefined && !attachmentTargets.has(passSpec.depth.target)) {
-        attachmentTargets.set(passSpec.depth.target, 'depth-stencil')
+    if (passSpec.depth !== undefined && !attachmentTargets.has(passSpec.depth.target.texture)) {
+        attachmentTargets.set(passSpec.depth.target.texture, 'depth-stencil')
     }
 
     return attachmentTargets
@@ -3395,7 +3419,7 @@ function validatePipelineDepthStencil(command: DrawCommand, passSpec: RenderPass
     if (pipelineDepthStencil === undefined) return
 
     const pipelineFormat = pipelineDepthStencil.format
-    const passFormat = passSpec.depth?.target.format
+    const passFormat = passSpec.depth?.target.descriptor.format
 
     if (passFormat === undefined) {
         throwScratchDiagnostic({
@@ -3534,15 +3558,15 @@ function advanceRenderAttachmentEpochs(passSpec: RenderPassSpec) {
 
     for (const attachment of passSpec.color) {
         const target = attachment.target
-        if (!(target instanceof TextureResource) || writtenTargets.has(target)) continue
+        if (!isTextureViewSpec(target) || writtenTargets.has(target.texture)) continue
 
-        advanceResourceContentEpoch(target)
-        writtenTargets.add(target)
+        advanceResourceContentEpoch(target.texture)
+        writtenTargets.add(target.texture)
     }
 
-    if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target)) {
-        advanceResourceContentEpoch(passSpec.depth.target)
-        writtenTargets.add(passSpec.depth.target)
+    if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target.texture)) {
+        advanceResourceContentEpoch(passSpec.depth.target.texture)
+        writtenTargets.add(passSpec.depth.target.texture)
     }
 }
 

@@ -65,8 +65,8 @@ async function createComputeFixture() {
         ],
     })
     const bindSet = runtime.createBindSet(bindLayout, {
-        inputValues: input,
-        outputValues: output,
+        inputValues: input.region(),
+        outputValues: output.region(),
     }, {
         label: 'compute storage set',
     })
@@ -99,9 +99,8 @@ async function createComputeFixture() {
     })
     const upload = runtime.createUploadCommand({
         label: 'upload compute input',
-        target: input,
+        target: (input).region({ offset: 0 }),
         data: new Float32Array([ 1, 2, 3, 4 ]),
-        offset: 0,
     })
 
     return {
@@ -163,11 +162,11 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
             entries: [
                 {
                     binding: 0,
-                    resource: { buffer: fixture.input.gpuBuffer },
+                    resource: { buffer: fixture.input.gpuBuffer, offset: 0, size: 16 },
                 },
                 {
                     binding: 1,
-                    resource: { buffer: fixture.output.gpuBuffer },
+                    resource: { buffer: fixture.output.gpuBuffer, offset: 0, size: 16 },
                 },
             ],
         })
@@ -232,14 +231,13 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
 
         const readback = fixture.runtime.createReadback({
             label: 'read doubled output',
-            source: fixture.output,
+            source: fixture.output.region(),
             after: submitted,
-            range: { offset: 0, byteLength: 16 },
         })
         const values = await readback.toArray(Float32Array)
 
         expect(readback).to.be.instanceOf(ReadbackOperation)
-        expect(readback.source).to.equal(fixture.output)
+        expect(readback.source.buffer).to.equal(fixture.output)
         expect(readback.contentEpoch).to.equal(1)
         expect([ ...values ]).to.deep.equal([ 2, 4, 6, 8 ])
         expect(fixture.calls.copies[0]).to.deep.include({
@@ -256,27 +254,24 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
         expect(readback.state).to.equal('consumed')
     })
 
-    it('rejects invalid readback ranges with structured diagnostics', async() => {
+    it('rejects invalid BufferRegion ranges before readback construction', async() => {
 
         const fixture = await createComputeFixture()
 
         try {
-            fixture.runtime.createReadback({
-                source: fixture.output,
-                range: { offset: 12, byteLength: 8 },
-            })
+            fixture.runtime.createReadback({ source: fixture.output.region({ offset: 12, size: 8 }) })
             throw new Error('expected invalid readback range to fail')
         } catch (error) {
             expect(error).to.be.instanceOf(ScratchDiagnosticError)
             expect(error.diagnostic).to.include({
-                code: 'SCRATCH_READBACK_RANGE_INVALID',
+                code: 'SCRATCH_BUFFER_REGION_RANGE_INVALID',
                 severity: 'error',
-                phase: 'readback',
+                phase: 'resource',
             })
             expect(error.diagnostic.actual).to.deep.include({
                 offset: 12,
-                byteLength: 8,
-                sourceSize: 16,
+                size: 8,
+                bufferSize: 16,
             })
         }
     })
