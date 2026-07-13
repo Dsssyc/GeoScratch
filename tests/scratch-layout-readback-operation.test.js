@@ -260,7 +260,8 @@ describe('scratch layout-aware ReadbackOperation', () => {
 
         expect(diagnostic.subject).to.deep.equal({
             kind: 'LayoutArtifact',
-            hash: codec.artifact.structuralHash,
+            abiHash: codec.artifact.abiHash,
+            schemaHash: codec.artifact.schemaHash,
             label: codec.artifact.label,
         })
         expect(diagnostic.expected).to.deep.equal({ byteLength: `positive multiple of ${codec.artifact.stride}` })

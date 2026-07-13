@@ -39,6 +39,37 @@ The Goal-start package exports the following affected public contracts through
 
 These names and shapes are replacement inputs, not aliases to retain.
 
+## Historical Type-Export Audit
+
+The fixed historical JavaScript/declaration reference exposes every runtime
+value that still has a Goal-start TypeScript successor. It also exposes 18
+package-root type names that are absent from the Goal-start TypeScript entrypoint:
+
+- `BufferResourceDescriptor`
+- `NormalizedDrawVertexBufferBinding`
+- `ProgramDescriptor`
+- `ProgramEntryPoints`
+- `QuerySetResourceDescriptor`
+- `QuerySetType`
+- `ResourceOptions`
+- `SamplerResourceDescriptor`
+- `ScratchComputePipelineDescriptor`
+- `ScratchDiagnosticInput`
+- `ScratchRenderPipelineDescriptor`
+- `SurfaceFormat`
+- `SurfaceOptions`
+- `SurfaceSize`
+- `TextureUploadLayout`
+- `TextureUploadOrigin`
+- `TextureUploadSize`
+- `TypedArrayConstructor`
+
+This is an explicit final-parity gate, not an instruction to restore obsolete
+shapes. Each name must be classified as either a still-current type export to
+restore through both public entrypoints, or an intentional clean-cut removal
+with its target replacement recorded in the final parity audit. "Runtime values
+match" is not sufficient evidence for declaration parity.
+
 ## Native Creation Inventory
 
 At the Goal-start commit, persistent binding-related native creation occurs at

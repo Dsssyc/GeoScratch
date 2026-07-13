@@ -133,7 +133,8 @@ export function programLayoutRequirementExpected(requirement: ProgramBufferLayou
         ...(requirement.name !== undefined ? { name: requirement.name } : {}),
         type: requirement.type,
         ...(requirement.visibility !== undefined ? { visibility: requirement.visibility } : {}),
-        structuralHash: requirement.layout.structuralHash,
+        abiHash: requirement.layout.abiHash,
+        schemaHash: requirement.layout.schemaHash,
     }
 }
 

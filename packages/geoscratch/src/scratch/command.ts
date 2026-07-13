@@ -1,7 +1,13 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferResource } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { isLayoutArtifact, isLayoutUploadView, layoutArtifactSubject } from './layout-codec.js'
+import {
+    describeLayoutCompatibilityDifference,
+    isLayoutArtifact,
+    isLayoutUploadView,
+    layoutArtifactSubject,
+    layoutArtifactsSchemaCompatible,
+} from './layout-codec.js'
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import { QuerySetResource } from './query-set.js'
 import {
@@ -3359,17 +3365,25 @@ function validateProgramLayoutRequirementsForCommand(command: DrawCommand | Disp
                 bindSet,
                 entry: binding.entry,
                 resource: buffer.subject,
-                actual: { structuralHash: undefined },
+                actual: { abiHash: undefined, schemaHash: undefined },
             })
         }
 
-        if (buffer.layout.structuralHash !== requirement.layout.structuralHash) {
+        if (!layoutArtifactsSchemaCompatible(requirement.layout, buffer.layout)) {
             throwCommandProgramLayoutMismatch(command, requirement, {
                 bindSet,
                 entry: binding.entry,
                 resource: buffer.subject,
                 actualLayout: buffer.layoutSubject,
-                actual: { structuralHash: buffer.layout.structuralHash },
+                actual: {
+                    abiHash: buffer.layout.abiHash,
+                    schemaHash: buffer.layout.schemaHash,
+                    difference: describeLayoutCompatibilityDifference(
+                        requirement.layout,
+                        buffer.layout,
+                        'schema'
+                    ),
+                },
             })
         }
     }
@@ -4218,16 +4232,26 @@ function validateUploadLayout(command: UploadCommand) {
     const targetLayout = command.target.layout
     if (targetLayout === undefined) return
 
-    if (command.layout !== undefined && command.layout.structuralHash !== targetLayout.structuralHash) {
+    if (command.layout !== undefined && !layoutArtifactsSchemaCompatible(targetLayout, command.layout)) {
         throwScratchDiagnostic({
-            code: 'SCRATCH_CODEC_STRUCTURAL_HASH_MISMATCH',
+            code: 'SCRATCH_CODEC_SCHEMA_MISMATCH',
             severity: 'error',
             phase: 'layout-codec',
             subject: command.target.layoutSubject ?? layoutArtifactSubject(targetLayout),
             related: [ command.subject, layoutArtifactSubject(command.layout), command.target.subject ],
             message: 'UploadCommand LayoutArtifact does not match the target BufferResource layout.',
-            expected: { structuralHash: targetLayout.structuralHash },
-            actual: { structuralHash: command.layout.structuralHash },
+            expected: {
+                abiHash: targetLayout.abiHash,
+                schemaHash: targetLayout.schemaHash,
+            },
+            actual: {
+                abiHash: command.layout.abiHash,
+                schemaHash: command.layout.schemaHash,
+            },
+            evidence: [ {
+                kind: 'layout-schema-difference',
+                value: describeLayoutCompatibilityDifference(targetLayout, command.layout, 'schema'),
+            } ],
         })
     }
 

@@ -30,10 +30,16 @@ results, native outcomes, and exported evidence advance together to version 5.
 Schema v4 writers, adapters, aliases, and dual output are removed during
 `0.x.x`.
 
-The operation target union represents `Resource`, `Pipeline`, `BindLayout`, and
-`BindSet` explicitly. Existing command, readback, submission, and runtime
-incident context remains where required by its owning evidence family; no target
-is coerced into a Resource.
+This version is the bounded GPU evidence schema. The stable validation envelope
+is separate: `ScratchDiagnostic.version` and `ScratchDiagnosticReport.version`
+remain `1`. New validation failures continue to use that v1 structured envelope
+and do not invent a second diagnostic format.
+
+The operation target union represents `Resource`, `Pipeline`, `Command`,
+`Readback`, `Submission`, `BindLayout`, and `BindSet` explicitly. The existing
+command, readback, and submission target variants remain first-class rather than
+being demoted to optional context. Runtime remains an incident-only target. No
+target is coerced into a Resource.
 
 Resource targets are discriminated:
 
@@ -71,6 +77,15 @@ Stable diagnostics use structured codes, subjects, related subjects,
 expected/actual payloads, and bounded evidence. Native message prose may remain
 bounded supporting evidence but is never parsed into a stable classification.
 
+Operation queries preserve the exact v4 selectors `operationId`, `resourceId`,
+`pipelineId`, `commandId`, `readbackId`, `submissionId`,
+`nativeLocationKind`, `nativeStage`, `nativeOutcomeStatus`, `targetKind`,
+`kind`, `status`, `sequenceFrom`, and `sequenceTo`; v5 adds `resourceKind`,
+`bindLayoutId`, `bindSetId`, and `preparationStage`. Incident queries preserve
+the same applicable selectors except `status` and add the same four v5
+selectors. Unsupported selector combinations return no match rather than
+coercing target kinds.
+
 ### Failure and OOM attribution
 
 Independent native outcomes are retained independently. BindSet preparation
@@ -92,6 +107,11 @@ The ADR-032 retention split remains:
 - recent operation history has fixed configurable capacity;
 - immutable incidents are bounded by count and serialized-evidence budget; and
 - deep capture is explicit, finite, temporary, and automatically detached.
+
+Default retained capacities remain 256 recent operations, 32 incidents, and
+256 KiB of serialized evidence. They stay independently configurable. Deep
+capture keeps its separate explicit operation, duration, and byte limits and is
+never enabled implicitly by runtime creation.
 
 Successful unchanged BindSet use creates no preparation operation, history
 record, incident, scope work, or copied binding snapshot. Submission evidence may

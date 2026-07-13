@@ -1,5 +1,10 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { isLayoutArtifact, layoutArtifactSubject } from './layout-codec.js'
+import {
+    describeLayoutCompatibilityDifference,
+    isLayoutArtifact,
+    layoutArtifactSubject,
+    layoutArtifactsAbiCompatible,
+} from './layout-codec.js'
 import {
     createScratchNativeLabel,
     destroyNativeCandidate,
@@ -20,11 +25,25 @@ export type BufferResourceDescriptor = GPUBufferDescriptor & {
     elementCount?: number
 }
 
+export type BufferRegionDescriptor = Readonly<{
+    offset?: number
+    size?: number
+    layout?: LayoutArtifact
+}>
+
+export type BufferSubregionDescriptor = Readonly<{
+    offset?: number
+    size?: number
+    layout?: LayoutArtifact
+}>
+
 type NormalizedBufferResourceDescriptor = BufferResourceDescriptor & {
     layoutByteLength?: number
 }
 
 const bufferResourceToken = Symbol('BufferResource')
+const bufferRegionToken = Symbol('BufferRegion')
+const bufferRegions = new WeakSet<BufferRegion>()
 const BUFFER_ALLOCATION_CODES = Object.freeze({
     validation: 'SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED',
     outOfMemory: 'SCRATCH_BUFFER_ALLOCATION_OUT_OF_MEMORY',
@@ -73,6 +92,12 @@ export class BufferResource extends Resource {
         return this.#gpuBuffer
     }
 
+    region(descriptor: BufferRegionDescriptor = {}): BufferRegion {
+
+        this.assertUsable()
+        return constructBufferRegion(this, normalizeBufferRegionDescriptor(this, descriptor))
+    }
+
     dispose(): void {
 
         if (this.isDisposed) return
@@ -89,6 +114,295 @@ export class BufferResource extends Resource {
         if (this.layout === undefined) return undefined
         return layoutArtifactSubject(this.layout)
     }
+}
+
+export class BufferRegion {
+
+    readonly buffer: BufferResource
+    readonly offset: number
+    readonly size: number
+    readonly layout?: LayoutArtifact
+
+    private constructor(
+        token: symbol,
+        buffer: BufferResource,
+        descriptor: Readonly<{ offset: number, size: number, layout?: LayoutArtifact }>
+    ) {
+
+        if (token !== bufferRegionToken || new.target !== BufferRegion) {
+            throw new TypeError('BufferRegion must be created by BufferResource.region().')
+        }
+
+        this.buffer = buffer
+        this.offset = descriptor.offset
+        this.size = descriptor.size
+        if (descriptor.layout !== undefined) this.layout = descriptor.layout
+        bufferRegions.add(this)
+        Object.freeze(this)
+    }
+
+    get elementCount(): number | undefined {
+
+        if (this.layout === undefined || this.size % this.layout.stride !== 0) return undefined
+        return this.size / this.layout.stride
+    }
+
+    get subject(): DiagnosticSubject {
+
+        return bufferRegionSubject(this)
+    }
+
+    assertUsable(): void {
+
+        this.buffer.assertUsable()
+        validateBufferRegionRange(this.buffer, this.offset, this.size)
+        if (this.layout !== undefined) {
+            validateBufferRegionLayout(this.buffer, this.offset, this.size, this.layout)
+        }
+    }
+
+    subregion(descriptor: BufferSubregionDescriptor = {}): BufferRegion {
+
+        this.assertUsable()
+        if (!isRecord(descriptor)) {
+            return throwBufferRegionRangeDiagnostic(this.buffer, descriptor, {
+                descriptor: 'object with optional offset, size, and layout',
+            })
+        }
+
+        const relativeOffset = descriptor.offset ?? 0
+        const size = descriptor.size ?? this.size - relativeOffset
+        validateSafeRangeValues(this.buffer, relativeOffset, size, {
+            offset: descriptor.offset,
+            size: descriptor.size,
+            relativeTo: { offset: this.offset, size: this.size },
+        })
+        const relativeEnd = relativeOffset + size
+        if (relativeEnd > this.size) {
+            return throwBufferRegionRangeDiagnostic(this.buffer, descriptor, {
+                range: `within parent region size ${this.size}`,
+            })
+        }
+
+        const absoluteOffset = this.offset + relativeOffset
+        if (!Number.isSafeInteger(absoluteOffset)) {
+            return throwBufferRegionRangeDiagnostic(this.buffer, descriptor, {
+                absoluteOffset: 'safe integer',
+            })
+        }
+
+        return this.buffer.region({
+            offset: absoluteOffset,
+            size,
+            ...(descriptor.layout !== undefined ? { layout: descriptor.layout } : {}),
+        })
+    }
+
+    interpretAs(layout: LayoutArtifact): BufferRegion {
+
+        this.assertUsable()
+        if (!isLayoutArtifact(layout)) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
+                severity: 'error',
+                phase: 'layout-codec',
+                subject: this.subject,
+                related: [ this.buffer.subject ],
+                message: 'BufferRegion interpretation requires a LayoutArtifact.',
+                expected: { layout: 'LayoutArtifact' },
+                actual: { layout: describeValue(layout) },
+            })
+        }
+
+        if (this.layout !== undefined && !layoutArtifactsAbiCompatible(this.layout, layout)) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_LAYOUT_ABI_MISMATCH',
+                severity: 'error',
+                phase: 'layout-codec',
+                subject: this.subject,
+                related: [
+                    this.buffer.subject,
+                    layoutArtifactSubject(this.layout),
+                    layoutArtifactSubject(layout),
+                ],
+                message: 'BufferRegion cannot be reinterpreted with a physically incompatible layout.',
+                expected: {
+                    abiHash: this.layout.abiHash,
+                    schemaHash: this.layout.schemaHash,
+                },
+                actual: {
+                    abiHash: layout.abiHash,
+                    schemaHash: layout.schemaHash,
+                },
+                evidence: [ {
+                    kind: 'layout-abi-difference',
+                    value: describeLayoutCompatibilityDifference(this.layout, layout, 'abi'),
+                } ],
+                hints: [ 'Create another explicit region from the parent buffer for a different physical interpretation.' ],
+            })
+        }
+
+        return this.buffer.region({ offset: this.offset, size: this.size, layout })
+    }
+}
+
+Object.freeze(BufferRegion.prototype)
+
+export function isBufferRegion(value: unknown): value is BufferRegion {
+
+    return typeof value === 'object' && value !== null && bufferRegions.has(value as BufferRegion)
+}
+
+export function bufferRegionSubject(region: BufferRegion): DiagnosticSubject {
+
+    const subject: DiagnosticSubject = {
+        kind: 'BufferRegion',
+        resourceId: region.buffer.id,
+        offset: region.offset,
+        size: region.size,
+    }
+    if (region.layout !== undefined) {
+        subject.abiHash = region.layout.abiHash
+        subject.schemaHash = region.layout.schemaHash
+    }
+    return subject
+}
+
+function constructBufferRegion(
+    buffer: BufferResource,
+    descriptor: Readonly<{ offset: number, size: number, layout?: LayoutArtifact }>
+): BufferRegion {
+
+    const Constructor = BufferRegion as unknown as new (
+        token: symbol,
+        buffer: BufferResource,
+        descriptor: Readonly<{ offset: number, size: number, layout?: LayoutArtifact }>
+    ) => BufferRegion
+    return new Constructor(bufferRegionToken, buffer, descriptor)
+}
+
+function normalizeBufferRegionDescriptor(
+    buffer: BufferResource,
+    descriptor: unknown
+): Readonly<{ offset: number, size: number, layout?: LayoutArtifact }> {
+
+    if (!isRecord(descriptor)) {
+        return throwBufferRegionRangeDiagnostic(buffer, descriptor, {
+            descriptor: 'object with optional offset, size, and layout',
+        })
+    }
+
+    const offsetValue = descriptor.offset ?? 0
+    const sizeValue = descriptor.size ?? (
+        typeof offsetValue === 'number' ? buffer.size - offsetValue : Number.NaN
+    )
+    validateSafeRangeValues(buffer, offsetValue, sizeValue, descriptor)
+    const offset = offsetValue as number
+    const size = sizeValue as number
+    validateBufferRegionRange(buffer, offset, size)
+
+    const layout = descriptor.layout
+    if (layout !== undefined) {
+        if (!isLayoutArtifact(layout)) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
+                severity: 'error',
+                phase: 'layout-codec',
+                subject: buffer.subject,
+                message: 'BufferRegion layout must be a LayoutArtifact.',
+                expected: { layout: 'LayoutArtifact' },
+                actual: { layout: describeValue(layout) },
+            })
+        }
+        validateBufferRegionLayout(buffer, offset, size, layout)
+    }
+
+    return Object.freeze({
+        offset,
+        size,
+        ...(layout !== undefined ? { layout } : {}),
+    })
+}
+
+function validateSafeRangeValues(
+    buffer: BufferResource,
+    offset: unknown,
+    size: unknown,
+    actual: unknown
+): void {
+
+    if (
+        typeof offset !== 'number' ||
+        typeof size !== 'number' ||
+        !Number.isSafeInteger(offset) ||
+        !Number.isSafeInteger(size) ||
+        offset < 0 ||
+        size < 0 ||
+        !Number.isSafeInteger(offset + size)
+    ) {
+        throwBufferRegionRangeDiagnostic(buffer, actual, {
+            offset: 'non-negative safe integer',
+            size: 'non-negative safe integer',
+            end: 'safe integer without overflow',
+        })
+    }
+}
+
+function validateBufferRegionRange(buffer: BufferResource, offset: number, size: number): void {
+
+    if (offset + size > buffer.size) {
+        throwBufferRegionRangeDiagnostic(buffer, { offset, size, bufferSize: buffer.size }, {
+            range: `within BufferResource size ${buffer.size}`,
+        })
+    }
+}
+
+function validateBufferRegionLayout(
+    buffer: BufferResource,
+    offset: number,
+    size: number,
+    layout: LayoutArtifact
+): void {
+
+    if (offset % layout.alignment !== 0 || size % layout.stride !== 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BUFFER_REGION_LAYOUT_INVALID',
+            severity: 'error',
+            phase: 'layout-codec',
+            subject: {
+                kind: 'BufferRegion',
+                resourceId: buffer.id,
+                offset,
+                size,
+                abiHash: layout.abiHash,
+                schemaHash: layout.schemaHash,
+            },
+            related: [ buffer.subject, layoutArtifactSubject(layout) ],
+            message: 'BufferRegion range is incompatible with its LayoutArtifact.',
+            expected: {
+                offsetAlignment: layout.alignment,
+                sizeStride: layout.stride,
+            },
+            actual: { offset, size },
+        })
+    }
+}
+
+function throwBufferRegionRangeDiagnostic(
+    buffer: BufferResource,
+    actual: unknown,
+    expected: unknown
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_BUFFER_REGION_RANGE_INVALID',
+        severity: 'error',
+        phase: 'resource',
+        subject: buffer.subject,
+        message: 'BufferRegion requires a safe byte range within its parent BufferResource.',
+        expected,
+        actual,
+    })
 }
 
 export async function createBufferResource(

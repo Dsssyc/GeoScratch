@@ -90,9 +90,11 @@ export type {
 export { Surface } from './surface.js'
 export { Resource } from './resource.js'
 export type { ResourceState } from './resource.js'
-export { BufferResource } from './buffer.js'
-export { TextureResource } from './texture.js'
+export { BufferRegion, BufferResource } from './buffer.js'
+export type { BufferRegionDescriptor, BufferSubregionDescriptor } from './buffer.js'
+export { TextureResource, TextureViewSpec } from './texture.js'
 export type {
+    NormalizedTextureViewDescriptor,
     TextureResourceDescriptor,
     TextureResourceSize,
     TextureViewDescriptor,
@@ -115,6 +117,7 @@ export type {
 export { LayoutCodec, layoutCodec } from './layout-codec.js'
 export type {
     LayoutArtifact,
+    LayoutCompatibilityDifference,
     LayoutCodecOptions,
     LayoutCodecUsage,
     LayoutFieldArtifact,

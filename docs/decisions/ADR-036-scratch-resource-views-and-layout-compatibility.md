@@ -46,6 +46,13 @@ Runtime current facts are discriminated by kind. Provisional native candidates
 receive identities for labels and evidence, but become current registered
 objects only after acknowledgement and lifecycle rechecks succeed.
 
+The V1 persistent resource set is closed to `BufferResource`,
+`TextureResource`, `SamplerResource`, and `QuerySetResource`.
+`ShaderModuleResource` is not part of this hierarchy. Shader source and entry
+point contracts remain owned by `Program`; native shader modules are
+transaction-local pipeline-creation candidates and do not acquire independent
+resource identity, readiness, content state, or allocation lifetime.
+
 ### Raw buffer resources and immutable regions
 
 `BufferResource` is a raw physical byte container. Its descriptor and public
@@ -88,6 +95,12 @@ The descriptor covers format, dimension, usage, aspect, mip and layer ranges,
 and feature-gated component swizzle. Each later use revalidates the same recipe
 against current allocation extent, format and `viewFormats`, dimension, sample
 count, compatibility mode, usage, and device features.
+
+`TextureResource.textureBindingViewDimension` remains a normalized physical
+descriptor constraint for compatibility-mode devices. It is not a logical view
+cache or an inferred BindSet default. Every `TextureViewSpec` used as a sampled
+or storage binding must satisfy that current native compatibility constraint in
+addition to its explicit descriptor and the authoritative `BindLayout` entry.
 
 Public Scratch-managed `TextureResource.createView()` is removed. Direct
 `gpuTexture.createView()` remains an explicit raw escape from Scratch ownership,

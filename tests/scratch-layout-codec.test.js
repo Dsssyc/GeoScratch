@@ -50,8 +50,9 @@ describe('scratch LayoutCodec', () => {
             readback: true,
             vertex: false,
         })
-        expect(codec.artifact.structuralHash).to.match(/^layout-[0-9a-f]{8}$/)
-        expect(layoutCodec({
+        expect(codec.artifact.abiHash).to.match(/^layout-abi-[0-9a-f]{16}$/)
+        expect(codec.artifact.schemaHash).to.match(/^layout-schema-[0-9a-f]{16}$/)
+        const sameArtifact = layoutCodec({
             label: 'camera uniforms',
             name: 'CameraUniforms',
             fields: [
@@ -62,8 +63,10 @@ describe('scratch LayoutCodec', () => {
             ],
         }, {
             usage: [ 'uniform', 'storage', 'readback' ],
-        }).artifact.structuralHash).to.equal(codec.artifact.structuralHash)
-        expect(layoutCodec({
+        }).artifact
+        expect(sameArtifact.abiHash).to.equal(codec.artifact.abiHash)
+        expect(sameArtifact.schemaHash).to.equal(codec.artifact.schemaHash)
+        const changedArtifact = layoutCodec({
             name: 'CameraUniforms',
             fields: [
                 { name: 'time', type: 'u32' },
@@ -73,7 +76,9 @@ describe('scratch LayoutCodec', () => {
             ],
         }, {
             usage: [ 'uniform', 'storage', 'readback' ],
-        }).artifact.structuralHash).to.not.equal(codec.artifact.structuralHash)
+        }).artifact
+        expect(changedArtifact.abiHash).to.not.equal(codec.artifact.abiHash)
+        expect(changedArtifact.schemaHash).to.not.equal(codec.artifact.schemaHash)
         expect(codec.artifact.fields.map(field => ({
             name: field.name,
             type: field.type,
@@ -274,7 +279,8 @@ describe('scratch LayoutCodec', () => {
             })
             expect(error.diagnostic.subject).to.deep.equal({
                 kind: 'LayoutArtifact',
-                hash: codec.artifact.structuralHash,
+                abiHash: codec.artifact.abiHash,
+                schemaHash: codec.artifact.schemaHash,
                 label: 'Small',
             })
         }

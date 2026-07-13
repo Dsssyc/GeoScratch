@@ -33,7 +33,22 @@ const TEXTURE_BINDING_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([
     'cube-array',
     '3d',
 ])
+const TEXTURE_VIEW_ASPECTS = new Set<GPUTextureAspect>([ 'all', 'stencil-only', 'depth-only' ])
+const DEPTH_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'depth16unorm',
+    'depth24plus',
+    'depth24plus-stencil8',
+    'depth32float',
+    'depth32float-stencil8',
+])
+const STENCIL_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'stencil8',
+    'depth24plus-stencil8',
+    'depth32float-stencil8',
+])
 const textureResourceToken = Symbol('TextureResource')
+const textureViewSpecToken = Symbol('TextureViewSpec')
+const textureViewSpecs = new WeakSet<TextureViewSpec>()
 const TEXTURE_ALLOCATION_CODES = Object.freeze({
     validation: 'SCRATCH_TEXTURE_ALLOCATION_VALIDATION_FAILED',
     outOfMemory: 'SCRATCH_TEXTURE_ALLOCATION_OUT_OF_MEMORY',
@@ -63,7 +78,22 @@ export type TextureResourceDescriptor =
         textureBindingViewDimension?: GPUTextureViewDimension
     }
 
-export type TextureViewDescriptor = GPUTextureViewDescriptor
+export type TextureViewDescriptor = GPUTextureViewDescriptor & {
+    swizzle?: string
+}
+
+export type NormalizedTextureViewDescriptor = Readonly<{
+    label?: string
+    format: GPUTextureFormat
+    dimension: GPUTextureViewDimension
+    usage: GPUTextureUsageFlags
+    aspect: GPUTextureAspect
+    baseMipLevel: number
+    mipLevelCount: number
+    baseArrayLayer: number
+    arrayLayerCount: number
+    swizzle: string
+}>
 
 type NormalizedTextureSize = Readonly<{
     width: number
@@ -264,6 +294,12 @@ export class TextureResource extends Resource {
         return this.#viewCache.get(key)!
     }
 
+    view(descriptor: TextureViewDescriptor = {}): TextureViewSpec {
+
+        this.assertUsable()
+        return constructTextureViewSpec(this, normalizeTextureViewSpecDescriptor(this, descriptor))
+    }
+
     dispose(): void {
 
         if (this.isDisposed) return
@@ -278,6 +314,95 @@ export class TextureResource extends Resource {
 }
 
 Object.freeze(TextureResource.prototype)
+
+export class TextureViewSpec {
+
+    readonly texture: TextureResource
+    readonly descriptor: NormalizedTextureViewDescriptor
+    readonly hash: string
+
+    private constructor(
+        token: symbol,
+        texture: TextureResource,
+        descriptor: NormalizedTextureViewDescriptor
+    ) {
+
+        if (token !== textureViewSpecToken || new.target !== TextureViewSpec) {
+            throw new TypeError('TextureViewSpec must be created by TextureResource.view().')
+        }
+
+        this.texture = texture
+        this.descriptor = descriptor
+        this.hash = `texture-view-${fnv1a64(textureViewDescriptorSignature(descriptor))}`
+        textureViewSpecs.add(this)
+        Object.freeze(this)
+    }
+
+    get subject(): DiagnosticSubject {
+
+        return textureViewSpecSubject(this)
+    }
+
+    assertUsable(): void {
+
+        this.texture.assertUsable()
+        validateNormalizedTextureViewDescriptor(this.texture, this.descriptor, this.descriptor)
+    }
+}
+
+Object.freeze(TextureViewSpec.prototype)
+
+export function isTextureViewSpec(value: unknown): value is TextureViewSpec {
+
+    return typeof value === 'object' && value !== null && textureViewSpecs.has(value as TextureViewSpec)
+}
+
+export function textureViewSpecSubject(view: TextureViewSpec): DiagnosticSubject {
+
+    const subject: DiagnosticSubject = {
+        kind: 'TextureViewSpec',
+        resourceId: view.texture.id,
+        hash: view.hash,
+        descriptor: view.descriptor,
+    }
+    if (view.descriptor.label !== undefined) subject.label = view.descriptor.label
+    return subject
+}
+
+export function prepareTextureViewSpecDescriptor(
+    view: TextureViewSpec,
+    binding = false
+): NormalizedTextureViewDescriptor {
+
+    if (!isTextureViewSpec(view)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject: { kind: 'TextureViewSpec' },
+            message: 'Texture view preparation requires a TextureViewSpec.',
+            expected: { view: 'TextureViewSpec' },
+            actual: { view: typeof view },
+        })
+    }
+
+    view.assertUsable()
+    if (binding) validateTextureBindingViewDimension(view.texture, view.descriptor)
+    return view.descriptor
+}
+
+function constructTextureViewSpec(
+    texture: TextureResource,
+    descriptor: NormalizedTextureViewDescriptor
+): TextureViewSpec {
+
+    const Constructor = TextureViewSpec as unknown as new (
+        token: symbol,
+        texture: TextureResource,
+        descriptor: NormalizedTextureViewDescriptor
+    ) => TextureViewSpec
+    return new Constructor(textureViewSpecToken, texture, descriptor)
+}
 
 export async function createTextureResource(
     runtime: ScratchRuntime,
@@ -604,6 +729,116 @@ function normalizeTextureViewDescriptor(texture: TextureResource, descriptor: un
     return sortObjectKeys(descriptor) as GPUTextureViewDescriptor
 }
 
+function normalizeTextureViewSpecDescriptor(
+    texture: TextureResource,
+    descriptor: unknown
+): NormalizedTextureViewDescriptor {
+
+    if (!isRecord(descriptor)) {
+        throwTextureViewDescriptorDiagnostic(texture, descriptor, {
+            descriptor: 'object',
+        })
+    }
+
+    const format = descriptor.format === undefined ? texture.format : descriptor.format
+    const dimension = descriptor.dimension === undefined
+        ? texture.depthOrArrayLayers === 1 ? '2d' : '2d-array'
+        : descriptor.dimension
+    const usage = descriptor.usage === undefined || descriptor.usage === 0
+        ? texture.usage
+        : descriptor.usage
+    const aspect = descriptor.aspect === undefined ? 'all' : descriptor.aspect
+    const baseMipLevel = descriptor.baseMipLevel === undefined ? 0 : descriptor.baseMipLevel
+    const mipLevelCount = descriptor.mipLevelCount === undefined
+        ? typeof baseMipLevel === 'number' ? texture.mipLevelCount - baseMipLevel : Number.NaN
+        : descriptor.mipLevelCount
+    const baseArrayLayer = descriptor.baseArrayLayer === undefined ? 0 : descriptor.baseArrayLayer
+    const arrayLayerCount = descriptor.arrayLayerCount === undefined && typeof dimension === 'string' && typeof baseArrayLayer === 'number'
+        ? defaultTextureViewArrayLayerCount(
+            texture,
+            dimension as GPUTextureViewDimension,
+            baseArrayLayer
+        )
+        : descriptor.arrayLayerCount
+    const swizzle = descriptor.swizzle === undefined ? 'rgba' : descriptor.swizzle
+
+    const normalized = Object.freeze({
+        ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
+        format,
+        dimension,
+        usage,
+        aspect,
+        baseMipLevel,
+        mipLevelCount,
+        baseArrayLayer,
+        arrayLayerCount,
+        swizzle,
+    }) as NormalizedTextureViewDescriptor
+
+    validateNormalizedTextureViewDescriptor(texture, normalized, descriptor)
+    return normalized
+}
+
+function validateNormalizedTextureViewDescriptor(
+    texture: TextureResource,
+    descriptor: NormalizedTextureViewDescriptor,
+    actual: unknown
+): void {
+
+    const textureDescriptor = texture.descriptor as NormalizedTextureDescriptor
+    const allowedFormats = new Set<GPUTextureFormat>([
+        texture.format,
+        ...textureDescriptor.viewFormats,
+    ])
+    if (!allowedFormats.has(descriptor.format)) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            format: [ ...allowedFormats ],
+        })
+    }
+    if (
+        !Number.isSafeInteger(descriptor.usage) ||
+        descriptor.usage < 0 ||
+        (descriptor.usage & texture.usage) !== descriptor.usage
+    ) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            usage: `GPUTextureUsageFlags subset of ${texture.usage}`,
+        })
+    }
+    if (!TEXTURE_VIEW_ASPECTS.has(descriptor.aspect)) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            aspect: [ ...TEXTURE_VIEW_ASPECTS ],
+        })
+    }
+    if (
+        (descriptor.aspect === 'depth-only' && !DEPTH_TEXTURE_FORMATS.has(descriptor.format)) ||
+        (descriptor.aspect === 'stencil-only' && !STENCIL_TEXTURE_FORMATS.has(descriptor.format))
+    ) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            aspect: `aspect supported by ${descriptor.format}`,
+        })
+    }
+    if (typeof descriptor.swizzle !== 'string' || !/^[rgba01]{4}$/.test(descriptor.swizzle)) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            swizzle: 'four characters selected from r, g, b, a, 0, and 1',
+        })
+    }
+    if (
+        descriptor.swizzle !== 'rgba' &&
+        !texture.runtime.deviceFeatures.has('texture-component-swizzle')
+    ) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            swizzleFeature: 'texture-component-swizzle',
+        })
+    }
+    if (descriptor.label !== undefined && typeof descriptor.label !== 'string') {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            label: 'string',
+        })
+    }
+
+    validateTextureViewDescriptor(texture, descriptor, actual)
+}
+
 export function prepareTextureViewDescriptor(
     texture: TextureResource,
     descriptor: unknown = {}
@@ -633,6 +868,19 @@ export function prepareTextureBindingViewDescriptor(
     }
 
     return prepared
+}
+
+function validateTextureBindingViewDimension(
+    texture: TextureResource,
+    descriptor: Pick<NormalizedTextureViewDescriptor, 'dimension'>
+): void {
+
+    const requiredDimension = currentTextureBindingViewDimension(texture)
+    if (requiredDimension !== undefined && descriptor.dimension !== requiredDimension) {
+        throwTextureViewDescriptorDiagnostic(texture, descriptor, {
+            textureBindingViewDimension: requiredDimension,
+        })
+    }
 }
 
 function validateTextureViewDescriptor(
@@ -760,6 +1008,31 @@ function sortObjectKeys(value: unknown): unknown {
         result[key] = sortObjectKeys(value[key])
         return result
     }, {})
+}
+
+function textureViewDescriptorSignature(descriptor: NormalizedTextureViewDescriptor): string {
+
+    return JSON.stringify({
+        format: descriptor.format,
+        dimension: descriptor.dimension,
+        usage: descriptor.usage,
+        aspect: descriptor.aspect,
+        baseMipLevel: descriptor.baseMipLevel,
+        mipLevelCount: descriptor.mipLevelCount,
+        baseArrayLayer: descriptor.baseArrayLayer,
+        arrayLayerCount: descriptor.arrayLayerCount,
+        swizzle: descriptor.swizzle,
+    })
+}
+
+function fnv1a64(value: string): string {
+
+    let hash = 0xcbf29ce484222325n
+    for (let index = 0; index < value.length; index++) {
+        hash ^= BigInt(value.charCodeAt(index))
+        hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+    }
+    return hash.toString(16).padStart(16, '0')
 }
 
 function normalizeTextureDimension(

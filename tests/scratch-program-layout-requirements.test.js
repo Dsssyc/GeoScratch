@@ -363,7 +363,8 @@ describe('scratch Program buffer layout requirements', () => {
             name: 'particles',
             type: 'storage',
             visibility: [ 'compute' ],
-            structuralHash: codec.artifact.structuralHash,
+            abiHash: codec.artifact.abiHash,
+            schemaHash: codec.artifact.schemaHash,
         })
         expect(diagnostic.actual).to.deep.equal({ group: undefined })
     })
@@ -583,10 +584,11 @@ describe('scratch Program buffer layout requirements', () => {
         })
 
         expect(drawDiagnostic.expected).to.include({
-            structuralHash: codec.artifact.structuralHash,
+            abiHash: codec.artifact.abiHash,
+            schemaHash: codec.artifact.schemaHash,
         })
-        expect(drawDiagnostic.actual).to.deep.equal({ structuralHash: undefined })
-        expect(dispatchDiagnostic.actual).to.deep.equal({ structuralHash: undefined })
+        expect(drawDiagnostic.actual).to.deep.equal({ abiHash: undefined, schemaHash: undefined })
+        expect(dispatchDiagnostic.actual).to.deep.equal({ abiHash: undefined, schemaHash: undefined })
     })
 
     it('rejects draw and dispatch commands when bound buffer layout hashes differ', async() => {
@@ -642,13 +644,18 @@ describe('scratch Program buffer layout requirements', () => {
         })
 
         expect(drawDiagnostic.expected).to.include({
-            structuralHash: codec.artifact.structuralHash,
+            abiHash: codec.artifact.abiHash,
+            schemaHash: codec.artifact.schemaHash,
         })
-        expect(drawDiagnostic.actual).to.deep.equal({
-            structuralHash: otherCodec.artifact.structuralHash,
+        expect(drawDiagnostic.actual).to.deep.include({
+            abiHash: otherCodec.artifact.abiHash,
+            schemaHash: otherCodec.artifact.schemaHash,
         })
-        expect(dispatchDiagnostic.actual).to.deep.equal({
-            structuralHash: otherCodec.artifact.structuralHash,
+        expect(dispatchDiagnostic.actual).to.deep.include({
+            abiHash: otherCodec.artifact.abiHash,
+            schemaHash: otherCodec.artifact.schemaHash,
         })
+        expect(drawDiagnostic.actual.difference.path).to.match(/^schema/)
+        expect(dispatchDiagnostic.actual.difference.path).to.match(/^schema/)
     })
 })

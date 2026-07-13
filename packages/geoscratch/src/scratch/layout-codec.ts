@@ -45,7 +45,7 @@ export type LayoutCodecOptions = {
     usage?: LayoutCodecUsage[]
 }
 
-export type LayoutFieldArtifact = {
+export type LayoutFieldArtifact = Readonly<{
     kind: 'LayoutField'
     name: string
     path: string
@@ -62,9 +62,9 @@ export type LayoutFieldArtifact = {
     elementType?: string
     elementSize?: number
     elementAlignment?: number
-}
+}>
 
-export type LayoutArtifact = {
+export type LayoutArtifact = Readonly<{
     kind: 'LayoutArtifact'
     name: string
     label?: string
@@ -72,11 +72,18 @@ export type LayoutArtifact = {
     alignment: number
     byteLength: number
     stride: number
-    fields: LayoutFieldArtifact[]
-    structuralHash: string
-    usages: LayoutCodecUsage[]
-    usageCompatibility: LayoutUsageCompatibility
-}
+    fields: readonly LayoutFieldArtifact[]
+    abiHash: string
+    schemaHash: string
+    usages: readonly LayoutCodecUsage[]
+    usageCompatibility: Readonly<LayoutUsageCompatibility>
+}>
+
+export type LayoutCompatibilityDifference = Readonly<{
+    path: string
+    expected: unknown
+    actual: unknown
+}>
 
 export type LayoutUploadView = {
     bytes: Uint8Array
@@ -146,6 +153,10 @@ const PRIMITIVE_DEFINITIONS: Record<LayoutPrimitiveType, PrimitiveDefinition> = 
 }
 
 const DEFAULT_USAGES: LayoutCodecUsage[] = [ 'storage', 'readback' ]
+const layoutCanonicalSignatures = new WeakMap<LayoutArtifact, Readonly<{
+    abi: string
+    schema: string
+}>>()
 
 export interface LayoutCodec {
     spec: LayoutSpec
@@ -166,7 +177,8 @@ export class LayoutCodec {
 
         const subject: DiagnosticSubject = {
             kind: 'LayoutArtifact',
-            hash: this.artifact.structuralHash,
+            abiHash: this.artifact.abiHash,
+            schemaHash: this.artifact.schemaHash,
         }
         subject.label = this.artifact.label ?? this.artifact.name
 
@@ -284,6 +296,7 @@ export function createLayoutReadbackView(
 export function isLayoutArtifact(value: unknown): value is LayoutArtifact {
 
     return isRecord(value) &&
+        layoutCanonicalSignatures.has(value as LayoutArtifact) &&
         value.kind === 'LayoutArtifact' &&
         typeof value.name === 'string' &&
         value.alignmentMode === 'host-shareable' &&
@@ -291,9 +304,54 @@ export function isLayoutArtifact(value: unknown): value is LayoutArtifact {
         isPositiveSafeInteger(value.byteLength) &&
         isPositiveSafeInteger(value.stride) &&
         Array.isArray(value.fields) &&
-        typeof value.structuralHash === 'string' &&
+        typeof value.abiHash === 'string' &&
+        typeof value.schemaHash === 'string' &&
         Array.isArray(value.usages) &&
         isRecord(value.usageCompatibility)
+}
+
+export function layoutArtifactsAbiCompatible(left: LayoutArtifact, right: LayoutArtifact): boolean {
+
+    const leftSignatures = layoutCanonicalSignatures.get(left)
+    const rightSignatures = layoutCanonicalSignatures.get(right)
+    return leftSignatures !== undefined &&
+        rightSignatures !== undefined &&
+        left.abiHash === right.abiHash &&
+        leftSignatures.abi === rightSignatures.abi
+}
+
+export function layoutArtifactsSchemaCompatible(left: LayoutArtifact, right: LayoutArtifact): boolean {
+
+    const leftSignatures = layoutCanonicalSignatures.get(left)
+    const rightSignatures = layoutCanonicalSignatures.get(right)
+    return leftSignatures !== undefined &&
+        rightSignatures !== undefined &&
+        left.schemaHash === right.schemaHash &&
+        leftSignatures.schema === rightSignatures.schema
+}
+
+export function describeLayoutCompatibilityDifference(
+    expected: LayoutArtifact,
+    actual: LayoutArtifact,
+    kind: 'abi' | 'schema'
+): LayoutCompatibilityDifference | undefined {
+
+    const expectedSignature = layoutCanonicalSignatures.get(expected)?.[kind]
+    const actualSignature = layoutCanonicalSignatures.get(actual)?.[kind]
+    if (expectedSignature === undefined || actualSignature === undefined) {
+        return Object.freeze({
+            path: kind,
+            expected: expectedSignature === undefined ? 'registered LayoutArtifact' : 'available',
+            actual: actualSignature === undefined ? 'unregistered LayoutArtifact' : 'available',
+        })
+    }
+    if (expectedSignature === actualSignature) return undefined
+
+    return Object.freeze(firstCanonicalDifference(
+        JSON.parse(expectedSignature) as unknown,
+        JSON.parse(actualSignature) as unknown,
+        kind
+    ))
 }
 
 export function isLayoutUploadView(value: unknown): value is LayoutUploadView {
@@ -309,7 +367,8 @@ export function layoutArtifactSubject(artifact: LayoutArtifact): DiagnosticSubje
 
     const subject: DiagnosticSubject = {
         kind: 'LayoutArtifact',
-        hash: artifact.structuralHash,
+        abiHash: artifact.abiHash,
+        schemaHash: artifact.schemaHash,
     }
     subject.label = artifact.label ?? artifact.name
 
@@ -526,7 +585,7 @@ function lowerLayoutArtifact(spec: LayoutSpec, options: LayoutCodecOptions): Lay
     const byteLength = roundUp(alignment, cursor)
     const fields: LayoutFieldArtifact[] = lowered.map((field, index) => {
         const nextOffset = lowered[index + 1]?.offset ?? byteLength
-        const artifact: LayoutFieldArtifact = {
+        return {
             kind: 'LayoutField',
             name: field.descriptor.name,
             path: field.descriptor.name,
@@ -536,55 +595,83 @@ function lowerLayoutArtifact(spec: LayoutSpec, options: LayoutCodecOptions): Lay
             size: field.type.size,
             alignment: field.type.alignment,
             padding: nextOffset - (field.offset + field.type.size),
+            ...(field.type.element === undefined && field.type.componentType !== undefined
+                ? { componentType: field.type.componentType }
+                : {}),
+            ...(field.type.element === undefined && field.type.componentCount !== undefined
+                ? { componentCount: field.type.componentCount }
+                : {}),
+            ...(field.type.arrayLength !== undefined ? { arrayLength: field.type.arrayLength } : {}),
+            ...(field.type.arrayStride !== undefined ? { arrayStride: field.type.arrayStride } : {}),
+            ...(field.type.element !== undefined ? {
+                elementType: field.type.element.type,
+                elementSize: field.type.element.size,
+                elementAlignment: field.type.element.alignment,
+                ...(field.type.element.componentType !== undefined
+                    ? { componentType: field.type.element.componentType }
+                    : {}),
+                ...(field.type.element.componentCount !== undefined
+                    ? { componentCount: field.type.element.componentCount }
+                    : {}),
+            } : {}),
         }
-
-        if (field.type.componentType !== undefined) artifact.componentType = field.type.componentType
-        if (field.type.componentCount !== undefined) artifact.componentCount = field.type.componentCount
-        if (field.type.arrayLength !== undefined) artifact.arrayLength = field.type.arrayLength
-        if (field.type.arrayStride !== undefined) artifact.arrayStride = field.type.arrayStride
-        if (field.type.element !== undefined) {
-            artifact.elementType = field.type.element.type
-            artifact.elementSize = field.type.element.size
-            artifact.elementAlignment = field.type.element.alignment
-            artifact.componentType = field.type.element.componentType
-            artifact.componentCount = field.type.element.componentCount
-        }
-
-        return artifact
     })
     const usageCompatibility = computeUsageCompatibility(fields)
 
-    const canonical = {
-        name: spec.name,
+    const abiCanonical = {
+        alignmentMode: 'host-shareable',
+        alignment,
+        byteLength,
+        stride: byteLength,
         fields: fields.map(field => ({
-            name: field.name,
             type: field.type,
             offset: field.offset,
             size: field.size,
             alignment: field.alignment,
+            padding: field.padding,
+            componentType: field.componentType,
+            componentCount: field.componentCount,
             arrayLength: field.arrayLength,
             arrayStride: field.arrayStride,
+            elementType: field.elementType,
+            elementSize: field.elementSize,
+            elementAlignment: field.elementAlignment,
         })),
-        byteLength,
-        alignment,
-        usages,
-        usageCompatibility,
     }
+    const schemaCanonical = {
+        name: spec.name,
+        fields: fields.map(field => ({
+            name: field.name,
+            type: field.type,
+            componentType: field.componentType,
+            componentCount: field.componentCount,
+            arrayLength: field.arrayLength,
+            arrayStride: field.arrayStride,
+            elementType: field.elementType,
+        })),
+    }
+    const abiSignature = JSON.stringify(abiCanonical)
+    const schemaSignature = JSON.stringify(schemaCanonical)
     const artifact: LayoutArtifact = {
         kind: 'LayoutArtifact',
         name: spec.name,
+        ...(spec.label !== undefined ? { label: spec.label } : {}),
         alignmentMode: 'host-shareable',
         alignment,
         byteLength,
         stride: byteLength,
         fields,
-        structuralHash: `layout-${fnv1a(JSON.stringify(canonical))}`,
+        abiHash: `layout-abi-${fnv1a64(abiSignature)}`,
+        schemaHash: `layout-schema-${fnv1a64(schemaSignature)}`,
         usages,
         usageCompatibility,
     }
-    if (spec.label !== undefined) artifact.label = spec.label
 
-    return artifact
+    layoutCanonicalSignatures.set(artifact, Object.freeze({
+        abi: abiSignature,
+        schema: schemaSignature,
+    }))
+    return freezeLayoutArtifact(artifact)
 }
 
 function lowerFieldType(path: string, type: LayoutFieldType): LoweredFieldType {
@@ -927,7 +1014,8 @@ function unresolvedArtifactSubject(label: string | undefined): DiagnosticSubject
 
     const subject: DiagnosticSubject = {
         kind: 'LayoutArtifact',
-        hash: 'unresolved',
+        abiHash: 'unresolved',
+        schemaHash: 'unresolved',
     }
     if (label !== undefined) subject.label = label
 
@@ -964,13 +1052,59 @@ function pascalName(name: string): string {
         .join('')
 }
 
-function fnv1a(value: string): string {
+function fnv1a64(value: string): string {
 
-    let hash = 0x811c9dc5
+    let hash = 0xcbf29ce484222325n
     for (let index = 0; index < value.length; index++) {
-        hash ^= value.charCodeAt(index)
-        hash = Math.imul(hash, 0x01000193)
+        hash ^= BigInt(value.charCodeAt(index))
+        hash = BigInt.asUintN(64, hash * 0x100000001b3n)
     }
 
-    return (hash >>> 0).toString(16).padStart(8, '0')
+    return hash.toString(16).padStart(16, '0')
+}
+
+function freezeLayoutArtifact(artifact: LayoutArtifact): LayoutArtifact {
+
+    for (const field of artifact.fields) Object.freeze(field)
+    Object.freeze(artifact.fields)
+    Object.freeze(artifact.usages)
+    Object.freeze(artifact.usageCompatibility)
+    return Object.freeze(artifact)
+}
+
+function firstCanonicalDifference(
+    expected: unknown,
+    actual: unknown,
+    path: string
+): LayoutCompatibilityDifference {
+
+    if (Object.is(expected, actual)) return { path, expected, actual }
+    if (Array.isArray(expected) && Array.isArray(actual)) {
+        const length = Math.max(expected.length, actual.length)
+        for (let index = 0; index < length; index++) {
+            if (!Object.is(expected[index], actual[index])) {
+                return firstCanonicalDifference(expected[index], actual[index], `${path}[${index}]`)
+            }
+        }
+    }
+    if (isRecord(expected) && isRecord(actual)) {
+        const keys = [ ...new Set([ ...Object.keys(expected), ...Object.keys(actual) ]) ].sort()
+        for (const key of keys) {
+            if (!Object.is(expected[key], actual[key])) {
+                return firstCanonicalDifference(expected[key], actual[key], `${path}.${key}`)
+            }
+        }
+    }
+
+    return {
+        path,
+        expected: boundedDifferenceValue(expected),
+        actual: boundedDifferenceValue(actual),
+    }
+}
+
+function boundedDifferenceValue(value: unknown): unknown {
+
+    if (typeof value !== 'string') return value
+    return value.length <= 128 ? value : `${value.slice(0, 128)}...`
 }

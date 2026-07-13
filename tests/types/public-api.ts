@@ -172,6 +172,15 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 1,
     })
+    const wholeBufferRegion: scr.BufferRegion = buffer.region()
+    const slicedBufferRegion: scr.BufferRegion = buffer.region({ offset: 4, size: 8 })
+    const normalizedSubregion: scr.BufferRegion = slicedBufferRegion.subregion({ offset: 4 })
+    const regionOffset: number = normalizedSubregion.offset
+    const regionSize: number = normalizedSubregion.size
+    // @ts-expect-error BufferRegion construction is closed
+    new scr.BufferRegion()
+    // @ts-expect-error BufferRegion facts are immutable
+    wholeBufferRegion.offset = 4
     const resourceState: scr.ResourceState = buffer.state
     const resourceReady: boolean = buffer.isReady
     const compatResourceState: scratchCompat.ResourceState = resourceState
@@ -275,6 +284,19 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         magFilter: 'nearest',
         minFilter: 'nearest',
     })
+    const defaultTextureViewSpec: scr.TextureViewSpec = scratchTexture.view()
+    const explicitTextureViewSpec: scr.TextureViewSpec = scratchTexture.view({
+        dimension: '2d',
+        baseMipLevel: 0,
+        mipLevelCount: 1,
+        baseArrayLayer: 0,
+        arrayLayerCount: 1,
+    })
+    const normalizedViewDescriptor: scr.NormalizedTextureViewDescriptor = explicitTextureViewSpec.descriptor
+    // @ts-expect-error TextureViewSpec construction is closed
+    new scr.TextureViewSpec()
+    // @ts-expect-error TextureViewSpec descriptors are immutable
+    normalizedViewDescriptor.baseMipLevel = 1
     const scratchTextureView: GPUTextureView = scratchTexture.createView()
     await scratchTexture.resize(compatTextureSize)
     // @ts-expect-error TextureResource descriptor is read-only
@@ -383,6 +405,17 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const typedReadback = codec.createReadbackView(packed)
     const wgslAccessors: string = codec.wgslAccessors({ namespace: 'TypedUniformsLayout' })
     const artifactByteLength: number = codec.artifact.byteLength
+    const artifactAbiHash: string = codec.artifact.abiHash
+    const artifactSchemaHash: string = codec.artifact.schemaHash
+    // @ts-expect-error structuralHash was removed without an alias
+    codec.artifact.structuralHash
+    const typedRegion: scr.BufferRegion = buffer.region({
+        offset: 0,
+        size: codec.artifact.stride,
+        layout: codec.artifact,
+    })
+    const reinterpretedRegion: scr.BufferRegion = typedRegion.interpretAs(codec.artifact)
+    const regionElementCount: number | undefined = reinterpretedRegion.elementCount
     const usageCompatibility: scr.LayoutUsageCompatibility = codec.artifact.usageCompatibility
     const readbackCount: number = typedReadback.count
     const readbackObject: Record<string, unknown> = typedReadback.toObject()

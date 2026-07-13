@@ -40,9 +40,11 @@ static factories. Exported classes remain usable for types and `instanceof`.
 
 Each factory normalizes and preflights its complete descriptor, allocates a
 provisional identity and stable label, begins exactly one matching operation,
-pushes validation, internal, and out-of-memory scopes, issues exactly one native
-create call, and pops every scope before the first `await`. Synchronous throws
-and asynchronous scope outcomes remain distinct evidence.
+pushes scopes in the exact nesting order out-of-memory, internal, then
+validation, issues exactly one native create call, and pops in reverse order:
+validation, internal, then out-of-memory. Every pop is issued before the first
+`await`. Synchronous throws, rejected scope settlement, and resolved scoped
+errors remain distinct evidence.
 
 After settlement Scratch rechecks runtime and device lifecycle, then constructs
 and registers the wrapper. Failure or cancellation never registers a current
@@ -53,6 +55,11 @@ Sampler validation covers the complete current native descriptor. Query-set
 validation covers positive count and limits, timestamp feature preflight, and
 occlusion without a fabricated feature. Pipeline-statistics queries remain
 outside core WebGPU and unsupported.
+
+Unsupported query features or types reject the factory Promise with a structured
+diagnostic. `QueryUnsupportedPolicy` and its `warn-disable` or `disable` object
+modes are removed: an acknowledged factory either returns a usable QuerySet or
+returns no object.
 
 `BindLayout` is authoritative only for native binding ABI. Its immutable entries
 contain group and binding indices, stable names, visibility, buffer binding type,
@@ -98,17 +105,40 @@ fails with a structured conflict; it is not queued and does not trigger an
 automatic retry. Allocation drift or lifecycle change before settlement blocks
 commit. A pending transaction cannot revive a disposed object.
 
-For each unique texture-view candidate, Scratch independently pushes validation,
-internal, and OOM scopes, calls `GPUTexture.createView()` once, and pops all
-scopes immediately. It then builds one bind-group candidate, independently
-scopes exactly one `GPUDevice.createBindGroup()` call, and pops those scopes.
-Every native create and pop is issued before the first `await`.
+An already prepared call whose current snapshot is unchanged returns one cached
+resolved Promise for that preparation generation and performs no operation,
+scope, native create, or generation change. `stale` is derived whenever state is
+observed or used by comparing the current allocation snapshot with the committed
+snapshot. Resources do not retain reverse BindSet listener graphs, and allocation
+replacement does not walk or mutate dependent BindSets.
+
+For each unique texture-view candidate, Scratch independently pushes scopes in
+the exact order OOM, internal, validation, calls `GPUTexture.createView()` once,
+then pops validation, internal, and OOM. It then builds one bind-group candidate
+and applies the same scope order around exactly one
+`GPUDevice.createBindGroup()` call. Every native create and pop is issued before
+the first `await`.
 
 After independent settlement, Scratch selects the primary failure by stable
 causal order and retains secondary evidence. It rechecks runtime, device, object
 lifecycle, and the complete allocation snapshot. Native views, bind group,
 snapshot hash, and generation commit atomically. Failed candidates are
 dereferenced; no partial candidate becomes current.
+
+Primary-failure selection never follows Promise settlement order or native
+message text. It sorts complete unbounded transaction facts by this fixed tuple:
+
+1. transaction stage: descriptor/preflight, synchronous native issue, scope
+   settlement, resolved scoped error, lifecycle recheck, snapshot recheck, then
+   commit;
+2. native issue sequence: texture views in normalized binding-index order,
+   followed by the bind group; and
+3. scope order within one issue: validation, internal, then OOM.
+
+Within lifecycle recheck, runtime disposal precedes device loss, BindSet and
+BindLayout disposal, then bound-resource disposal. Snapshot drift follows all
+lifecycle failures. The first fact is primary and every remaining independent or
+derivative fact is retained as bounded related evidence.
 
 ### Persistent binding parity
 

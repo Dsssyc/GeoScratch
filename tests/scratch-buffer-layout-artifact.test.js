@@ -93,7 +93,8 @@ describe('scratch BufferResource layout artifacts', () => {
         expect(buffer.layoutByteLength).to.equal(codec.artifact.stride * 2)
         expect(buffer.layoutSubject).to.deep.equal({
             kind: 'LayoutArtifact',
-            hash: codec.artifact.structuralHash,
+            abiHash: codec.artifact.abiHash,
+            schemaHash: codec.artifact.schemaHash,
             label: codec.artifact.label,
         })
         expect(buffer.descriptor).to.include({
@@ -147,7 +148,8 @@ describe('scratch BufferResource layout artifacts', () => {
         })
         expect(invalidCount.subject).to.deep.equal({
             kind: 'LayoutArtifact',
-            hash: codec.artifact.structuralHash,
+            abiHash: codec.artifact.abiHash,
+            schemaHash: codec.artifact.schemaHash,
             label: codec.artifact.label,
         })
         expect(invalidCount.expected).to.deep.equal({ elementCount: 'positive integer' })
@@ -167,7 +169,8 @@ describe('scratch BufferResource layout artifacts', () => {
         })
         expect(tooSmall.subject).to.deep.equal({
             kind: 'LayoutArtifact',
-            hash: codec.artifact.structuralHash,
+            abiHash: codec.artifact.abiHash,
+            schemaHash: codec.artifact.schemaHash,
             label: codec.artifact.label,
         })
         expect(tooSmall.expected).to.deep.equal({ layoutByteLength: codec.artifact.stride })
@@ -217,13 +220,20 @@ describe('scratch BufferResource layout artifacts', () => {
                 data: mismatchCodec.uploadView(createParticleValues()),
             })
         }, {
-            code: 'SCRATCH_CODEC_STRUCTURAL_HASH_MISMATCH',
+            code: 'SCRATCH_CODEC_SCHEMA_MISMATCH',
             severity: 'error',
             phase: 'layout-codec',
         })
         expect(mismatch.subject).to.deep.equal(buffer.layoutSubject)
-        expect(mismatch.expected).to.deep.equal({ structuralHash: codec.artifact.structuralHash })
-        expect(mismatch.actual).to.deep.equal({ structuralHash: mismatchCodec.artifact.structuralHash })
+        expect(mismatch.expected).to.deep.equal({
+            abiHash: codec.artifact.abiHash,
+            schemaHash: codec.artifact.schemaHash,
+        })
+        expect(mismatch.actual).to.deep.equal({
+            abiHash: mismatchCodec.artifact.abiHash,
+            schemaHash: mismatchCodec.artifact.schemaHash,
+        })
+        expect(mismatch.evidence).to.have.length(1)
     })
 
     it('validates uploads against the layout-declared logical byte range', async() => {
@@ -276,7 +286,8 @@ describe('scratch BufferResource layout artifacts', () => {
             elementCount: values.length,
         })
 
-        expect(buffer.layout.structuralHash).to.equal(codec.artifact.structuralHash)
+        expect(buffer.layout.abiHash).to.equal(codec.artifact.abiHash)
+        expect(buffer.layout.schemaHash).to.equal(codec.artifact.schemaHash)
 
         const view = codec.createReadbackView(bytes)
 
