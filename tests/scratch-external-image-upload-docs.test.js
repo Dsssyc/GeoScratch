@@ -60,15 +60,15 @@ describe('scratch external image upload documentation', () => {
         expect(provider).to.include('"texture-formats-tier2"')
     })
 
-    it('records the contributor boundary and both user-facing example catalogs', () => {
+    it('records the contributor routing and both user-facing example catalogs', () => {
 
         const agents = read('AGENTS.md')
         const readme = read('README.md')
         const readmeZh = read('README_zh.md')
 
-        expect(agents).to.include('`ExternalImageUploadCommand`')
-        expect(agents).to.include('`GPUQueue.copyExternalImageToTexture()`')
-        expect(agents).to.include('must not lower through CPU pixel extraction or `writeTexture()`')
+        expect(agents).to.include('docs/vision/scratch-api/')
+        expect(agents).to.include('explicit CPU/GPU transfer operations')
+        expect(agents).to.include('Do not create prose-only validation errors')
         expect(readme).to.include('| External Image Upload | `examples/externalImageUpload/` |')
         expect(readmeZh).to.include('| External Image Upload | `examples/externalImageUpload/` |')
     })

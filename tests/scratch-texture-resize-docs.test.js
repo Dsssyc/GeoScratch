@@ -114,7 +114,7 @@ describe('scratch texture resize documentation', () => {
         expect(config.compilerOptions.types).to.deep.equal([ '@webgpu/types' ])
     })
 
-    it('records the contributor boundary and user-facing browser proof', () => {
+    it('records the contributor routing and user-facing browser proof', () => {
 
         const agents = read('AGENTS.md')
         const examples = read('examples', 'README.md')
@@ -122,15 +122,10 @@ describe('scratch texture resize documentation', () => {
         const readmeZh = read('README_zh.md')
         const review = read('docs', 'review', 'scratch-api-intelligent-friendly-review.md')
 
-        expect(agents).to.include('`TextureResource.resize()`')
-        expect(agents).to.include('the only public texture allocation transition')
-        expect(agents).to.include('ECMAScript-private backing slots')
-        expect(agents).to.include('non-extensible')
-        expect(agents).to.include('closed to subclass construction')
-        expect(agents).to.include('preflight one explicit 2D mip/layer')
-        expect(agents).to.include('reject binding consumers that no longer match')
-        expect(agents).to.include('TypeScript `private` fields')
-        expect(agents).to.include('must not wait for queue completion')
+        expect(agents).to.include('docs/vision/scratch-api/')
+        expect(agents).to.include('logical resources with allocation versions and content epochs')
+        expect(agents).to.include('explicit CPU/GPU transfer operations')
+        expect(agents).to.include('Do not create prose-only validation errors')
         expect(examples).to.include('`textureResize/`')
         expect(examples).to.include('exact padded readback bytes')
         expect(readme).to.include('| Texture Resize | `examples/textureResize/` |')
