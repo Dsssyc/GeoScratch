@@ -140,6 +140,7 @@ export function createFakeGpu(options = {}) {
         unmaps: [],
         bufferDestroys: [],
         errorScopes: [],
+        debugGroups: [],
         nativeTimeline: [],
         compilationInfoRequests: [],
         asyncPipelineRequests: [],
@@ -906,6 +907,14 @@ function createFakeCommandEncoder(calls, descriptor, issueNativeMethod, initiall
     const encoder = {
         descriptor,
         invalid: initiallyInvalid,
+        pushDebugGroup(label) {
+            calls.debugGroups.push({ action: 'push', encoder: 'command', label })
+            calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'command', label })
+        },
+        popDebugGroup() {
+            calls.debugGroups.push({ action: 'pop', encoder: 'command' })
+            calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'command' })
+        },
         beginRenderPass(renderPassDescriptor) {
             const failed = issueEncoderMethod(this, issueNativeMethod, 'beginRenderPass')
             const passEncoder = createFakeRenderPassEncoder(
@@ -1041,6 +1050,14 @@ function createFakeRenderPassEncoder(
         descriptor,
         actions: [],
         invalid: initiallyInvalid,
+        pushDebugGroup(label) {
+            calls.debugGroups.push({ action: 'push', encoder: 'render-pass', label })
+            calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'render-pass', label })
+        },
+        popDebugGroup() {
+            calls.debugGroups.push({ action: 'pop', encoder: 'render-pass' })
+            calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'render-pass' })
+        },
         setPipeline(pipeline) {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'renderSetPipeline')) return
             this.actions.push({ type: 'setPipeline', pipeline })
@@ -1127,6 +1144,14 @@ function createFakeComputePassEncoder(
         descriptor,
         actions: [],
         invalid: initiallyInvalid,
+        pushDebugGroup(label) {
+            calls.debugGroups.push({ action: 'push', encoder: 'compute-pass', label })
+            calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'compute-pass', label })
+        },
+        popDebugGroup() {
+            calls.debugGroups.push({ action: 'pop', encoder: 'compute-pass' })
+            calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'compute-pass' })
+        },
         setPipeline(pipeline) {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'computeSetPipeline')) return
             this.actions.push({ type: 'setPipeline', pipeline })

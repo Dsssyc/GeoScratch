@@ -25,6 +25,7 @@ import { validateRenderPassAttachments } from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
+import { beginSubmissionNativeObservation } from './submission-native-observation.js'
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
@@ -33,6 +34,14 @@ import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
 import type { Resource, ResourceState } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
+import type {
+    SubmissionNativeIssue,
+    SubmissionNativeObservation,
+} from './submission-native-observation.js'
+import type {
+    ScratchSubmissionNativeLocation,
+    ScratchSubmissionQueueActionKind,
+} from './gpu-operation.js'
 
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 
@@ -455,20 +464,30 @@ export class SubmissionBuilder {
         }
 
         const submittedId = `scratch-submitted-${UUID()}`
+        const nativeIssuePlan = createSubmissionNativeIssuePlan(submittedId, resolvedPlan.steps)
+        const nativeObservation = beginSubmissionNativeObservation({
+            runtime: this.runtime,
+            submissionId: submittedId,
+            effectful: nativeIssuePlan.length > 0,
+            plan: nativeIssuePlan,
+        })
         const commandBuffers: GPUCommandBuffer[] = []
         const queueTimeline: PreparedQueueAction[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
         const pendingReadbacks: PendingReadback[] = []
+        const submittedReadbacks = new Set<PendingReadback>()
         const readbackClaims = new Map<number, ReadbackCommandClaim>()
         const commandBufferReadbacks = new Map<GPUCommandBuffer, PendingReadback[]>()
         const resourceSnapshots = new Map<Resource, ResourceContentSnapshot>()
         const querySlotSnapshots = new Map<QuerySetResource, Map<number, QuerySlotContentSnapshot>>()
         let encoder: GPUCommandEncoder | undefined
         let encoderSegmentIndex = 0
+        let activeEncoderSegmentIndex: number | undefined
         let segmentResources = new Set<Resource>()
         let segmentQuerySlots = new Map<QuerySetResource, Set<number>>()
         let segmentReadbacks: PendingReadback[] = []
 
+        try {
         try {
             for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
                 if (step.kind !== 'readback') continue
@@ -511,12 +530,16 @@ export class SubmissionBuilder {
         const getEncoder = () => {
 
             if (encoder === undefined) {
-                encoder = this.runtime.device.createCommandEncoder({
-                    label: encoderSegmentIndex === 0
+                const segmentIndex = encoderSegmentIndex++
+                const location = encoderSegmentLocation(submittedId, segmentIndex)
+                encoder = nativeObservation.issue('encoder-create', location, () =>
+                    this.runtime.device.createCommandEncoder({
+                    label: segmentIndex === 0
                         ? submittedId
-                        : `${submittedId}:segment-${encoderSegmentIndex}`,
-                })
-                encoderSegmentIndex++
+                        : `${submittedId}:segment-${segmentIndex}`,
+                    })
+                )
+                activeEncoderSegmentIndex = segmentIndex
             }
 
             return encoder
@@ -526,7 +549,15 @@ export class SubmissionBuilder {
 
             if (encoder === undefined) return
 
-            const commandBuffer = encoder.finish()
+            if (activeEncoderSegmentIndex === undefined) {
+                throw new TypeError('Active encoder segment index is unavailable.')
+            }
+            const location = encoderSegmentLocation(submittedId, activeEncoderSegmentIndex)
+            const commandBuffer = nativeObservation.issue(
+                'encoder-finish',
+                location,
+                () => encoder!.finish()
+            )
             commandBuffers.push(commandBuffer)
             queueTimeline.push({
                 kind: 'command-buffer',
@@ -535,6 +566,7 @@ export class SubmissionBuilder {
             })
             commandBufferReadbacks.set(commandBuffer, segmentReadbacks)
             encoder = undefined
+            activeEncoderSegmentIndex = undefined
             segmentResources = new Set()
             segmentQuerySlots = new Map()
             segmentReadbacks = []
@@ -566,7 +598,14 @@ export class SubmissionBuilder {
                         captureResourceAccess(step.command.source.resource, 'read', origin),
                         captureResourceAccess(step.command.target, 'write', origin),
                     ]
-                    step.command.encode(encoder)
+                    issueStandaloneCommandEncoding(
+                        nativeObservation,
+                        submittedId,
+                        stepIndex,
+                        step.command,
+                        encoder,
+                        () => step.command.encode(encoder)
+                    )
                     completeResourceAccesses(resourceAccesses, accesses)
                     continue
                 }
@@ -581,7 +620,14 @@ export class SubmissionBuilder {
                         contentEpoch: readAccess.contentEpochBefore,
                         allocationVersion: step.command.source.resource.allocationVersion,
                     })
-                    encodeReadbackCommandClaim(claim, encoder)
+                    issueStandaloneCommandEncoding(
+                        nativeObservation,
+                        submittedId,
+                        stepIndex,
+                        step.command,
+                        encoder,
+                        () => encodeReadbackCommandClaim(claim, encoder)
+                    )
                     const pendingReadback = {
                         command: step.command,
                         claim,
@@ -601,7 +647,14 @@ export class SubmissionBuilder {
                     const writes = [
                         captureResourceAccess(step.command.destination, 'write', commandAccessOrigin(stepIndex, 'resolve', step.command)),
                     ]
-                    step.command.encode(encoder)
+                    issueStandaloneCommandEncoding(
+                        nativeObservation,
+                        submittedId,
+                        stepIndex,
+                        step.command,
+                        encoder,
+                        () => step.command.encode(encoder)
+                    )
                     completeResourceAccesses(resourceAccesses, writes)
                     continue
                 }
@@ -611,7 +664,16 @@ export class SubmissionBuilder {
                     if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
                     const encoder = getEncoder()
-                    const passEncoder = encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
+                    const passLocation = submissionPassLocation(
+                        submittedId,
+                        stepIndex,
+                        step.passSpec
+                    )
+                    const passEncoder = nativeObservation.issue(
+                        'pass-begin',
+                        passLocation,
+                        () => encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
+                    )
                     for (const command of step.commands) {
                         const origin = commandAccessOrigin(stepIndex, 'compute', command, step.passSpec)
                         const declaredWrites = command._producesDeclaredWrites ? command.resources.write : []
@@ -620,10 +682,18 @@ export class SubmissionBuilder {
                             ...command.resources.read.map(read => captureResourceAccess(read.resource, 'read', origin)),
                             ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
                         ]
-                        command.encode(passEncoder)
+                        issuePassCommandEncoding(
+                            nativeObservation,
+                            submittedId,
+                            stepIndex,
+                            step.passSpec,
+                            command,
+                            passEncoder,
+                            () => command.encode(passEncoder)
+                        )
                         completeResourceAccesses(resourceAccesses, accesses)
                     }
-                    passEncoder.end()
+                    nativeObservation.issue('pass-end', passLocation, () => passEncoder.end())
                     trackTimestampWrites(step.passSpec)
                     step.passSpec.advanceTimestampWriteEpochs()
                     continue
@@ -634,7 +704,16 @@ export class SubmissionBuilder {
 
                 const encoder = getEncoder()
                 const colorWrites = captureRenderAttachmentWrites(stepIndex, step.passSpec)
-                const passEncoder = encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
+                const passLocation = submissionPassLocation(
+                    submittedId,
+                    stepIndex,
+                    step.passSpec
+                )
+                const passEncoder = nativeObservation.issue(
+                    'pass-begin',
+                    passLocation,
+                    () => encoder.beginRenderPass(step.passSpec.createRenderPassDescriptor())
+                )
                 let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
                 for (const command of step.commands) {
                     const origin = commandAccessOrigin(stepIndex, 'render', command, step.passSpec)
@@ -648,7 +727,15 @@ export class SubmissionBuilder {
                             ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
                         ]
                         : []
-                    command.encode(passEncoder)
+                    issuePassCommandEncoding(
+                        nativeObservation,
+                        submittedId,
+                        stepIndex,
+                        step.passSpec,
+                        command,
+                        passEncoder,
+                        () => command.encode(passEncoder)
+                    )
                     if (command.commandKind === 'begin-occlusion-query') {
                         activeOcclusionQueryCommand = command
                     } else if (command.commandKind === 'end-occlusion-query') {
@@ -663,7 +750,7 @@ export class SubmissionBuilder {
                     }
                     completeResourceAccesses(resourceAccesses, accesses)
                 }
-                passEncoder.end()
+                nativeObservation.issue('pass-end', passLocation, () => passEncoder.end())
                 trackTimestampWrites(step.passSpec)
                 step.passSpec.advanceTimestampWriteEpochs()
                 for (const write of colorWrites) trackSegmentResourceWrite(write.resource)
@@ -679,12 +766,20 @@ export class SubmissionBuilder {
             restorePreparedContentState(resourceSnapshots, querySlotSnapshots)
         }
         this.isSubmitted = true
-        const submittedReadbacks = new Set<PendingReadback>()
         try {
-            for (const action of queueTimeline) {
+            for (const [ actionIndex, action ] of queueTimeline.entries()) {
+                const location = submissionQueueActionLocation(
+                    submittedId,
+                    actionIndex,
+                    action.kind
+                )
                 switch (action.kind) {
                     case 'command-buffer':
-                        this.runtime.queue.submit([ action.commandBuffer ])
+                        nativeObservation.issue(
+                            'queue-submit',
+                            location,
+                            () => this.runtime.queue.submit([ action.commandBuffer ])
+                        )
                         for (const pending of commandBufferReadbacks.get(action.commandBuffer) ?? []) {
                             submittedReadbacks.add(pending)
                         }
@@ -692,7 +787,11 @@ export class SubmissionBuilder {
                     case 'buffer-upload':
                     case 'texture-upload':
                     case 'external-image-upload':
-                        writeUploadCommandQueueAction(action.command, this.runtime.queue)
+                        nativeObservation.issue(
+                            'queue-action',
+                            location,
+                            () => writeUploadCommandQueueAction(action.command, this.runtime.queue)
+                        )
                         break
                     default:
                         assertNeverPreparedQueueAction(action)
@@ -703,6 +802,9 @@ export class SubmissionBuilder {
         } catch (cause) {
             releaseFailedSubmissionReadbacks(this.runtime.queue, pendingReadbacks, submittedReadbacks)
             throw cause
+        }
+        } finally {
+            nativeObservation.finish()
         }
 
         let nativeDone: Promise<unknown>
@@ -771,6 +873,246 @@ export class SubmissionBuilder {
             id: this.id,
         }
     }
+}
+
+function createSubmissionNativeIssuePlan(
+    submissionId: string,
+    steps: readonly ResolvedSubmissionStep[]
+): SubmissionNativeIssue[] {
+
+    const encoding: SubmissionNativeIssue[] = []
+    const queueActions: ScratchSubmissionQueueActionKind[] = []
+    let nextSegmentIndex = 0
+    let activeSegmentIndex: number | undefined
+
+    const ensureEncoder = () => {
+
+        if (activeSegmentIndex !== undefined) return
+        activeSegmentIndex = nextSegmentIndex++
+        encoding.push({
+            stage: 'encoder-create',
+            location: encoderSegmentLocation(submissionId, activeSegmentIndex),
+        })
+    }
+    const finishEncoder = () => {
+
+        if (activeSegmentIndex === undefined) return
+        encoding.push({
+            stage: 'encoder-finish',
+            location: encoderSegmentLocation(submissionId, activeSegmentIndex),
+        })
+        queueActions.push('command-buffer')
+        activeSegmentIndex = undefined
+    }
+
+    for (const [ stepIndex, step ] of steps.entries()) {
+        if (step.kind === 'upload') {
+            finishEncoder()
+            queueActions.push(uploadQueueActionKind(step.command))
+            continue
+        }
+        if (step.kind === 'copy' || step.kind === 'readback' || step.kind === 'resolve') {
+            ensureEncoder()
+            encoding.push({
+                stage: 'command-encode',
+                location: standaloneCommandLocation(
+                    submissionId,
+                    stepIndex,
+                    step.command
+                ),
+            })
+            continue
+        }
+        if (
+            step.disposition === 'skip-pass' ||
+            (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects())
+        ) continue
+
+        ensureEncoder()
+        const passLocation = submissionPassLocation(submissionId, stepIndex, step.passSpec)
+        encoding.push({ stage: 'pass-begin', location: passLocation })
+        for (const command of step.commands) {
+            encoding.push({
+                stage: 'command-encode',
+                location: passCommandLocation(
+                    submissionId,
+                    stepIndex,
+                    step.passSpec,
+                    command
+                ),
+            })
+        }
+        encoding.push({ stage: 'pass-end', location: passLocation })
+    }
+    finishEncoder()
+
+    return [
+        ...encoding,
+        ...queueActions.map((actionKind, actionIndex): SubmissionNativeIssue => ({
+            stage: actionKind === 'command-buffer' ? 'queue-submit' : 'queue-action',
+            location: submissionQueueActionLocation(
+                submissionId,
+                actionIndex,
+                actionKind
+            ),
+        })),
+    ]
+}
+
+function issueStandaloneCommandEncoding(
+    observation: SubmissionNativeObservation,
+    submissionId: string,
+    stepIndex: number,
+    command: { id: string, label?: string | undefined, commandKind: string },
+    encoder: GPUCommandEncoder,
+    issue: () => void
+): void {
+
+    issueCommandEncoding(
+        observation,
+        standaloneCommandLocation(submissionId, stepIndex, command),
+        encoder,
+        command,
+        issue
+    )
+}
+
+function issuePassCommandEncoding(
+    observation: SubmissionNativeObservation,
+    submissionId: string,
+    stepIndex: number,
+    passSpec: RenderPassSpec | ComputePassSpec,
+    command: { id: string, label?: string | undefined, commandKind: string },
+    encoder: GPURenderPassEncoder | GPUComputePassEncoder,
+    issue: () => void
+): void {
+
+    issueCommandEncoding(
+        observation,
+        passCommandLocation(submissionId, stepIndex, passSpec, command),
+        encoder,
+        command,
+        issue
+    )
+}
+
+function issueCommandEncoding(
+    observation: SubmissionNativeObservation,
+    location: ScratchSubmissionNativeLocation,
+    encoder: Readonly<{
+        pushDebugGroup?: (groupLabel: string) => void
+        popDebugGroup?: () => void
+    }>,
+    command: { id: string, label?: string | undefined, commandKind: string },
+    issue: () => void
+): void {
+
+    observation.issue('command-encode', location, () => {
+        const detailedDebugGroup = observation.mode === 'detailed' &&
+            typeof encoder.pushDebugGroup === 'function' &&
+            typeof encoder.popDebugGroup === 'function'
+        if (detailedDebugGroup) {
+            encoder.pushDebugGroup!(submissionDebugLabel(command))
+        }
+        try {
+            issue()
+        } finally {
+            if (detailedDebugGroup) encoder.popDebugGroup!()
+        }
+    })
+}
+
+function encoderSegmentLocation(
+    submissionId: string,
+    segmentIndex: number
+): ScratchSubmissionNativeLocation {
+
+    return {
+        kind: 'encoder-segment',
+        submissionId,
+        segmentIndex,
+    }
+}
+
+function submissionPassLocation(
+    submissionId: string,
+    stepIndex: number,
+    passSpec: RenderPassSpec | ComputePassSpec
+): ScratchSubmissionNativeLocation {
+
+    return {
+        kind: 'pass',
+        submissionId,
+        stepIndex,
+        passId: passSpec.id,
+        passKind: passSpec.passKind,
+    }
+}
+
+function standaloneCommandLocation(
+    submissionId: string,
+    stepIndex: number,
+    command: { id: string, commandKind: string }
+): ScratchSubmissionNativeLocation {
+
+    return {
+        kind: 'standalone-command',
+        submissionId,
+        stepIndex,
+        commandId: command.id,
+        commandKind: command.commandKind,
+    }
+}
+
+function passCommandLocation(
+    submissionId: string,
+    stepIndex: number,
+    passSpec: RenderPassSpec | ComputePassSpec,
+    command: { id: string, commandKind: string }
+): ScratchSubmissionNativeLocation {
+
+    return {
+        kind: 'pass-command',
+        submissionId,
+        stepIndex,
+        passId: passSpec.id,
+        passKind: passSpec.passKind,
+        commandId: command.id,
+        commandKind: command.commandKind,
+    }
+}
+
+function submissionQueueActionLocation(
+    submissionId: string,
+    actionIndex: number,
+    actionKind: ScratchSubmissionQueueActionKind
+): ScratchSubmissionNativeLocation {
+
+    return {
+        kind: 'queue-action',
+        submissionId,
+        actionIndex,
+        actionKind,
+    }
+}
+
+function uploadQueueActionKind(
+    command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand
+): ScratchSubmissionQueueActionKind {
+
+    if (command.uploadKind === 'buffer') return 'buffer-upload'
+    if (command.uploadKind === 'texture') return 'texture-upload'
+    return 'external-image-upload'
+}
+
+function submissionDebugLabel(
+    command: { id: string, label?: string | undefined, commandKind: string }
+): string {
+
+    const suffix = ` [scratch:${command.id}]`
+    const prefix = command.label ?? command.commandKind
+    const maximumPrefixLength = Math.max(0, 256 - suffix.length)
+    return `${prefix.slice(0, maximumPrefixLength)}${suffix}`
 }
 
 function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSubmissionPlan {
