@@ -2,7 +2,7 @@
 
 Date: 2026-07-13
 Decision: ADR-035
-Status: Source inventory, runtime stress, benchmark, and headed Chrome evidence complete; fixed-baseline parity remains open
+Status: Complete; fixed-baseline parity and strict review are recorded separately
 
 ## Audit Boundary
 
@@ -94,6 +94,7 @@ Inventory totals:
 | Finite detailed scope around one discriminated location | `exact-location` | It does not prove one native call inside that location when several calls share the scope. |
 | Default summary scope | `enclosing-submission-family` | Issued locations do not identify a unique command. |
 | Queue completion rejection | `enclosing-submission-family` | It does not identify which replayed command or action failed. |
+| Device loss or runtime disposal during observed work | `temporal-correlation` | Detailed mode cannot make a runtime-wide lifecycle event exact. |
 | Device `uncapturederror` near an operation | `temporal-correlation` or `unknown` | Time proximity is not ownership. |
 | Raw `runtime.device` / `runtime.queue` activity | `unknown` | It is never attached to a Scratch submission by inference. |
 
@@ -135,9 +136,9 @@ The existing 11-page headed regression matrix and exact readback probe also
 passed. All 11 canvases were nonblank under the existing pixel checks, and all
 pages retained zero unexpected browser failures.
 
-## Remaining Completion Gate
+## Completion Link
 
-Task 10 evidence is closed. ADR-035 completion still requires the fixed
-Goal-start `a69c79a` parity audit and the final five-axis strict review with all
-fresh gates rerun. Those results belong to the final parity record and are not
-inferred from this source/runtime audit.
+Task 10 evidence is closed. The fixed Goal-start `a69c79a` parity matrix,
+five-axis strict review, review fixes, fresh gates, and final verdict are in
+`scratch-submission-native-final-parity-audit.md`; they are not inferred from
+this source/runtime inventory.

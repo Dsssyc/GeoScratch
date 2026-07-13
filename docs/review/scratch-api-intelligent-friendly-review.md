@@ -211,7 +211,7 @@ schema-v2 compatibility path. Texture readback, mapped leases, and broader
 native-operation provenance remain explicit future slices rather than hidden
 partial implementations.
 
-## Current Review Items
+## Resolved Review Items
 
 ### Submission Native Outcome And Content Truth
 
@@ -237,8 +237,9 @@ Implementation and bilingual contract are now present for the ADR-035 core:
 
 The schema-v4 implementation, unit/type gates, bilingual contract, ordinary
 example migration, complete native-call inventory, long-run scope/budget
-evidence, and real delayed-validation Chrome evidence are now recorded. Keep
-this item open until fixed-baseline parity and a strict re-review are complete.
+evidence, real delayed-validation Chrome evidence, fixed-baseline parity, and
+the strict re-review are now recorded. This item is resolved by ADR-035 and
+`scratch-submission-native-final-parity-audit.md`.
 
 ## Update Rules
 

@@ -140,11 +140,12 @@ describe('scratch submission native outcome documentation', () => {
         const review = read('docs', 'review', 'scratch-api-intelligent-friendly-review.md')
 
         expect(review).to.include('Implementation and bilingual contract are now present')
-        expect(review).to.match(/Keep\s+this item open/)
+        expect(review).to.include('This item is resolved by ADR-035')
         expect(review).to.include('complete native-call inventory')
-        expect(review).to.match(/real\s+delayed-validation Chrome evidence are now recorded/)
+        expect(review).to.match(/real\s+delayed-validation Chrome evidence,[\s\S]*are now recorded/)
         expect(review).to.match(/fixed-baseline parity/)
         expect(review).to.match(/strict\s+re-review/)
+        expect(review).not.to.match(/Keep\s+this item open/)
     })
 
     it('publishes executable source, stress, benchmark, and headed-browser evidence', () => {
@@ -172,7 +173,7 @@ describe('scratch submission native outcome documentation', () => {
             'Chrome 150.0.7871.115',
             'encoder-finish',
             'There is no fabricated',
-            'Goal-start `a69c79a` parity audit',
+            'Goal-start `a69c79a` parity matrix',
         ]) {
             expect(audit, marker).to.include(marker)
         }
@@ -194,6 +195,46 @@ describe('scratch submission native outcome documentation', () => {
         expect(browser).to.include('validateDelayedValidationProbe')
         expect(browser).to.include('claimedCommandOutcome')
         expect(browser).to.include("stage === 'encoder-finish'")
+    })
+
+    it('locks the fixed-baseline parity runner and resolved strict-review record', () => {
+
+        const runner = read(
+            'tests',
+            'audits',
+            'scratch-submission-native-final-parity.mjs'
+        )
+        const audit = read(
+            'docs',
+            'review',
+            'scratch-submission-native-final-parity-audit.md'
+        )
+
+        for (const marker of [
+            'a69c79a2f6789330f108aff5031a6d5e11fd59c4',
+            'unchangedSourceChecks',
+            'preservedBehaviorChecks',
+            'intentionalReplacements',
+            'missingDiagnosticCodes',
+            'missingExports',
+            'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE',
+            'observeSubmissionLifecycleUntilQueueCompletion',
+        ]) {
+            expect(runner, marker).to.include(marker)
+        }
+        for (const marker of [
+            'Status: Complete on the feature branch',
+            '5/5',
+            '17/17',
+            '14/14',
+            '724 passing',
+            'Chrome 150.0.7871.115',
+            'five RED/GREEN regressions',
+            'Neither returned a result',
+            'no remaining correctness',
+        ]) {
+            expect(audit, marker).to.include(marker)
+        }
     })
 
     it('makes every ordinary completion proof inspect native outcome and done', () => {

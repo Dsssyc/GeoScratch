@@ -52,8 +52,8 @@ stress harness itself did not retain a linear native-call log.
 
 | Profile | Submissions | Elapsed | Scope pushes/pops | Queue writes | Retained recorder | Terminal facts |
 | --- | ---: | ---: | ---: | ---: | --- | --- |
-| Summary | 20,000 | 773.986 ms | 60,000 / 60,000 | 20,000 | 64 operations, 0 incidents, 55,446 bytes, 19,938 overwritten | 0 pending operations, observation owners, effectful works, resources, captures, subscribers, open scopes, or post-disposal listeners |
-| Off | 20,000 | 563.497 ms | 0 / 0 | 20,000 | 64 operations, 0 incidents, 54,573 bytes, 19,938 overwritten | Same terminal zero; peak pending observations also remained 0 |
+| Summary | 20,000 | 639.072 ms | 60,000 / 60,000 | 20,000 | 64 operations, 0 incidents, 55,441 bytes, 19,938 overwritten | 0 pending operations, observation owners, effectful works, resources, captures, subscribers, open scopes, or post-disposal listeners |
+| Off | 20,000 | 550.382 ms | 0 / 0 | 20,000 | 64 operations, 0 incidents, 54,564 bytes, 19,938 overwritten | Same terminal zero; peak pending observations also remained 0 |
 
 The elapsed values are one synthetic run and are not a portable percentage
 claim. The structural result is the contract: summary uses exactly one
@@ -72,7 +72,7 @@ Additional stress gates passed:
   indeterminate, and a later acknowledged upload restored `ready` at epoch 2.
 - One operation-limited detailed copy used 12 scope pushes and one balanced
   debug group. The capture stopped with `operation-limit`, retained one operation
-  and 1,235 bytes, then the next copy returned to summary's 3 scopes and zero
+  and 1,236 bytes, then the next copy returned to summary's 3 scopes and zero
   debug groups.
 - Every profile remained below 64 KiB retained evidence and ended with zero
   lifecycle subscribers and zero application-visible resource ownership.
@@ -85,17 +85,17 @@ queue actions. Values are microseconds per submission.
 
 | Profile | Issue | Observation | Done after observation | Total done | Scopes/submission |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `effect-free-immediate` | 5.513 | 0.352 | 0.381 | 6.230 | 0 |
-| `off-one-command-immediate` | 41.886 | 13.068 | 0.722 | 54.900 | 0 |
-| `summary-one-command-immediate` | 43.749 | 12.875 | 0.500 | 57.149 | 3 |
-| `summary-many-commands-immediate` | 95.982 | 12.457 | 0.513 | 108.020 | 3 |
-| `summary-one-queue-action-immediate` | 23.924 | 11.627 | 0.408 | 35.939 | 3 |
-| `summary-many-queue-actions-immediate` | 75.228 | 11.373 | 0.456 | 86.976 | 3 |
-| `detailed-one-command-immediate` | 38.890 | 27.939 | 0.524 | 67.612 | 12 |
-| `detailed-many-commands-immediate` | 97.773 | 50.234 | 0.519 | 149.404 | 33 |
-| `summary-one-command-deferred-observation` | 34.657 | 11.426 | 0.419 | 46.727 | 3 |
-| `summary-one-command-deferred-done` | 35.008 | 11.487 | 0.729 | 47.211 | 3 |
-| `summary-one-command-deferred-observation-and-done` | 34.159 | 10.911 | 0.637 | 45.936 | 3 |
+| `effect-free-immediate` | 9.141 | 0.519 | 0.769 | 10.498 | 0 |
+| `off-one-command-immediate` | 44.058 | 12.561 | 1.034 | 57.530 | 0 |
+| `summary-one-command-immediate` | 51.118 | 14.588 | 0.782 | 65.939 | 3 |
+| `summary-many-commands-immediate` | 113.299 | 15.821 | 0.962 | 131.915 | 3 |
+| `summary-one-queue-action-immediate` | 23.774 | 12.392 | 0.734 | 36.794 | 3 |
+| `summary-many-queue-actions-immediate` | 80.123 | 13.679 | 0.778 | 94.419 | 3 |
+| `detailed-one-command-immediate` | 59.516 | 35.071 | 0.781 | 96.717 | 12 |
+| `detailed-many-commands-immediate` | 116.568 | 48.343 | 0.837 | 169.209 | 33 |
+| `summary-one-command-deferred-observation` | 34.331 | 12.020 | 0.665 | 46.768 | 3 |
+| `summary-one-command-deferred-done` | 47.412 | 14.884 | 1.383 | 66.703 | 3 |
+| `summary-one-command-deferred-observation-and-done` | 36.641 | 11.648 | 1.098 | 49.305 | 3 |
 
 All 55 rounds verified:
 
@@ -127,6 +127,10 @@ returns to terminal zero.
 The headed verifier passed on Chrome 150.0.7871.115 using the Apple Metal 3
 adapter. This is one current browser/adapter observation, not a portability
 claim for other implementations.
+
+The complete verifier was rerun after the strict-review fixes. The delayed
+capture retained one operation and 3,448 bytes; the valid and invalid terminal
+ownership results remained zero.
 
 - The existing 11-page regression matrix remained nonblank. Every page had zero
   unexpected console warning/error, page error, request failure, or verifier
