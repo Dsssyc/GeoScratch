@@ -114,6 +114,22 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         nativeStage: 'queue-submit',
     })
     const currentPipelineFacts: readonly scr.ScratchRuntimePipelineFact[] = diagnosticsSnapshot.pipelines
+    const currentResourceFacts: readonly scr.ScratchRuntimeResourceFact[] = diagnosticsSnapshot.resources
+    for (const fact of currentResourceFacts) {
+        if (fact.resourceKind === 'SamplerResource') {
+            // @ts-expect-error Sampler facts do not fabricate scalar content epochs
+            fact.contentEpoch
+            // @ts-expect-error Sampler facts do not fabricate logical footprint
+            fact.logicalFootprintBytes
+        } else if (fact.resourceKind === 'QuerySetResource') {
+            const slotFacts: readonly scr.QuerySetSlotSnapshot[] = fact.slots
+            // @ts-expect-error QuerySet facts do not fabricate scalar content state
+            fact.state
+        } else {
+            const contentEpoch: number = fact.contentEpoch
+            const logicalFootprintBytes: number = fact.logicalFootprintBytes
+        }
+    }
     const evidenceSchemaVersion: 4 = diagnosticsEvidence.version
     const snapshotSchemaVersion: 4 = diagnosticsSnapshot.version
     const submissionScopeMode: scr.ScratchSubmissionScopeMode =
@@ -182,6 +198,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     // @ts-expect-error BufferRegion facts are immutable
     wholeBufferRegion.offset = 4
     const resourceState: scr.ResourceState = buffer.state
+    const readyResourceState: scr.ResourceState = 'ready'
+    // @ts-expect-error disposal is lifecycle state, not scalar content state
+    const disposedResourceState: scr.ResourceState = 'disposed'
     const resourceReady: boolean = buffer.isReady
     const compatResourceState: scratchCompat.ResourceState = resourceState
     const uniformBuffer: scr.BufferResource = await runtime.createBuffer({
@@ -284,6 +303,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         magFilter: 'nearest',
         minFilter: 'nearest',
     })
+    // @ts-expect-error SamplerResource has no scalar content state
+    scratchSampler.state
+    // @ts-expect-error SamplerResource has no scalar content epoch
+    scratchSampler.contentEpoch
+    // @ts-expect-error SamplerResource has no readiness
+    scratchSampler.isReady
     const defaultTextureViewSpec: scr.TextureViewSpec = scratchTexture.view()
     const explicitTextureViewSpec: scr.TextureViewSpec = scratchTexture.view({
         dimension: '2d',
@@ -331,6 +356,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     scratchTexture.contentEpoch = 1
 
     const scratchResource: scr.Resource = scratchTexture
+    // @ts-expect-error Resource is abstract and direct construction is closed
+    new scr.Resource(runtime)
+    // @ts-expect-error Base Resource has no scalar content state
+    scratchResource.state
+    // @ts-expect-error Base Resource has no scalar content epoch
+    scratchResource.contentEpoch
+    // @ts-expect-error Base Resource has no readiness
+    scratchResource.isReady
     // @ts-expect-error Resource runtime owner is read-only
     scratchResource.runtime = runtime
     // @ts-expect-error Resource logical id is read-only
@@ -341,12 +374,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     scratchResource.resourceKind = 'ForgedResource'
     // @ts-expect-error Resource lifecycle state is read-only
     scratchResource.isDisposed = true
-    // @ts-expect-error Resource readiness state is read-only
-    scratchResource.state = 'ready'
     // @ts-expect-error Resource allocationVersion is read-only
     scratchResource.allocationVersion = 2
-    // @ts-expect-error Resource contentEpoch is read-only
-    scratchResource.contentEpoch = 1
     // @ts-expect-error Resource transition helpers are not package API
     scr.replaceResourceAllocation(scratchResource, scratchResource.descriptor)
     // @ts-expect-error Resource transition helpers are not package API
@@ -693,7 +722,17 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         type: 'timestamp',
         count: 2,
     })
-    const querySlotState: scr.QuerySetSlotState | undefined = querySet.slotStates[0]
+    const querySlot: scr.QuerySetSlotSnapshot = querySet.slot(0)
+    const querySlots: readonly scr.QuerySetSlotSnapshot[] = querySet.slots()
+    const querySlotState: scr.QuerySetSlotState = querySlot.state
+    // @ts-expect-error QuerySetResource has no scalar content state
+    querySet.state
+    // @ts-expect-error QuerySetResource has no scalar content epoch
+    querySet.contentEpoch
+    // @ts-expect-error QuerySetResource has no readiness
+    querySet.isReady
+    // @ts-expect-error Query slot snapshots are immutable
+    querySlot.contentEpoch = 2
     const querySlotRead: scr.QuerySetSlotReadDescriptor = {
         index: 0,
         contentEpoch: 1,
@@ -903,7 +942,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatDrawResources: scratchCompat.CommandResourceAccessDescriptor = compatDraw.resources
     const compatDrawReadResource: scratchCompat.Resource = compatDrawResources.read[0].resource
     const compatDrawReadContentEpoch: number = compatDrawResources.read[0].contentEpoch
-    const compatQuerySlotState: scratchCompat.QuerySetSlotState | undefined = querySet.slotStates[0]
+    const compatQuerySlotState: scratchCompat.QuerySetSlotState = querySet.slot(0).state
     const compatQueryResolveSource: scratchCompat.ResolveQuerySetSourceDescriptor = resolveQueries.source
     const passSpec: scr.RenderPassSpec = runtime.createRenderPass({
         color: [ {
@@ -1321,6 +1360,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void compatCopyKind
     void querySet
     void querySetAlias
+    void querySlot
+    void querySlots
     void querySlotState
     void querySlotRead
     void queryResolveSource

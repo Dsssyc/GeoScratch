@@ -4,6 +4,7 @@ import {
     ScratchRuntime,
 } from 'geoscratch'
 import {
+    advanceQuerySlotContentEpochForTest,
     advanceResourceContentEpochForTest,
     createFakeGpu,
     triangleWgsl,
@@ -1329,8 +1330,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             type: 'timestamp',
             count: 2,
         })
-        querySet._advanceSlotContentEpoch(0)
-        querySet._advanceSlotContentEpoch(1)
+        advanceQuerySlotContentEpochForTest(querySet, 0)
+        advanceQuerySlotContentEpochForTest(querySet, 1)
         const destination = await createBuffer(
             runtime,
             'query destination',
@@ -1367,8 +1368,8 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         ])
         expect(submitted.producerEpochs.map(epoch => epoch.resourceId)).to.deep.equal([ destination.id ])
         expect(submitted.resourceAccesses.map(access => access.resourceId)).to.not.include(querySet.id)
-        expect(querySet.slotContentEpochs).to.deep.equal([ 1, 1 ])
-        expect(querySet.slotStates).to.deep.equal([ 'ready', 'ready' ])
+        expect(querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 1, 1 ])
+        expect(querySet.slots().map(slot => slot.state)).to.deep.equal([ 'ready', 'ready' ])
         expect(destination.state).to.equal('ready')
         expect(destination.isReady).to.equal(true)
 

@@ -16,16 +16,28 @@ export type ScratchResourceIdentity = Readonly<{
     id: string
 }>
 
-export type ResourceState = 'empty' | 'ready' | 'indeterminate' | 'disposed'
+export type ResourceState = 'empty' | 'ready' | 'indeterminate'
+
+export interface ContentResource extends Resource {
+    readonly state: ResourceState
+    readonly contentEpoch: number
+    readonly isReady: boolean
+}
 
 type ResourceMutators = {
     replaceAllocation(descriptor: object): void
-    advanceContentEpoch(): void
-    setContentState(state: ResourceState, contentEpoch: number): void
+}
+
+type MutableResourceContentFacts = {
+    state: ResourceState
+    contentEpoch: number
 }
 
 const resourceMutators = new WeakMap<Resource, ResourceMutators>()
+const contentBearingOptions = new WeakSet<ResourceOptions>()
+const resourceContentFacts = new WeakMap<Resource, MutableResourceContentFacts>()
 const resourceDisposalSubscribers = new WeakMap<Resource, Set<() => void>>()
+const registeredResources = new WeakSet<Resource>()
 const resourceIdentityToken = Symbol('ScratchResourceIdentity')
 
 export function subscribeResourceDisposal(resource: Resource, subscriber: () => void): () => void {
@@ -61,26 +73,67 @@ function mutatorsFor(resource: Resource): ResourceMutators {
     return mutators
 }
 
+function contentFactsFor(resource: Resource): MutableResourceContentFacts {
+
+    const facts = resourceContentFacts.get(resource)
+    if (facts === undefined) throw new TypeError('Resource does not carry scalar content state.')
+    return facts
+}
+
+export function contentBearingResourceOptions(options: ResourceOptions): ResourceOptions {
+
+    contentBearingOptions.add(options)
+    return options
+}
+
+export function isContentResource(resource: unknown): resource is ContentResource {
+
+    return typeof resource === 'object' && resource !== null && resourceContentFacts.has(resource as Resource)
+}
+
+export function resourceContentState(resource: ContentResource): ResourceState {
+
+    return contentFactsFor(resource).state
+}
+
+export function resourceContentEpoch(resource: ContentResource): number {
+
+    return contentFactsFor(resource).contentEpoch
+}
+
 export function replaceResourceAllocation(resource: Resource, descriptor: object): void {
 
     mutatorsFor(resource).replaceAllocation(descriptor)
 }
 
-export function advanceResourceContentEpoch(resource: Resource): void {
+export function registerResource(resource: Resource): void {
 
-    mutatorsFor(resource).advanceContentEpoch()
+    if (registeredResources.has(resource)) throw new TypeError('Resource is already registered.')
+    resource.runtime._registerResource(resource)
+    registeredResources.add(resource)
+}
+
+export function advanceResourceContentEpoch(resource: ContentResource): void {
+
+    const facts = contentFactsFor(resource)
+    facts.contentEpoch++
+    facts.state = resource.isDisposed ? facts.state : 'ready'
+    updateRuntimeResourceFact(resource.runtime, resource)
 }
 
 export function setResourceContentState(
-    resource: Resource,
+    resource: ContentResource,
     state: ResourceState,
     contentEpoch: number
 ): void {
 
-    mutatorsFor(resource).setContentState(state, contentEpoch)
+    const facts = contentFactsFor(resource)
+    facts.state = state
+    facts.contentEpoch = contentEpoch
+    updateRuntimeResourceFact(resource.runtime, resource)
 }
 
-export class Resource {
+export abstract class Resource {
 
     #runtime: ScratchRuntime
     #id: string
@@ -88,11 +141,13 @@ export class Resource {
     #resourceKind: string
     #descriptor: object
     #isDisposed = false
-    #state: ResourceState = 'empty'
     #allocationVersion = 1
-    #contentEpoch = 0
 
-    constructor(runtime: ScratchRuntime, options: ResourceOptions = {}) {
+    protected constructor(runtime: ScratchRuntime, options: ResourceOptions = {}) {
+
+        if (new.target === Resource) {
+            throw new TypeError('Resource is abstract and cannot be constructed directly.')
+        }
 
         if (!runtime || typeof runtime._registerResource !== 'function') {
             throwScratchDiagnostic({
@@ -116,27 +171,24 @@ export class Resource {
         this.#resourceKind = options.resourceKind ?? 'Resource'
         this.#descriptor = options.descriptor ?? {}
 
+        if (contentBearingOptions.delete(options)) {
+            resourceContentFacts.set(this, {
+                state: 'empty',
+                contentEpoch: 0,
+            })
+        }
+
         resourceMutators.set(this, {
             replaceAllocation: descriptor => {
                 this.#descriptor = descriptor
                 this.#allocationVersion++
-                this.#state = this.#isDisposed ? 'disposed' : 'empty'
-                updateRuntimeResourceFact(this.#runtime, this)
-            },
-            advanceContentEpoch: () => {
-                this.#contentEpoch++
-                this.#state = this.#isDisposed ? 'disposed' : 'ready'
-                updateRuntimeResourceFact(this.#runtime, this)
-            },
-            setContentState: (state, contentEpoch) => {
-                this.#state = this.#isDisposed ? 'disposed' : state
-                this.#contentEpoch = contentEpoch
+                const content = resourceContentFacts.get(this)
+                if (content !== undefined) content.state = 'empty'
                 updateRuntimeResourceFact(this.#runtime, this)
             },
         })
         resourceDisposalSubscribers.set(this, new Set())
 
-        runtime._registerResource(this)
     }
 
     get runtime(): ScratchRuntime {
@@ -169,19 +221,9 @@ export class Resource {
         return this.#isDisposed
     }
 
-    get state(): ResourceState {
-
-        return this.#state
-    }
-
     get allocationVersion(): number {
 
         return this.#allocationVersion
-    }
-
-    get contentEpoch(): number {
-
-        return this.#contentEpoch
     }
 
     get subject(): DiagnosticSubject {
@@ -194,11 +236,6 @@ export class Resource {
         if (this.resourceKind !== undefined) subject.resourceKind = this.resourceKind
 
         return subject
-    }
-
-    get isReady(): boolean {
-
-        return this.state === 'ready'
     }
 
     assertRuntime(runtime: ScratchRuntime): void {
@@ -244,14 +281,13 @@ export class Resource {
         if (this.#isDisposed) return
 
         this.#isDisposed = true
-        this.#state = 'disposed'
         const subscribers = resourceDisposalSubscribers.get(this)
         resourceDisposalSubscribers.delete(this)
         if (subscribers !== undefined) {
             for (const subscriber of subscribers) subscriber()
             subscribers.clear()
         }
-        this.runtime._unregisterResource(this)
+        if (registeredResources.delete(this)) this.runtime._unregisterResource(this)
     }
 }
 

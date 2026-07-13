@@ -1,6 +1,7 @@
 import { expect } from 'chai'
 import { ScratchDiagnosticError, ScratchRuntime } from 'geoscratch'
 import {
+    advanceQuerySlotContentEpochForTest,
     advanceResourceContentEpochForTest,
     createFakeExternalImageSource,
     createFakeGpu,
@@ -917,7 +918,7 @@ describe('scratch submission queue order', () => {
             type: 'timestamp',
             count: 1,
         })
-        querySet._advanceSlotContentEpoch(0)
+        advanceQuerySlotContentEpochForTest(querySet, 0)
         const destination = await fixture.runtime.createBuffer({
             label: 'queue order resolve destination',
             size: 8,
@@ -1176,8 +1177,8 @@ describe('scratch submission queue order', () => {
 
         expect(() => builder.submit()).to.throw('injected copy encoding failure')
 
-        expect(querySet.slotStates).to.deep.equal([ 'empty', 'empty' ])
-        expect(querySet.slotContentEpochs).to.deep.equal([ 0, 0 ])
+        expect(querySet.slots().map(slot => slot.state)).to.deep.equal([ 'empty', 'empty' ])
+        expect(querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 0, 0 ])
         expect(fixture.firstCopyTarget.state).to.equal('empty')
         expect(fixture.firstCopyTarget.contentEpoch).to.equal(0)
         expect(timelineTypes(fixture.calls)).to.deep.equal([])
@@ -1187,8 +1188,8 @@ describe('scratch submission queue order', () => {
         failCopyEncoding = false
         const submitted = builder.submit()
 
-        expect(querySet.slotStates).to.deep.equal([ 'ready', 'ready' ])
-        expect(querySet.slotContentEpochs).to.deep.equal([ 1, 1 ])
+        expect(querySet.slots().map(slot => slot.state)).to.deep.equal([ 'ready', 'ready' ])
+        expect(querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 1, 1 ])
         expect(fixture.firstCopyTarget.contentEpoch).to.equal(1)
         expect(timelineTypes(fixture.calls)).to.deep.equal([ 'submit' ])
 

@@ -1,5 +1,5 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { Resource } from './resource.js'
+import { registerResource, Resource } from './resource.js'
 import { isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -26,6 +26,7 @@ export class SamplerResource extends Resource {
         })
 
         this.gpuSampler = runtime.device.createSampler(normalizedDescriptor)
+        registerResource(this)
     }
 
     static create(runtime: ScratchRuntime, descriptor: SamplerResourceDescriptor = {}): SamplerResource {

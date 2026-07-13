@@ -26,7 +26,7 @@ import {
     resetReadbackStaging,
 } from './readback-staging.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
-import { advanceResourceContentEpoch } from './resource.js'
+import { advanceResourceContentEpoch, isContentResource } from './resource.js'
 import { TextureResource } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { BindLayoutEntry, BindSet } from './binding.js'
@@ -41,7 +41,6 @@ import type {
     ReadbackStagingCleanupResult,
     ReadbackStagingSlot,
 } from './readback-staging.js'
-import type { Resource } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { ScratchReadbackCommandState } from './runtime-diagnostics.js'
 import type { SubmittedWork } from './submission.js'
@@ -201,7 +200,7 @@ export type NormalizedDrawIndexBufferBinding = Omit<DrawIndexBufferBinding, 'off
 }
 
 export type CommandResourceReadDescriptor = {
-    readonly resource: Resource
+    readonly resource: BufferResource | TextureResource
     readonly contentEpoch: number
 }
 
@@ -231,7 +230,7 @@ export type ResolveQuerySetSourceDescriptor = {
 
 export type CommandResourceAccessDescriptor = {
     readonly read: readonly CommandResourceReadDescriptor[]
-    readonly write: readonly Resource[]
+    readonly write: readonly (BufferResource | TextureResource)[]
 }
 
 type DrawCommandDescriptorBase = {
@@ -3678,7 +3677,7 @@ function normalizeResourceAccess(command: DrawCommand | DispatchCommand, resourc
             phase: 'command',
             subject: command.subject,
             message: 'Command requires explicit read and write resource declarations.',
-            expected: { resources: { read: 'CommandResourceReadDescriptor[]', write: 'Resource[]' } },
+            expected: { resources: { read: 'CommandResourceReadDescriptor[]', write: '(BufferResource | TextureResource)[]' } },
             actual: { resources },
         })
     }
@@ -3773,20 +3772,24 @@ function normalizeResourceReadList(
     })
 }
 
-function normalizeResourceList(command: DrawCommand | DispatchCommand, resources: readonly Resource[], access: 'read' | 'write'): Resource[] {
+function normalizeResourceList(
+    command: DrawCommand | DispatchCommand,
+    resources: readonly (BufferResource | TextureResource)[],
+    access: 'read' | 'write'
+): (BufferResource | TextureResource)[] {
 
-    const normalized: Resource[] = []
-    const seen = new Set<Resource>()
+    const normalized: (BufferResource | TextureResource)[] = []
+    const seen = new Set<BufferResource | TextureResource>()
 
     for (const resource of resources) {
-        if (!resource || typeof resource.assertRuntime !== 'function') {
+        if (!isContentResource(resource)) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
                 severity: 'error',
                 phase: 'command',
                 subject: command.subject,
-                message: 'Command resource access declarations must contain Resource objects.',
-                expected: { [access]: 'Resource[]' },
+                message: 'Command resource access declarations must contain BufferResource or TextureResource objects.',
+                expected: { [access]: '(BufferResource | TextureResource)[]' },
                 actual: { resource: resource === undefined || resource === null ? String(resource) : typeof resource },
             })
         }
@@ -3800,9 +3803,9 @@ function normalizeResourceList(command: DrawCommand | DispatchCommand, resources
     return normalized
 }
 
-function isResourceLike(value: unknown): value is Resource {
+function isResourceLike(value: unknown): value is BufferResource | TextureResource {
 
-    return isRecord(value) && typeof value.assertRuntime === 'function'
+    return isRecord(value) && isContentResource(value)
 }
 
 function throwResourceReadDescriptorDiagnostic(
@@ -3816,7 +3819,7 @@ function throwResourceReadDescriptorDiagnostic(
     const actual: Record<string, unknown> = {
         access: 'read',
         reason,
-        descriptor: isResourceLike(descriptor) ? 'Resource' : describeValue(descriptor),
+        descriptor: isResourceLike(descriptor) ? descriptor.resourceKind : describeValue(descriptor),
     }
 
     if (isResourceLike(resource)) {
@@ -3836,7 +3839,7 @@ function throwResourceReadDescriptorDiagnostic(
         message: 'Command read resource declarations must contain resource and contentEpoch.',
         expected: {
             read: {
-                resource: 'Resource',
+                resource: 'BufferResource | TextureResource',
                 contentEpoch: 'non-negative integer',
             },
         },

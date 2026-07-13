@@ -12,12 +12,19 @@ import {
     recheckScopedNativeAllocationLifecycle,
     throwScopedAllocationFailure,
 } from './native-allocation.js'
-import { createScratchResourceIdentity, Resource } from './resource.js'
+import {
+    contentBearingResourceOptions,
+    createScratchResourceIdentity,
+    registerResource,
+    Resource,
+    resourceContentEpoch,
+    resourceContentState,
+} from './resource.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { LayoutArtifact } from './layout-codec.js'
-import type { ScratchResourceIdentity } from './resource.js'
+import type { ResourceState, ScratchResourceIdentity } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type BufferResourceDescriptor = GPUBufferDescriptor & {
@@ -71,12 +78,12 @@ export class BufferResource extends Resource {
             throw new TypeError('BufferResource must be created by ScratchRuntime.createBuffer().')
         }
 
-        super(runtime, {
+        super(runtime, contentBearingResourceOptions({
             resourceKind: 'BufferResource',
             descriptor,
             identity,
             ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
-        })
+        }))
 
         this.size = descriptor.size
         this.usage = descriptor.usage
@@ -84,12 +91,28 @@ export class BufferResource extends Resource {
         if (descriptor.elementCount !== undefined) this.elementCount = descriptor.elementCount
         if (descriptor.layoutByteLength !== undefined) this.layoutByteLength = descriptor.layoutByteLength
         this.#gpuBuffer = gpuBuffer
+        registerResource(this)
         Object.preventExtensions(this)
     }
 
     get gpuBuffer(): GPUBuffer {
 
         return this.#gpuBuffer
+    }
+
+    get state(): ResourceState {
+
+        return resourceContentState(this)
+    }
+
+    get contentEpoch(): number {
+
+        return resourceContentEpoch(this)
+    }
+
+    get isReady(): boolean {
+
+        return this.state === 'ready'
     }
 
     region(descriptor: BufferRegionDescriptor = {}): BufferRegion {

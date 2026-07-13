@@ -85,28 +85,32 @@ describe('scratch resources', () => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu, label: 'resource runtime' })
-        const resource = new Resource(runtime, {
+        expect(() => new Resource(runtime)).to.throw(TypeError, 'abstract')
+        expect(Object.getOwnPropertyDescriptor(Resource.prototype, 'state')).to.equal(undefined)
+        expect(Object.getOwnPropertyDescriptor(Resource.prototype, 'contentEpoch')).to.equal(undefined)
+        expect(Object.getOwnPropertyDescriptor(Resource.prototype, 'isReady')).to.equal(undefined)
+
+        const resource = await runtime.createBuffer({
             label: 'logical resource',
-            resourceKind: 'TestResource',
-            descriptor: { role: 'test' },
+            size: 16,
+            usage: 1,
         })
 
         expect(resource.runtime).to.equal(runtime)
         expect(resource.id).to.be.a('string').and.not.equal('')
         expect(resource.label).to.equal('logical resource')
-        expect(resource.resourceKind).to.equal('TestResource')
-        expect(resource.descriptor).to.deep.equal({ role: 'test' })
+        expect(resource.resourceKind).to.equal('BufferResource')
+        expect(resource.descriptor).to.deep.equal({
+            label: 'logical resource',
+            size: 16,
+            usage: 1,
+        })
         expect(resource.isDisposed).to.equal(false)
-        expect(resource.state).to.equal('empty')
-        expect(resource.isReady).to.equal(false)
         expect(resource.allocationVersion).to.equal(1)
-        expect(resource.contentEpoch).to.equal(0)
 
         resource.dispose()
 
         expect(resource.isDisposed).to.equal(true)
-        expect(resource.state).to.equal('disposed')
-        expect(resource.isReady).to.equal(false)
         expect(() => resource.assertUsable()).to.throw(ScratchDiagnosticError)
     })
 
@@ -114,9 +118,10 @@ describe('scratch resources', () => {
 
         const runtimeA = await ScratchRuntime.create({ gpu: createFakeGpu().gpu, label: 'runtime A' })
         const runtimeB = await ScratchRuntime.create({ gpu: createFakeGpu().gpu, label: 'runtime B' })
-        const resource = new Resource(runtimeA, {
+        const resource = await runtimeA.createBuffer({
             label: 'owned resource',
-            resourceKind: 'TestResource',
+            size: 16,
+            usage: 1,
         })
 
         try {
@@ -133,7 +138,7 @@ describe('scratch resources', () => {
                 kind: 'Resource',
                 id: resource.id,
                 label: 'owned resource',
-                resourceKind: 'TestResource',
+                resourceKind: 'BufferResource',
             })
             expect(error.diagnostic.expected).to.deep.equal({ runtimeId: runtimeA.id })
             expect(error.diagnostic.actual).to.deep.equal({ runtimeId: runtimeB.id })
@@ -174,7 +179,8 @@ describe('scratch resources', () => {
         buffer.dispose()
 
         expect(buffer.isDisposed).to.equal(true)
-        expect(buffer.state).to.equal('disposed')
+        expect(buffer.state).to.equal('empty')
+        expect(buffer.isReady).to.equal(false)
         expect(buffers[0].destroyed).to.equal(true)
         expect(() => buffer.assertUsable()).to.throw(ScratchDiagnosticError)
     })

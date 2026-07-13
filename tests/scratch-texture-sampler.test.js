@@ -130,6 +130,19 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             mipmapFilter: 'nearest',
         })
         expect(fixture.calls.samplers[0].descriptor).to.deep.equal(fixture.sampler.descriptor)
+        expect('state' in fixture.sampler).to.equal(false)
+        expect('isReady' in fixture.sampler).to.equal(false)
+        expect('contentEpoch' in fixture.sampler).to.equal(false)
+        const samplerFact = fixture.runtime.diagnostics.snapshot().resources
+            .find(fact => fact.id === fixture.sampler.id)
+        expect(samplerFact).to.deep.include({
+            resourceKind: 'SamplerResource',
+            allocationVersion: 1,
+        })
+        expect(samplerFact).not.to.have.property('state')
+        expect(samplerFact).not.to.have.property('contentEpoch')
+        expect(samplerFact).not.to.have.property('logicalFootprintBytes')
+        expect(samplerFact).not.to.have.property('logicalFootprintKnown')
 
         fixture.texture.dispose()
 

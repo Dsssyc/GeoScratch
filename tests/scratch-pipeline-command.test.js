@@ -305,7 +305,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 phase: 'command',
             })
             expect(error.diagnostic.expected).to.deep.equal({
-                resources: { read: 'CommandResourceReadDescriptor[]', write: 'Resource[]' },
+                resources: { read: 'CommandResourceReadDescriptor[]', write: '(BufferResource | TextureResource)[]' },
             })
             expect(error.diagnostic.actual).to.deep.equal({ resources: undefined })
         }
@@ -337,7 +337,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 phase: 'command',
             })
             expect(error.diagnostic.expected).to.deep.equal({
-                resources: { read: 'CommandResourceReadDescriptor[]', write: 'Resource[]' },
+                resources: { read: 'CommandResourceReadDescriptor[]', write: '(BufferResource | TextureResource)[]' },
             })
             expect(error.diagnostic.actual).to.deep.equal({
                 resources: { read: 'positions', write: [] },
@@ -379,13 +379,13 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             })
             expect(error.diagnostic.expected).to.deep.equal({
                 read: {
-                    resource: 'Resource',
+                    resource: 'BufferResource | TextureResource',
                     contentEpoch: 'non-negative integer',
                 },
             })
             expect(error.diagnostic.actual).to.deep.include({
                 access: 'read',
-                descriptor: 'Resource',
+                descriptor: 'BufferResource',
             })
         }
     })
@@ -448,7 +448,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 })
                 expect(error.diagnostic.expected).to.deep.equal({
                     read: {
-                        resource: 'Resource',
+                    resource: 'BufferResource | TextureResource',
                         contentEpoch: 'non-negative integer',
                     },
                 })

@@ -7,9 +7,13 @@ import {
     throwScopedAllocationFailure,
 } from './native-allocation.js'
 import {
+    contentBearingResourceOptions,
     createScratchResourceIdentity,
+    registerResource,
     replaceResourceAllocation,
     Resource,
+    resourceContentEpoch,
+    resourceContentState,
 } from './resource.js'
 import {
     diagnosticsControllerFor,
@@ -17,7 +21,7 @@ import {
 } from './runtime-diagnostics.js'
 import { getGlobalConstant, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchResourceIdentity } from './resource.js'
+import type { ResourceState, ScratchResourceIdentity } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
 
@@ -135,22 +139,38 @@ export class TextureResource extends Resource {
             throw new TypeError('TextureResource must be created by ScratchRuntime.createTexture().')
         }
 
-        super(runtime, {
+        super(runtime, contentBearingResourceOptions({
             resourceKind: 'TextureResource',
             descriptor,
             identity,
             ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
-        })
+        }))
 
         this.#physicalDescriptor = descriptor
         this.#gpuTexture = gpuTexture
         this.#viewCache = new Map()
+        registerResource(this)
         Object.preventExtensions(this)
     }
 
     get gpuTexture(): GPUTexture {
 
         return this.#gpuTexture
+    }
+
+    get state(): ResourceState {
+
+        return resourceContentState(this)
+    }
+
+    get contentEpoch(): number {
+
+        return resourceContentEpoch(this)
+    }
+
+    get isReady(): boolean {
+
+        return this.state === 'ready'
     }
 
     get size(): NormalizedTextureSize {

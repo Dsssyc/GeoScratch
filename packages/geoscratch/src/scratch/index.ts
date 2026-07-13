@@ -101,7 +101,7 @@ export type {
 } from './texture.js'
 export { SamplerResource } from './sampler.js'
 export { QuerySetResource } from './query-set.js'
-export type { QuerySetSlotState } from './query-set.js'
+export type { QuerySetSlotSnapshot, QuerySetSlotState } from './query-set.js'
 export { BindLayout, BindSet } from './binding.js'
 export type {
     BindLayoutDescriptor,

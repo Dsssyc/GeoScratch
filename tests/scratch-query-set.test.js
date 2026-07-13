@@ -8,7 +8,11 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
 } from 'geoscratch'
-import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    advanceQuerySlotContentEpochForTest,
+    createFakeGpu,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
@@ -18,6 +22,16 @@ const GPU_BUFFER_USAGE_UNIFORM = 0x40
 function querySlots(indices, contentEpoch) {
 
     return indices.map(index => ({ index, contentEpoch }))
+}
+
+function currentQuerySlotStates(querySet) {
+
+    return querySet.slots().map(slot => slot.state)
+}
+
+function currentQuerySlotContentEpochs(querySet) {
+
+    return querySet.slots().map(slot => slot.contentEpoch)
 }
 
 async function createQueryFixture() {
@@ -155,8 +169,32 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         expect(fixture.querySet.resourceKind).to.equal('QuerySetResource')
         expect(fixture.querySet.type).to.equal('timestamp')
         expect(fixture.querySet.count).to.equal(4)
-        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 0, 0 ])
-        expect(fixture.querySet.slotStates).to.deep.equal([ 'empty', 'empty', 'empty', 'empty' ])
+        expect(fixture.querySet.slots()).to.deep.equal([
+            { index: 0, state: 'empty', contentEpoch: 0 },
+            { index: 1, state: 'empty', contentEpoch: 0 },
+            { index: 2, state: 'empty', contentEpoch: 0 },
+            { index: 3, state: 'empty', contentEpoch: 0 },
+        ])
+        expect(fixture.querySet.slot(2)).to.deep.equal({ index: 2, state: 'empty', contentEpoch: 0 })
+        expect(Object.isFrozen(fixture.querySet.slot(2))).to.equal(true)
+        expect(Object.isFrozen(fixture.querySet.slots())).to.equal(true)
+        expect('slotContentEpochs' in fixture.querySet).to.equal(false)
+        expect('slotStates' in fixture.querySet).to.equal(false)
+        expect('state' in fixture.querySet).to.equal(false)
+        expect('isReady' in fixture.querySet).to.equal(false)
+        expect('contentEpoch' in fixture.querySet).to.equal(false)
+        const queryFact = fixture.runtime.diagnostics.snapshot().resources
+            .find(fact => fact.id === fixture.querySet.id)
+        expect(queryFact).to.deep.include({
+            resourceKind: 'QuerySetResource',
+            queryType: 'timestamp',
+            count: 4,
+        })
+        expect(queryFact.slots).to.deep.equal(fixture.querySet.slots())
+        expect(Object.isFrozen(queryFact.slots)).to.equal(true)
+        expect(queryFact).not.to.have.property('state')
+        expect(queryFact).not.to.have.property('contentEpoch')
+        expect(queryFact).not.to.have.property('logicalFootprintBytes')
         expect(fixture.querySet.gpuQuerySet.descriptor).to.deep.equal({
             label: 'timing queries',
             type: 'timestamp',
@@ -197,8 +235,15 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         expect(fixture.calls.computePasses[0].actions).to.deep.equal([
             { type: 'end' },
         ])
-        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 1, 1, 0, 0 ])
-        expect(fixture.querySet.slotStates).to.deep.equal([ 'ready', 'ready', 'empty', 'empty' ])
+        expect(fixture.querySet.slots()).to.deep.equal([
+            { index: 0, state: 'ready', contentEpoch: 1 },
+            { index: 1, state: 'ready', contentEpoch: 1 },
+            { index: 2, state: 'empty', contentEpoch: 0 },
+            { index: 3, state: 'empty', contentEpoch: 0 },
+        ])
+        const queryFact = fixture.runtime.diagnostics.snapshot().resources
+            .find(fact => fact.id === fixture.querySet.id)
+        expect(queryFact.slots).to.deep.equal(fixture.querySet.slots())
 
         await submitted.done
     })
@@ -224,8 +269,10 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
             beginningOfPassWriteIndex: 0,
             endOfPassWriteIndex: 1,
         })
-        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 1, 1 ])
-        expect(fixture.querySet.slotStates).to.deep.equal([ 'ready', 'ready' ])
+        expect(fixture.querySet.slots()).to.deep.equal([
+            { index: 0, state: 'ready', contentEpoch: 1 },
+            { index: 1, state: 'ready', contentEpoch: 1 },
+        ])
 
         await submitted.done
     })
@@ -269,8 +316,8 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         ])
         expect(new DataView(fixture.destination.gpuBuffer.data.buffer).getBigUint64(256, true)).to.equal(11n)
         expect(new DataView(fixture.destination.gpuBuffer.data.buffer).getBigUint64(264, true)).to.equal(22n)
-        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 1, 1, 0 ])
-        expect(fixture.querySet.slotStates).to.deep.equal([ 'empty', 'ready', 'ready', 'empty' ])
+        expect(currentQuerySlotContentEpochs(fixture.querySet)).to.deep.equal([ 0, 1, 1, 0 ])
+        expect(currentQuerySlotStates(fixture.querySet)).to.deep.equal([ 'empty', 'ready', 'ready', 'empty' ])
         expect(fixture.destination.contentEpoch).to.equal(1)
         expect(fixture.querySet.allocationVersion).to.equal(queryAllocationVersion)
         expect(fixture.destination.allocationVersion).to.equal(destinationAllocationVersion)
@@ -362,8 +409,8 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                 simulatedSlotState: 'empty',
                 whenMissing: 'throw',
             })
-            expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 0, 0 ])
-            expect(fixture.querySet.slotStates).to.deep.equal([ 'empty', 'empty', 'empty', 'empty' ])
+            expect(currentQuerySlotContentEpochs(fixture.querySet)).to.deep.equal([ 0, 0, 0, 0 ])
+            expect(currentQuerySlotStates(fixture.querySet)).to.deep.equal([ 'empty', 'empty', 'empty', 'empty' ])
             expect(fixture.destination.contentEpoch).to.equal(0)
             expect(fixture.calls.commandEncoders).to.have.length(0)
             expect(fixture.calls.resolveQueries).to.have.length(0)
@@ -384,7 +431,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
             phase: 'query',
         })
 
-        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 0, 0 ])
+        expect(currentQuerySlotContentEpochs(fixture.querySet)).to.deep.equal([ 0, 0, 0, 0 ])
         expect(fixture.destination.contentEpoch).to.equal(0)
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.computePasses).to.have.length(0)
@@ -411,7 +458,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                     size: 512,
                     usage: GPU_BUFFER_USAGE_QUERY_RESOLVE | GPU_BUFFER_USAGE_COPY_SRC,
                 })
-                querySet._advanceSlotContentEpoch(0)
+                advanceQuerySlotContentEpochForTest(querySet, 0)
                 const resolve = runtime.createResolveQuerySetCommand({
                     label: `${scenario} resolve ${validation}`,
                     source: {
@@ -453,7 +500,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                         simulatedSlotState: 'ready',
                         whenMissing: 'throw',
                     })
-                    expect(querySet.slotContentEpochs).to.deep.equal([ 1 ])
+                    expect(currentQuerySlotContentEpochs(querySet)).to.deep.equal([ 1 ])
                     expect(destination.contentEpoch).to.equal(0)
                     expect(fake.calls.commandEncoders).to.have.length(0)
                     expect(fake.calls.resolveQueries).to.have.length(0)
@@ -474,7 +521,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
                 } else {
                     expect(submitted.diagnostics).to.deep.equal([])
                 }
-                expect(querySet.slotContentEpochs).to.deep.equal([ 1 ])
+                expect(currentQuerySlotContentEpochs(querySet)).to.deep.equal([ 1 ])
                 expect(destination.contentEpoch).to.equal(1)
                 expect(fake.calls.commandEncoders).to.have.length(1)
                 expect(fake.calls.resolveQueries).to.have.length(1)

@@ -2,6 +2,7 @@ import {
     advanceResourceContentEpoch,
     replaceResourceAllocation,
 } from '../packages/geoscratch/dist/scratch/resource.js'
+import { advanceQuerySlotContentEpoch } from '../packages/geoscratch/dist/scratch/query-set.js'
 
 const fakeExternalImageSourcePlatforms = new Map()
 
@@ -29,6 +30,11 @@ export function replaceResourceAllocationForTest(resource, descriptor = resource
 export function advanceResourceContentEpochForTest(resource) {
 
     advanceResourceContentEpoch(resource)
+}
+
+export function advanceQuerySlotContentEpochForTest(querySet, index) {
+
+    advanceQuerySlotContentEpoch(querySet, index)
 }
 
 export function createFakeExternalImageSource(

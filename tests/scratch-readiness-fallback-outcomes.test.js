@@ -557,7 +557,7 @@ describe('scratch readiness fallback execution outcomes', () => {
             missingStates: attempt.missing.map(missing => missing.simulatedState),
         }))).to.deep.equal([
             { commandId: primary.id, missingIds: [ primaryInput.id ], missingStates: [ 'empty' ] },
-            { commandId: fallback.id, missingIds: [ fallbackInput.id ], missingStates: [ 'disposed' ] },
+            { commandId: fallback.id, missingIds: [ fallbackInput.id ], missingStates: [ 'empty' ] },
         ])
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(output.state).to.equal('empty')

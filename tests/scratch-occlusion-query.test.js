@@ -168,8 +168,8 @@ describe('scratch occlusion query bracket commands', () => {
             { type: 'begin', queryIndex: 2 },
             { type: 'end' },
         ])
-        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 1, 0 ])
-        expect(fixture.querySet.slotStates).to.deep.equal([ 'empty', 'empty', 'ready', 'empty' ])
+        expect(fixture.querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 0, 0, 1, 0 ])
+        expect(fixture.querySet.slots().map(slot => slot.state)).to.deep.equal([ 'empty', 'empty', 'ready', 'empty' ])
         expect(fixture.querySet.allocationVersion).to.equal(queryAllocationVersion)
 
         await submitted.done
@@ -211,8 +211,8 @@ describe('scratch occlusion query bracket commands', () => {
             },
         ])
         expect(view.getBigUint64(0, true)).to.equal(1n)
-        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 1, 0 ])
-        expect(fixture.querySet.slotStates).to.deep.equal([ 'empty', 'empty', 'ready', 'empty' ])
+        expect(fixture.querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 0, 0, 1, 0 ])
+        expect(fixture.querySet.slots().map(slot => slot.state)).to.deep.equal([ 'empty', 'empty', 'ready', 'empty' ])
         expect(fixture.destination.contentEpoch).to.equal(1)
         expect(readback.state).to.equal('consumed')
     })
@@ -248,8 +248,8 @@ describe('scratch occlusion query bracket commands', () => {
             simulatedSlotState: 'empty',
             whenMissing: 'throw',
         })
-        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 0, 0 ])
-        expect(fixture.querySet.slotStates).to.deep.equal([ 'empty', 'empty', 'empty', 'empty' ])
+        expect(fixture.querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 0, 0, 0, 0 ])
+        expect(fixture.querySet.slots().map(slot => slot.state)).to.deep.equal([ 'empty', 'empty', 'empty', 'empty' ])
         expect(fixture.destination.contentEpoch).to.equal(0)
         expect(fixture.calls.commandEncoders).to.have.length(0)
         expect(fixture.calls.renderPasses).to.have.length(0)
@@ -450,7 +450,7 @@ describe('scratch occlusion query bracket commands', () => {
             phase: 'submission',
         })
 
-        expect(fixture.querySet.slotContentEpochs).to.deep.equal([ 0, 0, 0, 0 ])
+        expect(fixture.querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 0, 0, 0, 0 ])
         expect(fixture.calls.renderPasses).to.have.length(0)
     })
 

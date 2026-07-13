@@ -1,6 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { QuerySetResource } from './query-set.js'
+import { advanceQuerySlotContentEpoch, QuerySetResource } from './query-set.js'
 import { TextureResource, prepareTextureViewDescriptor } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -374,7 +374,7 @@ function advanceTimestampWriteEpochs(timestampWrites?: TimestampWritesSpec) {
 
     const indices = [ timestampWrites.begin, timestampWrites.end ].filter((value): value is number => value !== undefined)
     for (const index of new Set(indices)) {
-        timestampWrites.querySet._advanceSlotContentEpoch(index)
+        advanceQuerySlotContentEpoch(timestampWrites.querySet, index)
     }
 }
 

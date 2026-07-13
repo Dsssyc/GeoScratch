@@ -508,7 +508,7 @@ describe('scratch submission content indeterminacy', () => {
         fixture.errors.failNext('beginComputePass', 'validation', new Error('compute pass validation'))
         const failed = fixture.runtime.submission().compute(pass, [ dispatch ]).submit()
         expect(output.state).to.equal('ready')
-        expect(querySet.slotStates).to.deep.equal([ 'ready', 'ready' ])
+        expect(querySet.slots().map(slot => slot.state)).to.deep.equal([ 'ready', 'ready' ])
         settlePendingScopes(fixture)
         await expectScratchDiagnostic(() => failed.done, {
             code: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
@@ -516,8 +516,8 @@ describe('scratch submission content indeterminacy', () => {
         })
         expect(output.state).to.equal('indeterminate')
         expect(output.contentEpoch).to.equal(1)
-        expect(querySet.slotStates).to.deep.equal([ 'indeterminate', 'indeterminate' ])
-        expect(querySet.slotContentEpochs).to.deep.equal([ 1, 1 ])
+        expect(querySet.slots().map(slot => slot.state)).to.deep.equal([ 'indeterminate', 'indeterminate' ])
+        expect(querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 1, 1 ])
         expect(failed.potentialWrites.map(write => write.kind)).to.deep.equal([
             'resource',
             'query-slot',
@@ -567,8 +567,8 @@ describe('scratch submission content indeterminacy', () => {
         await recovered.done
         expect(output.state).to.equal('ready')
         expect(output.contentEpoch).to.equal(2)
-        expect(querySet.slotStates).to.deep.equal([ 'ready', 'ready' ])
-        expect(querySet.slotContentEpochs).to.deep.equal([ 2, 2 ])
+        expect(querySet.slots().map(slot => slot.state)).to.deep.equal([ 'ready', 'ready' ])
+        expect(querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 2, 2 ])
 
         const resolveEpochTwo = fixture.runtime.createResolveQuerySetCommand({
             source: { querySet, slots: [ { index: 0, contentEpoch: 2 } ] },
@@ -613,8 +613,8 @@ describe('scratch submission content indeterminacy', () => {
         })
         expect(target.state).to.equal('indeterminate')
         expect(target.contentEpoch).to.equal(1)
-        expect(querySet.slotStates).to.deep.equal([ 'indeterminate' ])
-        expect(querySet.slotContentEpochs).to.deep.equal([ 1 ])
+        expect(querySet.slots().map(slot => slot.state)).to.deep.equal([ 'indeterminate' ])
+        expect(querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 1 ])
         expect(failed.potentialWrites.map(write => write.kind)).to.deep.equal([
             'resource',
             'query-slot',
@@ -640,8 +640,8 @@ describe('scratch submission content indeterminacy', () => {
         await recovered.done
         expect(target.state).to.equal('ready')
         expect(target.contentEpoch).to.equal(2)
-        expect(querySet.slotStates).to.deep.equal([ 'ready' ])
-        expect(querySet.slotContentEpochs).to.deep.equal([ 2 ])
+        expect(querySet.slots().map(slot => slot.state)).to.deep.equal([ 'ready' ])
+        expect(querySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 2 ])
     })
 
     it('keeps ephemeral surface output out of persistent potential-write facts', async () => {

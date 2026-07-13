@@ -25,7 +25,12 @@ import { validateRenderPassAttachments } from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
-import { setQuerySlotContentState } from './query-set.js'
+import {
+    advanceQuerySlotContentEpoch,
+    querySlotContentEpoch,
+    querySlotState,
+    setQuerySlotContentState,
+} from './query-set.js'
 import {
     beginSubmissionNativeObservation,
     compareSubmissionNativeStages,
@@ -36,7 +41,7 @@ import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCom
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
-import type { Resource, ResourceState } from './resource.js'
+import type { ContentResource, ResourceState } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 import type {
     SubmissionNativeIssue,
@@ -186,7 +191,7 @@ type ReadonlySubmittedFact<T> =
 
 type PendingSubmissionResourceAccess = {
     origin: SubmissionAccessOrigin
-    resource: Resource
+    resource: ContentResource
     access: SubmissionResourceAccessKind
     contentEpochBefore: number
 }
@@ -269,7 +274,7 @@ type PendingReadback = {
 
 type PreparedResourceContentEffect = {
     kind: 'resource-content'
-    resource: Resource
+    resource: ContentResource
     state: ResourceState
     contentEpoch: number
 }
@@ -287,7 +292,7 @@ type PreparedQueueEffect = PreparedResourceContentEffect | PreparedQuerySlotCont
 type SubmissionPotentialWrite =
     | Readonly<{
         kind: 'resource'
-        resource: Resource
+        resource: ContentResource
         allocationVersion: number
         contentEpoch: number
     }>
@@ -529,12 +534,12 @@ export class SubmissionBuilder {
         const submittedReadbacks = new Set<PendingReadback>()
         const readbackClaims = new Map<number, ReadbackCommandClaim>()
         const commandBufferReadbacks = new Map<GPUCommandBuffer, PendingReadback[]>()
-        const resourceSnapshots = new Map<Resource, ResourceContentSnapshot>()
+        const resourceSnapshots = new Map<ContentResource, ResourceContentSnapshot>()
         const querySlotSnapshots = new Map<QuerySetResource, Map<number, QuerySlotContentSnapshot>>()
         let encoder: GPUCommandEncoder | undefined
         let encoderSegmentIndex = 0
         let activeEncoderSegmentIndex: number | undefined
-        let segmentResources = new Set<Resource>()
+        let segmentResources = new Set<ContentResource>()
         let segmentQuerySlots = new Map<QuerySetResource, Set<number>>()
         let segmentReadbacks: PendingReadback[] = []
         let replayedQueueActionCount = 0
@@ -567,7 +572,7 @@ export class SubmissionBuilder {
 
         try {
 
-        const trackSegmentResourceWrite = (resource: Resource) => {
+        const trackSegmentResourceWrite = (resource: ContentResource) => {
 
             captureResourceContentSnapshot(resourceSnapshots, resource)
             segmentResources.add(resource)
@@ -811,7 +816,12 @@ export class SubmissionBuilder {
                                 activeOcclusionQueryCommand.index
                             )
                         }
-                        activeOcclusionQueryCommand?.querySet._advanceSlotContentEpoch(activeOcclusionQueryCommand.index)
+                        if (activeOcclusionQueryCommand !== undefined) {
+                            advanceQuerySlotContentEpoch(
+                                activeOcclusionQueryCommand.querySet,
+                                activeOcclusionQueryCommand.index
+                            )
+                        }
                         activeOcclusionQueryCommand = undefined
                     }
                     completeResourceAccesses(resourceAccesses, accesses)
@@ -2332,7 +2342,7 @@ function validateCommandReadEpochs(
     }
 }
 
-function simulatedResourceState(readiness: ReadinessSimulation, resource: Resource): ResourceSimulationState {
+function simulatedResourceState(readiness: ReadinessSimulation, resource: ContentResource): ResourceSimulationState {
 
     return readiness.get(resource.id) ?? {
         state: resource.state,
@@ -2340,7 +2350,7 @@ function simulatedResourceState(readiness: ReadinessSimulation, resource: Resour
     }
 }
 
-function markSimulatedReady(readiness: ReadinessSimulation, resource: Resource): void {
+function markSimulatedReady(readiness: ReadinessSimulation, resource: ContentResource): void {
 
     const simulated = simulatedResourceState(readiness, resource)
     readiness.set(resource.id, {
@@ -2356,8 +2366,8 @@ function simulatedQuerySlotState(
 ): QuerySlotSimulationState {
 
     return querySlots.get(querySlotKey(querySet, index)) ?? {
-        state: querySet.slotStates[index] ?? 'empty',
-        contentEpoch: querySet.slotContentEpochs[index] ?? 0,
+        state: querySlotState(querySet, index),
+        contentEpoch: querySlotContentEpoch(querySet, index),
     }
 }
 
@@ -2410,7 +2420,7 @@ function throwQuerySlotNotReadyDiagnostic(
             queryCount: command.queryCount,
             requiredContentEpoch: slot.contentEpoch,
             simulatedContentEpoch: simulated.contentEpoch,
-            currentContentEpoch: querySet.slotContentEpochs[slot.index] ?? 0,
+            currentContentEpoch: querySlotContentEpoch(querySet, slot.index),
             simulatedSlotState: simulated.state,
             whenMissing: command.whenMissing,
         },
@@ -2449,7 +2459,7 @@ function throwQuerySlotIndeterminateDiagnostic(
             slotIndex: slot.index,
             requiredContentEpoch: slot.contentEpoch,
             simulatedContentEpoch: simulated.contentEpoch,
-            currentContentEpoch: querySet.slotContentEpochs[slot.index] ?? 0,
+            currentContentEpoch: querySlotContentEpoch(querySet, slot.index),
             simulatedSlotState: simulated.state,
             whenMissing: command.whenMissing,
             validation: builder.validation,
@@ -2496,7 +2506,7 @@ function createQuerySlotEpochDiagnostic(
             queryCount: command.queryCount,
             requiredContentEpoch: slot.contentEpoch,
             simulatedContentEpoch: simulated.contentEpoch,
-            currentContentEpoch: querySet.slotContentEpochs[slot.index] ?? 0,
+            currentContentEpoch: querySlotContentEpoch(querySet, slot.index),
             simulatedSlotState: simulated.state,
             whenMissing: command.whenMissing,
         },
@@ -2834,7 +2844,7 @@ function passAccessOrigin(stepIndex: number, stepKind: SubmissionStepKind, passS
 }
 
 function captureResourceAccess(
-    resource: Resource,
+    resource: ContentResource,
     access: SubmissionResourceAccessKind,
     origin: SubmissionAccessOrigin
 ): PendingSubmissionResourceAccess {
@@ -3537,8 +3547,8 @@ function advanceRenderAttachmentEpochs(passSpec: RenderPassSpec) {
 }
 
 function captureResourceContentSnapshot(
-    snapshots: Map<Resource, ResourceContentSnapshot>,
-    resource: Resource
+    snapshots: Map<ContentResource, ResourceContentSnapshot>,
+    resource: ContentResource
 ): void {
 
     if (snapshots.has(resource)) return
@@ -3563,12 +3573,12 @@ function captureQuerySlotContentSnapshot(
     if (slots.has(index)) return
 
     slots.set(index, {
-        state: querySet.slotStates[index],
-        contentEpoch: querySet.slotContentEpochs[index],
+        state: querySlotState(querySet, index),
+        contentEpoch: querySlotContentEpoch(querySet, index),
     })
 }
 
-function createPreparedResourceContentEffect(resource: Resource): PreparedResourceContentEffect {
+function createPreparedResourceContentEffect(resource: ContentResource): PreparedResourceContentEffect {
 
     return {
         kind: 'resource-content',
@@ -3579,7 +3589,7 @@ function createPreparedResourceContentEffect(resource: Resource): PreparedResour
 }
 
 function createPreparedQueueEffects(
-    resources: ReadonlySet<Resource>,
+    resources: ReadonlySet<ContentResource>,
     querySlots: ReadonlyMap<QuerySetResource, ReadonlySet<number>>
 ): PreparedQueueEffect[] {
 
@@ -3593,8 +3603,8 @@ function createPreparedQueueEffects(
                 kind: 'query-slot-content',
                 querySet,
                 index,
-                state: querySet.slotStates[index],
-                contentEpoch: querySet.slotContentEpochs[index],
+                state: querySlotState(querySet, index),
+                contentEpoch: querySlotContentEpoch(querySet, index),
             })
         }
     }
@@ -3603,7 +3613,7 @@ function createPreparedQueueEffects(
 }
 
 function restorePreparedContentState(
-    resourceSnapshots: ReadonlyMap<Resource, ResourceContentSnapshot>,
+    resourceSnapshots: ReadonlyMap<ContentResource, ResourceContentSnapshot>,
     querySlotSnapshots: ReadonlyMap<QuerySetResource, ReadonlyMap<number, QuerySlotContentSnapshot>>
 ): void {
 
@@ -3612,8 +3622,7 @@ function restorePreparedContentState(
     }
     for (const [querySet, slots] of querySlotSnapshots) {
         for (const [index, snapshot] of slots) {
-            querySet.slotStates[index] = snapshot.state
-            querySet.slotContentEpochs[index] = snapshot.contentEpoch
+            setQuerySlotContentState(querySet, index, snapshot.state, snapshot.contentEpoch)
         }
     }
 }
@@ -3626,8 +3635,7 @@ function applyPreparedQueueEffects(effects: readonly PreparedQueueEffect[]): voi
             continue
         }
 
-        effect.querySet.slotStates[effect.index] = effect.state
-        effect.querySet.slotContentEpochs[effect.index] = effect.contentEpoch
+        setQuerySlotContentState(effect.querySet, effect.index, effect.state, effect.contentEpoch)
     }
 }
 
@@ -3635,7 +3643,7 @@ function snapshotSubmissionPotentialWrites(
     queueTimeline: readonly PreparedQueueAction[]
 ): readonly SubmissionPotentialWrite[] {
 
-    const resourceWrites = new Map<Resource, SubmissionPotentialWrite & { kind: 'resource' }>()
+    const resourceWrites = new Map<ContentResource, SubmissionPotentialWrite & { kind: 'resource' }>()
     const querySlotWrites = new Map<string, SubmissionPotentialWrite & { kind: 'query-slot' }>()
     for (const action of queueTimeline) {
         for (const effect of action.effects) {
@@ -3712,8 +3720,8 @@ function markSubmissionPotentialWritesIndeterminate(
         }
         if (
             write.querySet.isDisposed ||
-            write.querySet.slotContentEpochs[write.index] !== write.contentEpoch ||
-            write.querySet.slotStates[write.index] === 'indeterminate'
+            querySlotContentEpoch(write.querySet, write.index) !== write.contentEpoch ||
+            querySlotState(write.querySet, write.index) === 'indeterminate'
         ) continue
         setQuerySlotContentState(
             write.querySet,

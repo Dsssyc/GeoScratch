@@ -1,4 +1,5 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { isContentResource } from './resource.js'
 import {
     assertGpuOperationTarget,
     boundedGpuOperationNativeLabel,
@@ -40,6 +41,7 @@ import type {
 import type { ScratchReadbackNativeOutcomeInput } from './gpu-operation.js'
 import type { PipelineCompilationReport, PipelineKind } from './pipeline-compilation.js'
 import type { ScratchReadbackPolicy } from './readback-ownership.js'
+import type { QuerySetResource, QuerySetSlotSnapshot, QuerySetType } from './query-set.js'
 import type { Resource, ResourceState } from './resource.js'
 
 const DEFAULT_OPERATION_CAPACITY = 256
@@ -83,19 +85,38 @@ export type NormalizedScratchRuntimeDiagnosticsOptions = Readonly<{
     maxPendingNativeObservations: number
 }>
 
-export type ScratchRuntimeResourceFact = Readonly<{
+type ScratchRuntimeResourceFactBase = Readonly<{
     id: string
     label?: string
-    resourceKind: string
     descriptorHash: string
     allocationVersion: number
+    lastAllocationOperationId?: string
+    pendingReplacementOperationId?: string
+}>
+
+export type ScratchRuntimeContentResourceFact = ScratchRuntimeResourceFactBase & Readonly<{
+    resourceKind: 'BufferResource' | 'TextureResource'
     contentEpoch: number
     state: ResourceState
     logicalFootprintBytes: number
     logicalFootprintKnown: boolean
-    lastAllocationOperationId?: string
-    pendingReplacementOperationId?: string
 }>
+
+export type ScratchRuntimeSamplerResourceFact = ScratchRuntimeResourceFactBase & Readonly<{
+    resourceKind: 'SamplerResource'
+}>
+
+export type ScratchRuntimeQuerySetResourceFact = ScratchRuntimeResourceFactBase & Readonly<{
+    resourceKind: 'QuerySetResource'
+    queryType: QuerySetType
+    count: number
+    slots: readonly QuerySetSlotSnapshot[]
+}>
+
+export type ScratchRuntimeResourceFact =
+    | ScratchRuntimeContentResourceFact
+    | ScratchRuntimeSamplerResourceFact
+    | ScratchRuntimeQuerySetResourceFact
 
 export type ScratchPendingGpuOperationFact = Readonly<{
     id: string
@@ -1683,9 +1704,10 @@ export class ScratchRuntimeDiagnosticsController {
         })
     }
 
-    #largestResourceFacts(limit: number): ScratchRuntimeResourceFact[] {
+    #largestResourceFacts(limit: number): ScratchRuntimeContentResourceFact[] {
 
         return [ ...this.#resourceFacts.values() ]
+            .filter(isContentRuntimeResourceFact)
             .sort((left, right) =>
                 right.logicalFootprintBytes - left.logicalFootprintBytes ||
                 left.id.localeCompare(right.id)
@@ -1708,6 +1730,7 @@ export class ScratchRuntimeDiagnosticsController {
     #recalculatePressure(): void {
 
         this.#currentLogicalFootprintBytes = [ ...this.#resourceFacts.values() ]
+            .filter(isContentRuntimeResourceFact)
             .reduce((total, fact) => total + fact.logicalFootprintBytes, 0)
         this.#peakLogicalFootprintBytes = Math.max(
             this.#peakLogicalFootprintBytes,
@@ -2264,25 +2287,54 @@ function resourceFact(
     previous?: ScratchRuntimeResourceFact
 ): ScratchRuntimeResourceFact {
 
-    const footprint = logicalResourceFootprint(resource)
     const descriptor = createGpuDescriptorEvidence(resourceDescriptorSummary(resource))
-    return Object.freeze({
+    const common = {
         id: resource.id,
         ...(resource.label !== undefined ? { label: boundedLabel(resource.label) } : {}),
-        resourceKind: resource.resourceKind,
         descriptorHash: descriptor.hash,
         allocationVersion: resource.allocationVersion,
-        contentEpoch: resource.contentEpoch,
-        state: resource.state,
-        logicalFootprintBytes: footprint.bytes,
-        logicalFootprintKnown: footprint.known,
         ...(previous?.lastAllocationOperationId !== undefined
             ? { lastAllocationOperationId: previous.lastAllocationOperationId }
             : {}),
         ...(previous?.pendingReplacementOperationId !== undefined
             ? { pendingReplacementOperationId: previous.pendingReplacementOperationId }
             : {}),
-    })
+    }
+
+    if (isContentResource(resource)) {
+        if (resource.resourceKind !== 'BufferResource' && resource.resourceKind !== 'TextureResource') {
+            throw new TypeError('Only BufferResource and TextureResource may carry scalar content facts.')
+        }
+        const footprint = logicalResourceFootprint(resource)
+        return Object.freeze({
+            ...common,
+            resourceKind: resource.resourceKind,
+            contentEpoch: resource.contentEpoch,
+            state: resource.state,
+            logicalFootprintBytes: footprint.bytes,
+            logicalFootprintKnown: footprint.known,
+        })
+    }
+
+    if (resource.resourceKind === 'SamplerResource') {
+        return Object.freeze({
+            ...common,
+            resourceKind: 'SamplerResource',
+        })
+    }
+
+    if (resource.resourceKind === 'QuerySetResource') {
+        const querySet = resource as QuerySetResource
+        return Object.freeze({
+            ...common,
+            resourceKind: 'QuerySetResource',
+            queryType: querySet.type,
+            count: querySet.count,
+            slots: querySet.slots(),
+        })
+    }
+
+    throw new TypeError(`Unsupported Scratch resource kind: ${resource.resourceKind}`)
 }
 
 function resourceDescriptorSummary(resource: Resource): Record<string, unknown> {
@@ -2295,6 +2347,26 @@ function resourceDescriptorSummary(resource: Resource): Record<string, unknown> 
             ...(descriptor.mappedAtCreation !== undefined
                 ? { mappedAtCreation: descriptor.mappedAtCreation }
                 : {}),
+        }
+    }
+
+    if (resource.resourceKind === 'SamplerResource') {
+        return {
+            addressModeU: descriptor.addressModeU,
+            addressModeV: descriptor.addressModeV,
+            addressModeW: descriptor.addressModeW,
+            magFilter: descriptor.magFilter,
+            minFilter: descriptor.minFilter,
+            mipmapFilter: descriptor.mipmapFilter,
+            compare: descriptor.compare,
+            maxAnisotropy: descriptor.maxAnisotropy,
+        }
+    }
+
+    if (resource.resourceKind === 'QuerySetResource') {
+        return {
+            type: descriptor.type,
+            count: descriptor.count,
         }
     }
 
@@ -2324,6 +2396,13 @@ function logicalResourceFootprint(resource: Resource): { bytes: number, known: b
     }
     if (resource.resourceKind !== 'TextureResource') return { bytes: 0, known: false }
     return logicalTextureDescriptorFootprint(descriptor)
+}
+
+function isContentRuntimeResourceFact(
+    fact: ScratchRuntimeResourceFact
+): fact is ScratchRuntimeContentResourceFact {
+
+    return fact.resourceKind === 'BufferResource' || fact.resourceKind === 'TextureResource'
 }
 
 export function logicalTextureDescriptorFootprint(

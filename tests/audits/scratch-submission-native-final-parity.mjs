@@ -184,7 +184,7 @@ const preservedBehaviorChecks = [
         hasAll(current.submission, [
             'validateResolveReadiness(',
             'step.passSpec.advanceTimestampWriteEpochs()',
-            'activeOcclusionQueryCommand?.querySet._advanceSlotContentEpoch(',
+            'advanceQuerySlotContentEpoch(',
             'markSimulatedQuerySlotReady(',
         ])
     ),
@@ -416,7 +416,7 @@ const intentionalReplacements = [
             'observeSubmissionPotentialWriteNativeFailures(',
             'write.resource.contentEpoch !== write.contentEpoch',
             "setResourceContentState(write.resource, 'indeterminate', write.contentEpoch)",
-            'write.querySet.slotContentEpochs[write.index] !== write.contentEpoch',
+            'querySlotContentEpoch(write.querySet, write.index) !== write.contentEpoch',
         ])
     ),
     replacement(

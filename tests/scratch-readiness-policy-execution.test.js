@@ -592,10 +592,10 @@ describe('scratch readiness policy execution', () => {
         expect(fixture.colorTarget.contentEpoch).to.equal(0)
         expect(fixture.depthTarget.state).to.equal('empty')
         expect(fixture.depthTarget.contentEpoch).to.equal(0)
-        expect(fixture.timestampQuerySet.slotStates).to.deep.equal([ 'empty', 'empty' ])
-        expect(fixture.timestampQuerySet.slotContentEpochs).to.deep.equal([ 0, 0 ])
-        expect(fixture.occlusionQuerySet.slotStates).to.deep.equal([ 'empty', 'empty' ])
-        expect(fixture.occlusionQuerySet.slotContentEpochs).to.deep.equal([ 0, 0 ])
+        expect(fixture.timestampQuerySet.slots().map(slot => slot.state)).to.deep.equal([ 'empty', 'empty' ])
+        expect(fixture.timestampQuerySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 0, 0 ])
+        expect(fixture.occlusionQuerySet.slots().map(slot => slot.state)).to.deep.equal([ 'empty', 'empty' ])
+        expect(fixture.occlusionQuerySet.slots().map(slot => slot.contentEpoch)).to.deep.equal([ 0, 0 ])
     })
 
     it('does not expose skipped render query writes to later resolve steps', async() => {
