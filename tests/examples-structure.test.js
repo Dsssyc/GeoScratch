@@ -8,15 +8,15 @@ const exists = (...parts) => fs.existsSync(path.join(root, ...parts))
 
 describe('examples structure', () => {
     const browserExamples = [
-        'scratch_helloTriangle',
-        'scratch_uniformTriangle',
-        'scratch_computeReadback',
+        'helloTriangle',
+        'uniformTriangle',
+        'computeReadback',
         'submissionOrder',
         'externalImageUpload',
         'textureResize',
-        'scratch_helloVertexBuffer',
-        'scratch_textureSampling',
-        'scratch_renderToTexture',
+        'helloVertexBuffer',
+        'textureSampling',
+        'renderToTexture',
         'indirectExecution',
         'readinessPolicies',
         'm_demLayer',
@@ -24,17 +24,15 @@ describe('examples structure', () => {
         'x_helloGAW',
     ]
     const standaloneExamples = [
-        '1_helloTriangle',
-        '2_helloVertexBuffer',
-        'scratch_helloTriangle',
-        'scratch_uniformTriangle',
-        'scratch_computeReadback',
+        'helloTriangle',
+        'uniformTriangle',
+        'computeReadback',
         'submissionOrder',
         'externalImageUpload',
         'textureResize',
-        'scratch_helloVertexBuffer',
-        'scratch_textureSampling',
-        'scratch_renderToTexture',
+        'helloVertexBuffer',
+        'textureSampling',
+        'renderToTexture',
         'indirectExecution',
         'readinessPolicies',
         'm_demLayer',
@@ -57,7 +55,7 @@ describe('examples structure', () => {
         }
     })
 
-    it('does not expose replaced legacy demos in the examples browser', () => {
+    it('removes replaced legacy demos and scratch-prefixed duplicate directories', () => {
         const html = read('examples', 'index.html')
 
         expect(html).to.not.include('href="?sample=1_helloTriangle"')
@@ -67,6 +65,19 @@ describe('examples structure', () => {
         expect(html).to.not.include('data-id="2_helloVertexBuffer"')
         expect(html).to.not.include('data-path="./2_helloVertexBuffer/"')
         expect(html).to.not.include('Hello Vertex Buffer (legacy)')
+
+        for (const name of [
+            '1_helloTriangle',
+            '2_helloVertexBuffer',
+            'scratch_helloTriangle',
+            'scratch_uniformTriangle',
+            'scratch_computeReadback',
+            'scratch_helloVertexBuffer',
+            'scratch_textureSampling',
+            'scratch_renderToTexture',
+        ]) {
+            expect(exists('examples', name), name).to.equal(false)
+        }
 
         const removedMapId = [ 'm', 'helloMap' ].join('_')
         const removedMapTitle = [ 'Hello', 'Map' ].join(' ')
@@ -79,10 +90,10 @@ describe('examples structure', () => {
     it('defaults the examples browser to the replacement Hello Triangle entry', () => {
         const html = read('examples', 'index.html')
 
-        expect(html).to.include('class="example-link is-active" href="?sample=scratch_helloTriangle"')
+        expect(html).to.include('class="example-link is-active" href="?sample=helloTriangle"')
         expect(html).to.include('<h1 id="stage-title">Hello Triangle</h1>')
-        expect(html).to.include('href="./scratch_helloTriangle/main.js"')
-        expect(html).to.include('href="./scratch_helloTriangle/"')
+        expect(html).to.include('href="./helloTriangle/main.js"')
+        expect(html).to.include('href="./helloTriangle/"')
         expect(html).to.include('src="about:blank"')
         expect(html).to.include('selectExample(currentLinkFromUrl(), false)')
     })
@@ -90,15 +101,15 @@ describe('examples structure', () => {
     it('uses stable demo names for Scratch-backed browser entries', () => {
         const html = read('examples', 'index.html')
         const scratchBackedExamples = [
-            [ 'scratch_helloTriangle', 'Hello Triangle' ],
-            [ 'scratch_uniformTriangle', 'Uniform Triangle' ],
-            [ 'scratch_computeReadback', 'Compute Readback' ],
+            [ 'helloTriangle', 'Hello Triangle' ],
+            [ 'uniformTriangle', 'Uniform Triangle' ],
+            [ 'computeReadback', 'Compute Readback' ],
             [ 'submissionOrder', 'Submission Order' ],
             [ 'externalImageUpload', 'External Image Upload' ],
             [ 'textureResize', 'Texture Resize' ],
-            [ 'scratch_helloVertexBuffer', 'Hello Vertex Buffer' ],
-            [ 'scratch_textureSampling', 'Texture Sampling' ],
-            [ 'scratch_renderToTexture', 'Render To Texture' ],
+            [ 'helloVertexBuffer', 'Hello Vertex Buffer' ],
+            [ 'textureSampling', 'Texture Sampling' ],
+            [ 'renderToTexture', 'Render To Texture' ],
             [ 'indirectExecution', 'Indirect Execution' ],
             [ 'readinessPolicies', 'Readiness Policies' ],
         ]
@@ -170,6 +181,8 @@ describe('examples structure', () => {
         for (const name of standaloneExamples) {
             expect(config).to.include(`${name}/index.html`)
         }
+
+        expect(config).to.not.match(/scratch[A-Z]\w*\s*:/)
     })
 
     it('keeps the DEM layer example focused on terrain only', () => {
@@ -229,7 +242,7 @@ describe('examples structure', () => {
 
     it('publishes first-frame completion for continuous Scratch examples', () => {
 
-        for (const name of [ 'scratch_textureSampling', 'scratch_renderToTexture' ]) {
+        for (const name of [ 'textureSampling', 'renderToTexture' ]) {
             const source = read('examples', name, 'main.js')
 
             expect(source, name).to.include("canvas.dataset.status = 'loading'")
@@ -321,10 +334,17 @@ describe('examples structure', () => {
         expect(source).to.include('.copy(copyToReadback)')
         expect(source).to.include('.readback(readback)')
         expect(source).to.include('.render(surfacePass, [ draw ])')
+        expect(source).to.include('sameTextureViewSpecObject')
         expect(source).to.include('sameBindSetObject')
         expect(source).to.include('samePassSpecObject')
         expect(source).to.include('sameDrawCommandObject')
         expect(source).to.include('oldTextureDestroyed')
+        expect(source).to.include("bindSetStateAfterResize === 'stale'")
+        expect(source).to.include('await bindSet.prepare()')
+        expect(source).to.include('explicitPreparationAdvancedOnce')
+        expect(source).to.include('preparedSnapshotChanged')
+        expect(source).to.include("bindSetStateAfterPrepare === 'prepared'")
+        expect(source).to.include('bindSetPreparationDiagnosticsSucceeded')
         expect(source).to.include('exactReadbackBytesMatched')
         expect(source).to.include('runtime.diagnostics.exportEvidence()')
         expect(source).to.include('allocationDiagnosticsSucceeded')

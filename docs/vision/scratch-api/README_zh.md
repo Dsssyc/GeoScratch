@@ -11,14 +11,14 @@
 
 - `00-overview/`: 设计原则、0.x 破坏性重构策略、API 边界
 - `01-runtime-surface/`: 显式异步 runtime 与 canvas surface 分离
-- `02-resources/`: 逻辑资源、allocation version、content epoch、readiness、资源替换
-- `03-bindings/`: 显式 bind layout、bind set、bind group 缓存、shader 检查辅助
+- `02-resources/`: 真实 resource hierarchy、不可变 BufferRegion/TextureViewSpec、双 layout compatibility、allocation/content facts 与资源替换
+- `03-bindings/`: Promise-only bind layout/bind set、完整 persistent binding matrix、显式 preparation、dynamic offset 与 shader 检查辅助
 - `04-pipelines-commands/`: 稳定 pipeline 与可执行 GPU command
 - `05-passes-submissions-scheduler/`: 持久 pass spec、submission builder、submitted work、scheduler 校验
 - `06-design-review/`: 从 AI 辅助编写与通用 compute 对等性两个角度，对 `00`–`05` 的评审
 - `07-transfers-epochs/`: submission-scoped transfer、allocation version、content epoch、readback operation 生命周期与 indexed query-set transfer(解决缺口 2-4)
 - `08-programs-codecs/`: shader `Program`、layout codec、生成 WGSL accessor、pipeline 边界，以及明确排除 `Material`
-- `09-diagnostics-validation/`: 统一 machine-readable diagnostic envelope、validation phases、code stability 与 repair suggestions
+- `09-diagnostics-validation/`: 统一 schema-v5 machine-readable diagnostic envelope、有界 evidence、validation phases、code stability 与 repair suggestions
 
 每个模块都包含英文 `README.md` 和中文 `README_zh.md`。
 
@@ -29,13 +29,13 @@
 - 现有 API 只是需求样本和反例材料，不是兼容性约束。
 - 核心 API 使用显式异步 `ScratchRuntime`。内核契约中不保留隐式全局 device。
 - `Surface` 与 `ScratchRuntime` 分离；runtime 必须支持 compute-only 和 offscreen 工作流。
-- 资源是逻辑句柄，并持有 physical GPU allocation version 与 content epoch。
+- Resource 是带 allocation lifecycle 的逻辑容器。只有 buffer/texture 拥有 scalar content facts；sampler 没有，query set 拥有 indexed slot facts。BufferRegion 与 TextureViewSpec 是不可变 non-resource value。
 - Layout codec 是连接 CPU packing、WGSL accessor、readback view 与 layout diagnostics 的准备期 artifact; submission hot path 只消费显式 artifact。
 - 资源缺失或未 ready 时的策略必须由 command 或 pass 使用点显式声明。
 - CPU/GPU transfer 必须显式表达: upload、readback、copy 是 command 或 operation，不是隐藏的 `Resource` 方法。
 - `ReadbackOperation` 有显式生命周期、retention、cancellation、disposal、budget 与 diagnostic 语义。
 - `QuerySetResource` 保留 WebGPU 的 `QuerySet` 名称，但语义是 indexed query slots。核心 query type 是 `timestamp | occlusion`; pipeline statistics 不是核心 query type。
-- 核心 API 中 bind layout 必须显式声明。Shader reflection 只作为开发辅助或校验工具。
+- Bind layout 与 bind set 是 Promise-only acknowledged supporting object。Allocation replacement 后 BindSet preparation 必须显式发生；submission 绝不修复它。Shader reflection 只作为开发辅助或校验工具。
 - `Program` 是由 user WGSL 与 generated modules 组合出的 shader contract; 它不拥有具体资源。
 - `Material` 不是 scratch core concept。material-like style 或 scene package 属于 scratch 之上，并降低到 `Program`、`BindSet`、`Pipeline` 和 `Command`。
 - Diagnostics 是 API contract 的一部分: 稳定 machine-readable code 与 subject，而不是 prose-only log。

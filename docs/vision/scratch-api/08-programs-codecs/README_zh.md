@@ -8,7 +8,7 @@
 面向 shader 的 API 应拆成显式 artifact:
 
 - `LayoutSpec` 描述逻辑数据形状。
-- `LayoutArtifact` 记录算出的 offset、stride、padding、alignment mode、usage lowering 与稳定 structural hash。
+- `LayoutArtifact` 记录算出的 offset、stride、padding、alignment mode、usage lowering、独立 `abiHash` / `schemaHash` identifier 与不可变 canonical signature。
 - `LayoutCodec` 是由 layout 生成的准备期 artifact: CPU writer、readback view 与 WGSL accessor module。
 - `Program` 描述 shader source、生成模块、entry points、所需 bind layouts、所需 features 与 diagnostic metadata。
 - `Pipeline` 是某个 `Program` entry point 加 render 或 compute pipeline state 得到的稳定 WebGPU 可执行状态。
@@ -38,7 +38,7 @@ user WGSL + generated accessor modules + bind-layout contract
 
 - Layout 与 shader helper 可以在 runtime 之前生成、在 build time 生成，也可以在 runtime 初始化阶段惰性生成。
 - Submission-time 执行只消费显式 artifact。它不应依赖临时 string generation 或隐藏 shader mutation。
-- 生成 artifact 必须可 inspect、可按 structural hash 缓存，并通过 `09-diagnostics-validation` 中的共享 `ScratchDiagnostic` envelope 诊断。
+- 生成 artifact 必须可 inspect、可按 canonical ABI/schema signature 缓存，并通过 `09-diagnostics-validation` 中的共享 `ScratchDiagnostic` envelope 诊断。短 hash 本身不是 compatibility proof。
 
 ## LayoutCodec
 
@@ -46,7 +46,7 @@ user WGSL + generated accessor modules + bind-layout contract
 
 目标输出:
 
-- `LayoutArtifact`: segment offset、element stride、field offset、padding、alignment mode、total byte length、storage/vertex/readback compatibility 与 structural hash
+- `LayoutArtifact`: segment offset、element stride、field offset、padding、alignment mode、total byte length、storage/vertex/readback compatibility、`abiHash`、`schemaHash` 与 canonical signature
 - CPU writer: 把逻辑值写入 GPU-aligned bytes，并跳过 padding
 - upload view: 可由一个 upload command 发送的连续字节范围
 - readback view factory: 从返回字节创建 typed、`DataView`、strided 或显式 deinterleaved view
@@ -173,7 +173,7 @@ Pipeline，Program 也不会获得具体 resource 或 submission state。
 Codec 与 shader composition 可以发生在 runtime 之前，但 scratch 仍需要一套连贯契约:
 
 - Build-time path: 提前生成 `LayoutArtifact`、WGSL accessor modules 与可选 CPU writer code。
-- Runtime-initialization path: 惰性生成同样的 artifacts，按 structural hash 缓存，并暴露 diagnostics。
+- Runtime-initialization path: 惰性生成同样的 artifacts，按 canonical ABI/schema signature 缓存，并暴露有界 hash 与 structural diagnostics。
 - Submission path: 只消费已经构建好的 artifacts。
 
 这避免两个坏极端:

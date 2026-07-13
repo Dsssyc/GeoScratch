@@ -27,7 +27,7 @@ queue action 时，`done` Promise 会把该 observation 与
 materialize readback result。
 
 ```ts
-const submitted = scratch.submission()  // no surface -> compute submission
+const submitted = runtime.createSubmission()  // no surface -> compute submission
     .compute(simulationPass, [simulate])
     .submit()
 
@@ -39,7 +39,8 @@ await submitted.done                    // observed submission, not host readbac
 
 ## Epoch 模型
 
-每个 resource 应暴露或内部追踪:
+每个 Resource 都追踪稳定 identity、allocation lifecycle 与 disposal。
+BufferResource 与 TextureResource 还会追踪:
 
 - runtime owner
 - logical id
@@ -59,7 +60,7 @@ await submitted.done                    // observed submission, not host readbac
 - device-loss rehydration
 - 改变 GPU object 或 view compatibility 的 descriptor 变化
 
-`allocationVersion` 是 `BindSet`、view cache、render attachment 和 command cache 在复用前比较的对象。单纯内容写入不应触发 bind group 重建，除非它也改变了物理 binding target。
+`allocationVersion` 是 BindSet preparation snapshot 与 current-allocation validation 比较的事实。单纯内容写入绝不会触发 preparation，除非它也改变 physical binding target。SamplerResource 没有 content state；QuerySetResource 按 indexed slot 追踪 state 与 epoch，而不是使用这些 scalar fields。
 
 Resource identity、lifecycle、readiness、`allocationVersion` 与 `contentEpoch` 都是由 ECMAScript-private slots 支撑的只读公开事实。Package consumer 不能通过字段、上转型到 `Resource`、object-level transition method 或任一公开 package entrypoint 改写 provenance。内部 command 与 submission modules 通过不属于 entrypoint 的 module functions 提交 transition。
 
@@ -72,7 +73,7 @@ Resource identity、lifecycle、readiness、`allocationVersion` 与 `contentEpoc
 - render pass clear、resolve、store 操作
 - 如果未来进入 API，显式 clear、resolve、mipmap generation command 也属于内容写入
 
-`contentEpoch` 可以先按整个 resource 追踪，之后在有价值时细化到 buffer range 或 texture region。关键契约是: readback 与 dependency validation 讨论 content epoch; binding invalidation 讨论 allocation version。
+`contentEpoch` 属于 parent BufferResource 或 TextureResource。BufferRegion 与 TextureViewSpec 不拥有独立 epoch。Readback 与 dependency validation 讨论 parent content epoch；binding invalidation 讨论 allocation version。
 
 ### 迟到 Failure 后的 Indeterminate Content
 
@@ -110,14 +111,14 @@ state = empty
 CPU-to-GPU 写入是显式 transfer command:
 
 ```ts
-const uploadPositions = scratch.command.upload({
+const positionRegion = positions.region()
+const uploadPositions = runtime.createUploadCommand({
     label: 'upload positions',
-    target: positions,
+    target: positionRegion,
     data: positionsArray,
-    range: { offset: 0 },
 })
 
-scratch.submission()
+runtime.createSubmission()
     .upload(uploadPositions)
     .submit()
 ```
@@ -170,19 +171,24 @@ zero-width or zero-height command 仍是 ordered queue action，并且仍调用 
 GPU-to-CPU 读取创建显式 `ReadbackOperation`:
 
 ```ts
-const submitted = scratch.submission()
+const particlePositions = particles.region({
+    offset: positionsOffset,
+    size: positionsByteLength,
+    layout: positionLayout,
+})
+const submitted = runtime.createSubmission()
     .compute(simulationPass, [simulate])
     .submit()
 
-const readback = scratch.readback({
-    source: particles.segment('positions'),
+const readback = runtime.createReadback({
+    source: particlePositions,
     after: submitted,
 })
 
-const values = await readback.toArray()
+const values = await readback.toArray(Float32Array)
 ```
 
-`toArray()` 与 `toBytes()` 属于 readback operation，不属于 `BufferResource` 或 `TextureResource`。该 operation 捕获 source resource、range 或 region、layout view、producer submission，以及 source `contentEpoch`。
+`toArray()` 与 `toBytes()` 属于 readback operation，不属于 `BufferResource` 或 `TextureResource`。该 operation 捕获一个 BufferRegion、其 parent allocation/content facts、可选 layout witness 与 producer submission。
 
 性质:
 
@@ -298,8 +304,8 @@ const result = await readback.toArray()  // returns an owned copy
 如果需要重复读取，调用方应显式选择 retention:
 
 ```ts
-const readback = scratch.readback({
-    source: particles.segment('positions'),
+const readback = runtime.createReadback({
+    source: particlePositions,
     after: submitted,
     retain: 'until-dispose',
 })
@@ -334,21 +340,21 @@ readback.dispose()
 少数情况下，如果 staging copy 点必须放进 command graph 的特定位置，使用 `ReadbackCommand`:
 
 ```ts
-const readParticles = await runtime.readbackCommand({
+const readParticles = await runtime.createReadbackCommand({
     label: 'read particle positions',
     source: {
-        resource: particlePositions,
-        contentEpoch: particlePositions.contentEpoch + 1,
+        region: particlePositions,
+        contentEpoch: particles.contentEpoch + 1,
     },
     whenMissing: 'throw',
 })
 
-const submitted = runtime.submission()
+const submitted = runtime.createSubmission()
     .compute(simulationPass, [simulate])
     .readback(readParticles)
     .submit()
 
-const values = await readParticles.result({ after: submitted }).toArray()
+const values = await readParticles.result({ after: submitted }).toArray(Float32Array)
 ```
 
 buffer-only `ReadbackCommand` ordered-staging 路径现已实现。它的 Promise-only factory 会在返回前确认可复用 staging slot。它验证显式 source epoch，记录 read-only submission ledger entry，并在声明的 step 把数据复制到 runtime-owned staging。`result({ after })` 返回与该次 submitted work 精确关联的 operation；materialization 只映射已有 staging buffer，不会再次提交 copy。它仍是逃生口，不是默认 readback 路径。直接 texture readback 与 mapped lease 仍属于未来工作；有限 staging budget 已是 runtime policy。
@@ -371,7 +377,7 @@ GPU-to-GPU copy 是显式 command。`CopyCommand` 应表达 WebGPU command encod
 CPU upload 与 CPU readback 是独立的 transfer 概念。`TextureUploadCommand` 表达通过 queue 写入 CPU bytes; `ReadbackOperation` 表达通过 staging 与 mapping 进行 host materialization。二者都不能替代 GPU-side `CopyCommand`。
 
 ```ts
-const copyHistory = scratch.command.copy({
+const copyHistory = runtime.createCopyCommand({
     label: 'copy color to history',
     source: {
         resource: sceneColor,
@@ -388,14 +394,13 @@ const copyHistory = scratch.command.copy({
 Buffer-texture copy 使用 WebGPU texel buffer layout，而不是 CPU data:
 
 ```ts
-const uploadPreparedPixels = scratch.command.copy({
+const uploadPreparedPixels = runtime.createCopyCommand({
     label: 'copy prepared pixels into texture',
     source: {
-        resource: preparedPixelBuffer,
+        region: preparedPixelBuffer.region(),
         contentEpoch: preparedPixelBuffer.contentEpoch,
     },
     sourceLayout: {
-        offset: 0,
         bytesPerRow: 256,
         rowsPerImage: 64,
     },
@@ -411,7 +416,7 @@ const uploadPreparedPixels = scratch.command.copy({
 Texture-buffer copy 仍然是 GPU-side copy。只有后续 `ReadbackOperation` map 或 materialize destination buffer 时，才进入 CPU 访问:
 
 ```ts
-const copyTileStats = scratch.command.copy({
+const copyTileStats = runtime.createCopyCommand({
     label: 'copy texture tile into staging buffer',
     source: {
         resource: tileTexture,
@@ -420,9 +425,8 @@ const copyTileStats = scratch.command.copy({
     sourceOrigin: [0, 0],
     sourceMipLevel: 0,
     sourceAspect: 'all',
-    target: tileStagingBuffer,
+    target: tileStagingBuffer.region(),
     targetLayout: {
-        offset: 0,
         bytesPerRow: 256,
         rowsPerImage: 32,
     },
@@ -441,7 +445,7 @@ Copy 读取 source `contentEpoch`，并推进 target `contentEpoch`。如果 cop
 - 后续 pass 采样该 texture 时，声明读取已产生的 `contentEpoch`。
 - depth 与 stencil attachment 使用同一规则。load/store policy 与 read-as-texture 用法必须足够显式，供 dependency validation 判断。
 - surface current texture 是借来的 presentation-submission-scoped target，不是持久 `TextureResource`。它不能在获取它的 presentation submission 之外保留。
-- `TextureResource.resize()` 会推进 `allocationVersion`，清除 allocation-scoped cached views，并把 replacement 标为 empty。Bind set 与 pass attachment 会惰性解析新 view；稳定逻辑 command 可继续复用，只有当其声明 range、readiness 或 required epoch 无法针对 current allocation 通过校验时才失败。
+- `TextureResource.resize()` 会推进 `allocationVersion`，并把 replacement 标为 empty。Dependent BindSet 变为 stale，且要求显式 acknowledged `prepare()`；PassSpec attachment 保留逻辑 TextureViewSpec，并创建受观察的 submission-scoped native view。Submission 不执行隐藏 binding repair。
 - TAA history、trails、迭代仿真纹理这类 temporal resources 都是普通资源; 它们的 previous-frame contents 由 content epochs 表达，而不是内核里的特殊一等特性。
 
 ## Timing 与 Query
@@ -452,13 +456,10 @@ GPU timing 与 visibility query 复用同一套 transfer 模型。`QuerySetResou
 
 ```ts
 type QuerySetType = 'timestamp' | 'occlusion'
-type QueryUnsupportedPolicy = 'throw' | 'warn-disable' | 'disable'
-
-const timingQueries = scratch.querySet({
+const timingQueries = await runtime.createQuerySet({
     label: 'simulation timing',
     type: 'timestamp',
     count: 2,
-    whenUnsupported: 'throw',
 })
 ```
 
@@ -467,12 +468,12 @@ const timingQueries = scratch.querySet({
 - `timestamp` 需要 `timestamp-query` feature，可用于 render 或 compute pass 的 `timestampWrites`。
 - `occlusion` 通过 `occlusionQuerySet` 和 begin/end occlusion query brackets 属于 render pass。
 - query write 会推进 query slot 的 content epoch。resolve query results 会推进 destination buffer 的 `contentEpoch`。
-- `whenUnsupported` 控制 feature-gate failure。开发期应优先用 `throw`; profiling overlays 可在 instrumentation 可选时使用 `warn-disable` 或 `disable`。
+- 不支持的 feature 通过结构化 diagnostic 失败。可选 profiling policy 属于 Scratch core 之上的层。
 
 Timestamp writes 是 pass-level instrumentation:
 
 ```ts
-const simulationPass = scratch.pass.compute({
+const simulationPass = runtime.createComputePass({
     label: 'simulate',
     timestampWrites: {
         querySet: timingQueries,
@@ -485,23 +486,23 @@ const simulationPass = scratch.pass.compute({
 Occlusion queries 是 render-pass-scoped:
 
 ```ts
-const visibilityQueries = scratch.querySet({
+const visibilityQueries = await runtime.createQuerySet({
     label: 'tile visibility',
     type: 'occlusion',
     count: tileCapacity,
 })
 
-const scenePass = scratch.pass.render({
+const scenePass = runtime.createRenderPass({
     label: 'scene',
     color: [
         {
-            target: sceneColor,
+            target: sceneColor.view(),
             load: 'load',
             store: 'store',
         },
     ],
     depth: {
-        target: depth,
+        target: depth.view({ aspect: 'depth-only' }),
         depthLoad: 'load',
         depthStore: 'store',
     },
@@ -509,16 +510,17 @@ const scenePass = scratch.pass.render({
 })
 
 const drawTileWithVisibility = [
-    scratch.command.beginOcclusionQuery({ querySet: visibilityQueries, index: tileIndex }),
+    runtime.createBeginOcclusionQueryCommand({ querySet: visibilityQueries, index: tileIndex }),
     drawTile,
-    scratch.command.endOcclusionQuery(),
+    runtime.createEndOcclusionQueryCommand(),
 ]
 ```
 
 Query result 只有显式 resolve 并 read back 后才 CPU-visible:
 
 ```ts
-const resolveTiming = scratch.command.resolveQuerySet({
+const timingRegion = timingBuffer.region({ size: 16 })
+const resolveTiming = runtime.createResolveQuerySetCommand({
     source: {
         querySet: timingQueries,
         slots: [
@@ -526,33 +528,21 @@ const resolveTiming = scratch.command.resolveQuerySet({
             { index: 1, contentEpoch: 1 },
         ],
     },
-    destination: timingBuffer,
-    destinationOffset: 0,
+    destination: timingRegion,
     whenMissing: 'throw',
 })
 
-const submitted = scratch.submission()
+const submitted = runtime.createSubmission()
     .compute(simulationPass, [simulateParticles])
     .resolve(resolveTiming)
     .submit()
 
-const timingReadback = scratch.readback({
-    source: {
-        resource: timingBuffer,
-        range: { offset: 0, byteLength: 16 },
-        view: 'u64',
-    },
+const timingReadback = runtime.createReadback({
+    source: timingRegion,
     after: submitted,
-    provenance: {
-        querySet: timingQueries,
-        slots: [
-            { index: 0, contentEpoch: 1 },
-            { index: 1, contentEpoch: 1 },
-        ],
-    },
 })
 
-const timingValues = await timingReadback.toBigUint64Array()
+const timingValues = await timingReadback.toArray(BigUint64Array)
 ```
 
 Pipeline statistics 不是当前 WebGPU core contract 的一部分; 除非未来 WebGPU target 或显式 extension 支持，否则必须留在 scratch core 之外。

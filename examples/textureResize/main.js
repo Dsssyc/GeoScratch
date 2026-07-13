@@ -114,8 +114,9 @@ async function main() {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
-        resizedTexture: texture,
+    const textureView = texture.view()
+    const bindSet = await runtime.createBindSet(bindLayout, {
+        resizedTexture: textureView,
         resizedSampler: sampler,
     }, {
         label: 'texture resize sample set',
@@ -138,7 +139,7 @@ async function main() {
         label: 'texture resize offscreen pass',
         color: [
             {
-                target: texture,
+                target: textureView,
                 load: 'clear',
                 store: 'store',
                 clear: clearColor,
@@ -171,13 +172,13 @@ async function main() {
         whenMissing: 'throw',
     })
 
-    const persistentReferences = { texture, texturePass, bindSet, draw }
+    const persistentReferences = { texture, textureView, texturePass, bindSet, draw }
     const initialResourceId = texture.id
     const initialTexture = texture.gpuTexture
-    const initialView = texture.createView()
-    const initialBindGroup = bindSet.getBindGroup()
     const wasInitialTextureDestroyed = observeDestroy(initialTexture)
     const initialAllocationVersion = texture.allocationVersion
+    const initialPrepareGeneration = bindSet.prepareGeneration
+    const initialPreparedSnapshotHash = bindSet.preparedSnapshotHash
 
     const initialWork = runtime.createSubmission({ validation: 'throw' })
         .render(texturePass, [])
@@ -195,7 +196,12 @@ async function main() {
     const contentEpochAfterResize = texture.contentEpoch
     const stateAfterResize = texture.state
     const replacementTexture = texture.gpuTexture
-    const replacementView = texture.createView()
+    const bindSetStateAfterResize = bindSet.preparationState
+    const prepareGenerationBeforeReplacement = bindSet.prepareGeneration
+    await bindSet.prepare()
+    const bindSetStateAfterPrepare = bindSet.preparationState
+    const replacementPrepareGeneration = bindSet.prepareGeneration
+    const replacementPreparedSnapshotHash = bindSet.preparedSnapshotHash
     const readbackByteLength = paddedBytesPerRow * surface.size.height
     const readbackBuffer = await runtime.createBuffer({
         label: 'texture resize padded readback buffer',
@@ -205,9 +211,8 @@ async function main() {
     const copyToReadback = runtime.createCopyCommand({
         label: 'copy resized texture into padded rows',
         source: { resource: texture, contentEpoch: contentEpochAfterResize + 1 },
-        target: readbackBuffer,
+        target: readbackBuffer.region(),
         targetLayout: {
-            offset: 0,
             bytesPerRow: paddedBytesPerRow,
             rowsPerImage: surface.size.height,
         },
@@ -216,9 +221,7 @@ async function main() {
     })
     const readback = await runtime.createReadbackCommand({
         label: 'read exact resized texture bytes',
-        source: { resource: readbackBuffer, contentEpoch: 1 },
-        sourceOffset: 0,
-        byteLength: readbackByteLength,
+        source: { region: readbackBuffer.region(), contentEpoch: 1 },
         whenMissing: 'throw',
     })
 
@@ -230,7 +233,6 @@ async function main() {
         .submit()
     const bytes = await readback.result({ after: replacementWork }).toBytes()
     const contentEpochAfterRender = texture.contentEpoch
-    const replacementBindGroup = bindSet.getBindGroup()
 
     const repeatedPresentation = runtime.createSubmission({ validation: 'throw' })
         .render(surfacePass, [ draw ])
@@ -260,6 +262,12 @@ async function main() {
         .find(operation => operation.kind === 'texture-allocation')
     const replacementOperation = textureOperations
         .find(operation => operation.kind === 'texture-replacement')
+    const bindSetOperations = evidence.operations
+        .filter(operation => (
+            operation.kind === 'bind-set-preparation' &&
+            operation.target.kind === 'bind-set' &&
+            operation.target.bindSetId === bindSet.id
+        ))
     const checks = {
         resourceIdUnchanged: texture.id === initialResourceId,
         gpuTextureChanged: replacementTexture !== initialTexture,
@@ -269,11 +277,22 @@ async function main() {
         stateBecameEmpty: stateAfterResize === 'empty',
         oldTextureDestroyed: wasInitialTextureDestroyed(),
         sameTextureObject: texture === persistentReferences.texture,
+        sameTextureViewSpecObject: textureView === persistentReferences.textureView,
+        textureViewStillTargetsLogicalResource: textureView.texture === texture,
         sameBindSetObject: bindSet === persistentReferences.bindSet,
         samePassSpecObject: texturePass === persistentReferences.texturePass,
         sameDrawCommandObject: draw === persistentReferences.draw,
-        viewChanged: replacementView !== initialView,
-        bindGroupChanged: replacementBindGroup !== initialBindGroup,
+        initialBindSetPrepared:
+            initialPrepareGeneration === 1 && initialPreparedSnapshotHash !== undefined,
+        bindSetBecameStale:
+            bindSetStateAfterResize === 'stale' &&
+            prepareGenerationBeforeReplacement === initialPrepareGeneration,
+        explicitPreparationAdvancedOnce:
+            replacementPrepareGeneration === initialPrepareGeneration + 1,
+        preparedSnapshotChanged:
+            replacementPreparedSnapshotHash !== undefined &&
+            replacementPreparedSnapshotHash !== initialPreparedSnapshotHash,
+        bindSetReturnedToPrepared: bindSetStateAfterPrepare === 'prepared',
         newRenderAdvancedOnce: contentEpochAfterRender === contentEpochAfterResize + 1,
         stateBecameReady: texture.state === 'ready',
         exactReadbackBytesMatched: bytesEqual(bytes, expectedBytes),
@@ -290,6 +309,11 @@ async function main() {
             initialAllocationOperation.target.allocationVersion === initialAllocationVersion &&
             replacementOperation?.status === 'succeeded' &&
             replacementOperation.target.allocationVersion === allocationVersionAfterResize,
+        bindSetPreparationDiagnosticsSucceeded:
+            bindSetOperations.length === 2 &&
+            bindSetOperations.every(operation => operation.status === 'succeeded') &&
+            bindSetOperations[0].target.generation === initialPrepareGeneration &&
+            bindSetOperations[1].target.generation === replacementPrepareGeneration,
         diagnosticEvidenceSerializable:
             JSON.stringify(JSON.parse(serializedEvidence)) === serializedEvidence,
         diagnosticEvidenceCompact:
@@ -313,6 +337,10 @@ async function main() {
     document.body.dataset.contentEpochAfterResize = String(contentEpochAfterResize)
     document.body.dataset.contentEpochAfterRender = String(contentEpochAfterRender)
     document.body.dataset.stateAfterResize = stateAfterResize
+    document.body.dataset.bindSetStateAfterResize = bindSetStateAfterResize
+    document.body.dataset.bindSetStateAfterPrepare = bindSetStateAfterPrepare
+    document.body.dataset.initialPrepareGeneration = String(initialPrepareGeneration)
+    document.body.dataset.replacementPrepareGeneration = String(replacementPrepareGeneration)
     document.body.dataset.expectedBytes = JSON.stringify(Array.from(expectedBytes))
     document.body.dataset.actualBytes = JSON.stringify(Array.from(bytes))
     document.body.dataset.drawExecutionCount = '2'

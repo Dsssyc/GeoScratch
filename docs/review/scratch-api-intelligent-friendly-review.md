@@ -193,9 +193,10 @@ modules, and the TypeScript implementation:
   availability barrier. Fixed-order native outcomes, lifecycle races, cleanup,
   one materialization owner, and consume/retain concurrency are explicit.
 - Pending operations, logical staging bytes, retained host bytes, and active
-  mappings are always-current bounded facts. The current schema-v4
+  mappings are always-current bounded facts. The current schema-v5
   operation/incident history remains separately bounded, serializable,
-  source-free, and handle-free; ADR-035 replaced the prior schema-v3 envelope.
+  source-free, and handle-free; ADR-038 cleanly replaced schema v4 after
+  supporting-object targets and preparation operations became necessary.
 - Final fixed-baseline parity preserved 12/12 original JavaScript behaviors and
   16/16 Goal-start TypeScript behaviors; 10/10 intentional ADR-034 replacements
   are explicit rather than disguised as compatibility.
@@ -235,10 +236,11 @@ Implementation and bilingual contract are now present for the ADR-035 core:
   queue-completion rejection into mapping failure. Direct readback rejects an
   indeterminate source before staging allocation.
 
-The schema-v4 implementation, unit/type gates, bilingual contract, ordinary
+The schema-v5 implementation, unit/type gates, bilingual contract, ordinary
 example migration, complete native-call inventory, long-run scope/budget
 evidence, real delayed-validation Chrome evidence, fixed-baseline parity, and
-the strict re-review are now recorded. This item is resolved by ADR-035 and
+the strict re-review are now recorded. The submission slice remains resolved by ADR-035; its
+diagnostic envelope is now governed by ADR-038 and
 `scratch-submission-native-final-parity-audit.md`.
 
 ## Update Rules

@@ -117,7 +117,7 @@ ScratchDiagnostic = stable code + phase + subject + related + expected/actual + 
 
 ### 第一部分不改变什么
 
-- **保留 `BindSet` 命名**(不改名为 `BindGroup`)。`BindSet` 比 `GPUBindGroup` 做得更多——allocation-version 比对、惰性重建、暴露 readiness(`03-bindings`)。语义不同正是它必须命名不同的理由: 与 WebGPU 同名会诱导错误的心智模型并产出微妙 bug。规则: 行为与 WebGPU 一致处才照 WebGPU 命名，不一致处精确改名。
+- **保留 `BindSet` 命名**(不改名为 `BindGroup`)。`BindSet` 比 `GPUBindGroup` 做得更多：它冻结逻辑 BufferRegion/TextureViewSpec binding，暴露 readiness 与 allocation staleness，并拥有显式 acknowledged preparation lifecycle(`03-bindings`)。语义不同正是它必须命名不同的理由。Submission 绝不惰性重建它。
 - **不引入 `Material`。** kernel 保持 `Program`、`BindSet`、`Pipeline` 与 `Command` 分离。material-like scene concepts 留在 scratch 之上。
 - **Diagnostics 不自动修复。** 结构化 suggestions 可以指导 tooling，但 resource usage、bind layouts、shader code 与 submission order 仍然必须是显式的用户或工具编辑。
 - 保留显式的 `ScratchRuntime` / `Surface` 拆分、显式 resource access 与 transfer 声明、使用点上的 `whenMissing`、以及 `SubmissionValidationMode`(`off` / `warn` / `throw`)。它们本就与 AI 契合: 无隐藏全局状态、可局部推理、且提供了 agentic 闭环可以迭代对抗的错误面。
@@ -163,16 +163,16 @@ GPGPU 的常态是: dispatch → copy 到 readback buffer → `await map` → CP
 
 早期 `00`–`05` 全文未提 `timestamp-query` 或 `GPUQuerySet`(唯一的 "profiling" 指的是 validation mode，不是 GPU 计时)。"高性能"意味着要能测; 没有 timestamp query 就调不动 kernel。它是 feature-gated 的可选项，但设计得给它一个落脚点: 一种 query resource kind 加一个 pass/command 触点。
 
-#### 缺口 5 — compute 专属校验 + binding 完整性(可后补)
+#### 缺口 5 — compute 专属校验 + binding 完整性(已修)
 
-- `05` 的 validator 校验顺序 / 归属 / readiness，但不校验 compute 限制: workgroup 数 vs `maxComputeWorkgroupsPerDimension`、storage binding 大小 vs limits。这些现在是静默失败; 应纳入 validator。
-- `03-bindings` 没提 dynamic buffer offset(`hasDynamicOffset`); "绑一个大 buffer、每次 dispatch 用 offset 取一段"是常用的 compute 批处理手法。
+- Draw/dispatch 与 pipeline preflight 现在会在 encoder creation 前校验 workgroup dimension、binding range、alignment、`minBindingSize`、storage limit 与 declared binding access。
+- `03-bindings` 定义 command-owned named dynamic offset，并在构造期预先降低为 native binding order；同一 prepared BindSet 可被不同 immutable Command 选择不同 region，而不发生 mutation 或 preparation。
 
 ### 用评判轴小结
 
 - **必须修**: 缺口 1(定位决定所有下游决策)、缺口 2(功能性 + 可验证性双失)。
 - **应该修**: 缺口 3(功能性，且与缺口 2 耦合)、缺口 4(高性能的前提)。
-- **可后补**: 缺口 5。
+- **在 binding-view clean cut 中已修**: 缺口 5。
 
 净判断: 不是推倒，而是"把 compute 从附属升为一等"——重定位 + 补回读/提交语义 + 给计时和 compute 校验留位置。补对了，这套 read/write 依赖模型反而会成为 GPGPU 的强项。
 

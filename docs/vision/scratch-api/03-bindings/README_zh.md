@@ -1,111 +1,162 @@
 # Bindings
 
 状态: Vision draft
-日期: 2026-07-06
+日期: 2026-07-13
 
 ## 决策
 
-旧 `Binding` 概念应拆成 `BindLayout` 和 `BindSet`。
+Scratch 将 native binding ABI 与具体资源选择分开:
 
-`BindLayout` 描述稳定 shader binding 形状。`BindSet` 把具体资源绑定到该形状，并拥有 bind group cache invalidation。
+- `BindLayout` 是权威且不可变的 WebGPU binding ABI。
+- `BindSet` 冻结一份 name-to-resource-view 映射，并拥有一个经过确认的 prepared native snapshot。
+- `Program.layoutRequirements` 保存 shader 的 typed schema 预期。
+- `Command` 为一次可执行动作组合 pipeline、bind-set invocation、dynamic offset 与显式 resource access。
 
-Vertex buffer、index buffer、indirect buffer、draw count、dispatch count 和 executable state 不属于 `BindSet`。
+Vertex buffer、index buffer、indirect argument、count、readiness policy、shader source，以及 scene/material 语义都不属于 `BindSet`。
 
 ## BindLayout
 
-核心 API 中 `BindLayout` 必须显式声明:
+Bind layout 创建是 Promise-only，因为成功意味着持久 `GPUBindGroupLayout` 已被 native acknowledgement:
 
 ```ts
-const terrainLayout = scratch.bindLayout({
+const terrainLayout = await runtime.createBindLayout({
     label: 'terrain group',
     group: 0,
     entries: [
-        { binding: 0, name: 'camera', type: 'uniform', visibility: ['vertex'] },
-        { binding: 1, name: 'nodes', type: 'read-storage', visibility: ['vertex'] },
-        { binding: 2, name: 'dem', type: 'texture', sampleType: 'float', visibility: ['fragment'] },
-        { binding: 3, name: 'linear', type: 'sampler', visibility: ['fragment'] },
+        {
+            binding: 0,
+            name: 'camera',
+            type: 'uniform',
+            visibility: [ 'vertex' ],
+            minBindingSize: 256,
+        },
+        {
+            binding: 1,
+            name: 'nodes',
+            type: 'read-storage',
+            visibility: [ 'vertex' ],
+            hasDynamicOffset: true,
+        },
+        {
+            binding: 2,
+            name: 'dem',
+            type: 'texture',
+            sampleType: 'float',
+            viewDimension: '2d',
+            visibility: [ 'fragment' ],
+        },
+        {
+            binding: 3,
+            name: 'linear',
+            type: 'sampler',
+            samplerType: 'filtering',
+            visibility: [ 'fragment' ],
+        },
     ],
 })
 ```
 
-核心 layout descriptor 应可预测地映射到 WebGPU bind group layout entries。
+Scratch 会预检 name、binding index、visibility、device feature、limit、buffer type、dynamic-offset contract、`minBindingSize`、sampled-texture shape、storage-texture access/format/dimension 与 sampler type。Acknowledged transaction 只 issue 一次 native layout creation；validation、internal 与 OOM scope settle 且 lifecycle 事实复核通过后才注册对象。
 
-支持的 entry 家族应包括:
+持久 binding matrix 覆盖:
 
-- uniform buffer
-- read-only storage buffer
-- writable storage buffer
-- sampled texture
-- storage texture
-- sampler
-- external texture, when supported
+- uniform、read-only storage 与 writable storage buffer；
+- filtering、non-filtering 与 comparison sampler；
+- float、unfilterable-float、depth、signed-integer 与 unsigned-integer sampled texture，包括全部 native-valid view dimension 与 multisampled 约束；
+- write-only、read-only 与 read-write storage texture，具有显式 format 和 native-valid `1d`、`2d`、`2d-array` 或 `3d` dimension。
 
-buffer entry(uniform 与 storage)应支持可选的 dynamic-offset 标志，这样可以只绑定一次大 buffer、按 offset 选取每次 dispatch 或 draw 的一段——这是常用的 compute 批处理手法。
+`externalTexture` 在拥有独立 frame/task lifetime contract 前明确排除。Shader reflection 可以交叉检查显式 layout，但绝不是生产路径的真相来源。
 
 ## BindSet
 
-`BindSet` 按 layout entry name 绑定资源:
+核心只接受以下持久 binding value:
 
 ```ts
-const terrainSet = scratch.bindSet(terrainLayout, {
-    camera: cameraBuffer,
-    nodes: nodeBuffer,
-    dem: demTexture,
+Record<string, BufferRegion | TextureViewSpec | SamplerResource>
+```
+
+Whole buffer、whole texture、native GPU object 与 legacy wrapper 都会被拒绝。资源选择是显式且 many-to-many 的:
+
+```ts
+const terrainSet = await runtime.createBindSet(terrainLayout, {
+    camera: cameraBuffer.region({ size: 256, layout: cameraLayout }),
+    nodes: sharedBuffer.region({ offset: 4096, size: 16384, layout: nodeLayout }),
+    dem: demTexture.view({ dimension: '2d' }),
     linear: linearSampler,
 })
 ```
 
-职责:
+Binding table 不可变。若要绑定另一组逻辑资源，必须创建另一个 BindSet。内容写入不改变 native binding shape，也绝不会使 preparation 失效。
 
-- 校验所有 required slots 都已提供
-- 校验 runtime ownership
-- 缓存 `GPUBindGroup`
-- 使用前比较已绑定 resource 的 `allocationVersion`
-- 当绑定资源 allocation version 变化时惰性重建 bind group
-- 向 command validation 暴露已绑定资源的 readiness
+`await runtime.createBindSet(...)` 只返回 initially prepared 对象。Preparation 私有创建 allocation-scoped texture view 和一个 bind group，并在 native scope acknowledgement 与 lifecycle/snapshot 复核后原子提交。同一 candidate 内可以去重完全相同的 texture view；不存在 runtime-wide 或 cross-BindSet native-view cache。
 
-完成 `BindSet` 构造后，normalized binding table 及其中的 entries 不可变。Command 因而会针对同一份 slot-to-resource mapping 完成 validation 与 encoding。Resource 本身仍保留显式的 content、allocation 与 lifecycle transition; allocation 变化继续通过 `allocationVersion` 使 cached bind group 失效。
+## Preparation 生命周期
 
-`BindSet` 不会仅因已绑定 resource 的 `contentEpoch` 改变而重建。内容变化影响 dependency validation 与 readback，不代表 physical binding target 变化。
+BindSet 暴露:
 
-`TextureResource.resize()` 让这一区别成为可观察事实。返回 Promise 的 replacement transaction settle 期间，旧 allocation 保持 current。显式 await 的 size-changing resize 成功后第一次使用时，`BindSet` 会比较新的 `allocationVersion`，从 bind layout 的显式 view dimension 派生 view，并针对 current mip/layer extent 与 effective texture binding dimension 完成校验，然后创建 exactly one replacement bind group。在具备 `core-features-and-limits` 的设备上，默认 layout dimension `2d` 可在 array-layer 增长后继续选择一个 layer。Compatibility mode 下，省略的 texture binding dimension 会在单层派生为 `2d`、多层派生为 `2d-array`；因此 persistent default-`2d` bind set 在 `1 -> N` 增长后会于 preflight 失败，而不是进入 native validation。若从一开始声明 `textureBindingViewDimension: '2d-array'` 并使用匹配 layout，该 contract 可跨同一 resize 保持。该校验只发生在 binding time，不会拒绝原本有效的 raw view 或 render attachment。不兼容的 cube、array、mip 或 layer selection 同样会在 native view 或 bind-group creation 前失败。有效 allocation 的后续使用会复用该 group。只改变 content 的写入不会重建；normalized same-size resize 不改变任何 version，因此也不重建。
+- `preparationState`: `preparing | prepared | stale | disposed`；
+- `prepareGeneration`；
+- `preparedSnapshotHash`；
+- current/last preparation 与 incident id。
 
-Raw `GPUTextureView` 是 allocation-scoped。Texture allocation 变化时，Scratch 会使自身 view cache 失效；但应用代码独立保留的 raw view 已过期，不能通过 `BindSet` 修复。
-
-`BindSet` 不是 material parameter object。它只为显式 `BindLayout` 提供具体资源; 它不拥有 shader source、生成 accessor module、pipeline state、render style、object assignment、draw count 或 dispatch count。command 才是 pipeline 与 bind sets 为一次可执行动作相遇的位置。
-
-## Shader Inspection 与交叉校验
-
-Shader reflection 不是 source of truth，也不在核心 runtime 路径上。显式 `BindLayout` 仍然权威。但 reflection 应从"仅脚手架"提升为一道 *守卫*，针对最常见的绑定错误: `BindLayout` 与 shader 在 binding index、type 或 visibility 上不一致。
-
-helper 与守卫方向:
+已经绑定的逻辑资源发生 allocation replacement 后，snapshot 变为 stale。Submission 绝不 prepare、等待、重试或修复:
 
 ```ts
-const report = scratch.inspectShader(shader).compareBindLayouts([terrainLayout])
+await colorTexture.resize(nextSize)
 
-const draft = scratch.inspectShader(shader).suggestBindLayout({ group: 0 })
+// 逻辑 view 与 slot mapping 未变，但 native snapshot 已 stale。
+await colorSet.prepare()
 ```
 
-约束该交叉校验，使它绝不挡住正当工作:
+Stale、preparing、failed 或 disposed set 会在 encoder creation 前结构化失败。成功 re-prepare 只让 generation 增加一次。失败后对象保持 stale，并丢弃全部 candidate native reference；只允许显式 retry。
 
-- 仅 dev——生产路径不硬依赖某个具体 WGSL parser
-- 默认 `warn` 而非 `throw`——否则一个滞后于 WGSL spec 的 parser 会对合法但少见的 layout 报假错
-- 可按 entry 关闭——有意构造的 superset layout 可静默某项检查
-- 只做交叉校验——它把显式 layout 与 shader 比对; 绝不生成权威 layout
+针对同一 current snapshot 的并发调用共享一个 in-flight Promise。若 pending 期间另一调用观察到不同 snapshot，则以结构化 conflict diagnostic 失败；不会排队，也不会后台重启。Allocation drift、disposal、runtime shutdown 或 device loss 都会阻止 commit。
 
-Reflection 不能成为生产 layout 创建的真相来源。
+## Dynamic Offset
 
-交叉校验 findings 应使用 `09-diagnostics-validation` 中的共享 diagnostic envelope，以 `BindLayoutEntry` 作为 `subject`，并把反射得到的 `ShaderBinding` 与 `Program` 作为 `related` context。
+Dynamic offset 属于不可变 command invocation，不属于可变 BindSet state:
 
-## 显式声明是核心契约
+```ts
+const draw = runtime.createDrawCommand({
+    pipeline,
+    bindSets: [ {
+        set: terrainSet,
+        dynamicOffsets: {
+            nodes: 1024,
+        },
+    } ],
+    count: { vertexCount: 3 },
+    resources,
+    whenMissing: 'throw',
+})
+```
 
-Shader 和 bind layout 都应由用户有意识地编写。这能保留特殊 WebGPU layout 的表达能力，也避免内核绑定到某个 WGSL parser 或 reflection 实现。
+每个 dynamic entry 都必须按名给出，包括显式零。Missing、extra、fractional、negative、non-finite 或超出 native range 的值在 command construction 时失败。Scratch 只在构造期按 native binding-index order 归一化一次，并保存不可变 offset sequence。Submission 不执行 name sorting 或 offset-sequence reconstruction。
+
+Buffer binding 的有效范围为:
+
+```text
+effectiveOffset = region.offset + dynamicOffset
+effectiveSize = region.size
+```
+
+Encoder creation 前会针对 current allocation 重新校验 bounds 与 uniform/storage alignment。不同 command 可以用不同 offset 复用同一个 prepared BindSet，而不改变其 snapshot 或 generation。
+
+## Program 兼容性
+
+校验保持分层:
+
+1. Pipeline creation 将 `Program.layoutRequirements` 与 `BindLayout` ABI 事实比较: group/binding、visibility、buffer type、dynamic-offset contract、`minBindingSize`、device feature 与 limit。
+2. Command preflight 将实际绑定的 `BufferRegion` 与 Program requirement 比较: runtime/lifecycle、current allocation、usage、range、alignment、canonical ABI compatibility 与 exact canonical schema compatibility。
+3. Command 的显式 resource access 必须覆盖 binding 隐含的每个 buffer/texture read/write，包括 storage-texture access。
+
+`abiHash` 与 `schemaHash` 是有界 diagnostic identifier，不是无碰撞证明。兼容性还会比较不可变 canonical signature，并报告有界 structural difference。
 
 ## 非目标
 
-- 不在 `BindSet` 中存储 vertex 或 index input state。
-- 不在 `BindSet` 中存储 draw 或 dispatch count。
-- 不在 `BindSet` 中存储 command readiness policy。
-- 不把 `BindSet` 当作 material、style 或 scene-object parameter bundle。
-- 不把 bind validation failures 暴露成 prose-only errors。
-- 不把 shader reflection 作为主要 runtime layout 机制。
+- 不提供 mutable rebinding 或 `BindSet.set()`。
+- 不做隐藏 resource search、shader-driven auto-binding 或 resource-to-BindSet reverse graph。
+- 不在 submission 时创建 native binding，也不自动 preparation。
+- 不提供 raw ordered dynamic-offset array overload。
+- 不在 `BindSet` 中放 vertex/index state、count、readiness policy、material、style、scene 或 layer 语义。
+- 不输出 prose-only binding validation error。

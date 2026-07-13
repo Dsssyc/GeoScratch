@@ -115,7 +115,7 @@ async function inspectAdapter(browser) {
 
     const context = await browser.newContext()
     const page = await context.newPage()
-    await page.goto(`${baseUrl}/scratch_helloTriangle/index.html`, {
+    await page.goto(`${baseUrl}/helloTriangle/index.html`, {
         waitUntil: 'domcontentloaded',
         timeout,
     })
@@ -156,7 +156,7 @@ async function verifySubmissionTransactions(browser) {
     const pageErrors = []
     const requestFailures = []
     attachFailureListeners(page, consoleFailures, pageErrors, requestFailures)
-    await page.goto(`${baseUrl}/scratch_helloTriangle/index.html`, {
+    await page.goto(`${baseUrl}/helloTriangle/index.html`, {
         waitUntil: 'domcontentloaded',
         timeout,
     })

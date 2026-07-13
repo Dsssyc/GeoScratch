@@ -10,9 +10,9 @@
 `scratch` 应降低这些重复低层工作的负担:
 
 - runtime 与 device 生命周期
-- 资源身份、经确认的 allocation、allocation replacement、readiness、content epoch、显式 transfer
+- 真实 resource identity、经确认的 allocation、逻辑 BufferRegion/TextureViewSpec selection、replacement、readiness、content epoch 与显式 transfer
 - layout artifact、layout codec 与 shader accessor 生成
-- bind layout 与 bind group 构建
+- acknowledged bind-layout construction 与显式 BindSet preparation
 - shader program 组合与 pipeline cache 兼容性
 - command readiness 与资源依赖校验
 - machine-readable diagnostics 与 validation reports
@@ -89,21 +89,22 @@ Descriptor 不适合承担时间变化行为:
 新 API 应让这些边界很难被误解:
 
 - `ScratchRuntime` 拥有 GPU device 状态与缓存。
-- 被覆盖的原生 allocation 是返回 Promise 的 GPU operation。只有 validation 与 out-of-memory scope 都成功 settle 后，逻辑资源才会安装。
+- 被覆盖的原生 allocation 是返回 Promise 的 GPU operation。只有 validation、internal、out-of-memory scope 与 lifecycle recheck 都成功 settle 后，逻辑资源才会安装。
 - `Surface` 拥有呈现目标配置，不拥有 GPU 执行上下文。
-- `Resource` 是带有 physical GPU allocation version 与 content epoch 的逻辑句柄。
+- `Resource` 拥有 logical identity、allocation lifecycle 与 disposal。只有 BufferResource 与 TextureResource 拥有 scalar content/readiness fact；SamplerResource 没有这些事实，QuerySetResource 则拥有 indexed slot facts。
+- `BufferRegion` 与 `TextureViewSpec` 是同步、不可变的 selection/interpretation value，不是 resource 或 native allocation。
 - `QuerySetResource` 是 indexed query-slot resource，不是无序集合，也不是 shader binding。
 - Transfer operation 显式移动 CPU/GPU 或 GPU/GPU 边界上的数据，并推进 content epoch。
 - `LayoutCodec` 是连接 CPU packing、WGSL accessor、readback view 与 layout diagnostics 的准备期 artifact。
-- `BindLayout` 描述 shader binding 形状。
-- `BindSet` 把具体资源绑定到 layout。
+- `BindLayout` 是 Promise-only acknowledged native binding ABI。
+- `BindSet` 冻结显式 BufferRegion/TextureViewSpec/SamplerResource binding，并只在 initial native snapshot prepared 后返回。Allocation replacement 要求显式 `prepare()`；submission 绝不修复它。
 - `Program` 描述 shader source、生成模块、entry points 与所需 layouts，但不拥有具体资源。
 - `Pipeline` 描述某个 `Program` entry point 的稳定 WebGPU 可执行状态。公开 render 与 compute factory 只返回 Promise；只有原生异步创建、compilation evidence、supporting-object scopes 与 lifecycle checks 全部成功 settle 后才暴露 wrapper。
 - `Command` 描述一个可执行 GPU 动作。
 - `ScratchDiagnostic` 是统一 machine-readable validation contract; prose message 不是稳定 API。
 - `runtime.diagnostics` 将始终当前的事实、有界近期 operation、不可变 incident 与显式临时 deep capture 分开。
-- GPU operation evidence 使用 schema-v2 resource/pipeline target union。Pipeline fact 不伪装成 allocation version、content epoch、footprint 或 pressure evidence。
+- GPU operation evidence 使用 schema v5 discriminated Resource、Pipeline、BindLayout、BindSet、Command、Readback 与 Submission target。任何 fact 都不借用不属于其 object kind 的字段。
 - `PassSpec` 描述稳定 pass 形状。
 - `SubmissionBuilder` 按显式顺序把 commands 记录进 pass specs。
-- `SubmittedWork` 是 `.submit()` 返回的可 inspect 句柄，并通过 `done` promise 等待 GPU 完成。
+- `SubmittedWork` 是 `.submit()` 返回的可 inspect 句柄。它的 native outcome 与 `done` boundary 报告 observed submission、queue-completion 与 lifecycle facts，但不等待 readback mapping 或 host copy。
 - `Frame` 不是 scratch core type; frame cadence 属于 `geo`、应用或 presentation loops。

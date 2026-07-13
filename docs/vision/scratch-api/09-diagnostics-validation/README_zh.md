@@ -510,12 +510,39 @@ suggestions: [
 ## GPU Operation、Pipeline 与 Readback Evidence
 
 GPU operation、incident、snapshot、capture 与 exported-evidence schema 使用
-version 4。`0.x.x` 期间不输出或转换 version 2 或 version 3。operation 与 pending fact
+version 5。`0.x.x` 期间不输出或转换 version 2 到 version 4。operation 与 pending fact
 显式选择一种宏观 target:
 
 ```ts
+type ScratchGpuResourceOperationTarget =
+    | {
+        kind: 'resource'
+        resourceKind: 'BufferResource' | 'TextureResource'
+        resourceId: string
+        allocationVersion: number
+        contentEpoch: number
+        logicalFootprintBytes: number
+    }
+    | {
+        kind: 'resource'
+        resourceKind: 'SamplerResource'
+        resourceId: string
+        allocationVersion: number
+    }
+    | {
+        kind: 'resource'
+        resourceKind: 'QuerySetResource'
+        resourceId: string
+        allocationVersion: number
+        queryType: 'timestamp' | 'occlusion'
+        count: number
+        slots: readonly { index: number; state: string; contentEpoch: number }[]
+    }
+
 type ScratchGpuOperationTarget =
-    | { kind: 'resource'; resourceId: string; resourceKind: string; allocationVersion: number; contentEpoch: number; logicalFootprintBytes: number }
+    | ScratchGpuResourceOperationTarget
+    | { kind: 'bind-layout'; bindLayoutId: string; group: number; entries: readonly unknown[]; acknowledgementState: 'pending' }
+    | { kind: 'bind-set'; bindSetId: string; bindLayoutId: string; preparationState: string; generation: number; snapshotHash: string; preparationStage: string }
     | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programSourceHash: string }
     | { kind: 'command'; commandId: string; commandKind: 'readback' }
     | {
@@ -533,14 +560,30 @@ type ScratchGpuOperationTarget =
     | { kind: 'submission'; submissionId: string }
 ```
 
-Query 通过 `targetKind`、`resourceId`、`pipelineId`、`commandId` 或
-`readbackId`、`submissionId` 选择，而不是猜 optional field。Resource allocation incident
-保留 ADR-032 的 pressure 与 attribution 语义。Pipeline incident 只包含
-compilation 与 creation evidence，不获得虚构的 allocation pressure。
-Readback target 不伪装成 persistent resource。
+Schema v5 新增 `sampler-allocation`、`query-set-allocation`、
+`bind-layout-allocation` 与 `bind-set-preparation`。Sampler target 绝不获得
+content/readiness/footprint field。QuerySet target 报告有界 indexed slot fact，
+没有 scalar epoch。BindLayout 报告 ABI shape 与 acknowledgement；BindSet 报告
+preparation state、generation、snapshot 与 stage，不伪装成 Resource。
+BufferRegion 与 TextureViewSpec 只作为 subject 或 related evidence，绝不重复计算
+resource pressure。
+
+Query 通过 `targetKind` 加上对应 discriminator 的 identifier 选择，而不是猜
+optional field。Resource allocation incident 保留 ADR-032 的 pressure 与
+attribution 语义。Pipeline 与 supporting-object incident 只包含真实的
+creation/preparation evidence，不获得虚构 allocation pressure。Readback target
+不伪装成 persistent resource。
+
+BindSet preparation evidence 区分 descriptor validation、native issue、
+synchronous native throw、per-view acknowledgement、bind-group acknowledgement、
+lifecycle recheck、snapshot recheck、commit、cancellation 与 explicit retry。
+成功的 steady-state BindSet use 不创建 preparation operation，也不会把完整 binding
+snapshot 复制进每条 submission record。Supporting object 与 native view 不获得
+虚构 byte footprint；OOM incident 可以包含有界 current Buffer/Texture pressure
+context，但不能声称 candidate 单独导致 aggregate exhaustion。
 
 Submission issue provenance 使用 `submission-native-observation` operation 与
-`submission-failure` incident。其 version 4 outcome 记录 summary、detailed 或
+`submission-failure` incident。其 version 5 outcome 记录 summary、detailed 或
 off mode、一个稳定 status、有界 discriminated locations、固定顺序的 native
 outcome facts，以及显式 omission counts。Native stage 区分 encoder creation、
 pass begin/end、command encoding、encoder finish、queue action/submit、scope

@@ -117,7 +117,7 @@ This revision resolves the remaining open review item by making `09-diagnostics-
 
 ### What Part 1 does NOT change
 
-- **`BindSet` name is kept** (not renamed to `BindGroup`). `BindSet` does more than `GPUBindGroup` - allocation-version comparison, lazy rebuild, readiness exposure (`03-bindings`). The semantic difference is exactly why it must be named differently: a WebGPU-identical name would invite the wrong mental model and produce subtle bugs. Rule: name like WebGPU only where behavior matches; rename precisely where it diverges.
+- **`BindSet` name is kept** (not renamed to `BindGroup`). `BindSet` does more than `GPUBindGroup`: it freezes logical BufferRegion/TextureViewSpec bindings, exposes readiness and allocation staleness, and owns an explicitly acknowledged preparation lifecycle (`03-bindings`). The semantic difference is exactly why it must be named differently. Submission never rebuilds it lazily.
 - **`Material` is not introduced.** The kernel keeps `Program`, `BindSet`, `Pipeline`, and `Command` separate. Material-like scene concepts remain above scratch.
 - **Diagnostics do not auto-repair.** Structured suggestions may guide tooling, but resource usage, bind layouts, shader code, and submission order remain explicit user or tooling edits.
 - The explicit `ScratchRuntime` / `Surface` split, explicit resource access and transfer declarations, `whenMissing` at the usage point, and `SubmissionValidationMode` (`off` / `warn` / `throw`) are kept. They are already AI-aligned: no hidden global state, local reasoning, and an error surface the agentic loop can iterate against.
@@ -163,16 +163,16 @@ Resolved (`05-passes-submissions-scheduler` / `07-transfers-epochs`): the scratc
 
 Earlier `00`–`05` did not mention `timestamp-query` or `GPUQuerySet` (the only "profiling" reference was about validation mode, not GPU timing). "High-performance" implies measurement; without timestamp queries you cannot profile kernels. It is feature-gated, but the design needs a home for it: a query resource kind plus a pass/command touchpoint.
 
-#### Gap 5 — Compute-specific validation + binding completeness (later)
+#### Gap 5 — Compute-specific validation + binding completeness (fixed)
 
-- The `05` validator checks order / ownership / readiness but not compute limits: workgroup count vs `maxComputeWorkgroupsPerDimension`, storage binding size vs limits. These are silent failures today; fold them into the validator.
-- `03-bindings` does not mention dynamic buffer offsets (`hasDynamicOffset`); binding one large buffer and selecting a slice per dispatch is a common compute batching pattern.
+- Draw/dispatch and pipeline preflight now validate workgroup dimensions, binding ranges, alignment, `minBindingSize`, storage limits, and declared binding access before encoder creation.
+- `03-bindings` defines command-owned named dynamic offsets, pre-lowers them into native binding order, and allows one prepared BindSet to select different regions across immutable Commands without mutation or preparation.
 
 ### Lens summary
 
 - **Must fix**: Gap 1 (positioning drives every downstream decision), Gap 2 (fails functional + verifiability).
 - **Should fix**: Gap 3 (functional; coupled to Gap 2), Gap 4 (precondition for "high-performance").
-- **Later**: Gap 5.
+- **Fixed in the binding-view clean cut**: Gap 5.
 
 Net: not a rewrite — raise compute from adjunct to first-class (reposition + add readback/submission semantics + leave room for timing and compute validation). Done right, the read/write dependency model becomes GPGPU's strength.
 

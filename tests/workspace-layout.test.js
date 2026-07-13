@@ -75,12 +75,17 @@ describe('workspace layout', () => {
     it('makes examples consume the package API rather than internal source files', () => {
 
         const exampleFiles = [
-            'examples/1_helloTriangle/main.js',
-            'examples/2_helloVertexBuffer/main.js',
-            'examples/scratch_helloTriangle/main.js',
-            'examples/scratch_uniformTriangle/main.js',
-            'examples/scratch_computeReadback/main.js',
-            'examples/scratch_helloVertexBuffer/main.js',
+            'examples/helloTriangle/main.js',
+            'examples/uniformTriangle/main.js',
+            'examples/computeReadback/main.js',
+            'examples/submissionOrder/main.js',
+            'examples/externalImageUpload/main.js',
+            'examples/textureResize/main.js',
+            'examples/helloVertexBuffer/main.js',
+            'examples/textureSampling/main.js',
+            'examples/renderToTexture/main.js',
+            'examples/indirectExecution/main.js',
+            'examples/readinessPolicies/main.js',
             'examples/shared/scratchMap.js',
             'examples/m_demLayer/terrainLayer.js',
             'examples/m_flowLayer/steadyFlowLayer.js',

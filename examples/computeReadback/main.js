@@ -58,9 +58,9 @@ async function main() {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
-        inputValues: input,
-        outputValues: output,
+    const bindSet = await runtime.createBindSet(bindLayout, {
+        inputValues: input.region(),
+        outputValues: output.region(),
     }, {
         label: 'scratch compute readback bindings',
     })
@@ -81,9 +81,8 @@ async function main() {
     })
     const upload = runtime.createUploadCommand({
         label: 'upload scratch compute readback input',
-        target: input,
+        target: input.region(),
         data: new Float32Array([ 1, 2, 3, 4 ]),
-        offset: 0,
     })
     const dispatch = runtime.createDispatchCommand({
         label: 'dispatch scratch compute readback',
@@ -106,9 +105,8 @@ async function main() {
 
     const readback = runtime.createReadback({
         label: 'read scratch compute output',
-        source: output,
+        source: output.region(),
         after: submitted,
-        range: { offset: 0, byteLength: 16 },
     })
     const values = await readback.toArray(Float32Array)
     await requireObservedSubmission(submitted)

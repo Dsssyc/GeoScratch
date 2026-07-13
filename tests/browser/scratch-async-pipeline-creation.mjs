@@ -10,16 +10,16 @@ const outputDirectory = resolve(
 const headless = process.env.SCRATCH_PIPELINE_BROWSER_HEADLESS === '1'
 const timeout = Number(process.env.SCRATCH_PIPELINE_BROWSER_TIMEOUT_MS ?? 30_000)
 const examples = Object.freeze([
-    { name: 'scratch_helloTriangle' },
-    { name: 'scratch_helloVertexBuffer' },
-    { name: 'scratch_uniformTriangle' },
+    { name: 'helloTriangle' },
+    { name: 'helloVertexBuffer' },
+    { name: 'uniformTriangle' },
     {
-        name: 'scratch_computeReadback',
+        name: 'computeReadback',
         textSelector: '#readback-result',
         expectedText: 'GPU result: 2, 4, 6, 8',
     },
-    { name: 'scratch_textureSampling', statusSelector: '#GPUFrame', expectedStatus: 'ready' },
-    { name: 'scratch_renderToTexture', statusSelector: '#GPUFrame', expectedStatus: 'ready' },
+    { name: 'textureSampling', statusSelector: '#GPUFrame', expectedStatus: 'ready' },
+    { name: 'renderToTexture', statusSelector: '#GPUFrame', expectedStatus: 'ready' },
     { name: 'indirectExecution', statusSelector: '#GPUFrame', expectedStatus: 'ready' },
     { name: 'readinessPolicies', statusSelector: '#GPUFrame', expectedStatus: 'ready' },
     { name: 'submissionOrder', statusSelector: 'body', expectedStatus: 'passed' },
@@ -76,7 +76,7 @@ async function inspectAdapter(browser) {
 
     const context = await browser.newContext()
     const page = await context.newPage()
-    await page.goto(`${baseUrl}/scratch_helloTriangle/index.html`, {
+    await page.goto(`${baseUrl}/helloTriangle/index.html`, {
         waitUntil: 'domcontentloaded',
         timeout,
     })
@@ -114,7 +114,7 @@ async function verifyPipelineTransactions(browser) {
     const pageErrors = []
     const requestFailures = []
     attachFailureListeners(page, consoleFailures, pageErrors, requestFailures)
-    await page.goto(`${baseUrl}/scratch_helloTriangle/index.html`, {
+    await page.goto(`${baseUrl}/helloTriangle/index.html`, {
         waitUntil: 'domcontentloaded',
         timeout,
     })

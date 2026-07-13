@@ -39,11 +39,12 @@ describe('scratch submission native outcome documentation', () => {
         }
     })
 
-    it('keeps all six bilingual vision modules on the same implemented model', () => {
+    it('keeps the bilingual vision modules on the same implemented model', () => {
 
         const documents = language => ({
             runtime: read('docs', 'vision', 'scratch-api', '01-runtime-surface', language),
             resources: read('docs', 'vision', 'scratch-api', '02-resources', language),
+            bindings: read('docs', 'vision', 'scratch-api', '03-bindings', language),
             commands: read('docs', 'vision', 'scratch-api', '04-pipelines-commands', language),
             submissions: read(
                 'docs',
@@ -81,8 +82,18 @@ describe('scratch submission native outcome documentation', () => {
             ]) {
                 expect(vision.resources, `${language} resources ${marker}`).to.include(marker)
             }
-            expect(vision.commands).to.include('lazy bind-group creation')
-            expect(vision.commands).to.include('not independently acknowledged')
+            for (const marker of [
+                'BufferRegion',
+                'TextureViewSpec',
+                'prepareGeneration',
+                'dynamicOffsets',
+                'externalTexture',
+            ]) {
+                expect(vision.bindings, `${language} bindings ${marker}`).to.include(marker)
+            }
+            expect(vision.commands).to.include('bind-set-preparation')
+            expect(vision.commands).to.include('prepare()')
+            expect(vision.commands).not.to.include('lazy bind-group creation')
             for (const marker of [
                 'SubmittedWork.nativeOutcome',
                 'SubmittedWork.done',
@@ -110,7 +121,8 @@ describe('scratch submission native outcome documentation', () => {
                 expect(vision.transfers, `${language} transfers ${marker}`).to.include(marker)
             }
             for (const marker of [
-                'version 4',
+                'version 5',
+                'bind-set-preparation',
                 'submission-native-observation',
                 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
                 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
@@ -125,7 +137,7 @@ describe('scratch submission native outcome documentation', () => {
             for (const nonGoal of [
                 'mapped leases',
                 'texture readback',
-                'persistent supporting-object acknowledgement',
+                'external-texture frame lifetime',
                 'tracked dynamic values',
                 'render graph',
                 'raw-device tracking',
@@ -140,7 +152,8 @@ describe('scratch submission native outcome documentation', () => {
         const review = read('docs', 'review', 'scratch-api-intelligent-friendly-review.md')
 
         expect(review).to.include('Implementation and bilingual contract are now present')
-        expect(review).to.include('This item is resolved by ADR-035')
+        expect(review).to.include('submission slice remains resolved by ADR-035')
+        expect(review).to.include('ADR-038')
         expect(review).to.include('complete native-call inventory')
         expect(review).to.match(/real\s+delayed-validation Chrome evidence,[\s\S]*are now recorded/)
         expect(review).to.match(/fixed-baseline parity/)
@@ -262,12 +275,12 @@ describe('scratch submission native outcome documentation', () => {
     it('makes every ordinary completion proof inspect native outcome and done', () => {
 
         for (const example of [
-            'scratch_helloTriangle',
-            'scratch_helloVertexBuffer',
-            'scratch_uniformTriangle',
-            'scratch_computeReadback',
-            'scratch_textureSampling',
-            'scratch_renderToTexture',
+            'helloTriangle',
+            'helloVertexBuffer',
+            'uniformTriangle',
+            'computeReadback',
+            'textureSampling',
+            'renderToTexture',
             'indirectExecution',
             'readinessPolicies',
             'submissionOrder',

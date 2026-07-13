@@ -1,111 +1,162 @@
 # Bindings
 
 Status: Vision draft
-Date: 2026-07-06
+Date: 2026-07-13
 
 ## Decision
 
-The old `Binding` concept should be split into `BindLayout` and `BindSet`.
+Scratch separates native binding ABI from concrete resource selection:
 
-`BindLayout` describes stable shader binding shape. `BindSet` binds concrete resources to that shape and owns bind group cache invalidation.
+- `BindLayout` is the authoritative, immutable WebGPU binding ABI.
+- `BindSet` freezes one name-to-resource-view mapping and owns one acknowledged prepared native snapshot.
+- `Program.layoutRequirements` carries typed shader schema expectations.
+- `Command` combines a pipeline, bind-set invocations, dynamic offsets, and explicit resource access for one executable action.
 
-Vertex buffers, index buffers, indirect buffers, draw counts, dispatch counts, and executable state do not belong in `BindSet`.
+Vertex buffers, index buffers, indirect arguments, counts, readiness policy, shader source, and scene or material semantics do not belong in `BindSet`.
 
 ## BindLayout
 
-`BindLayout` is explicit in the core API:
+Bind-layout creation is Promise-only because success claims a persistent native `GPUBindGroupLayout`:
 
 ```ts
-const terrainLayout = scratch.bindLayout({
+const terrainLayout = await runtime.createBindLayout({
     label: 'terrain group',
     group: 0,
     entries: [
-        { binding: 0, name: 'camera', type: 'uniform', visibility: ['vertex'] },
-        { binding: 1, name: 'nodes', type: 'read-storage', visibility: ['vertex'] },
-        { binding: 2, name: 'dem', type: 'texture', sampleType: 'float', visibility: ['fragment'] },
-        { binding: 3, name: 'linear', type: 'sampler', visibility: ['fragment'] },
+        {
+            binding: 0,
+            name: 'camera',
+            type: 'uniform',
+            visibility: [ 'vertex' ],
+            minBindingSize: 256,
+        },
+        {
+            binding: 1,
+            name: 'nodes',
+            type: 'read-storage',
+            visibility: [ 'vertex' ],
+            hasDynamicOffset: true,
+        },
+        {
+            binding: 2,
+            name: 'dem',
+            type: 'texture',
+            sampleType: 'float',
+            viewDimension: '2d',
+            visibility: [ 'fragment' ],
+        },
+        {
+            binding: 3,
+            name: 'linear',
+            type: 'sampler',
+            samplerType: 'filtering',
+            visibility: [ 'fragment' ],
+        },
     ],
 })
 ```
 
-Core layout descriptors should map predictably to WebGPU bind group layout entries.
+Scratch preflights names, binding indices, visibility, device features, limits, buffer type, dynamic-offset contract, `minBindingSize`, sampled-texture shape, storage-texture access/format/dimension, and sampler type. The acknowledged transaction issues exactly one native layout creation call and registers the object only after validation, internal, and OOM scopes settle and lifecycle facts are rechecked.
 
-Supported entry families should include:
+The persistent matrix covers:
 
-- uniform buffer
-- read-only storage buffer
-- writable storage buffer
-- sampled texture
-- storage texture
-- sampler
-- external texture, when supported
+- uniform, read-only storage, and writable storage buffers;
+- filtering, non-filtering, and comparison samplers;
+- float, unfilterable-float, depth, signed-integer, and unsigned-integer sampled textures, including every native-valid view dimension and multisampled constraints;
+- write-only, read-only, and read-write storage textures with explicit format and native-valid `1d`, `2d`, `2d-array`, or `3d` dimensions.
 
-Buffer entries (uniform and storage) should support an optional dynamic-offset flag, so one large buffer can be bound once and a per-dispatch or per-draw slice selected by offset — a common compute batching pattern.
+`externalTexture` is deliberately excluded until its frame/task lifetime has a separate contract. Shader reflection may cross-check an explicit layout, but it is never the production source of truth.
 
 ## BindSet
 
-`BindSet` binds resources by layout entry name:
+The only persistent binding values accepted by core are:
 
 ```ts
-const terrainSet = scratch.bindSet(terrainLayout, {
-    camera: cameraBuffer,
-    nodes: nodeBuffer,
-    dem: demTexture,
+Record<string, BufferRegion | TextureViewSpec | SamplerResource>
+```
+
+Whole buffers, whole textures, native GPU objects, and legacy wrappers are rejected. Resource selection is explicit and many-to-many:
+
+```ts
+const terrainSet = await runtime.createBindSet(terrainLayout, {
+    camera: cameraBuffer.region({ size: 256, layout: cameraLayout }),
+    nodes: sharedBuffer.region({ offset: 4096, size: 16384, layout: nodeLayout }),
+    dem: demTexture.view({ dimension: '2d' }),
     linear: linearSampler,
 })
 ```
 
-Responsibilities:
+The binding table is immutable. A different logical resource mapping requires a different BindSet. Content writes do not change native binding shape and never invalidate preparation.
 
-- validate that all required slots are provided
-- validate runtime ownership
-- cache the `GPUBindGroup`
-- compare bound resource `allocationVersion` values before use
-- lazily rebuild bind groups when bound resource allocation versions change
-- expose readiness of bound resources to command validation
+`await runtime.createBindSet(...)` returns only an initially prepared object. Preparation privately creates allocation-scoped texture views and one bind group, then commits them atomically after native scope acknowledgement and lifecycle/snapshot rechecks. Identical texture views may be deduplicated only inside that one candidate. There is no runtime-wide or cross-BindSet native-view cache.
 
-The normalized binding table and its entries are immutable after `BindSet` construction. Commands therefore validate and encode against the same slot-to-resource mapping. The resources themselves retain their explicit content, allocation, and lifecycle transitions; allocation changes continue to invalidate the cached bind group through `allocationVersion`.
+## Preparation Lifecycle
 
-`BindSet` does not rebuild merely because a bound resource's `contentEpoch` changes. Content changes affect dependency validation and readback, not the physical binding target.
+A BindSet exposes:
 
-`TextureResource.resize()` makes this distinction observable. The old allocation remains current while the Promise-returning replacement transaction settles. On the next use after an awaited changed resize succeeds, `BindSet` compares the new `allocationVersion`, derives a view from the bind layout's explicit view dimension, validates that view against the current mip/layer extent and effective texture binding dimension, and creates exactly one replacement bind group. On devices with `core-features-and-limits`, the default layout dimension `2d` can continue to select one layer after array-layer growth. In compatibility mode, an omitted texture binding dimension is re-derived as `2d` for one layer or `2d-array` for multiple layers; a persistent default-`2d` bind set therefore fails preflight after `1 -> N` growth instead of reaching native validation. Declaring `textureBindingViewDimension: '2d-array'` with a matching layout preserves that contract across the same resize. This check is binding-time only; it does not reject an otherwise valid raw view or render attachment. Incompatible cube, array, mip, or layer selections likewise fail before native view or bind-group creation. Later uses of a valid allocation reuse the group. A content-only write does not rebuild it, and a normalized same-size resize changes no version and therefore rebuilds nothing.
+- `preparationState`: `preparing | prepared | stale | disposed`;
+- `prepareGeneration`;
+- `preparedSnapshotHash`;
+- current and last preparation/incident identifiers.
 
-A raw `GPUTextureView` is allocation-scoped. Scratch invalidates its own view cache when the texture allocation changes, but a raw view retained independently by application code remains stale and cannot be repaired through `BindSet`.
-
-`BindSet` is not a material parameter object. It supplies concrete resources for an explicit `BindLayout`; it does not own shader source, generated accessor modules, pipeline state, render style, object assignment, draw counts, or dispatch counts. A command is the place where a pipeline and bind sets meet for one executable action.
-
-## Shader Inspection And Cross-Check
-
-Shader reflection is not the source of truth and is not on the core runtime path. Explicit `BindLayout` stays authoritative. But reflection should be promoted from "scaffolding only" to a *guard* against the most common binding error: a `BindLayout` that disagrees with the shader on binding index, type, or visibility.
-
-Helper and guard directions:
+Allocation replacement inside an already-bound logical resource makes the snapshot stale. Submission never prepares, waits, retries, or repairs it:
 
 ```ts
-const report = scratch.inspectShader(shader).compareBindLayouts([terrainLayout])
+await colorTexture.resize(nextSize)
 
-const draft = scratch.inspectShader(shader).suggestBindLayout({ group: 0 })
+// The logical view and slot mapping are unchanged, but the native snapshot is stale.
+await colorSet.prepare()
 ```
 
-The cross-check is constrained so it never blocks legitimate work:
+A stale, preparing, failed, or disposed set fails structurally before encoder creation. Successful re-preparation increments generation exactly once. Failure leaves the set stale and discards all candidate native references; explicit retry is allowed.
 
-- dev-only - no hard dependency on a specific WGSL parser in the production path
-- default `warn`, not `throw` - a parser lagging the WGSL spec would otherwise emit false errors on legitimate-but-unusual layouts
-- per-entry suppressible - an intentional superset layout can silence a specific check
-- cross-check only - it compares explicit layout against the shader; it never generates the authoritative layout
+Concurrent calls for the same current snapshot share one in-flight Promise. A call that observes a different snapshot while preparation is pending fails with a structured conflict diagnostic; it is not queued or restarted in the background. Allocation drift, disposal, runtime shutdown, or device loss prevents commit.
 
-Reflection must not become the source of truth for production layout creation.
+## Dynamic Offsets
 
-Cross-check findings should use the shared diagnostic envelope from `09-diagnostics-validation`, with the `BindLayoutEntry` as `subject` and the reflected `ShaderBinding` plus `Program` as `related` context.
+Dynamic offsets belong to an immutable command invocation, not mutable BindSet state:
 
-## Explicit Is The Contract
+```ts
+const draw = runtime.createDrawCommand({
+    pipeline,
+    bindSets: [ {
+        set: terrainSet,
+        dynamicOffsets: {
+            nodes: 1024,
+        },
+    } ],
+    count: { vertexCount: 3 },
+    resources,
+    whenMissing: 'throw',
+})
+```
 
-The shader and the bind layout should both be intentionally authored. This keeps unusual WebGPU layouts possible and avoids binding the kernel to a specific WGSL parser or reflection implementation.
+Every dynamic entry must be named, including explicit zero. Missing, extra, fractional, negative, non-finite, or out-of-range values fail during command construction. Scratch normalizes names into native binding-index order once and stores an immutable offset sequence. Submission performs no name sorting or offset-sequence reconstruction.
+
+For a buffer binding:
+
+```text
+effectiveOffset = region.offset + dynamicOffset
+effectiveSize = region.size
+```
+
+Bounds and uniform/storage alignment are revalidated against the current allocation before encoder creation. Different commands may reuse one prepared BindSet with different offsets without changing its snapshot or generation.
+
+## Program Compatibility
+
+Validation remains layered:
+
+1. Pipeline creation compares `Program.layoutRequirements` with `BindLayout` ABI facts: group/binding, visibility, buffer type, dynamic-offset contract, `minBindingSize`, device features, and limits.
+2. Command preflight compares the bound `BufferRegion` with the Program requirement: runtime/lifecycle, current allocation, usage, range, alignment, canonical ABI compatibility, and exact canonical schema compatibility.
+3. Declared command resource access must cover every buffer or texture read/write implied by bindings, including storage-texture access.
+
+`abiHash` and `schemaHash` are bounded diagnostic identifiers, not collision-proof evidence. Compatibility also compares immutable canonical signatures and reports a bounded structural difference.
 
 ## Non-Goals
 
-- Do not store vertex or index input state in `BindSet`.
-- Do not store draw or dispatch counts in `BindSet`.
-- Do not store command readiness policy in `BindSet`.
-- Do not use `BindSet` as a material, style, or scene-object parameter bundle.
-- Do not emit bind validation failures as prose-only errors.
-- Do not use shader reflection as the primary runtime layout mechanism.
+- No mutable rebinding or `BindSet.set()`.
+- No hidden resource search, shader-driven auto-binding, or reverse resource-to-BindSet graph.
+- No submission-time native binding creation or automatic preparation.
+- No raw ordered dynamic-offset array overload.
+- No vertex/index state, counts, readiness policy, material, style, scene, or layer semantics in `BindSet`.
+- No prose-only binding validation errors.

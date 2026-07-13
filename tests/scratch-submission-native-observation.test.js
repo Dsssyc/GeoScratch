@@ -175,7 +175,7 @@ describe('scratch bounded submission native observation', () => {
         })).to.have.length(1)
     })
 
-    it('settles failures in fixed filter order and exposes queryable schema-v4 evidence', async () => {
+    it('settles failures in fixed filter order and exposes queryable schema-v5 evidence', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })

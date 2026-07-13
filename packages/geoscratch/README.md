@@ -92,7 +92,44 @@ const evidence = runtime.diagnostics.exportEvidence()
 
 `runtime.diagnostics` exposes current resource facts, bounded operation and incident history, and explicit temporary deep capture. Logical footprint evidence is not physical VRAM.
 
-+## Scratch Submission Outcomes
+## Scratch Resource Views And Bindings
+
+Buffers are raw containers. Every buffer range consumer receives an immutable
+`BufferRegion`; persistent texture consumers receive an immutable logical
+`TextureViewSpec`. Supporting native objects are Promise-only and a BindSet is
+returned only after its first preparation is acknowledged:
+
+```js
+const uniforms = await runtime.createBuffer({
+    size: 256,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+})
+const uniformRegion = uniforms.region()
+const colorView = color.view({ dimension: '2d' })
+const sampler = await runtime.createSampler()
+const layout = await runtime.createBindLayout({
+    group: 0,
+    entries: [
+        { binding: 0, name: 'uniforms', type: 'uniform', visibility: [ 'vertex' ] },
+        { binding: 1, name: 'color', type: 'texture', sampleType: 'float', viewDimension: '2d', visibility: [ 'fragment' ] },
+        { binding: 2, name: 'sampler', type: 'sampler', samplerType: 'filtering', visibility: [ 'fragment' ] },
+    ],
+})
+const set = await runtime.createBindSet(layout, {
+    uniforms: uniformRegion,
+    color: colorView,
+    sampler,
+})
+
+await color.resize({ width: 1920, height: 1080 })
+await set.prepare()
+```
+
+Content writes do not require preparation. Allocation replacement makes an
+affected BindSet `stale`; submission fails before encoder creation until the
+application explicitly awaits `prepare()`. Submission never rebuilds bindings.
+
+## Scratch Submission Outcomes
 
 `SubmissionBuilder.submit()` stays synchronous. Native validation remains
 asynchronous and is exposed explicitly:
@@ -151,7 +188,8 @@ materialization acknowledges an ephemeral staging allocation before copy or
 queue use:
 
 ```js
-const direct = runtime.createReadback({ source: resultBuffer })
+const resultRegion = resultBuffer.region()
+const direct = runtime.createReadback({ source: resultRegion })
 const directBytes = await direct.toBytes()
 ```
 
@@ -161,7 +199,7 @@ factory is Promise-only while `submit()` remains synchronous:
 ```js
 const ordered = await runtime.createReadbackCommand({
     source: {
-        resource: resultBuffer,
+        region: resultRegion,
         contentEpoch: resultBuffer.contentEpoch,
     },
     whenMissing: 'throw',
@@ -185,56 +223,61 @@ not the classifier.
 The example below renders a hard-coded triangle onto a canvas.
 
 ```js
-import * as scr from 'geoscratch'
+import { ScratchRuntime } from 'geoscratch'
 
-scr.StartDash().then(() => main(document.getElementById('GPUFrame')))
+const canvas = document.getElementById('GPUFrame')
 
-function main(canvas) {
-    const screen = scr.screen({ canvas })
+main().catch(console.error)
 
-    const shaderCode = `
-    const pos = array<vec2f, 3>(
-        vec2f(-0.5, -0.5),
-        vec2f(0.0, 0.5),
-        vec2f(0.5, -0.5),
-    );
+async function main() {
+    const runtime = await ScratchRuntime.create({ label: 'triangle runtime' })
+    const surface = runtime.createSurface(canvas, { format: 'preferred' })
+    const program = runtime.createProgram({
+        modules: [ `
+            @vertex
+            fn vsMain(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
+                let positions = array(
+                    vec2f(0.0, 0.58),
+                    vec2f(-0.58, -0.48),
+                    vec2f(0.58, -0.48)
+                );
+                return vec4f(positions[index], 0.0, 1.0);
+            }
 
-    @vertex
-    fn vMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
-        return vec4f(pos[vertexIndex], 0.0, 1.0);
-    }
-
-    @fragment
-    fn fMain() -> @location(0) vec4f {
-        return vec4f(128.0, 218.0, 197.0, 255.0) / 255.0;
-    }
-    `
-
-    const triangleBinding = scr.binding({
-        range: () => [ 3 ],
+            @fragment
+            fn fsMain() -> @location(0) vec4f {
+                return vec4f(0.12, 0.72, 0.58, 1.0);
+            }
+        ` ],
+        entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+    })
+    const pipeline = await runtime.createRenderPipeline({
+        program,
+        targets: [ { format: surface.format } ],
+    })
+    const pass = runtime.createRenderPass({
+        color: [ {
+            target: surface,
+            load: 'clear',
+            store: 'store',
+            clear: [ 0.03, 0.05, 0.08, 1 ],
+        } ],
+    })
+    const draw = runtime.createDrawCommand({
+        pipeline,
+        count: { vertexCount: 3 },
+        resources: { read: [], write: [] },
+        whenMissing: 'throw',
     })
 
-    const trianglePipeline = scr.renderPipeline({
-        shader: {
-            module: scr.shader({ codeFunc: () => shaderCode }),
-        },
-    })
-
-    const trianglePass = scr.renderPass({
-        colorAttachments: [ { colorResource: screen } ],
-    }).add(trianglePipeline, triangleBinding)
-
-    scr.director.addStage({
-        name: 'HelloTriangle',
-        items: [ trianglePass ],
-    })
-
-    function animate() {
-        scr.director.tick()
-        requestAnimationFrame(animate)
+    function render() {
+        runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [ draw ])
+            .submit()
+        requestAnimationFrame(render)
     }
 
-    animate()
+    render()
 }
 ```
 
@@ -244,12 +287,17 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 
 | Example | Path |
 | --- | --- |
-| Hello Triangle | `examples/scratch_helloTriangle/` |
-| Uniform Triangle | `examples/scratch_uniformTriangle/` |
-| Compute Readback | `examples/scratch_computeReadback/` |
-| Hello Vertex Buffer | `examples/scratch_helloVertexBuffer/` |
-| Texture Sampling | `examples/scratch_textureSampling/` |
-| Render To Texture | `examples/scratch_renderToTexture/` |
+| Hello Triangle | `examples/helloTriangle/` |
+| Uniform Triangle | `examples/uniformTriangle/` |
+| Compute Readback | `examples/computeReadback/` |
+| Submission Order | `examples/submissionOrder/` |
+| External Image Upload | `examples/externalImageUpload/` |
+| Texture Resize | `examples/textureResize/` |
+| Hello Vertex Buffer | `examples/helloVertexBuffer/` |
+| Texture Sampling | `examples/textureSampling/` |
+| Render To Texture | `examples/renderToTexture/` |
+| Indirect Execution | `examples/indirectExecution/` |
+| Readiness Policies | `examples/readinessPolicies/` |
 | DEM Layer (legacy) | `examples/m_demLayer/` |
 | Flow Layer (legacy) | `examples/m_flowLayer/` |
 | Hello GAW (legacy) | `examples/x_helloGAW/` |

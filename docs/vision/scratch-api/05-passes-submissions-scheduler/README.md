@@ -18,18 +18,18 @@ The first scheduler model is explicit submission order plus dependency validatio
 Render pass spec example:
 
 ```ts
-const scenePass = scratch.pass.render({
+const scenePass = runtime.createRenderPass({
     label: 'scene',
     color: [
         {
-            target: sceneColor,
+            target: sceneColor.view(),
             load: 'clear',
             store: 'store',
             clear: [0, 0, 0, 1],
         },
     ],
     depth: {
-        target: depthTexture,
+        target: depthTexture.view({ aspect: 'depth-only' }),
         depthLoad: 'clear',
         depthStore: 'store',
         depthClear: 1,
@@ -46,7 +46,7 @@ const scenePass = scratch.pass.render({
 Compute pass spec example:
 
 ```ts
-const simulationPass = scratch.pass.compute({
+const simulationPass = runtime.createComputePass({
     label: 'simulation',
     timestampWrites: {
         querySet: simulationTiming,
@@ -65,7 +65,7 @@ Pass specs do not store commands. This prevents stale command lists from survivi
 `SubmissionBuilder` records one explicit pass-command sequence. It is not a display frame and does not imply presentation:
 
 ```ts
-const submitted = scratch.submission({ validation: 'throw' })
+const submitted = runtime.createSubmission({ validation: 'throw' })
     .compute(simulationPass, [
         simulateParticles,
     ])
@@ -168,7 +168,7 @@ unique command. `off` opens no scope and publishes honest unobserved
 provenance. Effect-free work uses no owner or native scope.
 
 `SubmittedWork.nativeOutcome` always resolves to one deeply frozen,
-JSON-serializable version-4 result. Its status is exactly:
+JSON-serializable version-5 result. Its status is exactly:
 
 ```ts
 type ScratchSubmissionNativeOutcomeStatus =
@@ -228,7 +228,7 @@ replayed action prefix. Failed and unreplayed actions publish no write effect.
 
 ### Resize Between Construction And Submission
 
-`TextureResource.resize()` does not add a submission step. It is a Promise-returning resource allocation transaction, not queue work. While its candidate scopes settle, the old allocation remains current and submission encoding performs no hidden wait. An application that requires the replacement for a submission explicitly awaits resize first. A `SubmissionBuilder` stores logical pass, command, and resource references; preflight and encoding resolve and validate whichever allocation is current at submission time. Texture-backed color and depth/stencil attachments explicitly select one `2d` mip-level array layer; stale mip/layer view descriptors or mismatched current render extents/sample counts fail before command encoder creation or ledger mutation. Attachments remain independent of the compatibility-mode texture-binding dimension.
+`TextureResource.resize()` does not add a submission step. It is a Promise-returning resource allocation transaction, not queue work. While its candidate scopes settle, the old allocation remains current and submission encoding performs no hidden wait. An application that requires the replacement for a submission explicitly awaits resize first. A `SubmissionBuilder` stores logical pass, command, resource, and `TextureViewSpec` references; preflight and encoding validate whichever allocation is current at submission time. Texture-backed color and depth/stencil attachments explicitly select one `2d` mip-level array layer; stale mip/layer view descriptors or mismatched current render extents/sample counts fail before command encoder creation or ledger mutation. Native attachment views are submission-scoped, observed through `SubmittedWork`, and never cached or prepared by `PassSpec`. Attachments remain independent of the compatibility-mode texture-binding dimension.
 
 Resize itself records no resource access, producer epoch, command buffer, queue action, or completion registration. The replacement starts empty even though its `contentEpoch` number is preserved. A later write may make it ready for a later read in the same submission, and both ledgers then report the new `allocationVersion` and the next `contentEpoch`.
 
@@ -368,4 +368,4 @@ That layer can build on command read/write declarations without changing the cor
 - Do not encode geospatial layer order in the scratch scheduler.
 - Do not expose submission validation as prose-only errors.
 - Do not use `Frame` as the scratch core submission type; frame cadence belongs to geo, app, or presentation layers.
-- Keep mapped leases, texture readback, persistent supporting-object acknowledgement, tracked dynamic values, render graph ownership, and raw-device tracking outside this submission-native-outcome slice.
+- Keep mapped leases, texture readback, external-texture frame lifetime, tracked dynamic values, render graph ownership, and raw-device tracking outside this submission-native-outcome slice.

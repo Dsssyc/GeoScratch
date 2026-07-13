@@ -21,7 +21,6 @@ const pipelineFamilies = [
             'tests/types/public-api.ts',
         ]),
         legacyFiles: new Set([
-            'examples/1_helloTriangle/main.js',
             'examples/m_flowLayer/steadyFlowLayer.js',
             'examples/x_helloGAW/main.js',
             'tests/types/public-api.ts',

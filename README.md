@@ -93,7 +93,44 @@ const evidence = runtime.diagnostics.exportEvidence()
 
 `runtime.diagnostics` exposes current resource facts, bounded operation and incident history, and explicit temporary deep capture. Logical footprint evidence is not physical VRAM.
 
-+## Scratch Submission Outcomes
+## Scratch Resource Views And Bindings
+
+Buffers are raw containers. Every buffer range consumer receives an immutable
+`BufferRegion`; persistent texture consumers receive an immutable logical
+`TextureViewSpec`. Supporting native objects are Promise-only and a BindSet is
+returned only after its first preparation is acknowledged:
+
+```js
+const uniforms = await runtime.createBuffer({
+    size: 256,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+})
+const uniformRegion = uniforms.region()
+const colorView = color.view({ dimension: '2d' })
+const sampler = await runtime.createSampler()
+const layout = await runtime.createBindLayout({
+    group: 0,
+    entries: [
+        { binding: 0, name: 'uniforms', type: 'uniform', visibility: [ 'vertex' ] },
+        { binding: 1, name: 'color', type: 'texture', sampleType: 'float', viewDimension: '2d', visibility: [ 'fragment' ] },
+        { binding: 2, name: 'sampler', type: 'sampler', samplerType: 'filtering', visibility: [ 'fragment' ] },
+    ],
+})
+const set = await runtime.createBindSet(layout, {
+    uniforms: uniformRegion,
+    color: colorView,
+    sampler,
+})
+
+await color.resize({ width: 1920, height: 1080 })
+await set.prepare()
+```
+
+Content writes do not require preparation. Allocation replacement makes an
+affected BindSet `stale`; submission fails before encoder creation until the
+application explicitly awaits `prepare()`. Submission never rebuilds bindings.
+
+## Scratch Submission Outcomes
 
 `SubmissionBuilder.submit()` stays synchronous. Native validation remains
 asynchronous and is exposed explicitly:
@@ -152,7 +189,8 @@ materialization acknowledges an ephemeral staging allocation before copy or
 queue use:
 
 ```js
-const direct = runtime.createReadback({ source: resultBuffer })
+const resultRegion = resultBuffer.region()
+const direct = runtime.createReadback({ source: resultRegion })
 const directBytes = await direct.toBytes()
 ```
 
@@ -162,7 +200,7 @@ factory is Promise-only while `submit()` remains synchronous:
 ```js
 const ordered = await runtime.createReadbackCommand({
     source: {
-        resource: resultBuffer,
+        region: resultRegion,
         contentEpoch: resultBuffer.contentEpoch,
     },
     whenMissing: 'throw',
@@ -250,15 +288,17 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 
 | Example | Path |
 | --- | --- |
-| Hello Triangle | `examples/scratch_helloTriangle/` |
-| Uniform Triangle | `examples/scratch_uniformTriangle/` |
-| Compute Readback | `examples/scratch_computeReadback/` |
+| Hello Triangle | `examples/helloTriangle/` |
+| Uniform Triangle | `examples/uniformTriangle/` |
+| Compute Readback | `examples/computeReadback/` |
 | Submission Order | `examples/submissionOrder/` |
 | External Image Upload | `examples/externalImageUpload/` |
 | Texture Resize | `examples/textureResize/` |
-| Hello Vertex Buffer | `examples/scratch_helloVertexBuffer/` |
-| Texture Sampling | `examples/scratch_textureSampling/` |
-| Render To Texture | `examples/scratch_renderToTexture/` |
+| Hello Vertex Buffer | `examples/helloVertexBuffer/` |
+| Texture Sampling | `examples/textureSampling/` |
+| Render To Texture | `examples/renderToTexture/` |
+| Indirect Execution | `examples/indirectExecution/` |
+| Readiness Policies | `examples/readinessPolicies/` |
 | DEM Layer (legacy) | `examples/m_demLayer/` |
 | Flow Layer (legacy) | `examples/m_flowLayer/` |
 | Hello GAW (legacy) | `examples/x_helloGAW/` |

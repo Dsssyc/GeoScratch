@@ -110,9 +110,8 @@ async function main() {
     const copyToReadback = runtime.createCopyCommand({
         label: 'copy uploaded texture into padded readback rows',
         source: { resource: uploadedTexture, contentEpoch: 1 },
-        target: readbackBuffer,
+        target: readbackBuffer.region(),
         targetLayout: {
-            offset: 0,
             bytesPerRow: 256,
             rowsPerImage: copySize.height,
         },
@@ -121,9 +120,7 @@ async function main() {
     })
     const readback = await runtime.createReadbackCommand({
         label: 'read exact external upload bytes',
-        source: { resource: readbackBuffer, contentEpoch: 1 },
-        sourceOffset: 0,
-        byteLength: readbackByteLength,
+        source: { region: readbackBuffer.region(), contentEpoch: 1 },
         whenMissing: 'throw',
     })
     const sampler = await runtime.createSampler({
@@ -152,8 +149,8 @@ async function main() {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, {
-        uploadedTexture,
+    const bindSet = await runtime.createBindSet(bindLayout, {
+        uploadedTexture: uploadedTexture.view(),
         uploadedSampler: sampler,
     }, {
         label: 'external image sample set',

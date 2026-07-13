@@ -10,9 +10,9 @@ The new `scratch` API should maximize locally-verifiable correctness while prese
 `scratch` should make repeated low-level work easier:
 
 - runtime and device lifecycle
-- resource identity, acknowledged allocation, allocation replacement, readiness, content epochs, and explicit transfers
+- truthful resource identity, acknowledged allocation, logical BufferRegion/TextureViewSpec selection, replacement, readiness, content epochs, and explicit transfers
 - layout artifacts, layout codecs, and shader accessor generation
-- bind layout and bind group construction
+- acknowledged bind-layout construction and explicit BindSet preparation
 - shader program composition and pipeline cache compatibility
 - command readiness and resource dependency validation
 - machine-readable diagnostics and validation reports
@@ -89,21 +89,22 @@ Dynamic behavior should live in resource state, command state, and submission sc
 The new API should make these boundaries hard to miss:
 
 - `ScratchRuntime` owns GPU device state and caches.
-- Covered native allocation is a Promise-returning GPU operation. A logical resource is installed only after its validation and out-of-memory scopes settle successfully.
+- Covered native allocation is a Promise-returning GPU operation. A logical resource is installed only after validation, internal, and out-of-memory scopes plus lifecycle rechecks settle successfully.
 - `Surface` owns presentation target configuration, not GPU execution.
-- `Resource` is a logical handle with physical GPU allocation versions and content epochs.
+- `Resource` owns logical identity, allocation lifecycle, and disposal. Only BufferResource and TextureResource own scalar content/readiness facts; SamplerResource owns none, and QuerySetResource owns indexed slot facts.
+- `BufferRegion` and `TextureViewSpec` are synchronous immutable selection/interpretation values, not resources or native allocations.
 - `QuerySetResource` is an indexed query-slot resource, not an unordered collection or shader binding.
 - Transfer operations move data across CPU/GPU or GPU/GPU boundaries and advance content epochs explicitly.
 - `LayoutCodec` is a preparation artifact that connects CPU packing, WGSL accessors, readback views, and layout diagnostics.
-- `BindLayout` describes shader binding shape.
-- `BindSet` binds concrete resources to a layout.
+- `BindLayout` is a Promise-only acknowledged native binding ABI.
+- `BindSet` freezes explicit BufferRegion/TextureViewSpec/SamplerResource bindings and is returned only after its initial native snapshot is prepared. Allocation replacement requires explicit `prepare()`; submission never repairs it.
 - `Program` describes shader source, generated modules, entry points, and required layouts without owning concrete resources.
 - `Pipeline` describes stable WebGPU executable state for a `Program` entry point. Public render and compute factories are Promise-only transactions and expose a wrapper only after native async creation, compilation evidence, supporting-object scopes, and lifecycle checks settle successfully.
 - `Command` describes one executable GPU action.
 - `ScratchDiagnostic` is the unified machine-readable validation contract; prose messages are not the stable API.
 - `runtime.diagnostics` separates always-current facts, bounded recent operations, immutable incidents, and explicit temporary deep capture.
-- GPU operation evidence uses schema-v2 resource/pipeline target unions. Pipeline facts never masquerade as allocation versions, content epochs, footprints, or pressure evidence.
+- GPU operation evidence uses schema v5 discriminated Resource, Pipeline, BindLayout, BindSet, Command, Readback, and Submission targets. Facts never borrow fields that do not belong to their object kind.
 - `PassSpec` describes stable pass shape.
 - `SubmissionBuilder` records commands into pass specs in explicit order.
-- `SubmittedWork` is the inspectable handle returned by `.submit()`, with a `done` promise for GPU completion.
+- `SubmittedWork` is the inspectable handle returned by `.submit()`. Its native outcome and `done` boundary report observed submission, queue-completion, and lifecycle facts without waiting for readback mapping or host copy.
 - `Frame` is not a scratch core type; frame cadence belongs to `geo`, applications, or presentation loops.

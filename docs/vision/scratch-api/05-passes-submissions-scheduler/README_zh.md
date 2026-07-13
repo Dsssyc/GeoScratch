@@ -18,18 +18,18 @@
 Render pass spec 示例:
 
 ```ts
-const scenePass = scratch.pass.render({
+const scenePass = runtime.createRenderPass({
     label: 'scene',
     color: [
         {
-            target: sceneColor,
+            target: sceneColor.view(),
             load: 'clear',
             store: 'store',
             clear: [0, 0, 0, 1],
         },
     ],
     depth: {
-        target: depthTexture,
+        target: depthTexture.view({ aspect: 'depth-only' }),
         depthLoad: 'clear',
         depthStore: 'store',
         depthClear: 1,
@@ -46,7 +46,7 @@ const scenePass = scratch.pass.render({
 Compute pass spec 示例:
 
 ```ts
-const simulationPass = scratch.pass.compute({
+const simulationPass = runtime.createComputePass({
     label: 'simulation',
     timestampWrites: {
         querySet: simulationTiming,
@@ -65,7 +65,7 @@ Pass spec 不存储 command。这能避免上一轮 submission 残留 command li
 `SubmissionBuilder` 记录一条显式 pass-command 序列。它不是 display frame，也不暗示 presentation:
 
 ```ts
-const submitted = scratch.submission({ validation: 'throw' })
+const submitted = runtime.createSubmission({ validation: 'throw' })
     .compute(simulationPass, [
         simulateParticles,
     ])
@@ -165,7 +165,7 @@ command。`off` 不打开 scope，并发布诚实的 unobserved provenance。
 Effect-free work 不使用 owner 或 native scope。
 
 `SubmittedWork.nativeOutcome` 始终 resolve 为 deeply frozen、
-JSON-serializable 的 version-4 result。status 只能是:
+JSON-serializable 的 version-5 result。status 只能是:
 
 ```ts
 type ScratchSubmissionNativeOutcomeStatus =
@@ -222,7 +222,7 @@ action 不发布 write effect。
 
 ### 构造与提交之间的 Resize
 
-`TextureResource.resize()` 不会增加 submission step。它是返回 Promise 的 resource allocation transaction，不是 queue work。candidate scope settle 期间旧 allocation 保持 current，submission encoding 不会隐藏等待；若某个 submission 必须使用 replacement，应用需要先显式 await resize。`SubmissionBuilder` 保存逻辑 pass、command 与 resource reference；preflight 与 encoding 会解析并校验 submission 时实际 current 的 allocation。Texture-backed color 与 depth/stencil attachment 会显式选择一个 `2d` mip-level array layer；过期的 mip/layer view descriptor 或不匹配的 current render extents/sample counts，都会在 command encoder creation 或 ledger mutation 前失败。Attachment 不受 compatibility-mode texture-binding dimension 约束。
+`TextureResource.resize()` 不会增加 submission step。它是返回 Promise 的 resource allocation transaction，不是 queue work。candidate scope settle 期间旧 allocation 保持 current，submission encoding 不会隐藏等待；若某个 submission 必须使用 replacement，应用需要先显式 await resize。`SubmissionBuilder` 保存逻辑 pass、command、resource 与 `TextureViewSpec` reference；preflight 与 encoding 会校验 submission 时实际 current 的 allocation。Texture-backed color 与 depth/stencil attachment 会显式选择一个 `2d` mip-level array layer；过期的 mip/layer view descriptor 或不匹配的 current render extents/sample counts，都会在 command encoder creation 或 ledger mutation 前失败。Native attachment view 是 submission-scoped，通过 `SubmittedWork` 观察，且绝不会被 `PassSpec` 缓存或 prepare。Attachment 不受 compatibility-mode texture-binding dimension 约束。
 
 Resize 自身不记录 resource access、producer epoch、command buffer、queue action 或 completion registration。replacement 虽然保留 `contentEpoch` 数值，但初始为 empty。后续 write 可以在同一 submission 中让它 ready，供更后的 read 使用；两份 ledger 此时都记录新的 `allocationVersion` 与下一个 `contentEpoch`。
 
@@ -362,4 +362,4 @@ scratch.schedule(commands, {
 - 不在 scratch scheduler 中编码 geospatial layer order。
 - 不把 submission validation 暴露成 prose-only errors。
 - 不把 `Frame` 作为 scratch core submission type; frame cadence 属于 geo、app 或 presentation layers。
-- mapped leases、texture readback、persistent supporting-object acknowledgement、tracked dynamic values、render graph ownership 与 raw-device tracking 均不属于本 submission-native-outcome slice。
+- mapped leases、texture readback、external-texture frame lifetime、tracked dynamic values、render graph ownership 与 raw-device tracking 均不属于本 submission-native-outcome slice。

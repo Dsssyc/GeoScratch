@@ -46,7 +46,8 @@ async function main() {
             },
         ],
     })
-    const bindSet = runtime.createBindSet(bindLayout, { value }, {
+    const valueRegion = value.region()
+    const bindSet = await runtime.createBindSet(bindLayout, { value: valueRegion }, {
         label: 'submission order bind set',
     })
     const program = runtime.createProgram({
@@ -64,7 +65,7 @@ async function main() {
     })
     const uploadZero = runtime.createUploadCommand({
         label: 'upload zero',
-        target: value,
+        target: valueRegion,
         data: new Uint32Array([ 0 ]),
     })
     const incrementZero = runtime.createDispatchCommand({
@@ -80,7 +81,7 @@ async function main() {
     })
     const uploadTen = runtime.createUploadCommand({
         label: 'upload ten',
-        target: value,
+        target: valueRegion,
         data: new Uint32Array([ 10 ]),
     })
     const incrementTen = runtime.createDispatchCommand({
@@ -96,7 +97,7 @@ async function main() {
     })
     const readback = await runtime.createReadbackCommand({
         label: 'read ordered result',
-        source: { resource: value, contentEpoch: 4 },
+        source: { region: valueRegion, contentEpoch: 4 },
         whenMissing: 'throw',
     })
 

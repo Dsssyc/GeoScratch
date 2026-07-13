@@ -45,13 +45,13 @@ describe('scratch readback staging and mapping documentation', () => {
         for (const language of [ 'README.md', 'README_zh.md' ]) {
             const transfers = read('docs', 'vision', 'scratch-api', '07-transfers-epochs', language)
             const diagnostics = read('docs', 'vision', 'scratch-api', '09-diagnostics-validation', language)
-            expect(transfers).to.include('const readParticles = await runtime.readbackCommand({')
+            expect(transfers).to.include('const readParticles = await runtime.createReadbackCommand({')
             expect(transfers).to.include("retain: 'consume-on-read'")
             expect(transfers).not.to.include('staging-budget policy remain future work')
             expect(transfers).to.include('maxPendingOperations')
             expect(transfers).to.include('maxStagingBytes')
             expect(transfers).to.match(/historical\s+result lookup/)
-            expect(diagnostics).to.include('version 4')
+            expect(diagnostics).to.include('version 5')
             expect(diagnostics).to.include("| { kind: 'command'; commandId: string; commandKind: 'readback' }")
             expect(diagnostics).to.include("| 'lifecycle-recheck'")
         }
@@ -112,7 +112,7 @@ describe('scratch readback staging and mapping documentation', () => {
         expect(benchmark).to.include("profile('direct-mapping-deep-capture'")
         expect(benchmark).to.include("profile('submission-no-readback-history-disabled'")
         for (const example of [
-            'scratch_computeReadback',
+            'computeReadback',
             'externalImageUpload',
             'submissionOrder',
             'textureResize',

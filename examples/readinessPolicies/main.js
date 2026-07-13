@@ -145,8 +145,9 @@ async function main() {
             },
         ],
     })
-    const sampleSet = runtime.createBindSet(sampleLayout, {
-        preservedTexture: offscreenTexture,
+    const offscreenView = offscreenTexture.view()
+    const sampleSet = await runtime.createBindSet(sampleLayout, {
+        preservedTexture: offscreenView,
         preservedSampler: sampler,
     })
 
@@ -216,7 +217,7 @@ async function main() {
     const seedPass = runtime.createRenderPass({
         label: 'seed offscreen pass',
         color: [ {
-            target: offscreenTexture,
+            target: offscreenView,
             load: 'clear',
             store: 'store',
             clear: [ 0.04, 0.06, 0.08, 1 ],
@@ -225,7 +226,7 @@ async function main() {
     const skippedPass = runtime.createRenderPass({
         label: 'skipped destructive pass',
         color: [ {
-            target: offscreenTexture,
+            target: offscreenView,
             load: 'clear',
             store: 'store',
             clear: [ 0.90, 0.08, 0.10, 1 ],

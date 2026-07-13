@@ -106,17 +106,18 @@ This is broader than any one rendering technique. For example, alternating betwe
 
 ### Binding Model
 
-Bindings should describe resource binding instances and layout compatibility.
+Bindings describe an explicit native ABI and one immutable resource-view mapping. `BindLayout` owns binding shape; `BindSet` accepts only `BufferRegion`, `TextureViewSpec`, and `SamplerResource`, then owns an acknowledged allocation snapshot and preparation generation.
 
-They should not be the primary home for draw or dispatch semantics. In the current code, `Binding` carries resource binding, layout generation, bind group creation, vertex layout generation, invalidation callbacks, executable state, and draw/dispatch range. That made early examples concise, but it blurs kernel responsibilities.
+Binding responsibilities are:
 
-Long term, binding responsibilities should trend toward:
+- declared resource slots and complete persistent WebGPU binding shape
+- native ABI validation independent from Program schema requirements
+- immutable BufferRegion/TextureViewSpec selection
+- Promise-only initial native preparation
+- explicit stale detection and re-preparation after allocation replacement
+- resource readiness and command access cross-checks
 
-- declared resource slots
-- bind group layout compatibility
-- bind group instance creation and invalidation
-- resource readiness checks
-- minimal rebinding when resources change
+Submission never prepares or repairs a BindSet. Content changes and dynamic offsets do not trigger preparation; dynamic offsets belong to immutable command invocations.
 
 Draw count, dispatch count, index usage, and execution policy belong closer to command objects.
 
@@ -124,10 +125,10 @@ Draw count, dispatch count, index usage, and execution policy belong closer to c
 
 Shader authoring should separate layout/code generation from executable runtime state.
 
-Future designs should make room for:
+The current model provides:
 
 - `LayoutSpec` as logical data shape
-- `LayoutArtifact` as resolved offsets, stride, padding, alignment, usage lowering, and structural hash
+- `LayoutArtifact` as resolved offsets, stride, padding, alignment, usage lowering, separate `abiHash` / `schemaHash` identifiers, and canonical compatibility signatures
 - `LayoutCodec` as CPU writer, upload byte view, readback view, and WGSL accessor generation
 - `Program` as user WGSL plus generated modules, entry points, bind-layout contract, required features, and diagnostics
 - `Pipeline` as stable WebGPU executable state for one program entry point
@@ -165,7 +166,7 @@ It should be responsible for:
 - pass execution ordering
 - command submission
 - skipping empty work
-- invalidating dependent bindings or attachments when resources are replaced
+- detecting stale BindSet snapshots after resource replacement while lowering persistent TextureViewSpec attachments per submission
 
 The scheduler may eventually be implemented as a render graph or frame graph, but the important abstraction is dependency-aware submission execution, not a particular graph API shape.
 
@@ -257,5 +258,5 @@ This preserves GeoScratch's design philosophy:
 
 - How strict should buffer layout typing be across CPU views, vertex attributes, WGSL storage, and readback?
 - Should future graph orchestration remain a helper over explicit `Submission` order, or become a separate upper-layer API?
-- Which deferred native operation family should next reuse allocation operation provenance: internal staging, pipeline/binding creation, or submission-level scopes?
+- Which deferred native operation family should next reuse the established allocation, pipeline, binding-preparation, readback, and submission provenance protocols?
 - What compatibility guarantees should the raw primitive API keep once a recommended command/scheduler API exists?

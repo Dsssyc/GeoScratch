@@ -16,8 +16,8 @@ const examples = [
     { name: 'externalImageUpload', selector: 'body', status: 'passed' },
     { name: 'readinessPolicies', selector: '#GPUFrame', status: 'ready' },
     { name: 'indirectExecution', selector: '#GPUFrame', status: 'ready' },
-    { name: 'scratch_textureSampling', selector: '#GPUFrame', status: 'ready' },
-    { name: 'scratch_renderToTexture', selector: '#GPUFrame', status: 'ready' },
+    { name: 'textureSampling', selector: '#GPUFrame', status: 'ready' },
+    { name: 'renderToTexture', selector: '#GPUFrame', status: 'ready' },
 ]
 
 await mkdir(outputDirectory, { recursive: true })

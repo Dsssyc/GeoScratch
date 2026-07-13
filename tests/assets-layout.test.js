@@ -13,7 +13,7 @@ describe('asset layout', () => {
         expect(exists('docs', 'assets', 'icons', 'icon_light.png')).to.equal(true)
         expect(exists('docs', 'assets', 'icons', 'icon_dark.png')).to.equal(true)
         expect(read('examples', 'index.html')).to.include('../docs/assets/icons/icon_light.png')
-        expect(read('examples', '1_helloTriangle', 'index.html')).to.include('../../docs/assets/icons/icon_light.png')
+        expect(read('examples', 'helloTriangle', 'index.html')).to.include('../../docs/assets/icons/icon_light.png')
     })
 
     it('keeps ordinary example assets colocated with their examples', () => {

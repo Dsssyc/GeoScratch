@@ -510,12 +510,39 @@ suggestions: [
 ## GPU Operation, Pipeline, And Readback Evidence
 
 GPU operation, incident, snapshot, capture, and exported-evidence schemas use
-version 4. Versions 2 and 3 are not emitted or converted during `0.x.x`. Operations and
+version 5. Versions 2 through 4 are not emitted or converted during `0.x.x`. Operations and
 pending facts select one explicit macro target:
 
 ```ts
+type ScratchGpuResourceOperationTarget =
+    | {
+        kind: 'resource'
+        resourceKind: 'BufferResource' | 'TextureResource'
+        resourceId: string
+        allocationVersion: number
+        contentEpoch: number
+        logicalFootprintBytes: number
+    }
+    | {
+        kind: 'resource'
+        resourceKind: 'SamplerResource'
+        resourceId: string
+        allocationVersion: number
+    }
+    | {
+        kind: 'resource'
+        resourceKind: 'QuerySetResource'
+        resourceId: string
+        allocationVersion: number
+        queryType: 'timestamp' | 'occlusion'
+        count: number
+        slots: readonly { index: number; state: string; contentEpoch: number }[]
+    }
+
 type ScratchGpuOperationTarget =
-    | { kind: 'resource'; resourceId: string; resourceKind: string; allocationVersion: number; contentEpoch: number; logicalFootprintBytes: number }
+    | ScratchGpuResourceOperationTarget
+    | { kind: 'bind-layout'; bindLayoutId: string; group: number; entries: readonly unknown[]; acknowledgementState: 'pending' }
+    | { kind: 'bind-set'; bindSetId: string; bindLayoutId: string; preparationState: string; generation: number; snapshotHash: string; preparationStage: string }
     | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programSourceHash: string }
     | { kind: 'command'; commandId: string; commandKind: 'readback' }
     | {
@@ -533,14 +560,32 @@ type ScratchGpuOperationTarget =
     | { kind: 'submission'; submissionId: string }
 ```
 
-Queries select `targetKind`, `resourceId`, `pipelineId`, `commandId`, or
-`readbackId`, or `submissionId` rather than guessing from optional fields. Resource allocation
-incidents retain ADR-032 pressure and attribution semantics. Pipeline incidents
-contain compilation and creation evidence and never receive fabricated
-allocation pressure. Readback targets never masquerade as persistent resources.
+Schema v5 adds `sampler-allocation`, `query-set-allocation`,
+`bind-layout-allocation`, and `bind-set-preparation`. Sampler targets never gain
+content/readiness/footprint fields. QuerySet targets report bounded indexed slot
+facts and no scalar epoch. BindLayout reports ABI shape and acknowledgement;
+BindSet reports preparation state, generation, snapshot, and stage without
+pretending to be a Resource. BufferRegion and TextureViewSpec are subjects or
+related evidence and never double-count resource pressure.
+
+Queries select `targetKind` plus the identifier appropriate to that discriminator
+rather than guessing from optional fields. Resource allocation incidents retain
+ADR-032 pressure and attribution semantics. Pipeline and supporting-object
+incidents contain their actual creation/preparation evidence and never receive
+fabricated allocation pressure. Readback targets never masquerade as persistent
+resources.
+
+BindSet preparation evidence distinguishes descriptor validation, native issue,
+synchronous native throw, per-view acknowledgement, bind-group acknowledgement,
+lifecycle recheck, snapshot recheck, commit, cancellation, and explicit retry.
+Successful steady-state BindSet use creates no preparation operation and does
+not copy a complete binding snapshot into each submission record. Supporting
+objects and native views receive no invented byte footprint; an OOM incident
+may include bounded current Buffer/Texture pressure context without claiming
+that the candidate alone caused aggregate exhaustion.
 
 Submission issue provenance uses a `submission-native-observation` operation
-and `submission-failure` incidents. Its version 4 outcome records one of the
+and `submission-failure` incidents. Its version 5 outcome records one of the
 summary, detailed, or off modes; one stable status; bounded discriminated
 locations; fixed-order native outcome facts; and explicit omission counts.
 Native stages distinguish encoder creation, pass begin/end, command encoding,

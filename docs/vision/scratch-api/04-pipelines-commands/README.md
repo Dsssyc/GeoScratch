@@ -63,9 +63,9 @@ Target command families:
 
 `TextureResource.resize()` is a Promise-returning resource-lifecycle operation, not a `Command`, upload, copy, or submission step. It creates no encoder, queue action, resource-access entry, producer epoch, or content write. While native scopes settle, the old allocation remains current; acknowledged changed resize advances `allocationVersion`, preserves `contentEpoch`, and marks the replacement empty.
 
-Pass specs and commands retain logical resources rather than one physical texture. At submit or encode time, render attachments, texture uploads, external-image uploads, all texture copy directions, and texture bindings resolve the current physical texture or a current view. Commands created before resize therefore remain reusable when their immutable descriptor still fits.
+Pass specs retain `TextureViewSpec` values rather than physical views. Render attachments lower them against the current allocation inside each submission. Texture upload, external-image upload, and every texture copy direction retain the logical TextureResource and resolve its current physical texture. Persistent texture bindings are different: BindSet preparation owns their allocation-scoped views, so replacement makes the set stale and the application must explicitly prepare it before a pre-existing command can be reused.
 
-That reuse does not bypass validation. Upload and copy commands revalidate mip, origin, extent, layer, and sample constraints against the current allocation before encoder or queue effects. Texture bindings revalidate the bind-layout view dimension against both the current layer range and compatibility-mode effective texture binding dimension. Render attachments revalidate a single 2D mip/layer view before command encoder creation but do not apply the texture-binding-only dimension constraint. A fixed required `contentEpoch` remains exact: preserving the numeric epoch across replacement does not make the empty new allocation readable.
+That reuse does not bypass validation. Upload and copy commands revalidate mip, origin, extent, layer, and sample constraints against the current allocation before encoder or queue effects. BindSet preparation revalidates each TextureViewSpec against its BindLayout and current allocation; command preflight requires that prepared snapshot to remain current. Render attachments revalidate a single 2D mip/layer view before command encoder creation but do not apply texture-binding-only constraints. A fixed required `contentEpoch` remains exact: preserving the numeric epoch across replacement does not make the empty new allocation readable.
 
 ### ExternalImageUploadCommand
 
@@ -110,11 +110,12 @@ encoding and queue actions; it does not claim one failing command. A finite
 bundle around a standalone or pass-command location and report
 `exact-operation` attribution to that location.
 
-Bind sets still create or rebuild native bind groups lazily when a command
-resolves current allocation versions. That lazy bind-group creation can be
-enclosed by command observation, but it is not independently acknowledged by
-this contract. It has no separate persistent allocation transaction, Promise,
-or supporting-object success claim.
+Every referenced BindSet must already be `prepared`. Command preflight checks
+its immutable slot table, prepared allocation snapshot, Program requirements,
+named dynamic offsets, and declared resource access before encoder creation.
+Submission never creates a texture view or bind group, calls `prepare()`, waits,
+retries, or repairs stale state. BindSet preparation is an independently
+acknowledged `bind-set-preparation` operation.
 
 Draw and dispatch execution contracts are normalized and locked at construction. Their pipeline, bind/index/vertex state, count, dynamic offsets, resource declarations, readiness policy, and fallback reference cannot drift between validation and encoding; referenced bind sets expose the same immutable normalized binding table. `dispose()` remains the explicit mutable lifecycle transition, exposed through a read-only `isDisposed` state rather than a writable flag.
 
@@ -130,7 +131,7 @@ The implemented native count contract supports static vertex values, static inde
 type DrawCount =
     | { vertexCount: number, instanceCount?: number, firstVertex?: number, firstInstance?: number }
     | { indexCount: number, instanceCount?: number, firstIndex?: number, baseVertex?: number, firstInstance?: number }
-    | { indirect: BufferResource, offset?: number }
+    | { indirect: BufferRegion }
 ```
 
 An indexed static count requires `indexBuffer`; a static vertex count forbids it. Direct, indexed, and indirect count fields are mutually exclusive in the descriptor and at runtime. An indirect count selects `drawIndirect` without `indexBuffer` and `drawIndexedIndirect` with it. Draw construction requires a render pipeline and one binding for every vertex-buffer slot declared by that pipeline. Direct count values use WebGPU integer domains and allow zero-count no-ops. A known static no-op does not advance declared output epochs or create producer facts; an indirect command remains a potential writer because Scratch does not inspect GPU argument bytes. Index-buffer offsets follow the selected format's alignment; binding sizes preserve WebGPU's non-negative native byte-range semantics, including zero and ranges that do not end on a complete index element. Static `firstIndex + indexCount` must fit within the complete indices in the bound range, and strip pipelines require the bound format to match `stripIndexFormat`; indirect argument contents are not inspected for equivalent CPU-side count-range checks.
@@ -138,34 +139,18 @@ An indexed static count requires `indexBuffer`; a static vertex count forbids it
 Static values are the default path:
 
 ```ts
-const vertexBuffer = await scratch.buffer({
+const vertexBuffer = await runtime.createBuffer({
     label: 'triangle vertices',
-    usage: ['vertex', 'copyDst'],
     size: vertexBytes.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
 })
-
-const trianglePipeline = scratch.pipeline.render({
-    label: 'triangle pipeline',
-    program: triangleProgram,
-    vertexBuffers: [
-        {
-            arrayStride: 20,
-            stepMode: 'vertex',
-            attributes: [
-                { shaderLocation: 0, offset: 0, format: 'float32x2' },
-                { shaderLocation: 1, offset: 8, format: 'float32x3' },
-            ],
-        },
-    ],
-    targets: [{ format: surface.format }],
-})
-
-const drawTriangle = scratch.command.draw({
+const vertexRegion = vertexBuffer.region()
+const drawTriangle = runtime.createDrawCommand({
     label: 'draw triangle',
     pipeline: trianglePipeline,
     bindSets: [],
     vertexBuffers: [
-        { slot: 0, buffer: vertexBuffer },
+        { slot: 0, region: vertexRegion },
     ],
     count: { vertexCount: 3 },
     resources: {
@@ -178,26 +163,9 @@ const drawTriangle = scratch.command.draw({
 })
 ```
 
-CPU-dynamic resolvers remain a future option for scene-dependent counts; the following is target syntax, not current public API:
-
-```ts
-const drawTerrain = scratch.command.draw({
-    label: 'draw terrain',
-    pipeline: terrainPipeline,
-    bindSets: [terrainSet],
-    vertex: terrainVertex,
-    index: terrainIndex,
-    count: context => ({
-        indexCount: terrain.visibleIndexCount,
-        instanceCount: terrain.visibleTileCount,
-    }),
-    resources: {
-        read: [demTexture, lodMap],
-        write: [sceneColor, depth],
-    },
-    whenMissing: 'skip-command',
-})
-```
+CPU-dynamic resolver closures remain future work and are not accepted by the
+current public API. Use immutable static counts or explicit GPU indirect
+regions instead.
 
 Indirect counts are the implemented, preferred GPU-driven path when compute produces draw arguments. The indirect and optional index buffers must also appear in `resources.read` with their required content epochs. Scratch validates usage, alignment, range, ownership, disposal, readiness, and epochs without inspecting argument bytes on the CPU.
 
@@ -208,7 +176,7 @@ The implemented dispatch count follows the same native model:
 ```ts
 type DispatchCount =
     | { workgroups: [number, number?, number?] }
-    | { indirect: BufferResource, offset?: number }
+    | { indirect: BufferRegion }
 ```
 
 Static workgroup dimensions allow zero and are checked against `maxComputeWorkgroupsPerDimension`. Indirect dispatch validates a 12-byte GPU argument range and remains GPU-side.
@@ -216,13 +184,13 @@ Static workgroup dimensions allow zero and are checked against `maxComputeWorkgr
 Example:
 
 ```ts
-const simulate = scratch.command.dispatch({
+const simulate = runtime.createDispatchCommand({
     label: 'simulate particles',
     pipeline: simulationPipeline,
-    bindSets: [simulationSet],
+    bindSets: [ { set: simulationSet } ],
     count: { workgroups: [64, 64, 1] },
     resources: {
-        read: [flowTexture],
+        read: [ { resource: flowTexture, contentEpoch: flowTexture.contentEpoch } ],
         write: [particleBuffer],
     },
     whenMissing: 'skip-command',
@@ -234,7 +202,7 @@ const simulate = scratch.command.dispatch({
 Query commands expose WebGPU query mechanics without inventing profiling abstractions that the platform does not provide.
 
 ```ts
-const resolveTiming = scratch.command.resolveQuerySet({
+const resolveTiming = runtime.createResolveQuerySetCommand({
     label: 'resolve timing',
     source: {
         querySet: timingQueries,
@@ -243,8 +211,7 @@ const resolveTiming = scratch.command.resolveQuerySet({
             { index: 1, contentEpoch: 1 },
         ],
     },
-    destination: timingBuffer,
-    destinationOffset: 0,
+    destination: timingBuffer.region(),
     whenMissing: 'throw',
 })
 ```
@@ -254,8 +221,8 @@ const resolveTiming = scratch.command.resolveQuerySet({
 Occlusion query brackets are render-pass-only command-like encoder actions:
 
 ```ts
-scratch.command.beginOcclusionQuery({ querySet: visibilityQueries, index: tileIndex })
-scratch.command.endOcclusionQuery()
+runtime.createBeginOcclusionQueryCommand({ querySet: visibilityQueries, index: tileIndex })
+runtime.createEndOcclusionQueryCommand()
 ```
 
 They require the active render pass to own the same `occlusionQuerySet`, cannot be nested, and write one indexed query slot.

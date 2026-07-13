@@ -64,6 +64,8 @@ async function main() {
         size: instanceSize.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     })
+    const vertexRegion = vertexBuffer.region()
+    const instanceSizeRegion = instanceSizeBuffer.region()
     const program = runtime.createProgram({
         label: 'hello vertex buffer program',
         modules: [ vertexBufferWgsl ],
@@ -107,12 +109,12 @@ async function main() {
     })
     const uploadVertices = runtime.createUploadCommand({
         label: 'upload hello vertex attributes',
-        target: vertexBuffer,
+        target: vertexRegion,
         data: vertices,
     })
     const uploadInstanceSize = runtime.createUploadCommand({
         label: 'upload hello vertex instance size',
-        target: instanceSizeBuffer,
+        target: instanceSizeRegion,
         data: instanceSize,
     })
     let frame = 0
@@ -130,8 +132,8 @@ async function main() {
             label: 'draw hello vertex buffer',
             pipeline,
             vertexBuffers: [
-                { slot: 0, buffer: vertexBuffer },
-                { slot: 1, buffer: instanceSizeBuffer },
+                { slot: 0, region: vertexRegion },
+                { slot: 1, region: instanceSizeRegion },
             ],
             count: { vertexCount: 3, instanceCount: 1 },
             resources: {

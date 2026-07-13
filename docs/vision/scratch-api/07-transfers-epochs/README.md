@@ -27,7 +27,7 @@ data transfer: `done` does not map staging, access a mapped range, copy host
 bytes, or materialize a readback result.
 
 ```ts
-const submitted = scratch.submission()  // no surface -> compute submission
+const submitted = runtime.createSubmission()  // no surface -> compute submission
     .compute(simulationPass, [simulate])
     .submit()
 
@@ -39,7 +39,8 @@ await submitted.done                    // observed submission, not host readbac
 
 ## Epoch Model
 
-Every resource should expose or internally track:
+Every Resource tracks stable identity, allocation lifecycle, and disposal.
+BufferResource and TextureResource additionally track:
 
 - runtime owner
 - logical id
@@ -59,7 +60,7 @@ Every resource should expose or internally track:
 - device-loss rehydration
 - descriptor changes that change the GPU object or view compatibility
 
-`allocationVersion` is what `BindSet`, view caches, render attachments, and command caches compare before reuse. A content write must not force a bind group rebuild unless it also changes the physical binding target.
+`allocationVersion` is what BindSet preparation snapshots and current-allocation validation compare. A content write never forces preparation unless it also changes the physical binding target. SamplerResource has no content state; QuerySetResource tracks state and epoch per indexed slot rather than through these scalar fields.
 
 Resource identity, lifecycle, readiness, `allocationVersion`, and `contentEpoch` are read-only public facts backed by ECMAScript-private slots. Package consumers cannot rewrite provenance through fields, an upcast to `Resource`, an object-level transition method, or either public package entrypoint. Internal command and submission modules commit transitions through non-entrypoint module functions.
 
@@ -72,7 +73,7 @@ Resource identity, lifecycle, readiness, `allocationVersion`, and `contentEpoch`
 - render pass clear, resolve, and store operations
 - explicit clear, resolve, or mipmap generation commands if they become part of the API
 
-`contentEpoch` may be tracked per resource first, and later by buffer range or texture region where useful. The important contract is that readback and dependency validation talk about content epochs, while binding invalidation talks about allocation versions.
+`contentEpoch` belongs to the parent BufferResource or TextureResource. A BufferRegion or TextureViewSpec does not own an independent epoch. Readback and dependency validation talk about parent content epochs, while binding invalidation talks about allocation versions.
 
 ### Indeterminate Content After Delayed Failure
 
@@ -112,14 +113,14 @@ The next successful texture upload, external-image upload, copy target write, re
 CPU-to-GPU writes are explicit transfer commands:
 
 ```ts
-const uploadPositions = scratch.command.upload({
+const positionRegion = positions.region()
+const uploadPositions = runtime.createUploadCommand({
     label: 'upload positions',
-    target: positions,
+    target: positionRegion,
     data: positionsArray,
-    range: { offset: 0 },
 })
 
-scratch.submission()
+runtime.createSubmission()
     .upload(uploadPositions)
     .submit()
 ```
@@ -172,19 +173,24 @@ A zero-width or zero-height command remains an ordered queue action and still ca
 GPU-to-CPU reads create an explicit `ReadbackOperation`:
 
 ```ts
-const submitted = scratch.submission()
+const particlePositions = particles.region({
+    offset: positionsOffset,
+    size: positionsByteLength,
+    layout: positionLayout,
+})
+const submitted = runtime.createSubmission()
     .compute(simulationPass, [simulate])
     .submit()
 
-const readback = scratch.readback({
-    source: particles.segment('positions'),
+const readback = runtime.createReadback({
+    source: particlePositions,
     after: submitted,
 })
 
-const values = await readback.toArray()
+const values = await readback.toArray(Float32Array)
 ```
 
-`toArray()` and `toBytes()` belong to the readback operation, not to `BufferResource` or `TextureResource`. The operation captures the source resource, range or region, layout view, producer submission, and source `contentEpoch`.
+`toArray()` and `toBytes()` belong to the readback operation, not to `BufferResource` or `TextureResource`. The operation captures one BufferRegion, its parent allocation/content facts, optional layout witness, and producer submission.
 
 Properties:
 
@@ -306,8 +312,8 @@ const result = await readback.toArray()  // returns an owned copy
 If repeated reads are required, the caller should opt into retention explicitly:
 
 ```ts
-const readback = scratch.readback({
-    source: particles.segment('positions'),
+const readback = runtime.createReadback({
+    source: particlePositions,
     after: submitted,
     retain: 'until-dispose',
 })
@@ -343,21 +349,21 @@ readback.dispose()
 For uncommon cases where the staging copy point must be placed inside the command graph, use `ReadbackCommand`:
 
 ```ts
-const readParticles = await runtime.readbackCommand({
+const readParticles = await runtime.createReadbackCommand({
     label: 'read particle positions',
     source: {
-        resource: particlePositions,
-        contentEpoch: particlePositions.contentEpoch + 1,
+        region: particlePositions,
+        contentEpoch: particles.contentEpoch + 1,
     },
     whenMissing: 'throw',
 })
 
-const submitted = runtime.submission()
+const submitted = runtime.createSubmission()
     .compute(simulationPass, [simulate])
     .readback(readParticles)
     .submit()
 
-const values = await readParticles.result({ after: submitted }).toArray()
+const values = await readParticles.result({ after: submitted }).toArray(Float32Array)
 ```
 
 The buffer-only `ReadbackCommand` ordered-staging path is implemented. Its Promise-only factory acknowledges the reusable staging slot before returning. It validates the explicit source epoch, records a read-only submission ledger entry, and copies into runtime-owned staging at the declared step. `result({ after })` returns the operation associated with that exact submitted work; materialization maps the existing staging buffer and does not submit a second copy. This remains an escape hatch, not the default readback path. Direct texture readback and mapped leases remain future work; finite staging budgets are implemented runtime policy.
@@ -381,7 +387,7 @@ GPU-to-GPU copies are explicit commands. `CopyCommand` should expose the same na
 CPU uploads and CPU readbacks are separate transfer concepts. `TextureUploadCommand` expresses CPU bytes written through the queue; `ReadbackOperation` expresses host materialization through staging and mapping. Neither replaces a GPU-side `CopyCommand`.
 
 ```ts
-const copyHistory = scratch.command.copy({
+const copyHistory = runtime.createCopyCommand({
     label: 'copy color to history',
     source: {
         resource: sceneColor,
@@ -398,14 +404,13 @@ const copyHistory = scratch.command.copy({
 Buffer-texture copies use a WebGPU texel buffer layout instead of CPU data:
 
 ```ts
-const uploadPreparedPixels = scratch.command.copy({
+const uploadPreparedPixels = runtime.createCopyCommand({
     label: 'copy prepared pixels into texture',
     source: {
-        resource: preparedPixelBuffer,
+        region: preparedPixelBuffer.region(),
         contentEpoch: preparedPixelBuffer.contentEpoch,
     },
     sourceLayout: {
-        offset: 0,
         bytesPerRow: 256,
         rowsPerImage: 64,
     },
@@ -421,7 +426,7 @@ const uploadPreparedPixels = scratch.command.copy({
 Texture-buffer copies are still GPU-side copies. CPU access only begins if a later `ReadbackOperation` maps or materializes the destination buffer:
 
 ```ts
-const copyTileStats = scratch.command.copy({
+const copyTileStats = runtime.createCopyCommand({
     label: 'copy texture tile into staging buffer',
     source: {
         resource: tileTexture,
@@ -430,9 +435,8 @@ const copyTileStats = scratch.command.copy({
     sourceOrigin: [0, 0],
     sourceMipLevel: 0,
     sourceAspect: 'all',
-    target: tileStagingBuffer,
+    target: tileStagingBuffer.region(),
     targetLayout: {
-        offset: 0,
         bytesPerRow: 256,
         rowsPerImage: 32,
     },
@@ -451,7 +455,7 @@ The same model covers graphics resources:
 - A later pass that samples that texture declares a read of the produced `contentEpoch`.
 - Depth and stencil attachments use the same rule. Load/store policy and read-as-texture use must be explicit enough for dependency validation.
 - The surface current texture is a borrowed presentation-submission-scoped target, not a persistent `TextureResource`. It cannot be retained beyond the presentation submission that acquired it.
-- `TextureResource.resize()` advances `allocationVersion`, clears allocation-scoped cached views, and marks the replacement empty. Bind sets and pass attachments lazily resolve new views; stable logical commands remain reusable and fail only when their declared range, readiness, or required epoch no longer validates against the current allocation.
+- `TextureResource.resize()` advances `allocationVersion` and marks the replacement empty. Dependent BindSets become stale and require explicit acknowledged `prepare()`; PassSpec attachments keep their logical TextureViewSpec and create observed submission-scoped native views. Submission performs no hidden binding repair.
 - Temporal resources such as TAA history, trails, or iterative simulation textures are ordinary resources whose previous-frame contents are represented by content epochs, not by a special core feature.
 
 ## Timing And Queries
@@ -462,13 +466,10 @@ Core query-set contract:
 
 ```ts
 type QuerySetType = 'timestamp' | 'occlusion'
-type QueryUnsupportedPolicy = 'throw' | 'warn-disable' | 'disable'
-
-const timingQueries = scratch.querySet({
+const timingQueries = await runtime.createQuerySet({
     label: 'simulation timing',
     type: 'timestamp',
     count: 2,
-    whenUnsupported: 'throw',
 })
 ```
 
@@ -477,12 +478,12 @@ const timingQueries = scratch.querySet({
 - `timestamp` requires the `timestamp-query` feature and can be used by render or compute pass `timestampWrites`.
 - `occlusion` belongs to render passes through `occlusionQuerySet` and begin/end occlusion query brackets.
 - A query write advances the query slot's content epoch. Resolving query results advances the destination buffer's `contentEpoch`.
-- `whenUnsupported` controls feature-gate failure. Development should prefer `throw`; profiling overlays may choose `warn-disable` or `disable` when instrumentation is optional.
+- Unsupported features fail with a structured diagnostic. Optional profiling policy belongs above Scratch core.
 
 Timestamp writes are pass-level instrumentation:
 
 ```ts
-const simulationPass = scratch.pass.compute({
+const simulationPass = runtime.createComputePass({
     label: 'simulate',
     timestampWrites: {
         querySet: timingQueries,
@@ -495,23 +496,23 @@ const simulationPass = scratch.pass.compute({
 Occlusion queries are render-pass-scoped:
 
 ```ts
-const visibilityQueries = scratch.querySet({
+const visibilityQueries = await runtime.createQuerySet({
     label: 'tile visibility',
     type: 'occlusion',
     count: tileCapacity,
 })
 
-const scenePass = scratch.pass.render({
+const scenePass = runtime.createRenderPass({
     label: 'scene',
     color: [
         {
-            target: sceneColor,
+            target: sceneColor.view(),
             load: 'load',
             store: 'store',
         },
     ],
     depth: {
-        target: depth,
+        target: depth.view({ aspect: 'depth-only' }),
         depthLoad: 'load',
         depthStore: 'store',
     },
@@ -519,16 +520,17 @@ const scenePass = scratch.pass.render({
 })
 
 const drawTileWithVisibility = [
-    scratch.command.beginOcclusionQuery({ querySet: visibilityQueries, index: tileIndex }),
+    runtime.createBeginOcclusionQueryCommand({ querySet: visibilityQueries, index: tileIndex }),
     drawTile,
-    scratch.command.endOcclusionQuery(),
+    runtime.createEndOcclusionQueryCommand(),
 ]
 ```
 
 Query results are not CPU-visible until explicitly resolved and read back:
 
 ```ts
-const resolveTiming = scratch.command.resolveQuerySet({
+const timingRegion = timingBuffer.region({ size: 16 })
+const resolveTiming = runtime.createResolveQuerySetCommand({
     source: {
         querySet: timingQueries,
         slots: [
@@ -536,33 +538,21 @@ const resolveTiming = scratch.command.resolveQuerySet({
             { index: 1, contentEpoch: 1 },
         ],
     },
-    destination: timingBuffer,
-    destinationOffset: 0,
+    destination: timingRegion,
     whenMissing: 'throw',
 })
 
-const submitted = scratch.submission()
+const submitted = runtime.createSubmission()
     .compute(simulationPass, [simulateParticles])
     .resolve(resolveTiming)
     .submit()
 
-const timingReadback = scratch.readback({
-    source: {
-        resource: timingBuffer,
-        range: { offset: 0, byteLength: 16 },
-        view: 'u64',
-    },
+const timingReadback = runtime.createReadback({
+    source: timingRegion,
     after: submitted,
-    provenance: {
-        querySet: timingQueries,
-        slots: [
-            { index: 0, contentEpoch: 1 },
-            { index: 1, contentEpoch: 1 },
-        ],
-    },
 })
 
-const timingValues = await timingReadback.toBigUint64Array()
+const timingValues = await timingReadback.toArray(BigUint64Array)
 ```
 
 Pipeline statistics are not part of the current WebGPU core contract and must stay outside the scratch core design unless a future WebGPU target or explicit extension supports them.

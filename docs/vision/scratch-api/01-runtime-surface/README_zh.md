@@ -37,7 +37,7 @@ const surface = scratch.surface(canvas, {
 - `GPUQueue`
 - device limits 和 features
 - resource registry
-- pipeline 与 bind group caches
+- pipeline 与 acknowledged supporting-object registries；每个 BindSet 私有拥有自己的 prepared bind group
 - submission scheduler 默认配置
 - device-loss 状态
 - 当前 GPU operation facts 与有界 diagnostic evidence
@@ -117,6 +117,23 @@ Program 与每个 BindLayout。dispose 或 device loss 会取消 transaction，�
 安装 current pipeline fact。current pipeline facts 的规模随 live pipelines
 变化；历史 operation 留在有界 recorder 中。Pipeline 创建不会给
 `SubmissionBuilder.submit()` 增加工作或等待。
+
+## 异步 Supporting-Object Ownership
+
+持久 SamplerResource、QuerySetResource、BindLayout 与 BindSet factory 同样是
+Promise-only runtime transaction:
+
+```ts
+const sampler = await runtime.createSampler(samplerDescriptor)
+const querySet = await runtime.createQuerySet(queryDescriptor)
+const layout = await runtime.createBindLayout(layoutDescriptor)
+const set = await runtime.createBindSet(layout, bindings)
+```
+
+每个 candidate 只在 native issue、scope acknowledgement 与 lifecycle recheck
+成功后注册。Constructor 与同步 bypass 均关闭。BindSet 创建还会完成 generation-one
+preparation；后续 allocation replacement 会让它 stale，并要求显式
+`await set.prepare()`。Submission 保持同步，绝不执行、等待或重试该工作。
 
 ## Readback Ownership 与 Budgets
 

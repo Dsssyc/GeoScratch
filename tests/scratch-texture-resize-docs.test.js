@@ -7,27 +7,63 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
 
 describe('scratch texture resize documentation', () => {
 
-    const visionModules = [
-        '01-runtime-surface',
-        '02-resources',
-        '03-bindings',
-        '04-pipelines-commands',
-        '05-passes-submissions-scheduler',
-        '07-transfers-epochs',
-        '09-diagnostics-validation',
-    ]
+    const contractsByModule = {
+        '01-runtime-surface': [
+            'TextureResource.resize()',
+            'allocationVersion',
+            'contentEpoch',
+            'await set.prepare()',
+        ],
+        '02-resources': [
+            'TextureResource.resize()',
+            'BufferRegion',
+            'TextureViewSpec',
+            'allocationVersion',
+            'contentEpoch',
+            'prepare()',
+        ],
+        '03-bindings': [
+            'BufferRegion',
+            'TextureViewSpec',
+            'await colorSet.prepare()',
+            'preparationState',
+            'prepareGeneration',
+        ],
+        '04-pipelines-commands': [
+            'TextureResource.resize()',
+            'TextureViewSpec',
+            'bind-set-preparation',
+            'prepared snapshot',
+        ],
+        '05-passes-submissions-scheduler': [
+            'TextureResource.resize()',
+            'TextureViewSpec',
+            'allocationVersion',
+            'contentEpoch',
+        ],
+        '07-transfers-epochs': [
+            'TextureResource.resize()',
+            'BufferRegion',
+            'TextureViewSpec',
+            'allocationVersion',
+            'contentEpoch',
+            'prepare()',
+        ],
+        '09-diagnostics-validation': [
+            'Schema v5',
+            'BufferRegion',
+            'TextureViewSpec',
+            'bind-set-preparation',
+        ],
+    }
 
     it('keeps the English and Chinese vision modules on the same replacement contract', () => {
 
-        for (const module of visionModules) {
+        for (const [module, contracts] of Object.entries(contractsByModule)) {
             const english = read('docs', 'vision', 'scratch-api', module, 'README.md')
             const chinese = read('docs', 'vision', 'scratch-api', module, 'README_zh.md')
 
-            for (const contract of [
-                'TextureResource.resize()',
-                'allocationVersion',
-                'contentEpoch',
-            ]) {
+            for (const contract of contracts) {
                 expect(english, `${module} English ${contract}`).to.include(contract)
                 expect(chinese, `${module} Chinese ${contract}`).to.include(contract)
             }
@@ -44,17 +80,15 @@ describe('scratch texture resize documentation', () => {
         expect(runtime).to.include('target.resize(surface.size)')
         expect(runtime).to.include('does not install a `ResizeObserver`')
         expect(resources).to.include('create-before-swap')
-        expect(resources).to.include('state = empty')
-        expect(resources).to.include('TRANSIENT_ATTACHMENT | RENDER_ATTACHMENT')
-        expect(resources).to.include('only public size-replacement path')
-        expect(resources).to.include('ECMAScript-private backing slots')
-        expect(resources).to.include('read-only getters')
-        expect(resources).to.include('non-extensible')
-        expect(resources).to.include('reject subclass construction')
-        expect(resources).to.include('`null` is invalid')
-        expect(resources).to.include('not exported from either package entrypoint')
-        expect(resourcesZh).to.include('ECMAScript-private backing slots')
-        expect(resourcesZh).to.include('read-only getters')
+        expect(resources).to.include('marks content empty')
+        expect(resources).to.include('same-size resize is a true no-op')
+        expect(resources).to.include('returns a frozen `TextureViewSpec`')
+        expect(resources).to.include('never calls native `createView()`')
+        expect(resources).to.include('dependent BindSets become stale and require explicit preparation')
+        expect(resourcesZh).to.include('same-size resize 是真正的 no-op')
+        expect(resourcesZh).to.include('返回 frozen `TextureViewSpec`')
+        expect(resourcesZh).to.include('不会调用 native `createView()`')
+        expect(resourcesZh).to.include('dependent BindSet 变为 stale 并要求显式 preparation')
         expect(resources).to.not.include('sceneColor.invalidateSize()')
         expect(resources).to.not.include('size: derived(() => surface.size')
         expect(resourcesZh).to.not.include('sceneColor.invalidateSize()')
@@ -70,23 +104,29 @@ describe('scratch texture resize documentation', () => {
         const transfers = read('docs', 'vision', 'scratch-api', '07-transfers-epochs', 'README.md')
         const diagnostics = read('docs', 'vision', 'scratch-api', '09-diagnostics-validation', 'README.md')
 
-        expect(bindings).to.include('exactly one replacement bind group')
+        expect(bindings).to.include('await colorSet.prepare()')
+        expect(bindings).to.include('preparationState')
+        expect(bindings).to.include('prepareGeneration')
         expect(bindings).to.include('allocation-scoped')
-        expect(bindings).to.include("bind layout's explicit view dimension")
-        expect(bindings).to.include('array-layer growth')
-        expect(bindings).to.include('compatibility mode')
-        expect(bindings).to.include("textureBindingViewDimension: '2d-array'")
-        expect(bindings).to.include('binding-time only')
+        expect(bindings).to.include('Submission never prepares, waits, retries, or repairs it')
+        expect(bindings).to.include('Content writes do not change native binding shape')
+        expect(bindings).to.not.include('exactly one replacement bind group')
+        expect(bindings).to.not.include('binding-time only')
         expect(commands).to.include('resource-lifecycle operation')
+        expect(commands).to.include('TextureViewSpec')
         expect(commands).to.include('current physical texture')
+        expect(commands).to.include('BindSet preparation')
+        expect(commands).to.include('prepared snapshot')
+        expect(commands).to.include('Submission never creates a texture view or bind group')
         expect(commands).to.include('Render attachments revalidate a single 2D mip/layer view')
-        expect(commands).to.include('do not apply the texture-binding-only dimension constraint')
+        expect(commands).to.include('do not apply texture-binding-only constraints')
         expect(submissions).to.include('does not add a submission step')
         expect(submissions).to.include('immutable historical record')
         expect(submissions).to.include('before command encoder creation or ledger mutation')
         expect(submissions).to.include('mismatched current render extents/sample counts')
         expect(transfers).to.include('allocationVersion = previous allocationVersion + 1')
         expect(transfers).to.include('contentEpoch = previous contentEpoch')
+        expect(transfers).to.include('explicit acknowledged `prepare()`')
         expect(transfers).to.include('SCRATCH_READBACK_SOURCE_ALLOCATION_STALE')
         expect(diagnostics).to.include('SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
         expect(diagnostics).to.include('SCRATCH_TEXTURE_REPLACEMENT_VALIDATION_FAILED')

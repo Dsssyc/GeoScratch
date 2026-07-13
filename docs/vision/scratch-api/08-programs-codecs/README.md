@@ -8,7 +8,7 @@ Date: 2026-07-06
 Shader-facing APIs should be split into explicit artifacts:
 
 - `LayoutSpec` describes logical data shape.
-- `LayoutArtifact` records computed offsets, stride, padding, alignment mode, usage lowering, and a stable structural hash.
+- `LayoutArtifact` records computed offsets, stride, padding, alignment mode, usage lowering, separate `abiHash` / `schemaHash` identifiers, and immutable canonical signatures.
 - `LayoutCodec` is the preparation artifact built from a layout: CPU writers, readback views, and WGSL accessor modules.
 - `Program` describes shader source, generated modules, entry points, required bind layouts, required features, and diagnostic metadata.
 - `Pipeline` is stable WebGPU executable state for one `Program` entry point plus render or compute pipeline state.
@@ -38,7 +38,7 @@ This keeps code generation and runtime execution connected without hiding behavi
 
 - Layout and shader helpers may be generated ahead of runtime, at build time, or lazily during runtime initialization.
 - Submission-time execution consumes explicit artifacts. It must not depend on ad-hoc string generation or hidden shader mutation.
-- Generated artifacts must be inspectable, cacheable by structural hash, and diagnosable through the shared `ScratchDiagnostic` envelope in `09-diagnostics-validation`.
+- Generated artifacts must be inspectable, cacheable by canonical ABI/schema signatures, and diagnosable through the shared `ScratchDiagnostic` envelope in `09-diagnostics-validation`. Short hashes alone are not compatibility proof.
 
 ## LayoutCodec
 
@@ -46,7 +46,7 @@ This keeps code generation and runtime execution connected without hiding behavi
 
 Target outputs:
 
-- `LayoutArtifact`: segment offsets, element stride, field offsets, padding, alignment mode, total byte length, storage/vertex/readback compatibility, and structural hash
+- `LayoutArtifact`: segment offsets, element stride, field offsets, padding, alignment mode, total byte length, storage/vertex/readback compatibility, `abiHash`, `schemaHash`, and canonical signatures
 - CPU writer: packs logical values into GPU-aligned bytes while skipping padding
 - upload view: the contiguous byte range that can be sent with one upload command
 - readback view factory: creates typed, `DataView`, strided, or explicitly deinterleaved views from returned bytes
@@ -176,7 +176,7 @@ or submission state.
 Codec and shader composition can happen before runtime, but scratch still needs one coherent contract:
 
 - Build-time path: generate `LayoutArtifact`, WGSL accessor modules, and optional CPU writer code ahead of the app.
-- Runtime-initialization path: generate the same artifacts lazily, cache them by structural hash, and expose diagnostics.
+- Runtime-initialization path: generate the same artifacts lazily, cache them by canonical ABI/schema signatures, and expose both bounded hashes and structural diagnostics.
 - Submission path: consume already-built artifacts only.
 
 This avoids both bad extremes:

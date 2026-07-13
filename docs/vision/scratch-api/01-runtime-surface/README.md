@@ -37,7 +37,7 @@ const surface = scratch.surface(canvas, {
 - `GPUQueue`
 - device limits and features
 - resource registry
-- pipeline and bind group caches
+- pipeline and acknowledged supporting-object registries; each BindSet privately owns its prepared bind group
 - submission scheduler defaults
 - device-loss state
 - current GPU operation facts and bounded diagnostic evidence
@@ -118,6 +118,25 @@ or device loss cancels the transaction and installs no current pipeline fact.
 Current pipeline facts scale with live pipelines; historical operations remain
 in the bounded recorder. Pipeline creation does not add work or waits to
 `SubmissionBuilder.submit()`.
+
+## Async Supporting-Object Ownership
+
+Persistent SamplerResource, QuerySetResource, BindLayout, and BindSet factories
+are also Promise-only runtime transactions:
+
+```ts
+const sampler = await runtime.createSampler(samplerDescriptor)
+const querySet = await runtime.createQuerySet(queryDescriptor)
+const layout = await runtime.createBindLayout(layoutDescriptor)
+const set = await runtime.createBindSet(layout, bindings)
+```
+
+Each candidate is registered only after native issue, scope acknowledgement,
+and lifecycle rechecks succeed. Constructors and synchronous bypasses are
+closed. BindSet creation additionally completes generation-one preparation;
+later allocation replacement makes it stale and requires explicit
+`await set.prepare()`. Submission stays synchronous and never performs this
+work, waits for it, or retries it.
 
 ## Readback Ownership And Budgets
 

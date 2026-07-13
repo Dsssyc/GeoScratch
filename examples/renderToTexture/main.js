@@ -140,8 +140,9 @@ async function main() {
             },
         ],
     })
-    const sampleBindSet = runtime.createBindSet(sampleBindLayout, {
-        renderTexture: offscreenTexture,
+    const offscreenView = offscreenTexture.view()
+    const sampleBindSet = await runtime.createBindSet(sampleBindLayout, {
+        renderTexture: offscreenView,
         renderSampler: sampler,
     }, {
         label: 'render to texture sample set',
@@ -177,7 +178,7 @@ async function main() {
         label: 'render to texture offscreen pass',
         color: [
             {
-                target: offscreenTexture,
+                target: offscreenView,
                 load: 'clear',
                 store: 'store',
                 clear: [ 0.02, 0.04, 0.08, 1 ],

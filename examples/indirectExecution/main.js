@@ -112,9 +112,9 @@ async function main() {
             },
         ],
     })
-    const argumentSet = runtime.createBindSet(argumentLayout, {
-        drawArgs: drawArguments,
-        indexedArgs: indexedArguments,
+    const argumentSet = await runtime.createBindSet(argumentLayout, {
+        drawArgs: drawArguments.region(),
+        indexedArgs: indexedArguments.region(),
     })
     const argumentProgram = runtime.createProgram({
         label: 'argument writer program',
@@ -151,11 +151,11 @@ async function main() {
         } ],
     })
     const uploadDispatchArguments = runtime.createUploadCommand({
-        target: dispatchArguments,
+        target: dispatchArguments.region(),
         data: new Uint32Array([ 1, 1, 1 ]),
     })
     const uploadIndices = runtime.createUploadCommand({
-        target: indexBuffer,
+        target: indexBuffer.region(),
         data: new Uint16Array([ 3, 4, 5, 0 ]),
     })
 
@@ -171,7 +171,7 @@ async function main() {
             label: 'write indirect draw arguments',
             pipeline: argumentPipeline,
             bindSets: [ { set: argumentSet } ],
-            count: { indirect: dispatchArguments },
+            count: { indirect: dispatchArguments.region() },
             resources: {
                 read: [ { resource: dispatchArguments, contentEpoch: dispatchEpoch } ],
                 write: [ drawArguments, indexedArguments ],
@@ -181,7 +181,7 @@ async function main() {
         const draw = runtime.createDrawCommand({
             label: 'draw GPU-generated triangle',
             pipeline: renderPipeline,
-            count: { indirect: drawArguments },
+            count: { indirect: drawArguments.region() },
             resources: {
                 read: [ { resource: drawArguments, contentEpoch: drawEpoch } ],
                 write: [],
@@ -192,11 +192,10 @@ async function main() {
             label: 'draw GPU-generated indexed triangle',
             pipeline: renderPipeline,
             indexBuffer: {
-                buffer: indexBuffer,
+                region: indexBuffer.region({ size: 6 }),
                 format: 'uint16',
-                size: 6,
             },
-            count: { indirect: indexedArguments },
+            count: { indirect: indexedArguments.region() },
             resources: {
                 read: [
                     { resource: indexBuffer, contentEpoch: indexEpoch },
