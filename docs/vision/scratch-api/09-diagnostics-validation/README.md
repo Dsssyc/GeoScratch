@@ -486,7 +486,7 @@ suggestions: [
 ## GPU Operation, Pipeline, And Readback Evidence
 
 GPU operation, incident, snapshot, capture, and exported-evidence schemas use
-version 3. Version 2 is not emitted or converted during `0.x.x`. Operations and
+version 4. Versions 2 and 3 are not emitted or converted during `0.x.x`. Operations and
 pending facts select one explicit macro target:
 
 ```ts
@@ -506,10 +506,11 @@ type ScratchGpuOperationTarget =
         submissionId?: string
         stepIndex?: number
     }
+    | { kind: 'submission'; submissionId: string }
 ```
 
 Queries select `targetKind`, `resourceId`, `pipelineId`, `commandId`, or
-`readbackId` rather than guessing from optional fields. Resource allocation
+`readbackId`, or `submissionId` rather than guessing from optional fields. Resource allocation
 incidents retain ADR-032 pressure and attribution semantics. Pipeline incidents
 contain compilation and creation evidence and never receive fabricated
 allocation pressure. Readback targets never masquerade as persistent resources.

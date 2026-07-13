@@ -193,8 +193,9 @@ modules, and the TypeScript implementation:
   availability barrier. Fixed-order native outcomes, lifecycle races, cleanup,
   one materialization owner, and consume/retain concurrency are explicit.
 - Pending operations, logical staging bytes, retained host bytes, and active
-  mappings are always-current bounded facts. Schema-v3 operation/incident
-  history remains separately bounded, serializable, source-free, and handle-free.
+  mappings are always-current bounded facts. The current schema-v4
+  operation/incident history remains separately bounded, serializable,
+  source-free, and handle-free; ADR-035 replaced the prior schema-v3 envelope.
 - Final fixed-baseline parity preserved 12/12 original JavaScript behaviors and
   16/16 Goal-start TypeScript behaviors; 10/10 intentional ADR-034 replacements
   are explicit rather than disguised as compatibility.

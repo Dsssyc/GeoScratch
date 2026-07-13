@@ -486,7 +486,7 @@ suggestions: [
 ## GPU Operation、Pipeline 与 Readback Evidence
 
 GPU operation、incident、snapshot、capture 与 exported-evidence schema 使用
-version 3。`0.x.x` 期间不输出或转换 version 2。operation 与 pending fact
+version 4。`0.x.x` 期间不输出或转换 version 2 或 version 3。operation 与 pending fact
 显式选择一种宏观 target:
 
 ```ts
@@ -506,10 +506,11 @@ type ScratchGpuOperationTarget =
         submissionId?: string
         stepIndex?: number
     }
+    | { kind: 'submission'; submissionId: string }
 ```
 
 Query 通过 `targetKind`、`resourceId`、`pipelineId`、`commandId` 或
-`readbackId` 选择，而不是猜 optional field。Resource allocation incident
+`readbackId`、`submissionId` 选择，而不是猜 optional field。Resource allocation incident
 保留 ADR-032 的 pressure 与 attribution 语义。Pipeline incident 只包含
 compilation 与 creation evidence，不获得虚构的 allocation pressure。
 Readback target 不伪装成 persistent resource。

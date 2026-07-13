@@ -980,10 +980,11 @@ function createFakeCommandEncoder(calls, descriptor, issueNativeMethod, initiall
         },
         finish() {
             const failed = issueEncoderMethod(this, issueNativeMethod, 'finish')
+            const invalid = failed || this.invalid
             const commandBuffer = {
                 type: 'commandBuffer',
                 descriptor,
-                invalid: failed || this.invalid,
+                ...(invalid ? { invalid: true } : {}),
             }
             Object.defineProperty(commandBuffer, 'commands', {
                 value: [ ...commands ],

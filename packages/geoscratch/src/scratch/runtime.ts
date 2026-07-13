@@ -30,6 +30,7 @@ import {
     runtimeReadbackOperationSnapshot,
 } from './readback-ownership.js'
 import {
+    normalizeScratchRuntimeDiagnosticsOptions,
     registerRuntimeDiagnostics,
     retainDeviceLostInfo,
     ScratchRuntimeDiagnosticsController,
@@ -58,6 +59,7 @@ import type {
     ScratchRuntimeDiagnostics,
     ScratchRuntimeDiagnosticsOptions,
     ScratchDeviceLostInfo,
+    NormalizedScratchRuntimeDiagnosticsOptions,
 } from './runtime-diagnostics.js'
 import type { SamplerResourceDescriptor } from './sampler.js'
 import type { SubmissionBuilderOptions } from './submission.js'
@@ -82,6 +84,7 @@ type ScratchRuntimeConstructorOptions = ScratchRuntimeCreateOptions & {
     adapter: GPUAdapter
     device: GPUDevice
     readbackPolicy: ScratchReadbackPolicy
+    diagnosticsPolicy: NormalizedScratchRuntimeDiagnosticsOptions
 }
 
 export interface ScratchRuntime {
@@ -142,7 +145,7 @@ export class ScratchRuntime {
         this.#diagnosticsController = new ScratchRuntimeDiagnosticsController(
             this,
             options.device,
-            options.diagnostics,
+            options.diagnosticsPolicy,
             options.readbackPolicy
         )
         registerRuntimeDiagnostics(this, this.#diagnosticsController)
@@ -186,6 +189,10 @@ export class ScratchRuntime {
     static async create(options: ScratchRuntimeCreateOptions = {}) {
 
         const readbackPolicy = normalizeScratchReadbackPolicy(options.readback, options.label)
+        const diagnosticsPolicy = normalizeScratchRuntimeDiagnosticsOptions(
+            options.diagnostics,
+            options.label
+        )
         const gpu = options.gpu ?? globalThis.navigator?.gpu
 
         if (!gpu || typeof gpu.requestAdapter !== 'function') {
@@ -236,6 +243,7 @@ export class ScratchRuntime {
             adapter,
             device,
             readbackPolicy,
+            diagnosticsPolicy,
             ...(options.label !== undefined ? { label: options.label } : {}),
             ...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
         })

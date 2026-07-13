@@ -105,7 +105,7 @@ describe('scratch readback provenance contract', () => {
         expect(operation).not.to.have.property('stagingBuffer')
     })
 
-    it('uses schema version 3 command and readback targets without resource placeholders', () => {
+    it('uses schema version 4 command and readback targets without resource placeholders', () => {
 
         const commandRecord = createGpuOperationRecord({
             sequence: 1,
@@ -147,7 +147,7 @@ describe('scratch readback provenance contract', () => {
             },
         })
 
-        expect(commandRecord.version).to.equal(3)
+        expect(commandRecord.version).to.equal(4)
         expect(commandRecord.target.kind).to.equal('command')
         expect(commandRecord.target).not.to.have.any.keys(
             'resourceId',
@@ -155,7 +155,7 @@ describe('scratch readback provenance contract', () => {
             'contentEpoch',
             'logicalFootprintBytes'
         )
-        expect(readbackRecord.version).to.equal(3)
+        expect(readbackRecord.version).to.equal(4)
         expect(readbackRecord.target.kind).to.equal('readback')
         expect(readbackRecord.target).not.to.have.any.keys(
             'resourceId',
@@ -175,8 +175,8 @@ describe('scratch readback provenance contract', () => {
         const snapshot = runtime.diagnostics.snapshot()
         const evidence = runtime.diagnostics.exportEvidence()
 
-        expect(snapshot.version).to.equal(3)
-        expect(evidence.version).to.equal(3)
-        expect(evidence.snapshot.version).to.equal(3)
+        expect(snapshot.version).to.equal(4)
+        expect(evidence.version).to.equal(4)
+        expect(evidence.snapshot.version).to.equal(4)
     })
 })

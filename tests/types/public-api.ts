@@ -58,6 +58,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         label: 'typed scratch runtime',
         requiredFeatures: [ 'timestamp-query' ],
         requiredLimits: { maxBufferSize: 1024 },
+        diagnostics: {
+            submissionScopes: 'summary',
+            maxPendingNativeObservations: 8,
+        },
     })
     const diagnostics: scr.ScratchRuntimeDiagnostics = runtime.diagnostics
     const compatDiagnostics: scratchCompat.ScratchRuntimeDiagnostics = diagnostics
@@ -74,6 +78,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         kind: 'render-pipeline-creation',
         targetKind: 'pipeline',
         pipelineId: 'pipeline-id',
+    })
+    const submissionOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+        kind: 'submission-native-observation',
+        targetKind: 'submission',
+        submissionId: 'submission-id',
+        nativeLocationKind: 'pass-command',
+        nativeStage: 'command-encode',
+        nativeOutcomeStatus: 'observed-failed',
     })
     const operationTarget: scr.ScratchGpuOperationTarget | undefined = operationRecords[0]?.target
     if (operationTarget?.kind === 'resource') {
@@ -94,9 +106,20 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         targetKind: 'resource',
         sequenceFrom: 1,
     })
+    const submissionIncidentRecords: readonly scr.ScratchGpuIncidentReport[] = diagnostics.incidents({
+        kind: 'submission-failure',
+        targetKind: 'submission',
+        submissionId: 'submission-id',
+        nativeLocationKind: 'queue-action',
+        nativeStage: 'queue-submit',
+    })
     const currentPipelineFacts: readonly scr.ScratchRuntimePipelineFact[] = diagnosticsSnapshot.pipelines
-    const evidenceSchemaVersion: 3 = diagnosticsEvidence.version
-    const snapshotSchemaVersion: 3 = diagnosticsSnapshot.version
+    const evidenceSchemaVersion: 4 = diagnosticsEvidence.version
+    const snapshotSchemaVersion: 4 = diagnosticsSnapshot.version
+    const submissionScopeMode: scr.ScratchSubmissionScopeMode =
+        diagnosticsSnapshot.submissionNative.submissionScopes
+    const pendingNativeObservationBudget: number =
+        diagnosticsSnapshot.submissionNative.maxPendingNativeObservations
     const compatPipelineCompilationReport: scratchCompat.PipelineCompilationReport = typedPipelineCompilationReport
     const compilationMessageSourceRedacted: boolean | undefined =
         typedPipelineCompilationReport.messages[0]?.sourceExcerptRedacted

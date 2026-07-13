@@ -190,6 +190,99 @@ describe('scratch submission native contract', () => {
         expect(JSON.parse(JSON.stringify(record))).to.deep.equal(record)
     })
 
+    it('rejects forged submission facts and bounds retained native evidence', () => {
+
+        const base = {
+            sequence: 1,
+            id: 'operation-submission-validation',
+            kind: 'submission-native-observation',
+            status: 'failed',
+            runtimeId: 'runtime-1',
+            target: { kind: 'submission', submissionId: 'submission-1' },
+            descriptor: { hash: 'descriptor-1', summary: {} },
+        }
+        const location = {
+            kind: 'queue-action',
+            submissionId: 'submission-1',
+            actionIndex: 0,
+            actionKind: 'command-buffer',
+        }
+        const outcome = {
+            stage: 'queue-submit',
+            location,
+            nativeErrorCategory: 'validation',
+            diagnosticCode: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
+        }
+
+        for (const nativeOutcome of [
+            { mode: 'summary', status: 'invented', locations: [], outcomes: [] },
+            {
+                mode: 'summary',
+                status: 'observed-failed',
+                locations: [ location ],
+                outcomes: [ { ...outcome, stage: 'invented' } ],
+            },
+            {
+                mode: 'summary',
+                status: 'observed-failed',
+                locations: [ { ...location, actionKind: 'invented' } ],
+                outcomes: [ outcome ],
+            },
+            {
+                mode: 'summary',
+                status: 'observed-failed',
+                locations: [ {
+                    kind: 'pass',
+                    submissionId: 'submission-1',
+                    stepIndex: 0,
+                    passId: 'pass-1',
+                    passKind: 'invented',
+                } ],
+                outcomes: [ outcome ],
+            },
+            { mode: 'summary', status: 'observed-failed', locations: [], outcomes: [] },
+        ]) {
+            expect(() => createGpuOperationRecord({ ...base, nativeOutcome })).to.throw(TypeError)
+        }
+
+        expect(() => createGpuOperationRecord({
+            ...base,
+            kind: 'buffer-allocation',
+            target: {
+                kind: 'resource',
+                resourceId: 'buffer-1',
+                resourceKind: 'BufferResource',
+                allocationVersion: 1,
+                contentEpoch: 0,
+                logicalFootprintBytes: 16,
+            },
+            nativeOutcome: {
+                mode: 'summary',
+                status: 'observed-failed',
+                locations: [ location ],
+                outcomes: [ outcome ],
+            },
+        })).to.throw(TypeError)
+
+        const bounded = createGpuOperationRecord({
+            ...base,
+            nativeOutcome: {
+                mode: 'summary',
+                status: 'observed-failed',
+                locations: Array.from({ length: 80 }, (_, actionIndex) => ({
+                    ...location,
+                    actionIndex,
+                })),
+                outcomes: Array.from({ length: 80 }, (_, actionIndex) => ({
+                    ...outcome,
+                    location: { ...location, actionIndex },
+                })),
+            },
+        })
+        expect(bounded.nativeOutcome.locations).to.have.length(64)
+        expect(bounded.nativeOutcome.outcomes).to.have.length(64)
+    })
+
     it('versions runtime snapshots and exported evidence together', async () => {
 
         const fake = createFakeGpu()

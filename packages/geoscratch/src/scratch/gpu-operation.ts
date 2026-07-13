@@ -7,6 +7,8 @@ import type {
 
 const MAX_INCIDENT_RELATED_SUBJECTS = 64
 const MAX_INCIDENT_OUTCOMES = 64
+const MAX_SUBMISSION_NATIVE_LOCATIONS = 64
+const MAX_SUBMISSION_NATIVE_OUTCOMES = 64
 
 export type ScratchJsonPrimitive = string | number | boolean | null
 export type ScratchJsonValue =
@@ -25,6 +27,7 @@ export type GpuOperationKind =
     | 'readback-staging-allocation'
     | 'readback-mapping'
     | 'readback-staging-release'
+    | 'submission-native-observation'
 
 export type GpuOperationStatus =
     | 'pending'
@@ -90,11 +93,112 @@ export type ScratchGpuReadbackOperationTarget = Readonly<{
     stepIndex?: number
 }>
 
+export type ScratchGpuSubmissionOperationTarget = Readonly<{
+    kind: 'submission'
+    submissionId: string
+}>
+
 export type ScratchGpuOperationTarget =
     | ScratchGpuResourceOperationTarget
     | ScratchGpuPipelineOperationTarget
     | ScratchGpuCommandOperationTarget
     | ScratchGpuReadbackOperationTarget
+    | ScratchGpuSubmissionOperationTarget
+
+export type ScratchSubmissionScopeMode = 'summary' | 'off'
+
+export type ScratchSubmissionNativeOutcomeMode =
+    | ScratchSubmissionScopeMode
+    | 'detailed'
+
+export type ScratchSubmissionNativeOutcomeStatus =
+    | 'no-native-work'
+    | 'observed-succeeded'
+    | 'observed-failed'
+    | 'unobserved'
+    | 'observation-failed'
+
+export type ScratchSubmissionNativeStage =
+    | 'encoder-create'
+    | 'pass-begin'
+    | 'command-encode'
+    | 'pass-end'
+    | 'encoder-finish'
+    | 'queue-action'
+    | 'queue-submit'
+    | 'scope-settlement'
+    | 'queue-completion'
+    | 'lifecycle-recheck'
+
+export type ScratchSubmissionQueueActionKind =
+    | 'command-buffer'
+    | 'buffer-upload'
+    | 'texture-upload'
+    | 'external-image-upload'
+
+export type ScratchSubmissionNativeLocation =
+    | Readonly<{
+        kind: 'submission'
+        submissionId: string
+    }>
+    | Readonly<{
+        kind: 'encoder-segment'
+        submissionId: string
+        segmentIndex: number
+    }>
+    | Readonly<{
+        kind: 'pass'
+        submissionId: string
+        stepIndex: number
+        passId: string
+        passKind: 'render' | 'compute'
+    }>
+    | Readonly<{
+        kind: 'standalone-command'
+        submissionId: string
+        stepIndex: number
+        commandId: string
+        commandKind: string
+    }>
+    | Readonly<{
+        kind: 'pass-command'
+        submissionId: string
+        stepIndex: number
+        passId: string
+        passKind: 'render' | 'compute'
+        commandId: string
+        commandKind: string
+    }>
+    | Readonly<{
+        kind: 'queue-action'
+        submissionId: string
+        actionIndex: number
+        actionKind: ScratchSubmissionQueueActionKind
+    }>
+
+export type ScratchSubmissionNativeOutcomeFact = Readonly<{
+    stage: ScratchSubmissionNativeStage
+    location: ScratchSubmissionNativeLocation
+    nativeErrorCategory: GpuNativeErrorCategory
+    diagnosticCode?: string
+    nativeError?: ScratchNativeGpuErrorFacts
+}>
+
+export type ScratchSubmissionNativeOutcome = Readonly<{
+    version: 4
+    submissionId: string
+    mode: ScratchSubmissionNativeOutcomeMode
+    status: ScratchSubmissionNativeOutcomeStatus
+    locations: readonly ScratchSubmissionNativeLocation[]
+    outcomes: readonly ScratchSubmissionNativeOutcomeFact[]
+}>
+
+export type ScratchSubmissionNativeOutcomeInput = Readonly<{
+    mode: ScratchSubmissionNativeOutcomeMode
+    status: ScratchSubmissionNativeOutcomeStatus
+    locations: readonly ScratchSubmissionNativeLocation[]
+    outcomes: readonly ScratchSubmissionNativeOutcomeFact[]
+}>
 
 export type ScratchGpuRuntimeIncidentTarget = Readonly<{
     kind: 'runtime'
@@ -117,7 +221,7 @@ export type ScratchPipelineNativeLabelEvidence = Readonly<{
 }>
 
 type ScratchGpuOperationRecordBase = Readonly<{
-    version: 3
+    version: 4
     sequence: number
     id: string
     kind: GpuOperationKind
@@ -140,11 +244,13 @@ export type ScratchGpuResourceOperationRecord = ScratchGpuOperationRecordBase & 
     kind: 'buffer-allocation' | 'texture-allocation' | 'texture-replacement' | 'resource-disposal'
     nativeLabels?: never
     compilationReport?: never
+    nativeOutcome?: never
 }>
 
 export type ScratchGpuPipelineOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
     target: ScratchGpuPipelineOperationTarget
     kind: 'render-pipeline-creation' | 'compute-pipeline-creation' | 'pipeline-disposal'
+    nativeOutcome?: never
 }>
 
 export type ScratchGpuCommandOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
@@ -152,11 +258,21 @@ export type ScratchGpuCommandOperationRecord = ScratchGpuOperationRecordBase & R
     kind: 'readback-staging-allocation' | 'readback-staging-release'
     nativeLabels?: never
     compilationReport?: never
+    nativeOutcome?: never
 }>
 
 export type ScratchGpuReadbackOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
     target: ScratchGpuReadbackOperationTarget
     kind: 'readback-staging-allocation' | 'readback-mapping' | 'readback-staging-release'
+    nativeLabels?: never
+    compilationReport?: never
+    nativeOutcome?: never
+}>
+
+export type ScratchGpuSubmissionOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
+    target: ScratchGpuSubmissionOperationTarget
+    kind: 'submission-native-observation'
+    nativeOutcome?: ScratchSubmissionNativeOutcome
     nativeLabels?: never
     compilationReport?: never
 }>
@@ -166,6 +282,7 @@ export type ScratchGpuOperationRecord =
     | ScratchGpuPipelineOperationRecord
     | ScratchGpuCommandOperationRecord
     | ScratchGpuReadbackOperationRecord
+    | ScratchGpuSubmissionOperationRecord
 
 export type ScratchGpuOperationRecordInput = Readonly<{
     sequence: number
@@ -183,6 +300,7 @@ export type ScratchGpuOperationRecordInput = Readonly<{
     startedAtMs?: number
     settledAtMs?: number
     stack?: string
+    nativeOutcome?: ScratchSubmissionNativeOutcomeInput
     [key: string]: unknown
 }>
 
@@ -249,6 +367,7 @@ export type ScratchGpuIncidentKind =
     | 'allocation-failure'
     | 'pipeline-failure'
     | 'readback-failure'
+    | 'submission-failure'
     | 'uncaptured-error'
     | 'device-loss'
     | 'capture-degraded'
@@ -272,9 +391,14 @@ export type ScratchReadbackFailureStage =
     | 'budget'
     | 'lifecycle-recheck'
 
+export type ScratchSubmissionFailureStage =
+    | ScratchSubmissionNativeStage
+    | 'budget'
+
 export type ScratchGpuIncidentFailureStage =
     | ScratchGpuPipelineFailureStage
     | ScratchReadbackFailureStage
+    | ScratchSubmissionFailureStage
 
 export type ScratchGpuIncidentOutcome = Readonly<{
     stage: ScratchGpuIncidentFailureStage
@@ -283,6 +407,7 @@ export type ScratchGpuIncidentOutcome = Readonly<{
     subject?: DiagnosticSubject
     pipelineErrorReason?: GPUPipelineErrorReason
     nativeError?: ScratchNativeGpuErrorFacts
+    location?: ScratchSubmissionNativeLocation
 }>
 
 export type ScratchGpuIncidentPipelineFact = Readonly<{
@@ -297,7 +422,7 @@ export type ScratchGpuIncidentPipelineFact = Readonly<{
 }>
 
 type ScratchGpuIncidentReportBase = Readonly<{
-    version: 3
+    version: 4
     sequence: number
     id: string
     kind: ScratchGpuIncidentKind
@@ -344,6 +469,16 @@ export type ScratchGpuReadbackIncidentReport = ScratchGpuIncidentReportBase & Re
     pipelineErrorReason?: never
 }>
 
+export type ScratchGpuSubmissionIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
+    target: ScratchGpuSubmissionOperationTarget
+    kind: 'submission-failure'
+    failureStage: ScratchSubmissionFailureStage
+    outcomes?: readonly ScratchGpuIncidentOutcome[]
+    pressure?: never
+    compilationReport?: never
+    pipelineErrorReason?: never
+}>
+
 export type ScratchGpuRuntimeIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
     target: ScratchGpuRuntimeIncidentTarget
     kind: 'uncaptured-error' | 'device-loss' | 'capture-degraded'
@@ -354,6 +489,7 @@ export type ScratchGpuIncidentReport =
     | ScratchGpuResourceIncidentReport
     | ScratchGpuPipelineIncidentReport
     | ScratchGpuReadbackIncidentReport
+    | ScratchGpuSubmissionIncidentReport
     | ScratchGpuRuntimeIncidentReport
 
 export type ScratchGpuIncidentReportInput = Readonly<{
@@ -389,7 +525,7 @@ export function createGpuOperationRecord(
 
     assertGpuOperationTarget(input.kind, input.target)
     const record: Record<string, unknown> = {
-        version: 3,
+        version: 4,
         sequence: input.sequence,
         id: input.id,
         kind: input.kind,
@@ -417,6 +553,14 @@ export function createGpuOperationRecord(
             )
         }
     }
+    if (input.target.kind === 'submission' && input.nativeOutcome !== undefined) {
+        record.nativeOutcome = createSubmissionNativeOutcome(
+            input.target.submissionId,
+            input.nativeOutcome
+        )
+    } else if (input.nativeOutcome !== undefined) {
+        throw new TypeError('Only submission GPU operations may retain a submission native outcome.')
+    }
 
     copyDefined(record, input, [
         'nativeErrorCategory',
@@ -427,6 +571,46 @@ export function createGpuOperationRecord(
     ])
 
     return deepFreeze(record) as ScratchGpuOperationRecord
+}
+
+export function createSubmissionNativeOutcome(
+    submissionId: string,
+    input: ScratchSubmissionNativeOutcomeInput
+): ScratchSubmissionNativeOutcome {
+
+    assertNonEmptyString(submissionId, 'submissionId')
+    assertSubmissionNativeOutcomeStatus(input.mode, input.status)
+    const locations: ScratchSubmissionNativeLocation[] = input.locations
+        .slice(0, MAX_SUBMISSION_NATIVE_LOCATIONS)
+        .map(location => {
+        assertSubmissionNativeLocation(location, submissionId)
+        return cloneJsonValue(location) as ScratchSubmissionNativeLocation
+    })
+    const outcomes: ScratchSubmissionNativeOutcomeFact[] = input.outcomes
+        .slice(0, MAX_SUBMISSION_NATIVE_OUTCOMES)
+        .map(outcome => {
+        assertSubmissionNativeStage(outcome.stage)
+        assertNativeErrorCategory(outcome.nativeErrorCategory)
+        assertSubmissionNativeLocation(outcome.location, submissionId)
+        if (outcome.diagnosticCode !== undefined) {
+            assertNonEmptyString(outcome.diagnosticCode, 'diagnosticCode')
+        }
+        return cloneJsonValue(
+            outcome,
+            new Set<object>(),
+            true
+        ) as ScratchSubmissionNativeOutcomeFact
+    })
+    assertSubmissionNativeOutcomeContents(input.status, locations, outcomes)
+
+    return deepFreeze({
+        version: 4,
+        submissionId,
+        mode: input.mode,
+        status: input.status,
+        locations,
+        outcomes,
+    })
 }
 
 export function createGpuIncidentReport(
@@ -440,7 +624,8 @@ export function createGpuIncidentReport(
     const outcomes = (
         input.target.kind === 'pipeline' ||
         input.target.kind === 'command' ||
-        input.target.kind === 'readback'
+        input.target.kind === 'readback' ||
+        input.target.kind === 'submission'
     ) && input.outcomes !== undefined
         ? input.outcomes.slice(0, MAX_INCIDENT_OUTCOMES)
         : undefined
@@ -457,7 +642,7 @@ export function createGpuIncidentReport(
         omittedRecords: input.evidence.omittedRecords + omittedEvidenceItems,
     }
     const report: Record<string, unknown> = {
-        version: 3,
+        version: 4,
         sequence: input.sequence,
         id: input.id,
         kind: input.kind,
@@ -497,7 +682,11 @@ export function createGpuIncidentReport(
             )
         }
     }
-    if (input.target.kind === 'command' || input.target.kind === 'readback') {
+    if (
+        input.target.kind === 'command' ||
+        input.target.kind === 'readback' ||
+        input.target.kind === 'submission'
+    ) {
         copyJsonDefined(report, input, [ 'failureStage' ])
         if (outcomes !== undefined) {
             report.outcomes = cloneJsonValue(outcomes, new Set<object>(), true)
@@ -638,6 +827,9 @@ function createIncidentRelatedSubjects(input: ScratchGpuIncidentReportInput): Di
         related.push({ kind: 'ReadbackOperation', id: input.target.readbackId })
         related.push({ kind: 'Resource', id: input.target.sourceResourceId })
     }
+    if (input.target.kind === 'submission') {
+        related.push({ kind: 'Submission', id: input.target.submissionId })
+    }
     if (input.operationId !== undefined) {
         related.push({
             kind: 'GpuOperation',
@@ -669,6 +861,9 @@ function createIncidentSubject(input: ScratchGpuIncidentReportInput): Diagnostic
     if (input.target.kind === 'readback') {
         return { kind: 'ReadbackOperation', id: input.target.readbackId }
     }
+    if (input.target.kind === 'submission') {
+        return { kind: 'Submission', id: input.target.submissionId }
+    }
     return {
         kind: 'Incident',
         id: input.id,
@@ -681,40 +876,42 @@ export function assertGpuOperationTarget(
     target: ScratchGpuOperationTarget
 ): void {
 
-    if (kind === 'buffer-allocation' && (
-        target.kind !== 'resource' || target.resourceKind !== 'BufferResource'
-    )) {
-        throw new TypeError(`GPU operation ${kind} requires a BufferResource target.`)
+    switch (kind) {
+        case 'buffer-allocation':
+            if (target.kind === 'resource' && target.resourceKind === 'BufferResource') return
+            throw new TypeError(`GPU operation ${kind} requires a BufferResource target.`)
+        case 'texture-allocation':
+        case 'texture-replacement':
+            if (target.kind === 'resource' && target.resourceKind === 'TextureResource') return
+            throw new TypeError(`GPU operation ${kind} requires a TextureResource target.`)
+        case 'resource-disposal':
+            if (target.kind === 'resource') return
+            break
+        case 'render-pipeline-creation':
+            if (target.kind === 'pipeline' && target.pipelineKind === 'render') return
+            throw new TypeError(`GPU operation ${kind} requires a render pipeline target.`)
+        case 'compute-pipeline-creation':
+            if (target.kind === 'pipeline' && target.pipelineKind === 'compute') return
+            throw new TypeError(`GPU operation ${kind} requires a compute pipeline target.`)
+        case 'pipeline-disposal':
+            if (target.kind === 'pipeline') return
+            break
+        case 'readback-staging-allocation':
+        case 'readback-staging-release':
+            if (target.kind === 'command' || target.kind === 'readback') return
+            throw new TypeError(`GPU operation ${kind} requires a command or readback target.`)
+        case 'readback-mapping':
+            if (target.kind === 'readback') return
+            throw new TypeError(`GPU operation ${kind} requires a readback target.`)
+        case 'submission-native-observation':
+            if (target.kind === 'submission') {
+                assertNonEmptyString(target.submissionId, 'submissionId')
+                return
+            }
+            throw new TypeError(`GPU operation ${kind} requires a submission target.`)
     }
-    if ((kind === 'texture-allocation' || kind === 'texture-replacement') && (
-        target.kind !== 'resource' || target.resourceKind !== 'TextureResource'
-    )) {
-        throw new TypeError(`GPU operation ${kind} requires a TextureResource target.`)
-    }
-    if (kind === 'resource-disposal' && target.kind !== 'resource') {
-        throw new TypeError(`GPU operation ${kind} has an incompatible ${target.kind} target.`)
-    }
-    if (kind === 'render-pipeline-creation' && (
-        target.kind !== 'pipeline' || target.pipelineKind !== 'render'
-    )) {
-        throw new TypeError(`GPU operation ${kind} requires a render pipeline target.`)
-    }
-    if (kind === 'compute-pipeline-creation' && (
-        target.kind !== 'pipeline' || target.pipelineKind !== 'compute'
-    )) {
-        throw new TypeError(`GPU operation ${kind} requires a compute pipeline target.`)
-    }
-    if (kind === 'pipeline-disposal' && target.kind !== 'pipeline') {
-        throw new TypeError(`GPU operation ${kind} has an incompatible ${target.kind} target.`)
-    }
-    if ((kind === 'readback-staging-allocation' || kind === 'readback-staging-release') && (
-        target.kind !== 'command' && target.kind !== 'readback'
-    )) {
-        throw new TypeError(`GPU operation ${kind} requires a command or readback target.`)
-    }
-    if (kind === 'readback-mapping' && target.kind !== 'readback') {
-        throw new TypeError(`GPU operation ${kind} requires a readback target.`)
-    }
+
+    throw new TypeError(`GPU operation ${kind} has an incompatible ${target.kind} target.`)
 }
 
 function assertIncidentTarget(input: ScratchGpuIncidentReportInput): void {
@@ -725,13 +922,39 @@ function assertIncidentTarget(input: ScratchGpuIncidentReportInput): void {
             ? input.target.kind === 'pipeline'
             : input.kind === 'readback-failure'
                 ? input.target.kind === 'command' || input.target.kind === 'readback'
-                : input.target.kind === 'runtime'
+                : input.kind === 'submission-failure'
+                    ? input.target.kind === 'submission'
+                    : input.target.kind === 'runtime'
     if (!compatible) {
         throw new TypeError(`GPU incident ${input.kind} has an incompatible ${input.target.kind} target.`)
     }
-    if ((input.kind === 'pipeline-failure' || input.kind === 'readback-failure') && input.failureStage === undefined) {
+    if ((
+        input.kind === 'pipeline-failure' ||
+        input.kind === 'readback-failure' ||
+        input.kind === 'submission-failure'
+    ) && input.failureStage === undefined) {
         throw new TypeError(`${input.kind} incidents require a failureStage.`)
     }
+    if (input.kind === 'submission-failure' && input.target.kind === 'submission') {
+        assertNonEmptyString(input.target.submissionId, 'submissionId')
+        assertSubmissionFailureStage(input.failureStage)
+        for (const outcome of input.outcomes ?? []) {
+            assertSubmissionFailureStage(outcome.stage)
+            assertNativeErrorCategory(outcome.nativeErrorCategory)
+            assertNonEmptyString(outcome.diagnosticCode, 'diagnosticCode')
+            if (outcome.location !== undefined) {
+                assertSubmissionNativeLocation(outcome.location, input.target.submissionId)
+            }
+        }
+    }
+}
+
+function assertSubmissionFailureStage(
+    value: unknown
+): asserts value is ScratchSubmissionFailureStage {
+
+    if (value === 'budget') return
+    assertSubmissionNativeStage(value)
 }
 
 function operationTargetId(target: ScratchGpuOperationTarget): string {
@@ -741,6 +964,155 @@ function operationTargetId(target: ScratchGpuOperationTarget): string {
         case 'pipeline': return target.pipelineId
         case 'command': return target.commandId
         case 'readback': return target.readbackId
+        case 'submission': return target.submissionId
+    }
+}
+
+function assertSubmissionNativeOutcomeStatus(
+    mode: ScratchSubmissionNativeOutcomeMode,
+    status: ScratchSubmissionNativeOutcomeStatus
+): void {
+
+    if (mode !== 'summary' && mode !== 'off' && mode !== 'detailed') {
+        throw new TypeError(`Unsupported submission native outcome mode: ${String(mode)}`)
+    }
+    if (
+        status !== 'no-native-work' &&
+        status !== 'observed-succeeded' &&
+        status !== 'observed-failed' &&
+        status !== 'unobserved' &&
+        status !== 'observation-failed'
+    ) {
+        throw new TypeError(`Unsupported submission native outcome status: ${String(status)}`)
+    }
+    if (status === 'unobserved' && mode !== 'off') {
+        throw new TypeError('Only off mode may publish an unobserved native outcome.')
+    }
+    if ((status === 'observed-succeeded' || status === 'observed-failed' || status === 'observation-failed') && mode === 'off') {
+        throw new TypeError(`Off mode cannot publish ${status}.`)
+    }
+}
+
+function assertSubmissionNativeOutcomeContents(
+    status: ScratchSubmissionNativeOutcomeStatus,
+    locations: readonly ScratchSubmissionNativeLocation[],
+    outcomes: readonly ScratchSubmissionNativeOutcomeFact[]
+): void {
+
+    if (status === 'no-native-work' && (locations.length !== 0 || outcomes.length !== 0)) {
+        throw new TypeError('No-native-work outcomes cannot retain native locations or failures.')
+    }
+    if ((status === 'observed-succeeded' || status === 'unobserved') && outcomes.length !== 0) {
+        throw new TypeError(`${status} outcomes cannot retain native failures.`)
+    }
+    if ((status === 'observed-failed' || status === 'observation-failed') && outcomes.length === 0) {
+        throw new TypeError(`${status} outcomes require at least one native failure.`)
+    }
+}
+
+function assertSubmissionNativeLocation(
+    location: ScratchSubmissionNativeLocation,
+    submissionId: string
+): void {
+
+    if (location === null || typeof location !== 'object') {
+        throw new TypeError('Submission native location must be an object.')
+    }
+    if (location.submissionId !== submissionId) {
+        throw new TypeError('Submission native location belongs to another submission.')
+    }
+
+    switch (location.kind) {
+        case 'submission': return
+        case 'encoder-segment':
+            assertNonNegativeInteger(location.segmentIndex, 'segmentIndex')
+            return
+        case 'pass':
+            assertNonNegativeInteger(location.stepIndex, 'stepIndex')
+            assertNonEmptyString(location.passId, 'passId')
+            assertPassKind(location.passKind)
+            return
+        case 'standalone-command':
+            assertNonNegativeInteger(location.stepIndex, 'stepIndex')
+            assertNonEmptyString(location.commandId, 'commandId')
+            assertNonEmptyString(location.commandKind, 'commandKind')
+            return
+        case 'pass-command':
+            assertNonNegativeInteger(location.stepIndex, 'stepIndex')
+            assertNonEmptyString(location.passId, 'passId')
+            assertPassKind(location.passKind)
+            assertNonEmptyString(location.commandId, 'commandId')
+            assertNonEmptyString(location.commandKind, 'commandKind')
+            return
+        case 'queue-action':
+            assertNonNegativeInteger(location.actionIndex, 'actionIndex')
+            assertQueueActionKind(location.actionKind)
+            return
+    }
+
+    throw new TypeError(`Unsupported submission native location kind: ${String((location as { kind?: unknown }).kind)}`)
+}
+
+function assertSubmissionNativeStage(value: unknown): asserts value is ScratchSubmissionNativeStage {
+
+    if (
+        value === 'encoder-create' ||
+        value === 'pass-begin' ||
+        value === 'command-encode' ||
+        value === 'pass-end' ||
+        value === 'encoder-finish' ||
+        value === 'queue-action' ||
+        value === 'queue-submit' ||
+        value === 'scope-settlement' ||
+        value === 'queue-completion' ||
+        value === 'lifecycle-recheck'
+    ) return
+    throw new TypeError(`Unsupported submission native stage: ${String(value)}`)
+}
+
+function assertNativeErrorCategory(value: unknown): asserts value is GpuNativeErrorCategory {
+
+    if (
+        value === 'validation' ||
+        value === 'internal' ||
+        value === 'out-of-memory' ||
+        value === 'native-exception' ||
+        value === 'scope-failure' ||
+        value === 'uncaptured-error' ||
+        value === 'device-lost' ||
+        value === 'none'
+    ) return
+    throw new TypeError(`Unsupported native error category: ${String(value)}`)
+}
+
+function assertPassKind(value: unknown): asserts value is 'render' | 'compute' {
+
+    if (value === 'render' || value === 'compute') return
+    throw new TypeError(`Unsupported pass kind: ${String(value)}`)
+}
+
+function assertQueueActionKind(value: unknown): asserts value is ScratchSubmissionQueueActionKind {
+
+    if (
+        value === 'command-buffer' ||
+        value === 'buffer-upload' ||
+        value === 'texture-upload' ||
+        value === 'external-image-upload'
+    ) return
+    throw new TypeError(`Unsupported submission queue action kind: ${String(value)}`)
+}
+
+function assertNonEmptyString(value: unknown, name: string): asserts value is string {
+
+    if (typeof value !== 'string' || value.length === 0) {
+        throw new TypeError(`${name} must be a non-empty string.`)
+    }
+}
+
+function assertNonNegativeInteger(value: unknown, name: string): asserts value is number {
+
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+        throw new TypeError(`${name} must be a non-negative safe integer.`)
     }
 }
 

@@ -51,7 +51,7 @@ describe('scratch readback staging and mapping documentation', () => {
             expect(transfers).to.include('maxPendingOperations')
             expect(transfers).to.include('maxStagingBytes')
             expect(transfers).to.match(/historical\s+result lookup/)
-            expect(diagnostics).to.include('version 3')
+            expect(diagnostics).to.include('version 4')
             expect(diagnostics).to.include("| { kind: 'command'; commandId: string; commandKind: 'readback' }")
             expect(diagnostics).to.include("| 'lifecycle-recheck'")
         }
