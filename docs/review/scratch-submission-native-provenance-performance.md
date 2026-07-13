@@ -2,7 +2,7 @@
 
 Date: 2026-07-13
 Decision: ADR-035
-Status: Node stress and benchmark complete; headed Chrome evidence is recorded in a later checkpoint
+Status: Node stress, benchmark, and headed Chrome evidence complete
 
 ## Reproduction
 
@@ -12,6 +12,16 @@ node tests/stress/scratch-submission-native-provenance.mjs \
   > /tmp/geoscratch-submission-native-stress.json
 node tests/benchmarks/scratch-submission-native-provenance.mjs \
   > /tmp/geoscratch-submission-native-benchmark.json
+```
+
+Start the example consumer in one terminal, then run the headed verifier in a
+second terminal:
+
+```bash
+npm --workspace examples run dev -- \
+  --host 127.0.0.1 --port 4173 --strictPort
+node tests/browser/scratch-submission-native-provenance.mjs \
+  > /tmp/geoscratch-submission-native-browser.json
 ```
 
 Both scripts self-verify structural invariants before writing a successful JSON
@@ -114,6 +124,34 @@ returns to terminal zero.
 
 ## Headed Chrome
 
-Real WebGPU valid submission, delayed validation, exact readback bytes, and the
-11-page visual regression matrix are intentionally left to the headed Chrome
-checkpoint. No browser or adapter claim is inferred from the Node results above.
+The headed verifier passed on Chrome 150.0.7871.115 using the Apple Metal 3
+adapter. This is one current browser/adapter observation, not a portability
+claim for other implementations.
+
+- The existing 11-page regression matrix remained nonblank. Every page had zero
+  unexpected console warning/error, page error, request failure, or verifier
+  failure; the existing exact readback probe also passed.
+- The valid probe returned a non-thenable `SubmittedWork` synchronously. Its
+  frozen summary outcome was `observed-succeeded`, ordered and direct readback
+  both returned exactly `[2, 4, 6, 8]`, and it retained zero incidents or
+  uncaptured errors.
+- The delayed-validation probe used a 4-byte uniform binding for a shader that
+  requires a 16-byte uniform structure. Scratch preflight accepted the public
+  shape, while the real implementation reported validation at
+  `encoder-finish` for the encoder segment and then at `queue-submit` for the
+  invalid command-buffer action.
+- `SubmittedWork.done` rejected with
+  `SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED`. Both epoch-1 potential-write
+  targets became `indeterminate`; evidence remained JSON-safe and omitted the
+  complete WGSL source.
+- The verifier deliberately requires no fabricated `pass-command` outcome for
+  this delayed error. The exact observed operation is encoder finalization; the
+  evidence does not identify the draw command as the unique native cause.
+- Both valid and invalid probes ended with zero pending observations, effectful
+  submitted works, live resources, active mappings, active captures, lifecycle
+  subscribers, uncaptured errors, and unexpected browser failures.
+
+Screenshots and the machine-readable report were written below
+`/tmp/geoscratch-submission-native-provenance-browser/` and
+`/tmp/geoscratch-submission-native-browser.json`. They are verification output,
+not tracked repository artifacts.

@@ -2,7 +2,7 @@
 
 Date: 2026-07-13
 Decision: ADR-035
-Status: Source inventory complete; runtime evidence follows in later checkpoints
+Status: Source inventory, runtime stress, benchmark, and headed Chrome evidence complete; fixed-baseline parity remains open
 
 ## Audit Boundary
 
@@ -103,9 +103,41 @@ attribution or selects a stable diagnostic. OOM does not identify one command
 or resource; it proves only that the enclosing observed family captured an OOM
 error.
 
-## Source Result
+## Runtime And Browser Result
 
-The source inventory is closed with executable coverage. Runtime stress,
-benchmark measurements, real Chrome valid/invalid probes, and the final
-Goal-start parity review are separate checkpoints and must supply their own
-current-state evidence before ADR-035 completion.
+The executable source inventory, 20,000-summary/20,000-off stress run, eleven
+benchmark profiles, and headed Chrome verifier all passed on 2026-07-13. The
+performance record contains the exact machine, scope, timing, evidence-byte,
+budget, ignored-Promise, finite-capture, and terminal-zero observations.
+
+Chrome 150.0.7871.115 on Apple Metal 3 supplied two distinct proofs:
+
+- A valid summary submission returned synchronously and non-thenably, resolved
+  to frozen `observed-succeeded`, preserved ordered/direct bytes
+  `[2, 4, 6, 8]`, and left no incident, uncaptured error, owner, subscriber, or
+  resource behind.
+- A valid Scratch render setup with a 4-byte uniform binding and shader-required
+  16-byte uniform structure produced delayed validation. Detailed capture
+  observed it at `encoder-finish` with an `encoder-segment` location, followed
+  by validation at `queue-submit` for the command-buffer action. `done` rejected
+  with the structured submission diagnostic, and both current epoch-1
+  potential-write targets became `indeterminate`.
+
+The Chrome result is deliberately not described as a unique draw-command cause.
+This browser/device validated the undersized binding when the encoder was
+finalized, so the strongest supported statement is the exact observed
+`encoder-finish` operation inside its segment. There is no fabricated
+`pass-command` outcome, and native prose did not select the primary diagnostic.
+The error remained inside Scratch scopes: the probe recorded zero uncaptured,
+console, page, or request failures.
+
+The existing 11-page headed regression matrix and exact readback probe also
+passed. All 11 canvases were nonblank under the existing pixel checks, and all
+pages retained zero unexpected browser failures.
+
+## Remaining Completion Gate
+
+Task 10 evidence is closed. ADR-035 completion still requires the fixed
+Goal-start `a69c79a` parity audit and the final five-axis strict review with all
+fresh gates rerun. Those results belong to the final parity record and are not
+inferred from this source/runtime audit.

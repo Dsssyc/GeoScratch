@@ -231,11 +231,10 @@ Implementation and bilingual contract are now present for the ADR-035 core:
   readback gates bytes on the associated submission outcome without converting
   queue-completion rejection into mapping failure.
 
-The schema-v4 implementation, unit/type gates, bilingual contract, and ordinary
-example migration are complete for this slice. Keep this item open until the
-complete native-call inventory, long-run scope/budget evidence, real
-delayed-validation Chrome evidence, fixed-baseline parity, and a strict
-re-review are all recorded.
+The schema-v4 implementation, unit/type gates, bilingual contract, ordinary
+example migration, complete native-call inventory, long-run scope/budget
+evidence, and real delayed-validation Chrome evidence are now recorded. Keep
+this item open until fixed-baseline parity and a strict re-review are complete.
 
 ## Update Rules
 

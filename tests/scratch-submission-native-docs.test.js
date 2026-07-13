@@ -135,10 +135,60 @@ describe('scratch submission native outcome documentation', () => {
         const review = read('docs', 'review', 'scratch-api-intelligent-friendly-review.md')
 
         expect(review).to.include('Implementation and bilingual contract are now present')
-        expect(review).to.include('Keep this item open')
+        expect(review).to.match(/Keep\s+this item open/)
         expect(review).to.include('complete native-call inventory')
-        expect(review).to.match(/real\s+delayed-validation Chrome evidence/)
+        expect(review).to.match(/real\s+delayed-validation Chrome evidence are now recorded/)
+        expect(review).to.match(/fixed-baseline parity/)
         expect(review).to.match(/strict\s+re-review/)
+    })
+
+    it('publishes executable source, stress, benchmark, and headed-browser evidence', () => {
+
+        const audit = read(
+            'docs',
+            'review',
+            'scratch-submission-native-provenance-audit.md'
+        )
+        const performance = read(
+            'docs',
+            'review',
+            'scratch-submission-native-provenance-performance.md'
+        )
+        const stress = read('tests', 'stress', 'scratch-submission-native-provenance.mjs')
+        const benchmark = read(
+            'tests',
+            'benchmarks',
+            'scratch-submission-native-provenance.mjs'
+        )
+        const browser = read('tests', 'browser', 'scratch-submission-native-provenance.mjs')
+
+        for (const marker of [
+            '37 source call sites',
+            'Chrome 150.0.7871.115',
+            'encoder-finish',
+            'There is no fabricated',
+            'Goal-start `a69c79a` parity audit',
+        ]) {
+            expect(audit, marker).to.include(marker)
+        }
+        for (const marker of [
+            '20,000 summary and 20,000 off submissions',
+            'All 55 rounds verified',
+            'Chrome 150.0.7871.115',
+            'Apple Metal 3',
+            '11-page regression matrix',
+            '[2, 4, 6, 8]',
+            'does not identify the draw command',
+        ]) {
+            expect(performance, marker).to.include(marker)
+        }
+        expect(stress).to.include('20_000')
+        expect(stress).to.include('maxPendingNativeObservations')
+        expect(benchmark).to.include("profile('detailed-many-commands-immediate'")
+        expect(benchmark).to.include('timingThresholdsEnforced: false')
+        expect(browser).to.include('validateDelayedValidationProbe')
+        expect(browser).to.include('claimedCommandOutcome')
+        expect(browser).to.include("stage === 'encoder-finish'")
     })
 
     it('makes every ordinary completion proof inspect native outcome and done', () => {
