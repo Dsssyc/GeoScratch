@@ -144,6 +144,17 @@ also produces a `readback-failure` incident at `queue-completion` with
 `enclosing-operation-family` attribution: the completion barrier identifies
 the replayed submission family, not one proven causal command.
 
+ADR-035 accepts a clean-cut native-outcome extension. `submit()` remains
+synchronous, but each effectful attempt is observed by one constant-size
+summary error-scope bundle by default; instrumentation may be explicitly off,
+and per-stage detail exists only inside finite diagnostic capture. The returned
+work exposes an always-resolving immutable `nativeOutcome`. Its `done` Promise
+joins native observation with queue completion while continuing to exclude
+readback mapping and host copy. Delayed native failure marks only still-current
+potential writes indeterminate; it never rolls epochs back or rewrites the
+historical submission ledger. This is the accepted target contract;
+implementation evidence is tracked by ADR-035 and the active review item.
+
 ### Resize Between Construction And Submission
 
 `TextureResource.resize()` does not add a submission step. It is a Promise-returning resource allocation transaction, not queue work. While its candidate scopes settle, the old allocation remains current and submission encoding performs no hidden wait. An application that requires the replacement for a submission explicitly awaits resize first. A `SubmissionBuilder` stores logical pass, command, and resource references; preflight and encoding resolve and validate whichever allocation is current at submission time. Texture-backed color and depth/stencil attachments explicitly select one `2d` mip-level array layer; stale mip/layer view descriptors or mismatched current render extents/sample counts fail before command encoder creation or ledger mutation. Attachments remain independent of the compatibility-mode texture-binding dimension.

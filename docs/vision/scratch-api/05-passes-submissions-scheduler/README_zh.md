@@ -142,6 +142,16 @@ operation 的 mapping outcome。每个 immutable link 还会产生一个位于
 `readback-failure` incident：completion barrier 只能标识 replayed submission
 family，不能证明某一个 command 是原因。
 
+ADR-035 接受一个 clean-cut native-outcome 扩展。`submit()` 继续同步，但每个
+effectful attempt 默认由一个常数规模的 summary error-scope bundle 观察；
+instrumentation 可以显式关闭，per-stage detail 只能存在于有限 diagnostic
+capture。返回的 work 暴露始终 resolve 的 immutable `nativeOutcome`；它的
+`done` Promise 联合 native observation 与 queue completion，但继续排除
+readback mapping 与 host copy。迟到的 native failure 只把仍为当前版本的
+potential writes 标为 indeterminate，不回滚 epoch，也不改写历史 submission
+ledger。这是已接受的目标契约；实现证据由 ADR-035 与 active review item
+继续跟踪。
+
 ### 构造与提交之间的 Resize
 
 `TextureResource.resize()` 不会增加 submission step。它是返回 Promise 的 resource allocation transaction，不是 queue work。candidate scope settle 期间旧 allocation 保持 current，submission encoding 不会隐藏等待；若某个 submission 必须使用 replacement，应用需要先显式 await resize。`SubmissionBuilder` 保存逻辑 pass、command 与 resource reference；preflight 与 encoding 会解析并校验 submission 时实际 current 的 allocation。Texture-backed color 与 depth/stencil attachment 会显式选择一个 `2d` mip-level array layer；过期的 mip/layer view descriptor 或不匹配的 current render extents/sample counts，都会在 command encoder creation 或 ledger mutation 前失败。Attachment 不受 compatibility-mode texture-binding dimension 约束。

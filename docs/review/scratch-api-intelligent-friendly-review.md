@@ -212,9 +212,22 @@ partial implementations.
 
 ## Current Review Items
 
-No unresolved readback staging or mapping item remains after ADR-034. Add a new
-item only when a distinct design risk is found; do not reopen this completed
-scope merely to absorb one of its explicit non-goals.
+### Submission Native Outcome And Content Truth
+
+ADR-035 accepts the next target contract. Completion evidence must prove that
+`SubmissionBuilder.submit()` remains synchronous and physically ordered while
+summary scopes remain constant-size, detailed scopes remain finite, and off
+mode is explicitly unobserved. `SubmittedWork.nativeOutcome` must retain all
+native scope outcomes without mutating the preflight report, while `done` must
+join native observation with queue completion without waiting for readback
+mapping or host copy.
+
+The implementation must also prove that delayed native failure cannot leave
+optimistic resource/query content marked ready, cannot roll epochs backward,
+and cannot poison a later acknowledged epoch. Keep this item open until schema
+v4, content indeterminacy, complete native-call inventory, long-run scope/budget
+evidence, real delayed-validation Chrome evidence, fixed-baseline parity, and a
+strict re-review are all recorded.
 
 ## Update Rules
 
