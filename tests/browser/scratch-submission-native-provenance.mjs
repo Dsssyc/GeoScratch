@@ -206,12 +206,12 @@ async function verifySubmissionTransactions(browser) {
                 usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
             })
             const upload = runtime.createUploadCommand({
-                target: source,
+                target: source.region(),
                 data: new Uint32Array([ 2, 4, 6, 8 ]),
             })
             const readbackCommand = await runtime.createReadbackCommand({
                 label: 'browser valid ordered readback',
-                source: { resource: source, contentEpoch: 1 },
+                source: { region: source.region(), contentEpoch: 1 },
                 whenMissing: 'throw',
             })
 
@@ -227,7 +227,7 @@ async function verifySubmissionTransactions(browser) {
             await submitted.done
             const directOperation = runtime.createReadback({
                 label: 'browser valid direct readback',
-                source,
+                source: source.region(),
                 after: submitted,
             })
             const directBytes = await directOperation.toBytes()
@@ -351,7 +351,7 @@ async function verifySubmissionTransactions(browser) {
             const pass = runtime.createRenderPass({
                 label: 'browser delayed validation pass',
                 color: [ {
-                    target,
+                    target: target.view(),
                     load: 'clear',
                     store: 'store',
                     clear: [ 0, 0, 0, 1 ],
@@ -359,7 +359,7 @@ async function verifySubmissionTransactions(browser) {
             })
             const upload = runtime.createUploadCommand({
                 label: 'browser undersized uniform upload',
-                target: uniform,
+                target: uniform.region(),
                 data: new Uint32Array([ 1 ]),
             })
             const draw = runtime.createDrawCommand({

@@ -63,7 +63,7 @@ async function stressDirect(iterations) {
     for (let index = 0; index < iterations; index++) {
         const operation = runtime.createReadback({
             label: `direct stress ${index}`,
-            source,
+            source: source.region(),
             retain: 'consume-on-read',
         })
         const bytes = await operation.toBytes()
@@ -97,7 +97,7 @@ async function stressOrdered(iterations) {
     const source = await createReadySource(runtime)
     const command = await runtime.createReadbackCommand({
         label: 'ordered stress command',
-        source: { resource: source, contentEpoch: source.contentEpoch },
+        source: { region: source.region(), contentEpoch: source.contentEpoch },
         whenMissing: 'throw',
     })
     const stagingAllocations = fake.calls.buffers.filter(isStagingBuffer).length
@@ -169,7 +169,7 @@ async function createReadySource(runtime) {
         usage: 0x4 | 0x8,
     })
     const upload = runtime.createUploadCommand({
-        target: source,
+        target: source.region(),
         data: new Uint32Array([ 1, 2, 3, 4 ]),
     })
     const submitted = runtime.createSubmission().upload(upload).submit()

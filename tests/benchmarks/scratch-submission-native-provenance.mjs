@@ -222,7 +222,7 @@ async function createFixture(runtime) {
     })
     const seed = runtime.createUploadCommand({
         label: 'submission benchmark seed',
-        target: source,
+        target: source.region(),
         data: new Uint32Array([ 1, 2, 3, 4 ]),
     })
     const seeded = runtime.createSubmission().upload(seed).submit()
@@ -230,16 +230,15 @@ async function createFixture(runtime) {
     const copies = Array.from({ length: manyCount }, (_, index) =>
         runtime.createCopyCommand({
             label: `submission benchmark copy ${index}`,
-            source: { resource: source, contentEpoch: 1 },
-            target,
-            byteLength: 16,
+            source: { region: source.region(), contentEpoch: 1 },
+            target: target.region(),
             whenMissing: 'throw',
         })
     )
     const uploads = Array.from({ length: manyCount }, (_, index) =>
         runtime.createUploadCommand({
             label: `submission benchmark upload ${index}`,
-            target,
+            target: target.region(),
             data: new Uint32Array([ index, index + 1, index + 2, index + 3 ]),
         })
     )

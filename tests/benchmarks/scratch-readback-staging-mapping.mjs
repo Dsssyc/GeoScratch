@@ -85,7 +85,7 @@ async function benchmarkProfile(definition) {
         await runWorkload(runtime, fake, definition.workload, setup, warmupIterations, false)
         const capture = definition.recorder === 'capture'
             ? runtime.diagnostics.capture({
-                maxOperations: iterations * 4,
+                maxOperations: iterations * 6,
                 maxDurationMs: 60_000,
                 maxEvidenceBytes: 32 * 1024 * 1024,
                 includeStacks: true,
@@ -154,14 +154,14 @@ async function setupWorkload(runtime, workload) {
         usage: 0x4 | 0x8,
     })
     const upload = runtime.createUploadCommand({
-        target: source,
+        target: source.region(),
         data: new Uint32Array([ 1, 2, 3, 4 ]),
     })
     await runtime.createSubmission().upload(upload).submit().done
     if (workload !== 'ordered-reuse') return { source }
     const command = await runtime.createReadbackCommand({
         label: 'ordered mapping benchmark',
-        source: { resource: source, contentEpoch: source.contentEpoch },
+        source: { region: source.region(), contentEpoch: source.contentEpoch },
         whenMissing: 'throw',
     })
     return { source, command }
@@ -178,13 +178,16 @@ async function runWorkload(runtime, fake, workload, setup, count, timed) {
         let cleanup
         if (workload === 'direct') {
             const operation = runtime.createReadback({
-                source: setup.source,
+                source: setup.source.region(),
                 retain: 'consume-on-read',
             })
             settlement = operation.toBytes()
         } else if (workload === 'ordered-factory') {
             settlement = runtime.createReadbackCommand({
-                source: { resource: setup.source, contentEpoch: setup.source.contentEpoch },
+                source: {
+                    region: setup.source.region(),
+                    contentEpoch: setup.source.contentEpoch,
+                },
                 whenMissing: 'throw',
             })
             cleanup = value => value.dispose()

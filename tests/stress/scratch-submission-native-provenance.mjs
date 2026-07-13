@@ -98,7 +98,7 @@ async function stressSubmissionMode(mode, iterations) {
     })
     const upload = runtime.createUploadCommand({
         label: `${mode} stress upload`,
-        target,
+        target: target.region(),
         data: new Uint32Array([ 1, 2, 3, 4 ]),
     })
     const counters = emptyCounters()
@@ -157,7 +157,7 @@ async function stressDelayedObservationBudget() {
     })
     const target = await runtime.createBuffer({ size: 16, usage: 0x8 })
     const upload = runtime.createUploadCommand({
-        target,
+        target: target.region(),
         data: new Uint32Array([ 5, 6, 7, 8 ]),
     })
     clearFakeCalls(fake)
@@ -216,7 +216,7 @@ async function stressIgnoredRejectingDone() {
     const runtime = await createStressRuntime(fake)
     const target = await runtime.createBuffer({ size: 16, usage: 0x8 })
     const upload = runtime.createUploadCommand({
-        target,
+        target: target.region(),
         data: new Uint32Array([ 9, 10, 11, 12 ]),
     })
     const unhandledRejections = []
@@ -272,15 +272,14 @@ async function stressFiniteDetailedCapture() {
     const source = await runtime.createBuffer({ size: 16, usage: 0x4 | 0x8 })
     const target = await runtime.createBuffer({ size: 16, usage: 0x8 })
     const upload = runtime.createUploadCommand({
-        target: source,
+        target: source.region(),
         data: new Uint32Array([ 13, 14, 15, 16 ]),
     })
     const seeded = runtime.createSubmission().upload(upload).submit()
     await seeded.done
     const copy = runtime.createCopyCommand({
-        source: { resource: source, contentEpoch: 1 },
-        target,
-        byteLength: 16,
+        source: { region: source.region(), contentEpoch: 1 },
+        target: target.region(),
         whenMissing: 'throw',
     })
     const capture = runtime.diagnostics.capture({

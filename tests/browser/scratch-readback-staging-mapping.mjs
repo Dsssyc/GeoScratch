@@ -160,12 +160,12 @@ async function verifyReadbackTransactions(browser) {
             usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
         })
         const upload = runtime.createUploadCommand({
-            target: source,
+            target: source.region(),
             data: new Uint32Array([ 2, 4, 6, 8 ]),
         })
         const commandPromise = runtime.createReadbackCommand({
             label: 'browser ordered readback',
-            source: { resource: source, contentEpoch: 1 },
+            source: { region: source.region(), contentEpoch: 1 },
             whenMissing: 'throw',
         })
         const factoryIsPromise = commandPromise instanceof Promise
@@ -180,7 +180,7 @@ async function verifyReadbackTransactions(browser) {
         await submitted.done
         const directOperation = runtime.createReadback({
             label: 'browser direct readback',
-            source,
+            source: source.region(),
             after: submitted,
             retain: 'consume-on-read',
         })
@@ -237,7 +237,7 @@ async function verifyReadbackTransactions(browser) {
             usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
         })
         const budgetFailure = await captureFailure(
-            budgetRuntime.createReadback({ source: budgetSource }).toBytes(),
+            budgetRuntime.createReadback({ source: budgetSource.region() }).toBytes(),
             ScratchDiagnosticError
         )
         const budgetSnapshot = budgetRuntime.diagnostics.snapshot()
