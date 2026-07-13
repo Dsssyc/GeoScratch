@@ -89,13 +89,13 @@ Coverage check for this pass:
 
 ### Submission Naming And Mental Model
 
-Resolved in `docs/vision/scratch-api/05-passes-submissions-scheduler/`: scratch core now uses `Submission` rather than `Frame` as the single submission model. The design separates `SubmissionBuilder` from `SubmittedWork`, uses `submitted.done` for GPU completion, and treats presentation as one submission mode rather than the definition of the core type.
+Resolved in `docs/vision/scratch-api/05-passes-submissions-scheduler/`: scratch core now uses `Submission` rather than `Frame` as the single submission model. The design separates `SubmissionBuilder` from `SubmittedWork`, uses `submitted.nativeOutcome` for immutable native evidence and `submitted.done` for the joined native-observation/queue-completion boundary, and treats presentation as one submission mode rather than the definition of the core type.
 
 Coverage check for this pass:
 
 - `Frame` is no longer the scratch core submission type: covered by `05-passes-submissions-scheduler`, `00-overview`, and `07-transfers-epochs`.
 - `SubmissionBuilder` / `SubmittedWork` split: covered by `05-passes-submissions-scheduler` and the scratch-api module index.
-- `SubmittedWork` is not thenable; GPU completion uses `submitted.done`: covered by `05-passes-submissions-scheduler` and `07-transfers-epochs`.
+- `SubmittedWork` is not thenable; native evidence uses `submitted.nativeOutcome`, and the joined native-observation/queue-completion boundary uses `submitted.done`: covered by `05-passes-submissions-scheduler` and `07-transfers-epochs`.
 - Presentation is a submission mode, not the core concept: covered by `01-runtime-surface`, `05-passes-submissions-scheduler`, `07-transfers-epochs`, and `scratch-graphics-kernel.md`.
 - `FrameContext` / `FrameValidationMode` are renamed to `SubmissionContext` / `SubmissionValidationMode`: covered by `04-pipelines-commands` and `05-passes-submissions-scheduler`.
 
@@ -193,8 +193,9 @@ modules, and the TypeScript implementation:
   availability barrier. Fixed-order native outcomes, lifecycle races, cleanup,
   one materialization owner, and consume/retain concurrency are explicit.
 - Pending operations, logical staging bytes, retained host bytes, and active
-  mappings are always-current bounded facts. Schema-v3 operation/incident
-  history remains separately bounded, serializable, source-free, and handle-free.
+  mappings are always-current bounded facts. The current schema-v4
+  operation/incident history remains separately bounded, serializable,
+  source-free, and handle-free; ADR-035 replaced the prior schema-v3 envelope.
 - Final fixed-baseline parity preserved 12/12 original JavaScript behaviors and
   16/16 Goal-start TypeScript behaviors; 10/10 intentional ADR-034 replacements
   are explicit rather than disguised as compatibility.
@@ -210,11 +211,35 @@ schema-v2 compatibility path. Texture readback, mapped leases, and broader
 native-operation provenance remain explicit future slices rather than hidden
 partial implementations.
 
-## Current Review Items
+## Resolved Review Items
 
-No unresolved readback staging or mapping item remains after ADR-034. Add a new
-item only when a distinct design risk is found; do not reopen this completed
-scope merely to absorb one of its explicit non-goals.
+### Submission Native Outcome And Content Truth
+
+Implementation and bilingual contract are now present for the ADR-035 core:
+
+- `SubmissionBuilder.submit()` remains synchronous and physically ordered;
+  default summary scopes are constant-size, off mode is explicitly unobserved,
+  per-location detail exists only in finite capture, and readback ownership
+  claims complete before observation scopes.
+- `SubmittedWork.nativeOutcome` is immutable and always resolving, the preflight
+  report remains historical, and `done` joins native observation with queue
+  completion plus lifecycle until that completion settles, without waiting for
+  readback mapping or host copy. Lifecycle attribution remains temporal.
+- Delayed native or queue failure marks only still-current persistent potential
+  writes indeterminate, including a successfully replayed prefix when a later
+  action throws. Epochs never roll back, later acknowledged epochs are guarded,
+  all reads hard-fail before native effects, and Surface presentation output is
+  excluded.
+- Direct readback observes copy issue independently from mapping; ordered
+  readback gates bytes on the associated submission outcome without converting
+  queue-completion rejection into mapping failure. Direct readback rejects an
+  indeterminate source before staging allocation.
+
+The schema-v4 implementation, unit/type gates, bilingual contract, ordinary
+example migration, complete native-call inventory, long-run scope/budget
+evidence, real delayed-validation Chrome evidence, fixed-baseline parity, and
+the strict re-review are now recorded. This item is resolved by ADR-035 and
+`scratch-submission-native-final-parity-audit.md`.
 
 ## Update Rules
 

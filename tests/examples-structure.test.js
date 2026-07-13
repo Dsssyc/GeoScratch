@@ -235,7 +235,10 @@ describe('examples structure', () => {
             expect(source, name).to.include("canvas.dataset.status = 'loading'")
             expect(source, name).to.include("canvas.dataset.status = 'ready'")
             expect(source, name).to.include("canvas.dataset.status = 'error'")
-            expect(source, name).to.include('submitted.done.then')
+            expect(source, name).to.include('requireObservedSubmission(submitted).then')
+            expect(source, name).to.include('submitted.nativeOutcome')
+            expect(source, name).to.include('submitted.done')
+            expect(source, name).to.include('observed-succeeded')
         }
     })
 

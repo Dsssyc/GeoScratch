@@ -3,6 +3,7 @@ import {
 } from 'geoscratch'
 
 const canvas = document.getElementById('GPUFrame')
+canvas.dataset.status = 'loading'
 
 const uniformTriangleWgsl = `
 struct TriangleUniforms {
@@ -30,6 +31,7 @@ fn fsMain() -> @location(0) vec4f {
 `
 
 void main().catch((error) => {
+    canvas.dataset.status = 'error'
     console.error(error)
 })
 
@@ -111,6 +113,7 @@ async function main() {
     })
 
     let needsUpload = true
+    let firstFrameSettled = false
 
     function render() {
 
@@ -125,7 +128,15 @@ async function main() {
         const submitted = submission
             .render(pass, [ draw ])
             .submit()
-        void submitted.done
+        if (!firstFrameSettled) {
+            firstFrameSettled = true
+            void requireObservedSubmission(submitted).then(() => {
+                canvas.dataset.status = 'ready'
+            }).catch((error) => {
+                canvas.dataset.status = 'error'
+                console.error(error)
+            })
+        }
 
         requestAnimationFrame(render)
     }
@@ -141,5 +152,16 @@ function resizeSurface(surface, canvas) {
 
     if (surface.size.width !== width || surface.size.height !== height) {
         surface.resize({ width, height })
+    }
+}
+
+async function requireObservedSubmission(submitted) {
+
+    const [ nativeOutcome ] = await Promise.all([
+        submitted.nativeOutcome,
+        submitted.done,
+    ])
+    if (nativeOutcome.status !== 'observed-succeeded') {
+        throw new Error(`Submission native outcome was ${nativeOutcome.status}.`)
     }
 }

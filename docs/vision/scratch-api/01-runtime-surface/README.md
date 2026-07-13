@@ -157,6 +157,38 @@ allocation, hidden retry, or native staging handle on the public objects.
 `SubmissionBuilder.submit()` remains synchronous and never waits for mapping or
 host-copy completion.
 
+## Submission Native Observation Ownership And Budgets
+
+Submission native observation is runtime-owned diagnostics policy. Runtime
+creation exposes the complete persistent policy surface:
+
+```ts
+const runtime = await ScratchRuntime.create({
+    diagnostics: {
+        submissionScopes: 'summary',
+        maxPendingNativeObservations: 64,
+    },
+})
+```
+
+`summary` is the default. One effectful submission or direct readback reserves
+one native-observation owner and uses one constant-size validation, internal,
+and out-of-memory scope bundle around its complete native issue family. The
+number of scopes does not grow with passes, commands, encoder segments, or
+queue actions. `off` opens no such scopes and reports explicit `unobserved`
+provenance; it does not reinterpret queue completion as native validation
+acknowledgement. Effect-free submissions reserve no owner and report
+`no-native-work`.
+
+`maxPendingNativeObservations` is a shared finite limit for unsettled
+submission and direct-readback observations. Exhaustion fails before encoder or
+queue effects instead of silently degrading to `off`. The always-current fact
+graph exposes `submissionScopes`, `maxPendingNativeObservations`,
+`currentPendingNativeObservations`, `peakPendingNativeObservations`, and
+`currentEffectfulSubmittedWork`. These facts scale with unsettled ownership,
+not runtime age; bounded operation and incident history remains a separate
+retention concern.
+
 ## Device Loss
 
 `ScratchRuntime` owns device-loss handling. After device loss:

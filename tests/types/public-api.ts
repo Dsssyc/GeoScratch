@@ -58,6 +58,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         label: 'typed scratch runtime',
         requiredFeatures: [ 'timestamp-query' ],
         requiredLimits: { maxBufferSize: 1024 },
+        diagnostics: {
+            submissionScopes: 'summary',
+            maxPendingNativeObservations: 8,
+        },
     })
     const diagnostics: scr.ScratchRuntimeDiagnostics = runtime.diagnostics
     const compatDiagnostics: scratchCompat.ScratchRuntimeDiagnostics = diagnostics
@@ -74,6 +78,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         kind: 'render-pipeline-creation',
         targetKind: 'pipeline',
         pipelineId: 'pipeline-id',
+    })
+    const submissionOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+        kind: 'submission-native-observation',
+        targetKind: 'submission',
+        submissionId: 'submission-id',
+        nativeLocationKind: 'pass-command',
+        nativeStage: 'command-encode',
+        nativeOutcomeStatus: 'observed-failed',
     })
     const operationTarget: scr.ScratchGpuOperationTarget | undefined = operationRecords[0]?.target
     if (operationTarget?.kind === 'resource') {
@@ -94,9 +106,20 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         targetKind: 'resource',
         sequenceFrom: 1,
     })
+    const submissionIncidentRecords: readonly scr.ScratchGpuIncidentReport[] = diagnostics.incidents({
+        kind: 'submission-failure',
+        targetKind: 'submission',
+        submissionId: 'submission-id',
+        nativeLocationKind: 'queue-action',
+        nativeStage: 'queue-submit',
+    })
     const currentPipelineFacts: readonly scr.ScratchRuntimePipelineFact[] = diagnosticsSnapshot.pipelines
-    const evidenceSchemaVersion: 3 = diagnosticsEvidence.version
-    const snapshotSchemaVersion: 3 = diagnosticsSnapshot.version
+    const evidenceSchemaVersion: 4 = diagnosticsEvidence.version
+    const snapshotSchemaVersion: 4 = diagnosticsSnapshot.version
+    const submissionScopeMode: scr.ScratchSubmissionScopeMode =
+        diagnosticsSnapshot.submissionNative.submissionScopes
+    const pendingNativeObservationBudget: number =
+        diagnosticsSnapshot.submissionNative.maxPendingNativeObservations
     const compatPipelineCompilationReport: scratchCompat.PipelineCompilationReport = typedPipelineCompilationReport
     const compilationMessageSourceRedacted: boolean | undefined =
         typedPipelineCompilationReport.messages[0]?.sourceExcerptRedacted
@@ -112,6 +135,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         maxEvidenceBytes: 4096,
         includeStacks: true,
         includeDescriptors: true,
+        nativeSubmissionDetail: 'step',
     })
     const diagnosticCaptureReport: scr.ScratchDiagnosticCaptureReport = diagnosticCapture.stop()
     // @ts-expect-error Runtime native device ownership is read-only
@@ -1068,6 +1092,40 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     textureUpload._commitLogicalWrite()
     const builder: scr.SubmissionBuilder = runtime.createSubmission(submissionOptions)
     const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).upload(externalImageUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
+    const nativeOutcome: Promise<scr.ScratchSubmissionNativeOutcome> = submitted.nativeOutcome
+    const compatNativeOutcome: Promise<scratchCompat.ScratchSubmissionNativeOutcome> = nativeOutcome
+    const readbackNativeOutcome: scr.ScratchReadbackNativeOutcome = {
+        version: 4,
+        readbackId: 'readback-id',
+        mode: 'off',
+        status: 'unobserved',
+        locations: [],
+        outcomes: [],
+        omittedLocationCount: 0,
+        omittedOutcomeCount: 0,
+    }
+    const compatReadbackNativeOutcome: scratchCompat.ScratchReadbackNativeOutcome = readbackNativeOutcome
+    // @ts-expect-error direct readback native outcomes cannot fabricate submission locations
+    readbackNativeOutcome.locations[0] = { kind: 'submission', submissionId: submitted.id }
+    const indeterminateResourceState: scr.ResourceState = 'indeterminate'
+    const indeterminateQuerySlotState: scr.QuerySetSlotState = 'indeterminate'
+    const potentialWrites: readonly scr.SubmittedPotentialWrite[] = submitted.potentialWrites
+    // @ts-expect-error SubmittedWork construction is package-private
+    new scr.SubmittedWork(runtime)
+    // @ts-expect-error SubmittedWork reports expose readonly diagnostic arrays
+    submitted.report.diagnostics.push(diagnostic)
+    // @ts-expect-error SubmittedWork diagnostic facts are deeply readonly
+    submitted.diagnostics[0]!.code = 'FORGED'
+    // @ts-expect-error SubmittedWork resource access facts are deeply readonly
+    submitted.resourceAccesses[0]!.contentEpochBefore = 999
+    // @ts-expect-error SubmittedWork producer origins are deeply readonly
+    submitted.producerEpochs[0]!.producedBy.stepIndex = 999
+    // @ts-expect-error SubmittedWork execution facts are deeply readonly
+    submitted.executionOutcomes[0]!.status = 'executed'
+    // @ts-expect-error SubmittedWork readback links are deeply readonly
+    submitted.readbacks[0]!.operationId = 'forged'
+    // @ts-expect-error SubmittedWork potential-write facts are deeply readonly
+    submitted.potentialWrites[0]!.contentEpoch = 999
     const resourceAccesses: readonly scr.SubmissionResourceAccess[] = submitted.resourceAccesses
     const producerEpochs: readonly scr.SubmittedResourceEpoch[] = submitted.producerEpochs
     const diagnosticSubject: scr.DiagnosticSubject = storageInput.subject

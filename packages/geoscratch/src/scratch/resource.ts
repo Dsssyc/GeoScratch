@@ -16,7 +16,7 @@ export type ScratchResourceIdentity = Readonly<{
     id: string
 }>
 
-export type ResourceState = 'empty' | 'ready' | 'disposed'
+export type ResourceState = 'empty' | 'ready' | 'indeterminate' | 'disposed'
 
 type ResourceMutators = {
     replaceAllocation(descriptor: object): void

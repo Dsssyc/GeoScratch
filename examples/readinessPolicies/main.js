@@ -316,7 +316,7 @@ async function main() {
         sampleDraw,
     })
 
-    await submitted.done
+    await requireObservedSubmission(submitted)
     canvas.dataset.status = 'ready'
 }
 
@@ -411,5 +411,16 @@ function resizeSurface(surface, targetCanvas) {
 
     if (surface.size.width !== width || surface.size.height !== height) {
         surface.resize({ width, height })
+    }
+}
+
+async function requireObservedSubmission(submitted) {
+
+    const [ nativeOutcome ] = await Promise.all([
+        submitted.nativeOutcome,
+        submitted.done,
+    ])
+    if (nativeOutcome.status !== 'observed-succeeded') {
+        throw new Error(`Submission native outcome was ${nativeOutcome.status}.`)
     }
 }

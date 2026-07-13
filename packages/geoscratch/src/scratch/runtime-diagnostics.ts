@@ -27,9 +27,17 @@ import type {
     ScratchGpuPressureEvidence,
     ScratchGpuReadbackOperationTarget,
     ScratchGpuResourceOperationTarget,
+    ScratchGpuSubmissionOperationTarget,
     ScratchPipelineNativeLabelEvidence,
     ScratchNativeGpuErrorFacts,
+    ScratchSubmissionScopeMode,
+    ScratchSubmissionNativeLocation,
+    ScratchSubmissionNativeOutcomeInput,
+    ScratchSubmissionNativeOutcomeMode,
+    ScratchSubmissionNativeOutcomeStatus,
+    ScratchSubmissionNativeStage,
 } from './gpu-operation.js'
+import type { ScratchReadbackNativeOutcomeInput } from './gpu-operation.js'
 import type { PipelineCompilationReport, PipelineKind } from './pipeline-compilation.js'
 import type { ScratchReadbackPolicy } from './readback-ownership.js'
 import type { Resource, ResourceState } from './resource.js'
@@ -40,6 +48,7 @@ const DEFAULT_EVIDENCE_BYTE_CAPACITY = 256 * 1024
 const DEFAULT_RECENT_OPERATION_LIMIT = 16
 const DEFAULT_CONTRIBUTOR_LIMIT = 8
 const DEFAULT_MAX_ACTIVE_CAPTURES = 4
+const DEFAULT_MAX_PENDING_NATIVE_OBSERVATIONS = 64
 const DEFAULT_CAPTURE_MAX_OPERATIONS = 128
 const DEFAULT_CAPTURE_MAX_DURATION_MS = 5_000
 const DEFAULT_CAPTURE_MAX_EVIDENCE_BYTES = 256 * 1024
@@ -59,15 +68,19 @@ export type ScratchRuntimeDiagnosticsOptions = Readonly<{
     recentOperationLimit?: number
     contributorLimit?: number
     maxActiveCaptures?: number
+    submissionScopes?: ScratchSubmissionScopeMode
+    maxPendingNativeObservations?: number
 }>
 
-type NormalizedScratchRuntimeDiagnosticsOptions = Readonly<{
+export type NormalizedScratchRuntimeDiagnosticsOptions = Readonly<{
     operationCapacity: number
     incidentCapacity: number
     evidenceByteCapacity: number
     recentOperationLimit: number
     contributorLimit: number
     maxActiveCaptures: number
+    submissionScopes: ScratchSubmissionScopeMode
+    maxPendingNativeObservations: number
 }>
 
 export type ScratchRuntimeResourceFact = Readonly<{
@@ -163,7 +176,7 @@ export type ScratchReadbackStagingReservation = Readonly<{
 }>
 
 export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
-    version: 3
+    version: 4
     runtime: Readonly<{
         id: string
         label?: string
@@ -189,6 +202,13 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
         peakRetainedHostBytes: number
         activeMappings: number
         peakActiveMappings: number
+    }>
+    submissionNative: Readonly<{
+        submissionScopes: ScratchSubmissionScopeMode
+        maxPendingNativeObservations: number
+        currentPendingNativeObservations: number
+        peakPendingNativeObservations: number
+        currentEffectfulSubmittedWork: number
     }>
     recorder: Readonly<{
         operationCapacity: number
@@ -228,7 +248,7 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
 }>
 
 export type ScratchRuntimeDiagnosticsEvidence = Readonly<{
-    version: 3
+    version: 4
     snapshot: ScratchRuntimeDiagnosticsSnapshot
     operations: readonly ScratchGpuOperationRecord[]
     incidents: readonly ScratchGpuIncidentReport[]
@@ -240,6 +260,10 @@ export type ScratchGpuOperationQuery = Readonly<{
     pipelineId?: string
     commandId?: string
     readbackId?: string
+    submissionId?: string
+    nativeLocationKind?: ScratchSubmissionNativeLocation['kind']
+    nativeStage?: ScratchSubmissionNativeStage
+    nativeOutcomeStatus?: ScratchSubmissionNativeOutcomeStatus
     targetKind?: ScratchGpuOperationTarget['kind']
     kind?: GpuOperationKind
     status?: GpuOperationStatus
@@ -254,7 +278,10 @@ export type ScratchGpuIncidentQuery = Readonly<{
     pipelineId?: string
     commandId?: string
     readbackId?: string
-    targetKind?: 'resource' | 'pipeline' | 'command' | 'readback' | 'runtime'
+    submissionId?: string
+    nativeLocationKind?: ScratchSubmissionNativeLocation['kind']
+    nativeStage?: ScratchSubmissionNativeStage
+    targetKind?: 'resource' | 'pipeline' | 'command' | 'readback' | 'submission' | 'runtime'
     kind?: ScratchGpuIncidentKind
     sequenceFrom?: number
     sequenceTo?: number
@@ -266,6 +293,7 @@ export type ScratchDiagnosticCaptureOptions = Readonly<{
     maxEvidenceBytes?: number
     includeStacks?: boolean
     includeDescriptors?: boolean
+    nativeSubmissionDetail?: 'step'
 }>
 
 type NormalizedScratchDiagnosticCaptureOptions = Readonly<{
@@ -274,6 +302,7 @@ type NormalizedScratchDiagnosticCaptureOptions = Readonly<{
     maxEvidenceBytes: number
     includeStacks: boolean
     includeDescriptors: boolean
+    nativeSubmissionDetail?: 'step'
 }>
 
 export type ScratchDiagnosticCaptureStopReason =
@@ -284,7 +313,7 @@ export type ScratchDiagnosticCaptureStopReason =
     | 'runtime-disposed'
 
 export type ScratchDiagnosticCaptureReport = Readonly<{
-    version: 3
+    version: 4
     id: string
     runtimeId: string
     stopReason: ScratchDiagnosticCaptureStopReason
@@ -322,6 +351,19 @@ export type ScratchGpuOperationCompletion = Readonly<{
     incidentId?: string
     nativeLabels?: ScratchPipelineNativeLabelEvidence
     compilationReport?: PipelineCompilationReport
+    nativeOutcome?: ScratchSubmissionNativeOutcomeInput | ScratchReadbackNativeOutcomeInput
+}>
+
+export type ScratchSubmissionNativeObservationReservation = Readonly<{
+    id: string
+    readonly isReleased: boolean
+    release(): void
+}>
+
+export type ScratchEffectfulSubmittedWorkReservation = Readonly<{
+    id: string
+    readonly isReleased: boolean
+    release(): void
 }>
 
 export type ScratchGpuIncidentInput = Readonly<{
@@ -339,6 +381,7 @@ export type ScratchGpuIncidentInput = Readonly<{
     pipelineErrorReason?: GPUPipelineErrorReason
     compilationReport?: PipelineCompilationReport
     outcomes?: readonly ScratchGpuIncidentOutcome[]
+    omittedOutcomeCount?: number
 }>
 
 type RuntimeDiagnosticsOwner = {
@@ -477,6 +520,8 @@ export class ScratchRuntimeDiagnosticsController {
     #readbackCommandFacts = new Map<string, ScratchRuntimeReadbackCommandFact>()
     #readbackFacts = new Map<string, ScratchRuntimeReadbackOperationFact>()
     #readbackStagingReservations = new Map<string, number>()
+    #submissionNativeObservationReservations = new Set<string>()
+    #effectfulSubmittedWorkReservations = new Set<string>()
     #pendingOperations = new Map<string, ScratchPendingGpuOperation>()
     #completedOperations = new WeakSet<ScratchGpuOperationRecord>()
     #registeredPipelineCreations = new WeakSet<ScratchGpuPipelineOperationRecord>()
@@ -499,6 +544,9 @@ export class ScratchRuntimeDiagnosticsController {
     #peakRetainedHostBytes = 0
     #activeMappings = 0
     #peakActiveMappings = 0
+    #currentPendingNativeObservations = 0
+    #peakPendingNativeObservations = 0
+    #currentEffectfulSubmittedWork = 0
     #aggregates: AggregateFacts = {
         allocationAttempts: 0,
         successfulAllocations: 0,
@@ -527,13 +575,13 @@ export class ScratchRuntimeDiagnosticsController {
     constructor(
         owner: RuntimeDiagnosticsOwner,
         device: GPUDevice,
-        options: ScratchRuntimeDiagnosticsOptions = {},
+        options: NormalizedScratchRuntimeDiagnosticsOptions,
         readbackPolicy: ScratchReadbackPolicy
     ) {
 
         this.#owner = owner
         this.#device = device
-        this.#options = normalizeDiagnosticsOptions(owner, options)
+        this.#options = options
         this.#readbackPolicy = readbackPolicy
         this.#facade = createDiagnosticsFacade(this)
         this.#installUncapturedErrorListener()
@@ -547,6 +595,178 @@ export class ScratchRuntimeDiagnosticsController {
     get lifecycleSubscriberCount(): number {
 
         return this.#lifecycleSubscribers.size
+    }
+
+    submissionNativeObservationMode(): ScratchSubmissionNativeOutcomeMode {
+
+        const detailed = [ ...this.#captures ].some(capture => {
+            const state = captureStateFor(capture)
+            return state.isActive && state.options.nativeSubmissionDetail === 'step'
+        })
+        return detailed ? 'detailed' : this.#options.submissionScopes
+    }
+
+    reserveSubmissionNativeObservation(
+        target: ScratchGpuSubmissionOperationTarget
+    ): ScratchSubmissionNativeObservationReservation {
+
+        const reservationId = target.submissionId
+        if (this.#submissionNativeObservationReservations.has(reservationId)) {
+            throw new TypeError(`Submission native observation ${reservationId} is already reserved.`)
+        }
+        if (
+            this.#submissionNativeObservationReservations.size >=
+            this.#options.maxPendingNativeObservations
+        ) {
+            const incident = this.recordIncident({
+                kind: 'submission-failure',
+                diagnosticCode: 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
+                nativeErrorCategory: 'none',
+                attribution: 'exact-operation',
+                target,
+                failureStage: 'budget',
+            })
+            throwScratchDiagnostic({
+                code: 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
+                severity: 'error',
+                phase: 'submission',
+                subject: { kind: 'Submission', id: target.submissionId },
+                related: [ this.#runtimeSubject(), incident.subject ],
+                message: 'ScratchRuntime submission native-observation budget is exhausted.',
+                expected: {
+                    maxPendingNativeObservations: this.#options.maxPendingNativeObservations,
+                },
+                actual: {
+                    currentPendingNativeObservations:
+                        this.#submissionNativeObservationReservations.size,
+                    requested: 1,
+                },
+            }, { incident })
+        }
+
+        this.#submissionNativeObservationReservations.add(reservationId)
+        this.#currentPendingNativeObservations =
+            this.#submissionNativeObservationReservations.size
+        this.#peakPendingNativeObservations = Math.max(
+            this.#peakPendingNativeObservations,
+            this.#currentPendingNativeObservations
+        )
+
+        let isReleased = false
+        const controller = this
+        return Object.freeze({
+            id: reservationId,
+            get isReleased() {
+
+                return isReleased
+            },
+            release() {
+
+                if (isReleased) return
+                isReleased = true
+                if (!controller.#submissionNativeObservationReservations.delete(reservationId)) return
+                controller.#currentPendingNativeObservations =
+                    controller.#submissionNativeObservationReservations.size
+            },
+        })
+    }
+
+    reserveReadbackNativeObservation(
+        target: ScratchGpuReadbackOperationTarget
+    ): ScratchSubmissionNativeObservationReservation {
+
+        const reservationId = target.readbackId
+        if (this.#submissionNativeObservationReservations.has(reservationId)) {
+            throw new TypeError(`Readback native observation ${reservationId} is already reserved.`)
+        }
+        if (
+            this.#submissionNativeObservationReservations.size >=
+            this.#options.maxPendingNativeObservations
+        ) {
+            const incident = this.recordIncident({
+                kind: 'readback-failure',
+                diagnosticCode: 'SCRATCH_READBACK_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
+                nativeErrorCategory: 'none',
+                attribution: 'exact-operation',
+                target,
+                failureStage: 'budget',
+            })
+            throwScratchDiagnostic({
+                code: 'SCRATCH_READBACK_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
+                severity: 'error',
+                phase: 'readback',
+                subject: { kind: 'ReadbackOperation', id: target.readbackId },
+                related: [ this.#runtimeSubject(), incident.subject ],
+                message: 'ScratchRuntime readback native-observation budget is exhausted.',
+                expected: {
+                    maxPendingNativeObservations: this.#options.maxPendingNativeObservations,
+                },
+                actual: {
+                    currentPendingNativeObservations:
+                        this.#submissionNativeObservationReservations.size,
+                    requested: 1,
+                },
+            }, { incident })
+        }
+
+        this.#submissionNativeObservationReservations.add(reservationId)
+        this.#currentPendingNativeObservations =
+            this.#submissionNativeObservationReservations.size
+        this.#peakPendingNativeObservations = Math.max(
+            this.#peakPendingNativeObservations,
+            this.#currentPendingNativeObservations
+        )
+
+        let isReleased = false
+        const controller = this
+        return Object.freeze({
+            id: reservationId,
+            get isReleased() {
+
+                return isReleased
+            },
+            release() {
+
+                if (isReleased) return
+                isReleased = true
+                if (!controller.#submissionNativeObservationReservations.delete(reservationId)) return
+                controller.#currentPendingNativeObservations =
+                    controller.#submissionNativeObservationReservations.size
+            },
+        })
+    }
+
+    retainEffectfulSubmittedWork(
+        submissionId: string
+    ): ScratchEffectfulSubmittedWorkReservation {
+
+        if (submissionId.length === 0) {
+            throw new TypeError('Effectful SubmittedWork requires a submissionId.')
+        }
+        if (this.#effectfulSubmittedWorkReservations.has(submissionId)) {
+            throw new TypeError(`Effectful SubmittedWork ${submissionId} is already retained.`)
+        }
+
+        this.#effectfulSubmittedWorkReservations.add(submissionId)
+        this.#currentEffectfulSubmittedWork = this.#effectfulSubmittedWorkReservations.size
+
+        let isReleased = false
+        const controller = this
+        return Object.freeze({
+            id: submissionId,
+            get isReleased() {
+
+                return isReleased
+            },
+            release() {
+
+                if (isReleased) return
+                isReleased = true
+                if (!controller.#effectfulSubmittedWorkReservations.delete(submissionId)) return
+                controller.#currentEffectfulSubmittedWork =
+                    controller.#effectfulSubmittedWorkReservations.size
+            },
+        })
     }
 
     subscribeLifecycle(subscriber: (change: ScratchRuntimeLifecycleChange) => void): () => void {
@@ -579,7 +799,7 @@ export class ScratchRuntimeDiagnosticsController {
             .map(operation => pendingFact(operation))
 
         return freezeEvidence({
-            version: 3,
+            version: 4,
             runtime: {
                 id: this.#owner.id,
                 ...(this.#owner.label !== undefined ? { label: boundedLabel(this.#owner.label) } : {}),
@@ -605,6 +825,13 @@ export class ScratchRuntimeDiagnosticsController {
                 peakRetainedHostBytes: this.#peakRetainedHostBytes,
                 activeMappings: this.#activeMappings,
                 peakActiveMappings: this.#peakActiveMappings,
+            },
+            submissionNative: {
+                submissionScopes: this.#options.submissionScopes,
+                maxPendingNativeObservations: this.#options.maxPendingNativeObservations,
+                currentPendingNativeObservations: this.#currentPendingNativeObservations,
+                peakPendingNativeObservations: this.#peakPendingNativeObservations,
+                currentEffectfulSubmittedWork: this.#currentEffectfulSubmittedWork,
             },
             recorder: {
                 operationCapacity: this.#options.operationCapacity,
@@ -652,7 +879,7 @@ export class ScratchRuntimeDiagnosticsController {
     exportEvidence(): ScratchRuntimeDiagnosticsEvidence {
 
         return freezeEvidence({
-            version: 3,
+            version: 4,
             snapshot: this.snapshot(),
             operations: this.operations(),
             incidents: this.incidents(),
@@ -707,7 +934,7 @@ export class ScratchRuntimeDiagnosticsController {
                 ...this.#aggregates,
                 pipelineCreationAttempts: this.#aggregates.pipelineCreationAttempts + 1,
             }
-        } else {
+        } else if (target.kind !== 'submission') {
             this.#aggregates = {
                 ...this.#aggregates,
                 readbackOperationAttempts: this.#aggregates.readbackOperationAttempts + 1,
@@ -745,6 +972,9 @@ export class ScratchRuntimeDiagnosticsController {
             ...(completion.nativeLabels !== undefined ? { nativeLabels: completion.nativeLabels } : {}),
             ...(completion.compilationReport !== undefined
                 ? { compilationReport: completion.compilationReport }
+                : {}),
+            ...(completion.nativeOutcome !== undefined
+                ? { nativeOutcome: completion.nativeOutcome }
                 : {}),
             startedAtMs: operation.startedAtMs,
             settledAtMs: nowMs(),
@@ -895,6 +1125,9 @@ export class ScratchRuntimeDiagnosticsController {
                 ? { compilationReport: input.compilationReport }
                 : {}),
             ...(input.outcomes !== undefined ? { outcomes: input.outcomes } : {}),
+            ...(input.omittedOutcomeCount !== undefined
+                ? { omittedOutcomeCount: input.omittedOutcomeCount }
+                : {}),
             evidence: {
                 complete: this.#overwrittenOperations === 0 &&
                     this.#overwrittenIncidents === 0 &&
@@ -1225,8 +1458,12 @@ export class ScratchRuntimeDiagnosticsController {
         this.#readbackCommandFacts.clear()
         this.#readbackFacts.clear()
         this.#readbackStagingReservations.clear()
+        this.#submissionNativeObservationReservations.clear()
+        this.#effectfulSubmittedWorkReservations.clear()
         this.#currentReadbackStagingBytes = 0
         this.#currentRetainedHostBytes = 0
+        this.#currentPendingNativeObservations = 0
+        this.#currentEffectfulSubmittedWork = 0
     }
 
     #publishLifecycleChange(change: ScratchRuntimeLifecycleChange): void {
@@ -1385,7 +1622,7 @@ export class ScratchRuntimeDiagnosticsController {
             if (completion.status === 'succeeded') next.successfulPipelineCreations++
             if (completion.status === 'failed') next.failedPipelineCreations++
             if (completion.status === 'cancelled') next.cancelledPipelineCreations++
-        } else {
+        } else if (operation.target.kind !== 'submission') {
             if (completion.status === 'succeeded') next.successfulReadbackOperations++
             if (completion.status === 'failed') next.failedReadbackOperations++
             if (completion.status === 'cancelled') next.cancelledReadbackOperations++
@@ -1680,6 +1917,9 @@ function acceptCaptureOperation(
         ...(completion.compilationReport !== undefined
             ? { compilationReport: completion.compilationReport }
             : {}),
+        ...(completion.nativeOutcome !== undefined
+            ? { nativeOutcome: completion.nativeOutcome }
+            : {}),
         startedAtMs: operation.startedAtMs,
         settledAtMs: nowMs(),
         ...(state.options.includeStacks && operation.stack !== undefined ? { stack: operation.stack } : {}),
@@ -1771,7 +2011,7 @@ function stopCapture(
     if (state.timer !== undefined) clearTimeout(state.timer)
     state.timer = undefined
     state.report = freezeEvidence({
-        version: 3,
+        version: 4,
         id: state.id,
         runtimeId: state.runtimeId,
         stopReason: reason,
@@ -1795,11 +2035,14 @@ function captureStateFor(capture: ScratchDiagnosticCapture): CaptureState {
     return state
 }
 
-function normalizeDiagnosticsOptions(
-    owner: RuntimeDiagnosticsOwner,
-    options: ScratchRuntimeDiagnosticsOptions
+export function normalizeScratchRuntimeDiagnosticsOptions(
+    options: ScratchRuntimeDiagnosticsOptions = {},
+    label?: string
 ): NormalizedScratchRuntimeDiagnosticsOptions {
 
+    const owner: DiagnosticsOptionOwner = {
+        ...(label !== undefined ? { label } : {}),
+    }
     return Object.freeze({
         operationCapacity: finiteIntegerOption(owner, options.operationCapacity, 'operationCapacity', 0, DEFAULT_OPERATION_CAPACITY),
         incidentCapacity: finiteIntegerOption(owner, options.incidentCapacity, 'incidentCapacity', 0, DEFAULT_INCIDENT_CAPACITY),
@@ -1807,11 +2050,45 @@ function normalizeDiagnosticsOptions(
         recentOperationLimit: finiteIntegerOption(owner, options.recentOperationLimit, 'recentOperationLimit', 1, DEFAULT_RECENT_OPERATION_LIMIT),
         contributorLimit: finiteIntegerOption(owner, options.contributorLimit, 'contributorLimit', 1, DEFAULT_CONTRIBUTOR_LIMIT),
         maxActiveCaptures: finiteIntegerOption(owner, options.maxActiveCaptures, 'maxActiveCaptures', 1, DEFAULT_MAX_ACTIVE_CAPTURES),
+        submissionScopes: submissionScopesOption(owner, options.submissionScopes),
+        maxPendingNativeObservations: submissionNativeIntegerOption(
+            owner,
+            options.maxPendingNativeObservations,
+            'maxPendingNativeObservations',
+            DEFAULT_MAX_PENDING_NATIVE_OBSERVATIONS
+        ),
     })
 }
 
+type DiagnosticsOptionOwner = Readonly<{
+    id?: string
+    label?: string
+}>
+
+function submissionScopesOption(
+    owner: DiagnosticsOptionOwner,
+    value: unknown
+): ScratchSubmissionScopeMode {
+
+    if (value === undefined) return 'summary'
+    if (value === 'summary' || value === 'off') return value
+    throwSubmissionNativePolicyOption(owner, 'submissionScopes', value, 'summary | off')
+}
+
+function submissionNativeIntegerOption(
+    owner: DiagnosticsOptionOwner,
+    value: unknown,
+    name: string,
+    fallback: number
+): number {
+
+    if (value === undefined) return fallback
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
+    throwSubmissionNativePolicyOption(owner, name, value, 'safe integer >= 1')
+}
+
 function normalizeCaptureOptions(
-    owner: RuntimeDiagnosticsOwner,
+    owner: DiagnosticsOptionOwner,
     options: ScratchDiagnosticCaptureOptions
 ): NormalizedScratchDiagnosticCaptureOptions {
 
@@ -1821,11 +2098,23 @@ function normalizeCaptureOptions(
         maxEvidenceBytes: finiteIntegerOption(owner, options.maxEvidenceBytes, 'maxEvidenceBytes', 1, DEFAULT_CAPTURE_MAX_EVIDENCE_BYTES),
         includeStacks: options.includeStacks === true,
         includeDescriptors: options.includeDescriptors === true,
+        ...(options.nativeSubmissionDetail !== undefined
+            ? { nativeSubmissionDetail: nativeSubmissionDetailOption(owner, options.nativeSubmissionDetail) }
+            : {}),
     })
 }
 
+function nativeSubmissionDetailOption(
+    owner: DiagnosticsOptionOwner,
+    value: unknown
+): 'step' {
+
+    if (value === 'step') return value
+    throwDiagnosticsOption(owner, 'nativeSubmissionDetail', value, 'step')
+}
+
 function finiteIntegerOption(
-    owner: RuntimeDiagnosticsOwner,
+    owner: DiagnosticsOptionOwner,
     value: unknown,
     name: string,
     minimum: number,
@@ -1838,7 +2127,7 @@ function finiteIntegerOption(
 }
 
 function finiteNumberOption(
-    owner: RuntimeDiagnosticsOwner,
+    owner: DiagnosticsOptionOwner,
     value: unknown,
     name: string,
     fallback: number
@@ -1850,7 +2139,7 @@ function finiteNumberOption(
 }
 
 function throwDiagnosticsOption(
-    owner: RuntimeDiagnosticsOwner,
+    owner: DiagnosticsOptionOwner,
     name: string,
     value: unknown,
     expected: string
@@ -1862,10 +2151,32 @@ function throwDiagnosticsOption(
         phase: 'runtime',
         subject: {
             kind: 'ScratchRuntime',
-            id: owner.id,
+            ...(owner.id !== undefined ? { id: owner.id } : {}),
             ...(owner.label !== undefined ? { label: owner.label } : {}),
         },
         message: `ScratchRuntime diagnostic option ${name} is invalid.`,
+        expected: { [name]: expected },
+        actual: { [name]: value },
+    })
+}
+
+function throwSubmissionNativePolicyOption(
+    owner: DiagnosticsOptionOwner,
+    name: string,
+    value: unknown,
+    expected: string
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_SUBMISSION_NATIVE_POLICY_INVALID',
+        severity: 'error',
+        phase: 'runtime',
+        subject: {
+            kind: 'ScratchRuntime',
+            ...(owner.id !== undefined ? { id: owner.id } : {}),
+            ...(owner.label !== undefined ? { label: owner.label } : {}),
+        },
+        message: `ScratchRuntime submission native policy option ${name} is invalid.`,
         expected: { [name]: expected },
         actual: { [name]: value },
     })
@@ -1894,7 +2205,9 @@ function assertPendingGpuOperationKind(
         kind === 'render-pipeline-creation' ||
         kind === 'compute-pipeline-creation' ||
         kind === 'readback-staging-allocation' ||
-        kind === 'readback-mapping'
+        kind === 'readback-mapping' ||
+        kind === 'readback-native-observation' ||
+        kind === 'submission-native-observation'
     ) return
     throw new TypeError(`GPU operation ${String(kind)} cannot be pending.`)
 }
@@ -2108,6 +2421,25 @@ function matchesOperationQuery(
         (query.readbackId === undefined || (
             record.target.kind === 'readback' && record.target.readbackId === query.readbackId
         )) &&
+        (query.submissionId === undefined || (
+            record.target.kind === 'submission' && record.target.submissionId === query.submissionId
+        )) &&
+        (query.nativeLocationKind === undefined || (
+            record.target.kind === 'submission' &&
+            record.nativeOutcome?.locations.some(
+                location => location.kind === query.nativeLocationKind
+            ) === true
+        )) &&
+        (query.nativeStage === undefined || (
+            (record.target.kind === 'submission' || record.target.kind === 'readback') &&
+            record.nativeOutcome?.outcomes.some(
+                outcome => outcome.stage === query.nativeStage
+            ) === true
+        )) &&
+        (query.nativeOutcomeStatus === undefined || (
+            (record.target.kind === 'submission' || record.target.kind === 'readback') &&
+            record.nativeOutcome?.status === query.nativeOutcomeStatus
+        )) &&
         (query.kind === undefined || record.kind === query.kind) &&
         (query.status === undefined || record.status === query.status) &&
         (query.sequenceFrom === undefined || record.sequence >= query.sequenceFrom) &&
@@ -2135,6 +2467,21 @@ function matchesIncidentQuery(
         )) &&
         (query.readbackId === undefined || (
             report.target.kind === 'readback' && report.target.readbackId === query.readbackId
+        )) &&
+        (query.submissionId === undefined || (
+            report.target.kind === 'submission' && report.target.submissionId === query.submissionId
+        )) &&
+        (query.nativeLocationKind === undefined || (
+            report.kind === 'submission-failure' &&
+            report.outcomes?.some(
+                outcome => outcome.location?.kind === query.nativeLocationKind
+            ) === true
+        )) &&
+        (query.nativeStage === undefined || (
+            (report.kind === 'submission-failure' || report.kind === 'readback-failure') && (
+                report.failureStage === query.nativeStage ||
+                report.outcomes?.some(outcome => outcome.stage === query.nativeStage) === true
+            )
         )) &&
         (query.kind === undefined || report.kind === query.kind) &&
         (query.sequenceFrom === undefined || report.sequence >= query.sequenceFrom) &&
@@ -2164,6 +2511,7 @@ function operationTargetId(target: ScratchGpuOperationTarget): string {
         case 'pipeline': return target.pipelineId
         case 'command': return target.commandId
         case 'readback': return target.readbackId
+        case 'submission': return target.submissionId
     }
 }
 

@@ -299,7 +299,7 @@ async function verifyReadbackTransactions(browser) {
     if (success.directState !== 'consumed') failures.push('direct operation did not consume')
     if (success.readbackLinks.length !== 1) failures.push('submitted readback link count drifted')
     if (!success.linksFrozen) failures.push('submitted readback links are mutable')
-    if (success.evidenceVersion !== 3) failures.push('readback evidence is not schema v3')
+    if (success.evidenceVersion !== 4) failures.push('readback evidence is not schema v4')
     if (!success.evidenceJsonRoundTrip) failures.push('readback evidence failed JSON round trip')
     for (const kind of [
         'readback-staging-allocation',

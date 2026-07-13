@@ -57,8 +57,8 @@ for (const code of oldDiagnosticCodes) {
 }
 
 const legacyBehaviorChecks = [
-    behavior('typed-array-readback', oldJsReadback, /async toArray\(/, currentSources.readback, /async toArray\(/),
-    behavior('explicit-byte-readback', oldJsReadback, /async toBytes\(/, currentSources.readback, /async toBytes\(/),
+    behavior('typed-array-readback', oldJsReadback, /async toArray\(/, currentSources.readback, /toArray\(\): Promise<Uint8Array>/),
+    behavior('explicit-byte-readback', oldJsReadback, /async toBytes\(/, currentSources.readback, /toBytes\(\): Promise<Uint8Array>/),
     behavior('range-default-and-validation', oldJsReadback, /function normalizeRange\(/, currentSources.readback, /function normalizeRange\(/),
     behavior('same-runtime-after-validation', oldJsReadback, /function normalizeAfter\(/, currentSources.readback, /function normalizeAfter\(/),
     behavior('copy-source-usage-validation', oldJsReadback, /BUFFER_USAGE_COPY_SRC/, currentSources.readback, /BUFFER_USAGE_COPY_SRC/),
@@ -163,9 +163,9 @@ assertParity(/buffer\.mapAsync\(GPUMapModeValue\(\), 0, byteLength\)/.test(
 assertParity(/allocateReadbackStaging\(/.test(currentSources.readback), 'direct acknowledged staging is missing')
 assertParity(/allocateReadbackStaging\(/.test(currentSources.command), 'ordered acknowledged staging is missing')
 assertParity(
-    /version: 3/.test(currentSupportSources['gpu-operation']) &&
-        !/version: 2/.test(currentSupportSources['gpu-operation']),
-    'schema v3 clean cut is missing'
+    /version: 4/.test(currentSupportSources['gpu-operation']) &&
+        !/version: [23]/.test(currentSupportSources['gpu-operation']),
+    'schema v4 clean cut is missing'
 )
 assertParity(
     /failureStage: 'budget'/.test(currentSupportSources['runtime-diagnostics']),

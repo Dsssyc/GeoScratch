@@ -94,7 +94,7 @@ describe('scratch async pipeline public contract', () => {
     })
 })
 
-describe('scratch GPU provenance schema v3 contract', () => {
+describe('scratch GPU provenance schema v4 contract', () => {
 
     it('encodes a resource operation through an explicit resource target', () => {
 
@@ -118,7 +118,7 @@ describe('scratch GPU provenance schema v3 contract', () => {
             },
         })
 
-        expect(record.version).to.equal(3)
+        expect(record.version).to.equal(4)
         expect(record.target).to.deep.equal({
             kind: 'resource',
             resourceId: 'buffer-1',
@@ -157,7 +157,7 @@ describe('scratch GPU provenance schema v3 contract', () => {
             },
         })
 
-        expect(record.version).to.equal(3)
+        expect(record.version).to.equal(4)
         expect(record.target.kind).to.equal('pipeline')
         expect(record.target).not.to.have.any.keys(
             'resourceId',
@@ -218,7 +218,7 @@ describe('scratch GPU provenance schema v3 contract', () => {
             },
         })
 
-        expect(report.version).to.equal(3)
+        expect(report.version).to.equal(4)
         expect(report.target).to.deep.equal(operation.target)
         expect(report.failureStage).to.equal('pipeline-creation')
         expect(report).not.to.have.property('pressure')
@@ -598,7 +598,7 @@ describe('scratch GPU provenance schema v3 contract', () => {
         })
 
         const pendingSnapshot = runtime.diagnostics.snapshot()
-        expect(pendingSnapshot.version).to.equal(3)
+        expect(pendingSnapshot.version).to.equal(4)
         expect(pendingSnapshot.pendingOperations[0].target).to.deep.equal(target)
 
         const record = controller.completeOperation(pending, {
@@ -613,7 +613,7 @@ describe('scratch GPU provenance schema v3 contract', () => {
         const snapshot = runtime.diagnostics.snapshot()
         const evidence = runtime.diagnostics.exportEvidence()
         const captureReport = capture.stop()
-        expect(snapshot.version).to.equal(3)
+        expect(snapshot.version).to.equal(4)
         expect(snapshot.pipelines).to.deep.equal([ {
             id: target.pipelineId,
             label: 'current pipeline',
@@ -625,8 +625,8 @@ describe('scratch GPU provenance schema v3 contract', () => {
             lastCreationOperationId: record.id,
             compilation: { errorCount: 0, warningCount: 0, infoCount: 0 },
         } ])
-        expect(evidence.version).to.equal(3)
-        expect(captureReport.version).to.equal(3)
+        expect(evidence.version).to.equal(4)
+        expect(captureReport.version).to.equal(4)
         expect(runtime.diagnostics.operations({
             targetKind: 'pipeline',
             pipelineId: target.pipelineId,

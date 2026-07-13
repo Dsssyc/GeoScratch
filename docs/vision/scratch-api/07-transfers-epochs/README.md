@@ -18,14 +18,21 @@ This replaces the earlier resource-as-readback-handle model. It resolves the asy
 - with a surface output -> a presentation submission using a presentation-submission-scoped surface texture view
 - with no surface -> a compute or offscreen submission
 
-`.submit()` returns `SubmittedWork`, an inspectable handle with a `done` promise backed by `queue.onSubmittedWorkDone` when the submission enqueues physical queue actions. Effect-free work uses an already-resolved promise so it does not wait on unrelated queue work. Completion is separate from data transfer: awaiting `submitted.done` tells you submitted GPU work finished; it does not automatically move data to or from the CPU.
+`.submit()` synchronously returns `SubmittedWork`, an inspectable non-thenable
+handle. Its always-resolving `nativeOutcome` reports native observation, while
+its `done` Promise joins that observation with `queue.onSubmittedWorkDone()`
+when physical queue actions exist. Effect-free work reports `no-native-work`
+and does not wait on unrelated queue work. Completion remains separate from
+data transfer: `done` does not map staging, access a mapped range, copy host
+bytes, or materialize a readback result.
 
 ```ts
 const submitted = scratch.submission()  // no surface -> compute submission
     .compute(simulationPass, [simulate])
     .submit()
 
-await submitted.done                    // GPU completion, not host readback
+const nativeOutcome = await submitted.nativeOutcome
+await submitted.done                    // observed submission, not host readback
 ```
 
 `Submission` is therefore the single core submission concept. There is no separate `Frame` or `Batch` type in the scratch core model.
@@ -66,6 +73,23 @@ Resource identity, lifecycle, readiness, `allocationVersion`, and `contentEpoch`
 - explicit clear, resolve, or mipmap generation commands if they become part of the API
 
 `contentEpoch` may be tracked per resource first, and later by buffer range or texture region where useful. The important contract is that readback and dependency validation talk about content epochs, while binding invalidation talks about allocation versions.
+
+### Indeterminate Content After Delayed Failure
+
+Submission effects advance epochs optimistically when native actions are
+issued. If native observation later fails, observation cannot settle, or queue
+completion rejects, Scratch does not roll those published epochs backward.
+Instead, each still-current persistent potential write becomes
+`indeterminate`: the allocation or query slot exists, but its bytes, texels, or
+query values are not proven to match the recorded epoch.
+
+Allocation version and content epoch guards prevent a delayed failure from
+poisoning a replacement or a later producer. Every attempt to read current
+indeterminate content hard-fails before native work, including copy, direct or
+ordered readback, bind-backed draw/dispatch, attachment `load`, and query
+resolve. Missing-resource policies and validation modes cannot suppress it. A
+later explicit producer advances a new epoch and restores `ready`; historical
+submission ledgers and outcomes remain unchanged.
 
 ### Texture Allocation Replacement
 
@@ -201,6 +225,36 @@ The mapping transaction distinguishes `mapping`, `mapped-range`, `host-copy`,
 separate outcome codes under one `SCRATCH_READBACK_CLEANUP_FAILED` incident. If
 host bytes were already copied, cleanup failure does not discard those owned
 bytes or falsely claim native destruction succeeded.
+
+### Native Copy Observation And Byte Trust
+
+Direct and ordered readback preserve two independent native boundaries.
+
+A direct readback first acknowledges its ephemeral staging allocation. Its
+materialization then applies the runtime `submissionScopes` policy to encoder
+creation, copy encoding, encoder finish, and queue submit under a readback
+target. Copy observation and buffer mapping settle independently, and bytes are
+exposed only after both applicable outcomes succeed. With
+`submissionScopes: 'off'`, copy provenance is explicitly `unobserved`; a
+successful map is not described as validation acknowledgement. Current
+`indeterminate` source content fails with
+`SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE` before staging allocation or
+encoder work, including when the operation captured the same epoch before a
+delayed submission failure settled.
+
+An ordered readback does not create a second copy or observation. Before mapped
+bytes are exposed, it awaits the associated `SubmittedWork.nativeOutcome`. An
+`observed-failed` or `observation-failed` staging-copy family makes those bytes
+untrusted and rejects materialization. An explicit `unobserved` outcome permits
+the mapped bytes while preserving that provenance. Queue-completion rejection
+alone remains independent: it can reject `SubmittedWork.done` and record an
+enclosing-family incident without fabricating a mapping failure or discarding
+separately owned bytes.
+
+Direct copy observation and submission observation share
+`maxPendingNativeObservations`. Budget exhaustion occurs before encoder work;
+finite `nativeSubmissionDetail: 'step'` capture records the four direct stages
+without inventing a submission ID for the readback target.
 
 Each readback has one materialization owner. Concurrent
 `retain: 'until-dispose'` readers share one allocation/copy/map and receive
@@ -579,6 +633,7 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_IN_PROGRESS'
     | 'SCRATCH_READBACK_CANCELLED'
     | 'SCRATCH_READBACK_OPERATION_DISPOSED'
+    | 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE'
     | 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE'
     | 'SCRATCH_READBACK_SOURCE_EPOCH_STALE'
 ```

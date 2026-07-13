@@ -109,6 +109,7 @@ async function main() {
         .submit()
     const operation = readback.result({ after: submitted })
     const [ result ] = await operation.toArray(Uint32Array)
+    await requireObservedSubmission(submitted)
     const passed = result === 11
 
     document.body.dataset.status = passed ? 'passed' : 'failed'
@@ -136,4 +137,15 @@ function renderResult(value, status) {
     context.fillStyle = 'rgba(238, 245, 242, 0.68)'
     context.font = `500 ${Math.max(14, Math.floor(16 * devicePixelRatio))}px system-ui, sans-serif`
     context.fillText('UPLOAD 0  /  +1  /  UPLOAD 10  /  +1', width * 0.5, height * 0.76)
+}
+
+async function requireObservedSubmission(submitted) {
+
+    const [ nativeOutcome ] = await Promise.all([
+        submitted.nativeOutcome,
+        submitted.done,
+    ])
+    if (nativeOutcome.status !== 'observed-succeeded') {
+        throw new Error(`Submission native outcome was ${nativeOutcome.status}.`)
+    }
 }

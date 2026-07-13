@@ -173,19 +173,36 @@ Normalized same-size resize is an already-resolved Promise and a true no-op; it 
 
 ## Readiness State
 
-Resources should have explicit state. The exact enum may evolve, but the model should distinguish:
+Persistent resources expose the implemented readiness state:
 
 ```ts
 type ResourceState =
     | 'empty'
     | 'ready'
-    | 'dirty'
-    | 'resizing'
-    | 'lost'
+    | 'indeterminate'
     | 'disposed'
 ```
 
-`dirty` means the resource is logically usable but has pending preparation requested by an explicit transfer or replacement operation before recording commands that depend on the new data. `empty`, `lost`, and `disposed` are not usable.
+Indexed query slots use the corresponding `empty | ready | indeterminate`
+content state. `indeterminate` means the current allocation or slot still
+exists and its monotonic `contentEpoch` remains historical fact, but a delayed
+submission-native or queue-completion failure means Scratch can no longer
+prove those contents match that epoch. It is not ordinary streaming absence.
+
+Every resource or query-slot read hard-fails before native effects in every
+validation and readiness mode. `warn`, `off`, `skip-command`, `skip-pass`, and
+`use-fallback` cannot consume or hide it. The stable diagnostics are
+`SCRATCH_COMMAND_RESOURCE_CONTENT_INDETERMINATE`,
+`SCRATCH_QUERY_SLOT_CONTENT_INDETERMINATE`, and
+`SCRATCH_PASS_ATTACHMENT_CONTENT_INDETERMINATE` for persistent attachment
+loads.
+
+A delayed failure marks only a potential write whose allocation and produced
+epoch are still current. It never decrements an epoch and cannot poison content
+already replaced or advanced by a later producer. A later explicit upload,
+copy, render, compute, clear, or resolve producer advances a new epoch and
+restores `ready`. Presentation-scoped surface textures are not retained as
+persistent indeterminate resources.
 
 ## Dynamic Values: Prefer Tracked Values Over Closures
 
@@ -214,7 +231,7 @@ This policy must be explicitly declared at the usage point.
 
 The implemented Draw/Dispatch path resolves this policy from the resource state at the command's exact submission position. `skip-command` applies no command read/write fact, `skip-pass` transactionally discards every command and pass-level effect, and `use-fallback` resolves a same-kind command without mutating either command or resource. Only selected commands can advance content epochs or create producer facts.
 
-Expected absence is observable through `SubmittedWork.executionOutcomes`; it is not a warning/error. Required-epoch stale/future diagnostics are separate and apply only after a command is selected. The current implementation state remains `empty | ready | disposed`; this readiness execution does not introduce additional streaming lifecycle states. `CopyCommand`, `ReadbackCommand`, and `ResolveQuerySetCommand` remain `throw`-only.
+Expected absence is observable through `SubmittedWork.executionOutcomes`; it is not a warning/error. Required-epoch stale/future diagnostics are separate and apply only after a command is selected. Indeterminate content is always a hard failure and never enters expected-absence policy. `CopyCommand`, `ReadbackCommand`, and `ResolveQuerySetCommand` remain `throw`-only.
 
 ## Non-Goals
 

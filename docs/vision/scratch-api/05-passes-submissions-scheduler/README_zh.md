@@ -78,13 +78,17 @@ const submitted = scratch.submission({ validation: 'throw' })
     ])
     .submit()
 
+const nativeOutcome = await submitted.nativeOutcome
 await submitted.done
 ```
 
 概念拆分:
 
 - `SubmissionBuilder` 负责记录并校验当前 pass-command 序列。
-- `SubmittedWork` 由 `.submit()` 返回，持有 submitted-work id、`done` promise、execution outcomes、resource accesses、producer epochs、diagnostics，以及 readback operations 使用的链接信息。
+- `SubmittedWork` 由 `.submit()` 返回，持有 submitted-work id、始终 resolve 的
+  `nativeOutcome`、强化后的 `done` promise、execution outcomes、resource
+  accesses、producer epochs、potential writes、diagnostics，以及 readback
+  operations 使用的 links。
 
 `SubmittedWork` 不应是 thenable。等待使用 `await submitted.done`，而不是 `await submitted`。这样 submitted-work object 仍然可 inspect，并与 `ReadbackOperation` 保持一致: object 本身不是 promise。
 
@@ -98,6 +102,7 @@ Submission 职责:
 - 把 command readiness policies 解析成唯一 pre-encoder execution plan
 - 跳过 empty passes
 - 只记录该 plan 最终选中的 commands
+- 按 runtime policy 观察 Scratch-owned native issue boundaries
 - 提交 command buffers
 - 返回 `SubmittedWork`
 
@@ -133,14 +138,87 @@ type SubmittedReadbackLink = Readonly<{
 ```
 
 `SubmittedWork.readbacks` 保存 links，不保存 mutable operations、command
-payloads、mapped bytes 或 native buffers。`SubmittedWork.done` 只覆盖实际
-replay 的 queue work；它不等待 `mapAsync()`、mapped-range access、host
-copy、retention、cancellation 或 cleanup。原生 completion rejection 会变成
+payloads、mapped bytes 或 native buffers。Queue completion rejection 会变成
 `SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED`，但不会改写关联 readback
-operation 的 mapping outcome。每个 immutable link 还会产生一个位于
+operation 独立的 mapping outcome。每个 immutable link 还会产生一个位于
 `queue-completion` 阶段、归因为 `enclosing-operation-family` 的
 `readback-failure` incident：completion barrier 只能标识 replayed submission
 family，不能证明某一个 command 是原因。
+
+### Native Outcome 与 Completion
+
+`SubmissionBuilder.submit()` 保持同步且 non-thenable。完整 Scratch preflight
+在 observation reservation 或 native effect 前完成；随后 encoding 与 queue
+action 按声明的物理顺序发生，最后方法才返回。所有 Scratch error scope 都在
+return 或 throw 前按逆序 pop，其 settlement Promise 被保留并立即观察，但 queue
+call 不会被移入 microtask。
+
+Ordered-readback ownership claim 也属于该 preflight。busy/disposed claim 会在
+observation scope 前失败；若 observation reservation 本身失败，所有已取得 claim
+都会在 encoder 或 queue work 前释放。
+
+Runtime diagnostics policy 是 `submissionScopes: 'summary' | 'off'`。默认
+`summary` mode 为完整 effectful attempt 预留一个有限 owner，并打开一个常数
+规模的 validation/internal/OOM bundle。它报告
+`enclosing-operation-family` attribution 与 issued locations，不虚构唯一失败
+command。`off` 不打开 scope，并发布诚实的 unobserved provenance。
+Effect-free work 不使用 owner 或 native scope。
+
+`SubmittedWork.nativeOutcome` 始终 resolve 为 deeply frozen、
+JSON-serializable 的 version-4 result。status 只能是:
+
+```ts
+type ScratchSubmissionNativeOutcomeStatus =
+    | 'no-native-work'
+    | 'observed-succeeded'
+    | 'observed-failed'
+    | 'unobserved'
+    | 'observation-failed'
+```
+
+Outcome 按固定 stage/issue 顺序保留有界 locations 与每项 retained independent
+failure fact，不会通过 reject 丢掉并发证据。`SubmittedWork.report` 仍是 immutable
+synchronous preflight report，return 后绝不改写。
+
+`SubmittedWork.done` 联合 native observation、`queue.onSubmittedWorkDone()`，
+以及 queue completion 结算前的 runtime/device lifecycle。任一适用边界证明失败，
+或 observation 本身无法 settle 时，它以一个结构化 submission diagnostic reject。
+迟到的 lifecycle event 使用 `lifecycle-recheck` 与 `temporal-correlation`
+attribution，永远不能升级为 `exact-operation`；若 native settlement 已保留同一
+outcome，则不重复记录 incident。`done` 不等待 readback `mapAsync()`、
+mapped-range access、host copy、retention、mapped leases、cancellation 或
+cleanup。Queue completion 仍只是 enclosing-family evidence，不能定位唯一
+command，也不能把独立成功的 mapping 改写为失败。
+
+Per-location detail 只存在于有限 diagnostics capture:
+
+```ts
+const capture = runtime.diagnostics.capture({
+    maxOperations: 128,
+    maxDurationMs: 5_000,
+    maxEvidenceBytes: 256 * 1024,
+    nativeSubmissionDetail: 'step',
+})
+
+// 在有限 submission 中复现，必要时显式停止。
+const report = capture.stop()
+```
+
+Detailed mode 分别为 encoder creation/finalization、pass begin/end、
+standalone/pass command 与 queue action 建立 scope。它可以把
+`exact-operation` attribution 指向 scoped location，但不一定能定位该 location
+内部的唯一 native call。多个 active detailed capture 共享一份在 attempt 开始时
+快照的 instrumentation plan，绝不复制 native issue call。
+
+每个 submission 还发布 immutable `potentialWrites`。当 native observation
+失败、observation settlement 失败或 queue completion reject 时，只有 allocation
+与 produced epoch 仍为 current 的 write 才变成 `indeterminate`。Epoch 与历史
+ledger 永不回滚。后续 acknowledged producer 会保护或恢复更新的 epoch；Surface
+presentation target 不进入持久 indeterminate state。
+
+若后续同步 native exception 令 replay 中止且没有返回 `SubmittedWork`，同一个
+native-settlement guard 只覆盖已经成功 replay 的 action prefix；失败和未 replay
+action 不发布 write effect。
 
 ### 构造与提交之间的 Resize
 
@@ -181,7 +259,7 @@ submit(render + readback)
 
 `SubmittedWork.commandBuffers` 按物理 queue 顺序包含每个真实 segment。upload-only work 的 command-buffer array 为空，但仍在最后一次 queue write 后注册 completion。effect-free work 不创建 encoder 或 queue action，并使用已 resolve 的 `done` promise。见 ADR-029。
 
-每个 resolved upload 都会在 encoder 创建前重新校验 live data range 与所需 queue method。replay 一旦开始，builder 就不可重试: 意外的同步 queue failure 不能重复先前 action，且只有成功入队的 action 才提交其 prepared logical effects。
+每个 resolved upload 都会在 encoder 创建前重新校验 live data range 与所需 queue method。replay 一旦开始，builder 就不可重试: 意外的同步 queue failure 不能重复先前 action，且只有成功入队的 action 才提交其 prepared logical effects。即使 `submit()` 随后 throw，这些已提交的 prefix effect 仍由该 attempt 的 native settlement guard 覆盖。
 
 ### External Image Queue Actions
 
@@ -284,3 +362,4 @@ scratch.schedule(commands, {
 - 不在 scratch scheduler 中编码 geospatial layer order。
 - 不把 submission validation 暴露成 prose-only errors。
 - 不把 `Frame` 作为 scratch core submission type; frame cadence 属于 geo、app 或 presentation layers。
+- mapped leases、texture readback、persistent supporting-object acknowledgement、tracked dynamic values、render graph ownership 与 raw-device tracking 均不属于本 submission-native-outcome slice。

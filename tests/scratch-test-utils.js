@@ -140,6 +140,7 @@ export function createFakeGpu(options = {}) {
         unmaps: [],
         bufferDestroys: [],
         errorScopes: [],
+        debugGroups: [],
         nativeTimeline: [],
         compilationInfoRequests: [],
         asyncPipelineRequests: [],
@@ -331,9 +332,16 @@ export function createFakeGpu(options = {}) {
     function applyNativeFailure(method) {
 
         const failure = takeNativeFailure(method)
-        if (failure === undefined) return
+        if (failure === undefined) return false
         if (failure.kind === 'throw') throw failure.error
         captureOrDispatchError(failure.filter, failure.error)
+        return true
+    }
+
+    function issueNativeMethod(method) {
+
+        calls.nativeTimeline.push({ type: 'native-method', method })
+        return applyNativeFailure(method)
     }
 
     function applyPromiseMethodSynchronousFailure(method) {
@@ -452,6 +460,7 @@ export function createFakeGpu(options = {}) {
     const queue = {
         submittedWorkDoneCalls: 0,
         writeBuffer(buffer, offset, data, dataOffset, size) {
+            if (issueNativeMethod('writeBuffer')) return
             calls.queueTimeline.push({
                 type: 'write-buffer',
                 buffer,
@@ -468,6 +477,7 @@ export function createFakeGpu(options = {}) {
             buffer.data.set(source, offset)
         },
         writeTexture(destination, data, layout, size) {
+            if (issueNativeMethod('writeTexture')) return
             calls.queueTimeline.push({
                 type: 'write-texture',
                 destination,
@@ -486,6 +496,7 @@ export function createFakeGpu(options = {}) {
             })
         },
         copyExternalImageToTexture(source, destination, copySize) {
+            if (issueNativeMethod('copyExternalImageToTexture')) return
             calls.queueTimeline.push({
                 type: 'external-image-upload',
                 source,
@@ -498,12 +509,20 @@ export function createFakeGpu(options = {}) {
             })
         },
         submit(commandBuffers) {
+            if (issueNativeMethod('submit')) return
             calls.queueTimeline.push({
                 type: 'submit',
                 commandBuffers,
             })
             calls.queueSubmissions.push(commandBuffers)
             for (const commandBuffer of commandBuffers) {
+                if (commandBuffer.invalid === true) {
+                    captureOrDispatchError(
+                        'validation',
+                        new Error('Fake queue received an invalid command buffer.')
+                    )
+                    continue
+                }
                 executeFakeCommandBuffer(commandBuffer)
             }
         },
@@ -663,9 +682,11 @@ export function createFakeGpu(options = {}) {
             return layout
         },
         createBindGroup(descriptor) {
+            const invalid = issueNativeMethod('createBindGroup')
             const bindGroup = {
                 type: 'bindGroup',
                 descriptor,
+                invalid,
             }
             calls.bindGroups.push(bindGroup)
             return bindGroup
@@ -755,7 +776,13 @@ export function createFakeGpu(options = {}) {
             return querySet
         },
         createCommandEncoder(descriptor) {
-            const encoder = createFakeCommandEncoder(calls, descriptor)
+            const invalid = issueNativeMethod('createCommandEncoder')
+            const encoder = createFakeCommandEncoder(
+                calls,
+                descriptor,
+                issueNativeMethod,
+                invalid
+            )
             calls.commandEncoders.push(encoder)
             return encoder
         },
@@ -874,23 +901,46 @@ fn fsMain() -> @location(0) vec4f {
 }
 `
 
-function createFakeCommandEncoder(calls, descriptor) {
+function createFakeCommandEncoder(calls, descriptor, issueNativeMethod, initiallyInvalid = false) {
 
     const commands = []
-
-    return {
+    const encoder = {
         descriptor,
+        invalid: initiallyInvalid,
+        pushDebugGroup(label) {
+            calls.debugGroups.push({ action: 'push', encoder: 'command', label })
+            calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'command', label })
+        },
+        popDebugGroup() {
+            calls.debugGroups.push({ action: 'pop', encoder: 'command' })
+            calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'command' })
+        },
         beginRenderPass(renderPassDescriptor) {
-            const passEncoder = createFakeRenderPassEncoder(calls, renderPassDescriptor)
+            const failed = issueEncoderMethod(this, issueNativeMethod, 'beginRenderPass')
+            const passEncoder = createFakeRenderPassEncoder(
+                calls,
+                renderPassDescriptor,
+                issueNativeMethod,
+                () => { this.invalid = true },
+                failed || this.invalid
+            )
             calls.renderPasses.push(passEncoder)
             return passEncoder
         },
         beginComputePass(computePassDescriptor) {
-            const passEncoder = createFakeComputePassEncoder(calls, computePassDescriptor)
+            const failed = issueEncoderMethod(this, issueNativeMethod, 'beginComputePass')
+            const passEncoder = createFakeComputePassEncoder(
+                calls,
+                computePassDescriptor,
+                issueNativeMethod,
+                () => { this.invalid = true },
+                failed || this.invalid
+            )
             calls.computePasses.push(passEncoder)
             return passEncoder
         },
         copyBufferToBuffer(source, sourceOffset, destination, destinationOffset, size) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'copyBufferToBuffer')) return
             const call = {
                 source,
                 sourceOffset,
@@ -902,6 +952,7 @@ function createFakeCommandEncoder(calls, descriptor) {
             commands.push({ type: 'copy-buffer-to-buffer', ...call })
         },
         copyTextureToTexture(source, destination, size) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'copyTextureToTexture')) return
             calls.textureCopies.push({
                 source,
                 destination,
@@ -909,6 +960,7 @@ function createFakeCommandEncoder(calls, descriptor) {
             })
         },
         copyBufferToTexture(source, destination, size) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'copyBufferToTexture')) return
             calls.bufferTextureCopies.push({
                 source,
                 destination,
@@ -916,6 +968,7 @@ function createFakeCommandEncoder(calls, descriptor) {
             })
         },
         copyTextureToBuffer(source, destination, size) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'copyTextureToBuffer')) return
             calls.textureBufferCopies.push({
                 source,
                 destination,
@@ -923,6 +976,7 @@ function createFakeCommandEncoder(calls, descriptor) {
             })
         },
         resolveQuerySet(querySet, firstQuery, queryCount, destination, destinationOffset) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'resolveQuerySet')) return
             const call = {
                 querySet,
                 firstQuery,
@@ -934,9 +988,12 @@ function createFakeCommandEncoder(calls, descriptor) {
             commands.push({ type: 'resolve-query-set', ...call })
         },
         finish() {
+            const failed = issueEncoderMethod(this, issueNativeMethod, 'finish')
+            const invalid = failed || this.invalid
             const commandBuffer = {
                 type: 'commandBuffer',
                 descriptor,
+                ...(invalid ? { invalid: true } : {}),
             }
             Object.defineProperty(commandBuffer, 'commands', {
                 value: [ ...commands ],
@@ -945,6 +1002,15 @@ function createFakeCommandEncoder(calls, descriptor) {
             return commandBuffer
         },
     }
+
+    return encoder
+}
+
+function issueEncoderMethod(encoder, issueNativeMethod, method) {
+
+    const failed = issueNativeMethod(method)
+    if (failed) encoder.invalid = true
+    return failed
 }
 
 function executeFakeCommandBuffer(commandBuffer) {
@@ -972,26 +1038,46 @@ function executeFakeCommandBuffer(commandBuffer) {
     }
 }
 
-function createFakeRenderPassEncoder(calls, descriptor) {
+function createFakeRenderPassEncoder(
+    calls,
+    descriptor,
+    issueNativeMethod,
+    invalidateParent,
+    initiallyInvalid = false
+) {
 
-    return {
+    const pass = {
         descriptor,
         actions: [],
+        invalid: initiallyInvalid,
+        pushDebugGroup(label) {
+            calls.debugGroups.push({ action: 'push', encoder: 'render-pass', label })
+            calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'render-pass', label })
+        },
+        popDebugGroup() {
+            calls.debugGroups.push({ action: 'pop', encoder: 'render-pass' })
+            calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'render-pass' })
+        },
         setPipeline(pipeline) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'renderSetPipeline')) return
             this.actions.push({ type: 'setPipeline', pipeline })
         },
         setBindGroup(group, bindGroup, dynamicOffsets) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'renderSetBindGroup')) return
             const action = { type: 'setBindGroup', group, bindGroup }
             if (dynamicOffsets !== undefined) action.dynamicOffsets = [ ...dynamicOffsets ]
             this.actions.push(action)
         },
         setVertexBuffer(slot, buffer, offset, size) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'setVertexBuffer')) return
             this.actions.push({ type: 'setVertexBuffer', slot, buffer, offset, size })
         },
         setIndexBuffer(buffer, indexFormat, offset, size) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'setIndexBuffer')) return
             this.actions.push({ type: 'setIndexBuffer', buffer, indexFormat, offset, size })
         },
         draw(vertexCount, instanceCount, firstVertex, firstInstance) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'draw')) return
             const call = {
                 vertexCount,
                 instanceCount,
@@ -1002,6 +1088,7 @@ function createFakeRenderPassEncoder(calls, descriptor) {
             calls.drawCalls.push(call)
         },
         drawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'drawIndexed')) return
             const call = {
                 indexCount,
                 instanceCount,
@@ -1013,58 +1100,97 @@ function createFakeRenderPassEncoder(calls, descriptor) {
             calls.drawCalls.push(call)
         },
         drawIndirect(buffer, offset) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'drawIndirect')) return
             const action = { type: 'drawIndirect', buffer, offset }
             this.actions.push(action)
             calls.drawCalls.push(action)
         },
         drawIndexedIndirect(buffer, offset) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'drawIndexedIndirect')) return
             const action = { type: 'drawIndexedIndirect', buffer, offset }
             this.actions.push(action)
             calls.drawCalls.push(action)
         },
         beginOcclusionQuery(queryIndex) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'beginOcclusionQuery')) return
             const call = { type: 'begin', queryIndex }
             this.actions.push({ type: 'beginOcclusionQuery', queryIndex })
             calls.occlusionQueries.push(call)
         },
         endOcclusionQuery() {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'endOcclusionQuery')) return
             const call = { type: 'end' }
             this.actions.push({ type: 'endOcclusionQuery' })
             calls.occlusionQueries.push(call)
         },
         end() {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'renderPassEnd')) return
             this.actions.push({ type: 'end' })
         },
     }
+
+    return pass
 }
 
-function createFakeComputePassEncoder(calls, descriptor) {
+function createFakeComputePassEncoder(
+    calls,
+    descriptor,
+    issueNativeMethod,
+    invalidateParent,
+    initiallyInvalid = false
+) {
 
-    return {
+    const pass = {
         descriptor,
         actions: [],
+        invalid: initiallyInvalid,
+        pushDebugGroup(label) {
+            calls.debugGroups.push({ action: 'push', encoder: 'compute-pass', label })
+            calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'compute-pass', label })
+        },
+        popDebugGroup() {
+            calls.debugGroups.push({ action: 'pop', encoder: 'compute-pass' })
+            calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'compute-pass' })
+        },
         setPipeline(pipeline) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'computeSetPipeline')) return
             this.actions.push({ type: 'setPipeline', pipeline })
         },
         setBindGroup(group, bindGroup, dynamicOffsets) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'computeSetBindGroup')) return
             const action = { type: 'setBindGroup', group, bindGroup }
             if (dynamicOffsets !== undefined) action.dynamicOffsets = [ ...dynamicOffsets ]
             this.actions.push(action)
         },
         dispatchWorkgroups(x, y, z) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'dispatchWorkgroups')) return
             const call = { x, y, z }
             this.actions.push({ type: 'dispatchWorkgroups', call })
             calls.dispatchCalls.push(call)
         },
         dispatchWorkgroupsIndirect(buffer, offset) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'dispatchWorkgroupsIndirect')) return
             const action = { type: 'dispatchWorkgroupsIndirect', buffer, offset }
             this.actions.push(action)
             calls.dispatchCalls.push(action)
         },
         end() {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'computePassEnd')) return
             this.actions.push({ type: 'end' })
         },
     }
+
+    return pass
+}
+
+function issuePassMethod(pass, issueNativeMethod, invalidateParent, method) {
+
+    const failed = issueNativeMethod(method)
+    if (failed) {
+        pass.invalid = true
+        invalidateParent()
+    }
+    return failed
 }
 
 function bytesFrom(data, dataOffset = 0, size) {

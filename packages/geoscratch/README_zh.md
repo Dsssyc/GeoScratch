@@ -92,6 +92,56 @@ const evidence = runtime.diagnostics.exportEvidence()
 
 `runtime.diagnostics` 暴露当前 resource facts、有界 operation/incident history 与显式临时 deep capture。logical footprint evidence 不是 physical VRAM。
 
++## Scratch Submission Outcomes
+
+`SubmissionBuilder.submit()` 保持同步。异步 native validation 通过显式结果暴露:
+
+```js
+const runtime = await scr.ScratchRuntime.create({
+    diagnostics: {
+        submissionScopes: 'summary',
+        maxPendingNativeObservations: 64,
+    },
+})
+const submitted = runtime.createSubmission()
+    .compute(pass, [ dispatch ])
+    .submit()
+
+const nativeOutcome = await submitted.nativeOutcome
+await submitted.done
+```
+
+`summary` 是默认值，每个 effectful submission 只使用一个常数规模的 native
+error-scope bundle。`off` 不打开 submission scope，并报告 `unobserved`；queue
+completion 不会被改写成 validation success。`maxPendingNativeObservations`
+限制尚未 settle 的 submission 与 direct-readback observation，耗尽时会在 native
+effect 前失败。
+
+`SubmittedWork.nativeOutcome` 始终 resolve 为不可变且可序列化的 result。
+`SubmittedWork.done` 联合 native observation、queue completion，以及该 completion
+边界结算前的 runtime/device lifecycle；任一适用边界失败时以结构化 diagnostic
+reject，但不等待 readback mapping 或 host copy。迟到的 failure 只把仍为 current
+的 potential write 标为 `indeterminate`，不回滚 epoch，也不能污染已被后续
+producer 推进的内容。
+
+Per-command/pass attribution 只在临时有限 capture 中启用:
+
+```js
+const capture = runtime.diagnostics.capture({
+    maxOperations: 128,
+    maxDurationMs: 5_000,
+    maxEvidenceBytes: 256 * 1024,
+    nativeSubmissionDetail: 'step',
+})
+// 在有限窗口复现后停止 capture。
+const report = capture.stop()
+```
+
+默认 summary failure 只能标识 enclosing submission family。Detailed capture
+定位 scoped location，不一定定位唯一 native call；OOM 也不证明某一个 command
+或 resource 独自耗尽 physical memory。
+
+
 ## Scratch Readback
 
 Direct readback 在请求 bytes 前保持同步。第一次 materialization 会先确认一个
@@ -118,8 +168,11 @@ const orderedBytes = await ordered.result({ after: submitted }).toBytes()
 await submitted.done
 ```
 
-`SubmittedWork.done` 只覆盖已 replay 的 queue work，不覆盖 mapping 或 host
-copy。Runtime options `maxPendingOperations` 与 `maxStagingBytes` 限制当前
+`SubmittedWork.done` 联合 submission native observation、已 replay 的 queue-work
+completion，以及该 completion 结算前的 lifecycle；它不覆盖 mapping 或 host
+copy。Direct readback 会在 staging allocation 前拒绝当前为 `indeterminate` 的
+source content。Runtime options
+`maxPendingOperations` 与 `maxStagingBytes` 限制当前
 readback ownership。Mapping validation 使用结构化 code
 `SCRATCH_READBACK_MAPPING_VALIDATION_FAILED`；native message prose 只是
 evidence，不是 classifier。

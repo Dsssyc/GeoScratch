@@ -101,6 +101,20 @@ Buffer `ReadbackCommand` 路径已通过 Promise-only `createReadbackCommand()` 
 
 写入资源内容的 command 推进 `contentEpoch`。替换物理 GPU 对象的 command 推进 `allocationVersion`。两者分离，这样 compute 写入不会被误解为 bind group invalidation。
 
+### Native Observation Boundary
+
+Command execution 进入其 enclosing submission observation。默认 summary
+mode 用一个 submission-family scope bundle 包围全部 command encoding 与 queue
+action；它不会声称某个唯一 command 失败。有限的
+`nativeSubmissionDetail: 'step'` capture 可以改为在 standalone 或
+pass-command location 外放置 balanced scope bundle，并把 `exact-operation`
+attribution 指向该 location。
+
+Bind set 仍在 command 解析 current allocation version 时惰性创建或重建 native
+bind group。该 lazy bind-group creation 可以被 command observation 包围，但
+is not independently acknowledged by 本契约。它没有独立 persistent
+allocation transaction、Promise 或 supporting-object success claim。
+
 Draw 与 dispatch execution contract 会在构造时完成 normalization 并锁定。它们的 pipeline、bind/index/vertex state、count、dynamic offsets、resource declarations、readiness policy 与 fallback reference 不能在 validation 和 encoding 之间漂移; 被引用的 bind set 也会暴露同一份不可变的 normalized binding table。`dispose()` 仍是显式可变的 lifecycle transition，并通过只读 `isDisposed` state 暴露，而不是可写 flag。
 
 Pipeline 与 command validation findings 应使用 `09-diagnostics-validation` 中的共享 `ScratchDiagnostic` envelope。`Command` diagnostics 应以 command 自身作为 `subject`，并把相关 resources、pass specs、pipelines 或 bind sets 放进 `related`，而不是只写在 prose 里。

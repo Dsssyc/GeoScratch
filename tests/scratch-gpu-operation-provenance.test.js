@@ -49,7 +49,7 @@ describe('scratch GPU operation provenance facts', () => {
         })
 
         expect(record).to.deep.equal({
-            version: 3,
+            version: 4,
             sequence: 7,
             id: 'gpu-operation-7',
             kind: 'buffer-allocation',
