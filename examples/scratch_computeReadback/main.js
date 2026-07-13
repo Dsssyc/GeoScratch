@@ -4,6 +4,7 @@ import {
 
 const canvas = document.getElementById('GPUFrame')
 const result = document.getElementById('readback-result')
+canvas.dataset.status = 'loading'
 
 const computeWgsl = `
 @group(0) @binding(0)
@@ -19,6 +20,7 @@ fn csMain(@builtin(global_invocation_id) id: vec3u) {
 `
 
 void main().catch((error) => {
+    canvas.dataset.status = 'error'
     result.textContent = `GPU result: ${error.message}`
     console.error(error)
 })
@@ -109,8 +111,10 @@ async function main() {
         range: { offset: 0, byteLength: 16 },
     })
     const values = await readback.toArray(Float32Array)
+    await requireObservedSubmission(submitted)
     const numbers = [ ...values ].map(value => Number(value.toFixed(3)))
 
+    canvas.dataset.status = 'ready'
     result.textContent = `GPU result: ${numbers.join(', ')}`
     renderBars(canvas, numbers)
 }
@@ -147,5 +151,16 @@ function renderBars(canvas, values) {
         const text = String(values[index])
         const x = gap + index * (barWidth + gap) + barWidth * 0.5
         context.fillText(text, x - context.measureText(text).width * 0.5, baseline + 26 * devicePixelRatio)
+    }
+}
+
+async function requireObservedSubmission(submitted) {
+
+    const [ nativeOutcome ] = await Promise.all([
+        submitted.nativeOutcome,
+        submitted.done,
+    ])
+    if (nativeOutcome.status !== 'observed-succeeded') {
+        throw new Error(`Submission native outcome was ${nativeOutcome.status}.`)
     }
 }

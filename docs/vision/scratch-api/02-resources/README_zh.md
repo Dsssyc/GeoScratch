@@ -173,19 +173,34 @@ normalized same-size resize 返回 already-resolved Promise，并且是真正的
 
 ## Readiness State
 
-资源应有显式状态。具体 enum 可以演进，但模型应区分:
+持久 resource 暴露当前已实现的 readiness state:
 
 ```ts
 type ResourceState =
     | 'empty'
     | 'ready'
-    | 'dirty'
-    | 'resizing'
-    | 'lost'
+    | 'indeterminate'
     | 'disposed'
 ```
 
-`dirty` 表示资源逻辑上可用，但在记录依赖新数据的 command 前，有显式 transfer 或 replacement operation 请求的 pending preparation。`empty`、`lost`、`disposed` 不可用。
+Indexed query slot 使用对应的 `empty | ready | indeterminate` content state。
+`indeterminate` 表示 current allocation 或 slot 仍存在，且其单调递增的
+`contentEpoch` 仍是历史事实，但迟到的 submission-native 或 queue-completion
+failure 使 Scratch 无法继续证明内容与该 epoch 一致。它不是普通 streaming
+absence。
+
+所有 resource 或 query-slot read 都会在任意 validation/readiness mode 下于
+native effect 前硬失败。`warn`、`off`、`skip-command`、`skip-pass` 与
+`use-fallback` 都不能消费或隐藏它。稳定 diagnostic 分别是
+`SCRATCH_COMMAND_RESOURCE_CONTENT_INDETERMINATE`、
+`SCRATCH_QUERY_SLOT_CONTENT_INDETERMINATE`，以及用于持久 attachment load 的
+`SCRATCH_PASS_ATTACHMENT_CONTENT_INDETERMINATE`。
+
+迟到的 failure 只会标记 allocation 与 produced epoch 仍为 current 的
+potential write。它绝不递减 epoch，也不能污染已被后续 producer 替换或推进的
+内容。之后的显式 upload、copy、render、compute、clear 或 resolve producer
+推进新 epoch，并恢复 `ready`。Presentation-scoped surface texture 不作为持久
+indeterminate resource 保留。
 
 ## 动态值: 受追踪的值优于闭包
 
@@ -214,7 +229,7 @@ type ResourceReadinessPolicy =
 
 当前已实现的 Draw/Dispatch 路径会在 command 所处的精确 submission 位置根据 resource state 解析该策略。`skip-command` 不应用任何 command read/write fact，`skip-pass` 会事务化丢弃所有 command 与 pass-level effect，`use-fallback` 会解析同 kind command，但不修改任一 command 或 resource。只有最终选中的 command 才能推进 content epoch 或创建 producer fact。
 
-预期的数据缺失通过 `SubmittedWork.executionOutcomes` 可观察，不是 warning/error。Required-epoch 的 stale/future diagnostics 与此分离，只对已选中的 command 生效。当前实现的 state 仍是 `empty | ready | disposed`; 本轮 readiness execution 不引入额外 streaming lifecycle state。`CopyCommand`、`ReadbackCommand` 与 `ResolveQuerySetCommand` 仍然只支持 `throw`。
+预期的数据缺失通过 `SubmittedWork.executionOutcomes` 可观察，不是 warning/error。Required-epoch 的 stale/future diagnostics 与此分离，只对已选中的 command 生效。Indeterminate content 始终硬失败，绝不进入 expected-absence policy。`CopyCommand`、`ReadbackCommand` 与 `ResolveQuerySetCommand` 仍然只支持 `throw`。
 
 ## 非目标
 

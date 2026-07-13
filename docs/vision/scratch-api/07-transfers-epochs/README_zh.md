@@ -18,14 +18,21 @@
 - 带 surface 输出 -> 使用 presentation-submission-scoped surface texture view 的 presentation submission
 - 不带 surface -> compute 或 offscreen submission
 
-`.submit()` 返回 `SubmittedWork`，这是带 `done` promise 的可 inspect 句柄; 当 submission 确实入队了物理 queue action 时，底层使用 `queue.onSubmittedWorkDone`。effect-free work 使用已 resolve 的 promise，因此不会等待无关 queue work。完成等待与数据传输是两件事: await `submitted.done` 只说明已提交 GPU 工作完成了，不会自动把数据搬到 CPU，也不会自动从 CPU 搬到 GPU。
+`.submit()` 同步返回 `SubmittedWork`，这是可 inspect 且 non-thenable 的
+handle。始终 resolve 的 `nativeOutcome` 报告 native observation；当存在物理
+queue action 时，`done` Promise 会把该 observation 与
+`queue.onSubmittedWorkDone()` 联合起来。Effect-free work 报告
+`no-native-work`，且不等待无关 queue work。Completion 与 data transfer 仍然
+分离：`done` 不负责 map staging、访问 mapped range、复制 host bytes 或
+materialize readback result。
 
 ```ts
 const submitted = scratch.submission()  // no surface -> compute submission
     .compute(simulationPass, [simulate])
     .submit()
 
-await submitted.done                    // GPU completion, not host readback
+const nativeOutcome = await submitted.nativeOutcome
+await submitted.done                    // observed submission, not host readback
 ```
 
 因此 `Submission` 是唯一核心提交概念。scratch core model 中不额外引入 `Frame` 或 `Batch` 类型。
@@ -66,6 +73,21 @@ Resource identity、lifecycle、readiness、`allocationVersion` 与 `contentEpoc
 - 如果未来进入 API，显式 clear、resolve、mipmap generation command 也属于内容写入
 
 `contentEpoch` 可以先按整个 resource 追踪，之后在有价值时细化到 buffer range 或 texture region。关键契约是: readback 与 dependency validation 讨论 content epoch; binding invalidation 讨论 allocation version。
+
+### 迟到 Failure 后的 Indeterminate Content
+
+Submission effect 在 native action issue 时乐观推进 epoch。若 native
+observation 后续失败、observation 无法 settle，或 queue completion reject，
+Scratch 不回滚已经发布的 epoch。它会把每个仍为 current 的持久 potential
+write 标为 `indeterminate`：allocation 或 query slot 仍存在，但其 bytes、
+texels 或 query values 已无法证明与记录的 epoch 一致。
+
+Allocation version 与 content epoch guard 会阻止迟到 failure 污染 replacement
+或后续 producer。任何 current indeterminate content read 都会在 native work
+前硬失败，包括 copy、direct readback、ordered readback、bind-backed
+draw/dispatch、attachment `load` 与 query resolve。missing-resource policy 与
+validation mode 都不能压制它。后续显式 producer 推进新 epoch 并恢复
+`ready`；历史 submission ledger 与 outcome 保持不变。
 
 ### Texture Allocation Replacement
 
@@ -198,6 +220,30 @@ Mapping transaction 区分 `mapping`、`mapped-range`、`host-copy`、
 `SCRATCH_READBACK_CLEANUP_FAILED` incident 下使用不同 outcome code。若 host
 bytes 已完成复制，cleanup failure 不会丢弃 owned bytes，也不会虚构 native
 destruction 成功。
+
+### Native Copy Observation 与 Byte Trust
+
+direct readback 与 ordered readback 保留两个相互独立的 native boundary。
+
+direct readback 先确认 ephemeral staging allocation。随后 materialization 按
+runtime `submissionScopes` policy，在 readback target 下观察 encoder creation、
+copy encoding、encoder finish 与 queue submit。Copy observation 与 buffer
+mapping 独立 settle；只有两项适用 outcome 都成功后才暴露 bytes。使用
+`submissionScopes: 'off'` 时，copy provenance 明确为 `unobserved`；成功 map
+不会被描述成 validation acknowledgement。
+
+ordered readback 不创建第二次 copy 或 observation。暴露 mapped bytes 前，它
+await 关联的 `SubmittedWork.nativeOutcome`。`observed-failed` 或
+`observation-failed` 的 staging-copy family 会让 bytes 不可信，并使
+materialization reject。显式 `unobserved` outcome 允许返回 mapped bytes，同时
+保留该 provenance。Queue-completion rejection 仍是独立事实：它可以 reject
+`SubmittedWork.done` 并记录 enclosing-family incident，但不会虚构 mapping
+failure，也不会丢弃已独立取得的 owned bytes。
+
+Direct copy observation 与 submission observation 共享
+`maxPendingNativeObservations`。Budget 耗尽发生在 encoder work 前；有限
+`nativeSubmissionDetail: 'step'` capture 记录四个 direct stage，不会为
+readback target 虚构 submission ID。
 
 每个 readback 只有一个 materialization owner。并发
 `retain: 'until-dispose'` readers 共享一次 allocation/copy/map，并分别获得

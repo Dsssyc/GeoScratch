@@ -55,6 +55,7 @@ const checkerboard = new Uint8Array([
 ])
 
 void main().catch((error) => {
+    canvas.dataset.status = 'error'
     console.error(error)
 })
 
@@ -174,7 +175,7 @@ async function main() {
             .submit()
         if (!firstFrameSettled) {
             firstFrameSettled = true
-            void submitted.done.then(() => {
+            void requireObservedSubmission(submitted).then(() => {
                 canvas.dataset.status = 'ready'
             }).catch((error) => {
                 canvas.dataset.status = 'error'
@@ -196,5 +197,16 @@ function resizeSurface(surface, canvas) {
 
     if (surface.size.width !== width || surface.size.height !== height) {
         surface.resize({ width, height })
+    }
+}
+
+async function requireObservedSubmission(submitted) {
+
+    const [ nativeOutcome ] = await Promise.all([
+        submitted.nativeOutcome,
+        submitted.done,
+    ])
+    if (nativeOutcome.status !== 'observed-succeeded') {
+        throw new Error(`Submission native outcome was ${nativeOutcome.status}.`)
     }
 }

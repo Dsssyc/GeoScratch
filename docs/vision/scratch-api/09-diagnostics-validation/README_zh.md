@@ -360,9 +360,25 @@ type SubmissionDiagnosticCode =
     | 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE'
     | 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE'
     | 'SCRATCH_SUBMISSION_WORK_ALREADY_SUBMITTED'
+    | 'SCRATCH_SUBMISSION_NATIVE_POLICY_INVALID'
+    | 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_BUDGET_EXCEEDED'
+    | 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED'
+    | 'SCRATCH_SUBMISSION_NATIVE_INTERNAL_FAILED'
+    | 'SCRATCH_SUBMISSION_NATIVE_OUT_OF_MEMORY'
+    | 'SCRATCH_SUBMISSION_NATIVE_EXCEPTION'
+    | 'SCRATCH_SUBMISSION_NATIVE_SCOPE_FAILED'
+    | 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_FAILED'
+    | 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED'
 ```
 
 `skipped-empty` 是 execution outcome，不是 diagnostic code。Validation mode 只控制 optional dependency findings; 它不会关闭 readiness resolution，也不会删除 execution-outcome facts。
+
+Indeterminate content 是 required safety validation，不是 optional readiness
+finding。Resource、query-slot 与 persistent attachment read 在任意 validation
+mode 下都会于 native effect 前分别使用
+`SCRATCH_COMMAND_RESOURCE_CONTENT_INDETERMINATE`、
+`SCRATCH_QUERY_SLOT_CONTENT_INDETERMINATE` 与
+`SCRATCH_PASS_ATTACHMENT_CONTENT_INDETERMINATE`。
 
 ### Query 与 Readback
 
@@ -387,6 +403,14 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_STAGING_VALIDATION_FAILED'
     | 'SCRATCH_READBACK_STAGING_OUT_OF_MEMORY'
     | 'SCRATCH_READBACK_COPY_ISSUE_FAILED'
+    | 'SCRATCH_READBACK_NATIVE_OBSERVATION_BUDGET_EXCEEDED'
+    | 'SCRATCH_READBACK_NATIVE_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_NATIVE_INTERNAL_FAILED'
+    | 'SCRATCH_READBACK_NATIVE_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_NATIVE_EXCEPTION'
+    | 'SCRATCH_READBACK_NATIVE_SCOPE_FAILED'
+    | 'SCRATCH_READBACK_NATIVE_OBSERVATION_FAILED'
+    | 'SCRATCH_READBACK_ORDERED_COPY_UNTRUSTED'
     | 'SCRATCH_READBACK_MAPPING_VALIDATION_FAILED'
     | 'SCRATCH_READBACK_MAPPING_INTERNAL_FAILED'
     | 'SCRATCH_READBACK_MAPPING_OUT_OF_MEMORY'
@@ -515,8 +539,33 @@ Query 通过 `targetKind`、`resourceId`、`pipelineId`、`commandId` 或
 compilation 与 creation evidence，不获得虚构的 allocation pressure。
 Readback target 不伪装成 persistent resource。
 
+Submission issue provenance 使用 `submission-native-observation` operation 与
+`submission-failure` incident。其 version 4 outcome 记录 summary、detailed 或
+off mode、一个稳定 status、有界 discriminated locations、固定顺序的 native
+outcome facts，以及显式 omission counts。Native stage 区分 encoder creation、
+pass begin/end、command encoding、encoder finish、queue action/submit、scope
+settlement、queue completion 与 lifecycle recheck。
+
+默认 `submissionScopes: 'summary'` 为完整 submission family 使用一个常数
+规模的 scope bundle。因此即使 issued-location index 缩小了调查范围，failure
+仍是 `enclosing-operation-family` attribution。临时
+`nativeSubmissionDetail: 'step'` capture 可以把 `exact-operation` attribution
+指向一个 scoped location，但不能证明该 location 内部哪次 native call 导致
+错误。Queue completion 同样只是 family evidence。OOM scope 证明其
+submission/readback family 捕获了 OOM，不证明某一个 command 或 resource 独自
+耗尽 physical memory。Native prose 绝不提升 attribution。
+
+Always-current `submissionNative` fact 报告 `submissionScopes`、
+`maxPendingNativeObservations`、`currentPendingNativeObservations`、
+`peakPendingNativeObservations` 与 `currentEffectfulSubmittedWork`。即使
+successful operation-history capacity 为零，这些事实与 budget enforcement
+仍保持开启。`off` 是显式 `unobserved` provenance，绝不推断为 success。
+
 Readback provenance 使用 `readback-staging-allocation`、`readback-mapping` 与
-`readback-staging-release` operation，以及 `readback-failure` incident。
+`readback-staging-release` operation，以及 `readback-failure` incident。Direct
+copy issue 另外使用 `readback-native-observation`；它保留 readback target，
+绝不虚构 submission ID。Ordered readback 信任关联 submission
+`nativeOutcome`，而不是创建另一份 copy observation。
 `readback-staging-release` 是瞬时 operation，不能出现在 pending fact 中。
 Failure stage 是结构化事实:
 

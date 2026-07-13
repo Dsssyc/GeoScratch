@@ -360,9 +360,25 @@ type SubmissionDiagnosticCode =
     | 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE'
     | 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE'
     | 'SCRATCH_SUBMISSION_WORK_ALREADY_SUBMITTED'
+    | 'SCRATCH_SUBMISSION_NATIVE_POLICY_INVALID'
+    | 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_BUDGET_EXCEEDED'
+    | 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED'
+    | 'SCRATCH_SUBMISSION_NATIVE_INTERNAL_FAILED'
+    | 'SCRATCH_SUBMISSION_NATIVE_OUT_OF_MEMORY'
+    | 'SCRATCH_SUBMISSION_NATIVE_EXCEPTION'
+    | 'SCRATCH_SUBMISSION_NATIVE_SCOPE_FAILED'
+    | 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_FAILED'
+    | 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED'
 ```
 
 `skipped-empty` is an execution outcome rather than a diagnostic code. Validation mode controls optional dependency findings; it never disables readiness resolution or removes execution-outcome facts.
+
+Indeterminate content is required safety validation rather than an optional
+readiness finding. Resource, query-slot, and persistent attachment reads use
+`SCRATCH_COMMAND_RESOURCE_CONTENT_INDETERMINATE`,
+`SCRATCH_QUERY_SLOT_CONTENT_INDETERMINATE`, and
+`SCRATCH_PASS_ATTACHMENT_CONTENT_INDETERMINATE` before native effects in every
+validation mode.
 
 ### Query And Readback
 
@@ -387,6 +403,14 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_STAGING_VALIDATION_FAILED'
     | 'SCRATCH_READBACK_STAGING_OUT_OF_MEMORY'
     | 'SCRATCH_READBACK_COPY_ISSUE_FAILED'
+    | 'SCRATCH_READBACK_NATIVE_OBSERVATION_BUDGET_EXCEEDED'
+    | 'SCRATCH_READBACK_NATIVE_VALIDATION_FAILED'
+    | 'SCRATCH_READBACK_NATIVE_INTERNAL_FAILED'
+    | 'SCRATCH_READBACK_NATIVE_OUT_OF_MEMORY'
+    | 'SCRATCH_READBACK_NATIVE_EXCEPTION'
+    | 'SCRATCH_READBACK_NATIVE_SCOPE_FAILED'
+    | 'SCRATCH_READBACK_NATIVE_OBSERVATION_FAILED'
+    | 'SCRATCH_READBACK_ORDERED_COPY_UNTRUSTED'
     | 'SCRATCH_READBACK_MAPPING_VALIDATION_FAILED'
     | 'SCRATCH_READBACK_MAPPING_INTERNAL_FAILED'
     | 'SCRATCH_READBACK_MAPPING_OUT_OF_MEMORY'
@@ -515,8 +539,37 @@ incidents retain ADR-032 pressure and attribution semantics. Pipeline incidents
 contain compilation and creation evidence and never receive fabricated
 allocation pressure. Readback targets never masquerade as persistent resources.
 
+Submission issue provenance uses a `submission-native-observation` operation
+and `submission-failure` incidents. Its version 4 outcome records one of the
+summary, detailed, or off modes; one stable status; bounded discriminated
+locations; fixed-order native outcome facts; and explicit omission counts.
+Native stages distinguish encoder creation, pass begin/end, command encoding,
+encoder finish, queue action/submit, scope settlement, queue completion, and
+lifecycle recheck.
+
+Default `submissionScopes: 'summary'` uses one constant-size scope bundle for
+the complete submission family. A failure therefore has
+`enclosing-operation-family` attribution even when the issued-location index
+narrows the search. Temporary `nativeSubmissionDetail: 'step'` capture can
+provide `exact-operation` attribution to one scoped location, but cannot prove
+which native call inside that location caused the error. Queue completion is
+also family evidence. An OOM scope proves that its submission/readback family
+captured OOM; it does not prove one command or one resource alone exhausted
+physical memory. Native prose never upgrades attribution.
+
+The always-current `submissionNative` fact reports `submissionScopes`,
+`maxPendingNativeObservations`, `currentPendingNativeObservations`,
+`peakPendingNativeObservations`, and `currentEffectfulSubmittedWork`. These
+facts and budget enforcement remain active when successful operation-history
+capacity is zero. `off` is explicit `unobserved` provenance, never inferred
+success.
+
 Readback provenance uses `readback-staging-allocation`, `readback-mapping`, and
-`readback-staging-release` operations plus `readback-failure` incidents.
+`readback-staging-release` operations plus `readback-failure` incidents. Direct
+copy issue additionally uses `readback-native-observation`; it retains a
+readback target and never fabricates a submission ID. Ordered readback trusts
+the associated submission `nativeOutcome` instead of creating another copy
+observation.
 `readback-staging-release` is instantaneous and cannot appear in pending facts.
 Failure stages are structural and include:
 

@@ -101,6 +101,21 @@ Every command should declare:
 
 Commands that write resource contents advance `contentEpoch`. Commands that replace physical GPU objects advance `allocationVersion`. The two effects are separate so a compute write does not accidentally imply bind group invalidation.
 
+### Native Observation Boundary
+
+Command execution participates in its enclosing submission observation. In the
+default summary mode, one submission-family scope bundle surrounds all command
+encoding and queue actions; it does not claim one failing command. A finite
+`nativeSubmissionDetail: 'step'` capture can instead place a balanced scope
+bundle around a standalone or pass-command location and report
+`exact-operation` attribution to that location.
+
+Bind sets still create or rebuild native bind groups lazily when a command
+resolves current allocation versions. That lazy bind-group creation can be
+enclosed by command observation, but it is not independently acknowledged by
+this contract. It has no separate persistent allocation transaction, Promise,
+or supporting-object success claim.
+
 Draw and dispatch execution contracts are normalized and locked at construction. Their pipeline, bind/index/vertex state, count, dynamic offsets, resource declarations, readiness policy, and fallback reference cannot drift between validation and encoding; referenced bind sets expose the same immutable normalized binding table. `dispose()` remains the explicit mutable lifecycle transition, exposed through a read-only `isDisposed` state rather than a writable flag.
 
 Pipeline and command validation findings should use the shared `ScratchDiagnostic` envelope from `09-diagnostics-validation`. `Command` diagnostics should identify the command as `subject` and put related resources, pass specs, pipelines, or bind sets in `related` instead of prose.

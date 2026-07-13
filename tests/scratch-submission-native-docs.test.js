@@ -1,0 +1,182 @@
+import { expect } from 'chai'
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+function read(...parts) {
+
+    return fs.readFileSync(path.join(root, ...parts), 'utf8')
+}
+
+describe('scratch submission native outcome documentation', () => {
+
+    it('publishes the public completion contract in every user README', () => {
+
+        for (const file of [
+            [ 'README.md' ],
+            [ 'README_zh.md' ],
+            [ 'packages', 'geoscratch', 'README.md' ],
+            [ 'packages', 'geoscratch', 'README_zh.md' ],
+        ]) {
+            const document = read(...file)
+
+            for (const marker of [
+                "submissionScopes: 'summary'",
+                'maxPendingNativeObservations',
+                "nativeSubmissionDetail: 'step'",
+                'submitted.nativeOutcome',
+                'SubmittedWork.done',
+                'indeterminate',
+                'mapping',
+                'host copy',
+            ]) {
+                expect(document, `${file.join('/')} ${marker}`).to.include(marker)
+            }
+        }
+    })
+
+    it('keeps all six bilingual vision modules on the same implemented model', () => {
+
+        const documents = language => ({
+            runtime: read('docs', 'vision', 'scratch-api', '01-runtime-surface', language),
+            resources: read('docs', 'vision', 'scratch-api', '02-resources', language),
+            commands: read('docs', 'vision', 'scratch-api', '04-pipelines-commands', language),
+            submissions: read(
+                'docs',
+                'vision',
+                'scratch-api',
+                '05-passes-submissions-scheduler',
+                language
+            ),
+            transfers: read('docs', 'vision', 'scratch-api', '07-transfers-epochs', language),
+            diagnostics: read(
+                'docs',
+                'vision',
+                'scratch-api',
+                '09-diagnostics-validation',
+                language
+            ),
+        })
+
+        for (const language of [ 'README.md', 'README_zh.md' ]) {
+            const vision = documents(language)
+
+            for (const marker of [
+                'submissionScopes',
+                'maxPendingNativeObservations',
+                'currentPendingNativeObservations',
+                'currentEffectfulSubmittedWork',
+            ]) {
+                expect(vision.runtime, `${language} runtime ${marker}`).to.include(marker)
+            }
+            for (const marker of [
+                "'indeterminate'",
+                'SCRATCH_COMMAND_RESOURCE_CONTENT_INDETERMINATE',
+                'SCRATCH_QUERY_SLOT_CONTENT_INDETERMINATE',
+                'SCRATCH_PASS_ATTACHMENT_CONTENT_INDETERMINATE',
+            ]) {
+                expect(vision.resources, `${language} resources ${marker}`).to.include(marker)
+            }
+            expect(vision.commands).to.include('lazy bind-group creation')
+            expect(vision.commands).to.include('not independently acknowledged')
+            for (const marker of [
+                'SubmittedWork.nativeOutcome',
+                'SubmittedWork.done',
+                "'no-native-work'",
+                "'observed-succeeded'",
+                "'observed-failed'",
+                "'unobserved'",
+                "'observation-failed'",
+                "nativeSubmissionDetail: 'step'",
+                'enclosing-operation-family',
+                'exact-operation',
+            ]) {
+                expect(vision.submissions, `${language} submissions ${marker}`).to.include(marker)
+            }
+            for (const marker of [
+                'direct readback',
+                'ordered readback',
+                'nativeOutcome',
+                'indeterminate',
+                'unobserved',
+            ]) {
+                expect(vision.transfers, `${language} transfers ${marker}`).to.include(marker)
+            }
+            for (const marker of [
+                'version 4',
+                'submission-native-observation',
+                'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
+                'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
+                'SCRATCH_SUBMISSION_NATIVE_OUT_OF_MEMORY',
+                'enclosing-operation-family',
+                'exact-operation',
+            ]) {
+                expect(vision.diagnostics, `${language} diagnostics ${marker}`).to.include(marker)
+            }
+
+            for (const nonGoal of [
+                'mapped leases',
+                'texture readback',
+                'persistent supporting-object acknowledgement',
+                'tracked dynamic values',
+                'render graph',
+                'raw-device tracking',
+            ]) {
+                expect(vision.submissions, `${language} non-goal ${nonGoal}`).to.include(nonGoal)
+            }
+        }
+    })
+
+    it('keeps the living review honest about implemented and pending evidence', () => {
+
+        const review = read('docs', 'review', 'scratch-api-intelligent-friendly-review.md')
+
+        expect(review).to.include('Implementation and bilingual contract are now present')
+        expect(review).to.include('Keep this item open')
+        expect(review).to.include('complete native-call inventory')
+        expect(review).to.match(/real\s+delayed-validation Chrome evidence/)
+        expect(review).to.match(/strict\s+re-review/)
+    })
+
+    it('makes every ordinary completion proof inspect native outcome and done', () => {
+
+        for (const example of [
+            'scratch_helloTriangle',
+            'scratch_helloVertexBuffer',
+            'scratch_uniformTriangle',
+            'scratch_computeReadback',
+            'scratch_textureSampling',
+            'scratch_renderToTexture',
+            'indirectExecution',
+            'readinessPolicies',
+            'submissionOrder',
+            'externalImageUpload',
+            'textureResize',
+        ]) {
+            const source = read('examples', example, 'main.js')
+
+            expect(source, `${example} native outcome`).to.include('.nativeOutcome')
+            expect(source, `${example} completion`).to.include('.done')
+            expect(source, `${example} observed success`).to.include('observed-succeeded')
+        }
+    })
+
+    it('leaves all three legacy example implementations byte-for-byte unchanged', () => {
+
+        const expected = new Map([
+            [ 'm_demLayer', 'ef22fcc37b806a62873ad1324db120ef6baf23acc5a0eb944cda7a0b8904a576' ],
+            [ 'm_flowLayer', '60988379cbe94f8c0b295e84552603196275697c6ed1469cbcda760d838c62ee' ],
+            [ 'x_helloGAW', '079750fca1070e31a2bf41ff781db08db4aa7085873dd32a7048c781360a8ed3' ],
+        ])
+
+        for (const [ example, digest ] of expected) {
+            const source = read('examples', example, 'main.js')
+            const actual = crypto.createHash('sha256').update(source).digest('hex')
+
+            expect(actual, example).to.equal(digest)
+        }
+    })
+})

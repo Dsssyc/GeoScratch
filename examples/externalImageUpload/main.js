@@ -200,6 +200,7 @@ async function main() {
         .render(surfacePass, [ draw ])
         .submit()
     const bytes = await readback.result({ after: submitted }).toBytes()
+    await requireObservedSubmission(submitted)
     const actualRows = [
         Array.from(bytes.slice(0, copySize.width * 4)),
         Array.from(bytes.slice(paddedBytesPerRow, paddedBytesPerRow + copySize.width * 4)),
@@ -246,5 +247,16 @@ function resizeSurface(surface, targetCanvas) {
 
     if (surface.size.width !== width || surface.size.height !== height) {
         surface.resize({ width, height })
+    }
+}
+
+async function requireObservedSubmission(submitted) {
+
+    const [ nativeOutcome ] = await Promise.all([
+        submitted.nativeOutcome,
+        submitted.done,
+    ])
+    if (nativeOutcome.status !== 'observed-succeeded') {
+        throw new Error(`Submission native outcome was ${nativeOutcome.status}.`)
     }
 }

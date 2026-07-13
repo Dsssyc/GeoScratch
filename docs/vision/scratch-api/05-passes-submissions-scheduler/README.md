@@ -78,13 +78,17 @@ const submitted = scratch.submission({ validation: 'throw' })
     ])
     .submit()
 
+const nativeOutcome = await submitted.nativeOutcome
 await submitted.done
 ```
 
 Conceptual split:
 
 - `SubmissionBuilder` records and validates the current pass-command sequence.
-- `SubmittedWork` is returned by `.submit()`. It owns the submitted-work id, `done` promise, execution outcomes, resource accesses, producer epochs, diagnostics, and links used by readback operations.
+- `SubmittedWork` is returned by `.submit()`. It owns the submitted-work id,
+  always-resolving `nativeOutcome`, strengthened `done` promise, execution
+  outcomes, resource accesses, producer epochs, potential writes, diagnostics,
+  and links used by readback operations.
 
 `SubmittedWork` should not be thenable. Waiting uses `await submitted.done`, not `await submitted`. This keeps the submitted-work object inspectable and consistent with `ReadbackOperation`, where the object is not itself a promise.
 
@@ -98,6 +102,7 @@ Submission responsibilities:
 - resolve command readiness policies into one pre-encoder execution plan
 - skip empty passes
 - record only the commands selected by that plan
+- observe Scratch-owned native issue boundaries under runtime policy
 - submit command buffers
 - return `SubmittedWork`
 
@@ -135,25 +140,80 @@ type SubmittedReadbackLink = Readonly<{
 ```
 
 `SubmittedWork.readbacks` contains links, not mutable operations, command
-payloads, mapped bytes, or native buffers. `SubmittedWork.done` covers only the
-queue work actually replayed. It does not wait for `mapAsync()`, mapped-range
-access, host copy, retention, cancellation, or cleanup. A native completion
-rejection becomes `SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED` without
-rewriting the linked readback operation's mapping outcome. Each immutable link
-also produces a `readback-failure` incident at `queue-completion` with
+payloads, mapped bytes, or native buffers. A queue completion rejection becomes
+`SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED` without rewriting the linked
+readback operation's independent mapping outcome. Each immutable link also
+produces a `readback-failure` incident at `queue-completion` with
 `enclosing-operation-family` attribution: the completion barrier identifies
 the replayed submission family, not one proven causal command.
 
-ADR-035 accepts a clean-cut native-outcome extension. `submit()` remains
-synchronous, but each effectful attempt is observed by one constant-size
-summary error-scope bundle by default; instrumentation may be explicitly off,
-and per-stage detail exists only inside finite diagnostic capture. The returned
-work exposes an always-resolving immutable `nativeOutcome`. Its `done` Promise
-joins native observation with queue completion while continuing to exclude
-readback mapping and host copy. Delayed native failure marks only still-current
-potential writes indeterminate; it never rolls epochs back or rewrites the
-historical submission ledger. This is the accepted target contract;
-implementation evidence is tracked by ADR-035 and the active review item.
+### Native Outcome And Completion
+
+`SubmissionBuilder.submit()` remains synchronous and non-thenable. Complete
+Scratch preflight happens before observation reservation or native effects;
+encoding and queue actions then occur in the declared physical order before
+the method returns. Every Scratch error scope is popped in reverse order before
+return or throw, while its settlement Promise is retained and immediately
+observed without moving queue calls into a microtask.
+
+Runtime diagnostics policy is `submissionScopes: 'summary' | 'off'`. The
+default `summary` mode reserves one finite owner and opens one constant-size
+validation/internal/OOM bundle for the complete effectful attempt. It reports
+`enclosing-operation-family` attribution and issued locations, not a fabricated
+unique command. `off` opens no scope and publishes honest unobserved
+provenance. Effect-free work uses no owner or native scope.
+
+`SubmittedWork.nativeOutcome` always resolves to one deeply frozen,
+JSON-serializable version-4 result. Its status is exactly:
+
+```ts
+type ScratchSubmissionNativeOutcomeStatus =
+    | 'no-native-work'
+    | 'observed-succeeded'
+    | 'observed-failed'
+    | 'unobserved'
+    | 'observation-failed'
+```
+
+The outcome retains bounded locations and every retained independent failure
+fact in fixed stage/issue order. It does not reject away simultaneous evidence.
+`SubmittedWork.report` remains the immutable synchronous preflight report and
+is never rewritten after return.
+
+`SubmittedWork.done` joins native observation and
+`queue.onSubmittedWorkDone()`. It rejects with one structured submission
+diagnostic when either boundary proves failure or observation itself cannot
+settle. It does not wait for readback `mapAsync()`, mapped-range access, host
+copy, retention, mapped leases, cancellation, or cleanup. Queue completion is
+still enclosing-family evidence and cannot identify one command or turn an
+independently successful mapping into failure.
+
+Per-location detail exists only in finite diagnostics capture:
+
+```ts
+const capture = runtime.diagnostics.capture({
+    maxOperations: 128,
+    maxDurationMs: 5_000,
+    maxEvidenceBytes: 256 * 1024,
+    nativeSubmissionDetail: 'step',
+})
+
+// Reproduce a bounded number of submissions, then stop explicitly if needed.
+const report = capture.stop()
+```
+
+Detailed mode scopes encoder creation/finalization, pass begin/end,
+standalone/pass commands, and queue actions separately. It can report
+`exact-operation` attribution to the scoped location, but not necessarily to
+one native call inside that location. Active detailed captures share one
+snapshotted instrumentation plan and never multiply native issue calls.
+
+Every submission also publishes immutable `potentialWrites`. If native
+observation fails, observation settlement fails, or queue completion rejects,
+only writes whose allocation and produced epoch are still current become
+`indeterminate`. Epochs and historical ledgers never roll back. A later
+acknowledged producer protects or recovers the newer epoch; Surface presentation
+targets are excluded from persistent indeterminate state.
 
 ### Resize Between Construction And Submission
 
@@ -297,3 +357,4 @@ That layer can build on command read/write declarations without changing the cor
 - Do not encode geospatial layer order in the scratch scheduler.
 - Do not expose submission validation as prose-only errors.
 - Do not use `Frame` as the scratch core submission type; frame cadence belongs to geo, app, or presentation layers.
+- Keep mapped leases, texture readback, persistent supporting-object acknowledgement, tracked dynamic values, render graph ownership, and raw-device tracking outside this submission-native-outcome slice.

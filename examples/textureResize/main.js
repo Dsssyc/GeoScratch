@@ -236,7 +236,11 @@ async function main() {
         .render(surfacePass, [ draw ])
         .submit()
 
-    await Promise.all([ initialWork.done, replacementWork.done, repeatedPresentation.done ])
+    await Promise.all([
+        requireObservedSubmission(initialWork),
+        requireObservedSubmission(replacementWork),
+        requireObservedSubmission(repeatedPresentation),
+    ])
 
     const expectedBytes = createExpectedPaddedBytes(
         surface.size,
@@ -371,4 +375,15 @@ function bytesEqual(actual, expected) {
 
     return actual.byteLength === expected.byteLength &&
         actual.every((value, index) => value === expected[index])
+}
+
+async function requireObservedSubmission(submitted) {
+
+    const [ nativeOutcome ] = await Promise.all([
+        submitted.nativeOutcome,
+        submitted.done,
+    ])
+    if (nativeOutcome.status !== 'observed-succeeded') {
+        throw new Error(`Submission native outcome was ${nativeOutcome.status}.`)
+    }
 }

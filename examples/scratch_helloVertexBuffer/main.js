@@ -3,6 +3,7 @@ import {
 } from 'geoscratch'
 
 const canvas = document.getElementById('GPUFrame')
+canvas.dataset.status = 'loading'
 
 const vertexBufferWgsl = `
 struct VertexInput {
@@ -39,6 +40,7 @@ const vertices = new Float32Array([
 const instanceSize = new Float32Array([ 1 ])
 
 void main().catch((error) => {
+    canvas.dataset.status = 'error'
     console.error(error)
 })
 
@@ -115,6 +117,7 @@ async function main() {
     })
     let frame = 0
     let needsVertexUpload = true
+    let firstFrameSettled = false
 
     function render() {
 
@@ -151,7 +154,15 @@ async function main() {
             .upload(uploadInstanceSize)
             .render(pass, [ draw ])
             .submit()
-        void submitted.done
+        if (!firstFrameSettled) {
+            firstFrameSettled = true
+            void requireObservedSubmission(submitted).then(() => {
+                canvas.dataset.status = 'ready'
+            }).catch((error) => {
+                canvas.dataset.status = 'error'
+                console.error(error)
+            })
+        }
 
         requestAnimationFrame(render)
     }
@@ -167,5 +178,16 @@ function resizeSurface(surface, canvas) {
 
     if (surface.size.width !== width || surface.size.height !== height) {
         surface.resize({ width, height })
+    }
+}
+
+async function requireObservedSubmission(submitted) {
+
+    const [ nativeOutcome ] = await Promise.all([
+        submitted.nativeOutcome,
+        submitted.done,
+    ])
+    if (nativeOutcome.status !== 'observed-succeeded') {
+        throw new Error(`Submission native outcome was ${nativeOutcome.status}.`)
     }
 }

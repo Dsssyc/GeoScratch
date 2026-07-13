@@ -92,6 +92,57 @@ const evidence = runtime.diagnostics.exportEvidence()
 
 `runtime.diagnostics` exposes current resource facts, bounded operation and incident history, and explicit temporary deep capture. Logical footprint evidence is not physical VRAM.
 
++## Scratch Submission Outcomes
+
+`SubmissionBuilder.submit()` stays synchronous. Native validation remains
+asynchronous and is exposed explicitly:
+
+```js
+const runtime = await scr.ScratchRuntime.create({
+    diagnostics: {
+        submissionScopes: 'summary',
+        maxPendingNativeObservations: 64,
+    },
+})
+const submitted = runtime.createSubmission()
+    .compute(pass, [ dispatch ])
+    .submit()
+
+const nativeOutcome = await submitted.nativeOutcome
+await submitted.done
+```
+
+`summary` is the default and uses one constant-size native error-scope bundle
+per effectful submission. `off` opens no submission scopes and reports
+`unobserved`; queue completion is not relabeled as validation success.
+`maxPendingNativeObservations` bounds unsettled submission and direct-readback
+observations and fails before native effects when exhausted.
+
+`SubmittedWork.nativeOutcome` always resolves to an immutable serializable
+result. `SubmittedWork.done` joins native observation and queue completion; it
+rejects structurally if either boundary fails, but does not wait for readback
+mapping or host copy. A delayed failure marks only still-current potential
+writes `indeterminate`, never rolls an epoch back, and cannot poison content
+already advanced by a later producer.
+
+Per-command/pass attribution is temporary and finite:
+
+```js
+const capture = runtime.diagnostics.capture({
+    maxOperations: 128,
+    maxDurationMs: 5_000,
+    maxEvidenceBytes: 256 * 1024,
+    nativeSubmissionDetail: 'step',
+})
+// Reproduce the issue, then stop the bounded capture.
+const report = capture.stop()
+```
+
+Default summary failures identify the enclosing submission family. Detailed
+capture identifies a scoped location, not necessarily one native call; OOM does
+not prove that one command or resource alone exhausted physical memory.
+
+
 ## Scratch Readback
 
 Direct readback stays synchronous until bytes are requested. Its first
@@ -119,7 +170,8 @@ const orderedBytes = await ordered.result({ after: submitted }).toBytes()
 await submitted.done
 ```
 
-`SubmittedWork.done` covers replayed queue work, not mapping or host copying.
+`SubmittedWork.done` joins submission native observation and replayed queue-work
+completion; it does not cover mapping or host copy.
 Runtime options `maxPendingOperations` and `maxStagingBytes` bound current
 readback ownership. Mapping validation is reported structurally as
 `SCRATCH_READBACK_MAPPING_VALIDATION_FAILED`; native message prose is evidence,

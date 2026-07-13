@@ -153,6 +153,36 @@ const alias = await runtime.readbackCommand(descriptor)
 隐藏 retry 或 public native staging handle。`SubmissionBuilder.submit()` 保持
 同步，并且不等待 mapping 或 host-copy 完成。
 
+## Submission Native Observation Ownership 与 Budgets
+
+Submission native observation 是 runtime-owned diagnostics policy。Runtime
+创建暴露完整 persistent policy surface:
+
+```ts
+const runtime = await ScratchRuntime.create({
+    diagnostics: {
+        submissionScopes: 'summary',
+        maxPendingNativeObservations: 64,
+    },
+})
+```
+
+`summary` 是默认值。每个 effectful submission 或 direct readback 只预留一个
+native-observation owner，并用一个常数规模的 validation、internal 与
+out-of-memory scope bundle 包围完整 native issue family。scope 数量不随
+pass、command、encoder segment 或 queue action 数量增长。`off` 不打开这些
+scope，并报告显式 `unobserved` provenance；它不会把 queue completion 解释成
+native validation acknowledgement。Effect-free submission 不预留 owner，并
+报告 `no-native-work`。
+
+`maxPendingNativeObservations` 是 unsettled submission 与 direct-readback
+observation 共享的有限上限。budget 耗尽会在 encoder 或 queue effect 前失败，
+而不是静默降级到 `off`。always-current fact graph 暴露
+`submissionScopes`、`maxPendingNativeObservations`、
+`currentPendingNativeObservations`、`peakPendingNativeObservations` 与
+`currentEffectfulSubmittedWork`。这些事实随 unsettled ownership 变化，不随
+runtime 年龄增长；有界 operation/incident history 是另一项 retention concern。
+
 ## Device Loss
 
 `ScratchRuntime` 拥有 device-loss 处理。Device loss 后:

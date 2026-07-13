@@ -89,13 +89,13 @@ Coverage check for this pass:
 
 ### Submission Naming And Mental Model
 
-Resolved in `docs/vision/scratch-api/05-passes-submissions-scheduler/`: scratch core now uses `Submission` rather than `Frame` as the single submission model. The design separates `SubmissionBuilder` from `SubmittedWork`, uses `submitted.done` for GPU completion, and treats presentation as one submission mode rather than the definition of the core type.
+Resolved in `docs/vision/scratch-api/05-passes-submissions-scheduler/`: scratch core now uses `Submission` rather than `Frame` as the single submission model. The design separates `SubmissionBuilder` from `SubmittedWork`, uses `submitted.nativeOutcome` for immutable native evidence and `submitted.done` for the joined native-observation/queue-completion boundary, and treats presentation as one submission mode rather than the definition of the core type.
 
 Coverage check for this pass:
 
 - `Frame` is no longer the scratch core submission type: covered by `05-passes-submissions-scheduler`, `00-overview`, and `07-transfers-epochs`.
 - `SubmissionBuilder` / `SubmittedWork` split: covered by `05-passes-submissions-scheduler` and the scratch-api module index.
-- `SubmittedWork` is not thenable; GPU completion uses `submitted.done`: covered by `05-passes-submissions-scheduler` and `07-transfers-epochs`.
+- `SubmittedWork` is not thenable; native evidence uses `submitted.nativeOutcome`, and the joined native-observation/queue-completion boundary uses `submitted.done`: covered by `05-passes-submissions-scheduler` and `07-transfers-epochs`.
 - Presentation is a submission mode, not the core concept: covered by `01-runtime-surface`, `05-passes-submissions-scheduler`, `07-transfers-epochs`, and `scratch-graphics-kernel.md`.
 - `FrameContext` / `FrameValidationMode` are renamed to `SubmissionContext` / `SubmissionValidationMode`: covered by `04-pipelines-commands` and `05-passes-submissions-scheduler`.
 
@@ -215,20 +215,27 @@ partial implementations.
 
 ### Submission Native Outcome And Content Truth
 
-ADR-035 accepts the next target contract. Completion evidence must prove that
-`SubmissionBuilder.submit()` remains synchronous and physically ordered while
-summary scopes remain constant-size, detailed scopes remain finite, and off
-mode is explicitly unobserved. `SubmittedWork.nativeOutcome` must retain all
-native scope outcomes without mutating the preflight report, while `done` must
-join native observation with queue completion without waiting for readback
-mapping or host copy.
+Implementation and bilingual contract are now present for the ADR-035 core:
 
-The implementation must also prove that delayed native failure cannot leave
-optimistic resource/query content marked ready, cannot roll epochs backward,
-and cannot poison a later acknowledged epoch. Keep this item open until schema
-v4, content indeterminacy, complete native-call inventory, long-run scope/budget
-evidence, real delayed-validation Chrome evidence, fixed-baseline parity, and a
-strict re-review are all recorded.
+- `SubmissionBuilder.submit()` remains synchronous and physically ordered;
+  default summary scopes are constant-size, off mode is explicitly unobserved,
+  and per-location detail exists only in finite capture.
+- `SubmittedWork.nativeOutcome` is immutable and always resolving, the preflight
+  report remains historical, and `done` joins native observation with queue
+  completion without waiting for readback mapping or host copy.
+- Delayed native or queue failure marks only still-current persistent potential
+  writes indeterminate. Epochs never roll back, later acknowledged epochs are
+  guarded, all reads hard-fail before native effects, and Surface presentation
+  output is excluded.
+- Direct readback observes copy issue independently from mapping; ordered
+  readback gates bytes on the associated submission outcome without converting
+  queue-completion rejection into mapping failure.
+
+The schema-v4 implementation, unit/type gates, bilingual contract, and ordinary
+example migration are complete for this slice. Keep this item open until the
+complete native-call inventory, long-run scope/budget evidence, real
+delayed-validation Chrome evidence, fixed-baseline parity, and a strict
+re-review are all recorded.
 
 ## Update Rules
 
