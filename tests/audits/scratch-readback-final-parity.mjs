@@ -57,8 +57,8 @@ for (const code of oldDiagnosticCodes) {
 }
 
 const legacyBehaviorChecks = [
-    behavior('typed-array-readback', oldJsReadback, /async toArray\(/, currentSources.readback, /async toArray\(/),
-    behavior('explicit-byte-readback', oldJsReadback, /async toBytes\(/, currentSources.readback, /async toBytes\(/),
+    behavior('typed-array-readback', oldJsReadback, /async toArray\(/, currentSources.readback, /toArray\(\): Promise<Uint8Array>/),
+    behavior('explicit-byte-readback', oldJsReadback, /async toBytes\(/, currentSources.readback, /toBytes\(\): Promise<Uint8Array>/),
     behavior('range-default-and-validation', oldJsReadback, /function normalizeRange\(/, currentSources.readback, /function normalizeRange\(/),
     behavior('same-runtime-after-validation', oldJsReadback, /function normalizeAfter\(/, currentSources.readback, /function normalizeAfter\(/),
     behavior('copy-source-usage-validation', oldJsReadback, /BUFFER_USAGE_COPY_SRC/, currentSources.readback, /BUFFER_USAGE_COPY_SRC/),

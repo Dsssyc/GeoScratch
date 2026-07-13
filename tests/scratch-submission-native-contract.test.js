@@ -205,6 +205,104 @@ describe('scratch submission native contract', () => {
         expect(JSON.parse(JSON.stringify(record))).to.deep.equal(record)
     })
 
+    it('records direct readback native observation without fabricating a submission target', () => {
+
+        const record = createGpuOperationRecord({
+            sequence: 1,
+            id: 'operation-readback-native-1',
+            kind: 'readback-native-observation',
+            status: 'succeeded',
+            runtimeId: 'runtime-1',
+            target: {
+                kind: 'readback',
+                readbackId: 'readback-1',
+                path: 'direct',
+                sourceResourceId: 'buffer-1',
+                allocationVersion: 1,
+                contentEpoch: 1,
+                byteLength: 16,
+            },
+            descriptor: {
+                hash: 'descriptor-readback-native-1',
+                summary: { mode: 'off', issueCount: 4 },
+            },
+            nativeOutcome: {
+                mode: 'off',
+                status: 'unobserved',
+                locations: [],
+                outcomes: [],
+            },
+        })
+
+        expect(record).to.deep.include({
+            version: 4,
+            kind: 'readback-native-observation',
+            target: {
+                kind: 'readback',
+                readbackId: 'readback-1',
+                path: 'direct',
+                sourceResourceId: 'buffer-1',
+                allocationVersion: 1,
+                contentEpoch: 1,
+                byteLength: 16,
+            },
+        })
+        expect(record.nativeOutcome).to.deep.equal({
+            version: 4,
+            readbackId: 'readback-1',
+            mode: 'off',
+            status: 'unobserved',
+            locations: [],
+            outcomes: [],
+            omittedLocationCount: 0,
+            omittedOutcomeCount: 0,
+        })
+        expect(Object.isFrozen(record.nativeOutcome)).to.equal(true)
+
+        for (const nativeOutcome of [
+            {
+                mode: 'summary',
+                status: 'observed-failed',
+                locations: [],
+                outcomes: [],
+            },
+            {
+                mode: 'summary',
+                status: 'observed-failed',
+                locations: [],
+                outcomes: [ {
+                    stage: 'invented',
+                    nativeErrorCategory: 'validation',
+                } ],
+            },
+            {
+                mode: 'off',
+                status: 'unobserved',
+                locations: [ { kind: 'submission', submissionId: 'forged' } ],
+                outcomes: [],
+            },
+            {
+                mode: 'summary',
+                status: 'no-native-work',
+                locations: [],
+                outcomes: [],
+            },
+        ]) {
+            expect(() => createGpuOperationRecord({
+                ...record,
+                nativeOutcome,
+            })).to.throw(TypeError)
+        }
+        expect(() => createGpuOperationRecord({
+            ...record,
+            kind: 'readback-mapping',
+        })).to.throw(TypeError)
+        expect(() => createGpuOperationRecord({
+            ...record,
+            target: { ...record.target, path: 'ordered' },
+        })).to.throw(TypeError)
+    })
+
     it('rejects forged submission facts and bounds retained native evidence', () => {
 
         const base = {

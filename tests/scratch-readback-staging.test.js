@@ -410,7 +410,9 @@ describe('scratch acknowledged readback staging', () => {
             return bytes
         })
 
-        await settleMicrotasks()
+        for (let attempt = 0; attempt < 64 && !materialized; attempt++) {
+            await Promise.resolve()
+        }
         const observation = {
             materialized,
             submissions: fake.calls.queueSubmissions.length,

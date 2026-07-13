@@ -27,6 +27,7 @@ export type GpuOperationKind =
     | 'readback-staging-allocation'
     | 'readback-mapping'
     | 'readback-staging-release'
+    | 'readback-native-observation'
     | 'submission-native-observation'
 
 export type GpuOperationStatus =
@@ -204,6 +205,41 @@ export type ScratchSubmissionNativeOutcomeInput = Readonly<{
     omittedOutcomeCount?: number
 }>
 
+export type ScratchReadbackNativeStage =
+    | 'encoder-create'
+    | 'command-encode'
+    | 'encoder-finish'
+    | 'queue-submit'
+    | 'scope-settlement'
+    | 'lifecycle-recheck'
+
+export type ScratchReadbackNativeOutcomeFact = Readonly<{
+    stage: ScratchReadbackNativeStage
+    nativeErrorCategory: GpuNativeErrorCategory
+    diagnosticCode?: string
+    nativeError?: ScratchNativeGpuErrorFacts
+}>
+
+export type ScratchReadbackNativeOutcome = Readonly<{
+    version: 4
+    readbackId: string
+    mode: ScratchSubmissionNativeOutcomeMode
+    status: Exclude<ScratchSubmissionNativeOutcomeStatus, 'no-native-work'>
+    locations: readonly []
+    outcomes: readonly ScratchReadbackNativeOutcomeFact[]
+    omittedLocationCount: 0
+    omittedOutcomeCount: number
+}>
+
+export type ScratchReadbackNativeOutcomeInput = Readonly<{
+    mode: ScratchSubmissionNativeOutcomeMode
+    status: Exclude<ScratchSubmissionNativeOutcomeStatus, 'no-native-work'>
+    locations: readonly []
+    outcomes: readonly ScratchReadbackNativeOutcomeFact[]
+    omittedLocationCount?: 0
+    omittedOutcomeCount?: number
+}>
+
 export type ScratchGpuRuntimeIncidentTarget = Readonly<{
     kind: 'runtime'
     runtimeId: string
@@ -265,13 +301,21 @@ export type ScratchGpuCommandOperationRecord = ScratchGpuOperationRecordBase & R
     nativeOutcome?: never
 }>
 
-export type ScratchGpuReadbackOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
-    target: ScratchGpuReadbackOperationTarget
-    kind: 'readback-staging-allocation' | 'readback-mapping' | 'readback-staging-release'
-    nativeLabels?: never
-    compilationReport?: never
-    nativeOutcome?: never
-}>
+export type ScratchGpuReadbackOperationRecord =
+    | ScratchGpuOperationRecordBase & Readonly<{
+        target: ScratchGpuReadbackOperationTarget
+        kind: 'readback-staging-allocation' | 'readback-mapping' | 'readback-staging-release'
+        nativeLabels?: never
+        compilationReport?: never
+        nativeOutcome?: never
+    }>
+    | ScratchGpuOperationRecordBase & Readonly<{
+        target: ScratchGpuReadbackOperationTarget
+        kind: 'readback-native-observation'
+        nativeLabels?: never
+        compilationReport?: never
+        nativeOutcome?: ScratchReadbackNativeOutcome
+    }>
 
 export type ScratchGpuSubmissionOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
     target: ScratchGpuSubmissionOperationTarget
@@ -304,7 +348,7 @@ export type ScratchGpuOperationRecordInput = Readonly<{
     startedAtMs?: number
     settledAtMs?: number
     stack?: string
-    nativeOutcome?: ScratchSubmissionNativeOutcomeInput
+    nativeOutcome?: ScratchSubmissionNativeOutcomeInput | ScratchReadbackNativeOutcomeInput
     [key: string]: unknown
 }>
 
@@ -561,10 +605,19 @@ export function createGpuOperationRecord(
     if (input.target.kind === 'submission' && input.nativeOutcome !== undefined) {
         record.nativeOutcome = createSubmissionNativeOutcome(
             input.target.submissionId,
-            input.nativeOutcome
+            input.nativeOutcome as ScratchSubmissionNativeOutcomeInput
+        )
+    } else if (
+        input.target.kind === 'readback' &&
+        input.kind === 'readback-native-observation' &&
+        input.nativeOutcome !== undefined
+    ) {
+        record.nativeOutcome = createReadbackNativeOutcome(
+            input.target.readbackId,
+            input.nativeOutcome as ScratchReadbackNativeOutcomeInput
         )
     } else if (input.nativeOutcome !== undefined) {
-        throw new TypeError('Only submission GPU operations may retain a submission native outcome.')
+        throw new TypeError('Only native-observation GPU operations may retain a native outcome.')
     }
 
     copyDefined(record, input, [
@@ -622,6 +675,52 @@ export function createSubmissionNativeOutcome(
         omittedOutcomeCount: (input.omittedOutcomeCount ?? 0) +
             Math.max(0, input.outcomes.length - outcomes.length),
     })
+}
+
+export function createReadbackNativeOutcome(
+    readbackId: string,
+    input: ScratchReadbackNativeOutcomeInput
+): ScratchReadbackNativeOutcome {
+
+    assertNonEmptyString(readbackId, 'readbackId')
+    assertSubmissionNativeOutcomeStatus(input.mode, input.status)
+    if ((input.status as ScratchSubmissionNativeOutcomeStatus) === 'no-native-work') {
+        throw new TypeError('Readback native observations cannot publish no-native-work.')
+    }
+    if (!Array.isArray(input.locations) || input.locations.length !== 0) {
+        throw new TypeError('Readback native outcomes do not retain submission locations.')
+    }
+    if ((input.omittedLocationCount ?? 0) !== 0) {
+        throw new TypeError('Readback native outcomes cannot omit submission locations.')
+    }
+    assertNonNegativeInteger(input.omittedOutcomeCount ?? 0, 'omittedOutcomeCount')
+    const outcomes = input.outcomes
+        .slice(0, MAX_SUBMISSION_NATIVE_OUTCOMES)
+        .map(outcome => {
+            assertReadbackNativeStage(outcome.stage)
+            assertNativeErrorCategory(outcome.nativeErrorCategory)
+            if (outcome.diagnosticCode !== undefined) {
+                assertNonEmptyString(outcome.diagnosticCode, 'diagnosticCode')
+            }
+            return cloneJsonValue(
+                outcome,
+                new Set<object>(),
+                true
+            ) as ScratchReadbackNativeOutcomeFact
+        })
+    assertSubmissionNativeOutcomeContents(input.status, [], outcomes)
+
+    return deepFreeze({
+        version: 4,
+        readbackId,
+        mode: input.mode,
+        status: input.status,
+        locations: [],
+        outcomes,
+        omittedLocationCount: 0,
+        omittedOutcomeCount: (input.omittedOutcomeCount ?? 0) +
+            Math.max(0, input.outcomes.length - outcomes.length),
+    }) as ScratchReadbackNativeOutcome
 }
 
 export function createGpuIncidentReport(
@@ -915,6 +1014,9 @@ export function assertGpuOperationTarget(
         case 'readback-mapping':
             if (target.kind === 'readback') return
             throw new TypeError(`GPU operation ${kind} requires a readback target.`)
+        case 'readback-native-observation':
+            if (target.kind === 'readback' && target.path === 'direct') return
+            throw new TypeError(`GPU operation ${kind} requires a direct readback target.`)
         case 'submission-native-observation':
             if (target.kind === 'submission') {
                 assertNonEmptyString(target.submissionId, 'submissionId')
@@ -1008,7 +1110,7 @@ function assertSubmissionNativeOutcomeStatus(
 function assertSubmissionNativeOutcomeContents(
     status: ScratchSubmissionNativeOutcomeStatus,
     locations: readonly ScratchSubmissionNativeLocation[],
-    outcomes: readonly ScratchSubmissionNativeOutcomeFact[]
+    outcomes: readonly unknown[]
 ): void {
 
     if (status === 'no-native-work' && (locations.length !== 0 || outcomes.length !== 0)) {
@@ -1019,6 +1121,20 @@ function assertSubmissionNativeOutcomeContents(
     }
     if ((status === 'observed-failed' || status === 'observation-failed') && outcomes.length === 0) {
         throw new TypeError(`${status} outcomes require at least one native failure.`)
+    }
+}
+
+function assertReadbackNativeStage(stage: ScratchReadbackNativeStage): void {
+
+    if (
+        stage !== 'encoder-create' &&
+        stage !== 'command-encode' &&
+        stage !== 'encoder-finish' &&
+        stage !== 'queue-submit' &&
+        stage !== 'scope-settlement' &&
+        stage !== 'lifecycle-recheck'
+    ) {
+        throw new TypeError(`Unsupported readback native stage: ${String(stage)}`)
     }
 }
 

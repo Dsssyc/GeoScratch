@@ -21,16 +21,21 @@ import {
     releaseReadbackStaging,
 } from './readback-staging.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
+import { beginReadbackNativeObservation } from './submission-native-observation.js'
 import { describeValue } from './type-utils.js'
 import type { BufferResource } from './buffer.js'
 import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchReadbackFailureStage } from './gpu-operation.js'
+import type {
+    ScratchReadbackFailureStage,
+    ScratchSubmissionNativeOutcome,
+} from './gpu-operation.js'
 import type { LayoutArtifact, LayoutReadbackView } from './layout-codec.js'
 import type { ReadbackMappingTransaction } from './readback-mapping.js'
 import type { ReadbackStagingCleanupResult, ReadbackStagingSlot } from './readback-staging.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { ScratchRuntimeReadbackOperationFact } from './runtime-diagnostics.js'
 import type { SubmittedResourceEpoch, SubmittedWork } from './submission.js'
+import type { ReadbackNativeSettlement } from './submission-native-observation.js'
 
 const BUFFER_USAGE_COPY_SRC = 0x4
 const readbackOperationToken = Symbol('ReadbackOperation')
@@ -304,16 +309,23 @@ export class ReadbackOperation {
         return subject
     }
 
-    async toBytes(): Promise<Uint8Array> {
+    toBytes(): Promise<Uint8Array> {
 
-        return this._readBytes()
+        return observeReadbackPromise(this._readBytes())
     }
 
     async toArray(): Promise<Uint8Array>
 
     async toArray<T extends ArrayBufferView>(TypedArrayConstructor: TypedArrayConstructor<T>): Promise<T>
 
-    async toArray<T extends ArrayBufferView>(
+    toArray<T extends ArrayBufferView>(
+        TypedArrayConstructor?: TypedArrayConstructor<T>
+    ): Promise<T | Uint8Array> {
+
+        return observeReadbackPromise(this.#toArray(TypedArrayConstructor))
+    }
+
+    async #toArray<T extends ArrayBufferView>(
         TypedArrayConstructor?: TypedArrayConstructor<T>
     ): Promise<T | Uint8Array> {
 
@@ -341,7 +353,12 @@ export class ReadbackOperation {
         )
     }
 
-    async toLayoutView(): Promise<LayoutReadbackView> {
+    toLayoutView(): Promise<LayoutReadbackView> {
+
+        return observeReadbackPromise(this.#toLayoutView())
+    }
+
+    async #toLayoutView(): Promise<LayoutReadbackView> {
 
         this._assertReadableLifecycle()
 
@@ -426,6 +443,7 @@ export class ReadbackOperation {
     async _materializeBytes(): Promise<Uint8Array> {
 
         let mappingTransaction: ReadbackMappingTransaction | undefined
+        let directNativeSettlement: Promise<ReadbackNativeSettlement> | undefined
         let failureStage: ScratchReadbackFailureStage = 'lifecycle-recheck'
 
         try {
@@ -454,21 +472,51 @@ export class ReadbackOperation {
                 this._assertBeforeMaterialization()
                 failureStage = 'copy-issue'
                 const stagingBuffer = readbackStagingBuffer(slot)
+                const nativeObservation = beginReadbackNativeObservation({
+                    runtime: this.runtime,
+                    target: readbackTarget(this),
+                    plan: [
+                        'encoder-create',
+                        'command-encode',
+                        'encoder-finish',
+                        'queue-submit',
+                    ],
+                })
+                directNativeSettlement = nativeObservation.settlement
+                let issueFailed = false
+                let issueFailure: unknown
+                try {
+                    const encoderDescriptor: GPUCommandEncoderDescriptor = {}
+                    const encoderLabel = labelWithSuffix(this.label, 'copy')
+                    if (encoderLabel !== undefined) encoderDescriptor.label = encoderLabel
+                    const encoder = nativeObservation.issue(
+                        'encoder-create',
+                        () => device.createCommandEncoder(encoderDescriptor)
+                    )
+                    nativeObservation.issue('command-encode', () => encoder.copyBufferToBuffer(
+                        this.source.gpuBuffer,
+                        this.range.offset,
+                        stagingBuffer,
+                        0,
+                        this.range.byteLength
+                    ))
+                    const commandBuffer = nativeObservation.issue(
+                        'encoder-finish',
+                        () => encoder.finish()
+                    )
 
-                const encoderDescriptor: GPUCommandEncoderDescriptor = {}
-                const encoderLabel = labelWithSuffix(this.label, 'copy')
-                if (encoderLabel !== undefined) encoderDescriptor.label = encoderLabel
-                const encoder = device.createCommandEncoder(encoderDescriptor)
-                encoder.copyBufferToBuffer(
-                    this.source.gpuBuffer,
-                    this.range.offset,
-                    stagingBuffer,
-                    0,
-                    this.range.byteLength
-                )
-
-                this._setState('submitted')
-                queue.submit([ encoder.finish() ])
+                    this._setState('submitted')
+                    nativeObservation.issue('queue-submit', () => queue.submit([ commandBuffer ]))
+                } catch (cause) {
+                    issueFailed = true
+                    issueFailure = cause
+                } finally {
+                    nativeObservation.finish()
+                }
+                if (issueFailed) {
+                    const settlement = await directNativeSettlement
+                    assertDirectReadbackNativeSettlement(this, settlement, issueFailure)
+                }
             }
 
             this._assertReadableLifecycle()
@@ -534,6 +582,19 @@ export class ReadbackOperation {
                 completeReadbackMapping(mappingTransaction)
             }
             mappingTransaction = undefined
+
+            if (isScheduled) {
+                const after = readbackStateFor(this).after
+                if (after === undefined) {
+                    throw new TypeError('Ordered readback is missing its SubmittedWork owner.')
+                }
+                assertOrderedReadbackNativeOutcome(this, await after.nativeOutcome)
+            } else {
+                if (directNativeSettlement === undefined) {
+                    throw new TypeError('Direct readback is missing its native observation.')
+                }
+                assertDirectReadbackNativeSettlement(this, await directNativeSettlement)
+            }
 
             if (this.retain === 'until-dispose') {
                 const state = readbackStateFor(this)
@@ -775,6 +836,93 @@ function publishReadbackLifecycle(
     const subscribers = readbackStateFor(operation).lifecycleSubscribers
     for (const subscriber of [ ...subscribers ]) subscriber(lifecycle)
     subscribers.clear()
+}
+
+function assertDirectReadbackNativeSettlement(
+    operation: ReadbackOperation,
+    settlement: ReadbackNativeSettlement,
+    fallbackCause?: unknown
+): void {
+
+    const primary = settlement.primaryFailure
+    if (primary === undefined) {
+        if (fallbackCause !== undefined) throw fallbackCause
+        return
+    }
+    const incident = primary.incident
+    throwScratchDiagnostic({
+        code: primary.fact.diagnosticCode,
+        severity: 'error',
+        phase: 'readback',
+        subject: operation.subject,
+        related: [
+            operation.source.subject,
+            ...(incident !== undefined ? [ incident.subject ] : []),
+        ],
+        message: 'Direct readback copy issue produced a captured native failure.',
+        actual: readbackDiagnosticActual(operation, {
+            failureStage: 'copy-issue',
+            nativeOutcome: settlement.outcome,
+            primary: primary.fact,
+        }),
+    }, {
+        ...(primary.cause !== undefined
+            ? { cause: primary.cause }
+            : fallbackCause !== undefined
+                ? { cause: fallbackCause }
+                : {}),
+        ...(incident !== undefined ? { incident } : {}),
+    })
+}
+
+function assertOrderedReadbackNativeOutcome(
+    operation: ReadbackOperation,
+    outcome: ScratchSubmissionNativeOutcome
+): void {
+
+    if (outcome.status === 'observed-succeeded' || outcome.status === 'unobserved') return
+
+    const primary = outcome.outcomes[0]
+    const nativeErrorCategory = primary?.nativeErrorCategory ?? 'none'
+    const controller = diagnosticsControllerFor(operation.runtime)
+    const incident = controller.recordIncident({
+        kind: 'readback-failure',
+        diagnosticCode: 'SCRATCH_READBACK_ORDERED_COPY_UNTRUSTED',
+        nativeErrorCategory,
+        attribution: 'enclosing-operation-family',
+        target: readbackTarget(operation),
+        failureStage: 'copy-issue',
+        related: [ { kind: 'Submission', id: outcome.submissionId } ],
+        ...(primary?.nativeError !== undefined ? { nativeError: primary.nativeError } : {}),
+        outcomes: outcome.outcomes.map(failure => ({
+            stage: failure.stage,
+            diagnosticCode: failure.diagnosticCode ?? 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_FAILED',
+            nativeErrorCategory: failure.nativeErrorCategory,
+            location: failure.location,
+            ...(failure.nativeError !== undefined ? { nativeError: failure.nativeError } : {}),
+        })),
+        omittedOutcomeCount: outcome.omittedOutcomeCount,
+    })
+    throwScratchDiagnostic({
+        code: 'SCRATCH_READBACK_ORDERED_COPY_UNTRUSTED',
+        severity: 'error',
+        phase: 'readback',
+        subject: operation.subject,
+        related: [
+            operation.source.subject,
+            { kind: 'Submission', id: outcome.submissionId },
+            incident.subject,
+        ],
+        message: 'Ordered readback bytes are not exposed after the associated submission reports a native failure.',
+        actual: readbackDiagnosticActual(operation, {
+            submissionId: outcome.submissionId,
+            failureStage: 'copy-issue',
+            copyTrust: 'indeterminate',
+            nativeOutcome: outcome,
+        }),
+    }, {
+        incident,
+    })
 }
 
 function unexpectedReadbackFailureCode(stage: ScratchReadbackFailureStage): string {
@@ -1060,6 +1208,12 @@ function labelWithSuffix(label: string | undefined, suffix: string): string | un
 function cloneBytes(bytes: Uint8Array): Uint8Array {
 
     return new Uint8Array(bytes)
+}
+
+function observeReadbackPromise<T>(promise: Promise<T>): Promise<T> {
+
+    void promise.catch(() => {})
+    return promise
 }
 
 function readbackDiagnosticActual(

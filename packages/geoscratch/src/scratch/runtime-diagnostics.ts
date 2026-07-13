@@ -37,6 +37,7 @@ import type {
     ScratchSubmissionNativeOutcomeStatus,
     ScratchSubmissionNativeStage,
 } from './gpu-operation.js'
+import type { ScratchReadbackNativeOutcomeInput } from './gpu-operation.js'
 import type { PipelineCompilationReport, PipelineKind } from './pipeline-compilation.js'
 import type { ScratchReadbackPolicy } from './readback-ownership.js'
 import type { Resource, ResourceState } from './resource.js'
@@ -350,7 +351,7 @@ export type ScratchGpuOperationCompletion = Readonly<{
     incidentId?: string
     nativeLabels?: ScratchPipelineNativeLabelEvidence
     compilationReport?: PipelineCompilationReport
-    nativeOutcome?: ScratchSubmissionNativeOutcomeInput
+    nativeOutcome?: ScratchSubmissionNativeOutcomeInput | ScratchReadbackNativeOutcomeInput
 }>
 
 export type ScratchSubmissionNativeObservationReservation = Readonly<{
@@ -632,6 +633,71 @@ export class ScratchRuntimeDiagnosticsController {
                 subject: { kind: 'Submission', id: target.submissionId },
                 related: [ this.#runtimeSubject(), incident.subject ],
                 message: 'ScratchRuntime submission native-observation budget is exhausted.',
+                expected: {
+                    maxPendingNativeObservations: this.#options.maxPendingNativeObservations,
+                },
+                actual: {
+                    currentPendingNativeObservations:
+                        this.#submissionNativeObservationReservations.size,
+                    requested: 1,
+                },
+            }, { incident })
+        }
+
+        this.#submissionNativeObservationReservations.add(reservationId)
+        this.#currentPendingNativeObservations =
+            this.#submissionNativeObservationReservations.size
+        this.#peakPendingNativeObservations = Math.max(
+            this.#peakPendingNativeObservations,
+            this.#currentPendingNativeObservations
+        )
+
+        let isReleased = false
+        const controller = this
+        return Object.freeze({
+            id: reservationId,
+            get isReleased() {
+
+                return isReleased
+            },
+            release() {
+
+                if (isReleased) return
+                isReleased = true
+                if (!controller.#submissionNativeObservationReservations.delete(reservationId)) return
+                controller.#currentPendingNativeObservations =
+                    controller.#submissionNativeObservationReservations.size
+            },
+        })
+    }
+
+    reserveReadbackNativeObservation(
+        target: ScratchGpuReadbackOperationTarget
+    ): ScratchSubmissionNativeObservationReservation {
+
+        const reservationId = target.readbackId
+        if (this.#submissionNativeObservationReservations.has(reservationId)) {
+            throw new TypeError(`Readback native observation ${reservationId} is already reserved.`)
+        }
+        if (
+            this.#submissionNativeObservationReservations.size >=
+            this.#options.maxPendingNativeObservations
+        ) {
+            const incident = this.recordIncident({
+                kind: 'readback-failure',
+                diagnosticCode: 'SCRATCH_READBACK_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
+                nativeErrorCategory: 'none',
+                attribution: 'exact-operation',
+                target,
+                failureStage: 'budget',
+            })
+            throwScratchDiagnostic({
+                code: 'SCRATCH_READBACK_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
+                severity: 'error',
+                phase: 'readback',
+                subject: { kind: 'ReadbackOperation', id: target.readbackId },
+                related: [ this.#runtimeSubject(), incident.subject ],
+                message: 'ScratchRuntime readback native-observation budget is exhausted.',
                 expected: {
                     maxPendingNativeObservations: this.#options.maxPendingNativeObservations,
                 },
@@ -2140,6 +2206,7 @@ function assertPendingGpuOperationKind(
         kind === 'compute-pipeline-creation' ||
         kind === 'readback-staging-allocation' ||
         kind === 'readback-mapping' ||
+        kind === 'readback-native-observation' ||
         kind === 'submission-native-observation'
     ) return
     throw new TypeError(`GPU operation ${String(kind)} cannot be pending.`)
@@ -2364,13 +2431,13 @@ function matchesOperationQuery(
             ) === true
         )) &&
         (query.nativeStage === undefined || (
-            record.target.kind === 'submission' &&
+            (record.target.kind === 'submission' || record.target.kind === 'readback') &&
             record.nativeOutcome?.outcomes.some(
                 outcome => outcome.stage === query.nativeStage
             ) === true
         )) &&
         (query.nativeOutcomeStatus === undefined || (
-            record.target.kind === 'submission' &&
+            (record.target.kind === 'submission' || record.target.kind === 'readback') &&
             record.nativeOutcome?.status === query.nativeOutcomeStatus
         )) &&
         (query.kind === undefined || record.kind === query.kind) &&
@@ -2411,7 +2478,7 @@ function matchesIncidentQuery(
             ) === true
         )) &&
         (query.nativeStage === undefined || (
-            report.kind === 'submission-failure' && (
+            (report.kind === 'submission-failure' || report.kind === 'readback-failure') && (
                 report.failureStage === query.nativeStage ||
                 report.outcomes?.some(outcome => outcome.stage === query.nativeStage) === true
             )

@@ -72,8 +72,8 @@ describe('scratch readback mapping transaction', () => {
 
         const mapIndex = fake.calls.nativeTimeline.findLastIndex(event => event.type === 'map-async')
         const mappingBoundary = fake.calls.nativeTimeline.slice(mapIndex - 3, mapIndex + 4)
-        const mappingPops = fake.errors.pendingPops.slice(4)
-        for (const index of [ 6, 4, 5 ]) {
+        const mappingPops = fake.errors.pendingPops.slice(7)
+        for (const index of [ 6, 4, 5, 9, 7, 8 ]) {
             if (fake.errors.pendingPops[index] !== undefined && !fake.errors.pendingPops[index].settled) {
                 fake.errors.settlePop(index)
             }
@@ -178,10 +178,13 @@ describe('scratch readback mapping transaction', () => {
         fake.errors.settlePop(3)
         await settleMicrotasks()
 
-        if (fake.errors.pendingPops[4] !== undefined) {
-            fake.errors.rejectPop(4, new Error('validation pop failed'))
+        if (fake.errors.pendingPops[7] !== undefined) {
+            fake.errors.settlePop(4)
             fake.errors.settlePop(5)
             fake.errors.settlePop(6)
+            fake.errors.rejectPop(7, new Error('validation pop failed'))
+            fake.errors.settlePop(8)
+            fake.errors.settlePop(9)
         }
         fake.readbacks.resolveMap(0)
         const error = await rejectedDiagnostic(materialization)
@@ -242,13 +245,13 @@ describe('scratch readback mapping transaction', () => {
         const incident = runtime.diagnostics.incidents({ readbackId: operation.id })
             .find(candidate => candidate.failureStage === 'copy-issue')
 
-        expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_COPY_ISSUE_FAILED')
+        expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_NATIVE_EXCEPTION')
         expect(error.cause).to.equal(nativeError)
-        expect(repeated.diagnostic.code).to.equal('SCRATCH_READBACK_COPY_ISSUE_FAILED')
+        expect(repeated.diagnostic.code).to.equal('SCRATCH_READBACK_NATIVE_EXCEPTION')
         expect(incident).to.deep.include({
-            diagnosticCode: 'SCRATCH_READBACK_COPY_ISSUE_FAILED',
+            diagnosticCode: 'SCRATCH_READBACK_NATIVE_EXCEPTION',
             nativeErrorCategory: 'native-exception',
-            attribution: 'exact-operation',
+            attribution: 'enclosing-operation-family',
             failureStage: 'copy-issue',
         })
         expect(operation.state).to.equal('failed')

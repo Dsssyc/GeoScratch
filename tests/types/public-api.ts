@@ -1094,6 +1094,19 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).upload(externalImageUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
     const nativeOutcome: Promise<scr.ScratchSubmissionNativeOutcome> = submitted.nativeOutcome
     const compatNativeOutcome: Promise<scratchCompat.ScratchSubmissionNativeOutcome> = nativeOutcome
+    const readbackNativeOutcome: scr.ScratchReadbackNativeOutcome = {
+        version: 4,
+        readbackId: 'readback-id',
+        mode: 'off',
+        status: 'unobserved',
+        locations: [],
+        outcomes: [],
+        omittedLocationCount: 0,
+        omittedOutcomeCount: 0,
+    }
+    const compatReadbackNativeOutcome: scratchCompat.ScratchReadbackNativeOutcome = readbackNativeOutcome
+    // @ts-expect-error direct readback native outcomes cannot fabricate submission locations
+    readbackNativeOutcome.locations[0] = { kind: 'submission', submissionId: submitted.id }
     const indeterminateResourceState: scr.ResourceState = 'indeterminate'
     const indeterminateQuerySlotState: scr.QuerySetSlotState = 'indeterminate'
     const potentialWrites: readonly scr.SubmittedPotentialWrite[] = submitted.potentialWrites
