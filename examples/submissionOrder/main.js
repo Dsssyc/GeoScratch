@@ -34,7 +34,7 @@ async function main() {
         size: 4,
         usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'submission order bind layout',
         group: 0,
         entries: [

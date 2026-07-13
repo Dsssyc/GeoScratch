@@ -911,7 +911,7 @@ describe('scratch submission queue order', () => {
     it('segments query resolves at an upload boundary', async() => {
 
         const fixture = await createOrderingFixture()
-        const querySet = fixture.runtime.createQuerySet({
+        const querySet = await fixture.runtime.createQuerySet({
             label: 'queue order query set',
             type: 'timestamp',
             count: 1,
@@ -1145,7 +1145,7 @@ describe('scratch submission queue order', () => {
     it('restores resource and query state when timeline preparation fails before replay', async() => {
 
         const fixture = await createOrderingFixture()
-        const querySet = fixture.runtime.createQuerySet({
+        const querySet = await fixture.runtime.createQuerySet({
             label: 'preparation rollback query set',
             type: 'timestamp',
             count: 2,

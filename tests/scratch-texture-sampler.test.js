@@ -34,12 +34,12 @@ async function createTextureFixture({ features = [] } = {}) {
         format: 'rgba8unorm',
         usage: GPU_TEXTURE_USAGE_COPY_DST | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
     })
-    const sampler = runtime.createSampler({
+    const sampler = await runtime.createSampler({
         label: 'nearest sampler',
         magFilter: 'nearest',
         minFilter: 'nearest',
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'texture sampling layout',
         group: 0,
         entries: [
@@ -129,8 +129,14 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             magFilter: 'nearest',
             minFilter: 'nearest',
             mipmapFilter: 'nearest',
+            lodMinClamp: 0,
+            lodMaxClamp: 32,
+            maxAnisotropy: 1,
         })
-        expect(fixture.calls.samplers[0].descriptor).to.deep.equal(fixture.sampler.descriptor)
+        expect(fixture.calls.samplers[0].descriptor).to.deep.equal({
+            ...fixture.sampler.descriptor,
+            label: `nearest sampler [scratch:${fixture.sampler.id}]`,
+        })
         expect('state' in fixture.sampler).to.equal(false)
         expect('isReady' in fixture.sampler).to.equal(false)
         expect('contentEpoch' in fixture.sampler).to.equal(false)
@@ -177,7 +183,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             },
         ])
         expect(fixture.calls.bindGroupLayouts[0].descriptor).to.deep.equal({
-            label: 'texture sampling layout',
+            label: `texture sampling layout [scratch:${fixture.bindLayout.id}]`,
             entries: [
                 {
                     binding: 0,
@@ -261,7 +267,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
             textureBindingViewDimension: '2d-array',
         })
-        const layout = runtime.createBindLayout({
+        const layout = await runtime.createBindLayout({
             group: 0,
             entries: [ {
                 binding: 0,
@@ -293,7 +299,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
         })
-        const layout = runtime.createBindLayout({
+        const layout = await runtime.createBindLayout({
             group: 0,
             entries: [ {
                 binding: 0,
@@ -497,7 +503,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
     it('rebuilds the texture bind group used by a persistent dispatch command', async() => {
 
         const fixture = await createTextureFixture()
-        const bindLayout = fixture.runtime.createBindLayout({
+        const bindLayout = await fixture.runtime.createBindLayout({
             group: 0,
             entries: [
                 {
@@ -565,7 +571,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
 
         try {
-            runtime.createBindLayout({
+            await runtime.createBindLayout({
                 group: 0,
                 entries: [
                     {
@@ -588,7 +594,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         }
 
         try {
-            runtime.createBindLayout({
+            await runtime.createBindLayout({
                 group: 0,
                 entries: [
                     {
@@ -665,7 +671,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_DST,
         })
-        const replacementSampler = fixtureA.runtime.createSampler()
+        const replacementSampler = await fixtureA.runtime.createSampler()
 
         try {
             fixtureA.runtime.createBindSet(fixtureA.bindLayout, {

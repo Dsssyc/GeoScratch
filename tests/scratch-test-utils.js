@@ -124,6 +124,7 @@ export function createFakeGpu(options = {}) {
         renderPipelines: [],
         computePipelines: [],
         querySets: [],
+        querySetDestroys: [],
         commandEncoders: [],
         queueWrites: [],
         queueTextureWrites: [],
@@ -208,6 +209,14 @@ export function createFakeGpu(options = {}) {
         },
         listenerCount(type) {
             return eventListeners.get(type)?.size ?? 0
+        },
+        resetHistory() {
+            if (errorScopeStack.length !== 0 || pendingPops.some(pop => !pop.settled)) {
+                throw new Error('Cannot reset error-scope history while scopes are pending.')
+            }
+            pendingPops.length = 0
+            calls.errorScopes.length = 0
+            calls.nativeTimeline.length = 0
         },
         get pendingPops() {
             return pendingPops.map(({ scope, settled }) => ({
@@ -558,6 +567,21 @@ export function createFakeGpu(options = {}) {
     const device = {
         features: new Set([ 'timestamp-query' ]),
         limits: {
+            maxBindGroups: 4,
+            maxBindingsPerBindGroup: 1000,
+            maxDynamicUniformBuffersPerPipelineLayout: 8,
+            maxDynamicStorageBuffersPerPipelineLayout: 4,
+            maxSampledTexturesPerShaderStage: 16,
+            maxSamplersPerShaderStage: 16,
+            maxStorageBuffersPerShaderStage: 8,
+            maxStorageBuffersInVertexStage: 8,
+            maxStorageBuffersInFragmentStage: 8,
+            maxStorageTexturesPerShaderStage: 4,
+            maxStorageTexturesInVertexStage: 4,
+            maxStorageTexturesInFragmentStage: 4,
+            maxUniformBuffersPerShaderStage: 12,
+            maxUniformBufferBindingSize: 65_536,
+            maxStorageBufferBindingSize: 134_217_728,
             maxColorAttachments: 8,
             maxComputeWorkgroupsPerDimension: 65_535,
             maxTextureDimension2D: 8192,
@@ -680,9 +704,11 @@ export function createFakeGpu(options = {}) {
             return shaderModule
         },
         createBindGroupLayout(descriptor) {
+            const invalid = issueNativeMethod('createBindGroupLayout')
             const layout = {
                 type: 'bindGroupLayout',
                 descriptor,
+                invalid,
             }
             calls.bindGroupLayouts.push(layout)
             return layout
@@ -723,9 +749,11 @@ export function createFakeGpu(options = {}) {
             return texture
         },
         createSampler(descriptor) {
+            const invalid = issueNativeMethod('createSampler')
             const sampler = {
                 type: 'sampler',
                 descriptor,
+                invalid,
             }
             calls.samplers.push(sampler)
             return sampler
@@ -769,12 +797,15 @@ export function createFakeGpu(options = {}) {
             return issueAsyncPipeline('compute', descriptor)
         },
         createQuerySet(descriptor) {
+            const invalid = issueNativeMethod('createQuerySet')
             const querySet = {
                 type: 'querySet',
                 descriptor,
                 values: new BigUint64Array(descriptor.count ?? 0),
                 destroyed: false,
+                invalid,
                 destroy() {
+                    calls.querySetDestroys.push({ querySet: this })
                     this.destroyed = true
                 },
             }
@@ -800,6 +831,21 @@ export function createFakeGpu(options = {}) {
     const adapter = {
         features: new Set([ 'timestamp-query' ]),
         limits: {
+            maxBindGroups: 4,
+            maxBindingsPerBindGroup: 1000,
+            maxDynamicUniformBuffersPerPipelineLayout: 8,
+            maxDynamicStorageBuffersPerPipelineLayout: 4,
+            maxSampledTexturesPerShaderStage: 16,
+            maxSamplersPerShaderStage: 16,
+            maxStorageBuffersPerShaderStage: 8,
+            maxStorageBuffersInVertexStage: 8,
+            maxStorageBuffersInFragmentStage: 8,
+            maxStorageTexturesPerShaderStage: 4,
+            maxStorageTexturesInVertexStage: 4,
+            maxStorageTexturesInFragmentStage: 4,
+            maxUniformBuffersPerShaderStage: 12,
+            maxUniformBufferBindingSize: 65_536,
+            maxStorageBufferBindingSize: 134_217_728,
             maxColorAttachments: 8,
             maxComputeWorkgroupsPerDimension: 65_535,
             maxTextureDimension2D: 8192,

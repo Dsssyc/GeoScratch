@@ -61,7 +61,7 @@ async function createCopyFixture() {
         target: target.region({ offset: 8, size: 16 }),
         whenMissing: 'throw',
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'copy target bind layout',
         group: 0,
         entries: [

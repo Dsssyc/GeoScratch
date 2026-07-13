@@ -25,7 +25,7 @@ async function createOcclusionFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const querySet = runtime.createQuerySet({
+    const querySet = await runtime.createQuerySet({
         label: 'visibility queries',
         type: 'occlusion',
         count: 4,
@@ -90,7 +90,7 @@ async function createOcclusionFixture() {
         destination: destinationRegion,
         whenMissing: 'throw',
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'visibility destination bind layout',
         group: 0,
         entries: [
@@ -281,7 +281,7 @@ describe('scratch occlusion query bracket commands', () => {
 
         const fixtureA = await createOcclusionFixture()
         const fixtureB = await createOcclusionFixture()
-        const timestampQueries = fixtureA.runtime.createQuerySet({
+        const timestampQueries = await fixtureA.runtime.createQuerySet({
             type: 'timestamp',
             count: 1,
         })
@@ -345,7 +345,7 @@ describe('scratch occlusion query bracket commands', () => {
 
         const fixtureA = await createOcclusionFixture()
         const fixtureB = await createOcclusionFixture()
-        const timestampQueries = fixtureA.runtime.createQuerySet({
+        const timestampQueries = await fixtureA.runtime.createQuerySet({
             type: 'timestamp',
             count: 4,
         })
@@ -410,7 +410,7 @@ describe('scratch occlusion query bracket commands', () => {
                 store: 'store',
             } ],
         })
-        const otherQuerySet = fixture.runtime.createQuerySet({
+        const otherQuerySet = await fixture.runtime.createQuerySet({
             type: 'occlusion',
             count: 4,
         })

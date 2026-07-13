@@ -86,6 +86,23 @@ function expectDiagnostic(fn, include) {
     return caught.diagnostic
 }
 
+async function expectAsyncDiagnostic(fn, include) {
+
+    let caught
+    try {
+        await fn()
+    } catch (error) {
+        caught = error
+    }
+
+    expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+    expect(caught.diagnostic).to.include(include)
+    expect(caught.diagnostic.expected).to.not.equal(undefined)
+    expect(caught.diagnostic.actual).to.not.equal(undefined)
+
+    return caught.diagnostic
+}
+
 function readResource(resource, contentEpoch = resource.contentEpoch) {
 
     return { resource, contentEpoch }
@@ -141,7 +158,7 @@ async function createRenderFixture(entries = [ dynamicUniformEntry() ]) {
         format: 'bgra8unorm',
         size: { width: 2, height: 2 },
     })
-    const bindLayout = fixture.runtime.createBindLayout({
+    const bindLayout = await fixture.runtime.createBindLayout({
         label: 'dynamic render bind layout',
         group: 0,
         entries,
@@ -189,7 +206,7 @@ async function createRenderFixture(entries = [ dynamicUniformEntry() ]) {
 async function createComputeFixture(entries = [ dynamicReadStorageEntry(), dynamicStorageEntry() ]) {
 
     const fixture = await createRuntimeFixture()
-    const bindLayout = fixture.runtime.createBindLayout({
+    const bindLayout = await fixture.runtime.createBindLayout({
         label: 'dynamic compute bind layout',
         group: 1,
         entries,
@@ -276,13 +293,13 @@ describe('scratch dynamic buffer bind offsets', () => {
     it('accepts dynamic uniform buffer entries', async() => {
 
         const fixture = await createRuntimeFixture()
-        const bindLayout = fixture.runtime.createBindLayout({
+        const bindLayout = await fixture.runtime.createBindLayout({
             group: 0,
             entries: [ dynamicUniformEntry() ],
         })
 
         expect(bindLayout.entries).to.deep.equal([
-            dynamicUniformEntry(),
+            { ...dynamicUniformEntry(), minBindingSize: 0 },
         ])
     })
 
@@ -290,18 +307,21 @@ describe('scratch dynamic buffer bind offsets', () => {
 
         const fixture = await createRuntimeFixture()
         const entries = [ dynamicReadStorageEntry(), dynamicStorageEntry() ]
-        const bindLayout = fixture.runtime.createBindLayout({
+        const bindLayout = await fixture.runtime.createBindLayout({
             group: 1,
             entries,
         })
 
-        expect(bindLayout.entries).to.deep.equal(entries)
+        expect(bindLayout.entries).to.deep.equal(entries.map(entry => ({
+            ...entry,
+            minBindingSize: 0,
+        })))
     })
 
     it('lowers dynamic buffer entries to WebGPU descriptors', async() => {
 
         const fixture = await createRuntimeFixture()
-        fixture.runtime.createBindLayout({
+        const bindLayout = await fixture.runtime.createBindLayout({
             label: 'dynamic offsets layout',
             group: 1,
             entries: [
@@ -311,17 +331,17 @@ describe('scratch dynamic buffer bind offsets', () => {
         })
 
         expect(fixture.calls.bindGroupLayouts[0].descriptor).to.deep.equal({
-            label: 'dynamic offsets layout',
+            label: `dynamic offsets layout [scratch:${bindLayout.id}]`,
             entries: [
                 {
                     binding: 0,
                     visibility: 4,
-                    buffer: { type: 'read-only-storage', hasDynamicOffset: true },
+                    buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: 0 },
                 },
                 {
                     binding: 1,
                     visibility: 4,
-                    buffer: { type: 'storage', hasDynamicOffset: true },
+                    buffer: { type: 'storage', hasDynamicOffset: true, minBindingSize: 0 },
                 },
             ],
         })
@@ -330,7 +350,7 @@ describe('scratch dynamic buffer bind offsets', () => {
     it('preserves non-dynamic descriptor output shape', async() => {
 
         const fixture = await createRuntimeFixture()
-        const bindLayout = fixture.runtime.createBindLayout({
+        const bindLayout = await fixture.runtime.createBindLayout({
             label: 'plain uniforms layout',
             group: 0,
             entries: [
@@ -349,15 +369,17 @@ describe('scratch dynamic buffer bind offsets', () => {
                 name: 'uniforms',
                 type: 'uniform',
                 visibility: [ 'vertex', 'fragment' ],
+                hasDynamicOffset: false,
+                minBindingSize: 0,
             },
         ])
         expect(fixture.calls.bindGroupLayouts[0].descriptor).to.deep.equal({
-            label: 'plain uniforms layout',
+            label: `plain uniforms layout [scratch:${bindLayout.id}]`,
             entries: [
                 {
                     binding: 0,
                     visibility: 3,
-                    buffer: { type: 'uniform' },
+                    buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: 0 },
                 },
             ],
         })
@@ -384,8 +406,8 @@ describe('scratch dynamic buffer bind offsets', () => {
         ]
 
         for (const entry of cases) {
-            const diagnostic = expectDiagnostic(() => {
-                fixture.runtime.createBindLayout({
+            const diagnostic = await expectAsyncDiagnostic(() => {
+                return fixture.runtime.createBindLayout({
                     group: 0,
                     entries: [ entry ],
                 })

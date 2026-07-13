@@ -87,6 +87,20 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         nativeStage: 'command-encode',
         nativeOutcomeStatus: 'observed-failed',
     })
+    const bindLayoutOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+        kind: 'bind-layout-allocation',
+        targetKind: 'bind-layout',
+        bindLayoutId: 'bind-layout-id',
+    })
+    const bindSetPreparationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+        kind: 'bind-set-preparation',
+        targetKind: 'bind-set',
+        bindSetId: 'bind-set-id',
+        preparationStage: 'bind-group-acknowledgement',
+    })
+    const querySetOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+        resourceKind: 'QuerySetResource',
+    })
     const operationTarget: scr.ScratchGpuOperationTarget | undefined = operationRecords[0]?.target
     if (operationTarget?.kind === 'resource') {
         const operationResourceId: string = operationTarget.resourceId
@@ -114,6 +128,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         nativeStage: 'queue-submit',
     })
     const currentPipelineFacts: readonly scr.ScratchRuntimePipelineFact[] = diagnosticsSnapshot.pipelines
+    const currentBindLayoutFacts: readonly scr.ScratchRuntimeBindLayoutFact[] = diagnosticsSnapshot.bindLayouts
     const currentResourceFacts: readonly scr.ScratchRuntimeResourceFact[] = diagnosticsSnapshot.resources
     for (const fact of currentResourceFacts) {
         if (fact.resourceKind === 'SamplerResource') {
@@ -130,8 +145,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             const logicalFootprintBytes: number = fact.logicalFootprintBytes
         }
     }
-    const evidenceSchemaVersion: 4 = diagnosticsEvidence.version
-    const snapshotSchemaVersion: 4 = diagnosticsSnapshot.version
+    const evidenceSchemaVersion: 5 = diagnosticsEvidence.version
+    const snapshotSchemaVersion: 5 = diagnosticsSnapshot.version
     const submissionScopeMode: scr.ScratchSubmissionScopeMode =
         diagnosticsSnapshot.submissionNative.submissionScopes
     const pendingNativeObservationBudget: number =
@@ -304,11 +319,18 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         format: 'depth24plus',
         usage: 0x4 | 0x10,
     })
-    const scratchSampler: scr.SamplerResource = runtime.createSampler({
+    const samplerDescriptor: scr.SamplerResourceDescriptor = {
         label: 'typed scratch sampler',
         magFilter: 'nearest',
         minFilter: 'nearest',
-    })
+    }
+    const scratchSamplerPromise: Promise<scr.SamplerResource> = runtime.createSampler(samplerDescriptor)
+    const scratchSampler: scr.SamplerResource = await scratchSamplerPromise
+    const scratchSamplerAliasPromise: Promise<scr.SamplerResource> = runtime.sampler()
+    // @ts-expect-error SamplerResource construction is closed
+    new scr.SamplerResource(runtime, {})
+    // @ts-expect-error SamplerResource has no static construction bypass
+    scr.SamplerResource.create(runtime, {})
     // @ts-expect-error SamplerResource has no scalar content state
     scratchSampler.state
     // @ts-expect-error SamplerResource has no scalar content epoch
@@ -504,7 +526,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         layoutRequirements: [ programBufferRequirement ],
     })
     const normalizedRequirement: scr.ProgramBufferLayoutRequirement = program.layoutRequirements[0]
-    const bindLayout: scr.BindLayout = runtime.createBindLayout({
+    const bindLayoutDescriptor: scr.BindLayoutDescriptor = {
         label: 'typed bind layout',
         group: 0,
         entries: [
@@ -515,13 +537,24 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
                 visibility: [ 'vertex', 'fragment' ],
             },
         ],
-    })
+    }
+    const bindLayoutPromise: Promise<scr.BindLayout> = runtime.createBindLayout(bindLayoutDescriptor)
+    const bindLayout: scr.BindLayout = await bindLayoutPromise
+    const bindLayoutAliasPromise: Promise<scr.BindLayout> = runtime.bindLayout({ group: 0, entries: [] })
+    // @ts-expect-error BindLayout construction is closed
+    new scr.BindLayout(runtime, bindLayoutDescriptor)
+    // @ts-expect-error BindLayout has no static construction bypass
+    scr.BindLayout.create(runtime, bindLayoutDescriptor)
+    // @ts-expect-error acknowledged BindLayout ABI facts are immutable
+    bindLayout.group = 1
+    // @ts-expect-error acknowledged BindLayout entries cannot be replaced
+    bindLayout.entries = []
     const bindSet: scr.BindSet = runtime.createBindSet(bindLayout, {
         uniforms: uniformRegion,
     }, {
         label: 'typed bind set',
     })
-    const storageLayout: scr.BindLayout = runtime.createBindLayout({
+    const storageLayout: scr.BindLayout = await runtime.createBindLayout({
         label: 'typed storage layout',
         group: 1,
         entries: [
@@ -545,7 +578,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     // @ts-expect-error normalized BindSet bindings are immutable
     storageSet.bindings.clear()
-    const dynamicStorageLayout: scr.BindLayout = runtime.createBindLayout({
+    const dynamicStorageLayout: scr.BindLayout = await runtime.createBindLayout({
         label: 'typed dynamic storage layout',
         group: 3,
         entries: [
@@ -579,7 +612,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatDynamicDispatchOffsets: scratchCompat.DispatchCommandDescriptor['dynamicOffsets'] = {
         3: [ 256, 512 ],
     }
-    const textureLayout: scr.BindLayout = runtime.createBindLayout({
+    const textureLayout: scr.BindLayout = await runtime.createBindLayout({
         label: 'typed texture layout',
         group: 2,
         entries: [
@@ -729,11 +762,17 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatTextureToBufferDescriptor: scratchCompat.TextureToBufferCopyCommandDescriptor = textureToBufferDescriptor
     const copyKind: 'buffer-to-buffer' | 'texture-to-texture' | 'buffer-to-texture' | 'texture-to-buffer' = textureCopy.copyKind
     const compatCopyKind: 'buffer-to-buffer' | 'texture-to-texture' | 'buffer-to-texture' | 'texture-to-buffer' = textureCopyAlias.copyKind
-    const querySet: scr.QuerySetResource = runtime.createQuerySet({
+    const querySetDescriptor: scr.QuerySetResourceDescriptor = {
         label: 'typed timestamp queries',
         type: 'timestamp',
         count: 2,
-    })
+    }
+    const querySetPromise: Promise<scr.QuerySetResource> = runtime.createQuerySet(querySetDescriptor)
+    const querySet: scr.QuerySetResource = await querySetPromise
+    // @ts-expect-error QuerySetResource construction is closed
+    new scr.QuerySetResource(runtime, querySetDescriptor)
+    // @ts-expect-error QuerySetResource has no static construction bypass
+    scr.QuerySetResource.create(runtime, querySetDescriptor)
     const querySlot: scr.QuerySetSlotSnapshot = querySet.slot(0)
     const querySlots: readonly scr.QuerySetSlotSnapshot[] = querySet.slots()
     const querySlotState: scr.QuerySetSlotState = querySlot.state
@@ -756,7 +795,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             { index: 1, contentEpoch: 1 },
         ],
     }
-    const querySetAlias: scr.QuerySetResource = runtime.querySet({
+    const querySetAlias: scr.QuerySetResource = await runtime.querySet({
         type: 'occlusion',
         count: 1,
     })
@@ -1176,7 +1215,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const nativeOutcome: Promise<scr.ScratchSubmissionNativeOutcome> = submitted.nativeOutcome
     const compatNativeOutcome: Promise<scratchCompat.ScratchSubmissionNativeOutcome> = nativeOutcome
     const readbackNativeOutcome: scr.ScratchReadbackNativeOutcome = {
-        version: 4,
+        version: 5,
         readbackId: 'readback-id',
         mode: 'off',
         status: 'unobserved',

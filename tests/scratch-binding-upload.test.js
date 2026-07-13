@@ -65,7 +65,7 @@ async function createUniformFixture(format = 'bgra8unorm') {
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_UNIFORM,
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'triangle uniforms layout',
         group: 0,
         entries: [
@@ -74,6 +74,8 @@ async function createUniformFixture(format = 'bgra8unorm') {
                 name: 'uniforms',
                 type: 'uniform',
                 visibility: [ 'vertex', 'fragment' ],
+                hasDynamicOffset: false,
+                minBindingSize: 0,
             },
         ],
     })
@@ -153,16 +155,18 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
                 name: 'uniforms',
                 type: 'uniform',
                 visibility: [ 'vertex', 'fragment' ],
+                hasDynamicOffset: false,
+                minBindingSize: 0,
             },
         ])
         expect(fixture.calls.bindGroupLayouts).to.have.length(1)
         expect(fixture.calls.bindGroupLayouts[0].descriptor).to.deep.equal({
-            label: 'triangle uniforms layout',
+            label: `triangle uniforms layout [scratch:${fixture.bindLayout.id}]`,
             entries: [
                 {
                     binding: 0,
                     visibility: 3,
-                    buffer: { type: 'uniform' },
+                    buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: 0 },
                 },
             ],
         })
@@ -404,7 +408,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
     it('rejects bind set and pipeline layout mismatches with structured diagnostics', async() => {
 
         const fixture = await createUniformFixture()
-        const otherLayout = fixture.runtime.createBindLayout({
+        const otherLayout = await fixture.runtime.createBindLayout({
             group: 0,
             entries: [
                 {

@@ -88,12 +88,12 @@ async function main() {
     const initialTextureIssuedAt = performance.now()
     const texture = await initialTextureAllocation
     const initialTextureSettledAt = performance.now()
-    const sampler = runtime.createSampler({
+    const sampler = await runtime.createSampler({
         label: 'texture resize sampler',
         magFilter: 'nearest',
         minFilter: 'nearest',
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'texture resize sample layout',
         group: 0,
         entries: [

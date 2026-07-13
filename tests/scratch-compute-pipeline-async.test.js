@@ -218,6 +218,7 @@ describe('ScratchRuntime async compute pipeline creation', () => {
                 codes: [
                     'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
                     'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
+                    'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED',
                 ],
                 act: fixture => fixture.runtime.dispose(),
             },
@@ -334,7 +335,7 @@ async function createComputeFixture(options = {}) {
     const fake = createFakeGpu(options)
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
     const program = createProgram(runtime)
-    const bindLayout = runtime.createBindLayout({
+    const bindLayoutCreation = runtime.createBindLayout({
         group: 0,
         entries: [ {
             binding: 0,
@@ -343,6 +344,13 @@ async function createComputeFixture(options = {}) {
             visibility: [ 'compute' ],
         } ],
     })
+    if (options.deferErrorScopePops) {
+        fake.errors.settlePop(0)
+        fake.errors.settlePop(1)
+        fake.errors.settlePop(2)
+    }
+    const bindLayout = await bindLayoutCreation
+    fake.errors.resetHistory()
     return {
         ...fake,
         runtime,

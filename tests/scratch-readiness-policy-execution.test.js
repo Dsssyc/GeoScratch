@@ -63,12 +63,12 @@ async function createRenderSkipPassFixture() {
         format: 'depth24plus',
         usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
     })
-    const timestampQuerySet = fixture.runtime.createQuerySet({
+    const timestampQuerySet = await fixture.runtime.createQuerySet({
         label: 'skipped timestamps',
         type: 'timestamp',
         count: 2,
     })
-    const occlusionQuerySet = fixture.runtime.createQuerySet({
+    const occlusionQuerySet = await fixture.runtime.createQuerySet({
         label: 'skipped occlusion',
         type: 'occlusion',
         count: 2,

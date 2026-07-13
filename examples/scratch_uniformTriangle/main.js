@@ -50,7 +50,7 @@ async function main() {
         size: 16,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'scratch uniform triangle layout',
         group: 0,
         entries: [

@@ -114,12 +114,12 @@ async function main() {
         format: offscreenFormat,
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
-    const sampler = runtime.createSampler({
+    const sampler = await runtime.createSampler({
         label: 'render to texture sampler',
         magFilter: 'linear',
         minFilter: 'linear',
     })
-    const sampleBindLayout = runtime.createBindLayout({
+    const sampleBindLayout = await runtime.createBindLayout({
         label: 'render to texture sample layout',
         group: 0,
         entries: [

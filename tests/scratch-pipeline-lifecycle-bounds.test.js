@@ -185,7 +185,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
             modules: [ `${sourceSentinel}\n${triangleWgsl}` ],
             entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
         })
-        const bindLayout = runtime.createBindLayout({
+        const bindLayout = await runtime.createBindLayout({
             label: layoutLabel,
             group: 0,
             entries: [ {
@@ -238,7 +238,8 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         })
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
         const program = createRenderProgram(runtime)
-        const bindLayouts = Array.from({ length: 80 }, (_, group) =>
+        fake.device.limits.maxBindGroups = 80
+        const bindLayouts = await Promise.all(Array.from({ length: 80 }, (_, group) =>
             runtime.createBindLayout({
                 group,
                 entries: [ {
@@ -248,7 +249,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
                     visibility: [ 'vertex' ],
                 } ],
             })
-        )
+        ))
         const promise = runtime.createRenderPipeline({
             program,
             bindLayouts,

@@ -533,8 +533,8 @@ describe('scratch texture resize', () => {
     it('invalidates cached views and lazily rebuilds one bind group', async() => {
 
         const fixture = await createFixture()
-        const sampler = fixture.runtime.createSampler()
-        const layout = fixture.runtime.createBindLayout({
+        const sampler = await fixture.runtime.createSampler()
+        const layout = await fixture.runtime.createBindLayout({
             group: 0,
             entries: [
                 {

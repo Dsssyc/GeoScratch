@@ -94,7 +94,7 @@ async function main() {
         size: 8,
         usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_INDEX,
     })
-    const argumentLayout = runtime.createBindLayout({
+    const argumentLayout = await runtime.createBindLayout({
         label: 'argument writer layout',
         group: 0,
         entries: [

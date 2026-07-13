@@ -46,7 +46,7 @@ async function createComputeFixture() {
         size: 16,
         usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'compute storage layout',
         group: 0,
         entries: [
@@ -55,12 +55,16 @@ async function createComputeFixture() {
                 name: 'inputValues',
                 type: 'read-storage',
                 visibility: [ 'compute' ],
+                hasDynamicOffset: false,
+                minBindingSize: 0,
             },
             {
                 binding: 1,
                 name: 'outputValues',
                 type: 'storage',
                 visibility: [ 'compute' ],
+                hasDynamicOffset: false,
+                minBindingSize: 0,
             },
         ],
     })
@@ -130,26 +134,30 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
                 name: 'inputValues',
                 type: 'read-storage',
                 visibility: [ 'compute' ],
+                hasDynamicOffset: false,
+                minBindingSize: 0,
             },
             {
                 binding: 1,
                 name: 'outputValues',
                 type: 'storage',
                 visibility: [ 'compute' ],
+                hasDynamicOffset: false,
+                minBindingSize: 0,
             },
         ])
         expect(fixture.calls.bindGroupLayouts[0].descriptor).to.deep.equal({
-            label: 'compute storage layout',
+            label: `compute storage layout [scratch:${fixture.bindLayout.id}]`,
             entries: [
                 {
                     binding: 0,
                     visibility: 4,
-                    buffer: { type: 'read-only-storage' },
+                    buffer: { type: 'read-only-storage', hasDynamicOffset: false, minBindingSize: 0 },
                 },
                 {
                     binding: 1,
                     visibility: 4,
-                    buffer: { type: 'storage' },
+                    buffer: { type: 'storage', hasDynamicOffset: false, minBindingSize: 0 },
                 },
             ],
         })

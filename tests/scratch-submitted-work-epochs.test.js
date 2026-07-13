@@ -120,7 +120,7 @@ async function createTexture(runtime, label, usage = GPU_TEXTURE_USAGE_COPY_DST 
 
 async function createCompute(runtime, input, output, readContentEpoch = input.contentEpoch) {
 
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         group: 0,
         entries: [
             {
@@ -1324,7 +1324,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
     it('records query resolve destination writes', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const querySet = runtime.createQuerySet({
+        const querySet = await runtime.createQuerySet({
             label: 'timing queries',
             type: 'timestamp',
             count: 2,

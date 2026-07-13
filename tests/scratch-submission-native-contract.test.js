@@ -91,7 +91,7 @@ describe('scratch submission native contract', () => {
 
         const outcome = await submitted.nativeOutcome
         expect(outcome).to.deep.include({
-            version: 4,
+            version: 5,
             submissionId: submitted.id,
             mode: 'summary',
             status: 'no-native-work',
@@ -160,7 +160,7 @@ describe('scratch submission native contract', () => {
         }
     })
 
-    it('uses schema version 4 with a macro submission target and discriminated location', () => {
+    it('uses schema version 5 with a macro submission target and discriminated location', () => {
 
         const record = createGpuOperationRecord({
             sequence: 1,
@@ -191,7 +191,7 @@ describe('scratch submission native contract', () => {
             },
         })
 
-        expect(record.version).to.equal(4)
+        expect(record.version).to.equal(5)
         expect(record.target).to.deep.equal({
             kind: 'submission',
             submissionId: 'submission-1',
@@ -235,7 +235,7 @@ describe('scratch submission native contract', () => {
         })
 
         expect(record).to.deep.include({
-            version: 4,
+            version: 5,
             kind: 'readback-native-observation',
             target: {
                 kind: 'readback',
@@ -248,7 +248,7 @@ describe('scratch submission native contract', () => {
             },
         })
         expect(record.nativeOutcome).to.deep.equal({
-            version: 4,
+            version: 5,
             readbackId: 'readback-1',
             mode: 'off',
             status: 'unobserved',
@@ -405,9 +405,9 @@ describe('scratch submission native contract', () => {
         const snapshot = runtime.diagnostics.snapshot()
         const evidence = runtime.diagnostics.exportEvidence()
 
-        expect(snapshot.version).to.equal(4)
-        expect(evidence.version).to.equal(4)
-        expect(evidence.snapshot.version).to.equal(4)
+        expect(snapshot.version).to.equal(5)
+        expect(evidence.version).to.equal(5)
+        expect(evidence.snapshot.version).to.equal(5)
     })
 })
 

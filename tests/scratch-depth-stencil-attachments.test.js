@@ -430,7 +430,7 @@ describe('scratch depth/stencil render attachments', () => {
     it('does not rebuild BindSet only because a depth attachment contentEpoch changes', async() => {
 
         const fixture = await createDepthFixture()
-        const bindLayout = fixture.runtime.createBindLayout({
+        const bindLayout = await fixture.runtime.createBindLayout({
             group: 0,
             entries: [
                 {

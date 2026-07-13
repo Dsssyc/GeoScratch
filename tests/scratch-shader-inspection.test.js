@@ -239,7 +239,7 @@ describe('scratch shader inspection', () => {
             @group(0) @binding(2) var colorTexture: texture_2d<f32>;
             @group(0) @binding(3) var colorSampler: sampler;
         `)
-        const bindLayout = createBindLayout(runtime, [
+        const bindLayout = await createBindLayout(runtime, [
             { binding: 0, name: 'camera', type: 'uniform', visibility: [ 'vertex' ] },
             { binding: 1, name: 'values', type: 'read-storage', visibility: [ 'compute' ] },
             { binding: 2, name: 'colorTexture', type: 'texture', visibility: [ 'fragment' ] },
@@ -282,7 +282,7 @@ describe('scratch shader inspection', () => {
     it('reports an explicit bind entry that is missing from shader bindings', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const bindLayout = createBindLayout(runtime, [
+        const bindLayout = await createBindLayout(runtime, [
             { binding: 0, name: 'camera', type: 'uniform', visibility: [ 'vertex' ] },
         ])
         const diagnostic = expectSingleDiagnostic(inspectShader('').compareBindLayouts([ bindLayout ]), {
@@ -313,7 +313,7 @@ describe('scratch shader inspection', () => {
     it('reports shader and bind entry type mismatches', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const bindLayout = createBindLayout(runtime, [
+        const bindLayout = await createBindLayout(runtime, [
             { binding: 0, name: 'camera', type: 'storage', visibility: [ 'compute' ] },
         ])
         const diagnostic = expectSingleDiagnostic(inspectShader(`
@@ -454,7 +454,7 @@ describe('scratch shader inspection', () => {
     it('suppresses an intentional bind entry mismatch by code, group, and binding', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const bindLayout = createBindLayout(runtime, [
+        const bindLayout = await createBindLayout(runtime, [
             { binding: 0, name: 'camera', type: 'uniform', visibility: [ 'vertex' ] },
         ])
 
@@ -484,7 +484,7 @@ describe('scratch shader inspection', () => {
             ],
             entryPoints: { compute: 'csMain' },
         })
-        const bindLayout = createBindLayout(runtime, [
+        const bindLayout = await createBindLayout(runtime, [
             { binding: 0, name: 'camera', type: 'storage', visibility: [ 'compute' ] },
         ])
         const diagnostic = expectSingleDiagnostic(inspectShader(program).compareBindLayouts([ bindLayout ]), {

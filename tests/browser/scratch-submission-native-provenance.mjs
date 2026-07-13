@@ -299,7 +299,7 @@ async function verifySubmissionTransactions(browser) {
                 format: 'rgba8unorm',
                 usage: GPUTextureUsage.RENDER_ATTACHMENT,
             })
-            const bindLayout = runtime.createBindLayout({
+            const bindLayout = await runtime.createBindLayout({
                 label: 'browser undersized uniform layout',
                 group: 0,
                 entries: [ {
@@ -556,7 +556,7 @@ function validateValidProbe(valid) {
     if (!valid.submitReturnedSynchronously) failures.push('valid submit returned a thenable')
     if (!valid.doneIsPromise) failures.push('valid SubmittedWork.done is not a Promise')
     if (!Number.isFinite(valid.submitCallDurationMs)) failures.push('valid submit timing is invalid')
-    if (valid.nativeOutcome?.version !== 4) failures.push('valid native outcome is not schema v4')
+    if (valid.nativeOutcome?.version !== 5) failures.push('valid native outcome is not schema v5')
     if (valid.nativeOutcome?.mode !== 'summary') failures.push('valid native outcome is not summary')
     if (valid.nativeOutcome?.status !== 'observed-succeeded') {
         failures.push(`valid native status ${valid.nativeOutcome?.status ?? 'missing'}`)
@@ -577,7 +577,7 @@ function validateValidProbe(valid) {
     if (valid.sourceState !== 'ready' || valid.sourceContentEpoch !== 1) {
         failures.push('valid ordered queue result did not preserve epoch 1 ready source')
     }
-    if (valid.evidenceVersion !== 4) failures.push('valid evidence is not schema v4')
+    if (valid.evidenceVersion !== 5) failures.push('valid evidence is not schema v5')
     for (const kind of [
         'submission-native-observation',
         'readback-native-observation',

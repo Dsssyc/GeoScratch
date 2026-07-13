@@ -119,12 +119,12 @@ async function main() {
         size: 16,
         usage: GPUBufferUsage.UNIFORM,
     })
-    const sampler = runtime.createSampler({
+    const sampler = await runtime.createSampler({
         label: 'preserved content sampler',
         magFilter: 'nearest',
         minFilter: 'nearest',
     })
-    const sampleLayout = runtime.createBindLayout({
+    const sampleLayout = await runtime.createBindLayout({
         label: 'preserved content layout',
         group: 0,
         entries: [

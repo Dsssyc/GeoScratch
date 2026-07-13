@@ -1,9 +1,20 @@
 import { UUID } from '../core/utils/uuid.js'
+import {
+    registerBindLayoutOwnership,
+    unregisterBindLayoutOwnership,
+} from './binding-ownership.js'
 import { BufferRegion, isBufferRegion } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { createScratchNativeLabel } from './native-allocation.js'
+import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { SamplerResource } from './sampler.js'
+import { throwSupportingObjectCreationFailure } from './supporting-object-failure.js'
+import {
+    issueSupportingObjectCreation,
+    recheckSupportingObjectLifecycle,
+} from './supporting-object-creation.js'
 import { TextureViewSpec, createNativeTextureView, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
-import { describeValue, getGlobalConstant } from './type-utils.js'
+import { describeValue, getGlobalConstant, isRecord } from './type-utils.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -22,6 +33,80 @@ const BUFFER_BINDING_TYPES = new Set<BufferBindingType>([ 'uniform', 'read-stora
 const TEXTURE_SAMPLE_TYPES = new Set<GPUTextureSampleType>([ 'float', 'unfilterable-float', 'depth', 'sint', 'uint' ])
 const TEXTURE_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([ '1d', '2d', '2d-array', 'cube', 'cube-array', '3d' ])
 const SAMPLER_BINDING_TYPES = new Set<GPUSamplerBindingType>([ 'filtering', 'non-filtering', 'comparison' ])
+const STORAGE_TEXTURE_ACCESS = new Set<GPUStorageTextureAccess>([ 'write-only', 'read-only', 'read-write' ])
+const STORAGE_TEXTURE_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([ '1d', '2d', '2d-array', '3d' ])
+type StorageTextureFeatureRequirement =
+    | 'base'
+    | 'bgra8unorm-storage'
+    | 'core-features-and-limits'
+    | 'texture-formats-tier1'
+    | 'texture-formats-tier2'
+
+type StorageTextureFormatCapabilities = Readonly<Partial<
+    Record<GPUStorageTextureAccess, StorageTextureFeatureRequirement>
+>>
+
+const BASE_STORAGE_TEXTURE_FORMATS = [
+    'rgba8unorm',
+    'rgba8snorm',
+    'rgba8uint',
+    'rgba8sint',
+    'rgba16uint',
+    'rgba16sint',
+    'rgba16float',
+    'r32uint',
+    'r32sint',
+    'r32float',
+    'rgba32uint',
+    'rgba32sint',
+    'rgba32float',
+] as const satisfies readonly GPUTextureFormat[]
+
+const TIER_1_STORAGE_TEXTURE_FORMATS = [
+    'r8unorm',
+    'r8snorm',
+    'r8uint',
+    'r8sint',
+    'rg8unorm',
+    'rg8snorm',
+    'rg8uint',
+    'rg8sint',
+    'r16unorm',
+    'r16snorm',
+    'r16uint',
+    'r16sint',
+    'r16float',
+    'rg16unorm',
+    'rg16snorm',
+    'rg16uint',
+    'rg16sint',
+    'rg16float',
+    'rgba16unorm',
+    'rgba16snorm',
+    'rgb10a2uint',
+    'rgb10a2unorm',
+    'rg11b10ufloat',
+] as const satisfies readonly GPUTextureFormat[]
+
+const TIER_2_READ_WRITE_STORAGE_TEXTURE_FORMATS = [
+    'r8unorm',
+    'r8uint',
+    'r8sint',
+    'rgba8unorm',
+    'rgba8uint',
+    'rgba8sint',
+    'r16uint',
+    'r16sint',
+    'r16float',
+    'rgba16uint',
+    'rgba16sint',
+    'rgba16float',
+    'rgba32uint',
+    'rgba32sint',
+    'rgba32float',
+] as const satisfies readonly GPUTextureFormat[]
+
+const STORAGE_TEXTURE_FORMAT_CAPABILITIES = createStorageTextureFormatCapabilities()
 const WEBGPU_BUFFER_BINDING_TYPES = {
     uniform: 'uniform',
     'read-storage': 'read-only-storage',
@@ -32,6 +117,14 @@ const REQUIRED_BUFFER_USAGE = {
     'read-storage': BUFFER_USAGE_STORAGE,
     storage: BUFFER_USAGE_STORAGE,
 } satisfies Record<BufferBindingType, GPUBufferUsageFlags>
+const bindLayoutToken = Symbol('BindLayout')
+const bindLayoutStates = new WeakMap<BindLayout, { isDisposed: boolean }>()
+const BIND_LAYOUT_ALLOCATION_CODES = Object.freeze({
+    validation: 'SCRATCH_BIND_LAYOUT_ALLOCATION_VALIDATION_FAILED',
+    internal: 'SCRATCH_BIND_LAYOUT_ALLOCATION_INTERNAL_FAILED',
+    outOfMemory: 'SCRATCH_BIND_LAYOUT_ALLOCATION_OUT_OF_MEMORY',
+    nativeException: 'SCRATCH_BIND_LAYOUT_ALLOCATION_NATIVE_FAILED',
+})
 
 export type BindVisibility = 'vertex' | 'fragment' | 'compute'
 
@@ -39,23 +132,25 @@ export type UniformBindLayoutEntry = {
     binding: number
     name: string
     type: 'uniform'
-    visibility: BindVisibility[]
+    visibility: readonly BindVisibility[]
     hasDynamicOffset?: boolean
+    minBindingSize?: number
 }
 
 export type StorageBindLayoutEntry = {
     binding: number
     name: string
     type: 'read-storage' | 'storage'
-    visibility: BindVisibility[]
+    visibility: readonly BindVisibility[]
     hasDynamicOffset?: boolean
+    minBindingSize?: number
 }
 
 export type TextureBindLayoutEntry = {
     binding: number
     name: string
     type: 'texture'
-    visibility: BindVisibility[]
+    visibility: readonly BindVisibility[]
     sampleType?: GPUTextureSampleType
     viewDimension?: GPUTextureViewDimension
     multisampled?: boolean
@@ -65,24 +160,89 @@ export type SamplerBindLayoutEntry = {
     binding: number
     name: string
     type: 'sampler'
-    visibility: BindVisibility[]
+    visibility: readonly BindVisibility[]
     samplerType?: GPUSamplerBindingType
+}
+
+export type StorageTextureBindLayoutEntry = {
+    binding: number
+    name: string
+    type: 'storage-texture'
+    visibility: readonly BindVisibility[]
+    access?: GPUStorageTextureAccess
+    format: GPUTextureFormat
+    viewDimension?: GPUTextureViewDimension
 }
 
 export type BindLayoutEntry =
     | UniformBindLayoutEntry
     | StorageBindLayoutEntry
     | TextureBindLayoutEntry
+    | StorageTextureBindLayoutEntry
     | SamplerBindLayoutEntry
+
+export type NormalizedUniformBindLayoutEntry = Readonly<{
+    binding: number
+    name: string
+    type: 'uniform'
+    visibility: readonly BindVisibility[]
+    hasDynamicOffset: boolean
+    minBindingSize: number
+}>
+
+export type NormalizedStorageBindLayoutEntry = Readonly<{
+    binding: number
+    name: string
+    type: 'read-storage' | 'storage'
+    visibility: readonly BindVisibility[]
+    hasDynamicOffset: boolean
+    minBindingSize: number
+}>
+
+export type NormalizedTextureBindLayoutEntry = Readonly<{
+    binding: number
+    name: string
+    type: 'texture'
+    visibility: readonly BindVisibility[]
+    sampleType: GPUTextureSampleType
+    viewDimension: GPUTextureViewDimension
+    multisampled: boolean
+}>
+
+export type NormalizedStorageTextureBindLayoutEntry = Readonly<{
+    binding: number
+    name: string
+    type: 'storage-texture'
+    visibility: readonly BindVisibility[]
+    access: GPUStorageTextureAccess
+    format: GPUTextureFormat
+    viewDimension: GPUTextureViewDimension
+}>
+
+export type NormalizedSamplerBindLayoutEntry = Readonly<{
+    binding: number
+    name: string
+    type: 'sampler'
+    visibility: readonly BindVisibility[]
+    samplerType: GPUSamplerBindingType
+}>
+
+export type NormalizedBindLayoutEntry =
+    | NormalizedUniformBindLayoutEntry
+    | NormalizedStorageBindLayoutEntry
+    | NormalizedTextureBindLayoutEntry
+    | NormalizedStorageTextureBindLayoutEntry
+    | NormalizedSamplerBindLayoutEntry
 
 type BufferBindingType = UniformBindLayoutEntry['type'] | StorageBindLayoutEntry['type']
 type BufferBindLayoutEntry = UniformBindLayoutEntry | StorageBindLayoutEntry
+type NormalizedBufferBindLayoutEntry = NormalizedUniformBindLayoutEntry | NormalizedStorageBindLayoutEntry
 type EntryWithDynamicOffsetFlag = BindLayoutEntry & { hasDynamicOffset?: unknown }
 
 export type BindLayoutDescriptor = {
     label?: string
     group: number
-    entries: BindLayoutEntry[]
+    entries: readonly BindLayoutEntry[]
 }
 
 export type BindSetBindings = Record<string, BufferRegion | TextureViewSpec | SamplerResource>
@@ -92,39 +252,60 @@ export type BindSetOptions = {
 }
 
 type NormalizedBindSetBinding = {
-    readonly entry: BindLayoutEntry
+    readonly entry: NormalizedBindLayoutEntry
     readonly resource: BufferRegion | TextureViewSpec | SamplerResource
 }
 
+type ScratchBindingSupportedLimits = GPUSupportedLimits & Readonly<{
+    maxStorageBuffersInVertexStage?: number
+    maxStorageBuffersInFragmentStage?: number
+    maxStorageTexturesInVertexStage?: number
+    maxStorageTexturesInFragmentStage?: number
+}>
+
 export interface BindLayout {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    group: number
-    entries: BindLayoutEntry[]
-    gpuBindGroupLayout: GPUBindGroupLayout
-    isDisposed: boolean
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly group: number
+    readonly entries: readonly NormalizedBindLayoutEntry[]
+    readonly gpuBindGroupLayout: GPUBindGroupLayout
 }
 
 export class BindLayout {
 
-    constructor(runtime: ScratchRuntime, descriptor: BindLayoutDescriptor) {
+    private constructor(
+        token: symbol,
+        runtime: ScratchRuntime,
+        id: string,
+        descriptor: Readonly<{
+            label?: string
+            group: number
+            entries: readonly NormalizedBindLayoutEntry[]
+        }>,
+        gpuBindGroupLayout: GPUBindGroupLayout
+    ) {
 
-        runtime.assertActive()
-
-        this.runtime = runtime
-        this.id = `scratch-bind-layout-${UUID()}`
-        this.group = normalizeGroup(this, descriptor.group)
-        this.entries = normalizeEntries(this, descriptor.entries)
-        this.isDisposed = false
-        if (descriptor.label !== undefined) this.label = descriptor.label
-
-        const gpuDescriptor: GPUBindGroupLayoutDescriptor = {
-            entries: this.entries.map((entry) => lowerBindLayoutEntry(entry)),
+        if (token !== bindLayoutToken || new.target !== BindLayout) {
+            throw new TypeError('BindLayout must be created by ScratchRuntime.createBindLayout().')
         }
-        if (this.label !== undefined) gpuDescriptor.label = this.label
+        bindLayoutStates.set(this, { isDisposed: false })
+        Object.defineProperties(this, {
+            runtime: immutableEnumerableProperty(runtime),
+            id: immutableEnumerableProperty(id),
+            group: immutableEnumerableProperty(descriptor.group),
+            entries: immutableEnumerableProperty(descriptor.entries),
+            gpuBindGroupLayout: immutableEnumerableProperty(gpuBindGroupLayout),
+            ...(descriptor.label !== undefined
+                ? { label: immutableEnumerableProperty(descriptor.label) }
+                : {}),
+        })
+        Object.preventExtensions(this)
+    }
 
-        this.gpuBindGroupLayout = runtime.device.createBindGroupLayout(gpuDescriptor)
+    get isDisposed(): boolean {
+
+        return bindLayoutStateFor(this).isDisposed
     }
 
     get subject(): DiagnosticSubject {
@@ -174,20 +355,110 @@ export class BindLayout {
         this.runtime.assertActive()
     }
 
-    entrySubject(entry: BindLayoutEntry) {
+    entrySubject(entry: unknown) {
 
-        return {
-            kind: 'BindLayoutEntry',
-            group: this.group,
-            binding: entry.binding,
-            name: entry.name,
-        }
+        return bindLayoutEntrySubject(this.group, entry)
     }
 
     dispose(): void {
 
-        this.isDisposed = true
+        if (this.isDisposed) return
+        bindLayoutStateFor(this).isDisposed = true
+        unregisterBindLayoutOwnership(this)
+        diagnosticsControllerFor(this.runtime).unregisterBindLayout(this)
     }
+}
+
+export async function createBindLayout(
+    runtime: ScratchRuntime,
+    descriptor: BindLayoutDescriptor
+): Promise<BindLayout> {
+
+    runtime.assertActive()
+    const id = `scratch-bind-layout-${UUID()}`
+    const normalizedDescriptor = normalizeBindLayoutDescriptor(runtime, id, descriptor)
+    const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, id)
+    const nativeEntries = normalizedDescriptor.entries.map(lowerBindLayoutEntry)
+    Object.freeze(nativeEntries)
+    const nativeDescriptor: GPUBindGroupLayoutDescriptor = {
+        label: nativeLabel,
+        entries: nativeEntries,
+    }
+    Object.freeze(nativeDescriptor)
+    const controller = diagnosticsControllerFor(runtime)
+    const operation = controller.beginOperation({
+        kind: 'bind-layout-allocation',
+        target: {
+            kind: 'bind-layout',
+            bindLayoutId: id,
+            group: normalizedDescriptor.group,
+            entries: normalizedDescriptor.entries,
+            acknowledgementState: 'pending',
+        },
+        descriptorSummary: {
+            group: normalizedDescriptor.group,
+            entryCount: normalizedDescriptor.entries.length,
+            entryTypes: normalizedDescriptor.entries.map(entry => entry.type),
+        },
+        fullDescriptor: {
+            ...normalizedDescriptor,
+            entries: normalizedDescriptor.entries,
+        },
+        nativeLabel,
+    })
+    const outcome = recheckSupportingObjectLifecycle(
+        runtime,
+        await issueSupportingObjectCreation(
+            runtime,
+            () => runtime.device.createBindGroupLayout(nativeDescriptor)
+        )
+    )
+    const subject = bindLayoutSubject(id, normalizedDescriptor.label)
+
+    if (outcome.failures.length > 0 || outcome.candidate === undefined) {
+        return throwSupportingObjectCreationFailure(
+            runtime,
+            operation,
+            outcome,
+            BIND_LAYOUT_ALLOCATION_CODES,
+            {
+                operationName: 'BindLayout allocation',
+                phase: 'binding',
+                subject,
+            }
+        )
+    }
+
+    let layout: BindLayout | undefined
+    try {
+        layout = constructBindLayout(
+            runtime,
+            id,
+            normalizedDescriptor,
+            outcome.candidate
+        )
+        registerBindLayoutOwnership(layout)
+        controller.registerBindLayout(layout, operation.id)
+    } catch (cause) {
+        if (layout !== undefined) unregisterBindLayoutOwnership(layout)
+        return throwSupportingObjectCreationFailure(
+            runtime,
+            operation,
+            {
+                candidate: outcome.candidate,
+                failures: [ { kind: 'native-exception', cause } ],
+            },
+            BIND_LAYOUT_ALLOCATION_CODES,
+            {
+                operationName: 'BindLayout allocation',
+                phase: 'binding',
+                subject,
+            }
+        )
+    }
+
+    controller.completeOperation(operation, { status: 'succeeded' })
+    return layout
 }
 
 export interface BindSet {
@@ -359,16 +630,130 @@ function bindingAllocationVersion(resource: BufferRegion | TextureViewSpec | Sam
     return resource.allocationVersion
 }
 
-function normalizeGroup(layout: BindLayout, group: number) {
+type BindLayoutDiagnosticContext = Readonly<{
+    subject: DiagnosticSubject
+    entrySubject(entry: unknown): DiagnosticSubject
+}>
 
-    if (!Number.isInteger(group) || group < 0) {
+function constructBindLayout(
+    runtime: ScratchRuntime,
+    id: string,
+    descriptor: Readonly<{
+        label?: string
+        group: number
+        entries: readonly NormalizedBindLayoutEntry[]
+    }>,
+    gpuBindGroupLayout: GPUBindGroupLayout
+): BindLayout {
+
+    const Constructor = BindLayout as unknown as new (
+        token: symbol,
+        runtime: ScratchRuntime,
+        id: string,
+        descriptor: Readonly<{
+            label?: string
+            group: number
+            entries: readonly NormalizedBindLayoutEntry[]
+        }>,
+        gpuBindGroupLayout: GPUBindGroupLayout
+    ) => BindLayout
+    return new Constructor(bindLayoutToken, runtime, id, descriptor, gpuBindGroupLayout)
+}
+
+function bindLayoutStateFor(layout: BindLayout): { isDisposed: boolean } {
+
+    const state = bindLayoutStates.get(layout)
+    if (state === undefined) throw new TypeError('BindLayout state is unavailable.')
+    return state
+}
+
+function immutableEnumerableProperty<T>(value: T): PropertyDescriptor {
+
+    return {
+        value,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+    }
+}
+
+function normalizeBindLayoutDescriptor(
+    runtime: ScratchRuntime,
+    id: string,
+    descriptor: unknown
+): Readonly<{
+    label?: string
+    group: number
+    entries: readonly NormalizedBindLayoutEntry[]
+}> {
+
+    if (!runtime?.device || typeof runtime.device.createBindGroupLayout !== 'function') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+            severity: 'error',
+            phase: 'runtime',
+            subject: runtime?.subject ?? { kind: 'ScratchRuntime' },
+            message: 'ScratchRuntime device cannot create GPU bind-group layouts.',
+            expected: { device: 'GPUDevice with createBindGroupLayout()' },
+            actual: { createBindGroupLayout: typeof runtime?.device?.createBindGroupLayout },
+        })
+    }
+    if (!isRecord(descriptor)) {
+        throwBindLayoutDescriptorDiagnostic(
+            bindLayoutSubject(id),
+            descriptor,
+            { descriptor: 'object' }
+        )
+    }
+    if (descriptor.label !== undefined && typeof descriptor.label !== 'string') {
+        throwBindLayoutDescriptorDiagnostic(
+            bindLayoutSubject(id),
+            descriptor,
+            { label: 'string' }
+        )
+    }
+
+    const label = descriptor.label as string | undefined
+    const subject = bindLayoutSubject(id, label)
+    const provisionalContext: BindLayoutDiagnosticContext = {
+        subject,
+        entrySubject: entry => bindLayoutEntrySubject(0, entry),
+    }
+    const group = normalizeGroup(runtime, provisionalContext, descriptor.group)
+    const context: BindLayoutDiagnosticContext = {
+        subject,
+        entrySubject: entry => bindLayoutEntrySubject(group, entry),
+    }
+    const entries = normalizeEntries(runtime, context, descriptor.entries)
+    validateBindingLimits(runtime, context, entries)
+
+    return Object.freeze({
+        ...(label !== undefined ? { label } : {}),
+        group,
+        entries,
+    })
+}
+
+function normalizeGroup(
+    runtime: ScratchRuntime,
+    layout: BindLayoutDiagnosticContext,
+    group: unknown
+): number {
+
+    const maxBindGroups = runtime.deviceLimits.maxBindGroups
+    if (
+        typeof group !== 'number' ||
+        !Number.isInteger(group) ||
+        group < 0 ||
+        group >= maxBindGroups
+    ) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',
             severity: 'error',
             phase: 'binding',
             subject: layout.subject,
             message: 'BindLayout group must be a non-negative integer.',
-            expected: { group: 'non-negative integer' },
+            expected: { group: `integer in [0, ${maxBindGroups})` },
             actual: { group },
         })
     }
@@ -376,29 +761,31 @@ function normalizeGroup(layout: BindLayout, group: number) {
     return group
 }
 
-function normalizeEntries(layout: BindLayout, entries: BindLayoutEntry[]): BindLayoutEntry[] {
+function normalizeEntries(
+    runtime: ScratchRuntime,
+    layout: BindLayoutDiagnosticContext,
+    entries: unknown
+): readonly NormalizedBindLayoutEntry[] {
 
-    if (!Array.isArray(entries) || entries.length === 0) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',
-            severity: 'error',
-            phase: 'binding',
-            subject: layout.subject,
-            message: 'BindLayout requires at least one entry.',
-            expected: { entries: 'non-empty array' },
-            actual: { entries },
-        })
+    if (!Array.isArray(entries)) {
+        throwBindLayoutDescriptorDiagnostic(layout.subject, { entries }, { entries: 'array' })
     }
 
     const names = new Set()
     const bindings = new Set()
 
-    return entries.map((entry) => {
-        if (!entry || typeof entry !== 'object' || typeof entry.name !== 'string') {
+    const normalized = entries.map((entry: unknown) => {
+        if (!isRecord(entry) || typeof entry.name !== 'string' || entry.name.length === 0) {
             throwBindEntryDiagnostic(layout, entry)
         }
 
-        if (!Number.isInteger(entry.binding) || entry.binding < 0 || !isSupportedBindingType(entry.type)) {
+        if (
+            typeof entry.binding !== 'number' ||
+            !Number.isInteger(entry.binding) ||
+            entry.binding < 0 ||
+            entry.binding >= runtime.deviceLimits.maxBindingsPerBindGroup ||
+            !isSupportedBindingType(entry.type)
+        ) {
             throwBindEntryDiagnostic(layout, entry)
         }
 
@@ -417,59 +804,89 @@ function normalizeEntries(layout: BindLayout, entries: BindLayoutEntry[]): BindL
         names.add(entry.name)
         bindings.add(entry.binding)
 
+        const typedEntry = entry as BindLayoutEntry
         const base = {
             binding: entry.binding,
             name: entry.name,
-            visibility: normalizeVisibility(layout, entry),
+            visibility: normalizeVisibility(layout, typedEntry),
         }
 
-        if (entry.type === 'texture') {
-            rejectDynamicOffsetFlag(layout, entry)
+        if (typedEntry.type === 'texture') {
+            rejectDynamicOffsetFlag(layout, typedEntry)
 
-            return {
-                ...base,
-                type: entry.type,
-                sampleType: normalizeTextureSampleType(layout, entry),
-                viewDimension: normalizeTextureViewDimension(layout, entry),
-                multisampled: normalizeTextureMultisampled(layout, entry),
+            const sampleType = normalizeTextureSampleType(layout, typedEntry)
+            const viewDimension = normalizeTextureViewDimension(layout, typedEntry)
+            const multisampled = normalizeTextureMultisampled(layout, typedEntry)
+            if (multisampled && (viewDimension !== '2d' || sampleType === 'float')) {
+                throwBindEntryDiagnostic(layout, typedEntry)
             }
-        }
 
-        if (entry.type === 'sampler') {
-            rejectDynamicOffsetFlag(layout, entry)
-
-            return {
+            return Object.freeze({
                 ...base,
-                type: entry.type,
-                samplerType: normalizeSamplerBindingType(layout, entry),
-            }
+                type: typedEntry.type,
+                sampleType,
+                viewDimension,
+                multisampled,
+            })
         }
 
-        const hasDynamicOffset = normalizeDynamicOffsetFlag(layout, entry)
-        if (hasDynamicOffset === true) {
-            return {
+        if (typedEntry.type === 'storage-texture') {
+            rejectDynamicOffsetFlag(layout, typedEntry)
+            const access = normalizeStorageTextureAccess(layout, typedEntry)
+            const format = normalizeStorageTextureFormat(runtime, layout, typedEntry, access)
+            const viewDimension = normalizeStorageTextureViewDimension(layout, typedEntry)
+            if (base.visibility.includes('vertex') && access !== 'read-only') {
+                throwBindEntryDiagnostic(layout, typedEntry)
+            }
+
+            return Object.freeze({
                 ...base,
-                type: entry.type,
-                hasDynamicOffset,
-            }
+                type: typedEntry.type,
+                access,
+                format,
+                viewDimension,
+            })
         }
 
-        return {
+        if (typedEntry.type === 'sampler') {
+            rejectDynamicOffsetFlag(layout, typedEntry)
+
+            return Object.freeze({
+                ...base,
+                type: typedEntry.type,
+                samplerType: normalizeSamplerBindingType(layout, typedEntry),
+            })
+        }
+
+        if (typedEntry.type === 'storage' && base.visibility.includes('vertex')) {
+            throwBindEntryDiagnostic(layout, typedEntry)
+        }
+        const hasDynamicOffset = normalizeDynamicOffsetFlag(layout, typedEntry)
+        const minBindingSize = normalizeMinBindingSize(layout, typedEntry)
+
+        return Object.freeze({
             ...base,
-            type: entry.type,
-        }
+            type: typedEntry.type,
+            hasDynamicOffset,
+            minBindingSize,
+        })
     })
+
+    return Object.freeze(normalized)
 }
 
 function isSupportedBindingType(type: unknown): type is BindLayoutEntry['type'] {
 
     return typeof type === 'string' &&
-        (isBufferBindingType(type) || type === 'texture' || type === 'sampler')
+        (isBufferBindingType(type) || type === 'texture' || type === 'storage-texture' || type === 'sampler')
 }
 
-function normalizeVisibility(layout: BindLayout, entry: BindLayoutEntry): BindVisibility[] {
+function normalizeVisibility(
+    layout: BindLayoutDiagnosticContext,
+    entry: BindLayoutEntry
+): readonly BindVisibility[] {
 
-    if (!Array.isArray(entry.visibility) || entry.visibility.length === 0) {
+    if (!Array.isArray(entry.visibility)) {
         throwBindEntryDiagnostic(layout, entry)
     }
 
@@ -479,7 +896,8 @@ function normalizeVisibility(layout: BindLayout, entry: BindLayoutEntry): BindVi
         }
     }
 
-    return [ ...entry.visibility ]
+    return Object.freeze(([ 'vertex', 'fragment', 'compute' ] as const)
+        .filter(stage => entry.visibility.includes(stage)))
 }
 
 function normalizeBindings(bindSet: BindSet, bindings: BindSetBindings): Map<string, NormalizedBindSetBinding> {
@@ -536,7 +954,7 @@ function normalizeBindings(bindSet: BindSet, bindings: BindSetBindings): Map<str
     return normalized
 }
 
-function validateBindingResource(bindSet: BindSet, entry: BindLayoutEntry, resource: unknown) {
+function validateBindingResource(bindSet: BindSet, entry: NormalizedBindLayoutEntry, resource: unknown) {
 
     if (isBufferBindLayoutEntry(entry)) {
         validateBufferResource(bindSet, entry, resource)
@@ -548,6 +966,19 @@ function validateBindingResource(bindSet: BindSet, entry: BindLayoutEntry, resou
         return
     }
 
+    if (entry.type === 'storage-texture') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
+            severity: 'error',
+            phase: 'binding',
+            subject: bindSet.layout.entrySubject(entry),
+            related: [ bindSet.subject ],
+            message: 'Storage-texture BindSet preparation is not yet available.',
+            expected: { preparation: 'Phase 5 storage-texture binding support' },
+            actual: { type: entry.type },
+        })
+    }
+
     if (entry.type === 'sampler') {
         validateSamplerResource(bindSet, entry, resource)
         return
@@ -556,7 +987,11 @@ function validateBindingResource(bindSet: BindSet, entry: BindLayoutEntry, resou
     throwBindEntryDiagnostic(bindSet.layout, entry)
 }
 
-function validateBufferResource(bindSet: BindSet, entry: BufferBindLayoutEntry, resource: unknown) {
+function validateBufferResource(
+    bindSet: BindSet,
+    entry: NormalizedBufferBindLayoutEntry,
+    resource: unknown
+) {
 
     if (!isBufferRegion(resource)) {
         throwScratchDiagnostic({
@@ -589,7 +1024,11 @@ function validateBufferResource(bindSet: BindSet, entry: BufferBindLayoutEntry, 
     }
 }
 
-function validateTextureResource(bindSet: BindSet, entry: TextureBindLayoutEntry, resource: unknown) {
+function validateTextureResource(
+    bindSet: BindSet,
+    entry: NormalizedTextureBindLayoutEntry,
+    resource: unknown
+) {
 
     if (!isTextureViewSpec(resource)) {
         throwScratchDiagnostic({
@@ -635,7 +1074,11 @@ function validateTextureResource(bindSet: BindSet, entry: TextureBindLayoutEntry
     }
 }
 
-function validateSamplerResource(bindSet: BindSet, entry: SamplerBindLayoutEntry, resource: unknown) {
+function validateSamplerResource(
+    bindSet: BindSet,
+    entry: NormalizedSamplerBindLayoutEntry,
+    resource: unknown
+) {
 
     if (!(resource instanceof SamplerResource)) {
         throwScratchDiagnostic({
@@ -653,7 +1096,7 @@ function validateSamplerResource(bindSet: BindSet, entry: SamplerBindLayoutEntry
     resource.assertRuntime(bindSet.runtime)
 }
 
-function lowerBindLayoutEntry(entry: BindLayoutEntry): GPUBindGroupLayoutEntry {
+function lowerBindLayoutEntry(entry: NormalizedBindLayoutEntry): GPUBindGroupLayoutEntry {
 
     const lowered: GPUBindGroupLayoutEntry = {
         binding: entry.binding,
@@ -661,25 +1104,36 @@ function lowerBindLayoutEntry(entry: BindLayoutEntry): GPUBindGroupLayoutEntry {
     }
 
     if (isBufferBindLayoutEntry(entry)) {
-        const buffer: GPUBufferBindingLayout = { type: WEBGPU_BUFFER_BINDING_TYPES[entry.type] }
-        if (entry.hasDynamicOffset === true) buffer.hasDynamicOffset = true
+        const buffer: GPUBufferBindingLayout = {
+            type: WEBGPU_BUFFER_BINDING_TYPES[entry.type],
+            hasDynamicOffset: entry.hasDynamicOffset,
+            minBindingSize: entry.minBindingSize,
+        }
         lowered.buffer = buffer
         return lowered
     }
 
     if (entry.type === 'texture') {
-        const texture: GPUTextureBindingLayout = {}
-        if (entry.sampleType !== undefined) texture.sampleType = entry.sampleType
-        if (entry.viewDimension !== undefined) texture.viewDimension = entry.viewDimension
-        if (entry.multisampled !== undefined) texture.multisampled = entry.multisampled
+        const texture: GPUTextureBindingLayout = {
+            sampleType: entry.sampleType,
+            viewDimension: entry.viewDimension,
+            multisampled: entry.multisampled,
+        }
         lowered.texture = texture
         return lowered
     }
 
+    if (entry.type === 'storage-texture') {
+        lowered.storageTexture = {
+            access: entry.access,
+            format: entry.format,
+            viewDimension: entry.viewDimension,
+        }
+        return lowered
+    }
+
     if (entry.type === 'sampler') {
-        const sampler: GPUSamplerBindingLayout = {}
-        if (entry.samplerType !== undefined) sampler.type = entry.samplerType
-        lowered.sampler = sampler
+        lowered.sampler = { type: entry.samplerType }
         return lowered
     }
 
@@ -721,7 +1175,320 @@ function createBindingResource(binding: NormalizedBindSetBinding): GPUBindingRes
     })
 }
 
-function normalizeTextureSampleType(layout: BindLayout, entry: TextureBindLayoutEntry): GPUTextureSampleType {
+function bindLayoutSubject(id: string, label?: string): DiagnosticSubject {
+
+    return {
+        kind: 'BindLayout',
+        id,
+        ...(label !== undefined ? { label } : {}),
+    }
+}
+
+function bindLayoutEntrySubject(
+    group: number,
+    entry: unknown
+): DiagnosticSubject {
+
+    const record = isRecord(entry) ? entry : {}
+    return {
+        kind: 'BindLayoutEntry',
+        group,
+        ...(typeof record.binding === 'number' ? { binding: record.binding } : {}),
+        ...(typeof record.name === 'string' ? { name: record.name } : {}),
+    }
+}
+
+function throwBindLayoutDescriptorDiagnostic(
+    subject: DiagnosticSubject,
+    actual: unknown,
+    expected: unknown
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_BIND_LAYOUT_DESCRIPTOR_INVALID',
+        severity: 'error',
+        phase: 'binding',
+        subject,
+        message: 'BindLayout requires a valid explicit group and entry descriptor.',
+        expected,
+        actual,
+    })
+}
+
+function normalizeStorageTextureAccess(
+    layout: BindLayoutDiagnosticContext,
+    entry: StorageTextureBindLayoutEntry
+): GPUStorageTextureAccess {
+
+    const access = entry.access ?? 'write-only'
+    if (!STORAGE_TEXTURE_ACCESS.has(access)) {
+        throwBindEntryDiagnostic(layout, entry)
+    }
+    return access
+}
+
+function normalizeStorageTextureFormat(
+    runtime: ScratchRuntime,
+    layout: BindLayoutDiagnosticContext,
+    entry: StorageTextureBindLayoutEntry,
+    access: GPUStorageTextureAccess
+): GPUTextureFormat {
+
+    if (typeof entry.format !== 'string') {
+        throwBindEntryDiagnostic(layout, entry)
+    }
+
+    const capabilities = STORAGE_TEXTURE_FORMAT_CAPABILITIES.get(entry.format as GPUTextureFormat)
+    const requirement = capabilities?.[access]
+    if (requirement === undefined || !runtimeSupportsStorageTextureRequirement(runtime, requirement)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_STORAGE_TEXTURE_FORMAT_UNSUPPORTED',
+            severity: 'error',
+            phase: 'binding',
+            subject: layout.entrySubject(entry),
+            related: [ layout.subject ],
+            message: 'Storage-texture format and access must be supported by the runtime device.',
+            expected: {
+                format: entry.format,
+                access,
+                ...(requirement !== undefined ? { feature: requirement } : {}),
+            },
+            actual: {
+                features: Array.from(runtime.deviceFeatures),
+                supportedAccesses: capabilities === undefined
+                    ? []
+                    : Object.keys(capabilities),
+            },
+        })
+    }
+
+    return entry.format as GPUTextureFormat
+}
+
+function normalizeStorageTextureViewDimension(
+    layout: BindLayoutDiagnosticContext,
+    entry: StorageTextureBindLayoutEntry
+): GPUTextureViewDimension {
+
+    const viewDimension = entry.viewDimension ?? '2d'
+    if (!STORAGE_TEXTURE_VIEW_DIMENSIONS.has(viewDimension)) {
+        throwBindEntryDiagnostic(layout, entry)
+    }
+    return viewDimension
+}
+
+function normalizeMinBindingSize(
+    layout: BindLayoutDiagnosticContext,
+    entry: BufferBindLayoutEntry
+): number {
+
+    const minBindingSize = entry.minBindingSize ?? 0
+    if (
+        typeof minBindingSize !== 'number' ||
+        !Number.isSafeInteger(minBindingSize) ||
+        minBindingSize < 0
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_MIN_BINDING_SIZE_INVALID',
+            severity: 'error',
+            phase: 'binding',
+            subject: layout.entrySubject(entry),
+            related: [ layout.subject ],
+            message: 'Buffer minBindingSize must be a non-negative safe integer byte count.',
+            expected: { minBindingSize: 'safe integer >= 0' },
+            actual: { minBindingSize },
+        })
+    }
+    return minBindingSize
+}
+
+function validateBindingLimits(
+    runtime: ScratchRuntime,
+    layout: BindLayoutDiagnosticContext,
+    entries: readonly NormalizedBindLayoutEntry[]
+): void {
+
+    const dynamicUniformCount = entries.filter(entry =>
+        entry.type === 'uniform' && entry.hasDynamicOffset
+    ).length
+    const dynamicStorageCount = entries.filter(entry =>
+        (entry.type === 'read-storage' || entry.type === 'storage') && entry.hasDynamicOffset
+    ).length
+    assertBindingLimit(
+        layout,
+        'maxDynamicUniformBuffersPerPipelineLayout',
+        runtime.deviceLimits.maxDynamicUniformBuffersPerPipelineLayout,
+        dynamicUniformCount
+    )
+    assertBindingLimit(
+        layout,
+        'maxDynamicStorageBuffersPerPipelineLayout',
+        runtime.deviceLimits.maxDynamicStorageBuffersPerPipelineLayout,
+        dynamicStorageCount
+    )
+
+    for (const stage of [ 'vertex', 'fragment', 'compute' ] as const) {
+        const visible = entries.filter(entry => entry.visibility.includes(stage))
+        assertBindingLimit(
+            layout,
+            'maxUniformBuffersPerShaderStage',
+            runtime.deviceLimits.maxUniformBuffersPerShaderStage,
+            visible.filter(entry => entry.type === 'uniform').length,
+            stage
+        )
+        assertBindingLimit(
+            layout,
+            'maxSamplersPerShaderStage',
+            runtime.deviceLimits.maxSamplersPerShaderStage,
+            visible.filter(entry => entry.type === 'sampler').length,
+            stage
+        )
+        assertBindingLimit(
+            layout,
+            'maxSampledTexturesPerShaderStage',
+            runtime.deviceLimits.maxSampledTexturesPerShaderStage,
+            visible.filter(entry => entry.type === 'texture').length,
+            stage
+        )
+        assertBindingLimit(
+            layout,
+            storageBufferLimitName(stage),
+            storageBufferLimit(runtime, stage),
+            visible.filter(entry => entry.type === 'read-storage' || entry.type === 'storage').length,
+            stage
+        )
+        assertBindingLimit(
+            layout,
+            storageTextureLimitName(stage),
+            storageTextureLimit(runtime, stage),
+            visible.filter(entry => entry.type === 'storage-texture').length,
+            stage
+        )
+    }
+}
+
+function assertBindingLimit(
+    layout: BindLayoutDiagnosticContext,
+    limit: string,
+    maximum: number,
+    actual: number,
+    stage?: BindVisibility
+): void {
+
+    if (actual <= maximum) return
+    throwScratchDiagnostic({
+        code: 'SCRATCH_BIND_LAYOUT_LIMIT_EXCEEDED',
+        severity: 'error',
+        phase: 'binding',
+        subject: layout.subject,
+        message: 'BindLayout entries exceed a device binding-slot limit.',
+        expected: { limit, maximum, ...(stage !== undefined ? { stage } : {}) },
+        actual: { count: actual, ...(stage !== undefined ? { stage } : {}) },
+    })
+}
+
+function storageBufferLimit(runtime: ScratchRuntime, stage: BindVisibility): number {
+
+    const limits = runtime.deviceLimits as ScratchBindingSupportedLimits
+    if (stage === 'vertex') {
+        return limits.maxStorageBuffersInVertexStage ?? limits.maxStorageBuffersPerShaderStage
+    }
+    if (stage === 'fragment') {
+        return limits.maxStorageBuffersInFragmentStage ?? limits.maxStorageBuffersPerShaderStage
+    }
+    return runtime.deviceLimits.maxStorageBuffersPerShaderStage
+}
+
+function storageBufferLimitName(stage: BindVisibility): string {
+
+    if (stage === 'vertex') return 'maxStorageBuffersInVertexStage'
+    if (stage === 'fragment') return 'maxStorageBuffersInFragmentStage'
+    return 'maxStorageBuffersPerShaderStage'
+}
+
+function storageTextureLimit(runtime: ScratchRuntime, stage: BindVisibility): number {
+
+    const limits = runtime.deviceLimits as ScratchBindingSupportedLimits
+    if (stage === 'vertex') {
+        return limits.maxStorageTexturesInVertexStage ?? limits.maxStorageTexturesPerShaderStage
+    }
+    if (stage === 'fragment') {
+        return limits.maxStorageTexturesInFragmentStage ?? limits.maxStorageTexturesPerShaderStage
+    }
+    return runtime.deviceLimits.maxStorageTexturesPerShaderStage
+}
+
+function storageTextureLimitName(stage: BindVisibility): string {
+
+    if (stage === 'vertex') return 'maxStorageTexturesInVertexStage'
+    if (stage === 'fragment') return 'maxStorageTexturesInFragmentStage'
+    return 'maxStorageTexturesPerShaderStage'
+}
+
+function createStorageTextureFormatCapabilities(): ReadonlyMap<
+    GPUTextureFormat,
+    StorageTextureFormatCapabilities
+> {
+
+    const formats = new Map<GPUTextureFormat, Record<string, StorageTextureFeatureRequirement>>()
+    const addAccess = (
+        format: GPUTextureFormat,
+        access: GPUStorageTextureAccess,
+        requirement: StorageTextureFeatureRequirement
+    ) => {
+        const capabilities = formats.get(format) ?? {}
+        capabilities[access] = requirement
+        formats.set(format, capabilities)
+    }
+
+    for (const format of BASE_STORAGE_TEXTURE_FORMATS) {
+        addAccess(format, 'write-only', 'base')
+        addAccess(format, 'read-only', 'base')
+    }
+    for (const format of [ 'r32uint', 'r32sint', 'r32float' ] as const) {
+        addAccess(format, 'read-write', 'base')
+    }
+    for (const format of TIER_1_STORAGE_TEXTURE_FORMATS) {
+        addAccess(format, 'write-only', 'texture-formats-tier1')
+        addAccess(format, 'read-only', 'texture-formats-tier1')
+    }
+    for (const format of [ 'rg32uint', 'rg32sint', 'rg32float' ] as const) {
+        addAccess(format, 'write-only', 'core-features-and-limits')
+        addAccess(format, 'read-only', 'core-features-and-limits')
+    }
+    for (const format of TIER_2_READ_WRITE_STORAGE_TEXTURE_FORMATS) {
+        addAccess(format, 'read-write', 'texture-formats-tier2')
+    }
+    addAccess('bgra8unorm', 'write-only', 'bgra8unorm-storage')
+
+    return new Map([ ...formats ].map(([ format, capabilities ]) => [
+        format,
+        Object.freeze(capabilities),
+    ]))
+}
+
+function runtimeSupportsStorageTextureRequirement(
+    runtime: ScratchRuntime,
+    requirement: StorageTextureFeatureRequirement
+): boolean {
+
+    if (requirement === 'base') return true
+    if (requirement === 'texture-formats-tier1') {
+        return runtimeHasFeature(runtime, 'texture-formats-tier1') ||
+            runtimeHasFeature(runtime, 'texture-formats-tier2')
+    }
+    return runtimeHasFeature(runtime, requirement)
+}
+
+function runtimeHasFeature(runtime: ScratchRuntime, feature: string): boolean {
+
+    return runtime.deviceFeatures.has(feature as GPUFeatureName)
+}
+
+function normalizeTextureSampleType(
+    layout: BindLayoutDiagnosticContext,
+    entry: TextureBindLayoutEntry
+): GPUTextureSampleType {
 
     const sampleType = entry.sampleType ?? 'float'
     if (!TEXTURE_SAMPLE_TYPES.has(sampleType)) {
@@ -731,7 +1498,10 @@ function normalizeTextureSampleType(layout: BindLayout, entry: TextureBindLayout
     return sampleType
 }
 
-function normalizeTextureViewDimension(layout: BindLayout, entry: TextureBindLayoutEntry): GPUTextureViewDimension {
+function normalizeTextureViewDimension(
+    layout: BindLayoutDiagnosticContext,
+    entry: TextureBindLayoutEntry
+): GPUTextureViewDimension {
 
     const viewDimension = entry.viewDimension ?? '2d'
     if (!TEXTURE_VIEW_DIMENSIONS.has(viewDimension)) {
@@ -741,7 +1511,10 @@ function normalizeTextureViewDimension(layout: BindLayout, entry: TextureBindLay
     return viewDimension
 }
 
-function normalizeTextureMultisampled(layout: BindLayout, entry: TextureBindLayoutEntry): boolean {
+function normalizeTextureMultisampled(
+    layout: BindLayoutDiagnosticContext,
+    entry: TextureBindLayoutEntry
+): boolean {
 
     const multisampled = entry.multisampled ?? false
     if (typeof multisampled !== 'boolean') {
@@ -751,7 +1524,10 @@ function normalizeTextureMultisampled(layout: BindLayout, entry: TextureBindLayo
     return multisampled
 }
 
-function normalizeSamplerBindingType(layout: BindLayout, entry: SamplerBindLayoutEntry): GPUSamplerBindingType {
+function normalizeSamplerBindingType(
+    layout: BindLayoutDiagnosticContext,
+    entry: SamplerBindLayoutEntry
+): GPUSamplerBindingType {
 
     const samplerType = entry.samplerType ?? 'filtering'
     if (!SAMPLER_BINDING_TYPES.has(samplerType)) {
@@ -761,10 +1537,13 @@ function normalizeSamplerBindingType(layout: BindLayout, entry: SamplerBindLayou
     return samplerType
 }
 
-function normalizeDynamicOffsetFlag(layout: BindLayout, entry: BufferBindLayoutEntry): true | undefined {
+function normalizeDynamicOffsetFlag(
+    layout: BindLayoutDiagnosticContext,
+    entry: BufferBindLayoutEntry
+): boolean {
 
     const hasDynamicOffset = (entry as EntryWithDynamicOffsetFlag).hasDynamicOffset
-    if (hasDynamicOffset === undefined) return undefined
+    if (hasDynamicOffset === undefined) return false
 
     if (typeof hasDynamicOffset !== 'boolean') {
         throwDynamicOffsetFlagDiagnostic(layout, entry, hasDynamicOffset, {
@@ -772,10 +1551,13 @@ function normalizeDynamicOffsetFlag(layout: BindLayout, entry: BufferBindLayoutE
         })
     }
 
-    return hasDynamicOffset === true ? true : undefined
+    return hasDynamicOffset
 }
 
-function rejectDynamicOffsetFlag(layout: BindLayout, entry: TextureBindLayoutEntry | SamplerBindLayoutEntry): void {
+function rejectDynamicOffsetFlag(
+    layout: BindLayoutDiagnosticContext,
+    entry: TextureBindLayoutEntry | StorageTextureBindLayoutEntry | SamplerBindLayoutEntry
+): void {
 
     const hasDynamicOffset = (entry as EntryWithDynamicOffsetFlag).hasDynamicOffset
     if (hasDynamicOffset === undefined) return
@@ -786,7 +1568,7 @@ function rejectDynamicOffsetFlag(layout: BindLayout, entry: TextureBindLayoutEnt
 }
 
 function throwDynamicOffsetFlagDiagnostic(
-    layout: BindLayout,
+    layout: BindLayoutDiagnosticContext,
     entry: BindLayoutEntry,
     hasDynamicOffset: unknown,
     expected: unknown
@@ -807,7 +1589,7 @@ function throwDynamicOffsetFlagDiagnostic(
     })
 }
 
-function throwBindEntryDiagnostic(layout: BindLayout, entry: unknown): never {
+function throwBindEntryDiagnostic(layout: BindLayoutDiagnosticContext, entry: unknown): never {
 
     throwScratchDiagnostic({
         code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',
@@ -819,7 +1601,7 @@ function throwBindEntryDiagnostic(layout: BindLayout, entry: unknown): never {
             entry: {
                 name: 'string',
                 binding: 'non-negative integer',
-                type: [ 'uniform', 'read-storage', 'storage', 'texture', 'sampler' ],
+                type: [ 'uniform', 'read-storage', 'storage', 'texture', 'storage-texture', 'sampler' ],
                 visibility: [ 'vertex', 'fragment', 'compute' ],
             },
         },
@@ -827,7 +1609,13 @@ function throwBindEntryDiagnostic(layout: BindLayout, entry: unknown): never {
     })
 }
 
-function isBufferBindLayoutEntry(entry: BindLayoutEntry): entry is BufferBindLayoutEntry {
+function isBufferBindLayoutEntry(entry: BindLayoutEntry): entry is BufferBindLayoutEntry
+function isBufferBindLayoutEntry(
+    entry: NormalizedBindLayoutEntry
+): entry is NormalizedBufferBindLayoutEntry
+function isBufferBindLayoutEntry(
+    entry: BindLayoutEntry | NormalizedBindLayoutEntry
+): boolean {
 
     return isBufferBindingType(entry.type)
 }

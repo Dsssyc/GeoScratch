@@ -38,7 +38,7 @@ async function createQueryFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const querySet = runtime.createQuerySet({
+    const querySet = await runtime.createQuerySet({
         label: 'timing queries',
         type: 'timestamp',
         count: 4,
@@ -66,7 +66,7 @@ async function createQueryFixture() {
             end: 2,
         },
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'query destination bind layout',
         group: 0,
         entries: [
@@ -91,7 +91,7 @@ async function createRenderTimestampFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const querySet = runtime.createQuerySet({
+    const querySet = await runtime.createQuerySet({
         label: 'render timestamps',
         type: 'timestamp',
         count: 2,
@@ -196,11 +196,11 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         expect(queryFact).not.to.have.property('contentEpoch')
         expect(queryFact).not.to.have.property('logicalFootprintBytes')
         expect(fixture.querySet.gpuQuerySet.descriptor).to.deep.equal({
-            label: 'timing queries',
+            label: `timing queries [scratch:${fixture.querySet.id}]`,
             type: 'timestamp',
             count: 4,
         })
-        expect(fixture.runtime.querySet({
+        expect(await fixture.runtime.querySet({
             type: 'occlusion',
             count: 1,
         })).to.be.instanceOf(QuerySetResource)
@@ -448,7 +448,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
             for (const validation of [ 'throw', 'warn', 'off' ]) {
                 const fake = createFakeGpu()
                 const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-                const querySet = runtime.createQuerySet({
+                const querySet = await runtime.createQuerySet({
                     label: `${scenario} timing queries ${validation}`,
                     type: 'timestamp',
                     count: 1,
@@ -580,7 +580,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
 
         const fixtureA = await createQueryFixture()
         const fixtureB = await createQueryFixture()
-        const occlusionQueries = fixtureA.runtime.createQuerySet({
+        const occlusionQueries = await fixtureA.runtime.createQuerySet({
             type: 'occlusion',
             count: 2,
         })
@@ -744,7 +744,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
             phase: 'resource',
         })
 
-        const freshQuerySet = fixtureA.runtime.createQuerySet({
+        const freshQuerySet = await fixtureA.runtime.createQuerySet({
             type: 'timestamp',
             count: 1,
         })

@@ -208,8 +208,11 @@ export function throwScopedAllocationFailure<T>(
     destroyNativeCandidate(outcome.candidate)
     const controller = diagnosticsControllerFor(runtime)
     const target = operation.target
-    if (target.kind !== 'resource') {
-        throw new TypeError('Scoped allocation failure requires a resource operation target.')
+    if (
+        target.kind !== 'resource' ||
+        (target.resourceKind !== 'BufferResource' && target.resourceKind !== 'TextureResource')
+    ) {
+        throw new TypeError('Scoped allocation failure requires a content-resource operation target.')
     }
 
     if (outcome.kind === 'device-lost') {

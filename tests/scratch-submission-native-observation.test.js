@@ -49,7 +49,7 @@ describe('scratch bounded submission native observation', () => {
             { action: 'pop', filter: 'out-of-memory' },
         ])
         expect(await observation.outcome).to.deep.include({
-            version: 4,
+            version: 5,
             submissionId,
             mode: 'summary',
             status: 'observed-succeeded',

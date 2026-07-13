@@ -75,12 +75,12 @@ async function main() {
         format: 'rgba8unorm',
         usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
     })
-    const sampler = runtime.createSampler({
+    const sampler = await runtime.createSampler({
         label: 'texture sampling nearest sampler',
         magFilter: 'nearest',
         minFilter: 'nearest',
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'texture sampling bind layout',
         group: 0,
         entries: [

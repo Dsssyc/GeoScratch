@@ -587,7 +587,7 @@ describe('scratch native indexed and indirect execution', () => {
         const indirect = await fixture.runtime.createBuffer({ size: 20, usage: GPU_BUFFER_USAGE_INDIRECT })
         const indexBuffer = await fixture.runtime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
         const boundBuffer = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-        const bindLayout = fixture.runtime.createBindLayout({
+        const bindLayout = await fixture.runtime.createBindLayout({
             group: 0,
             entries: [ {
                 binding: 0,

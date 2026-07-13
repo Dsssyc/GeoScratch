@@ -29,7 +29,7 @@ import { readonlyMapSnapshot } from './readonly-map.js'
 import { advanceResourceContentEpoch, isContentResource } from './resource.js'
 import { TextureResource } from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
-import type { BindLayoutEntry, BindSet } from './binding.js'
+import type { BindSet, NormalizedBindLayoutEntry } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { ComputePipeline, RenderPipeline } from './pipeline.js'
@@ -2980,7 +2980,10 @@ function normalizeBindSets(command: DrawCommand | DispatchCommand, bindSets: Bin
 }
 
 type DynamicOffsetCommand = DrawCommand | DispatchCommand
-type DynamicBufferBindLayoutEntry = BindLayoutEntry & {
+type DynamicBufferBindLayoutEntry = Extract<
+    NormalizedBindLayoutEntry,
+    { type: 'uniform' | 'read-storage' | 'storage' }
+> & {
     type: 'uniform' | 'read-storage' | 'storage'
     hasDynamicOffset: true
 }
@@ -3309,7 +3312,7 @@ function throwCommandProgramLayoutMismatch(
     details: {
         actual: unknown
         bindSet?: BindSet
-        entry?: BindLayoutEntry
+        entry?: NormalizedBindLayoutEntry
         resource?: DiagnosticSubject | undefined
         actualLayout?: DiagnosticSubject | undefined
     }

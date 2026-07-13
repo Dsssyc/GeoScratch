@@ -73,13 +73,13 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
         format,
         usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
     })
-    const sampler = runtime.createSampler({
+    const sampler = await runtime.createSampler({
         label: 'offscreen sampler',
         magFilter: 'nearest',
         minFilter: 'nearest',
     })
     const renderView = renderTarget.view()
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'sample offscreen layout',
         group: 0,
         entries: [

@@ -304,8 +304,8 @@ const intentionalReplacements = [
     replacement(
         'schema-v4-clean-cut',
         hasAll(baseline.gpuOperation, [ 'version: 3' ]) &&
-            !baseline.gpuOperation.includes('version: 4'),
-        hasAll(current.gpuOperation, [ 'version: 4' ]) &&
+            !baseline.gpuOperation.includes('version: 5'),
+        hasAll(current.gpuOperation, [ 'version: 5' ]) &&
             !current.gpuOperation.includes('version: 3')
     ),
     replacement(

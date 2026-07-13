@@ -126,12 +126,12 @@ async function main() {
         byteLength: readbackByteLength,
         whenMissing: 'throw',
     })
-    const sampler = runtime.createSampler({
+    const sampler = await runtime.createSampler({
         label: 'external image nearest sampler',
         magFilter: 'nearest',
         minFilter: 'nearest',
     })
-    const bindLayout = runtime.createBindLayout({
+    const bindLayout = await runtime.createBindLayout({
         label: 'external image sample layout',
         group: 0,
         entries: [

@@ -93,6 +93,7 @@ function createRenderProgram(runtime, codec, overrides = {}) {
         },
         layoutRequirements: [
             createRequirement(codec, {
+                type: 'read-storage',
                 visibility: [ 'vertex' ],
                 ...overrides,
             }),
@@ -102,6 +103,8 @@ function createRenderProgram(runtime, codec, overrides = {}) {
 
 function createBindLayout(runtime, overrides = {}) {
 
+    const visibility = overrides.visibility ?? [ 'compute' ]
+    const type = overrides.type ?? (visibility.includes('vertex') ? 'read-storage' : 'storage')
     return runtime.createBindLayout({
         label: 'particle bind layout',
         group: 0,
@@ -109,8 +112,8 @@ function createBindLayout(runtime, overrides = {}) {
             {
                 binding: 0,
                 name: 'particles',
-                type: 'storage',
-                visibility: [ 'vertex', 'fragment', 'compute' ],
+                type,
+                visibility,
                 ...overrides,
             },
         ],
@@ -318,10 +321,10 @@ describe('scratch Program buffer layout requirements', () => {
         const computeCodec = createParticleCodec('ComputeParticle')
         const renderProgram = createRenderProgram(runtime, renderCodec)
         const computeProgram = createProgram(runtime, computeCodec)
-        const renderLayout = createBindLayout(runtime, {
+        const renderLayout = await createBindLayout(runtime, {
             visibility: [ 'vertex', 'fragment' ],
         })
-        const computeLayout = createBindLayout(runtime, {
+        const computeLayout = await createBindLayout(runtime, {
             visibility: [ 'compute' ],
         })
 
@@ -376,7 +379,7 @@ describe('scratch Program buffer layout requirements', () => {
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
         const program = createProgram(runtime, codec, { binding: 1 })
-        const bindLayout = createBindLayout(runtime)
+        const bindLayout = await createBindLayout(runtime)
 
         const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
             await runtime.createComputePipeline({
@@ -420,7 +423,7 @@ describe('scratch Program buffer layout requirements', () => {
 
         for (const testCase of cases) {
             const program = createProgram(runtime, codec, testCase.requirement)
-            const bindLayout = createBindLayout(runtime, testCase.entry)
+            const bindLayout = await createBindLayout(runtime, testCase.entry)
             const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
                 await runtime.createComputePipeline({
                     program,
@@ -436,10 +439,10 @@ describe('scratch Program buffer layout requirements', () => {
         const { runtime } = await createRuntimeFixture()
         const renderCodec = createParticleCodec('RenderCommandParticle')
         const computeCodec = createParticleCodec('ComputeCommandParticle')
-        const renderLayout = createBindLayout(runtime, {
+        const renderLayout = await createBindLayout(runtime, {
             visibility: [ 'vertex', 'fragment' ],
         })
-        const computeLayout = createBindLayout(runtime, {
+        const computeLayout = await createBindLayout(runtime, {
             visibility: [ 'compute' ],
         })
         const renderProgram = createRenderProgram(runtime, renderCodec)
@@ -489,10 +492,10 @@ describe('scratch Program buffer layout requirements', () => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
-        const renderLayout = createBindLayout(runtime, {
+        const renderLayout = await createBindLayout(runtime, {
             visibility: [ 'vertex', 'fragment' ],
         })
-        const computeLayout = createBindLayout(runtime, {
+        const computeLayout = await createBindLayout(runtime, {
             visibility: [ 'compute' ],
         })
         const renderPipeline = await runtime.createRenderPipeline({
@@ -538,10 +541,10 @@ describe('scratch Program buffer layout requirements', () => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
-        const renderLayout = createBindLayout(runtime, {
+        const renderLayout = await createBindLayout(runtime, {
             visibility: [ 'vertex', 'fragment' ],
         })
-        const computeLayout = createBindLayout(runtime, {
+        const computeLayout = await createBindLayout(runtime, {
             visibility: [ 'compute' ],
         })
         const renderPipeline = await runtime.createRenderPipeline({
@@ -598,10 +601,10 @@ describe('scratch Program buffer layout requirements', () => {
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
         const otherCodec = createParticleCodec('OtherParticle')
-        const renderLayout = createBindLayout(runtime, {
+        const renderLayout = await createBindLayout(runtime, {
             visibility: [ 'vertex', 'fragment' ],
         })
-        const computeLayout = createBindLayout(runtime, {
+        const computeLayout = await createBindLayout(runtime, {
             visibility: [ 'compute' ],
         })
         const renderPipeline = await runtime.createRenderPipeline({

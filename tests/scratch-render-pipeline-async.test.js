@@ -34,7 +34,7 @@ describe('ScratchRuntime async render pipeline creation', () => {
 
     it('creates one ready wrapper through the native async render path', async() => {
 
-        const { gpu, calls } = createFakeGpu({
+        const { gpu, calls, errors } = createFakeGpu({
             compilationMessages: [
                 compilationMessage('warning', 'portable warning', 1, 1, 1, 2),
                 compilationMessage('info', 'portable info', 2, 1, 1, 3),
@@ -42,7 +42,7 @@ describe('ScratchRuntime async render pipeline creation', () => {
         })
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const bindLayout = createBindLayout(runtime)
+        const bindLayout = await createIsolatedBindLayout(runtime, errors)
         const descriptor = renderDescriptor(program, bindLayout)
 
         const pipeline = await runtime.createRenderPipeline(descriptor)
@@ -123,7 +123,7 @@ describe('ScratchRuntime async render pipeline creation', () => {
         })
         const runtime = await ScratchRuntime.create({ gpu })
         const program = createProgram(runtime)
-        const bindLayout = createBindLayout(runtime)
+        const bindLayout = await createIsolatedBindLayout(runtime, errors, true)
         const descriptor = renderDescriptor(program, bindLayout)
         const promise = runtime.createRenderPipeline(descriptor)
         let settled = false
@@ -415,6 +415,7 @@ describe('ScratchRuntime async render pipeline creation', () => {
                 codes: [
                     'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
                     'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
+                    'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED',
                 ],
                 act: fixture => fixture.runtime.dispose(),
             },
@@ -613,7 +614,11 @@ async function createRenderFixture(options = {}) {
     const fake = createFakeGpu(options)
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
     const program = createProgram(runtime)
-    const bindLayout = createBindLayout(runtime)
+    const bindLayout = await createIsolatedBindLayout(
+        runtime,
+        fake.errors,
+        options.deferErrorScopePops
+    )
     return {
         ...fake,
         runtime,
@@ -662,6 +667,19 @@ function createBindLayout(runtime) {
             visibility: [ 'vertex' ],
         } ],
     })
+}
+
+async function createIsolatedBindLayout(runtime, errors, deferErrorScopePops = false) {
+
+    const creation = createBindLayout(runtime)
+    if (deferErrorScopePops) {
+        errors.settlePop(0)
+        errors.settlePop(1)
+        errors.settlePop(2)
+    }
+    const layout = await creation
+    errors.resetHistory()
+    return layout
 }
 
 function renderDescriptor(program, bindLayout) {

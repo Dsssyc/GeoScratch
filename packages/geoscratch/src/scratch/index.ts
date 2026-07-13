@@ -23,6 +23,12 @@ export type {
     ScratchGpuIncidentReport,
     ScratchGpuCommandOperationRecord,
     ScratchGpuCommandOperationTarget,
+    ScratchGpuBindLayoutOperationRecord,
+    ScratchGpuBindLayoutOperationTarget,
+    ScratchGpuBindSetOperationRecord,
+    ScratchGpuBindSetOperationTarget,
+    ScratchGpuBindSetPreparationStage,
+    ScratchGpuContentResourceOperationTarget,
     ScratchGpuOperationRecord,
     ScratchGpuOperationTarget,
     ScratchGpuPipelineFailureStage,
@@ -32,6 +38,9 @@ export type {
     ScratchGpuPressureEvidence,
     ScratchGpuResourceOperationRecord,
     ScratchGpuResourceOperationTarget,
+    ScratchGpuSamplerOperationTarget,
+    ScratchGpuQuerySetOperationTarget,
+    ScratchGpuQuerySetSlotFact,
     ScratchGpuReadbackIncidentReport,
     ScratchGpuReadbackOperationRecord,
     ScratchGpuReadbackOperationTarget,
@@ -57,6 +66,8 @@ export type {
     ScratchPipelineNativeLabelEvidence,
     ScratchPipelineNativeLabelFact,
     ScratchNativeGpuErrorFacts,
+    ScratchGpuSupportingObjectIncidentReport,
+    ScratchSupportingObjectFailureStage,
 } from './gpu-operation.js'
 export type {
     PipelineCompilationMessage,
@@ -83,6 +94,10 @@ export type {
     ScratchRuntimeDiagnosticsEvidence,
     ScratchRuntimeDiagnosticsSnapshot,
     ScratchRuntimePipelineFact,
+    ScratchRuntimeBindLayoutFact,
+    ScratchRuntimeContentResourceFact,
+    ScratchRuntimeSamplerResourceFact,
+    ScratchRuntimeQuerySetResourceFact,
     ScratchRuntimeReadbackCommandFact,
     ScratchRuntimeReadbackOperationFact,
     ScratchRuntimeResourceFact,
@@ -100,8 +115,14 @@ export type {
     TextureViewDescriptor,
 } from './texture.js'
 export { SamplerResource } from './sampler.js'
+export type { SamplerResourceDescriptor } from './sampler.js'
 export { QuerySetResource } from './query-set.js'
-export type { QuerySetSlotSnapshot, QuerySetSlotState } from './query-set.js'
+export type {
+    QuerySetResourceDescriptor,
+    QuerySetSlotSnapshot,
+    QuerySetSlotState,
+    QuerySetType,
+} from './query-set.js'
 export { BindLayout, BindSet } from './binding.js'
 export type {
     BindLayoutDescriptor,
@@ -109,8 +130,15 @@ export type {
     BindSetBindings,
     BindSetOptions,
     BindVisibility,
+    NormalizedBindLayoutEntry,
+    NormalizedSamplerBindLayoutEntry,
+    NormalizedStorageBindLayoutEntry,
+    NormalizedStorageTextureBindLayoutEntry,
+    NormalizedTextureBindLayoutEntry,
+    NormalizedUniformBindLayoutEntry,
     SamplerBindLayoutEntry,
     StorageBindLayoutEntry,
+    StorageTextureBindLayoutEntry,
     TextureBindLayoutEntry,
     UniformBindLayoutEntry,
 } from './binding.js'

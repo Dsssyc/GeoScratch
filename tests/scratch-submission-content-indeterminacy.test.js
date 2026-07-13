@@ -490,7 +490,7 @@ describe('scratch submission content indeterminacy', () => {
             size: 16,
             usage: GPU_BUFFER_USAGE_QUERY_RESOLVE | GPU_BUFFER_USAGE_COPY_SRC,
         })
-        const querySet = fixture.runtime.createQuerySet({ type: 'timestamp', count: 2 })
+        const querySet = await fixture.runtime.createQuerySet({ type: 'timestamp', count: 2 })
         const destinationRegion = destination.region({ size: 8 })
         const pipeline = await createComputePipeline(fixture.runtime)
         const dispatch = fixture.runtime.createDispatchCommand({
@@ -594,7 +594,7 @@ describe('scratch submission content indeterminacy', () => {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
         })
-        const querySet = fixture.runtime.createQuerySet({ type: 'occlusion', count: 1 })
+        const querySet = await fixture.runtime.createQuerySet({ type: 'occlusion', count: 1 })
         const targetView = target.view()
         const clearPass = fixture.runtime.createRenderPass({
             color: [ { target: targetView, load: 'clear', store: 'store' } ],

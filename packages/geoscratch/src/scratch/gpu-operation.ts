@@ -20,6 +20,10 @@ export type GpuOperationKind =
     | 'buffer-allocation'
     | 'texture-allocation'
     | 'texture-replacement'
+    | 'sampler-allocation'
+    | 'query-set-allocation'
+    | 'bind-layout-allocation'
+    | 'bind-set-preparation'
     | 'resource-disposal'
     | 'render-pipeline-creation'
     | 'compute-pipeline-creation'
@@ -58,13 +62,71 @@ export type GpuDescriptorEvidence = Readonly<{
     full?: Readonly<Record<string, ScratchJsonValue>>
 }>
 
-export type ScratchGpuResourceOperationTarget = Readonly<{
+export type ScratchGpuContentResourceOperationTarget = Readonly<{
     kind: 'resource'
     resourceId: string
     resourceKind: 'BufferResource' | 'TextureResource'
     allocationVersion: number
     contentEpoch: number
     logicalFootprintBytes: number
+}>
+
+export type ScratchGpuSamplerOperationTarget = Readonly<{
+    kind: 'resource'
+    resourceId: string
+    resourceKind: 'SamplerResource'
+    allocationVersion: number
+}>
+
+export type ScratchGpuQuerySetSlotFact = Readonly<{
+    index: number
+    state: 'empty' | 'ready' | 'indeterminate'
+    contentEpoch: number
+}>
+
+export type ScratchGpuQuerySetOperationTarget = Readonly<{
+    kind: 'resource'
+    resourceId: string
+    resourceKind: 'QuerySetResource'
+    allocationVersion: number
+    queryType: 'timestamp' | 'occlusion'
+    count: number
+    slots: readonly ScratchGpuQuerySetSlotFact[]
+}>
+
+export type ScratchGpuResourceOperationTarget =
+    | ScratchGpuContentResourceOperationTarget
+    | ScratchGpuSamplerOperationTarget
+    | ScratchGpuQuerySetOperationTarget
+
+export type ScratchGpuBindLayoutOperationTarget = Readonly<{
+    kind: 'bind-layout'
+    bindLayoutId: string
+    group: number
+    entries: readonly ScratchJsonValue[]
+    acknowledgementState: 'pending'
+}>
+
+export type ScratchGpuBindSetPreparationStage =
+    | 'descriptor-validation'
+    | 'native-issue'
+    | 'synchronous-native-throw'
+    | 'texture-view-acknowledgement'
+    | 'bind-group-acknowledgement'
+    | 'lifecycle-recheck'
+    | 'snapshot-recheck'
+    | 'commit'
+    | 'cancellation'
+    | 'retry'
+
+export type ScratchGpuBindSetOperationTarget = Readonly<{
+    kind: 'bind-set'
+    bindSetId: string
+    bindLayoutId: string
+    preparationState: 'pending'
+    generation: number
+    snapshotHash: string
+    preparationStage: ScratchGpuBindSetPreparationStage
 }>
 
 export type ScratchGpuPipelineOperationTarget = Readonly<{
@@ -102,6 +164,8 @@ export type ScratchGpuSubmissionOperationTarget = Readonly<{
 export type ScratchGpuOperationTarget =
     | ScratchGpuResourceOperationTarget
     | ScratchGpuPipelineOperationTarget
+    | ScratchGpuBindLayoutOperationTarget
+    | ScratchGpuBindSetOperationTarget
     | ScratchGpuCommandOperationTarget
     | ScratchGpuReadbackOperationTarget
     | ScratchGpuSubmissionOperationTarget
@@ -186,7 +250,7 @@ export type ScratchSubmissionNativeOutcomeFact = Readonly<{
 }>
 
 export type ScratchSubmissionNativeOutcome = Readonly<{
-    version: 4
+    version: 5
     submissionId: string
     mode: ScratchSubmissionNativeOutcomeMode
     status: ScratchSubmissionNativeOutcomeStatus
@@ -221,7 +285,7 @@ export type ScratchReadbackNativeOutcomeFact = Readonly<{
 }>
 
 export type ScratchReadbackNativeOutcome = Readonly<{
-    version: 4
+    version: 5
     readbackId: string
     mode: ScratchSubmissionNativeOutcomeMode
     status: Exclude<ScratchSubmissionNativeOutcomeStatus, 'no-native-work'>
@@ -261,7 +325,7 @@ export type ScratchPipelineNativeLabelEvidence = Readonly<{
 }>
 
 type ScratchGpuOperationRecordBase = Readonly<{
-    version: 4
+    version: 5
     sequence: number
     id: string
     kind: GpuOperationKind
@@ -281,7 +345,29 @@ type ScratchGpuOperationRecordBase = Readonly<{
 
 export type ScratchGpuResourceOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
     target: ScratchGpuResourceOperationTarget
-    kind: 'buffer-allocation' | 'texture-allocation' | 'texture-replacement' | 'resource-disposal'
+    kind:
+        | 'buffer-allocation'
+        | 'texture-allocation'
+        | 'texture-replacement'
+        | 'sampler-allocation'
+        | 'query-set-allocation'
+        | 'resource-disposal'
+    nativeLabels?: never
+    compilationReport?: never
+    nativeOutcome?: never
+}>
+
+export type ScratchGpuBindLayoutOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
+    target: ScratchGpuBindLayoutOperationTarget
+    kind: 'bind-layout-allocation'
+    nativeLabels?: never
+    compilationReport?: never
+    nativeOutcome?: never
+}>
+
+export type ScratchGpuBindSetOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
+    target: ScratchGpuBindSetOperationTarget
+    kind: 'bind-set-preparation'
     nativeLabels?: never
     compilationReport?: never
     nativeOutcome?: never
@@ -328,6 +414,8 @@ export type ScratchGpuSubmissionOperationRecord = ScratchGpuOperationRecordBase 
 export type ScratchGpuOperationRecord =
     | ScratchGpuResourceOperationRecord
     | ScratchGpuPipelineOperationRecord
+    | ScratchGpuBindLayoutOperationRecord
+    | ScratchGpuBindSetOperationRecord
     | ScratchGpuCommandOperationRecord
     | ScratchGpuReadbackOperationRecord
     | ScratchGpuSubmissionOperationRecord
@@ -395,7 +483,7 @@ export type ScratchGpuPressureChurn = Readonly<{
 }>
 
 export type ScratchGpuPressureEvidence = Readonly<{
-    triggerLogicalFootprintBytes: number
+    triggerLogicalFootprintBytes?: number
     currentScratchLogicalFootprintBytes: number
     peakScratchLogicalFootprintBytes: number
     liveResourceCounts: Readonly<Record<string, number>>
@@ -413,6 +501,7 @@ export type ScratchGpuIncidentEvidenceCompleteness = Readonly<{
 
 export type ScratchGpuIncidentKind =
     | 'allocation-failure'
+    | 'supporting-object-failure'
     | 'pipeline-failure'
     | 'readback-failure'
     | 'submission-failure'
@@ -443,10 +532,16 @@ export type ScratchSubmissionFailureStage =
     | ScratchSubmissionNativeStage
     | 'budget'
 
+export type ScratchSupportingObjectFailureStage =
+    | 'native-issue'
+    | 'scope-settlement'
+    | 'lifecycle-recheck'
+
 export type ScratchGpuIncidentFailureStage =
     | ScratchGpuPipelineFailureStage
     | ScratchReadbackFailureStage
     | ScratchSubmissionFailureStage
+    | ScratchSupportingObjectFailureStage
 
 export type ScratchGpuIncidentOutcome = Readonly<{
     stage: ScratchGpuIncidentFailureStage
@@ -470,7 +565,7 @@ export type ScratchGpuIncidentPipelineFact = Readonly<{
 }>
 
 type ScratchGpuIncidentReportBase = Readonly<{
-    version: 4
+    version: 5
     sequence: number
     id: string
     kind: ScratchGpuIncidentKind
@@ -492,9 +587,23 @@ type ScratchGpuIncidentReportBase = Readonly<{
 }>
 
 export type ScratchGpuResourceIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
-    target: ScratchGpuResourceOperationTarget
+    target: ScratchGpuContentResourceOperationTarget
     kind: 'allocation-failure'
     pressure: ScratchGpuPressureEvidence
+}>
+
+export type ScratchGpuSupportingObjectIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
+    target:
+        | ScratchGpuSamplerOperationTarget
+        | ScratchGpuQuerySetOperationTarget
+        | ScratchGpuBindLayoutOperationTarget
+        | ScratchGpuBindSetOperationTarget
+    kind: 'supporting-object-failure'
+    failureStage: ScratchSupportingObjectFailureStage
+    outcomes?: readonly ScratchGpuIncidentOutcome[]
+    pressure?: ScratchGpuPressureEvidence
+    compilationReport?: never
+    pipelineErrorReason?: never
 }>
 
 export type ScratchGpuPipelineIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
@@ -535,6 +644,7 @@ export type ScratchGpuRuntimeIncidentReport = ScratchGpuIncidentReportBase & Rea
 
 export type ScratchGpuIncidentReport =
     | ScratchGpuResourceIncidentReport
+    | ScratchGpuSupportingObjectIncidentReport
     | ScratchGpuPipelineIncidentReport
     | ScratchGpuReadbackIncidentReport
     | ScratchGpuSubmissionIncidentReport
@@ -574,7 +684,7 @@ export function createGpuOperationRecord(
 
     assertGpuOperationTarget(input.kind, input.target)
     const record: Record<string, unknown> = {
-        version: 4,
+        version: 5,
         sequence: input.sequence,
         id: input.id,
         kind: input.kind,
@@ -664,7 +774,7 @@ export function createSubmissionNativeOutcome(
     assertSubmissionNativeOutcomeContents(input.status, locations, outcomes)
 
     return deepFreeze({
-        version: 4,
+        version: 5,
         submissionId,
         mode: input.mode,
         status: input.status,
@@ -711,7 +821,7 @@ export function createReadbackNativeOutcome(
     assertSubmissionNativeOutcomeContents(input.status, [], outcomes)
 
     return deepFreeze({
-        version: 4,
+        version: 5,
         readbackId,
         mode: input.mode,
         status: input.status,
@@ -733,6 +843,7 @@ export function createGpuIncidentReport(
     const completeRelated = input.related ?? createIncidentRelatedSubjects(input)
     const related = completeRelated.slice(0, MAX_INCIDENT_RELATED_SUBJECTS)
     const outcomes = (
+        input.kind === 'supporting-object-failure' ||
         input.target.kind === 'pipeline' ||
         input.target.kind === 'command' ||
         input.target.kind === 'readback' ||
@@ -753,7 +864,7 @@ export function createGpuIncidentReport(
         omittedRecords: input.evidence.omittedRecords + omittedEvidenceItems,
     }
     const report: Record<string, unknown> = {
-        version: 4,
+        version: 5,
         sequence: input.sequence,
         id: input.id,
         kind: input.kind,
@@ -776,6 +887,12 @@ export function createGpuIncidentReport(
     ])
     if (input.target.kind === 'resource') {
         copyJsonDefined(report, input, [ 'currentResources', 'pressure' ])
+    }
+    if (input.kind === 'supporting-object-failure') {
+        copyJsonDefined(report, input, [ 'failureStage', 'pressure' ])
+        if (outcomes !== undefined) {
+            report.outcomes = cloneJsonValue(outcomes, new Set<object>(), true)
+        }
     }
     if (input.target.kind === 'pipeline') {
         copyJsonDefined(report, input, [
@@ -919,6 +1036,13 @@ function createIncidentRelatedSubjects(input: ScratchGpuIncidentReportInput): Di
     if (input.target.kind === 'resource') {
         related.push({ kind: 'Resource', id: input.target.resourceId })
     }
+    if (input.target.kind === 'bind-layout') {
+        related.push({ kind: 'BindLayout', id: input.target.bindLayoutId })
+    }
+    if (input.target.kind === 'bind-set') {
+        related.push({ kind: 'BindSet', id: input.target.bindSetId })
+        related.push({ kind: 'BindLayout', id: input.target.bindLayoutId })
+    }
     if (input.target.kind === 'pipeline') {
         related.push({
             kind: 'Pipeline',
@@ -975,6 +1099,12 @@ function createIncidentSubject(input: ScratchGpuIncidentReportInput): Diagnostic
     if (input.target.kind === 'submission') {
         return { kind: 'Submission', id: input.target.submissionId }
     }
+    if (input.target.kind === 'bind-layout') {
+        return { kind: 'BindLayout', id: input.target.bindLayoutId }
+    }
+    if (input.target.kind === 'bind-set') {
+        return { kind: 'BindSet', id: input.target.bindSetId }
+    }
     return {
         kind: 'Incident',
         id: input.id,
@@ -995,6 +1125,18 @@ export function assertGpuOperationTarget(
         case 'texture-replacement':
             if (target.kind === 'resource' && target.resourceKind === 'TextureResource') return
             throw new TypeError(`GPU operation ${kind} requires a TextureResource target.`)
+        case 'sampler-allocation':
+            if (target.kind === 'resource' && target.resourceKind === 'SamplerResource') return
+            throw new TypeError(`GPU operation ${kind} requires a SamplerResource target.`)
+        case 'query-set-allocation':
+            if (target.kind === 'resource' && target.resourceKind === 'QuerySetResource') return
+            throw new TypeError(`GPU operation ${kind} requires a QuerySetResource target.`)
+        case 'bind-layout-allocation':
+            if (target.kind === 'bind-layout') return
+            throw new TypeError(`GPU operation ${kind} requires a BindLayout target.`)
+        case 'bind-set-preparation':
+            if (target.kind === 'bind-set') return
+            throw new TypeError(`GPU operation ${kind} requires a BindSet target.`)
         case 'resource-disposal':
             if (target.kind === 'resource') return
             break
@@ -1031,7 +1173,19 @@ export function assertGpuOperationTarget(
 function assertIncidentTarget(input: ScratchGpuIncidentReportInput): void {
 
     const compatible = input.kind === 'allocation-failure'
-        ? input.target.kind === 'resource'
+        ? input.target.kind === 'resource' && (
+            input.target.resourceKind === 'BufferResource' ||
+            input.target.resourceKind === 'TextureResource'
+        )
+        : input.kind === 'supporting-object-failure'
+            ? (
+                input.target.kind === 'bind-layout' ||
+                input.target.kind === 'bind-set' ||
+                input.target.kind === 'resource' && (
+                    input.target.resourceKind === 'SamplerResource' ||
+                    input.target.resourceKind === 'QuerySetResource'
+                )
+            )
         : input.kind === 'pipeline-failure'
             ? input.target.kind === 'pipeline'
             : input.kind === 'readback-failure'
@@ -1043,6 +1197,7 @@ function assertIncidentTarget(input: ScratchGpuIncidentReportInput): void {
         throw new TypeError(`GPU incident ${input.kind} has an incompatible ${input.target.kind} target.`)
     }
     if ((
+        input.kind === 'supporting-object-failure' ||
         input.kind === 'pipeline-failure' ||
         input.kind === 'readback-failure' ||
         input.kind === 'submission-failure'
@@ -1076,6 +1231,8 @@ function operationTargetId(target: ScratchGpuOperationTarget): string {
     switch (target.kind) {
         case 'resource': return target.resourceId
         case 'pipeline': return target.pipelineId
+        case 'bind-layout': return target.bindLayoutId
+        case 'bind-set': return target.bindSetId
         case 'command': return target.commandId
         case 'readback': return target.readbackId
         case 'submission': return target.submissionId

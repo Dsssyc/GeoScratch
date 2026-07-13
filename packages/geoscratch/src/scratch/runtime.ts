@@ -1,5 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
-import { BindLayout, BindSet } from './binding.js'
+import { BindSet, createBindLayout as createScratchBindLayout } from './binding.js'
+import { runtimeBindLayoutSnapshot } from './binding-ownership.js'
 import { BufferResource, createBufferResource } from './buffer.js'
 import {
     BeginOcclusionQueryCommand,
@@ -22,7 +23,7 @@ import {
 } from './pipeline.js'
 import { runtimePipelineSnapshot } from './pipeline-ownership.js'
 import { Program } from './program.js'
-import { QuerySetResource } from './query-set.js'
+import { createQuerySetResource, QuerySetResource } from './query-set.js'
 import { createReadbackOperation, ReadbackOperation } from './readback.js'
 import {
     normalizeScratchReadbackPolicy,
@@ -35,11 +36,11 @@ import {
     retainDeviceLostInfo,
     ScratchRuntimeDiagnosticsController,
 } from './runtime-diagnostics.js'
-import { SamplerResource } from './sampler.js'
+import { createSamplerResource, SamplerResource } from './sampler.js'
 import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
 import { createTextureResource, TextureResource } from './texture.js'
-import type { BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './binding.js'
+import type { BindLayout, BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './binding.js'
 import type { BufferResourceDescriptor } from './buffer.js'
 import type { BeginOcclusionQueryCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -319,35 +320,35 @@ export class ScratchRuntime {
         return this.createTexture(descriptor)
     }
 
-    createSampler(descriptor?: SamplerResourceDescriptor) {
+    async createSampler(descriptor?: SamplerResourceDescriptor): Promise<SamplerResource> {
 
         this.assertActive()
-        return new SamplerResource(this, descriptor)
+        return createSamplerResource(this, descriptor)
     }
 
-    sampler(descriptor?: SamplerResourceDescriptor) {
+    sampler(descriptor?: SamplerResourceDescriptor): Promise<SamplerResource> {
 
         return this.createSampler(descriptor)
     }
 
-    createQuerySet(descriptor: QuerySetResourceDescriptor) {
+    async createQuerySet(descriptor: QuerySetResourceDescriptor): Promise<QuerySetResource> {
 
         this.assertActive()
-        return new QuerySetResource(this, descriptor)
+        return createQuerySetResource(this, descriptor)
     }
 
-    querySet(descriptor: QuerySetResourceDescriptor) {
+    querySet(descriptor: QuerySetResourceDescriptor): Promise<QuerySetResource> {
 
         return this.createQuerySet(descriptor)
     }
 
-    createBindLayout(descriptor: BindLayoutDescriptor) {
+    async createBindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout> {
 
         this.assertActive()
-        return new BindLayout(this, descriptor)
+        return createScratchBindLayout(this, descriptor)
     }
 
-    bindLayout(descriptor: BindLayoutDescriptor) {
+    bindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout> {
 
         return this.createBindLayout(descriptor)
     }
@@ -561,6 +562,10 @@ export class ScratchRuntime {
 
         for (const pipeline of runtimePipelineSnapshot(this)) {
             pipeline.dispose()
+        }
+
+        for (const layout of runtimeBindLayoutSnapshot(this)) {
+            layout.dispose()
         }
 
         for (const readback of runtimeReadbackOperationSnapshot(this)) {

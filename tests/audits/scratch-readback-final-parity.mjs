@@ -163,9 +163,9 @@ assertParity(/buffer\.mapAsync\(GPUMapModeValue\(\), 0, byteLength\)/.test(
 assertParity(/allocateReadbackStaging\(/.test(currentSources.readback), 'direct acknowledged staging is missing')
 assertParity(/allocateReadbackStaging\(/.test(currentSources.command), 'ordered acknowledged staging is missing')
 assertParity(
-    /version: 4/.test(currentSupportSources['gpu-operation']) &&
+    /version: 5/.test(currentSupportSources['gpu-operation']) &&
         !/version: [23]/.test(currentSupportSources['gpu-operation']),
-    'schema v4 clean cut is missing'
+    'schema v5 clean cut is missing'
 )
 assertParity(
     /failureStage: 'budget'/.test(currentSupportSources['runtime-diagnostics']),
