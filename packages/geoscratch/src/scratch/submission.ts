@@ -25,7 +25,10 @@ import { validateRenderPassAttachments } from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
-import { beginSubmissionNativeObservation } from './submission-native-observation.js'
+import {
+    beginSubmissionNativeObservation,
+    compareSubmissionNativeStages,
+} from './submission-native-observation.js'
 import { TextureResource } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
@@ -37,11 +40,17 @@ import type { ScratchRuntime } from './runtime.js'
 import type {
     SubmissionNativeIssue,
     SubmissionNativeObservation,
+    SubmissionNativeSettlement,
 } from './submission-native-observation.js'
 import type {
+    GpuNativeErrorCategory,
+    ScratchGpuIncidentReport,
     ScratchSubmissionNativeLocation,
+    ScratchSubmissionNativeOutcome,
+    ScratchSubmissionNativeStage,
     ScratchSubmissionQueueActionKind,
 } from './gpu-operation.js'
+import type { ScratchEffectfulSubmittedWorkReservation } from './runtime-diagnostics.js'
 
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 
@@ -140,6 +149,15 @@ export type SubmissionPassExecutionOutcome = {
 export type SubmissionExecutionOutcome =
     | SubmissionCommandExecutionOutcome
     | SubmissionPassExecutionOutcome
+
+type ReadonlySubmittedFact<T> =
+    T extends (...args: any[]) => unknown
+        ? T
+        : T extends readonly (infer Item)[]
+            ? readonly ReadonlySubmittedFact<Item>[]
+            : T extends object
+                ? { readonly [Key in keyof T]: ReadonlySubmittedFact<T[Key]> }
+                : T
 
 type PendingSubmissionResourceAccess = {
     origin: SubmissionAccessOrigin
@@ -825,17 +843,29 @@ export class SubmissionBuilder {
             contentEpoch: pending.claim.contentEpoch,
             stagingAllocationOperationId: pending.claim.stagingAllocationOperationId,
         })))
-        const done = createSubmittedWorkDone(this.runtime, submittedId, nativeDone, readbackLinks)
+        const nativeOutcome = nativeObservation.outcome
+        const effectfulWorkReservation = nativeIssuePlan.length === 0
+            ? undefined
+            : diagnosticsControllerFor(this.runtime).retainEffectfulSubmittedWork(submittedId)
+        const done = createSubmittedWorkDone(
+            this.runtime,
+            submittedId,
+            nativeDone,
+            nativeObservation.settlement,
+            readbackLinks,
+            effectfulWorkReservation
+        )
         for (const pending of pendingReadbacks) {
             markReadbackCommandClaimSubmitted(pending.claim, done)
         }
-        const submitted = new SubmittedWork(this.runtime, {
+        const submitted = createSubmittedWork(this.runtime, {
             id: submittedId,
             commandBuffers,
             report: resolvedPlan.report,
             resourceAccesses,
             executionOutcomes: resolvedPlan.executionOutcomes,
             readbacks: readbackLinks,
+            nativeOutcome,
             done,
         })
         for (const pending of pendingReadbacks) {
@@ -2387,42 +2417,69 @@ function createCommandReadEpochDiagnostic(
 
 export class SubmittedWork {
 
-    runtime: ScratchRuntime
-    id: string
-    commandBuffers: GPUCommandBuffer[]
-    report: ScratchDiagnosticReport
-    diagnostics: ScratchDiagnostic[]
-    resourceAccesses: readonly SubmissionResourceAccess[]
-    producerEpochs: readonly SubmittedResourceEpoch[]
-    readonly executionOutcomes: readonly SubmissionExecutionOutcome[]
-    readonly readbacks: readonly SubmittedReadbackLink[]
-    done: Promise<unknown>
+    #runtime: ScratchRuntime
+    #id: string
+    #commandBuffers: readonly GPUCommandBuffer[]
+    #report: ScratchDiagnosticReport
+    #diagnostics: readonly ScratchDiagnostic[]
+    #resourceAccesses: readonly SubmissionResourceAccess[]
+    #producerEpochs: readonly SubmittedResourceEpoch[]
+    #executionOutcomes: readonly SubmissionExecutionOutcome[]
+    #readbacks: readonly SubmittedReadbackLink[]
+    #nativeOutcome: Promise<ScratchSubmissionNativeOutcome>
+    #done: Promise<unknown>
 
-    constructor(runtime: ScratchRuntime, options: {
-        id?: string
-        commandBuffers?: GPUCommandBuffer[]
-        report?: ScratchDiagnosticReport
-        resourceAccesses?: SubmissionResourceAccess[]
-        executionOutcomes?: SubmissionExecutionOutcome[]
-        readbacks?: readonly SubmittedReadbackLink[]
-        done?: Promise<unknown>
-    } = {}) {
+    private constructor(
+        token: symbol,
+        runtime: ScratchRuntime,
+        options: SubmittedWorkOptions
+    ) {
 
-        this.runtime = runtime
-        this.id = options.id ?? `scratch-submitted-${UUID()}`
-        this.commandBuffers = options.commandBuffers ?? []
-        this.report = options.report ?? createScratchDiagnosticReport([])
-        this.diagnostics = this.report.diagnostics
-        this.resourceAccesses = freezeResourceAccesses(options.resourceAccesses ?? [])
-        this.producerEpochs = freezeProducerEpochs(createProducerEpochs(this.resourceAccesses))
-        this.executionOutcomes = freezeExecutionOutcomes(options.executionOutcomes ?? [])
-        this.readbacks = freezeSubmittedReadbackLinks(options.readbacks ?? [])
-        Object.defineProperties(this, {
-            executionOutcomes: immutableSubmittedProperty(this.executionOutcomes),
-            readbacks: immutableSubmittedProperty(this.readbacks),
-        })
-        this.done = options.done ?? Promise.resolve()
+        if (token !== submittedWorkToken || new.target !== SubmittedWork) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_SUBMITTED_WORK_CONSTRUCTOR_PRIVATE',
+                severity: 'error',
+                phase: 'submission',
+                subject: { kind: 'Submission' },
+                message: 'SubmittedWork must be created by SubmissionBuilder.submit().',
+                hints: [ 'Use runtime.submission().submit().' ],
+            })
+        }
+
+        this.#runtime = runtime
+        this.#id = options.id
+        this.#commandBuffers = Object.freeze([ ...options.commandBuffers ])
+        this.#report = freezeSubmittedDiagnosticReport(options.report)
+        this.#diagnostics = this.#report.diagnostics
+        this.#resourceAccesses = freezeResourceAccesses(options.resourceAccesses)
+        this.#producerEpochs = freezeProducerEpochs(createProducerEpochs(this.#resourceAccesses))
+        this.#executionOutcomes = freezeExecutionOutcomes(options.executionOutcomes)
+        this.#readbacks = freezeSubmittedReadbackLinks(options.readbacks)
+        this.#nativeOutcome = options.nativeOutcome
+        this.#done = options.done
+        Object.preventExtensions(this)
     }
+
+    get runtime(): ScratchRuntime { return this.#runtime }
+    get id(): string { return this.#id }
+    get commandBuffers(): readonly GPUCommandBuffer[] { return this.#commandBuffers }
+    get report(): ReadonlySubmittedFact<ScratchDiagnosticReport> { return this.#report }
+    get diagnostics(): readonly ReadonlySubmittedFact<ScratchDiagnostic>[] { return this.#diagnostics }
+    get resourceAccesses(): readonly ReadonlySubmittedFact<SubmissionResourceAccess>[] {
+
+        return this.#resourceAccesses
+    }
+    get producerEpochs(): readonly ReadonlySubmittedFact<SubmittedResourceEpoch>[] {
+
+        return this.#producerEpochs
+    }
+    get executionOutcomes(): readonly ReadonlySubmittedFact<SubmissionExecutionOutcome>[] {
+
+        return this.#executionOutcomes
+    }
+    get readbacks(): readonly ReadonlySubmittedFact<SubmittedReadbackLink>[] { return this.#readbacks }
+    get nativeOutcome(): Promise<ScratchSubmissionNativeOutcome> { return this.#nativeOutcome }
+    get done(): Promise<unknown> { return this.#done }
 
     get subject() {
 
@@ -2432,6 +2489,34 @@ export class SubmittedWork {
         }
     }
 }
+
+type SubmittedWorkOptions = Readonly<{
+    id: string
+    commandBuffers: readonly GPUCommandBuffer[]
+    report: ScratchDiagnosticReport
+    resourceAccesses: SubmissionResourceAccess[]
+    executionOutcomes: SubmissionExecutionOutcome[]
+    readbacks: readonly SubmittedReadbackLink[]
+    nativeOutcome: Promise<ScratchSubmissionNativeOutcome>
+    done: Promise<unknown>
+}>
+
+const submittedWorkToken = Symbol('SubmittedWork')
+
+function createSubmittedWork(
+    runtime: ScratchRuntime,
+    options: SubmittedWorkOptions
+): SubmittedWork {
+
+    const Constructor = SubmittedWork as unknown as new (
+        token: symbol,
+        runtime: ScratchRuntime,
+        options: SubmittedWorkOptions
+    ) => SubmittedWork
+    return new Constructor(submittedWorkToken, runtime, options)
+}
+
+Object.freeze(SubmittedWork.prototype)
 
 function commandAccessOrigin(
     stepIndex: number,
@@ -2609,16 +2694,6 @@ function freezeSubmittedReadbackLinks(
     return Object.freeze(readbacks.map(link => Object.freeze({ ...link })))
 }
 
-function immutableSubmittedProperty(value: unknown): PropertyDescriptor {
-
-    return {
-        value,
-        enumerable: true,
-        configurable: false,
-        writable: false,
-    }
-}
-
 function freezeExecutionOutcomes(outcomes: SubmissionExecutionOutcome[]): readonly SubmissionExecutionOutcome[] {
 
     return Object.freeze(outcomes.map((outcome) => {
@@ -2643,6 +2718,56 @@ function freezeExecutionOutcomes(outcomes: SubmissionExecutionOutcome[]): readon
             attempts: Object.freeze(attempts),
         } as SubmissionCommandExecutionOutcome)
     }))
+}
+
+function freezeSubmittedDiagnosticReport(report: ScratchDiagnosticReport): ScratchDiagnosticReport {
+
+    const diagnostics = Object.freeze(report.diagnostics.map(diagnostic =>
+        cloneAndFreezeSubmittedDiagnosticValue(diagnostic) as ScratchDiagnostic
+    )) as ScratchDiagnostic[]
+
+    return Object.freeze({
+        ...report,
+        diagnostics,
+    })
+}
+
+function cloneAndFreezeSubmittedDiagnosticValue(
+    value: unknown,
+    ancestors = new Set<object>()
+): unknown {
+
+    if (
+        value === null ||
+        value === undefined ||
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean' ||
+        typeof value === 'bigint'
+    ) return value
+    if (typeof value === 'symbol' || typeof value === 'function') return String(value)
+    if (ancestors.has(value)) return '[Circular]'
+
+    const nextAncestors = new Set(ancestors)
+    nextAncestors.add(value)
+    if (Array.isArray(value)) {
+        return Object.freeze(value.map(item =>
+            cloneAndFreezeSubmittedDiagnosticValue(item, nextAncestors)
+        ))
+    }
+
+    const snapshot: Record<string, unknown> = {}
+    for (const key of Object.keys(value).sort()) {
+        try {
+            snapshot[key] = cloneAndFreezeSubmittedDiagnosticValue(
+                (value as Record<string, unknown>)[key],
+                nextAncestors
+            )
+        } catch {
+            snapshot[key] = '[Unavailable]'
+        }
+    }
+    return Object.freeze(snapshot)
 }
 
 function freezeDiagnosticSubject(subject: DiagnosticSubject): DiagnosticSubject {
@@ -3196,18 +3321,23 @@ function createSubmittedWorkDone(
     runtime: ScratchRuntime,
     submissionId: string,
     nativeDone: Promise<unknown>,
-    readbacks: readonly SubmittedReadbackLink[]
+    nativeSettlement: Promise<SubmissionNativeSettlement>,
+    readbacks: readonly SubmittedReadbackLink[],
+    reservation?: ScratchEffectfulSubmittedWorkReservation
 ): Promise<unknown> {
 
-    return Promise.resolve(nativeDone).catch((cause: unknown) => {
-        const incident = recordReadbackQueueCompletionIncidents(
-            runtime,
-            submissionId,
-            readbacks,
-            cause
-        )[0]
+    const queueCompletion = observeSubmissionQueueCompletion(
+        runtime,
+        submissionId,
+        nativeDone,
+        readbacks
+    )
+    const done = Promise.all([ nativeSettlement, queueCompletion ]).then(([ settlement, completion ]) => {
+        const primary = selectSubmissionDoneFailure(submissionId, settlement, completion)
+        if (primary === undefined) return
+
         throwScratchDiagnostic({
-            code: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            code: primary.diagnosticCode,
             severity: 'error',
             phase: 'submission',
             subject: { kind: 'Submission', id: submissionId },
@@ -3219,16 +3349,144 @@ function createSubmittedWorkDone(
                     { kind: 'Resource', id: link.sourceResourceId },
                 ]),
             ],
-            message: 'Submitted queue work did not complete successfully.',
+            message: primary.stage === 'queue-completion'
+                ? 'Submitted queue work did not complete successfully.'
+                : 'Submitted work produced a captured native failure.',
             actual: {
                 submissionId,
-                readbacks,
-                nativeError: serializeNativeGpuError(cause),
+                primary: {
+                    stage: primary.stage,
+                    nativeErrorCategory: primary.nativeErrorCategory,
+                    ...(primary.location !== undefined ? { location: primary.location } : {}),
+                    ...(primary.nativeError !== undefined ? { nativeError: primary.nativeError } : {}),
+                },
+                nativeOutcome: settlement.outcome,
+                ...(completion.status === 'failed'
+                    ? { queueCompletionError: serializeNativeGpuError(completion.cause) }
+                    : {}),
             },
         }, {
-            cause,
-            ...(incident !== undefined ? { incident } : {}),
+            ...(primary.cause !== undefined ? { cause: primary.cause } : {}),
+            ...(primary.incident !== undefined ? { incident: primary.incident } : {}),
         })
+    })
+
+    void done.catch(() => {})
+    if (reservation !== undefined) {
+        void done.then(
+            () => reservation.release(),
+            () => reservation.release()
+        )
+    }
+    return done
+}
+
+type SubmissionQueueCompletionOutcome =
+    | Readonly<{ status: 'succeeded' }>
+    | Readonly<{
+        status: 'failed'
+        cause: unknown
+        incident: ScratchGpuIncidentReport
+    }>
+
+type SubmissionDoneFailure = Readonly<{
+    stage: ScratchSubmissionNativeStage
+    diagnosticCode: string
+    nativeErrorCategory: GpuNativeErrorCategory
+    location?: ScratchSubmissionNativeLocation
+    nativeError?: ReturnType<typeof serializeNativeGpuError>
+    cause?: unknown
+    incident?: ScratchGpuIncidentReport
+}>
+
+function observeSubmissionQueueCompletion(
+    runtime: ScratchRuntime,
+    submissionId: string,
+    nativeDone: Promise<unknown>,
+    readbacks: readonly SubmittedReadbackLink[]
+): Promise<SubmissionQueueCompletionOutcome> {
+
+    return Promise.resolve(nativeDone).then(
+        () => Object.freeze({ status: 'succeeded' as const }),
+        (cause: unknown) => {
+            recordReadbackQueueCompletionIncidents(runtime, submissionId, readbacks, cause)
+            const incident = recordSubmissionQueueCompletionIncident(runtime, submissionId, readbacks, cause)
+            return Object.freeze({ status: 'failed' as const, cause, incident })
+        }
+    )
+}
+
+function selectSubmissionDoneFailure(
+    submissionId: string,
+    settlement: SubmissionNativeSettlement,
+    completion: SubmissionQueueCompletionOutcome
+): SubmissionDoneFailure | undefined {
+
+    const primary = settlement.primaryFailure
+    const nativeFailure: SubmissionDoneFailure | undefined = primary === undefined
+        ? undefined
+        : {
+            stage: primary.fact.stage,
+            diagnosticCode: primary.fact.diagnosticCode,
+            nativeErrorCategory: primary.fact.nativeErrorCategory,
+            location: primary.fact.location,
+            ...(primary.fact.nativeError !== undefined
+                ? { nativeError: primary.fact.nativeError }
+                : {}),
+            ...(primary.cause !== undefined ? { cause: primary.cause } : {}),
+            ...(primary.incident !== undefined ? { incident: primary.incident } : {}),
+        }
+    let queueFailure: SubmissionDoneFailure | undefined
+    if (completion.status === 'failed') {
+        queueFailure = {
+            stage: 'queue-completion',
+            diagnosticCode: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            nativeErrorCategory: 'native-exception',
+            location: Object.freeze({ kind: 'submission', submissionId }),
+            nativeError: serializeNativeGpuError(completion.cause),
+            cause: completion.cause,
+            incident: completion.incident,
+        }
+    }
+
+    if (nativeFailure === undefined) return queueFailure
+    if (queueFailure === undefined) return nativeFailure
+    return compareSubmissionNativeStages(nativeFailure.stage, queueFailure.stage) <= 0
+        ? nativeFailure
+        : queueFailure
+}
+
+function recordSubmissionQueueCompletionIncident(
+    runtime: ScratchRuntime,
+    submissionId: string,
+    readbacks: readonly SubmittedReadbackLink[],
+    cause: unknown
+): ScratchGpuIncidentReport {
+
+    const nativeError = serializeNativeGpuError(cause)
+    return diagnosticsControllerFor(runtime).recordIncident({
+        kind: 'submission-failure',
+        diagnosticCode: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+        nativeErrorCategory: 'native-exception',
+        attribution: 'enclosing-operation-family',
+        target: { kind: 'submission', submissionId },
+        related: [
+            runtime.subject,
+            ...readbacks.flatMap(link => [
+                { kind: 'Command', id: link.commandId, commandKind: 'readback' },
+                { kind: 'ReadbackOperation', id: link.operationId },
+                { kind: 'Resource', id: link.sourceResourceId },
+            ]),
+        ],
+        nativeError,
+        failureStage: 'queue-completion',
+        outcomes: [ Object.freeze({
+            stage: 'queue-completion' as const,
+            diagnosticCode: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            nativeErrorCategory: 'native-exception' as const,
+            location: Object.freeze({ kind: 'submission' as const, submissionId }),
+            nativeError,
+        }) ],
     })
 }
 

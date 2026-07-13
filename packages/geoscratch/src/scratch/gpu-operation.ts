@@ -519,6 +519,7 @@ export type ScratchGpuIncidentReportInput = Readonly<{
     pipelineErrorReason?: GPUPipelineErrorReason
     compilationReport?: PipelineCompilationReport
     outcomes?: readonly ScratchGpuIncidentOutcome[]
+    omittedOutcomeCount?: number
     evidence: ScratchGpuIncidentEvidenceCompleteness
     [key: string]: unknown
 }>
@@ -628,6 +629,7 @@ export function createGpuIncidentReport(
 ): ScratchGpuIncidentReport {
 
     assertIncidentTarget(input)
+    assertNonNegativeInteger(input.omittedOutcomeCount ?? 0, 'omittedOutcomeCount')
     const subject = input.subject ?? createIncidentSubject(input)
     const completeRelated = input.related ?? createIncidentRelatedSubjects(input)
     const related = completeRelated.slice(0, MAX_INCIDENT_RELATED_SUBJECTS)
@@ -645,7 +647,7 @@ export function createGpuIncidentReport(
     ) + Math.max(
         0,
         (input.outcomes?.length ?? 0) - (outcomes?.length ?? 0)
-    )
+    ) + (input.omittedOutcomeCount ?? 0)
     const evidence = {
         ...input.evidence,
         complete: input.evidence.complete && omittedEvidenceItems === 0,

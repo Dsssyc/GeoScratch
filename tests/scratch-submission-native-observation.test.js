@@ -221,6 +221,60 @@ describe('scratch bounded submission native observation', () => {
         })).to.have.length(1)
     })
 
+    it('selects primary failure from complete issue facts beyond bounded public evidence', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const capture = runtime.diagnostics.capture({
+            nativeSubmissionDetail: 'step',
+            maxOperations: 100,
+        })
+        const submissionId = 'submission-bounded-primary'
+        const plan = Array.from({ length: 65 }, (_, issueOrdinal) => ({
+            stage: issueOrdinal === 64 ? 'pass-begin' : 'pass-end',
+            location: commandLocation(
+                submissionId,
+                issueOrdinal,
+                `bounded-primary-command-${issueOrdinal}`
+            ),
+        }))
+        const observation = beginSubmissionNativeObservation({
+            runtime,
+            submissionId,
+            effectful: true,
+            plan,
+        })
+
+        for (const issue of plan) {
+            observation.issue(issue.stage, issue.location, () => {
+                fake.errors.emit('validation', new Error(`failure ${issue.location.stepIndex}`))
+            })
+        }
+        observation.finish()
+
+        const outcome = await observation.outcome
+        const settlement = await observation.settlement
+        expect(outcome.outcomes).to.have.length(64)
+        expect(outcome.omittedOutcomeCount).to.equal(1)
+        expect(outcome.outcomes.every(fact => fact.stage === 'pass-end')).to.equal(true)
+        expect(settlement.primaryFailure).to.deep.include({ issueOrdinal: 64 })
+        expect(settlement.primaryFailure.fact).to.deep.include({
+            stage: 'pass-begin',
+            diagnosticCode: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
+        })
+        expect(settlement.primaryFailure.incident).to.deep.include({
+            kind: 'submission-failure',
+            failureStage: 'pass-begin',
+            diagnosticCode: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
+        })
+        expect(settlement.primaryFailure.incident.outcomes).to.have.length(64)
+        expect(settlement.primaryFailure.incident.evidence).to.deep.include({
+            complete: false,
+            omittedRecords: 1,
+        })
+        capture.stop()
+    })
+
     it('records lifecycle cancellation and releases the owner exactly once', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })

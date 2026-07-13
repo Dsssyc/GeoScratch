@@ -359,6 +359,12 @@ export type ScratchSubmissionNativeObservationReservation = Readonly<{
     release(): void
 }>
 
+export type ScratchEffectfulSubmittedWorkReservation = Readonly<{
+    id: string
+    readonly isReleased: boolean
+    release(): void
+}>
+
 export type ScratchGpuIncidentInput = Readonly<{
     kind: ScratchGpuIncidentKind
     diagnosticCode: string
@@ -374,6 +380,7 @@ export type ScratchGpuIncidentInput = Readonly<{
     pipelineErrorReason?: GPUPipelineErrorReason
     compilationReport?: PipelineCompilationReport
     outcomes?: readonly ScratchGpuIncidentOutcome[]
+    omittedOutcomeCount?: number
 }>
 
 type RuntimeDiagnosticsOwner = {
@@ -513,6 +520,7 @@ export class ScratchRuntimeDiagnosticsController {
     #readbackFacts = new Map<string, ScratchRuntimeReadbackOperationFact>()
     #readbackStagingReservations = new Map<string, number>()
     #submissionNativeObservationReservations = new Set<string>()
+    #effectfulSubmittedWorkReservations = new Set<string>()
     #pendingOperations = new Map<string, ScratchPendingGpuOperation>()
     #completedOperations = new WeakSet<ScratchGpuOperationRecord>()
     #registeredPipelineCreations = new WeakSet<ScratchGpuPipelineOperationRecord>()
@@ -658,6 +666,39 @@ export class ScratchRuntimeDiagnosticsController {
                 if (!controller.#submissionNativeObservationReservations.delete(reservationId)) return
                 controller.#currentPendingNativeObservations =
                     controller.#submissionNativeObservationReservations.size
+            },
+        })
+    }
+
+    retainEffectfulSubmittedWork(
+        submissionId: string
+    ): ScratchEffectfulSubmittedWorkReservation {
+
+        if (submissionId.length === 0) {
+            throw new TypeError('Effectful SubmittedWork requires a submissionId.')
+        }
+        if (this.#effectfulSubmittedWorkReservations.has(submissionId)) {
+            throw new TypeError(`Effectful SubmittedWork ${submissionId} is already retained.`)
+        }
+
+        this.#effectfulSubmittedWorkReservations.add(submissionId)
+        this.#currentEffectfulSubmittedWork = this.#effectfulSubmittedWorkReservations.size
+
+        let isReleased = false
+        const controller = this
+        return Object.freeze({
+            id: submissionId,
+            get isReleased() {
+
+                return isReleased
+            },
+            release() {
+
+                if (isReleased) return
+                isReleased = true
+                if (!controller.#effectfulSubmittedWorkReservations.delete(submissionId)) return
+                controller.#currentEffectfulSubmittedWork =
+                    controller.#effectfulSubmittedWorkReservations.size
             },
         })
     }
@@ -1018,6 +1059,9 @@ export class ScratchRuntimeDiagnosticsController {
                 ? { compilationReport: input.compilationReport }
                 : {}),
             ...(input.outcomes !== undefined ? { outcomes: input.outcomes } : {}),
+            ...(input.omittedOutcomeCount !== undefined
+                ? { omittedOutcomeCount: input.omittedOutcomeCount }
+                : {}),
             evidence: {
                 complete: this.#overwrittenOperations === 0 &&
                     this.#overwrittenIncidents === 0 &&
@@ -1349,6 +1393,7 @@ export class ScratchRuntimeDiagnosticsController {
         this.#readbackFacts.clear()
         this.#readbackStagingReservations.clear()
         this.#submissionNativeObservationReservations.clear()
+        this.#effectfulSubmittedWorkReservations.clear()
         this.#currentReadbackStagingBytes = 0
         this.#currentRetainedHostBytes = 0
         this.#currentPendingNativeObservations = 0

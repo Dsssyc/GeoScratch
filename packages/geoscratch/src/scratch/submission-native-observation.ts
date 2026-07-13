@@ -5,6 +5,7 @@ import {
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type {
     GpuNativeErrorCategory,
+    ScratchGpuIncidentReport,
     ScratchSubmissionNativeLocation,
     ScratchSubmissionNativeOutcome,
     ScratchSubmissionNativeOutcomeFact,
@@ -19,6 +20,7 @@ import type {
 import type { ScratchRuntime } from './runtime.js'
 
 type ScopeFilter = 'validation' | 'internal' | 'out-of-memory'
+const MAX_RETAINED_SUBMISSION_FAILURES = 64
 
 export type SubmissionNativeIssue = Readonly<{
     stage: ScratchSubmissionNativeStage
@@ -35,6 +37,7 @@ export type BeginSubmissionNativeObservationInput = Readonly<{
 export type SubmissionNativeObservation = Readonly<{
     mode: ScratchSubmissionNativeOutcomeMode
     outcome: Promise<ScratchSubmissionNativeOutcome>
+    settlement: Promise<SubmissionNativeSettlement>
     issue<T>(
         stage: ScratchSubmissionNativeStage,
         location: ScratchSubmissionNativeLocation,
@@ -43,8 +46,21 @@ export type SubmissionNativeObservation = Readonly<{
     finish(): void
 }>
 
+export type SubmissionNativePrimaryFailure = Readonly<{
+    fact: ScratchSubmissionNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
+    issueOrdinal: number
+    cause?: unknown
+    incident?: ScratchGpuIncidentReport
+}>
+
+export type SubmissionNativeSettlement = Readonly<{
+    outcome: ScratchSubmissionNativeOutcome
+    primaryFailure?: SubmissionNativePrimaryFailure
+}>
+
 type SubmissionObservedFailure = Readonly<{
     fact: ScratchSubmissionNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
+    issueOrdinal: number
     cause?: unknown
 }>
 
@@ -61,6 +77,7 @@ type PendingScopeObservation = Readonly<{
 type ScopeBundle = {
     stage: ScratchSubmissionNativeStage
     location: ScratchSubmissionNativeLocation
+    issueOrdinal: number
     boundaryFailures: unknown[]
     pushed: ScopeFilter[]
     observations: PendingScopeObservation[]
@@ -73,6 +90,7 @@ type ObservationState = {
     operation: ScratchPendingGpuOperation
     reservation?: ScratchSubmissionNativeObservationReservation
     planKeys: Set<string>
+    issueOrdinals: Map<string, number>
     issuedKeys: Set<string>
     issuedLocations: ScratchSubmissionNativeLocation[]
     issuedLocationKeys: Set<string>
@@ -137,6 +155,10 @@ export function beginSubmissionNativeObservation(
         operation,
         ...(reservation !== undefined ? { reservation } : {}),
         planKeys: new Set(input.plan.map(issueKey)),
+        issueOrdinals: new Map(input.plan.map((issue, issueOrdinal) => [
+            issueKey(issue),
+            issueOrdinal,
+        ])),
         issuedKeys: new Set(),
         issuedLocations: [],
         issuedLocationKeys: new Set(),
@@ -155,19 +177,22 @@ export function beginSubmissionNativeObservation(
         const bundle = openScopeBundle(
             input.runtime.device,
             'scope-settlement',
-            summaryLocation
+            summaryLocation,
+            0
         )
         state.summaryBundle = bundle
         state.bundles.push(bundle)
     }
 
-    let resolveOutcome!: (outcome: ScratchSubmissionNativeOutcome) => void
-    const outcome = new Promise<ScratchSubmissionNativeOutcome>(resolve => {
-        resolveOutcome = resolve
+    let resolveSettlement!: (settlement: SubmissionNativeSettlement) => void
+    const settlement = new Promise<SubmissionNativeSettlement>(resolve => {
+        resolveSettlement = resolve
     })
+    const outcome = settlement.then(result => result.outcome)
     const observation: SubmissionNativeObservation = Object.freeze({
         mode,
         outcome,
+        settlement,
         issue<T>(
             stage: ScratchSubmissionNativeStage,
             location: ScratchSubmissionNativeLocation,
@@ -184,11 +209,15 @@ export function beginSubmissionNativeObservation(
             if (state.issuedKeys.has(key)) {
                 throw new TypeError('Submission native issue was already executed.')
             }
+            const issueOrdinal = state.issueOrdinals.get(key)
+            if (issueOrdinal === undefined) {
+                throw new TypeError('Submission native issue is missing its snapshotted ordinal.')
+            }
             state.issuedKeys.add(key)
             retainIssuedLocation(state, location)
 
             const bundle = mode === 'detailed'
-                ? openScopeBundle(input.runtime.device, stage, location)
+                ? openScopeBundle(input.runtime.device, stage, location, issueOrdinal)
                 : undefined
             if (bundle !== undefined) state.bundles.push(bundle)
             try {
@@ -197,6 +226,7 @@ export function beginSubmissionNativeObservation(
                 state.synchronousFailures.push(observedFailure(
                     stage,
                     location,
+                    issueOrdinal,
                     'native-exception',
                     'SCRATCH_SUBMISSION_NATIVE_EXCEPTION',
                     cause
@@ -213,7 +243,7 @@ export function beginSubmissionNativeObservation(
             if (state.summaryBundle !== undefined) {
                 closeScopeBundle(input.runtime.device, state.summaryBundle)
             }
-            void settleObservation(state).then(resolveOutcome)
+            void settleObservation(state).then(resolveSettlement)
         },
     })
 
@@ -225,16 +255,19 @@ function createEffectFreeObservation(
     mode: ScratchSubmissionNativeOutcomeMode
 ): SubmissionNativeObservation {
 
-    const outcome = Promise.resolve(createSubmissionNativeOutcome(submissionId, {
+    const publicOutcome = createSubmissionNativeOutcome(submissionId, {
         mode,
         status: 'no-native-work',
         locations: [],
         outcomes: [],
-    }))
+    })
+    const settlement = Promise.resolve(Object.freeze({ outcome: publicOutcome }))
+    const outcome = settlement.then(result => result.outcome)
     let isFinished = false
     return Object.freeze({
         mode,
         outcome,
+        settlement,
         issue<T>(
             _stage: ScratchSubmissionNativeStage,
             _location: ScratchSubmissionNativeLocation,
@@ -253,7 +286,7 @@ function createEffectFreeObservation(
 
 async function settleObservation(
     state: ObservationState
-): Promise<ScratchSubmissionNativeOutcome> {
+): Promise<SubmissionNativeSettlement> {
 
     const controller = diagnosticsControllerFor(state.input.runtime)
     try {
@@ -266,7 +299,8 @@ async function settleObservation(
             ...(state.lifecycleFailure !== undefined ? [ state.lifecycleFailure ] : []),
         ]
         const publicOutcome = createPublicOutcome(state, failures)
-        const primary = failures[0]
+        const retainedFailures = retainOrderedSubmissionFailures(failures)
+        const primary = retainedFailures[0]
         const record = controller.completeOperation(state.operation, {
             status: primary === undefined ? 'succeeded' : 'failed',
             ...(primary !== undefined
@@ -282,8 +316,9 @@ async function settleObservation(
             },
         })
 
+        let incident: ScratchGpuIncidentReport | undefined
         if (primary !== undefined) {
-            controller.recordIncident({
+            incident = controller.recordIncident({
                 kind: 'submission-failure',
                 diagnosticCode: primary.fact.diagnosticCode,
                 nativeErrorCategory: primary.fact.nativeErrorCategory,
@@ -297,7 +332,7 @@ async function settleObservation(
                 ...(primary.fact.nativeError !== undefined
                     ? { nativeError: primary.fact.nativeError }
                     : {}),
-                outcomes: failures.map(failure => ({
+                outcomes: retainedFailures.map(failure => ({
                     stage: failure.fact.stage,
                     diagnosticCode: failure.fact.diagnosticCode,
                     nativeErrorCategory: failure.fact.nativeErrorCategory,
@@ -306,30 +341,52 @@ async function settleObservation(
                         ? { nativeError: failure.fact.nativeError }
                         : {}),
                 })),
+                omittedOutcomeCount: Math.max(0, failures.length - retainedFailures.length),
             })
         }
-        return publicOutcome
+        return Object.freeze({
+            outcome: publicOutcome,
+            ...(primary !== undefined ? {
+                primaryFailure: Object.freeze({
+                    fact: primary.fact,
+                    issueOrdinal: primary.issueOrdinal,
+                    ...(primary.cause !== undefined ? { cause: primary.cause } : {}),
+                    ...(incident !== undefined ? { incident } : {}),
+                }),
+            } : {}),
+        })
     } catch (cause) {
         if (state.mode === 'off') {
-            return createSubmissionNativeOutcome(state.input.submissionId, {
-                mode: 'off',
-                status: 'unobserved',
-                locations: [ submissionLocation(state.input.submissionId) ],
-                outcomes: [],
+            return Object.freeze({
+                outcome: createSubmissionNativeOutcome(state.input.submissionId, {
+                    mode: 'off',
+                    status: 'unobserved',
+                    locations: [ submissionLocation(state.input.submissionId) ],
+                    outcomes: [],
+                }),
             })
         }
         const fallback = observedFailure(
             'scope-settlement',
             submissionLocation(state.input.submissionId),
+            Number.MAX_SAFE_INTEGER,
             'scope-failure',
             'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_FAILED',
             cause
         )
-        return createSubmissionNativeOutcome(state.input.submissionId, {
+        const outcome = createSubmissionNativeOutcome(state.input.submissionId, {
             mode: state.mode,
             status: 'observation-failed',
             locations: [ fallback.fact.location ],
             outcomes: [ fallback.fact ],
+        })
+        return Object.freeze({
+            outcome,
+            primaryFailure: Object.freeze({
+                fact: fallback.fact,
+                issueOrdinal: fallback.issueOrdinal,
+                ...(fallback.cause !== undefined ? { cause: fallback.cause } : {}),
+            }),
         })
     } finally {
         state.unsubscribeLifecycle()
@@ -355,13 +412,15 @@ function createPublicOutcome(
         failure.fact.nativeErrorCategory === 'device-lost' ||
         failure.fact.nativeErrorCategory === 'none'
     )
-    const locations = state.mode === 'summary'
+    const allLocations = state.mode === 'summary'
         ? failures.length === 0
             ? [ submissionLocation(state.input.submissionId) ]
             : state.issuedLocations.length > 0
                 ? state.issuedLocations
                 : [ submissionLocation(state.input.submissionId) ]
         : state.issuedLocations
+    const locations = allLocations.slice(0, MAX_RETAINED_SUBMISSION_FAILURES)
+    const retainedFailures = failures.slice(0, MAX_RETAINED_SUBMISSION_FAILURES)
     return createSubmissionNativeOutcome(state.input.submissionId, {
         mode: state.mode,
         status: failures.length === 0
@@ -370,7 +429,9 @@ function createPublicOutcome(
                 ? 'observation-failed'
                 : 'observed-failed',
         locations,
-        outcomes: failures.map(failure => failure.fact),
+        outcomes: retainedFailures.map(failure => failure.fact),
+        omittedLocationCount: Math.max(0, allLocations.length - locations.length),
+        omittedOutcomeCount: Math.max(0, failures.length - retainedFailures.length),
     })
 }
 
@@ -415,12 +476,14 @@ function assertObservationInput(input: BeginSubmissionNativeObservationInput): v
 function openScopeBundle(
     device: GPUDevice,
     stage: ScratchSubmissionNativeStage,
-    location: ScratchSubmissionNativeLocation
+    location: ScratchSubmissionNativeLocation,
+    issueOrdinal: number
 ): ScopeBundle {
 
     const bundle: ScopeBundle = {
         stage,
         location,
+        issueOrdinal,
         boundaryFailures: [],
         pushed: [],
         observations: [],
@@ -467,6 +530,7 @@ async function settleScopeBundle(
     const failures = bundle.boundaryFailures.map(cause => observedFailure(
         'scope-settlement',
         bundle.location,
+        bundle.issueOrdinal,
         'scope-failure',
         'SCRATCH_SUBMISSION_NATIVE_SCOPE_FAILED',
         cause
@@ -481,6 +545,7 @@ async function settleScopeBundle(
             failures.push(observedFailure(
                 'scope-settlement',
                 bundle.location,
+                bundle.issueOrdinal,
                 'scope-failure',
                 'SCRATCH_SUBMISSION_NATIVE_SCOPE_FAILED',
                 observation.reason
@@ -492,6 +557,7 @@ async function settleScopeBundle(
             failures.push(observedFailure(
                 'scope-settlement',
                 bundle.location,
+                bundle.issueOrdinal,
                 'scope-failure',
                 'SCRATCH_SUBMISSION_NATIVE_SCOPE_FAILED',
                 new TypeError(`The ${filter} error scope resolved with an invalid value.`)
@@ -501,6 +567,7 @@ async function settleScopeBundle(
         failures.push(observedFailure(
             bundle.stage,
             bundle.location,
+            bundle.issueOrdinal,
             filter,
             diagnosticCodeForCategory(filter),
             observation.value
@@ -540,6 +607,7 @@ function lifecycleFailure(
         return observedFailure(
             'lifecycle-recheck',
             location,
+            Number.MAX_SAFE_INTEGER,
             'device-lost',
             'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             runtime.deviceLostInfo
@@ -548,6 +616,7 @@ function lifecycleFailure(
     return observedFailure(
         'lifecycle-recheck',
         location,
+        Number.MAX_SAFE_INTEGER,
         'none',
         'SCRATCH_RUNTIME_DISPOSED'
     )
@@ -556,6 +625,7 @@ function lifecycleFailure(
 function observedFailure(
     stage: ScratchSubmissionNativeStage,
     location: ScratchSubmissionNativeLocation,
+    issueOrdinal: number,
     nativeErrorCategory: GpuNativeErrorCategory,
     diagnosticCode: string,
     cause?: unknown
@@ -571,8 +641,69 @@ function observedFailure(
                 ? { nativeError: serializeNativeGpuError(cause) }
                 : {}),
         }),
+        issueOrdinal,
         ...(cause !== undefined ? { cause } : {}),
     })
+}
+
+const submissionNativeStageOrder: readonly ScratchSubmissionNativeStage[] = Object.freeze([
+    'encoder-create',
+    'pass-begin',
+    'command-encode',
+    'pass-end',
+    'encoder-finish',
+    'queue-action',
+    'queue-submit',
+    'scope-settlement',
+    'queue-completion',
+    'lifecycle-recheck',
+])
+
+export function compareSubmissionNativeStages(
+    left: ScratchSubmissionNativeStage,
+    right: ScratchSubmissionNativeStage
+): number {
+
+    return submissionNativeStageOrder.indexOf(left) - submissionNativeStageOrder.indexOf(right)
+}
+
+function retainOrderedSubmissionFailures(
+    failures: readonly SubmissionObservedFailure[]
+): SubmissionObservedFailure[] {
+
+    const retained: Array<Readonly<{
+        failure: SubmissionObservedFailure
+        settlementOrder: number
+    }>> = []
+    for (const [ settlementOrder, failure ] of failures.entries()) {
+        const candidate = { failure, settlementOrder }
+        const insertionIndex = retained.findIndex(current =>
+            compareRankedSubmissionFailures(candidate, current) < 0
+        )
+        if (insertionIndex < 0) {
+            if (retained.length < MAX_RETAINED_SUBMISSION_FAILURES) retained.push(candidate)
+            continue
+        }
+        retained.splice(insertionIndex, 0, candidate)
+        if (retained.length > MAX_RETAINED_SUBMISSION_FAILURES) retained.pop()
+    }
+    return retained.map(item => item.failure)
+}
+
+function compareRankedSubmissionFailures(
+    left: Readonly<{ failure: SubmissionObservedFailure, settlementOrder: number }>,
+    right: Readonly<{ failure: SubmissionObservedFailure, settlementOrder: number }>
+): number {
+
+    const stageDifference = compareSubmissionNativeStages(
+        left.failure.fact.stage,
+        right.failure.fact.stage
+    )
+    if (stageDifference !== 0) return stageDifference
+    const issueDifference = left.failure.issueOrdinal - right.failure.issueOrdinal
+    return issueDifference !== 0
+        ? issueDifference
+        : left.settlementOrder - right.settlementOrder
 }
 
 function retainIssuedLocation(

@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import { ScratchRuntime } from 'geoscratch'
+import { ScratchDiagnosticError, ScratchRuntime } from 'geoscratch'
 import {
     createFakeExternalImageSource,
     createFakeGpu,
@@ -14,7 +14,10 @@ const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
 async function createCopyFixture(options = {}) {
 
-    const fake = createFakeGpu(options.fakeOptions)
+    const fakeOptions = { ...options.fakeOptions }
+    const deferSubmissionScopePops = fakeOptions.deferErrorScopePops === true
+    fakeOptions.deferErrorScopePops = false
+    const fake = createFakeGpu(fakeOptions)
     const runtime = await ScratchRuntime.create({
         gpu: fake.gpu,
         ...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
@@ -56,6 +59,7 @@ async function createCopyFixture(options = {}) {
 
     fake.calls.errorScopes.length = 0
     fake.calls.nativeTimeline.length = 0
+    fakeOptions.deferErrorScopePops = deferSubmissionScopePops
     return { ...fake, runtime, source, firstTarget, secondTarget, upload, firstCopy, secondCopy }
 }
 
@@ -67,6 +71,18 @@ async function waitForSubmissionOperation(runtime, submissionId) {
         await Promise.resolve()
     }
     throw new Error(`submission native operation ${submissionId} did not settle`)
+}
+
+async function expectScratchDiagnostic(action, expected) {
+
+    try {
+        await action()
+        throw new Error('expected Scratch diagnostic')
+    } catch (error) {
+        expect(error).to.be.instanceOf(ScratchDiagnosticError)
+        expect(error.diagnostic).to.include(expected)
+        return error
+    }
 }
 
 async function createRenderFixture() {
@@ -448,5 +464,264 @@ describe('scratch submission native integration', () => {
         expect(emptyFake.calls.queueTimeline).to.deep.equal([])
         expect(emptyRuntime.diagnostics.operations({ submissionId: emptySubmitted.id }))
             .to.deep.equal([])
+    })
+
+    it('joins deferred native observation and queue completion in done', async () => {
+
+        const fixture = await createCopyFixture({
+            fakeOptions: {
+                deferErrorScopePops: true,
+                deferSubmittedWorkDone: true,
+            },
+        })
+        const submitted = fixture.runtime.submission()
+            .upload(fixture.upload)
+            .copy(fixture.firstCopy)
+            .submit()
+        let doneSettled = false
+        submitted.done.then(() => { doneSettled = true })
+
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 1 })
+        fixture.readbacks.resolveQueueCompletion(0)
+        await Promise.resolve()
+        expect(doneSettled).to.equal(false)
+
+        fixture.errors.settlePop(2)
+        fixture.errors.settlePop(0)
+        fixture.errors.settlePop(1)
+        expect(await submitted.nativeOutcome).to.deep.include({
+            mode: 'summary',
+            status: 'observed-succeeded',
+        })
+        await submitted.done
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 0 })
+    })
+
+    it('rejects done for captured native failure while nativeOutcome still resolves', async () => {
+
+        const fixture = await createCopyFixture()
+        fixture.errors.failNext(
+            'copyBufferToBuffer',
+            'validation',
+            new Error('captured copy validation')
+        )
+        const submitted = fixture.runtime.submission()
+            .upload(fixture.upload)
+            .copy(fixture.firstCopy)
+            .submit()
+
+        const outcome = await submitted.nativeOutcome
+        expect(outcome.status).to.equal('observed-failed')
+        await expectScratchDiagnostic(() => submitted.done, {
+            code: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
+            phase: 'submission',
+        })
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 0 })
+    })
+
+    it('keeps queue completion failure independent from successful native observation', async () => {
+
+        const fixture = await createCopyFixture()
+        fixture.readbacks.rejectNextQueueCompletion(new Error('queue completion rejected'))
+        const submitted = fixture.runtime.submission()
+            .upload(fixture.upload)
+            .copy(fixture.firstCopy)
+            .submit()
+
+        expect(await submitted.nativeOutcome).to.deep.include({
+            status: 'observed-succeeded',
+        })
+        await expectScratchDiagnostic(() => submitted.done, {
+            code: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            phase: 'submission',
+        })
+        expect(fixture.runtime.diagnostics.incidents({
+            submissionId: submitted.id,
+            nativeStage: 'queue-completion',
+        }).some(incident => incident.kind === 'submission-failure')).to.equal(true)
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 0 })
+    })
+
+    it('selects native stage order over reverse Promise settlement order', async () => {
+
+        const fixture = await createCopyFixture({
+            fakeOptions: {
+                deferErrorScopePops: true,
+                deferSubmittedWorkDone: true,
+            },
+        })
+        fixture.errors.failNext(
+            'copyBufferToBuffer',
+            'validation',
+            new Error('simultaneous validation')
+        )
+        const submitted = fixture.runtime.submission()
+            .upload(fixture.upload)
+            .copy(fixture.firstCopy)
+            .submit()
+
+        fixture.readbacks.rejectQueueCompletion(0, new Error('completion settled first'))
+        fixture.errors.settlePop(2)
+        fixture.errors.settlePop(1)
+        fixture.errors.settlePop(0)
+
+        await expectScratchDiagnostic(() => submitted.done, {
+            code: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
+            phase: 'submission',
+        })
+        expect((await submitted.nativeOutcome).status).to.equal('observed-failed')
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 0 })
+    })
+
+    it('uses global issue order for equal-stage failures and attaches the same primary incident', async () => {
+
+        const fixture = await createCopyFixture({
+            fakeOptions: { deferErrorScopePops: true },
+        })
+        const capture = fixture.runtime.diagnostics.capture({ nativeSubmissionDetail: 'step' })
+        const submitted = fixture.runtime.submission()
+            .upload(fixture.upload)
+            .copy(fixture.firstCopy)
+            .submit()
+
+        expect(fixture.errors.pendingPops).to.have.length(15)
+        fixture.errors.rejectPop(3, new Error('copy issue scope settlement failed'))
+        fixture.errors.rejectPop(9, new Error('queue issue scope settlement failed'))
+        for (let index = 0; index < fixture.errors.pendingPops.length; index++) {
+            if (index !== 3 && index !== 9) fixture.errors.settlePop(index)
+        }
+
+        const caught = await expectScratchDiagnostic(() => submitted.done, {
+            code: 'SCRATCH_SUBMISSION_NATIVE_SCOPE_FAILED',
+            phase: 'submission',
+        })
+        expect(caught.diagnostic.actual.primary.location).to.deep.equal({
+            kind: 'standalone-command',
+            submissionId: submitted.id,
+            stepIndex: 1,
+            commandId: fixture.firstCopy.id,
+            commandKind: 'copy',
+        })
+        expect(caught.incident.failureStage).to.equal(caught.diagnostic.actual.primary.stage)
+        expect(caught.incident.outcomes[0].location)
+            .to.deep.equal(caught.diagnostic.actual.primary.location)
+        capture.stop()
+    })
+
+    it('internally observes ignored done rejection', async () => {
+
+        const fixture = await createCopyFixture()
+        fixture.readbacks.rejectNextQueueCompletion(new Error('ignored queue completion'))
+        fixture.errors.failNext(
+            'copyBufferToBuffer',
+            'validation',
+            new Error('ignored done validation')
+        )
+        const unhandled = []
+        const onUnhandled = reason => unhandled.push(reason)
+        process.on('unhandledRejection', onUnhandled)
+        try {
+            fixture.runtime.submission()
+                .upload(fixture.upload)
+                .copy(fixture.firstCopy)
+                .submit()
+            await new Promise(resolve => setImmediate(resolve))
+            await new Promise(resolve => setImmediate(resolve))
+            expect(unhandled).to.deep.equal([])
+            expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+                .to.include({ currentEffectfulSubmittedWork: 0 })
+        } finally {
+            process.removeListener('unhandledRejection', onUnhandled)
+        }
+    })
+
+    it('tracks off-mode work only until its queue completion settles', async () => {
+
+        const fixture = await createCopyFixture({
+            diagnostics: { submissionScopes: 'off' },
+            fakeOptions: { deferSubmittedWorkDone: true },
+        })
+        const submitted = fixture.runtime.submission()
+            .upload(fixture.upload)
+            .copy(fixture.firstCopy)
+            .submit()
+
+        expect(fixture.calls.errorScopes).to.deep.equal([])
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 1 })
+        fixture.readbacks.resolveQueueCompletion(0)
+        await submitted.done
+        expect((await submitted.nativeOutcome).status).to.equal('unobserved')
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 0 })
+    })
+
+    it('clears current submitted-work ownership on runtime disposal', async () => {
+
+        const fixture = await createCopyFixture({
+            fakeOptions: {
+                deferErrorScopePops: true,
+                deferSubmittedWorkDone: true,
+            },
+        })
+        const submitted = fixture.runtime.submission()
+            .upload(fixture.upload)
+            .copy(fixture.firstCopy)
+            .submit()
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 1 })
+
+        fixture.runtime.dispose()
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative).to.deep.include({
+            currentPendingNativeObservations: 0,
+            currentEffectfulSubmittedWork: 0,
+        })
+        fixture.readbacks.resolveQueueCompletion(0)
+        for (let index = 0; index < fixture.errors.pendingPops.length; index++) {
+            fixture.errors.settlePop(index)
+        }
+        await expectScratchDiagnostic(() => submitted.done, {
+            code: 'SCRATCH_RUNTIME_DISPOSED',
+            phase: 'submission',
+        })
+    })
+
+    it('returns the exact primary incident when history capacities are zero', async () => {
+
+        const fixture = await createCopyFixture({
+            diagnostics: {
+                operationCapacity: 0,
+                incidentCapacity: 0,
+            },
+        })
+        fixture.errors.failNext(
+            'copyBufferToBuffer',
+            'validation',
+            new Error('zero-capacity native failure')
+        )
+        const submitted = fixture.runtime.submission()
+            .upload(fixture.upload)
+            .copy(fixture.firstCopy)
+            .submit()
+
+        const caught = await expectScratchDiagnostic(() => submitted.done, {
+            code: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
+            phase: 'submission',
+        })
+        expect(caught.incident).to.deep.include({
+            kind: 'submission-failure',
+            diagnosticCode: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
+        })
+        expect(fixture.runtime.diagnostics.operations({ submissionId: submitted.id }))
+            .to.deep.equal([])
+        expect(fixture.runtime.diagnostics.incidents({ submissionId: submitted.id }))
+            .to.deep.equal([])
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 0 })
     })
 })

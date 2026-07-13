@@ -867,6 +867,14 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             contentEpoch: 1,
             allocationVersion: 1,
         })
+        expect(Object.isFrozen(submitted.diagnostics[0])).to.equal(true)
+        expect(Object.isFrozen(submitted.diagnostics[0].subject)).to.equal(true)
+        expect(Object.isFrozen(submitted.diagnostics[0].related)).to.equal(true)
+        expect(Object.isFrozen(submitted.diagnostics[0].actual)).to.equal(true)
+        expect(() => {
+            submitted.diagnostics[0].actual.stepIndex = 99
+        }).to.throw(TypeError)
+        expect(submitted.diagnostics[0].actual.stepIndex).to.equal(0)
         expect(fixture.calls.renderPasses).to.have.length(1)
         expect(fixture.calls.drawCalls).to.have.length(1)
         expect(fixture.calls.queueSubmissions).to.have.length(1)

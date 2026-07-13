@@ -711,7 +711,11 @@ describe('scratch ReadbackCommand', () => {
         ])
         const incident = runtime.diagnostics.incidents({ commandId: command.id })
             .find(candidate => candidate.failureStage === 'queue-completion')
-        expect(caught.incident).to.equal(incident)
+        expect(caught.incident).to.deep.include({
+            kind: 'submission-failure',
+            diagnosticCode: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
+            failureStage: 'queue-completion',
+        })
         expect(incident).to.deep.include({
             kind: 'readback-failure',
             diagnosticCode: 'SCRATCH_SUBMISSION_QUEUE_COMPLETION_FAILED',
@@ -775,7 +779,10 @@ describe('scratch ReadbackCommand', () => {
         })
 
         const incidents = runtime.diagnostics.incidents()
-            .filter(incident => incident.failureStage === 'queue-completion')
+            .filter(incident =>
+                incident.kind === 'readback-failure' &&
+                incident.failureStage === 'queue-completion'
+            )
         expect(incidents).to.have.length(2)
         expect(incidents.map(incident => incident.target.commandId).sort()).to.deep.equal(
             commands.map(command => command.id).sort()

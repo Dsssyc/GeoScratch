@@ -143,6 +143,19 @@ describe('scratch submission native contract', () => {
             const descriptor = findPropertyDescriptor(submitted, name)
             expect(descriptor?.set).to.equal(undefined)
         }
+        expect(Object.isExtensible(submitted)).to.equal(false)
+        expect(Object.isFrozen(scr.SubmittedWork.prototype)).to.equal(true)
+        for (const value of [
+            submitted.commandBuffers,
+            submitted.report,
+            submitted.diagnostics,
+            submitted.resourceAccesses,
+            submitted.producerEpochs,
+            submitted.executionOutcomes,
+            submitted.readbacks,
+        ]) {
+            expect(Object.isFrozen(value)).to.equal(true)
+        }
     })
 
     it('uses schema version 4 with a macro submission target and discriminated location', () => {
