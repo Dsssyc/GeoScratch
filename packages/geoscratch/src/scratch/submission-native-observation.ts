@@ -5,6 +5,7 @@ import {
 } from './gpu-operation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type {
+    GpuAttributionConfidence,
     GpuNativeErrorCategory,
     ScratchGpuIncidentReport,
     ScratchGpuReadbackOperationTarget,
@@ -495,9 +496,11 @@ async function settleObservation(
                 kind: 'submission-failure',
                 diagnosticCode: primary.fact.diagnosticCode,
                 nativeErrorCategory: primary.fact.nativeErrorCategory,
-                attribution: state.mode === 'summary'
-                    ? 'enclosing-operation-family'
-                    : 'exact-operation',
+                attribution: nativeObservationAttribution(
+                    state.mode,
+                    primary.fact.stage,
+                    primary.fact.nativeErrorCategory
+                ),
                 target: state.operation.target,
                 operationId: state.operation.id,
                 triggerOperation: record,
@@ -605,9 +608,11 @@ async function settleReadbackObservation(
                 kind: 'readback-failure',
                 diagnosticCode: primary.fact.diagnosticCode,
                 nativeErrorCategory: primary.fact.nativeErrorCategory,
-                attribution: state.mode === 'summary'
-                    ? 'enclosing-operation-family'
-                    : 'exact-operation',
+                attribution: nativeObservationAttribution(
+                    state.mode,
+                    primary.fact.stage,
+                    primary.fact.nativeErrorCategory
+                ),
                 target: state.input.target,
                 operationId: state.operation.id,
                 triggerOperation: record,
@@ -705,6 +710,18 @@ function createPublicReadbackOutcome(
         outcomes: retainedFailures.map(failure => failure.fact),
         omittedOutcomeCount: Math.max(0, failures.length - retainedFailures.length),
     })
+}
+
+function nativeObservationAttribution(
+    mode: ScratchSubmissionNativeOutcomeMode,
+    stage: ScratchSubmissionNativeStage,
+    category: GpuNativeErrorCategory
+): GpuAttributionConfidence {
+
+    if (stage === 'lifecycle-recheck' || category === 'device-lost') {
+        return 'temporal-correlation'
+    }
+    return mode === 'summary' ? 'enclosing-operation-family' : 'exact-operation'
 }
 
 function createPublicOutcome(

@@ -219,17 +219,21 @@ Implementation and bilingual contract are now present for the ADR-035 core:
 
 - `SubmissionBuilder.submit()` remains synchronous and physically ordered;
   default summary scopes are constant-size, off mode is explicitly unobserved,
-  and per-location detail exists only in finite capture.
+  per-location detail exists only in finite capture, and readback ownership
+  claims complete before observation scopes.
 - `SubmittedWork.nativeOutcome` is immutable and always resolving, the preflight
   report remains historical, and `done` joins native observation with queue
-  completion without waiting for readback mapping or host copy.
+  completion plus lifecycle until that completion settles, without waiting for
+  readback mapping or host copy. Lifecycle attribution remains temporal.
 - Delayed native or queue failure marks only still-current persistent potential
-  writes indeterminate. Epochs never roll back, later acknowledged epochs are
-  guarded, all reads hard-fail before native effects, and Surface presentation
-  output is excluded.
+  writes indeterminate, including a successfully replayed prefix when a later
+  action throws. Epochs never roll back, later acknowledged epochs are guarded,
+  all reads hard-fail before native effects, and Surface presentation output is
+  excluded.
 - Direct readback observes copy issue independently from mapping; ordered
   readback gates bytes on the associated submission outcome without converting
-  queue-completion rejection into mapping failure.
+  queue-completion rejection into mapping failure. Direct readback rejects an
+  indeterminate source before staging allocation.
 
 The schema-v4 implementation, unit/type gates, bilingual contract, ordinary
 example migration, complete native-call inventory, long-run scope/budget

@@ -1062,6 +1062,24 @@ function findSourceProducerEpoch(after: SubmittedWork | undefined, source: Buffe
 
 function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
 
+    if (operation.source.state === 'indeterminate') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE',
+            severity: 'error',
+            phase: 'readback',
+            subject: operation.subject,
+            related: readbackRelatedSubjects(operation),
+            message: 'ReadbackOperation cannot read source content whose current value is indeterminate.',
+            expected: { state: 'ready' },
+            actual: readbackDiagnosticActual(operation, {
+                state: operation.source.state,
+                contentEpoch: operation.source.contentEpoch,
+                capturedContentEpoch: operation.contentEpoch,
+                recovery: 'explicit later producer before direct readback',
+            }),
+        })
+    }
+
     if (operation.source.contentEpoch !== operation.contentEpoch) {
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_EPOCH_STALE',

@@ -51,7 +51,10 @@ import type {
     ScratchSubmissionNativeStage,
     ScratchSubmissionQueueActionKind,
 } from './gpu-operation.js'
-import type { ScratchEffectfulSubmittedWorkReservation } from './runtime-diagnostics.js'
+import type {
+    ScratchEffectfulSubmittedWorkReservation,
+    ScratchRuntimeLifecycleChange,
+} from './runtime-diagnostics.js'
 
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 
@@ -519,12 +522,6 @@ export class SubmissionBuilder {
 
         const submittedId = `scratch-submitted-${UUID()}`
         const nativeIssuePlan = createSubmissionNativeIssuePlan(submittedId, resolvedPlan.steps)
-        const nativeObservation = beginSubmissionNativeObservation({
-            runtime: this.runtime,
-            submissionId: submittedId,
-            effectful: nativeIssuePlan.length > 0,
-            plan: nativeIssuePlan,
-        })
         const commandBuffers: GPUCommandBuffer[] = []
         const queueTimeline: PreparedQueueAction[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
@@ -540,8 +537,8 @@ export class SubmissionBuilder {
         let segmentResources = new Set<Resource>()
         let segmentQuerySlots = new Map<QuerySetResource, Set<number>>()
         let segmentReadbacks: PendingReadback[] = []
+        let replayedQueueActionCount = 0
 
-        try {
         try {
             for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
                 if (step.kind !== 'readback') continue
@@ -554,6 +551,21 @@ export class SubmissionBuilder {
             releaseUnsubmittedReadbackClaims(readbackClaims.values())
             throw cause
         }
+
+        let nativeObservation: SubmissionNativeObservation
+        try {
+            nativeObservation = beginSubmissionNativeObservation({
+                runtime: this.runtime,
+                submissionId: submittedId,
+                effectful: nativeIssuePlan.length > 0,
+                plan: nativeIssuePlan,
+            })
+        } catch (cause) {
+            releaseUnsubmittedReadbackClaims(readbackClaims.values())
+            throw cause
+        }
+
+        try {
 
         const trackSegmentResourceWrite = (resource: Resource) => {
 
@@ -852,8 +864,13 @@ export class SubmissionBuilder {
                 }
 
                 applyPreparedQueueEffects(action.effects)
+                replayedQueueActionCount++
             }
         } catch (cause) {
+            observeSubmissionPotentialWriteNativeFailures(
+                nativeObservation.settlement,
+                snapshotSubmissionPotentialWrites(queueTimeline.slice(0, replayedQueueActionCount))
+            )
             releaseFailedSubmissionReadbacks(this.runtime.queue, pendingReadbacks, submittedReadbacks)
             throw cause
         }
@@ -3649,16 +3666,30 @@ function snapshotSubmissionPotentialWrites(
 function observeSubmissionPotentialWriteFailures(
     nativeSettlement: Promise<SubmissionNativeSettlement>,
     queueCompletion: Promise<SubmissionQueueCompletionOutcome>,
+    lifecycle: Promise<SubmissionLifecycleOutcome>,
+    potentialWrites: readonly SubmissionPotentialWrite[]
+): void {
+
+    observeSubmissionPotentialWriteNativeFailures(nativeSettlement, potentialWrites)
+    void queueCompletion.then(completion => {
+        if (completion.status === 'failed') {
+            markSubmissionPotentialWritesIndeterminate(potentialWrites)
+        }
+    })
+    void lifecycle.then(outcome => {
+        if (outcome.status === 'failed') {
+            markSubmissionPotentialWritesIndeterminate(potentialWrites)
+        }
+    })
+}
+
+function observeSubmissionPotentialWriteNativeFailures(
+    nativeSettlement: Promise<SubmissionNativeSettlement>,
     potentialWrites: readonly SubmissionPotentialWrite[]
 ): void {
 
     void nativeSettlement.then(settlement => {
         if (settlement.primaryFailure !== undefined) {
-            markSubmissionPotentialWritesIndeterminate(potentialWrites)
-        }
-    })
-    void queueCompletion.then(completion => {
-        if (completion.status === 'failed') {
             markSubmissionPotentialWritesIndeterminate(potentialWrites)
         }
     })
@@ -3718,13 +3749,37 @@ function createSubmittedWorkDone(
         nativeDone,
         readbacks
     )
+    const lifecycle = reservation === undefined
+        ? Promise.resolve(Object.freeze({ status: 'succeeded' as const }))
+        : observeSubmissionLifecycleUntilQueueCompletion(
+            runtime,
+            submissionId,
+            queueCompletion
+        )
     observeSubmissionPotentialWriteFailures(
         nativeSettlement,
         queueCompletion,
+        lifecycle,
         potentialWrites
     )
-    const done = Promise.all([ nativeSettlement, queueCompletion ]).then(([ settlement, completion ]) => {
-        const primary = selectSubmissionDoneFailure(submissionId, settlement, completion)
+    const done = Promise.all([
+        nativeSettlement,
+        queueCompletion,
+        lifecycle,
+    ]).then(([ settlement, completion, lifecycleOutcome ]) => {
+        const completedLifecycle = completeSubmissionLifecycleOutcome(
+            runtime,
+            submissionId,
+            readbacks,
+            settlement,
+            lifecycleOutcome
+        )
+        const primary = selectSubmissionDoneFailure(
+            submissionId,
+            settlement,
+            completion,
+            completedLifecycle
+        )
         if (primary === undefined) return
 
         throwScratchDiagnostic({
@@ -3742,7 +3797,9 @@ function createSubmittedWorkDone(
             ],
             message: primary.stage === 'queue-completion'
                 ? 'Submitted queue work did not complete successfully.'
-                : 'Submitted work produced a captured native failure.',
+                : primary.stage === 'lifecycle-recheck'
+                    ? 'Submitted work lost its runtime or device lifecycle before queue completion.'
+                    : 'Submitted work produced a captured native failure.',
             actual: {
                 submissionId,
                 primary: {
@@ -3754,6 +3811,9 @@ function createSubmittedWorkDone(
                 nativeOutcome: settlement.outcome,
                 ...(completion.status === 'failed'
                     ? { queueCompletionError: serializeNativeGpuError(completion.cause) }
+                    : {}),
+                ...(completedLifecycle.status === 'failed'
+                    ? { lifecycleOutcome: completedLifecycle.fact }
                     : {}),
             },
         }, {
@@ -3778,6 +3838,21 @@ type SubmissionQueueCompletionOutcome =
         status: 'failed'
         cause: unknown
         incident: ScratchGpuIncidentReport
+    }>
+
+type SubmissionLifecycleOutcome =
+    | Readonly<{ status: 'succeeded' }>
+    | Readonly<{
+        status: 'failed'
+        fact: Readonly<{
+            stage: 'lifecycle-recheck'
+            diagnosticCode: string
+            nativeErrorCategory: 'device-lost' | 'none'
+            location: ScratchSubmissionNativeLocation
+            nativeError?: ReturnType<typeof serializeNativeGpuError>
+        }>
+        cause?: unknown
+        incident?: ScratchGpuIncidentReport
     }>
 
 type SubmissionDoneFailure = Readonly<{
@@ -3807,10 +3882,108 @@ function observeSubmissionQueueCompletion(
     )
 }
 
+function observeSubmissionLifecycleUntilQueueCompletion(
+    runtime: ScratchRuntime,
+    submissionId: string,
+    queueCompletion: Promise<SubmissionQueueCompletionOutcome>
+): Promise<SubmissionLifecycleOutcome> {
+
+    let isSettled = false
+    let unsubscribe = () => {}
+    let resolveOutcome!: (outcome: SubmissionLifecycleOutcome) => void
+    const outcome = new Promise<SubmissionLifecycleOutcome>(resolve => {
+        resolveOutcome = resolve
+    })
+    const complete = (value: SubmissionLifecycleOutcome) => {
+
+        if (isSettled) return
+        isSettled = true
+        unsubscribe()
+        resolveOutcome(value)
+    }
+    unsubscribe = diagnosticsControllerFor(runtime).subscribeLifecycle(change => {
+        complete(createSubmissionLifecycleFailure(runtime, submissionId, change))
+    })
+    if (isSettled) unsubscribe()
+    void queueCompletion.then(() => complete(Object.freeze({ status: 'succeeded' as const })))
+    return outcome
+}
+
+function createSubmissionLifecycleFailure(
+    runtime: ScratchRuntime,
+    submissionId: string,
+    change: ScratchRuntimeLifecycleChange
+): SubmissionLifecycleOutcome & Readonly<{ status: 'failed' }> {
+
+    const deviceLost = change.kind === 'device-lost'
+    const diagnosticCode = deviceLost
+        ? 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION'
+        : 'SCRATCH_RUNTIME_DISPOSED'
+    const nativeErrorCategory = deviceLost ? 'device-lost' as const : 'none' as const
+    const location = Object.freeze({ kind: 'submission' as const, submissionId })
+    const nativeError = deviceLost
+        ? serializeNativeGpuError(runtime.deviceLostInfo ?? change.info)
+        : undefined
+    const fact = Object.freeze({
+        stage: 'lifecycle-recheck' as const,
+        diagnosticCode,
+        nativeErrorCategory,
+        location,
+        ...(nativeError !== undefined ? { nativeError } : {}),
+    })
+    return Object.freeze({
+        status: 'failed' as const,
+        fact,
+        ...(deviceLost ? { cause: change.info } : {}),
+    })
+}
+
+function completeSubmissionLifecycleOutcome(
+    runtime: ScratchRuntime,
+    submissionId: string,
+    readbacks: readonly SubmittedReadbackLink[],
+    settlement: SubmissionNativeSettlement,
+    lifecycle: SubmissionLifecycleOutcome
+): SubmissionLifecycleOutcome {
+
+    if (lifecycle.status === 'succeeded') return lifecycle
+    const alreadyObserved = settlement.outcome.outcomes.some(outcome =>
+        outcome.stage === lifecycle.fact.stage &&
+        outcome.nativeErrorCategory === lifecycle.fact.nativeErrorCategory
+    )
+    if (alreadyObserved) return lifecycle
+
+    const incident = diagnosticsControllerFor(runtime).recordIncident({
+        kind: 'submission-failure',
+        diagnosticCode: lifecycle.fact.diagnosticCode,
+        nativeErrorCategory: lifecycle.fact.nativeErrorCategory,
+        attribution: 'temporal-correlation',
+        target: { kind: 'submission', submissionId },
+        related: [
+            runtime.subject,
+            ...readbacks.flatMap(link => [
+                { kind: 'Command' as const, id: link.commandId, commandKind: 'readback' },
+                { kind: 'ReadbackOperation' as const, id: link.operationId },
+                { kind: 'Resource' as const, id: link.sourceResourceId },
+            ]),
+        ],
+        failureStage: 'lifecycle-recheck',
+        ...(lifecycle.fact.nativeError !== undefined
+            ? { nativeError: lifecycle.fact.nativeError }
+            : {}),
+        outcomes: [ lifecycle.fact ],
+    })
+    return Object.freeze({
+        ...lifecycle,
+        incident,
+    })
+}
+
 function selectSubmissionDoneFailure(
     submissionId: string,
     settlement: SubmissionNativeSettlement,
-    completion: SubmissionQueueCompletionOutcome
+    completion: SubmissionQueueCompletionOutcome,
+    lifecycle: SubmissionLifecycleOutcome
 ): SubmissionDoneFailure | undefined {
 
     const primary = settlement.primaryFailure
@@ -3840,11 +4013,24 @@ function selectSubmissionDoneFailure(
         }
     }
 
-    if (nativeFailure === undefined) return queueFailure
-    if (queueFailure === undefined) return nativeFailure
-    return compareSubmissionNativeStages(nativeFailure.stage, queueFailure.stage) <= 0
-        ? nativeFailure
-        : queueFailure
+    const lifecycleFailure: SubmissionDoneFailure | undefined = lifecycle.status === 'failed'
+        ? {
+            stage: lifecycle.fact.stage,
+            diagnosticCode: lifecycle.fact.diagnosticCode,
+            nativeErrorCategory: lifecycle.fact.nativeErrorCategory,
+            location: lifecycle.fact.location,
+            ...(lifecycle.fact.nativeError !== undefined
+                ? { nativeError: lifecycle.fact.nativeError }
+                : {}),
+            ...(lifecycle.cause !== undefined ? { cause: lifecycle.cause } : {}),
+            ...(lifecycle.incident !== undefined ? { incident: lifecycle.incident } : {}),
+        }
+        : undefined
+
+    const failures = [ nativeFailure, queueFailure, lifecycleFailure ]
+        .filter((failure): failure is SubmissionDoneFailure => failure !== undefined)
+        .sort((left, right) => compareSubmissionNativeStages(left.stage, right.stage))
+    return failures[0]
 }
 
 function recordSubmissionQueueCompletionIncident(

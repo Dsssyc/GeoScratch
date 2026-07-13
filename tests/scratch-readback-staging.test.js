@@ -471,6 +471,7 @@ describe('scratch acknowledged readback staging', () => {
         const firstSubmitted = runtime.submission().readback(command).submit()
         const firstOperation = command.result({ after: firstSubmitted })
         const encoderCount = fake.calls.commandEncoders.length
+        const submissionScopeCallCount = fake.calls.errorScopes.length
 
         const busy = await rejectedDiagnostic(Promise.resolve().then(
             () => runtime.submission().readback(command).submit()
@@ -478,6 +479,7 @@ describe('scratch acknowledged readback staging', () => {
         expect(busy.diagnostic.code).to.equal('SCRATCH_READBACK_COMMAND_BUSY')
         expect(fake.calls.commandEncoders).to.have.length(encoderCount)
         expect(fake.calls.buffers).to.have.length(factoryBufferCount)
+        expect(fake.calls.errorScopes).to.have.length(submissionScopeCallCount)
 
         const firstMaterialization = firstOperation.toBytes()
         await settlePendingErrorScopes(fake)

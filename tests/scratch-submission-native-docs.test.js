@@ -30,6 +30,7 @@ describe('scratch submission native outcome documentation', () => {
                 'submitted.nativeOutcome',
                 'SubmittedWork.done',
                 'indeterminate',
+                'lifecycle',
                 'mapping',
                 'host copy',
             ]) {
@@ -93,6 +94,8 @@ describe('scratch submission native outcome documentation', () => {
                 "nativeSubmissionDetail: 'step'",
                 'enclosing-operation-family',
                 'exact-operation',
+                'lifecycle-recheck',
+                'temporal-correlation',
             ]) {
                 expect(vision.submissions, `${language} submissions ${marker}`).to.include(marker)
             }
@@ -102,6 +105,7 @@ describe('scratch submission native outcome documentation', () => {
                 'nativeOutcome',
                 'indeterminate',
                 'unobserved',
+                'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE',
             ]) {
                 expect(vision.transfers, `${language} transfers ${marker}`).to.include(marker)
             }
@@ -113,6 +117,7 @@ describe('scratch submission native outcome documentation', () => {
                 'SCRATCH_SUBMISSION_NATIVE_OUT_OF_MEMORY',
                 'enclosing-operation-family',
                 'exact-operation',
+                'temporal-correlation',
             ]) {
                 expect(vision.diagnostics, `${language} diagnostics ${marker}`).to.include(marker)
             }

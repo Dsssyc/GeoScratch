@@ -65,15 +65,15 @@ a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 | N26 | `packages/geoscratch/src/scratch/readback.ts:496` | `copyBufferToBuffer()` | Direct-readback native observation, `command-encode`. | Observed direct readback |
 | N27 | `packages/geoscratch/src/scratch/readback.ts:505` | `finish()` | Direct-readback native observation, `encoder-finish`. | Observed direct readback |
 | N28 | `packages/geoscratch/src/scratch/readback.ts:509` | `queue.submit()` | Direct-readback native observation, `queue-submit`. | Observed direct readback |
-| N29 | `packages/geoscratch/src/scratch/submission.ts:590` | `createCommandEncoder()` | Submission encoder-segment location, `encoder-create`. | Observed submission |
-| N30 | `packages/geoscratch/src/scratch/submission.ts:613` | `finish()` | Submission encoder-segment location, `encoder-finish`. | Observed submission |
-| N31 | `packages/geoscratch/src/scratch/submission.ts:729` | `beginComputePass()` | Compute pass location, `pass-begin`. | Observed submission |
-| N32 | `packages/geoscratch/src/scratch/submission.ts:750` | compute pass `end()` | Compute pass location, `pass-end`. | Observed submission |
-| N33 | `packages/geoscratch/src/scratch/submission.ts:769` | `beginRenderPass()` | Render pass location, `pass-begin`. | Observed submission |
-| N34 | `packages/geoscratch/src/scratch/submission.ts:807` | render pass `end()` | Render pass location, `pass-end`. | Observed submission |
-| N35 | `packages/geoscratch/src/scratch/submission.ts:835` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
-| N36 | `packages/geoscratch/src/scratch/submission.ts:1085` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
-| N37 | `packages/geoscratch/src/scratch/submission.ts:1090` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
+| N29 | `packages/geoscratch/src/scratch/submission.ts:602` | `createCommandEncoder()` | Submission encoder-segment location, `encoder-create`. | Observed submission |
+| N30 | `packages/geoscratch/src/scratch/submission.ts:625` | `finish()` | Submission encoder-segment location, `encoder-finish`. | Observed submission |
+| N31 | `packages/geoscratch/src/scratch/submission.ts:741` | `beginComputePass()` | Compute pass location, `pass-begin`. | Observed submission |
+| N32 | `packages/geoscratch/src/scratch/submission.ts:762` | compute pass `end()` | Compute pass location, `pass-end`. | Observed submission |
+| N33 | `packages/geoscratch/src/scratch/submission.ts:781` | `beginRenderPass()` | Render pass location, `pass-begin`. | Observed submission |
+| N34 | `packages/geoscratch/src/scratch/submission.ts:819` | render pass `end()` | Render pass location, `pass-end`. | Observed submission |
+| N35 | `packages/geoscratch/src/scratch/submission.ts:847` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
+| N36 | `packages/geoscratch/src/scratch/submission.ts:1102` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
+| N37 | `packages/geoscratch/src/scratch/submission.ts:1107` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
 
 Inventory totals:
 

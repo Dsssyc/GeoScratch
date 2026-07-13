@@ -413,6 +413,11 @@ describe('scratch bounded submission native observation', () => {
             reason: 'destroyed',
             nativeMessageOmitted: true,
         })
+        expect(runtime.diagnostics.incidents({ submissionId })[0]).to.include({
+            kind: 'submission-failure',
+            attribution: 'temporal-correlation',
+            failureStage: 'lifecycle-recheck',
+        })
         expect(JSON.stringify(outcome)).not.to.include('raw device loss text')
         expect(runtime.diagnostics.snapshot().submissionNative.currentPendingNativeObservations).to.equal(0)
     })

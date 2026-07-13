@@ -118,10 +118,11 @@ completion 不会被改写成 validation success。`maxPendingNativeObservations
 effect 前失败。
 
 `SubmittedWork.nativeOutcome` 始终 resolve 为不可变且可序列化的 result。
-`SubmittedWork.done` 联合 native observation 与 queue completion；任一边界失败
-时以结构化 diagnostic reject，但不等待 readback mapping 或 host copy。迟到的
-failure 只把仍为 current 的 potential write 标为 `indeterminate`，不回滚 epoch，
-也不能污染已被后续 producer 推进的内容。
+`SubmittedWork.done` 联合 native observation、queue completion，以及该 completion
+边界结算前的 runtime/device lifecycle；任一适用边界失败时以结构化 diagnostic
+reject，但不等待 readback mapping 或 host copy。迟到的 failure 只把仍为 current
+的 potential write 标为 `indeterminate`，不回滚 epoch，也不能污染已被后续
+producer 推进的内容。
 
 Per-command/pass attribution 只在临时有限 capture 中启用:
 
@@ -167,8 +168,10 @@ const orderedBytes = await ordered.result({ after: submitted }).toBytes()
 await submitted.done
 ```
 
-`SubmittedWork.done` 联合 submission native observation 与已 replay 的 queue-work
-completion；它不覆盖 mapping 或 host copy。Runtime options
+`SubmittedWork.done` 联合 submission native observation、已 replay 的 queue-work
+completion，以及该 completion 结算前的 lifecycle；它不覆盖 mapping 或 host
+copy。Direct readback 会在 staging allocation 前拒绝当前为 `indeterminate` 的
+source content。Runtime options
 `maxPendingOperations` 与 `maxStagingBytes` 限制当前
 readback ownership。Mapping validation 使用结构化 code
 `SCRATCH_READBACK_MAPPING_VALIDATION_FAILED`；native message prose 只是

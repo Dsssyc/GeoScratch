@@ -57,6 +57,14 @@ existing structured throw boundary after scope ownership is balanced; any
 later scope outcome is retained by runtime diagnostics even though no
 `SubmittedWork` was returned.
 
+Readback-command ownership claims and all other preflight complete before the
+observation reservation opens a native scope. If observation reservation then
+fails, every acquired claim is released without encoder or queue work. When a
+later queue action throws after an earlier action was replayed, the successfully
+replayed prefix remains physically committed, but its still-current potential
+writes remain attached to native settlement and become indeterminate if that
+attempt reports failure.
+
 Application-owned outer error scopes remain composable. Scratch opens only
 balanced inner scopes and never clears, drains, or pairs an outer scope.
 
@@ -134,6 +142,14 @@ native outcome remains separately inspectable. `done` does not wait for
 readback mapping, mapped-range access, host copy, retained results, or mapped
 leases.
 
+After native scopes settle, `done` continues observing runtime/device lifecycle
+until queue completion settles. A device-loss or runtime-disposal event in that
+window is an independent `lifecycle-recheck` outcome. It never receives
+`exact-operation` attribution: runtime-wide lifecycle evidence remains
+`temporal-correlation`, including during detailed capture. If native settlement
+already retained the same lifecycle outcome, completion reuses it instead of
+recording a duplicate submission incident.
+
 Queue-completion rejection remains enclosing-family evidence. It cannot by
 itself identify one command or overwrite an independently successful readback
 mapping outcome. Scratch internally observes the rejecting `done` branch so an
@@ -159,6 +175,10 @@ become indeterminate. Detailed attribution improves diagnosis but does not
 attempt partial automatic recovery: later work may depend on an earlier failed
 write, and the device timeline does not expose a complete causal graph.
 
+The same guard applies to the successfully replayed prefix of an attempt that
+later throws synchronously and therefore returns no `SubmittedWork`. Failed and
+unreplayed actions never publish potential writes.
+
 The epoch is not decremented. Historical resource accesses, producer epochs,
 execution outcomes, and native outcomes remain unchanged. A delayed failure
 changes current readiness only when the target still has the epoch produced by
@@ -181,6 +201,9 @@ Direct readback uses the same summary/off/capture policy and pending-observation
 budget around encoder creation, copy encoding, finish, and queue submit. Its
 target remains the readback operation. Copy issue and mapping are independent;
 host bytes are returned only after both applicable outcomes are observed.
+Direct readback also rejects current indeterminate source content with
+`SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE` before staging allocation or
+encoder work.
 
 Ordered readback observes its associated submission native outcome before
 exposing bytes. An observed failure enclosing its staging-copy family makes the

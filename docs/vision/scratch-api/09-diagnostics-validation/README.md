@@ -555,7 +555,9 @@ provide `exact-operation` attribution to one scoped location, but cannot prove
 which native call inside that location caused the error. Queue completion is
 also family evidence. An OOM scope proves that its submission/readback family
 captured OOM; it does not prove one command or one resource alone exhausted
-physical memory. Native prose never upgrades attribution.
+physical memory. Device loss and runtime disposal are runtime-wide lifecycle
+facts: a `lifecycle-recheck` outcome remains `temporal-correlation` even during
+detailed capture. Native prose never upgrades attribution.
 
 The always-current `submissionNative` fact reports `submissionScopes`,
 `maxPendingNativeObservations`, `currentPendingNativeObservations`,

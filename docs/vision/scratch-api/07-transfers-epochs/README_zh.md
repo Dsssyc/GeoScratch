@@ -230,7 +230,10 @@ runtime `submissionScopes` policy，在 readback target 下观察 encoder creati
 copy encoding、encoder finish 与 queue submit。Copy observation 与 buffer
 mapping 独立 settle；只有两项适用 outcome 都成功后才暴露 bytes。使用
 `submissionScopes: 'off'` 时，copy provenance 明确为 `unobserved`；成功 map
-不会被描述成 validation acknowledgement。
+不会被描述成 validation acknowledgement。当前为 `indeterminate` 的 source
+content 会以 `SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE` 在 staging
+allocation 或 encoder work 前失败；即使 operation 在迟到 submission failure
+settle 前捕获了相同 epoch，也不能继续读取。
 
 ordered readback 不创建第二次 copy 或 observation。暴露 mapped bytes 前，它
 await 关联的 `SubmittedWork.nativeOutcome`。`observed-failed` 或
@@ -619,6 +622,7 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_IN_PROGRESS'
     | 'SCRATCH_READBACK_CANCELLED'
     | 'SCRATCH_READBACK_OPERATION_DISPOSED'
+    | 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE'
     | 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE'
     | 'SCRATCH_READBACK_SOURCE_EPOCH_STALE'
 ```

@@ -156,6 +156,10 @@ the method returns. Every Scratch error scope is popped in reverse order before
 return or throw, while its settlement Promise is retained and immediately
 observed without moving queue calls into a microtask.
 
+Ordered-readback ownership claims are part of that preflight. A busy/disposed
+claim fails before observation scopes; if observation reservation itself fails,
+all acquired claims are released before encoder or queue work.
+
 Runtime diagnostics policy is `submissionScopes: 'summary' | 'off'`. The
 default `summary` mode reserves one finite owner and opens one constant-size
 validation/internal/OOM bundle for the complete effectful attempt. It reports
@@ -180,13 +184,16 @@ fact in fixed stage/issue order. It does not reject away simultaneous evidence.
 `SubmittedWork.report` remains the immutable synchronous preflight report and
 is never rewritten after return.
 
-`SubmittedWork.done` joins native observation and
-`queue.onSubmittedWorkDone()`. It rejects with one structured submission
-diagnostic when either boundary proves failure or observation itself cannot
-settle. It does not wait for readback `mapAsync()`, mapped-range access, host
-copy, retention, mapped leases, cancellation, or cleanup. Queue completion is
-still enclosing-family evidence and cannot identify one command or turn an
-independently successful mapping into failure.
+`SubmittedWork.done` joins native observation,
+`queue.onSubmittedWorkDone()`, and runtime/device lifecycle until queue
+completion settles. It rejects with one structured submission diagnostic when
+an applicable boundary proves failure or observation itself cannot settle. A
+late lifecycle event is `lifecycle-recheck` with `temporal-correlation`
+attribution, never `exact-operation`, and is deduplicated when native settlement
+already retained it. `done` does not wait for readback `mapAsync()`, mapped-range
+access, host copy, retention, mapped leases, cancellation, or cleanup. Queue
+completion is still enclosing-family evidence and cannot identify one command
+or turn an independently successful mapping into failure.
 
 Per-location detail exists only in finite diagnostics capture:
 
@@ -214,6 +221,10 @@ only writes whose allocation and produced epoch are still current become
 `indeterminate`. Epochs and historical ledgers never roll back. A later
 acknowledged producer protects or recovers the newer epoch; Surface presentation
 targets are excluded from persistent indeterminate state.
+
+If replay stops on a later synchronous native exception and no `SubmittedWork`
+is returned, the same native-settlement guard covers only the successfully
+replayed action prefix. Failed and unreplayed actions publish no write effect.
 
 ### Resize Between Construction And Submission
 
@@ -254,7 +265,7 @@ Consecutive uploads do not create empty command buffers. Skipped commands, skipp
 
 `SubmittedWork.commandBuffers` contains every real segment in physical queue order. Upload-only work has an empty command-buffer array but still registers completion after the final queue write. Effect-free work creates no encoder or queue action and uses an already-resolved `done` promise. See ADR-029.
 
-Every resolved upload revalidates its live data range and required queue method before encoder creation. Once replay begins, the builder is non-retryable: an unexpected synchronous queue failure cannot duplicate earlier actions, and only successfully enqueued actions commit their prepared logical effects.
+Every resolved upload revalidates its live data range and required queue method before encoder creation. Once replay begins, the builder is non-retryable: an unexpected synchronous queue failure cannot duplicate earlier actions, and only successfully enqueued actions commit their prepared logical effects. Those committed prefix effects remain guarded by the attempt's native settlement even when `submit()` throws.
 
 ### External Image Queue Actions
 
@@ -268,7 +279,7 @@ Like buffer and texture uploads, it ends a preceding encoder segment and separat
 
 All external uploads are preflighted before the first encoder or queue side effect. Preparation simulates only non-empty target writes and restores live state before replay. Replay calls `GPUQueue.copyExternalImageToTexture()` at the action's exact position and commits the prepared target effect only after the native queue call succeeds. A zero-width or zero-height action stays in the physical timeline but carries no target effect, resource access, producer epoch, or simulated readiness.
 
-If the native call throws synchronously, replay stops. Earlier successful actions remain committed, the failed and later actions do not commit effects, and the builder remains non-retryable. Because `submit()` throws and returns no `SubmittedWork`, staging buffers for unreplayed readbacks are destroyed immediately; staging already referenced by a submitted command buffer is destroyed after `queue.onSubmittedWorkDone()` settles. The native exception is wrapped by the external-image command diagnostic contract rather than converted into a generic queue callback failure. See ADR-030.
+If the native call throws synchronously, replay stops. Earlier successful actions remain committed and attached to the attempt's native-settlement indeterminacy guard; the failed and later actions do not commit effects, and the builder remains non-retryable. Because `submit()` throws and returns no `SubmittedWork`, staging buffers for unreplayed readbacks are destroyed immediately; staging already referenced by a submitted command buffer is destroyed after `queue.onSubmittedWorkDone()` settles. The native exception is wrapped by the external-image command diagnostic contract rather than converted into a generic queue callback failure. See ADR-030.
 
 ## Resolved Readiness Execution
 

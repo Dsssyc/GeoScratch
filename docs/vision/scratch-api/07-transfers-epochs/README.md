@@ -236,7 +236,11 @@ creation, copy encoding, encoder finish, and queue submit under a readback
 target. Copy observation and buffer mapping settle independently, and bytes are
 exposed only after both applicable outcomes succeed. With
 `submissionScopes: 'off'`, copy provenance is explicitly `unobserved`; a
-successful map is not described as validation acknowledgement.
+successful map is not described as validation acknowledgement. Current
+`indeterminate` source content fails with
+`SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE` before staging allocation or
+encoder work, including when the operation captured the same epoch before a
+delayed submission failure settled.
 
 An ordered readback does not create a second copy or observation. Before mapped
 bytes are exposed, it awaits the associated `SubmittedWork.nativeOutcome`. An
@@ -629,6 +633,7 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_IN_PROGRESS'
     | 'SCRATCH_READBACK_CANCELLED'
     | 'SCRATCH_READBACK_OPERATION_DISPOSED'
+    | 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE'
     | 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE'
     | 'SCRATCH_READBACK_SOURCE_EPOCH_STALE'
 ```

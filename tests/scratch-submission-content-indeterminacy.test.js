@@ -115,6 +115,83 @@ describe('scratch submission content indeterminacy', () => {
         expect(target.contentEpoch).to.equal(2)
     })
 
+    it('guards partial replay writes when a later queue action throws synchronously', async () => {
+
+        const fixture = await createFixture()
+        const target = await fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const copyTarget = await fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const copy = fixture.runtime.createCopyCommand({
+            source: { resource: target, contentEpoch: 1 },
+            target: copyTarget,
+            byteLength: 16,
+            whenMissing: 'throw',
+        })
+        const queueFailure = new Error('later queue submit throws')
+        fixture.fakeOptions.deferErrorScopePops = true
+        fixture.errors.failNext('writeBuffer', 'validation', new Error('partial upload validation'))
+        fixture.errors.throwNext('submit', queueFailure)
+
+        expect(() => fixture.runtime.submission()
+            .upload(createUpload(fixture.runtime, target, 1))
+            .copy(copy)
+            .submit()
+        ).to.throw(queueFailure)
+        expect(target.state).to.equal('ready')
+        expect(target.contentEpoch).to.equal(1)
+        expect(copyTarget.state).to.equal('empty')
+        expect(copyTarget.contentEpoch).to.equal(0)
+
+        settlePendingScopes(fixture)
+        for (let attempt = 0; attempt < 20 && target.state === 'ready'; attempt++) {
+            await Promise.resolve()
+        }
+
+        expect(target.state).to.equal('indeterminate')
+        expect(target.contentEpoch).to.equal(1)
+        expect(copyTarget.state).to.equal('empty')
+        expect(copyTarget.contentEpoch).to.equal(0)
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative.currentPendingNativeObservations)
+            .to.equal(0)
+    })
+
+    it('hard-rejects direct readback of indeterminate content before staging allocation', async () => {
+
+        const fixture = await createFixture()
+        const target = await fixture.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        fixture.fakeOptions.deferErrorScopePops = true
+        fixture.errors.failNext('writeBuffer', 'validation', new Error('direct source validation'))
+        const failed = fixture.runtime.submission()
+            .upload(createUpload(fixture.runtime, target, 1))
+            .submit()
+        const readback = fixture.runtime.createReadback({ source: target })
+        settlePendingScopes(fixture)
+        await expectScratchDiagnostic(() => failed.done, {
+            code: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
+            phase: 'submission',
+        })
+        expect(target.state).to.equal('indeterminate')
+        fixture.fakeOptions.deferErrorScopePops = false
+        const bufferCount = fixture.calls.buffers.length
+        const encoderCount = fixture.calls.commandEncoders.length
+
+        await expectScratchDiagnostic(() => readback.toBytes(), {
+            code: 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE',
+            phase: 'readback',
+        })
+        expect(fixture.calls.buffers).to.have.length(bufferCount)
+        expect(fixture.calls.commandEncoders).to.have.length(encoderCount)
+        expect(readback.state).to.equal('failed')
+    })
+
     it('does not let a delayed failure poison a later confirmed writer', async () => {
 
         const fixture = await createFixture()

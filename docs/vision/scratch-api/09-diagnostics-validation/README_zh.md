@@ -553,7 +553,9 @@ settlement、queue completion 与 lifecycle recheck。
 指向一个 scoped location，但不能证明该 location 内部哪次 native call 导致
 错误。Queue completion 同样只是 family evidence。OOM scope 证明其
 submission/readback family 捕获了 OOM，不证明某一个 command 或 resource 独自
-耗尽 physical memory。Native prose 绝不提升 attribution。
+耗尽 physical memory。Device loss 与 runtime disposal 是 runtime-wide
+lifecycle fact：`lifecycle-recheck` outcome 即使在 detailed capture 中也保持
+`temporal-correlation`。Native prose 绝不提升 attribution。
 
 Always-current `submissionNative` fact 报告 `submissionScopes`、
 `maxPendingNativeObservations`、`currentPendingNativeObservations`、

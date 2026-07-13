@@ -120,8 +120,9 @@ per effectful submission. `off` opens no submission scopes and reports
 observations and fails before native effects when exhausted.
 
 `SubmittedWork.nativeOutcome` always resolves to an immutable serializable
-result. `SubmittedWork.done` joins native observation and queue completion; it
-rejects structurally if either boundary fails, but does not wait for readback
+result. `SubmittedWork.done` joins native observation, queue completion, and
+runtime/device lifecycle until that completion boundary settles; it rejects
+structurally if any applicable boundary fails, but does not wait for readback
 mapping or host copy. A delayed failure marks only still-current potential
 writes `indeterminate`, never rolls an epoch back, and cannot poison content
 already advanced by a later producer.
@@ -171,8 +172,10 @@ const orderedBytes = await ordered.result({ after: submitted }).toBytes()
 await submitted.done
 ```
 
-`SubmittedWork.done` joins submission native observation and replayed queue-work
-completion; it does not cover mapping or host copy.
+`SubmittedWork.done` joins submission native observation, replayed queue-work
+completion, and lifecycle until that completion settles; it does not cover
+mapping or host copy. Direct readback rejects current `indeterminate` source
+content before staging allocation.
 Runtime options `maxPendingOperations` and `maxStagingBytes` bound current
 readback ownership. Mapping validation is reported structurally as
 `SCRATCH_READBACK_MAPPING_VALIDATION_FAILED`; native message prose is evidence,

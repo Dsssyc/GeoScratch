@@ -153,6 +153,10 @@ action 按声明的物理顺序发生，最后方法才返回。所有 Scratch e
 return 或 throw 前按逆序 pop，其 settlement Promise 被保留并立即观察，但 queue
 call 不会被移入 microtask。
 
+Ordered-readback ownership claim 也属于该 preflight。busy/disposed claim 会在
+observation scope 前失败；若 observation reservation 本身失败，所有已取得 claim
+都会在 encoder 或 queue work 前释放。
+
 Runtime diagnostics policy 是 `submissionScopes: 'summary' | 'off'`。默认
 `summary` mode 为完整 effectful attempt 预留一个有限 owner，并打开一个常数
 规模的 validation/internal/OOM bundle。它报告
@@ -176,12 +180,15 @@ Outcome 按固定 stage/issue 顺序保留有界 locations 与每项 retained in
 failure fact，不会通过 reject 丢掉并发证据。`SubmittedWork.report` 仍是 immutable
 synchronous preflight report，return 后绝不改写。
 
-`SubmittedWork.done` 联合 native observation 与
-`queue.onSubmittedWorkDone()`。任一边界证明失败，或 observation 本身无法
-settle 时，它以一个结构化 submission diagnostic reject。它不等待 readback
-`mapAsync()`、mapped-range access、host copy、retention、mapped leases、
-cancellation 或 cleanup。Queue completion 仍只是 enclosing-family evidence，
-不能定位唯一 command，也不能把独立成功的 mapping 改写为失败。
+`SubmittedWork.done` 联合 native observation、`queue.onSubmittedWorkDone()`，
+以及 queue completion 结算前的 runtime/device lifecycle。任一适用边界证明失败，
+或 observation 本身无法 settle 时，它以一个结构化 submission diagnostic reject。
+迟到的 lifecycle event 使用 `lifecycle-recheck` 与 `temporal-correlation`
+attribution，永远不能升级为 `exact-operation`；若 native settlement 已保留同一
+outcome，则不重复记录 incident。`done` 不等待 readback `mapAsync()`、
+mapped-range access、host copy、retention、mapped leases、cancellation 或
+cleanup。Queue completion 仍只是 enclosing-family evidence，不能定位唯一
+command，也不能把独立成功的 mapping 改写为失败。
 
 Per-location detail 只存在于有限 diagnostics capture:
 
@@ -208,6 +215,10 @@ standalone/pass command 与 queue action 建立 scope。它可以把
 与 produced epoch 仍为 current 的 write 才变成 `indeterminate`。Epoch 与历史
 ledger 永不回滚。后续 acknowledged producer 会保护或恢复更新的 epoch；Surface
 presentation target 不进入持久 indeterminate state。
+
+若后续同步 native exception 令 replay 中止且没有返回 `SubmittedWork`，同一个
+native-settlement guard 只覆盖已经成功 replay 的 action prefix；失败和未 replay
+action 不发布 write effect。
 
 ### 构造与提交之间的 Resize
 
@@ -248,7 +259,7 @@ submit(render + readback)
 
 `SubmittedWork.commandBuffers` 按物理 queue 顺序包含每个真实 segment。upload-only work 的 command-buffer array 为空，但仍在最后一次 queue write 后注册 completion。effect-free work 不创建 encoder 或 queue action，并使用已 resolve 的 `done` promise。见 ADR-029。
 
-每个 resolved upload 都会在 encoder 创建前重新校验 live data range 与所需 queue method。replay 一旦开始，builder 就不可重试: 意外的同步 queue failure 不能重复先前 action，且只有成功入队的 action 才提交其 prepared logical effects。
+每个 resolved upload 都会在 encoder 创建前重新校验 live data range 与所需 queue method。replay 一旦开始，builder 就不可重试: 意外的同步 queue failure 不能重复先前 action，且只有成功入队的 action 才提交其 prepared logical effects。即使 `submit()` 随后 throw，这些已提交的 prefix effect 仍由该 attempt 的 native settlement guard 覆盖。
 
 ### External Image Queue Actions
 

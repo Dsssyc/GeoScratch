@@ -546,6 +546,39 @@ describe('scratch submission native integration', () => {
             .to.include({ currentEffectfulSubmittedWork: 0 })
     })
 
+    it('keeps device loss observable after native scopes settle and before queue completion', async () => {
+
+        const fixture = await createCopyFixture({
+            fakeOptions: { deferSubmittedWorkDone: true },
+        })
+        const submitted = fixture.runtime.submission().upload(fixture.upload).submit()
+
+        expect((await submitted.nativeOutcome).status).to.equal('observed-succeeded')
+        expect(fixture.source.state).to.equal('ready')
+        expect(fixture.source.contentEpoch).to.equal(1)
+        fixture.errors.loseDevice({
+            reason: 'destroyed',
+            message: 'late raw device loss must be omitted',
+        })
+        await Promise.resolve()
+        fixture.readbacks.resolveQueueCompletion(0)
+
+        const failure = await expectScratchDiagnostic(() => submitted.done, {
+            code: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+            phase: 'submission',
+        })
+        expect(failure.incident).to.include({
+            kind: 'submission-failure',
+            attribution: 'temporal-correlation',
+            failureStage: 'lifecycle-recheck',
+        })
+        expect(JSON.stringify(failure.diagnostic)).not.to.include('late raw device loss')
+        expect(fixture.source.state).to.equal('indeterminate')
+        expect(fixture.source.contentEpoch).to.equal(1)
+        expect(fixture.runtime.diagnostics.snapshot().submissionNative)
+            .to.include({ currentEffectfulSubmittedWork: 0 })
+    })
+
     it('selects native stage order over reverse Promise settlement order', async () => {
 
         const fixture = await createCopyFixture({
@@ -689,6 +722,10 @@ describe('scratch submission native integration', () => {
             code: 'SCRATCH_RUNTIME_DISPOSED',
             phase: 'submission',
         })
+        expect(fixture.runtime.diagnostics.incidents({ submissionId: submitted.id }).filter(
+            incident => incident.kind === 'submission-failure' &&
+                incident.failureStage === 'lifecycle-recheck'
+        )).to.have.length(1)
     })
 
     it('returns the exact primary incident when history capacities are zero', async () => {
