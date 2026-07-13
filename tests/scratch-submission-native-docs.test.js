@@ -209,6 +209,11 @@ describe('scratch submission native outcome documentation', () => {
             'review',
             'scratch-submission-native-final-parity-audit.md'
         )
+        const integration = read(
+            'docs',
+            'review',
+            'scratch-dev-feature-provenance-integration-audit.md'
+        )
 
         for (const marker of [
             'a69c79a2f6789330f108aff5031a6d5e11fd59c4',
@@ -223,7 +228,7 @@ describe('scratch submission native outcome documentation', () => {
             expect(runner, marker).to.include(marker)
         }
         for (const marker of [
-            'Status: Complete on the feature branch',
+            'Status: Complete and integrated into `dev-feature`',
             '5/5',
             '17/17',
             '14/14',
@@ -234,6 +239,16 @@ describe('scratch submission native outcome documentation', () => {
             'no remaining correctness',
         ]) {
             expect(audit, marker).to.include(marker)
+        }
+        for (const marker of [
+            '71717c4',
+            'b9cd70d',
+            '0057b88',
+            '635 passing / 7 failing',
+            'byte-for-byte identical',
+            'Rejected as a stale rollback',
+        ]) {
+            expect(integration, marker).to.include(marker)
         }
     })
 

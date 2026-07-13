@@ -1,7 +1,7 @@
 # Scratch Submission Native Final Parity Audit / Scratch Submission Native 最终事实核对
 
 Date: 2026-07-13
-Status: Complete on the feature branch
+Status: Complete and integrated into `dev-feature`
 Decision: ADR-035
 
 ## Fixed Baseline / 固定基线
@@ -11,7 +11,7 @@ Decision: ADR-035
 - Strict-review implementation checkpoint / 严格复审实现检查点:
   `d200e26cd5907d58fc13e7da9f57709d681b1eb9`
 - Audit target / 审计目标:
-  `socu/scratch-submission-native-provenance`
+  `dev-feature`
 
 The baseline is authoritative for queue order, segmentation, partial replay,
 readiness, epochs, queries, readback, pipeline/binding, native copy, external
@@ -185,8 +185,8 @@ snapshots are retained in
 No source-backed Goal-start behavior is silently missing. Preserved behavior is
 present on the TypeScript path; changed behavior is explicitly superseded by
 ADR-035 and tested as the clean target state. There is no remaining correctness,
-architecture, security, performance, or public-contract blocker on the feature
-branch.
+architecture, security, performance, or public-contract blocker on
+`dev-feature`.
 
 Remaining deferred native families are explicit rather than mislabeled:
 
@@ -196,5 +196,7 @@ Remaining deferred native families are explicit rather than mislabeled:
 - raw `runtime.device` / `runtime.queue` activity
 - persistent sampler/query-set/bind-layout acknowledgement
 
-The branch stops here. Merge, push, branch deletion, worktree removal, and
-legacy example migration require separate user approval.
+The verified feature branch was merged into local `dev-feature` after explicit
+user approval. The integration and discarded stale-vision diff are recorded in
+`scratch-dev-feature-provenance-integration-audit.md`. No push or legacy example
+migration is implied by that local integration.

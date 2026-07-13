@@ -1,7 +1,7 @@
 # Scratch Readback Staging And Mapping Performance
 
 Date: 2026-07-12
-Status: Final verification reproduced on the feature branch
+Status: Final verification integrated into `dev-feature`
 
 ## Reproduction
 

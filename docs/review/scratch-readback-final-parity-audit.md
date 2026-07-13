@@ -1,7 +1,7 @@
 # Scratch Readback Final Parity Audit / Scratch Readback 最终事实核对
 
 Date: 2026-07-12
-Status: Complete on the feature branch
+Status: Complete and integrated into `dev-feature`
 
 ## Fixed Baselines / 固定基线
 
@@ -10,7 +10,7 @@ Status: Complete on the feature branch
 - Goal-start TypeScript baseline / 本 Goal 起点 TypeScript 基线:
   `f3e73062bb352009a2118bf9960de062b1296ebe`
 - Audit target / 审计目标:
-  `socu/scratch-readback-staging-mapping-provenance`
+  `dev-feature`
 
 The JavaScript baseline is authoritative for functionality that existed before
 the TypeScript clean cut. It contains direct `ReadbackOperation`, but no
@@ -122,7 +122,8 @@ ownership accounting is constant-time.
 
 ## Final Gate Record / 最终门禁记录
 
-The feature branch was verified after the final runtime and audit changes:
+The integrated implementation was verified after the final runtime and audit
+changes:
 
 - `git diff --check`: passed
 - `npm test`: 642 passing
