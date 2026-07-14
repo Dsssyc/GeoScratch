@@ -218,15 +218,35 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
 
     const surface: scr.Surface = runtime.createSurface(canvas, {
         format: 'preferred',
+        usage: 0x14,
+        viewFormats: [ 'bgra8unorm-srgb' ],
+        colorSpace: 'display-p3',
+        toneMapping: { mode: 'extended' },
         alphaMode: 'opaque',
         size: { width: 2, height: 2 },
     })
+    const surfaceUsage: GPUTextureUsageFlags = surface.usage
+    const surfaceViewFormats: readonly GPUTextureFormat[] = surface.viewFormats
+    const surfaceColorSpace: PredefinedColorSpace = surface.colorSpace
+    const surfaceToneMapping: Readonly<GPUCanvasToneMapping> | undefined = surface.toneMapping
+    void surfaceUsage
+    void surfaceViewFormats
+    void surfaceColorSpace
+    void surfaceToneMapping
     // @ts-expect-error Surface context ownership is read-only
     surface.context = surface.context
     // @ts-expect-error Surface runtime ownership is read-only
     surface.runtime = runtime
     // @ts-expect-error Surface configuration observations are read-only
     surface.format = 'rgba8unorm'
+    // @ts-expect-error Surface native configuration observations are read-only
+    surface.usage = 0x10
+    // @ts-expect-error Surface native configuration observations are read-only
+    surface.viewFormats = []
+    // @ts-expect-error Surface native configuration observations are read-only
+    surface.colorSpace = 'srgb'
+    // @ts-expect-error Surface native configuration observations are read-only
+    surface.toneMapping = { mode: 'standard' }
     // @ts-expect-error Surface lifecycle observations are read-only
     surface.isDisposed = false
 

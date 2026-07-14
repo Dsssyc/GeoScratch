@@ -62,9 +62,11 @@ Attachment 按实际逻辑 view 校验，而不是只看 parent texture。持久
 `TextureViewSpec` 必须包含 `RENDER_ATTACHMENT` view usage，并满足完整的
 renderable-view shape。归一化后的 view format 是唯一 attachment format；可选
 pass metadata 必须与它精确一致。Color slot 要求 color-renderable format；
-depth/stencil renderable format 只能用于 depth/stencil attachment。显式 Surface view descriptor 必须保留已配置
-format、`2d` single-mip/single-layer all-aspect RGBA view，以及 `0` 或
-`RENDER_ATTACHMENT` usage。带 `TRANSIENT_ATTACHMENT` usage 的 view 对 color
+depth/stencil renderable format 只能用于 depth/stencil attachment。显式 Surface
+view descriptor 可以使用 configured format 或一个已配置的 compatible view
+format。它仍必须是 `2d` single-mip/single-layer all-aspect RGBA view；usage 为
+`0` 或一个包含 `RENDER_ATTACHMENT` 的 configured Surface usage subset。带
+`TRANSIENT_ATTACHMENT` usage 的 view 对 color
 以及每个可写 depth/stencil aspect 都要求 `load: 'clear'` 和
 `store: 'discard'`。Scratch 会把它们作为 transient default，并拒绝冲突的显式
 值。提供的 `depthClear` 必须有限且位于 `[0, 1]`。
@@ -81,12 +83,15 @@ view，并要求单个 mip 与单个选定 array layer。`2d-array` view 通过
 省略 color 与 depth/stencil attachment。Submission preflight 要求 color
 attachment region pairwise disjoint。同一 texture 上选择相同 mip 与 array layer，
 或相同 3D `depthSlice` 的 view 会重叠；不同 layer 与 slice 仍然合法。同一个
-canvas context 在 Surface 创建阶段另有单一 live owner 门禁。Submission 仍会
-在 pass 创建与提交阶段要求精确 owner，并把 current
-`GPUCanvasContext.getConfiguration()` 的 device、format、alpha mode、
-render-attachment usage 与 canvas size 同 Surface facts 比较。Forged alias 或
-外部 configuration drift 会在借用 current texture 或创建 encoder 前失败。
-Submission 在检查 region overlap 时仍会防御性比较 Surface context identity。
+canvas context 在 Surface 创建阶段另有单一 live owner 门禁。Pass 创建与提交阶段
+都要求精确 owner，并把完整的 current
+`GPUCanvasContext.getConfiguration()` 及 canvas size 同私有 Surface facts 比较。
+Submission plan 校验完成后，所有 executable Surface attachment 都会在创建任何
+command encoder 前 prepare。该 immutable lease 记录 Surface identity、format 与
+configuration version；之后受观察的 `attachment-view` operation 借用 current
+texture 并创建 view，不会再次读取 configuration。因此 forged alias 或外部
+configuration drift 会在 presentation/encoder effect 前失败。Submission 在检查
+region overlap 时仍会防御性比较 Surface context identity。
 
 Pass spec 不存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
 

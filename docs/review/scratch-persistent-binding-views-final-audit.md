@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-nineteenth-review fixes; clean acceptance and independent re-review pending
+Status: Post-twentieth-review fixes; clean acceptance and independent re-review pending
 Decisions: ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -11,7 +11,7 @@ Decisions: ADR-036, ADR-037, ADR-038, ADR-039
 - Audit target: `socu/scratch-persistent-binding-views-v1`
 - Structural audit: `node tests/audits/scratch-persistent-binding-views-final-parity.mjs`
 - Final acceptance: `SCRATCH_FINAL_AUDIT=1 node tests/audits/scratch-persistent-binding-views-final-parity.mjs`
-- Native authority: [WebGPU resource binding](https://gpuweb.github.io/gpuweb/#resource-binding), [texture views](https://gpuweb.github.io/gpuweb/#texture-view-creation), [copies](https://gpuweb.github.io/gpuweb/#copies), [query sets](https://gpuweb.github.io/gpuweb/#query-sets), and [Web IDL integer conversion](https://webidl.spec.whatwg.org/#es-integer-types)
+- Native authority: [WebGPU resource binding](https://gpuweb.github.io/gpuweb/#resource-binding), [texture views](https://gpuweb.github.io/gpuweb/#texture-view-creation), [canvas configuration](https://gpuweb.github.io/gpuweb/#canvas-configuration), [copies](https://gpuweb.github.io/gpuweb/#copies), [query sets](https://gpuweb.github.io/gpuweb/#query-sets), and [Web IDL integer conversion](https://webidl.spec.whatwg.org/#es-integer-types)
 
 The executable audit uses the TypeScript compiler AST to derive exports and every
 public exported-class constructor, property, method, getter, setter, parameter type,
@@ -24,8 +24,8 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 406
-referenced behavior tests; requires the complete suite to report exactly 829 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 417
+referenced behavior tests; requires the complete suite to report exactly 840 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -498,8 +498,9 @@ Resolved twelfth review findings:
    buffer upload offset/length, direct and ordered readback source offset/size, and vertex
    buffer offsets all enforce the relevant 4-byte rule before native or staging effects.
 4. The actual attachment view format is authoritative. Optional pass format metadata must
-   match it, and an explicit Surface view descriptor must preserve the configured format,
-   2D single-subresource shape, all aspect, RGBA swizzle, and render-attachment usage.
+   match it, and an explicit Surface view descriptor must select the configured format or
+   a configured compatible view format, preserve the 2D single-subresource shape, all
+   aspect and RGBA swizzle, and retain render-attachment usage.
 5. Raw Buffer/Texture descriptors reject noncanonical integer, flags, label, and boolean
    values before native issue. Retained logical descriptors can no longer differ from the
    values Web IDL would otherwise coerce for the native call.
@@ -651,6 +652,35 @@ Resolved nineteenth review findings:
 These findings bring the reproduced or source-verified reviewer total to 61. The
 `getConfiguration()`-driven external-drift and private-identity cleanup regressions are
 recorded as same-root proactive coverage rather than additional reviewer findings.
+
+The nineteenth-review fixes were accepted on clean checkpoint `52b14e4`. The next
+isolated review reported the five Surface authority and submission-order defects below.
+
+Resolved twentieth review findings:
+
+1. Pass validation no longer brands a Surface through replaceable public methods or
+   public context/runtime fields. Exact receiver state and context ownership come from
+   module-private weak records; a forged alias with shadowed methods fails before pass,
+   presentation, or encoder effects.
+2. `Surface.dispose()` now commits terminal lifecycle state, unregisters, unconfigures,
+   and releases the original context claim entirely through private state. Frozen or
+   otherwise non-writable public observations cannot strand a live claim.
+3. `Surface.configure()` no longer publishes a native candidate through public field
+   assignments. It commits one private state record only after native configure,
+   complete configuration observation, and exact canvas-size observation succeed;
+   observation failure restores and verifies the previous native/canvas state.
+4. Surface configuration validation now covers device, format, usage, view formats,
+   color space, optional tone mapping, alpha mode, and canvas size. Iterable and
+   dictionary inputs are snapshotted, observations are immutable, and pass view
+   descriptors may express configured compatible formats and native-valid usage subsets.
+5. Submission prepares immutable configuration-version leases for every executable
+   Surface after validation and before creating any command encoder. Surface current
+   texture/view creation remains an observed `attachment-view` operation, but descriptor
+   lowering performs no late public call or second configuration query.
+
+These findings bring the reproduced or source-verified reviewer total to 66. Additional
+rollback-verification, canvas-coercion, immutable view-descriptor, and complete native
+configuration cases are same-root proactive coverage rather than reviewer findings.
 
 ## Verification Record
 
@@ -980,6 +1010,47 @@ Post-nineteenth-review pre-commit verification:
   identities pending
 - `git diff --check` passed; clean-commit acceptance and a new isolated no-findings
   review remain required
+
+Clean checkpoint acceptance at `52b14e443b6b9b8464eaa99462d5a0f5f0e5c3d8`:
+
+- runner verification was `acceptance` / `passed`; initial and final repository
+  evidence named the same exact commit and an empty working tree
+- runner-owned typecheck, complete build, and diff checking passed in 6,677 ms,
+  5,287 ms, and 16 ms
+- focused acceptance passed 406/406; the complete suite reported 829 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- both 20,000-cycle steady-state phases passed at observed 1.77 and 1.49 microseconds
+  per cycle
+- Chrome 150.0.7871.115 on Apple Metal 3 passed the headed persistent-binding proof;
+  all 11 ordinary examples passed with zero matrix failures
+- the managed Vite server started in 234 ms, completed its 22,139 ms lifecycle, stopped
+  cleanly, and left port 4173 closed; the unavailable target produced the required
+  non-zero `ERR_CONNECTION_REFUSED` result
+- the subsequent twentieth isolated review found the five Surface authority and
+  submission-order issues recorded above, so this checkpoint is evidence history rather
+  than final approval
+
+Post-twentieth-review pre-commit verification:
+
+- the five reviewer scenarios first produced six expected focused failures around
+  public-method branding, frozen observation commits, incomplete configuration facts,
+  and late configuration reads; two same-root descriptor/diagnostic cases also failed
+  before implementation
+- Surface and render-submission regressions now pass 53/53, including verified native
+  rollback, silently coerced canvas size rejection, two-Surface pre-encoder preparation,
+  immutable view descriptors, and configured alternate view-format execution
+- focused acceptance passed 417/417 with zero pending cases and every newly required
+  behavior title present; `npm test` reported exactly 840 passing with only the two
+  acceptance/browser gate identities pending
+- fixed-history structural parity passed every capability, behavior-title, bilingual
+  documentation, ADR, production-emit, and baseline/historical contract while correctly
+  reporting `incomplete` on the dirty tree
+- the exact submission-native inventory passed all 43 classified call sites; Surface
+  configuration observation remains one deterministic preflight site, while current
+  texture and view creation are attributed to the submission `attachment-view` stage
+- `npm run typecheck` passed both the TypeScript 6 and canonical TypeScript 5.9/WebGPU
+  declaration consumers; package build and generated declarations passed
+- clean-commit acceptance and a new isolated exact no-findings review remain required
 
 The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.

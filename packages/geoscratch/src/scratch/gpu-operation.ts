@@ -231,6 +231,17 @@ export type ScratchSubmissionNativeLocation =
         allocationVersion: number
     }>
     | Readonly<{
+        kind: 'render-attachment'
+        submissionId: string
+        stepIndex: number
+        passId: string
+        attachmentKind: 'color'
+        attachmentIndex: number
+        surfaceId: string
+        surfaceFormat: GPUTextureFormat
+        configurationVersion: number
+    }>
+    | Readonly<{
         kind: 'standalone-command'
         submissionId: string
         stepIndex: number
@@ -1337,6 +1348,15 @@ function assertSubmissionNativeLocation(
                 throw new TypeError(`Unsupported render attachment kind: ${String(location.attachmentKind)}`)
             }
             assertNonNegativeInteger(location.attachmentIndex, 'attachmentIndex')
+            if ('surfaceId' in location) {
+                if (location.attachmentKind !== 'color') {
+                    throw new TypeError('Surface render attachments must be color attachments.')
+                }
+                assertNonEmptyString(location.surfaceId, 'surfaceId')
+                assertNonEmptyString(location.surfaceFormat, 'surfaceFormat')
+                assertNonNegativeInteger(location.configurationVersion, 'configurationVersion')
+                return
+            }
             assertNonEmptyString(location.viewSpecHash, 'viewSpecHash')
             assertNonEmptyString(location.resourceId, 'resourceId')
             assertNonNegativeInteger(location.allocationVersion, 'allocationVersion')

@@ -10,8 +10,8 @@ const nativeCalls = Object.freeze([
     [ 'GPUDevice.createCommandEncoder', /\b(?:device|this\.runtime\.device)\.createCommandEncoder\(/ ],
     [ 'GPUDevice.createBindGroup', /\b(?:this|bindSet)\.runtime\.device\.createBindGroup\(/ ],
     [ 'GPUTexture.createView', /(?:\.gpuTexture|\.getCurrentTexture\(\))\.createView\(/ ],
-    [ 'GPUCanvasContext.getConfiguration', /\b(?:surface|identity)\.context\.getConfiguration\(/ ],
-    [ 'GPUCanvasContext.getCurrentTexture', /\b(?:this|identity)\.context\.getCurrentTexture\(/ ],
+    [ 'GPUCanvasContext.getConfiguration', /\b(?:context|state\.context)\.getConfiguration\(/ ],
+    [ 'GPUCanvasContext.getCurrentTexture', /\b(?:this|identity|state)\.context\.getCurrentTexture\(/ ],
     [ 'GPUCommandEncoder.finish', /\bencoder!?\.finish\(/ ],
     [ 'GPUCommandEncoder.copyBufferToBuffer', /\b(?:commandEncoder|encoder)\.copyBufferToBuffer\(/ ],
     [ 'GPUCommandEncoder.copyTextureToTexture', /\bcommandEncoder\.copyTextureToTexture\(/ ],
@@ -58,14 +58,13 @@ describe('scratch submission native source audit', () => {
         const callSites = scanNativeCallSites(scratchRoot)
         const inventoryRows = audit.match(/^\| N\d+ \|.*\|$/gm) ?? []
 
-        expect(callSites).to.have.length(42)
+        expect(callSites).to.have.length(43)
         expect(countByFile(callSites)).to.deep.equal({
             'packages/geoscratch/src/scratch/binding.ts': 2,
             'packages/geoscratch/src/scratch/command.ts': 23,
-            'packages/geoscratch/src/scratch/pass.ts': 1,
             'packages/geoscratch/src/scratch/readback.ts': 4,
             'packages/geoscratch/src/scratch/submission.ts': 9,
-            'packages/geoscratch/src/scratch/surface.ts': 2,
+            'packages/geoscratch/src/scratch/surface.ts': 4,
             'packages/geoscratch/src/scratch/texture.ts': 1,
         })
         expect(inventoryRows).to.have.length(callSites.length)
@@ -100,14 +99,19 @@ describe('scratch submission native source audit', () => {
         expect(submission).to.match(
             /observation\.issue\('command-encode', location, \(\) => \{[\s\S]{0,500}issue\(\)/
         )
-        expect(submission.match(
-            /observation\.issue\(\s*'attachment-view',[\s\S]{0,500}\(\) => createNativeTextureView/g
-        )).to.have.length(2)
+        expect(submission.match(/observation\.issue\(\s*'attachment-view'/g)).to.have.length(2)
+        expect(submission).to.match(
+            /observation\.issue\(\s*'attachment-view',[\s\S]{0,650}createNativeTextureView[\s\S]{0,250}createPreparedSurfaceAttachmentView/
+        )
         expect(submission).to.match(
             /nativeObservation\.issue\(\s*'pass-begin',[\s\S]{0,350}\(\) => encoder\.beginRenderPass\(createRenderPassDescriptor/
         )
-        expect(pass).to.include('target.getCurrentTexture().createView(attachment.viewDescriptor)')
-        expect(surface).to.include('return identity.context.getCurrentTexture()')
+        expect(pass).to.not.include('.getCurrentTexture()')
+        expect(surface).to.include('return state.context.getCurrentTexture()')
+        expect(surface).to.include('return state.context.getCurrentTexture().createView(descriptor)')
+        expect(submission).to.match(
+            /const surfaceAttachments = prepareSubmissionSurfaceAttachments\(resolvedPlan\.steps\)[\s\S]{0,450}createSubmissionNativeIssuePlan/
+        )
 
         for (const nativeCall of [
             'device.createCommandEncoder',

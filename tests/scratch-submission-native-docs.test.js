@@ -182,7 +182,7 @@ describe('scratch submission native outcome documentation', () => {
         const browser = read('tests', 'browser', 'scratch-submission-native-provenance.mjs')
 
         for (const marker of [
-            '42 source call sites',
+            '43 source call sites',
             'Chrome 150.0.7871.115',
             'encoder-finish',
             'There is no fabricated',

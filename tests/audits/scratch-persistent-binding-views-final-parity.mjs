@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 406
-const expectedFullSuitePasses = 829
+const expectedFocusedAcceptancePasses = 417
+const expectedFullSuitePasses = 840
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -192,12 +192,14 @@ const capabilityRows = [
         final: hasAll(current.runtime, [ 'static async create', 'createSurface(', 'createSubmission(' ]) &&
             hasAll(current.surface, [
                 'surfaceContextOwners',
+                'surfaceStates',
                 'claimSurfaceContext(',
                 'SCRATCH_SURFACE_CONTEXT_IN_USE',
                 'releaseSurfaceContext(',
                 'assertSurfaceContextOwner(',
                 'assertSurfaceConfigurationCurrent(',
-                "ReturnType<GPUCanvasContext['getConfiguration']>",
+                'captureCurrentSurfaceConfiguration(',
+                'prepareSurfaceAttachment(',
                 'SCRATCH_SURFACE_CONFIGURATION_FAILED',
                 'SCRATCH_SURFACE_UNCONFIGURE_FAILED',
             ]),
@@ -559,9 +561,14 @@ const behaviorTestContracts = [
         'claims each canvas context exclusively until the owning Surface is disposed',
         'releases an uncommitted canvas-context claim after configure fails',
         'rolls back logical and canvas facts after synchronous reconfigure failure',
+        'verifies and rolls back native state when post-configure observation fails',
+        'rejects a silently coerced canvas size without publishing candidate facts',
+        'commits reconfiguration through private state when public observations are frozen',
         'rejects forged Surface aliases before lifecycle or presentation effects',
-        'releases the privately claimed context after public identity and lifecycle drift',
+        'keeps private ownership authoritative when public identity and lifecycle writes are attempted',
         'rejects external canvas-context drift before borrowing a current texture',
+        'rejects every external native configuration field drift against the committed snapshot',
+        'releases ownership when public Surface observations are frozen during disposal',
         'releases Surface ownership even when native unconfigure fails',
         'continues runtime cleanup after Surface unconfigure fails',
     ]),
@@ -598,6 +605,10 @@ const behaviorTestContracts = [
         'revalidates a persistent 3d attachment depthSlice after allocation replacement',
         'rejects overlapping color attachment regions while permitting disjoint 3d slices',
         'rejects a non-owner Surface alias before presentation effects',
+        'rejects a forged Surface alias with shadowed public methods before pass effects',
+        'performs the final Surface configuration read before encoder creation',
+        'preserves native Surface usage, view format, color, and tone-mapping capabilities',
+        'snapshots Surface attachment view descriptors when the PassSpec is created',
         'rejects depth-stencil formats in color attachment slots before encoder creation',
     ]),
     behaviorTestContract('tests/scratch-depth-stencil-attachments.test.js', [

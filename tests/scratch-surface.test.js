@@ -118,6 +118,9 @@ describe('Surface', () => {
             {
                 device,
                 format: 'bgra8unorm',
+                usage: 0x10,
+                viewFormats: [],
+                colorSpace: 'srgb',
                 alphaMode: 'premultiplied',
             },
         ])
@@ -142,6 +145,9 @@ describe('Surface', () => {
         expect(context.configureCalls[1]).to.deep.equal({
             device,
             format: 'rgba8unorm',
+            usage: 0x10,
+            viewFormats: [],
+            colorSpace: 'srgb',
             alphaMode: 'opaque',
         })
 
@@ -150,6 +156,75 @@ describe('Surface', () => {
         expect(surface.isDisposed).to.equal(true)
         expect(runtime.isDisposed).to.equal(false)
         expect(context.unconfigureCalls).to.equal(1)
+    })
+
+    it('expresses and snapshots every native canvas configuration field', async() => {
+
+        const { gpu, device } = createFakeGpu()
+        const { canvas, context } = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const viewFormats = [ 'rgba8unorm-srgb' ]
+        const toneMapping = { mode: 'extended' }
+        const surface = runtime.createSurface(canvas, {
+            format: 'rgba8unorm',
+            usage: 0x14,
+            viewFormats,
+            colorSpace: 'display-p3',
+            toneMapping,
+            alphaMode: 'premultiplied',
+            size: { width: 8, height: 4 },
+        })
+
+        viewFormats[0] = 'bgra8unorm'
+        toneMapping.mode = 'standard'
+
+        expect(context.configureCalls).to.deep.equal([ {
+            device,
+            format: 'rgba8unorm',
+            usage: 0x14,
+            viewFormats: [ 'rgba8unorm-srgb' ],
+            colorSpace: 'display-p3',
+            toneMapping: { mode: 'extended' },
+            alphaMode: 'premultiplied',
+        } ])
+        expect(surface.usage).to.equal(0x14)
+        expect(surface.viewFormats).to.deep.equal([ 'rgba8unorm-srgb' ])
+        expect(surface.colorSpace).to.equal('display-p3')
+        expect(surface.toneMapping).to.deep.equal({ mode: 'extended' })
+        expect(Object.isFrozen(surface.viewFormats)).to.equal(true)
+        expect(Object.isFrozen(surface.toneMapping)).to.equal(true)
+    })
+
+    it('reports invalid Surface configuration inputs through the diagnostic envelope', async() => {
+
+        for (const options of [
+            { format: null },
+            { usage: -1 },
+            { viewFormats: 'rgba8unorm' },
+            { colorSpace: 'linear-srgb' },
+            { toneMapping: { mode: 'filmic' } },
+            { alphaMode: 'straight' },
+            { size: { width: Number.NaN, height: 4 } },
+        ]) {
+            const { gpu } = createFakeGpu()
+            const { canvas, context } = createFakeCanvas()
+            const runtime = await ScratchRuntime.create({ gpu })
+
+            try {
+                runtime.createSurface(canvas, options)
+                throw new Error('expected invalid Surface configuration to fail')
+            } catch (error) {
+                expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                expect(error.diagnostic).to.include({
+                    code: 'SCRATCH_SURFACE_CONFIGURATION_FAILED',
+                    severity: 'error',
+                    phase: 'runtime',
+                })
+                expect(error.diagnostic.actual.reason).to.equal('descriptor-invalid')
+            }
+
+            expect(context.configureCalls).to.have.length(0)
+        }
     })
 
     it('claims each canvas context exclusively until the owning Surface is disposed', async() => {
@@ -286,6 +361,144 @@ describe('Surface', () => {
         expect(surface.getCurrentTexture()).to.equal(context.texture)
     })
 
+    it('verifies and rolls back native state when post-configure observation fails', async() => {
+
+        const { gpu } = createFakeGpu()
+        const { canvas, context } = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const surface = runtime.createSurface(canvas, {
+            format: 'rgba8unorm',
+            size: { width: 4, height: 4 },
+        })
+        const previousConfiguration = context.getConfiguration()
+        const getConfiguration = context.getConfiguration.bind(context)
+        let rejectCandidate = true
+        context.getConfiguration = () => {
+            const configuration = getConfiguration()
+            if (rejectCandidate && configuration?.format === 'bgra8unorm') {
+                rejectCandidate = false
+                return { ...configuration, toneMapping: { mode: 'extended' } }
+            }
+            return configuration
+        }
+
+        try {
+            surface.configure({
+                format: 'bgra8unorm',
+                usage: 0x14,
+                size: { width: 8, height: 8 },
+            })
+            throw new Error('expected Surface configuration observation to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_SURFACE_CONFIGURATION_FAILED',
+                severity: 'error',
+                phase: 'runtime',
+            })
+            expect(error.diagnostic.actual).to.include({
+                reason: 'native-configuration-observation-failed',
+                canvasRestored: true,
+                nativeConfigurationRestored: true,
+            })
+        }
+
+        expect(surface.format).to.equal('rgba8unorm')
+        expect(surface.usage).to.equal(0x10)
+        expect(surface.size).to.deep.equal({ width: 4, height: 4 })
+        expect(canvas.width).to.equal(4)
+        expect(canvas.height).to.equal(4)
+        expect(context.getConfiguration()).to.deep.equal(previousConfiguration)
+        expect(surface.getCurrentTexture()).to.equal(context.texture)
+    })
+
+    it('rejects a silently coerced canvas size without publishing candidate facts', async() => {
+
+        const { gpu } = createFakeGpu()
+        const { canvas, context } = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const surface = runtime.createSurface(canvas, {
+            format: 'rgba8unorm',
+            size: { width: 4, height: 4 },
+        })
+        let physicalWidth = canvas.width
+        Object.defineProperty(canvas, 'width', {
+            get() {
+                return physicalWidth
+            },
+            set(value) {
+                physicalWidth = value === 8 ? 7 : value
+            },
+            configurable: true,
+        })
+
+        try {
+            surface.configure({
+                format: 'bgra8unorm',
+                size: { width: 8, height: 8 },
+            })
+            throw new Error('expected coerced Surface size to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_SURFACE_CONFIGURATION_FAILED',
+                severity: 'error',
+                phase: 'runtime',
+            })
+            expect(error.diagnostic.actual).to.include({
+                reason: 'native-configuration-observation-failed',
+                canvasRestored: true,
+                nativeConfigurationRestored: true,
+            })
+        }
+
+        expect(surface.format).to.equal('rgba8unorm')
+        expect(surface.size).to.deep.equal({ width: 4, height: 4 })
+        expect(canvas.width).to.equal(4)
+        expect(canvas.height).to.equal(4)
+        expect(context.getConfiguration().format).to.equal('rgba8unorm')
+    })
+
+    it('commits reconfiguration through private state when public observations are frozen', async() => {
+
+        const { gpu, device } = createFakeGpu()
+        const { canvas, context } = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const surface = runtime.createSurface(canvas, {
+            format: 'rgba8unorm',
+            size: { width: 4, height: 4 },
+        })
+        Object.freeze(surface)
+
+        surface.configure({
+            format: 'bgra8unorm',
+            usage: 0x14,
+            viewFormats: [ 'bgra8unorm-srgb' ],
+            colorSpace: 'display-p3',
+            toneMapping: { mode: 'extended' },
+            alphaMode: 'premultiplied',
+            size: { width: 8, height: 6 },
+        })
+
+        expect(context.configureCalls.at(-1)).to.deep.equal({
+            device,
+            format: 'bgra8unorm',
+            usage: 0x14,
+            viewFormats: [ 'bgra8unorm-srgb' ],
+            colorSpace: 'display-p3',
+            toneMapping: { mode: 'extended' },
+            alphaMode: 'premultiplied',
+        })
+        expect(surface.format).to.equal('bgra8unorm')
+        expect(surface.usage).to.equal(0x14)
+        expect(surface.viewFormats).to.deep.equal([ 'bgra8unorm-srgb' ])
+        expect(surface.colorSpace).to.equal('display-p3')
+        expect(surface.toneMapping).to.deep.equal({ mode: 'extended' })
+        expect(surface.alphaMode).to.equal('premultiplied')
+        expect(surface.size).to.deep.equal({ width: 8, height: 6 })
+        expect(surface.isConfigured).to.equal(true)
+    })
+
     it('rejects forged Surface aliases before lifecycle or presentation effects', async() => {
 
         const { gpu } = createFakeGpu()
@@ -295,9 +508,10 @@ describe('Surface', () => {
             format: 'rgba8unorm',
             size: { width: 4, height: 4 },
         })
-        const alias = Object.assign(Object.create(owner), {
-            id: 'forged-surface-alias',
-            label: 'forged Surface alias',
+        const alias = Object.create(owner)
+        Object.defineProperties(alias, {
+            id: { value: 'forged-surface-alias', enumerable: true },
+            label: { value: 'forged Surface alias', enumerable: true },
         })
 
         for (const action of [
@@ -333,7 +547,7 @@ describe('Surface', () => {
         expect(context.currentTextureCalls).to.equal(0)
     })
 
-    it('releases the privately claimed context after public identity and lifecycle drift', async() => {
+    it('keeps private ownership authoritative when public identity and lifecycle writes are attempted', async() => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
@@ -344,21 +558,13 @@ describe('Surface', () => {
             size: { width: 4, height: 4 },
         })
 
-        surface.context = drifted.context
-        surface.isConfigured = false
-        surface.isDisposed = true
-
-        try {
-            surface.getCurrentTexture()
-            throw new Error('expected public Surface identity drift to fail')
-        } catch (error) {
-            expect(error).to.be.instanceOf(ScratchDiagnosticError)
-            expect(error.diagnostic).to.include({
-                code: 'SCRATCH_SURFACE_CONTEXT_NOT_OWNED',
-                severity: 'error',
-                phase: 'runtime',
-            })
-        }
+        expect(Reflect.set(surface, 'context', drifted.context)).to.equal(false)
+        expect(Reflect.set(surface, 'isConfigured', false)).to.equal(false)
+        expect(Reflect.set(surface, 'isDisposed', true)).to.equal(false)
+        expect(surface.context).to.equal(context)
+        expect(surface.isConfigured).to.equal(true)
+        expect(surface.isDisposed).to.equal(false)
+        expect(surface.getCurrentTexture()).to.equal(context.texture)
 
         try {
             runtime.createSurface(canvas, { format: 'bgra8unorm' })
@@ -372,6 +578,7 @@ describe('Surface', () => {
 
         expect(surface.isDisposed).to.equal(true)
         expect(context.unconfigureCalls).to.equal(1)
+        expect(context.currentTextureCalls).to.equal(1)
         expect(drifted.context.unconfigureCalls).to.equal(0)
         expect(drifted.context.currentTextureCalls).to.equal(0)
 
@@ -416,6 +623,65 @@ describe('Surface', () => {
 
             expect(context.currentTextureCalls).to.equal(0)
         }
+    })
+
+    it('rejects every external native configuration field drift against the committed snapshot', async() => {
+
+        for (const [ field, value ] of [
+            [ 'usage', 0x14 ],
+            [ 'viewFormats', [ 'rgba8unorm-srgb' ] ],
+            [ 'colorSpace', 'display-p3' ],
+            [ 'toneMapping', { mode: 'extended' } ],
+        ]) {
+            const { gpu, device } = createFakeGpu()
+            const { canvas, context } = createFakeCanvas()
+            const runtime = await ScratchRuntime.create({ gpu })
+            const surface = runtime.createSurface(canvas, {
+                format: 'rgba8unorm',
+                size: { width: 4, height: 4 },
+            })
+            context.configure({
+                device,
+                format: 'rgba8unorm',
+                usage: 0x10,
+                viewFormats: [],
+                colorSpace: 'srgb',
+                toneMapping: { mode: 'standard' },
+                alphaMode: 'opaque',
+                [field]: value,
+            })
+
+            try {
+                surface.getCurrentTexture()
+                throw new Error(`expected external ${field} drift to fail`)
+            } catch (error) {
+                expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                expect(error.diagnostic).to.include({
+                    code: 'SCRATCH_SURFACE_CONFIGURATION_STALE',
+                    severity: 'error',
+                    phase: 'runtime',
+                })
+            }
+
+            expect(context.currentTextureCalls).to.equal(0)
+        }
+    })
+
+    it('releases ownership when public Surface observations are frozen during disposal', async() => {
+
+        const { gpu } = createFakeGpu()
+        const { canvas, context } = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const surface = runtime.createSurface(canvas, { format: 'rgba8unorm' })
+        Object.freeze(surface)
+
+        surface.dispose()
+
+        expect(surface.isDisposed).to.equal(true)
+        expect(surface.isConfigured).to.equal(false)
+        expect(context.unconfigureCalls).to.equal(1)
+        const replacement = runtime.createSurface(canvas, { format: 'bgra8unorm' })
+        expect(replacement.context).to.equal(context)
     })
 
     it('releases Surface ownership even when native unconfigure fails', async() => {

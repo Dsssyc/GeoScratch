@@ -35,6 +35,11 @@ import {
     beginSubmissionNativeObservation,
     compareSubmissionNativeStages,
 } from './submission-native-observation.js'
+import {
+    createPreparedSurfaceAttachmentView,
+    prepareSurfaceAttachment,
+    preparedSurfaceAttachmentFacts,
+} from './surface.js'
 import { TextureResource, createNativeTextureView, isTextureViewSpec } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
@@ -43,6 +48,7 @@ import type { ComputePassSpec, RenderPassNativeAttachments, RenderPassSpec } fro
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
 import type { ContentResource, ResourceState } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
+import type { PreparedSurfaceAttachment, Surface } from './surface.js'
 import type { TextureViewSpec } from './texture.js'
 import type {
     SubmissionNativeIssue,
@@ -208,6 +214,8 @@ type RenderStep = {
     passSpec: RenderPassSpec
     commands: RenderCommand[]
 }
+
+type PreparedSurfaceAttachments = ReadonlyMap<Surface, PreparedSurfaceAttachment>
 
 type ComputeStep = {
     kind: 'compute'
@@ -525,9 +533,14 @@ export class SubmissionBuilder {
                 validateUploadCommandQueueAction(step.command, this.runtime.queue)
             }
         }
+        const surfaceAttachments = prepareSubmissionSurfaceAttachments(resolvedPlan.steps)
 
         const submittedId = `scratch-submitted-${UUID()}`
-        const nativeIssuePlan = createSubmissionNativeIssuePlan(submittedId, resolvedPlan.steps)
+        const nativeIssuePlan = createSubmissionNativeIssuePlan(
+            submittedId,
+            resolvedPlan.steps,
+            surfaceAttachments
+        )
         const commandBuffers: GPUCommandBuffer[] = []
         const queueTimeline: PreparedQueueAction[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
@@ -783,7 +796,6 @@ export class SubmissionBuilder {
                 if (step.disposition === 'skip-pass') continue
                 if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
-                const encoder = getEncoder()
                 const colorWrites = captureRenderAttachmentWrites(stepIndex, step.passSpec)
                 const passLocation = submissionPassLocation(
                     submittedId,
@@ -794,8 +806,10 @@ export class SubmissionBuilder {
                     nativeObservation,
                     submittedId,
                     stepIndex,
-                    step.passSpec
+                    step.passSpec,
+                    surfaceAttachments
                 )
+                const encoder = getEncoder()
                 const passEncoder = nativeObservation.issue(
                     'pass-begin',
                     passLocation,
@@ -992,7 +1006,8 @@ export class SubmissionBuilder {
 
 function createSubmissionNativeIssuePlan(
     submissionId: string,
-    steps: readonly ResolvedSubmissionStep[]
+    steps: readonly ResolvedSubmissionStep[],
+    surfaceAttachments: PreparedSurfaceAttachments
 ): SubmissionNativeIssue[] {
 
     const encoding: SubmissionNativeIssue[] = []
@@ -1043,11 +1058,12 @@ function createSubmissionNativeIssuePlan(
             (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects())
         ) continue
 
-        ensureEncoder()
         const passLocation = submissionPassLocation(submissionId, stepIndex, step.passSpec)
         if (step.kind === 'render') {
             for (const [ attachmentIndex, attachment ] of step.passSpec.color.entries()) {
-                if (!isTextureViewSpec(attachment.target)) continue
+                const target = isTextureViewSpec(attachment.target)
+                    ? attachment.target
+                    : preparedSurfaceAttachmentFor(surfaceAttachments, attachment.target)
                 encoding.push({
                     stage: 'attachment-view',
                     location: renderAttachmentLocation(
@@ -1056,7 +1072,7 @@ function createSubmissionNativeIssuePlan(
                         step.passSpec,
                         'color',
                         attachmentIndex,
-                        attachment.target
+                        target
                     ),
                 })
             }
@@ -1074,6 +1090,7 @@ function createSubmissionNativeIssuePlan(
                 })
             }
         }
+        ensureEncoder()
         encoding.push({ stage: 'pass-begin', location: passLocation })
         for (const command of step.commands) {
             encoding.push({
@@ -1103,15 +1120,48 @@ function createSubmissionNativeIssuePlan(
     ]
 }
 
+function prepareSubmissionSurfaceAttachments(
+    steps: readonly ResolvedSubmissionStep[]
+): PreparedSurfaceAttachments {
+
+    const prepared = new Map<Surface, PreparedSurfaceAttachment>()
+    for (const step of steps) {
+        if (
+            step.kind !== 'render' ||
+            step.disposition === 'skip-pass' ||
+            (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects())
+        ) continue
+
+        for (const attachment of step.passSpec.color) {
+            if (isTextureViewSpec(attachment.target) || prepared.has(attachment.target)) continue
+            prepared.set(attachment.target, prepareSurfaceAttachment(attachment.target))
+        }
+    }
+    return prepared
+}
+
+function preparedSurfaceAttachmentFor(
+    prepared: PreparedSurfaceAttachments,
+    surface: Surface
+): PreparedSurfaceAttachment {
+
+    const attachment = prepared.get(surface)
+    if (attachment !== undefined) return attachment
+    throw new TypeError('Executable Surface attachment has no submission-scoped preparation.')
+}
+
 function issueRenderAttachmentViews(
     observation: SubmissionNativeObservation,
     submissionId: string,
     stepIndex: number,
-    passSpec: RenderPassSpec
+    passSpec: RenderPassSpec,
+    surfaceAttachments: PreparedSurfaceAttachments
 ): RenderPassNativeAttachments {
 
     const color = passSpec.color.map((attachment, attachmentIndex) => {
-        if (!isTextureViewSpec(attachment.target)) return undefined
+        const target = isTextureViewSpec(attachment.target)
+            ? attachment.target
+            : preparedSurfaceAttachmentFor(surfaceAttachments, attachment.target)
         return observation.issue(
             'attachment-view',
             renderAttachmentLocation(
@@ -1120,9 +1170,11 @@ function issueRenderAttachmentViews(
                 passSpec,
                 'color',
                 attachmentIndex,
-                attachment.target
+                target
             ),
-            () => createNativeTextureView(attachment.target as TextureViewSpec)
+            () => isTextureViewSpec(attachment.target)
+                ? createNativeTextureView(attachment.target as TextureViewSpec)
+                : createPreparedSurfaceAttachmentView(target as PreparedSurfaceAttachment, attachment.viewDescriptor)
         )
     })
     Object.freeze(color)
@@ -1244,8 +1296,26 @@ function renderAttachmentLocation(
     passSpec: RenderPassSpec,
     attachmentKind: 'color' | 'depth-stencil',
     attachmentIndex: number,
-    view: TextureViewSpec
+    target: TextureViewSpec | PreparedSurfaceAttachment
 ): ScratchSubmissionNativeLocation {
+
+    if (!isTextureViewSpec(target)) {
+        if (attachmentKind !== 'color') {
+            throw new TypeError('Surface render attachments must be color attachments.')
+        }
+        const facts = preparedSurfaceAttachmentFacts(target)
+        return {
+            kind: 'render-attachment',
+            submissionId,
+            stepIndex,
+            passId: passSpec.id,
+            attachmentKind,
+            attachmentIndex,
+            surfaceId: facts.surfaceId,
+            surfaceFormat: facts.format,
+            configurationVersion: facts.configurationVersion,
+        }
+    }
 
     return {
         kind: 'render-attachment',
@@ -1254,9 +1324,9 @@ function renderAttachmentLocation(
         passId: passSpec.id,
         attachmentKind,
         attachmentIndex,
-        viewSpecHash: view.hash,
-        resourceId: view.texture.id,
-        allocationVersion: view.texture.allocationVersion,
+        viewSpecHash: target.hash,
+        resourceId: target.texture.id,
+        allocationVersion: target.texture.allocationVersion,
     }
 }
 

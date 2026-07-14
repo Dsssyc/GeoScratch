@@ -47,8 +47,8 @@ const surface = scratch.surface(canvas, {
 
 - `GPUCanvasContext`
 - canvas 或 `OffscreenCanvas`
-- presentation format
-- alpha mode 与 configure options
+- 完整 presentation configuration：format、usage、view formats、color space、
+  optional tone mapping 与 alpha mode
 - 当前 presentation texture 访问
 - resize policy
 
@@ -79,26 +79,27 @@ Surface operation 都会重新核对 receiver 是否为精确 owner；forged 或
 `SCRATCH_SURFACE_CONTEXT_NOT_OWNED`。
 
 Surface 的 ownership、configuration 与 lifecycle 字段都是只读 observation。
-Scratch 会把 ownership facts 记录到 receiver 私有记录中，并把 terminal disposal
-保留为私有事实。未类型化 JavaScript 的字段改写不能转移 claim、伪造 live owner
-可替换状态或通过普通字段写入阻止 cleanup：managed use 会拒绝 identity drift，
-而 `dispose()` 仍会清理最初 claim 的 context，并从最初的 runtime unregister。
+精确 receiver 对应的单个 module-private state record 是权威事实，其中也包含
+terminal disposal。未类型化 JavaScript 的字段改写不能转移 claim、发布 candidate
+configuration、伪造 live owner 可替换状态或阻止 cleanup；`dispose()` 始终会清理
+最初 claim 的 context，并从最初的 runtime unregister。
 
-`Surface.configure()` 是同步 candidate transaction。Candidate format、alpha mode
-与 size 在 canvas resize 和 native configure 返回之前都只保留在局部。同步 native
-失败会产生 `SCRATCH_SURFACE_CONFIGURATION_FAILED`，尽可能恢复之前的 canvas
-尺寸，并且不发布 candidate facts。WebGPU 会在替换 context current configuration
-之前完成同步 format/usage 检查，因此在该边界上，之前的 native configuration
-仍是与逻辑事实匹配的 current state。异步 native validation 仍遵循 WebGPU error
-model，Scratch 不会虚构同步成功或失败。
+`Surface.configure()` 是覆盖 format、usage、view formats、color space、optional
+tone mapping、alpha mode 与 size 的同步 candidate transaction。Iterable 与
+dictionary input 会在 native issue 前完成 materialize。Canvas resize 与 native
+configure 返回后，Scratch 要求 `GPUCanvasContext.getConfiguration()` 及 canvas
+尺寸都反映 candidate，之后才 commit 私有状态。失败会产生
+`SCRATCH_SURFACE_CONFIGURATION_FAILED`，尽可能恢复调用前的真实 canvas 尺寸与
+previous native configuration，验证恢复结果，并且绝不发布 candidate facts。
+异步 native validation 仍遵循 WebGPU error model，Scratch 不会虚构同步成功或失败。
 
 每次 managed use 前，Scratch 都会调用
-`GPUCanvasContext.getConfiguration()`，把其中的 device、format、alpha mode、
-render-attachment usage 与 current canvas size 同 Surface facts 比较。直接 native
-configure/unconfigure 或 canvas-size drift 因此会在 current-texture/encoder effect
-前产生 `SCRATCH_SURFACE_CONFIGURATION_STALE`。应用可显式调用
-`surface.configure()` 或 `surface.resize()` 修复 owned configuration；submission
-绝不隐式修复。
+`GPUCanvasContext.getConfiguration()`，把其中的 device、format、usage、view
+formats、color space、tone mapping、alpha mode 与 current canvas size 同私有
+committed facts 比较。直接 native configure/unconfigure 或 canvas-size drift 因此
+会在 current-texture/encoder effect 前产生
+`SCRATCH_SURFACE_CONFIGURATION_STALE`。应用可显式调用 `surface.configure()` 或
+`surface.resize()` 修复 owned configuration；submission 绝不隐式修复。
 
 `Surface.dispose()` 会 unconfigure context 并释放 claim。只有完成这次显式
 lifecycle transition 后，replacement Surface 才能重新 claim。构造过程若在

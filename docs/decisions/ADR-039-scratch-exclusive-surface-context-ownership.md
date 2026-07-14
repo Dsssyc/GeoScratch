@@ -36,21 +36,29 @@ Each `GPUCanvasContext` has exactly one live Scratch `Surface` owner.
   Forged or stale aliases fail with `SCRATCH_SURFACE_CONTEXT_NOT_OWNED` before
   canvas, context, current-texture, or encoder effects.
 - Surface ownership, configuration, and lifecycle fields are read-only public
-  observations. The exact receiver also owns a module-private identity record captured
-  at claim time and a private terminal-disposal fact. Ordinary untyped JavaScript field
-  writes cannot transfer ownership, make a live owner appear replaceable, or suppress cleanup:
-  managed use rejects public identity drift, while disposal still uses the private
-  facts to unregister from the original runtime, unconfigure the original context,
-  and release the original claim.
-- `Surface.configure()` computes candidate format, alpha, and size facts without
-  mutating committed state. It changes canvas size and issues native configure, then
-  commits the candidate only after synchronous success. A synchronous failure is
-  reported as `SCRATCH_SURFACE_CONFIGURATION_FAILED`, restores the prior canvas
-  dimensions when possible, and leaves the prior logical/native configuration current.
+  observations backed by one module-private state record for the exact receiver.
+  Ordinary untyped JavaScript field writes cannot transfer ownership, publish candidate
+  configuration, make a live owner appear replaceable, or suppress cleanup. Disposal
+  uses only that private state to unregister from the original runtime, unconfigure the
+  original context, and release the original claim.
+- `Surface.configure()` snapshots and validates the complete exposed native candidate:
+  device, format, usage, view formats, color space, optional tone mapping, alpha mode,
+  and canvas size. Iterable/dictionary inputs are materialized before native issue. It
+  resizes the canvas, calls native configure, then requires `getConfiguration()` and
+  the canvas dimensions to reflect the candidate before committing private state.
+  Observation failure produces `SCRATCH_SURFACE_CONFIGURATION_FAILED`, restores the
+  actual pre-call canvas dimensions and previous native configuration when possible,
+  verifies that restoration, and never publishes the candidate facts.
 - Before a configured Surface is used, Scratch calls `getConfiguration()` and compares
-  current device, format, alpha mode, render-attachment usage, and canvas size with
-  the logical owner. External configure, unconfigure, or resize drift fails with
-  `SCRATCH_SURFACE_CONFIGURATION_STALE` before presentation effects.
+  current device, format, usage, view formats, color space, tone mapping, alpha mode,
+  and canvas size with the private committed state. External configure, unconfigure,
+  or resize drift fails with `SCRATCH_SURFACE_CONFIGURATION_STALE` before presentation
+  effects.
+- After submission validation and before creating any command encoder, Scratch prepares
+  one immutable attachment lease for every executable Surface. The lease records exact
+  receiver identity, format, and configuration version. Later `attachment-view` issue
+  borrows the current texture and creates the requested native view without a second
+  configuration query or a public-method branding path.
 - Failed construction releases its uncommitted claim.
 - Successful `Surface.dispose()` unconfigures the context, unregisters the Surface,
   and releases the claim. A replacement may then claim the context.
@@ -62,9 +70,9 @@ Each `GPUCanvasContext` has exactly one live Scratch `Surface` owner.
   current-texture or encoder effects.
 
 The claim registry is a module-private `WeakMap<GPUCanvasContext, Surface>`, paired
-with a module-private `WeakMap<Surface, SurfaceIdentity>` and terminal-disposal
-`WeakSet<Surface>`. None is a public matching service, runtime reverse graph,
-observer, or historical log.
+with a module-private `WeakMap<Surface, SurfaceState>` and a private weak map for
+submission-scoped prepared attachment leases. None is a public matching service,
+runtime reverse graph, observer, or historical log.
 
 ## Rejected Alternatives
 
@@ -95,5 +103,8 @@ attribution and may create current-texture or encoder effects first.
 - Surface ownership cannot be reassigned by writing public identity observations.
 - Direct native context mutation is detected synchronously on the next managed
   Surface use and can be repaired explicitly with `Surface.configure()`.
+- Native canvas usage, compatible view formats, color space, tone mapping, and alpha
+  mode remain explicit Surface capabilities rather than being reduced to a fixed
+  render-attachment-only descriptor.
 - Scratch still does not claim that synchronous Surface validation captures every
   asynchronous WebGPU validation, OOM, or device-loss outcome.

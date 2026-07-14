@@ -1,15 +1,17 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { advanceQuerySlotContentEpoch, QuerySetResource } from './query-set.js'
+import { isSurfaceReceiver, surfaceFactsFor } from './surface.js'
 import { TextureResource, TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
 import { textureFormatIsColorRenderable } from './texture-format-capabilities.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
-import type { Surface } from './surface.js'
+import type { Surface, SurfaceFacts } from './surface.js'
 
 const TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
 const TEXTURE_USAGE_TRANSIENT_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'TRANSIENT_ATTACHMENT', 0x20)
+const GPU_FLAGS_MAX = 0xffff_ffff
 const LOAD_OPS = new Set<GPULoadOp>([ 'clear', 'load' ])
 const STORE_OPS = new Set<GPUStoreOp>([ 'store', 'discard' ])
 const DEPTH_FORMATS = new Set<GPUTextureFormat>([
@@ -65,7 +67,7 @@ export type ComputePassSpecDescriptor = {
 }
 
 export type RenderPassNativeAttachments = Readonly<{
-    color: readonly (GPUTextureView | undefined)[]
+    color: readonly GPUTextureView[]
     depth?: GPUTextureView
 }>
 
@@ -79,7 +81,7 @@ type RenderAttachmentExtent = {
 type RenderAttachmentRegion = {
     index: number
     subject: DiagnosticSubject
-    target: Surface | TextureResource
+    target: GPUCanvasContext | TextureResource
     dimension: 'surface' | GPUTextureViewDimension
     baseMipLevel?: number
     baseArrayLayer?: number
@@ -196,11 +198,8 @@ export function createRenderPassDescriptor(
 
     const descriptor: GPURenderPassDescriptor = {
         colorAttachments: pass.color.map((attachment, index) => {
-            const target = attachment.target
-            target.assertUsable()
-
             const colorAttachment: GPURenderPassColorAttachment = {
-                view: createColorAttachmentView(attachment, nativeAttachments.color[index]),
+                view: nativeAttachments.color[index],
                 loadOp: attachment.load ?? 'clear',
                 storeOp: attachment.store ?? 'store',
             }
@@ -520,7 +519,7 @@ function normalizeColorAttachment(
         return normalized
     }
 
-    if (!target || typeof target.assertUsable !== 'function' || typeof target.getCurrentTexture !== 'function') {
+    if (!isSurfaceReceiver(target)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE',
             severity: 'error',
@@ -532,32 +531,33 @@ function normalizeColorAttachment(
         })
     }
 
-    target.assertUsable()
+    const surface = surfaceFactsFor(target)
 
-    if (target.runtime !== pass.runtime) {
+    if (surface.runtime !== pass.runtime) {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE',
             severity: 'error',
             phase: 'submission',
             subject: pass.subject,
             related: [
-                target.subject,
+                surface.subject,
                 pass.runtime.subject,
             ].filter(Boolean),
             message: 'Surface color attachment belongs to a different ScratchRuntime.',
             expected: { runtimeId: pass.runtime.id },
-            actual: { runtimeId: target.runtime?.id },
+            actual: { runtimeId: surface.runtime.id },
         })
     }
 
+    const viewDescriptor = snapshotSurfaceAttachmentViewDescriptor(attachment.viewDescriptor)
     const viewFormat = validateSurfaceAttachmentViewDescriptor(
         pass,
-        target,
-        attachment.viewDescriptor
+        surface,
+        viewDescriptor
     )
-    validateColorRenderableAttachmentFormat(pass, target.subject, viewFormat)
-    validateColorAttachmentFormat(pass, target.subject, attachment.format, viewFormat)
-    const operations = normalizeColorAttachmentOperations(pass, target.subject, attachment, false)
+    validateColorRenderableAttachmentFormat(pass, surface.subject, viewFormat)
+    validateColorAttachmentFormat(pass, surface.subject, attachment.format, viewFormat)
+    const operations = normalizeColorAttachmentOperations(pass, surface.subject, attachment, false)
     const normalized: RenderPassColorAttachmentSpec = {
         target,
         format: viewFormat,
@@ -565,21 +565,21 @@ function normalizeColorAttachment(
         store: operations.store,
     }
     if (attachment.clear !== undefined) {
-        normalized.clear = normalizeColorClearValue(pass, target.subject, attachment.clear)
+        normalized.clear = normalizeColorClearValue(pass, surface.subject, attachment.clear)
     }
     if (attachment.depthSlice !== undefined) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
-            subject: target.subject,
+            subject: surface.subject,
             related: [ pass.subject ],
             message: 'Surface color attachments cannot select a 3D depth slice.',
             expected: { depthSlice: undefined },
             actual: { depthSlice: attachment.depthSlice },
         })
     }
-    if (attachment.viewDescriptor !== undefined) normalized.viewDescriptor = attachment.viewDescriptor
+    if (viewDescriptor !== undefined) normalized.viewDescriptor = viewDescriptor
 
     return normalized
 }
@@ -651,22 +651,6 @@ function normalizeColorClearValue(
 function isFiniteNumber(value: unknown): value is number {
 
     return typeof value === 'number' && Number.isFinite(value)
-}
-
-function createColorAttachmentView(
-    attachment: RenderPassColorAttachmentSpec,
-    persistentView: GPUTextureView | undefined
-): GPUTextureView {
-
-    const target = attachment.target
-    if (isTextureViewSpec(target)) {
-        if (persistentView === undefined) {
-            throw new TypeError('Persistent render color attachment has no submission-scoped native view.')
-        }
-        return persistentView
-    }
-
-    return target.getCurrentTexture().createView(attachment.viewDescriptor)
 }
 
 function normalizeColorAttachmentDepthSlice(
@@ -889,29 +873,29 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
             continue
         }
 
-        attachment.target.assertUsable()
+        const surface = surfaceFactsFor(attachment.target)
         const viewFormat = validateSurfaceAttachmentViewDescriptor(
             pass,
-            attachment.target,
+            surface,
             attachment.viewDescriptor
         )
-        validateColorRenderableAttachmentFormat(pass, attachment.target.subject, viewFormat)
+        validateColorRenderableAttachmentFormat(pass, surface.subject, viewFormat)
         validateColorAttachmentFormat(
             pass,
-            attachment.target.subject,
+            surface.subject,
             attachment.format,
             viewFormat
         )
         extents.push({
-            subject: attachment.target.subject,
-            width: attachment.target.size.width,
-            height: attachment.target.size.height,
+            subject: surface.subject,
+            width: surface.size.width,
+            height: surface.size.height,
             sampleCount: 1,
         })
         regions.push({
             index,
-            subject: attachment.target.subject,
-            target: attachment.target,
+            subject: surface.subject,
+            target: surface.context,
             dimension: 'surface',
         })
     }
@@ -1019,27 +1003,32 @@ function validateColorRenderableAttachmentFormat(
 
 function validateSurfaceAttachmentViewDescriptor(
     pass: RenderPassSpec,
-    surface: Surface,
+    surface: SurfaceFacts,
     descriptor: GPUTextureViewDescriptor | undefined
 ): GPUTextureFormat {
 
-    if (descriptor === undefined) return surface.format
-    const valid = isRecord(descriptor) &&
-        (descriptor.label === undefined || typeof descriptor.label === 'string') &&
-        (descriptor.format === undefined || descriptor.format === surface.format) &&
-        (descriptor.dimension === undefined || descriptor.dimension === '2d') &&
-        (
-            descriptor.usage === undefined ||
-            descriptor.usage === 0 ||
-            descriptor.usage === TEXTURE_USAGE_RENDER_ATTACHMENT
-        ) &&
-        (descriptor.aspect === undefined || descriptor.aspect === 'all') &&
-        (descriptor.baseMipLevel === undefined || descriptor.baseMipLevel === 0) &&
-        (descriptor.mipLevelCount === undefined || descriptor.mipLevelCount === 1) &&
-        (descriptor.baseArrayLayer === undefined || descriptor.baseArrayLayer === 0) &&
-        (descriptor.arrayLayerCount === undefined || descriptor.arrayLayerCount === 1) &&
-        (descriptor.swizzle === undefined || descriptor.swizzle === 'rgba')
-    if (valid) return surface.format
+    const record = isRecord(descriptor) ? descriptor : {}
+    const format = record.format ?? surface.format
+    const requestedUsage = typeof record.usage === 'number'
+        ? record.usage
+        : record.usage === undefined ? 0 : Number.NaN
+    const effectiveUsage = requestedUsage === 0 ? surface.usage : requestedUsage
+    const valid = (descriptor === undefined || isRecord(descriptor)) &&
+        (record.label === undefined || typeof record.label === 'string') &&
+        (format === surface.format || surface.viewFormats.includes(format as GPUTextureFormat)) &&
+        (record.dimension === undefined || record.dimension === '2d') &&
+        Number.isInteger(requestedUsage) &&
+        requestedUsage >= 0 &&
+        requestedUsage <= GPU_FLAGS_MAX &&
+        (requestedUsage === 0 || (requestedUsage & ~surface.usage) === 0) &&
+        (effectiveUsage & TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0 &&
+        (record.aspect === undefined || record.aspect === 'all') &&
+        (record.baseMipLevel === undefined || record.baseMipLevel === 0) &&
+        (record.mipLevelCount === undefined || record.mipLevelCount === 1) &&
+        (record.baseArrayLayer === undefined || record.baseArrayLayer === 0) &&
+        (record.arrayLayerCount === undefined || record.arrayLayerCount === 1) &&
+        (record.swizzle === undefined || record.swizzle === 'rgba')
+    if (valid) return format as GPUTextureFormat
 
     throwScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
@@ -1049,9 +1038,9 @@ function validateSurfaceAttachmentViewDescriptor(
         related: [ pass.subject ],
         message: 'Surface attachment view descriptor must describe its configured renderable canvas view.',
         expected: {
-            format: surface.format,
+            format: [ surface.format, ...surface.viewFormats ],
             dimension: '2d',
-            usage: '0 or GPUTextureUsage.RENDER_ATTACHMENT',
+            usage: '0 or a Surface usage subset containing GPUTextureUsage.RENDER_ATTACHMENT',
             aspect: 'all',
             baseMipLevel: 0,
             mipLevelCount: 1,
@@ -1061,6 +1050,30 @@ function validateSurfaceAttachmentViewDescriptor(
         },
         actual: { viewDescriptor: describeValue(descriptor) },
     })
+}
+
+function snapshotSurfaceAttachmentViewDescriptor(
+    descriptor: GPUTextureViewDescriptor | undefined
+): GPUTextureViewDescriptor | undefined {
+
+    if (descriptor === undefined || !isRecord(descriptor)) return descriptor
+    const snapshot: Record<string, unknown> = {}
+    for (const key of [
+        'label',
+        'format',
+        'dimension',
+        'usage',
+        'aspect',
+        'baseMipLevel',
+        'mipLevelCount',
+        'baseArrayLayer',
+        'arrayLayerCount',
+        'swizzle',
+    ]) {
+        const value = descriptor[key]
+        if (value !== undefined) snapshot[key] = value
+    }
+    return Object.freeze(snapshot) as GPUTextureViewDescriptor
 }
 
 function normalizeColorAttachmentOperations(
@@ -1171,7 +1184,7 @@ function renderAttachmentRegionsOverlap(
     if (left.dimension === 'surface' || right.dimension === 'surface') {
         return left.dimension === 'surface' &&
             right.dimension === 'surface' &&
-            (left.target as Surface).context === (right.target as Surface).context
+            left.target === right.target
     }
     if (left.target !== right.target) return false
     if (left.baseMipLevel !== right.baseMipLevel) return false

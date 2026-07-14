@@ -63,10 +63,11 @@ texture. A persistent `TextureViewSpec` must include `RENDER_ATTACHMENT` view
 usage and satisfy the complete renderable-view shape. Its normalized view format
 is the sole attachment format; optional pass metadata must match it exactly. A
 color slot requires a color-renderable format, while depth/stencil renderable
-formats belong only in the depth/stencil attachment. An
-explicit Surface view descriptor must preserve the configured format, a `2d`
-single-mip/single-layer all-aspect RGBA view, and usage `0` or
-`RENDER_ATTACHMENT`. A view with `TRANSIENT_ATTACHMENT` usage requires
+formats belong only in the depth/stencil attachment. An explicit Surface view
+descriptor may use the configured format or one configured compatible view format.
+It remains a `2d` single-mip/single-layer all-aspect RGBA view; usage is `0` or a
+configured Surface usage subset containing `RENDER_ATTACHMENT`. A view with
+`TRANSIENT_ATTACHMENT` usage requires
 `load: 'clear'` and `store: 'discard'` for color and for every writable
 depth/stencil aspect. Scratch chooses those operations as transient defaults and
 rejects incompatible explicit values. A provided `depthClear` must be finite and
@@ -85,11 +86,15 @@ depth/stencil attachments. Submission preflight requires color attachment region
 to be pairwise disjoint. Views of one texture overlap when they select the same
 mip and array layer, or the same 3D `depthSlice`; distinct layers and slices remain
 valid. Surface creation separately enforces one live owner per canvas context.
-Pass creation and submission both require the exact owner and compare the current
-`GPUCanvasContext.getConfiguration()` device, format, alpha mode, render-attachment
-usage, and canvas size with Surface facts. A forged alias or external configuration
-drift fails before borrowing a current texture or creating an encoder. Submission
-still compares Surface context identity defensively when checking region overlap.
+Pass creation and submission both require the exact owner and compare the complete
+current `GPUCanvasContext.getConfiguration()` plus canvas size with private Surface
+facts. After the submission plan is validated, every executable Surface attachment is
+prepared before any command encoder is created. This immutable lease records Surface
+identity, format, and configuration version; the later observed `attachment-view`
+operation borrows the current texture and creates its view without another
+configuration read. A forged alias or external configuration drift therefore fails
+before presentation or encoder effects. Submission still compares Surface context
+identity defensively when checking region overlap.
 
 Pass specs do not store commands. This prevents stale command lists from surviving across submissions.
 

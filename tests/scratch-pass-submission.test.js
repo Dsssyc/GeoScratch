@@ -434,9 +434,10 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             format: 'bgra8unorm',
             size: { width: 8, height: 8 },
         })
-        const alias = Object.assign(Object.create(owner), {
-            id: 'forged-pass-surface-alias',
-            label: 'forged pass Surface alias',
+        const alias = Object.create(owner)
+        Object.defineProperties(alias, {
+            id: { value: 'forged-pass-surface-alias', enumerable: true },
+            label: { value: 'forged pass Surface alias', enumerable: true },
         })
 
         await expectScratchDiagnostic(() => runtime.createRenderPass({
@@ -451,8 +452,147 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(fake.calls.textureViews).to.have.length(0)
         expect(fake.calls.renderPasses).to.have.length(0)
         expect(fake.calls.queueSubmissions).to.have.length(0)
-        expect(canvas.context.getConfigurationCalls).to.equal(0)
+        expect(canvas.context.getConfigurationCalls).to.equal(1)
         expect(canvas.context.currentTextureCalls).to.equal(0)
+    })
+
+    it('rejects a forged Surface alias with shadowed public methods before pass effects', async() => {
+
+        const fake = createFakeGpu()
+        const canvas = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const owner = runtime.createSurface(canvas.canvas, {
+            format: 'bgra8unorm',
+            size: { width: 8, height: 8 },
+        })
+        const alias = Object.create(owner)
+        Object.defineProperties(alias, {
+            id: { value: 'forged-shadowed-pass-surface-alias', enumerable: true },
+            runtime: { value: runtime, enumerable: true },
+            context: { value: owner.context, enumerable: true },
+            format: { value: owner.format, enumerable: true },
+            size: { value: owner.size, enumerable: true },
+            assertUsable: { value() {}, enumerable: true },
+            getCurrentTexture: {
+                value() {
+                    return canvas.context.getCurrentTexture()
+                },
+                enumerable: true,
+            },
+        })
+
+        await expectScratchDiagnostic(() => runtime.createRenderPass({
+            color: [ { target: alias } ],
+        }), {
+            code: 'SCRATCH_SURFACE_CONTEXT_NOT_OWNED',
+            severity: 'error',
+            phase: 'runtime',
+        })
+
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        expect(fake.calls.textureViews).to.have.length(0)
+        expect(fake.calls.renderPasses).to.have.length(0)
+        expect(fake.calls.queueSubmissions).to.have.length(0)
+        expect(canvas.context.getConfigurationCalls).to.equal(1)
+        expect(canvas.context.currentTextureCalls).to.equal(0)
+    })
+
+    it('performs the final Surface configuration read before encoder creation', async() => {
+
+        const fixture = await createTriangleScene()
+        const secondCanvas = createFakeCanvas()
+        const secondSurface = fixture.runtime.createSurface(secondCanvas.canvas, {
+            format: 'bgra8unorm',
+            size: { width: 32, height: 32 },
+        })
+        const secondPass = fixture.runtime.createRenderPass({
+            color: [ { target: secondSurface, load: 'clear', store: 'store' } ],
+        })
+        let postEncoderConfigurationReads = 0
+        for (const context of [ fixture.context, secondCanvas.context ]) {
+            const getConfiguration = context.getConfiguration.bind(context)
+            context.getConfiguration = () => {
+                if (fixture.calls.commandEncoders.length > 0) {
+                    postEncoderConfigurationReads++
+                    throw new Error('Surface configuration read after encoder creation')
+                }
+                return getConfiguration()
+            }
+        }
+
+        const submitted = fixture.runtime.submission()
+            .render(fixture.pass, [ fixture.draw ])
+            .render(secondPass)
+            .submit()
+
+        expect(postEncoderConfigurationReads).to.equal(0)
+        expect(fixture.calls.commandEncoders).to.have.length(1)
+        expect(fixture.calls.renderPasses).to.have.length(2)
+        expect(fixture.calls.queueSubmissions).to.have.length(1)
+        expect(secondCanvas.context.currentTextureCalls).to.equal(1)
+        await submitted.done
+    })
+
+    it('preserves native Surface usage, view format, color, and tone-mapping capabilities', async() => {
+
+        const fixture = await createTriangleScene('rgba8unorm')
+        fixture.surface.configure({
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+            viewFormats: [ 'rgba8unorm-srgb' ],
+            colorSpace: 'display-p3',
+            toneMapping: { mode: 'extended' },
+        })
+        const pass = fixture.runtime.createRenderPass({
+            color: [ {
+                target: fixture.surface,
+                format: 'rgba8unorm-srgb',
+                viewDescriptor: {
+                    format: 'rgba8unorm-srgb',
+                    usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+                },
+                load: 'clear',
+                store: 'store',
+            } ],
+        })
+
+        const submitted = fixture.runtime.submission().render(pass).submit()
+
+        expect(fixture.surface.usage).to.equal(0x14)
+        expect(fixture.surface.viewFormats).to.deep.equal([ 'rgba8unorm-srgb' ])
+        expect(fixture.surface.colorSpace).to.equal('display-p3')
+        expect(fixture.surface.toneMapping).to.deep.equal({ mode: 'extended' })
+        expect(fixture.textureViews.at(-1).descriptor).to.deep.equal({
+            format: 'rgba8unorm-srgb',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        await submitted.done
+    })
+
+    it('snapshots Surface attachment view descriptors when the PassSpec is created', async() => {
+
+        const fixture = await createTriangleScene()
+        const viewDescriptor = {
+            label: 'stable surface view',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        }
+        const pass = fixture.runtime.createRenderPass({
+            color: [ { target: fixture.surface, viewDescriptor } ],
+        })
+
+        viewDescriptor.usage = GPU_TEXTURE_USAGE_TEXTURE_BINDING
+
+        const submitted = fixture.runtime.submission().render(pass).submit()
+
+        expect(pass.color[0].viewDescriptor).to.deep.equal({
+            label: 'stable surface view',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        expect(Object.isFrozen(pass.color[0].viewDescriptor)).to.equal(true)
+        expect(fixture.textureViews.at(-1).descriptor).to.deep.equal({
+            label: 'stable surface view',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        await submitted.done
     })
 
     it('rejects depth-stencil formats in color attachment slots before encoder creation', async() => {
@@ -903,6 +1043,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         for (const viewDescriptor of [
             { format: 'rgba8unorm' },
             { usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING },
+            { usage: 0x1_0000_0010 },
             { dimension: '2d-array' },
         ]) {
             await expectScratchDiagnostic(() => fixture.runtime.createRenderPass({

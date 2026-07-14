@@ -47,8 +47,8 @@ const surface = scratch.surface(canvas, {
 
 - `GPUCanvasContext`
 - canvas or `OffscreenCanvas`
-- presentation format
-- alpha mode and configure options
+- complete presentation configuration: format, usage, view formats, color space,
+  optional tone mapping, and alpha mode
 - current presentation texture access
 - resize policy
 
@@ -79,27 +79,29 @@ stale aliases fail with `SCRATCH_SURFACE_CONTEXT_NOT_OWNED` before lifecycle or
 presentation effects.
 
 Surface ownership, configuration, and lifecycle fields are read-only observations.
-Scratch captures ownership facts in a private receiver record and keeps terminal
-disposal private. Ordinary untyped JavaScript field writes cannot transfer the claim,
-make a live owner replaceable, or suppress cleanup: managed use rejects identity
-drift, while `dispose()` still cleans the originally claimed context and unregisters
-from the original runtime.
+One module-private state record is authoritative for the exact receiver, including
+terminal disposal. Ordinary untyped JavaScript field writes cannot transfer the claim,
+publish candidate configuration, make a live owner replaceable, or suppress cleanup;
+`dispose()` always cleans the originally claimed context and unregisters from the
+original runtime.
 
-`Surface.configure()` is a synchronous candidate transaction. Candidate format,
-alpha mode, and size remain local until canvas resize and native configure return.
-A synchronous native failure produces `SCRATCH_SURFACE_CONFIGURATION_FAILED`,
-restores the previous canvas dimensions when possible, and does not publish the
-candidate facts. WebGPU performs synchronous format/usage checks before replacing
-the context's current configuration, so the prior native configuration remains the
-matching current state at this boundary. Asynchronous native validation remains part
+`Surface.configure()` is a synchronous candidate transaction over format, usage,
+view formats, color space, optional tone mapping, alpha mode, and size. Iterable and
+dictionary inputs are materialized before native issue. After canvas resize and native
+configure return, Scratch requires `GPUCanvasContext.getConfiguration()` plus the
+canvas dimensions to reflect the candidate before committing private state. Failure
+produces `SCRATCH_SURFACE_CONFIGURATION_FAILED`, restores the actual pre-call canvas
+dimensions and previous native configuration when possible, verifies that restoration,
+and never publishes the candidate facts. Asynchronous native validation remains part
 of the WebGPU error model and is not fabricated as synchronous success/failure.
 
 Before managed use, Scratch calls `GPUCanvasContext.getConfiguration()` and compares
-its device, format, alpha mode, render-attachment usage, and current canvas size with
-the Surface facts. Direct native configure/unconfigure or canvas-size drift therefore
-produces `SCRATCH_SURFACE_CONFIGURATION_STALE` before current-texture or encoder
-effects. An explicit `surface.configure()` or `surface.resize()` may restore the
-owned configuration; submission never repairs it implicitly.
+its device, format, usage, view formats, color space, tone mapping, alpha mode, and
+current canvas size with the private committed facts. Direct native configure,
+unconfigure, or canvas-size drift therefore produces
+`SCRATCH_SURFACE_CONFIGURATION_STALE` before current-texture or encoder effects. An
+explicit `surface.configure()` or `surface.resize()` may restore the owned
+configuration; submission never repairs it implicitly.
 
 `Surface.dispose()` unconfigures the context and releases the claim. A replacement
 Surface may claim it only after that explicit lifecycle transition. Construction
