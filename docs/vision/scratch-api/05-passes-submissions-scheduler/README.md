@@ -61,7 +61,9 @@ const simulationPass = runtime.createComputePass({
 An attachment is validated against its actual logical view, not only its parent
 texture. A persistent `TextureViewSpec` must include `RENDER_ATTACHMENT` view
 usage and satisfy the complete renderable-view shape. Its normalized view format
-is the sole attachment format; optional pass metadata must match it exactly. An
+is the sole attachment format; optional pass metadata must match it exactly. A
+color slot requires a color-renderable format, while depth/stencil renderable
+formats belong only in the depth/stencil attachment. An
 explicit Surface view descriptor must preserve the configured format, a `2d`
 single-mip/single-layer all-aspect RGBA view, and usage `0` or
 `RENDER_ATTACHMENT`. A view with `TRANSIENT_ATTACHMENT` usage requires
@@ -79,7 +81,10 @@ attachments reject `depthSlice`. Color clears are normalized only from an exact
 four-component finite sequence or a complete finite `{ r, g, b, a }`
 dictionary. Stencil clears are limited to the `GPUStencilValue`/`GPUSize32`
 range. A render pass may be depth-only, but it may not omit both color and
-depth/stencil attachments.
+depth/stencil attachments. Submission preflight requires color attachment regions
+to be pairwise disjoint. Views of one texture overlap when they select the same
+mip and array layer, or the same 3D `depthSlice`; distinct layers and slices remain
+valid. Color slots also reject two Surface objects that share one canvas context.
 
 Pass specs do not store commands. This prevents stale command lists from surviving across submissions.
 
@@ -251,7 +256,7 @@ replayed action prefix. Failed and unreplayed actions publish no write effect.
 
 ### Resize Between Construction And Submission
 
-`TextureResource.resize()` does not add a submission step. It is a Promise-returning resource allocation transaction, not queue work. While its candidate scopes settle, the old allocation remains current and submission encoding performs no hidden wait. An application that requires the replacement for a submission explicitly awaits resize first. A `SubmissionBuilder` stores logical pass, command, resource, and `TextureViewSpec` references; preflight and encoding validate whichever allocation is current at submission time. Texture-backed color and depth/stencil attachments retain their `2d`, `2d-array`, or `3d` logical view shape. Stale mip/layer descriptors, an out-of-range `3d` `depthSlice`, or mismatched current render extents/sample counts fail before command encoder creation or ledger mutation. Native attachment views are submission-scoped, observed through `SubmittedWork`, and never cached or prepared by `PassSpec`. Attachments remain independent of the compatibility-mode texture-binding dimension.
+`TextureResource.resize()` does not add a submission step. It is a Promise-returning resource allocation transaction, not queue work. While its candidate scopes settle, the old allocation remains current and submission encoding performs no hidden wait. An application that requires the replacement for a submission explicitly awaits resize first. A `SubmissionBuilder` stores logical pass, command, resource, and `TextureViewSpec` references; preflight and encoding validate whichever allocation is current at submission time. Texture-backed color and depth/stencil attachments retain their `2d`, `2d-array`, or `3d` logical view shape. Stale mip/layer descriptors, an out-of-range `3d` `depthSlice`, overlapping color attachment regions, or mismatched current render extents/sample counts fail before command encoder creation or ledger mutation. Native attachment views are submission-scoped, observed through `SubmittedWork`, and never cached or prepared by `PassSpec`. Attachments remain independent of the compatibility-mode texture-binding dimension.
 
 Resize itself records no resource access, producer epoch, command buffer, queue action, or completion registration. The replacement starts empty even though its `contentEpoch` number is preserved. A later write may make it ready for a later read in the same submission, and both ledgers then report the new `allocationVersion` and the next `contentEpoch`.
 

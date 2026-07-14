@@ -367,6 +367,120 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(volumeTexture.contentEpoch).to.equal(0)
     })
 
+    it('rejects overlapping color attachment regions while permitting disjoint 3d slices', async() => {
+
+        const fake = createFakeGpu()
+        const canvas = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const texture = await runtime.createTexture({
+            size: [ 8, 8 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const view = texture.view()
+        const overlappingViewPass = runtime.createRenderPass({
+            color: [ { target: view }, { target: view } ],
+        })
+        const surface = runtime.createSurface(canvas.canvas, {
+            format: 'bgra8unorm',
+            size: { width: 8, height: 8 },
+        })
+        const overlappingSurfacePass = runtime.createRenderPass({
+            color: [ { target: surface }, { target: surface } ],
+        })
+        const aliasedSurface = runtime.createSurface(canvas.canvas, {
+            format: 'bgra8unorm',
+            size: { width: 8, height: 8 },
+        })
+        const overlappingContextPass = runtime.createRenderPass({
+            color: [ { target: surface }, { target: aliasedSurface } ],
+        })
+
+        for (const pass of [ overlappingViewPass, overlappingSurfacePass, overlappingContextPass ]) {
+            await expectScratchDiagnostic(() => runtime.submission().render(pass).submit(), {
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        expect(fake.calls.textureViews).to.have.length(0)
+        expect(fake.calls.renderPasses).to.have.length(0)
+        expect(fake.calls.queueSubmissions).to.have.length(0)
+        expect(canvas.context.currentTextureCalls).to.equal(0)
+
+        const volumeTexture = await runtime.createTexture({
+            dimension: '3d',
+            size: [ 8, 8, 2 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const volumeView = volumeTexture.view({ dimension: '3d' })
+        const disjointPass = runtime.createRenderPass({
+            color: [
+                { target: volumeView, depthSlice: 0 },
+                { target: volumeView, depthSlice: 1 },
+            ],
+        })
+        const submitted = runtime.submission().render(disjointPass).submit()
+
+        expect(fake.calls.commandEncoders).to.have.length(1)
+        expect(fake.calls.textureViews).to.have.length(2)
+        expect(fake.calls.renderPasses).to.have.length(1)
+        expect(fake.calls.queueSubmissions).to.have.length(1)
+
+        await submitted.done
+    })
+
+    it('rejects depth-stencil formats in color attachment slots before encoder creation', async() => {
+
+        const fake = createFakeGpu()
+        const canvas = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const depthTexture = await runtime.createTexture({
+            size: [ 8, 8 ],
+            format: 'depth32float',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const invalidSurface = runtime.createSurface(canvas.canvas, {
+            format: 'depth32float',
+            size: { width: 8, height: 8 },
+        })
+
+        for (const target of [ depthTexture.view(), invalidSurface ]) {
+            await expectScratchDiagnostic(() => runtime.createRenderPass({
+                color: [ { target } ],
+            }), {
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        const validCanvas = createFakeCanvas()
+        const reconfiguredSurface = runtime.createSurface(validCanvas.canvas, {
+            format: 'bgra8unorm',
+            size: { width: 8, height: 8 },
+        })
+        const pass = runtime.createRenderPass({
+            color: [ { target: reconfiguredSurface } ],
+        })
+        reconfiguredSurface.configure({ format: 'depth32float' })
+        await expectScratchDiagnostic(() => runtime.submission().render(pass).submit(), {
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        expect(fake.calls.textureViews).to.have.length(0)
+        expect(fake.calls.renderPasses).to.have.length(0)
+        expect(fake.calls.queueSubmissions).to.have.length(0)
+        expect(canvas.context.currentTextureCalls).to.equal(0)
+        expect(validCanvas.context.currentTextureCalls).to.equal(0)
+    })
+
     it('keeps compatibility render attachments valid after array-layer growth', async() => {
 
         const fixture = await createRenderTargetScene()

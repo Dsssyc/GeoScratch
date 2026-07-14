@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-sixteenth-review fixes; clean acceptance and independent re-review pending
+Status: Post-seventeenth-review fixes; clean acceptance and independent re-review pending
 Decisions: ADR-036, ADR-037, ADR-038
 
 ## Fixed Evidence
@@ -24,8 +24,8 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 394
-referenced behavior tests; requires the complete suite to report exactly 817 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 397
+referenced behavior tests; requires the complete suite to report exactly 820 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -317,7 +317,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Fourteen isolated review passes have examined the fixed-baseline diff and working tree.
+Seventeen isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -564,9 +564,8 @@ Resolved fifteenth review findings:
    distinct buffer-to-buffer size rule. They no longer claim every copy needs both linear
    layouts or that only `all` is supported.
 
-A further new isolated reviewer must re-review these fixes and the remaining Goal
-surface. This section is not an approval until that reviewer reports no unresolved
-correctness finding.
+The next isolated review of the sixteenth-review fixes did not approve the branch. Its
+three actionable findings are recorded and resolved below.
 
 Resolved sixteenth review findings:
 
@@ -596,6 +595,23 @@ The first fifteen review rounds contained 50 reproduced or source-verified actio
 findings. The sixteenth review adds four, for 54 reviewer findings fixed before the next
 fresh-context approval. Proactive same-root cases are recorded separately rather than
 inflating that reviewer count.
+
+Resolved seventeenth review findings:
+
+1. A buffer-backed `CopyCommand` source no longer collapses its `BufferRegion` to the
+   parent `BufferResource` during current-use validation. Buffer-to-buffer and
+   buffer-to-texture copies revalidate the retained source region against the current
+   replacement allocation before readiness, encoder creation, or native copy effects.
+2. Render-pass preflight now requires all color attachment regions to be pairwise
+   disjoint. The overlap key uses logical texture identity plus mip and selected array
+   layer, or the selected `depthSlice` for a 3D view; Surface regions use canvas-context
+   identity, so separate wrappers cannot alias one current texture. Distinct 3D slices of
+   one texture remain native-valid and executable.
+3. A color attachment now requires a color-renderable view format. Depth/stencil
+   renderable formats fail with a structured descriptor diagnostic before native view or
+   command encoder creation instead of relying on asynchronous WebGPU validation.
+
+These three findings bring the reproduced or source-verified reviewer total to 57.
 
 ## Verification Record
 
@@ -799,7 +815,43 @@ Post-sixteenth-review pre-commit verification:
   identities pending; `npm run typecheck` and the package build passed
 - clean commit acceptance remains required before the next isolated no-findings review
 
-The exact no-findings re-review, clean-commit acceptance, final push, and clean-tree
+Clean checkpoint acceptance at `72d84bc856b0fc70d4d390e4e29d5e5451da5ce2`:
+
+- runner verification was `acceptance` / `passed`; the initial and final repository
+  evidence named the same exact commit and an empty working tree
+- all capability, public-surface, documentation, production-emit, fixed-baseline, and
+  historical JavaScript parity rows passed against the live official sources
+- runner-owned typecheck, complete build, and diff checking passed
+- focused acceptance passed 394/394; the complete suite reported 817 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- Chrome 150.0.7871.115 on Apple Metal 3 passed the headed persistent-binding proof and
+  all 11 ordinary examples; both 20,000-cycle steady-state phases passed
+- the integrated unavailable-target probe exited non-zero with
+  `ERR_CONNECTION_REFUSED`; the runner stopped its managed Vite server and confirmed the
+  same clean repository target after the complete execution sequence
+- the subsequent seventeenth isolated review found the three issues recorded above, so
+  this checkpoint is evidence history rather than final approval
+
+Post-seventeenth-review pre-commit verification:
+
+- all three review findings first produced exactly three focused RED failures; the Copy
+  failure reached the later readiness diagnostic, while both pass cases reached native
+  behavior instead of a Scratch diagnostic
+- the same three focused tests passed after implementation, including a positive
+  submission that binds two different 3D `depthSlice` values from one texture
+- the same-root pass audit also covers distinct Surface wrappers sharing one canvas
+  context and submit-time Surface format reconfiguration without increasing the reviewer
+  finding count
+- the affected copy, pass, depth/stencil, documentation, fixed-history, and native-source
+  suites passed after the exact 41-site native inventory was re-derived
+- fixed-history structural parity passed every capability, behavior-title, bilingual
+  documentation, production-emit, and baseline/historical contract while correctly
+  reporting `incomplete` on the dirty tree
+- `npm test`: 820 passing with only the two exact browser/final-acceptance gate
+  identities pending; `npm run typecheck` and the complete package/example build passed
+- clean-commit acceptance and a new isolated no-findings review remain required
+
+The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.
 
 ## Explicit Non-Goals

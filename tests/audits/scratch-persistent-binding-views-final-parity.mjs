@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 394
-const expectedFullSuitePasses = 817
+const expectedFocusedAcceptancePasses = 397
+const expectedFullSuitePasses = 820
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -332,7 +332,9 @@ const capabilityRows = [
                 'normalizeColorAttachmentOperations(',
                 'normalizeColorClearValue(',
                 'validateRenderPassHasAttachment(',
-                'normalizeColorAttachmentDepthSlice(pass, attachment.target, attachment.depthSlice)',
+                'normalizeColorAttachmentDepthSlice(',
+                'validateColorRenderableAttachmentFormat(',
+                'validateDisjointColorAttachmentRegions(pass, regions)',
                 'normalizeDepthClearValue(',
                 "normalized.depthLoad === 'clear' ? 1 : undefined",
             ]) &&
@@ -569,6 +571,8 @@ const behaviorTestContracts = [
         'rejects color attachment metadata and surface view descriptor divergence',
         'rejects invalid TextureResource attachment views and transient operations',
         'revalidates a persistent 3d attachment depthSlice after allocation replacement',
+        'rejects overlapping color attachment regions while permitting disjoint 3d slices',
+        'rejects depth-stencil formats in color attachment slots before encoder creation',
     ]),
     behaviorTestContract('tests/scratch-depth-stencil-attachments.test.js', [
         'defaults depth clear to one and accepts inclusive unit-range boundaries',
@@ -614,6 +618,7 @@ const behaviorTestContracts = [
         'enforces GPUSize32 bounds for both native buffer-texture copy layouts',
         'describes only BufferRegion-based copy shapes in structured diagnostics',
         'revalidates every buffer copy usage against replacement allocations before encoder effects',
+        'revalidates every buffer copy source region against replacement bounds before encoder effects',
         'rejects invalid copy ranges and every same-buffer copy',
     ]),
     behaviorTestContract('tests/scratch-texture-sampler.test.js', [
@@ -778,6 +783,8 @@ const documentationAudit = Object.freeze({
             '`3d`',
             '`depthSlice`',
             'current logical mip depth',
+            'color-renderable',
+            'pairwise disjoint',
             'GPUStencilValue',
             'GPUSize32',
             'clear',
@@ -1421,6 +1428,10 @@ async function fetchOfficialSpecificationEvidence(canonicalTypes) {
             'There must exist at least one attachment, either: - A non-`null` value in |this|.{{GPURenderPassDescriptor/colorAttachments}}, or - A |this|.{{GPURenderPassDescriptor/depthStencilAttachment}}.',
         renderAttachmentDepthSlice:
             '|this|.{{GPURenderPassColorAttachment/depthSlice}} |must| [=map/exist|be provided=] and |must| be &lt; the [=GPUExtent3D/depthOrArrayLayers=] of the [=logical miplevel-specific texture extent=]',
+        colorAttachmentRenderableFormat:
+            '|renderViewDescriptor|.{{GPUTextureViewDescriptor/format}} |must| be a [=color renderable format=].',
+        pairwiseColorAttachmentRegions:
+            'The set of texture regions in |attachmentRegions| must be pairwise disjoint. That is, no two texture regions may overlap.',
         writeBufferContentsAlignment:
             '|contentsSize|, converted to bytes, is a multiple of 4 bytes.',
         writeBufferOffsetAlignment:

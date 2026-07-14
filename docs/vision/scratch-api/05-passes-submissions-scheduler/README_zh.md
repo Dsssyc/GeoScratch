@@ -61,7 +61,8 @@ const simulationPass = runtime.createComputePass({
 Attachment 按实际逻辑 view 校验，而不是只看 parent texture。持久
 `TextureViewSpec` 必须包含 `RENDER_ATTACHMENT` view usage，并满足完整的
 renderable-view shape。归一化后的 view format 是唯一 attachment format；可选
-pass metadata 必须与它精确一致。显式 Surface view descriptor 必须保留已配置
+pass metadata 必须与它精确一致。Color slot 要求 color-renderable format；
+depth/stencil renderable format 只能用于 depth/stencil attachment。显式 Surface view descriptor 必须保留已配置
 format、`2d` single-mip/single-layer all-aspect RGBA view，以及 `0` 或
 `RENDER_ATTACHMENT` usage。带 `TRANSIENT_ATTACHMENT` usage 的 view 对 color
 以及每个可写 depth/stencil aspect 都要求 `load: 'clear'` 和
@@ -77,7 +78,10 @@ view，并要求单个 mip 与单个选定 array layer。`2d-array` view 通过
 `depthSlice`。Color clear 只接受精确四个有限分量的 sequence，或字段完整且值
 有限的 `{ r, g, b, a }` dictionary。Stencil clear 被限制在
 `GPUStencilValue`/`GPUSize32` 范围内。Render pass 可以只有 depth，但不能同时
-省略 color 与 depth/stencil attachment。
+省略 color 与 depth/stencil attachment。Submission preflight 要求 color
+attachment region pairwise disjoint。同一 texture 上选择相同 mip 与 array layer，
+或相同 3D `depthSlice` 的 view 会重叠；不同 layer 与 slice 仍然合法。同一个
+共享同一个 canvas context 的两个 Surface 对象不能在一个 pass 中占据两个 color slot。
 
 Pass spec 不存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
 
@@ -243,7 +247,7 @@ action 不发布 write effect。
 
 ### 构造与提交之间的 Resize
 
-`TextureResource.resize()` 不会增加 submission step。它是返回 Promise 的 resource allocation transaction，不是 queue work。candidate scope settle 期间旧 allocation 保持 current，submission encoding 不会隐藏等待；若某个 submission 必须使用 replacement，应用需要先显式 await resize。`SubmissionBuilder` 保存逻辑 pass、command、resource 与 `TextureViewSpec` reference；preflight 与 encoding 会校验 submission 时实际 current 的 allocation。Texture-backed color 与 depth/stencil attachment 会保留其 `2d`、`2d-array` 或 `3d` 逻辑 view shape。过期的 mip/layer descriptor、越出范围的 `3d` `depthSlice`，或不匹配的 current render extents/sample counts，都会在 command encoder creation 或 ledger mutation 前失败。Native attachment view 是 submission-scoped，通过 `SubmittedWork` 观察，且绝不会被 `PassSpec` 缓存或 prepare。Attachment 不受 compatibility-mode texture-binding dimension 约束。
+`TextureResource.resize()` 不会增加 submission step。它是返回 Promise 的 resource allocation transaction，不是 queue work。candidate scope settle 期间旧 allocation 保持 current，submission encoding 不会隐藏等待；若某个 submission 必须使用 replacement，应用需要先显式 await resize。`SubmissionBuilder` 保存逻辑 pass、command、resource 与 `TextureViewSpec` reference；preflight 与 encoding 会校验 submission 时实际 current 的 allocation。Texture-backed color 与 depth/stencil attachment 会保留其 `2d`、`2d-array` 或 `3d` 逻辑 view shape。过期的 mip/layer descriptor、越出范围的 `3d` `depthSlice`、重叠的 color attachment region，或不匹配的 current render extents/sample counts，都会在 command encoder creation 或 ledger mutation 前失败。Native attachment view 是 submission-scoped，通过 `SubmittedWork` 观察，且绝不会被 `PassSpec` 缓存或 prepare。Attachment 不受 compatibility-mode texture-binding dimension 约束。
 
 Resize 自身不记录 resource access、producer epoch、command buffer、queue action 或 completion registration。replacement 虽然保留 `contentEpoch` 数值，但初始为 empty。后续 write 可以在同一 submission 中让它 ready，供更后的 read 使用；两份 ledger 此时都记录新的 `allocationVersion` 与下一个 `contentEpoch`。
 

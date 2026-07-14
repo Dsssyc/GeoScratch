@@ -67,6 +67,11 @@ const DEPTH_STENCIL_FORMATS = [
     'depth32float',
 ] as const satisfies readonly GPUTextureFormat[]
 
+const DEPTH_STENCIL_FORMAT_SET = new Set<GPUTextureFormat>([
+    ...DEPTH_STENCIL_FORMATS,
+    'depth32float-stencil8',
+])
+
 const BASE_STORAGE_TEXTURE_FORMATS = [
     'rgba8unorm',
     'rgba8snorm',
@@ -138,6 +143,14 @@ export function textureFormatIsRenderable(
     const requirement = RENDERABLE_FORMAT_REQUIREMENTS.get(format)
     return requirement !== undefined &&
         runtimeSupportsTextureFormatRequirement(runtime, requirement)
+}
+
+export function textureFormatIsColorRenderable(
+    runtime: ScratchRuntime,
+    format: GPUTextureFormat
+): boolean {
+
+    return !DEPTH_STENCIL_FORMAT_SET.has(format) && textureFormatIsRenderable(runtime, format)
 }
 
 export function textureFormatSupportsStorageBinding(

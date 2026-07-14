@@ -1642,6 +1642,46 @@ describe('scratch CopyCommand', () => {
         }
     })
 
+    it('revalidates every buffer copy source region against replacement bounds before encoder effects', async() => {
+
+        const bufferToBuffer = await createCopyFixture()
+        const bufferToTexture = await createBufferToTextureCopyFixture()
+        const cases = [
+            {
+                fixture: bufferToBuffer,
+                replacementSize: 8,
+                copyCallCount: () => bufferToBuffer.calls.copies.length,
+            },
+            {
+                fixture: bufferToTexture,
+                replacementSize: 512,
+                copyCallCount: () => bufferToTexture.calls.bufferTextureCopies.length,
+            },
+        ]
+
+        for (const { fixture, replacementSize, copyCallCount } of cases) {
+            replaceResourceAllocationForTest(fixture.source, {
+                ...fixture.source.descriptor,
+                size: replacementSize,
+            })
+            const encoderCount = fixture.calls.commandEncoders.length
+            const submissionCount = fixture.calls.queueSubmissions.length
+
+            await expectScratchDiagnostic(() => fixture.runtime
+                .createSubmission({ validation: 'throw' })
+                .copy(fixture.copy)
+                .submit(), {
+                code: 'SCRATCH_BUFFER_REGION_RANGE_INVALID',
+                severity: 'error',
+                phase: 'resource',
+            })
+
+            expect(fixture.calls.commandEncoders).to.have.length(encoderCount)
+            expect(fixture.calls.queueSubmissions).to.have.length(submissionCount)
+            expect(copyCallCount()).to.equal(0)
+        }
+    })
+
     it('rejects invalid copy ranges and every same-buffer copy', async() => {
 
         const fixture = await createCopyFixture()

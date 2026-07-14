@@ -2,6 +2,7 @@ import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { advanceQuerySlotContentEpoch, QuerySetResource } from './query-set.js'
 import { TextureResource, TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
+import { textureFormatIsColorRenderable } from './texture-format-capabilities.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -73,6 +74,16 @@ type RenderAttachmentExtent = {
     width: number
     height: number
     sampleCount: number
+}
+
+type RenderAttachmentRegion = {
+    index: number
+    subject: DiagnosticSubject
+    target: Surface | TextureResource
+    dimension: 'surface' | GPUTextureViewDimension
+    baseMipLevel?: number
+    baseArrayLayer?: number
+    depthSlice?: number
 }
 
 export interface RenderPassSpec {
@@ -473,6 +484,12 @@ function normalizeColorAttachment(
         target.assertUsable()
         validateTextureColorAttachmentUsage(pass, target.texture)
         validateRenderAttachmentView(pass, target)
+        validateColorRenderableAttachmentFormat(
+            pass,
+            target.subject,
+            target.descriptor.format,
+            [ target.texture.subject ]
+        )
         if (attachment.viewDescriptor !== undefined) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
@@ -538,6 +555,7 @@ function normalizeColorAttachment(
         target,
         attachment.viewDescriptor
     )
+    validateColorRenderableAttachmentFormat(pass, target.subject, viewFormat)
     validateColorAttachmentFormat(pass, target.subject, attachment.format, viewFormat)
     const operations = normalizeColorAttachmentOperations(pass, target.subject, attachment, false)
     const normalized: RenderPassColorAttachmentSpec = {
@@ -851,20 +869,50 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
 
     pass.assertUsable()
     const extents: RenderAttachmentExtent[] = []
-    for (const attachment of pass.color) {
+    const regions: RenderAttachmentRegion[] = []
+    for (const [ index, attachment ] of pass.color.entries()) {
         if (isTextureViewSpec(attachment.target)) {
             validateRenderAttachmentView(pass, attachment.target)
-            normalizeColorAttachmentDepthSlice(pass, attachment.target, attachment.depthSlice)
+            validateColorRenderableAttachmentFormat(
+                pass,
+                attachment.target.subject,
+                attachment.target.descriptor.format,
+                [ attachment.target.texture.subject ]
+            )
+            const depthSlice = normalizeColorAttachmentDepthSlice(
+                pass,
+                attachment.target,
+                attachment.depthSlice
+            )
             extents.push(textureRenderAttachmentExtent(attachment.target))
+            regions.push(textureRenderAttachmentRegion(index, attachment.target, depthSlice))
             continue
         }
 
         attachment.target.assertUsable()
+        const viewFormat = validateSurfaceAttachmentViewDescriptor(
+            pass,
+            attachment.target,
+            attachment.viewDescriptor
+        )
+        validateColorRenderableAttachmentFormat(pass, attachment.target.subject, viewFormat)
+        validateColorAttachmentFormat(
+            pass,
+            attachment.target.subject,
+            attachment.format,
+            viewFormat
+        )
         extents.push({
             subject: attachment.target.subject,
             width: attachment.target.size.width,
             height: attachment.target.size.height,
             sampleCount: 1,
+        })
+        regions.push({
+            index,
+            subject: attachment.target.subject,
+            target: attachment.target,
+            dimension: 'surface',
         })
     }
     if (pass.depth !== undefined) {
@@ -872,6 +920,7 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
         extents.push(textureRenderAttachmentExtent(pass.depth.target))
     }
 
+    validateDisjointColorAttachmentRegions(pass, regions)
     validateMatchingRenderAttachmentExtents(pass, extents)
 }
 
@@ -944,6 +993,27 @@ function validateColorAttachmentFormat(
         message: 'RenderPassSpec color attachment format must equal its actual view format.',
         expected: { format: actual },
         actual: { format: requested },
+    })
+}
+
+function validateColorRenderableAttachmentFormat(
+    pass: RenderPassSpec,
+    subject: DiagnosticSubject,
+    format: GPUTextureFormat,
+    related: DiagnosticSubject[] = []
+): void {
+
+    if (textureFormatIsColorRenderable(pass.runtime, format)) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+        severity: 'error',
+        phase: 'resource',
+        subject,
+        related: [ pass.subject, ...related ],
+        message: 'RenderPassSpec color attachment requires a color-renderable texture format.',
+        expected: { format: 'color-renderable GPUTextureFormat' },
+        actual: { format },
     })
 }
 
@@ -1037,6 +1107,91 @@ function textureRenderAttachmentExtent(
         height: Math.max(1, Math.floor(target.height / divisor)),
         sampleCount: target.sampleCount,
     }
+}
+
+function textureRenderAttachmentRegion(
+    index: number,
+    view: TextureViewSpec,
+    depthSlice: number | undefined
+): RenderAttachmentRegion {
+
+    const descriptor = view.descriptor
+    const region = {
+        index,
+        subject: view.subject,
+        target: view.texture,
+        dimension: descriptor.dimension,
+        baseMipLevel: descriptor.baseMipLevel,
+    }
+    if (descriptor.dimension === '3d') {
+        if (depthSlice === undefined) {
+            throw new TypeError('Validated 3D render attachment region requires a depthSlice.')
+        }
+        return { ...region, depthSlice }
+    }
+    return { ...region, baseArrayLayer: descriptor.baseArrayLayer }
+}
+
+function validateDisjointColorAttachmentRegions(
+    pass: RenderPassSpec,
+    regions: RenderAttachmentRegion[]
+): void {
+
+    for (let leftIndex = 0; leftIndex < regions.length; leftIndex++) {
+        for (let rightIndex = leftIndex + 1; rightIndex < regions.length; rightIndex++) {
+            const left = regions[leftIndex]
+            const right = regions[rightIndex]
+            if (!renderAttachmentRegionsOverlap(left, right)) continue
+
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'resource',
+                subject: pass.subject,
+                related: [ left.subject, right.subject ],
+                message: 'RenderPassSpec color attachment regions must be pairwise disjoint.',
+                expected: { colorAttachmentRegions: 'pairwise disjoint texture regions' },
+                actual: {
+                    reason: 'overlap',
+                    colorAttachmentRegions: [
+                        describeRenderAttachmentRegion(left),
+                        describeRenderAttachmentRegion(right),
+                    ],
+                },
+            })
+        }
+    }
+}
+
+function renderAttachmentRegionsOverlap(
+    left: RenderAttachmentRegion,
+    right: RenderAttachmentRegion
+): boolean {
+
+    if (left.dimension === 'surface' || right.dimension === 'surface') {
+        return left.dimension === 'surface' &&
+            right.dimension === 'surface' &&
+            (left.target as Surface).context === (right.target as Surface).context
+    }
+    if (left.target !== right.target) return false
+    if (left.baseMipLevel !== right.baseMipLevel) return false
+    if (left.dimension === '3d' || right.dimension === '3d') {
+        return left.dimension === '3d' &&
+            right.dimension === '3d' &&
+            left.depthSlice === right.depthSlice
+    }
+    return left.baseArrayLayer === right.baseArrayLayer
+}
+
+function describeRenderAttachmentRegion(region: RenderAttachmentRegion): Readonly<Record<string, unknown>> {
+
+    return Object.freeze({
+        index: region.index,
+        dimension: region.dimension,
+        ...(region.baseMipLevel !== undefined ? { baseMipLevel: region.baseMipLevel } : {}),
+        ...(region.baseArrayLayer !== undefined ? { baseArrayLayer: region.baseArrayLayer } : {}),
+        ...(region.depthSlice !== undefined ? { depthSlice: region.depthSlice } : {}),
+    })
 }
 
 function validateMatchingRenderAttachmentExtents(

@@ -1626,7 +1626,11 @@ export class CopyCommand {
         }
 
         this.runtime.assertActive()
-        copySourceResource(this.source).assertUsable()
+        if (isBufferRegionSource(this.source)) {
+            this.source.region.assertUsable()
+        } else {
+            this.source.resource.assertUsable()
+        }
         this.target.assertUsable()
     }
 
