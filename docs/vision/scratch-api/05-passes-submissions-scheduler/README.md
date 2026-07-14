@@ -58,6 +58,29 @@ const simulationPass = runtime.createComputePass({
 
 `timestampWrites` lower to WebGPU pass descriptor timestamp writes and require a `timestamp` query set. `occlusionQuerySet` is render-pass-only and requires an `occlusion` query set. Query result transfer is not implicit in pass specs; resolve and readback remain explicit commands or operations.
 
+An attachment is validated against its actual logical view, not only its parent
+texture. A persistent `TextureViewSpec` must include `RENDER_ATTACHMENT` view
+usage and satisfy the complete renderable-view shape. Its normalized view format
+is the sole attachment format; optional pass metadata must match it exactly. An
+explicit Surface view descriptor must preserve the configured format, a `2d`
+single-mip/single-layer all-aspect RGBA view, and usage `0` or
+`RENDER_ATTACHMENT`. A view with `TRANSIENT_ATTACHMENT` usage requires
+`load: 'clear'` and `store: 'discard'` for color and for every writable
+depth/stencil aspect. Scratch chooses those operations as transient defaults and
+rejects incompatible explicit values. A provided `depthClear` must be finite and
+inside `[0, 1]`. When writable depth defaults or explicitly resolves to
+`depthLoad: 'clear'` and no value is provided, Scratch normalizes `depthClear` to
+`1`; it never emits a clear operation without the required native clear value.
+Texture-backed attachments may use native-renderable `2d`, `2d-array`, or `3d`
+views with one mip and one selected array layer. A `2d-array` view selects its
+layer with `baseArrayLayer`. A `3d` color view spans the current logical mip depth
+and requires the pass to select one in-range `depthSlice`; non-`3d`
+attachments reject `depthSlice`. Color clears are normalized only from an exact
+four-component finite sequence or a complete finite `{ r, g, b, a }`
+dictionary. Stencil clears are limited to the `GPUStencilValue`/`GPUSize32`
+range. A render pass may be depth-only, but it may not omit both color and
+depth/stencil attachments.
+
 Pass specs do not store commands. This prevents stale command lists from surviving across submissions.
 
 ## Submission
@@ -228,7 +251,7 @@ replayed action prefix. Failed and unreplayed actions publish no write effect.
 
 ### Resize Between Construction And Submission
 
-`TextureResource.resize()` does not add a submission step. It is a Promise-returning resource allocation transaction, not queue work. While its candidate scopes settle, the old allocation remains current and submission encoding performs no hidden wait. An application that requires the replacement for a submission explicitly awaits resize first. A `SubmissionBuilder` stores logical pass, command, resource, and `TextureViewSpec` references; preflight and encoding validate whichever allocation is current at submission time. Texture-backed color and depth/stencil attachments explicitly select one `2d` mip-level array layer; stale mip/layer view descriptors or mismatched current render extents/sample counts fail before command encoder creation or ledger mutation. Native attachment views are submission-scoped, observed through `SubmittedWork`, and never cached or prepared by `PassSpec`. Attachments remain independent of the compatibility-mode texture-binding dimension.
+`TextureResource.resize()` does not add a submission step. It is a Promise-returning resource allocation transaction, not queue work. While its candidate scopes settle, the old allocation remains current and submission encoding performs no hidden wait. An application that requires the replacement for a submission explicitly awaits resize first. A `SubmissionBuilder` stores logical pass, command, resource, and `TextureViewSpec` references; preflight and encoding validate whichever allocation is current at submission time. Texture-backed color and depth/stencil attachments retain their `2d`, `2d-array`, or `3d` logical view shape. Stale mip/layer descriptors, an out-of-range `3d` `depthSlice`, or mismatched current render extents/sample counts fail before command encoder creation or ledger mutation. Native attachment views are submission-scoped, observed through `SubmittedWork`, and never cached or prepared by `PassSpec`. Attachments remain independent of the compatibility-mode texture-binding dimension.
 
 Resize itself records no resource access, producer epoch, command buffer, queue action, or completion registration. The replacement starts empty even though its `contentEpoch` number is preserved. A later write may make it ready for a later read in the same submission, and both ledgers then report the new `allocationVersion` and the next `contentEpoch`.
 

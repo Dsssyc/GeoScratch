@@ -46,10 +46,13 @@ validation, internal, then out-of-memory. Every pop is issued before the first
 `await`. Synchronous throws, rejected scope settlement, and resolved scoped
 errors remain distinct evidence.
 
-After settlement Scratch rechecks runtime and device lifecycle, then constructs
-and registers the wrapper. Failure or cancellation never registers a current
-object. Query-set candidates call native `destroy()` when available; candidates
-without native destruction are dereferenced without a false destruction claim.
+After every independently issued scope has settled, Scratch rechecks runtime and
+device lifecycle, then constructs and registers the wrapper. A lifecycle change
+cannot short-circuit scope settlement or replace an already observed synchronous
+native or scoped failure as the causal primary. It is retained as secondary
+evidence. Failure or cancellation never registers a current object. Query-set
+candidates call native `destroy()` when available; candidates without native
+destruction are dereferenced without a false destruction claim.
 
 Sampler validation covers the complete current native descriptor. Query-set
 validation covers positive count and limits, timestamp feature preflight, and
@@ -120,10 +123,15 @@ and applies the same scope order around exactly one
 the first `await`.
 
 After independent settlement, Scratch selects the primary failure by stable
-causal order and retains secondary evidence. It rechecks runtime, device, object
-lifecycle, and the complete allocation snapshot. Native views, bind group,
-snapshot hash, and generation commit atomically. Failed candidates are
-dereferenced; no partial candidate becomes current.
+causal order and retains secondary evidence. Lifecycle notification may explain
+why the transaction cannot commit, but cannot short-circuit the pending scope
+joins or outrank an earlier synchronous native issue or scoped failure. Scratch
+then rechecks runtime, device, object lifecycle, and the complete allocation
+snapshot. The lifecycle result is appended before failure selection even when
+native failures already exist, so it remains visible as secondary incident
+evidence. Native views, bind group, snapshot hash, and generation commit
+atomically. Failed candidates are dereferenced; no partial candidate becomes
+current.
 
 Primary-failure selection never follows Promise settlement order or native
 message text. It sorts complete unbounded transaction facts by this fixed tuple:

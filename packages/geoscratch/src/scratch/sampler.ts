@@ -323,12 +323,33 @@ function normalizeFiniteNumber(
 
 function normalizeMaxAnisotropy(subject: DiagnosticSubject, value: unknown): number {
 
-    if (!Number.isInteger(value) || typeof value !== 'number' || value < 1 || value > 0xffff) {
+    if (typeof value !== 'number') {
         throwSamplerDescriptorDiagnostic(subject, { maxAnisotropy: value }, {
-            maxAnisotropy: 'integer in [1, 65535]',
+            maxAnisotropy: 'number converted by Web IDL [Clamp] unsigned short',
         })
     }
-    return value
+    const normalized = clampedUnsignedShort(value)
+    if (normalized < 1) {
+        throwSamplerDescriptorDiagnostic(subject, { maxAnisotropy: value }, {
+            maxAnisotropy: 'Web IDL [Clamp] unsigned short whose normalized value is >= 1',
+        })
+    }
+    return normalized
+}
+
+function clampedUnsignedShort(value: number): number {
+
+    if (Number.isNaN(value)) return 0
+    return nearestEvenInteger(Math.min(0xffff, Math.max(0, value)))
+}
+
+function nearestEvenInteger(value: number): number {
+
+    const lower = Math.floor(value)
+    const distance = value - lower
+    if (distance < 0.5) return lower
+    if (distance > 0.5) return lower + 1
+    return lower % 2 === 0 ? lower : lower + 1
 }
 
 function normalizeEnum<T extends string>(

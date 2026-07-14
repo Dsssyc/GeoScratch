@@ -7,6 +7,7 @@ export {
 export type {
     DiagnosticSubject,
     ScratchDiagnostic,
+    ScratchDiagnosticInput,
     ScratchDiagnosticReport,
 } from './diagnostics.js'
 export type {
@@ -104,10 +105,15 @@ export type {
     ScratchRuntimeResourceFact,
 } from './runtime-diagnostics.js'
 export { Surface } from './surface.js'
+export type { SurfaceFormat, SurfaceOptions, SurfaceSize } from './surface.js'
 export { Resource } from './resource.js'
 export type { ResourceState } from './resource.js'
 export { BufferRegion, BufferResource } from './buffer.js'
-export type { BufferRegionDescriptor, BufferSubregionDescriptor } from './buffer.js'
+export type {
+    BufferRegionDescriptor,
+    BufferResourceDescriptor,
+    BufferSubregionDescriptor,
+} from './buffer.js'
 export { TextureResource, TextureViewSpec } from './texture.js'
 export type {
     NormalizedTextureViewDescriptor,
@@ -163,7 +169,11 @@ export type {
     LayoutWriteOptions,
 } from './layout-codec.js'
 export { Program } from './program.js'
-export type { ProgramBufferLayoutRequirement } from './program.js'
+export type {
+    ProgramBufferLayoutRequirement,
+    ProgramDescriptor,
+    ProgramEntryPoints,
+} from './program.js'
 export { inspectShader } from './shader-inspection.js'
 export type {
     ShaderBindLayoutComparisonOptions,
@@ -174,6 +184,7 @@ export type {
     ShaderInspectionOptions,
 } from './shader-inspection.js'
 export { ComputePipeline, RenderPipeline } from './pipeline.js'
+export type { ComputePipelineDescriptor, RenderPipelineDescriptor } from './pipeline.js'
 export { BeginOcclusionQueryCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
 export type {
     BeginOcclusionQueryCommandDescriptor,
@@ -213,6 +224,9 @@ export type {
     TextureToTextureCopyCommandDescriptor,
     TexelCopyBufferLayout,
     TextureUploadCommandDescriptor,
+    TextureUploadLayout,
+    TextureUploadOrigin,
+    TextureUploadSize,
     UploadCommandDescriptor,
 } from './command.js'
 export { ComputePassSpec, RenderPassSpec } from './pass.js'

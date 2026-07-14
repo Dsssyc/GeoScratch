@@ -184,7 +184,9 @@ async function verifyPersistentBindings(browser) {
             const output = await runtime.createBuffer({
                 label: 'browser dynamic output',
                 size: 512,
-                usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.STORAGE,
+                usage: GPUBufferUsage.COPY_DST |
+                    GPUBufferUsage.COPY_SRC |
+                    GPUBufferUsage.STORAGE,
             })
             const inputA = input.region({
                 offset: 0,
@@ -343,9 +345,9 @@ async function verifyPersistentBindings(browser) {
                 label: 'browser persistent binding matrix pass',
             })
             const commands = [
-                { inputOffset: 0, outputOffset: 0 },
-                { inputOffset: 256, outputOffset: 256 },
-            ].map(({ inputOffset, outputOffset }, index) =>
+                { inputOffset: 0, outputOffset: 0, outputEpoch: 1 },
+                { inputOffset: 256, outputOffset: 256, outputEpoch: 2 },
+            ].map(({ inputOffset, outputOffset, outputEpoch }, index) =>
                 runtime.createDispatchCommand({
                     label: `browser dynamic region dispatch ${index}`,
                     pipeline,
@@ -360,6 +362,7 @@ async function verifyPersistentBindings(browser) {
                     resources: {
                         read: [
                             { resource: input, contentEpoch: 2 },
+                            { resource: output, contentEpoch: outputEpoch },
                             { resource: sampledTexture, contentEpoch: 1 },
                         ],
                         write: [ output, storageTexture ],
@@ -367,6 +370,27 @@ async function verifyPersistentBindings(browser) {
                     whenMissing: 'throw',
                 })
             )
+            const replacementCommand = runtime.createDispatchCommand({
+                label: 'browser replacement dispatch',
+                pipeline,
+                bindSets: [ {
+                    set: bindSet,
+                    dynamicOffsets: {
+                        inputValue: 0,
+                        outputValue: 0,
+                    },
+                } ],
+                count: { workgroups: [ 1 ] },
+                resources: {
+                    read: [
+                        { resource: input, contentEpoch: 2 },
+                        { resource: output, contentEpoch: 3 },
+                        { resource: sampledTexture, contentEpoch: 1 },
+                    ],
+                    write: [ output, storageTexture ],
+                },
+                whenMissing: 'throw',
+            })
             const uploads = [
                 runtime.createUploadCommand({
                     label: 'browser typed input A',
@@ -385,11 +409,17 @@ async function verifyPersistentBindings(browser) {
                     layout: { bytesPerRow: 4, rowsPerImage: 1 },
                     size: { width: 1, height: 1 },
                 }),
+                runtime.createUploadCommand({
+                    label: 'browser initialize dynamic output',
+                    target: output.region(),
+                    data: new Uint8Array(output.size),
+                }),
             ]
             const initialWork = runtime.createSubmission({ validation: 'throw' })
                 .upload(uploads[0])
                 .upload(uploads[1])
                 .upload(uploads[2])
+                .upload(uploads[3])
                 .compute(pass, commands)
                 .submit()
             await initialWork.done
@@ -406,7 +436,7 @@ async function verifyPersistentBindings(browser) {
             await storageTexture.resize([ 2, 2 ])
             const staleState = bindSet.preparationState
             const staleFailure = captureFailure(() => runtime.createSubmission({ validation: 'throw' })
-                .compute(pass, [ commands[0] ])
+                .compute(pass, [ replacementCommand ])
                 .submit(), ScratchDiagnosticError)
             await bindSet.prepare()
             const replacementGeneration = bindSet.prepareGeneration
@@ -425,7 +455,7 @@ async function verifyPersistentBindings(browser) {
                 whenMissing: 'throw',
             })
             const replacementWork = runtime.createSubmission({ validation: 'throw' })
-                .compute(pass, [ commands[0] ])
+                .compute(pass, [ replacementCommand ])
                 .copy(copyStorage)
                 .submit()
             await replacementWork.done
@@ -469,7 +499,7 @@ async function verifyPersistentBindings(browser) {
                     generationBefore: initialGeneration,
                     generationAfter: replacementGeneration,
                     snapshotChanged: replacementSnapshotHash !== initialSnapshotHash,
-                    reusedCommand: commands[0].bindSets[0].set === bindSet,
+                    reusedCommand: replacementCommand.bindSets[0].set === bindSet,
                     outputValue: replacementOutput,
                     storagePixel: Array.from(storageBytes.slice(0, 4)),
                 },
@@ -486,7 +516,9 @@ async function verifyPersistentBindings(browser) {
             const output = await runtime.createBuffer({
                 label: 'browser read-only storage output',
                 size: 4,
-                usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.STORAGE,
+                usage: GPUBufferUsage.COPY_DST |
+                    GPUBufferUsage.COPY_SRC |
+                    GPUBufferUsage.STORAGE,
             })
             const layout = await runtime.createBindLayout({
                 group: 0,
@@ -534,17 +566,26 @@ async function verifyPersistentBindings(browser) {
                 41,
                 'browser initialize read-only storage texture'
             )
+            const initializeOutput = runtime.createUploadCommand({
+                label: 'browser initialize read-only storage output',
+                target: output.region(),
+                data: new Uint32Array([ 0 ]),
+            })
             const dispatch = runtime.createDispatchCommand({
                 pipeline,
                 bindSets: [ { set: bindSet } ],
                 count: { workgroups: [ 1 ] },
                 resources: {
-                    read: [ { resource: sourceTexture, contentEpoch: 1 } ],
+                    read: [
+                        { resource: sourceTexture, contentEpoch: 1 },
+                        { resource: output, contentEpoch: 1 },
+                    ],
                     write: [ output ],
                 },
                 whenMissing: 'throw',
             })
             const work = runtime.createSubmission({ validation: 'throw' })
+                .upload(initializeOutput)
                 .compute(initializer.pass, [ initializer.dispatch ])
                 .compute(pass, [ dispatch ])
                 .submit()
@@ -567,7 +608,9 @@ async function verifyPersistentBindings(browser) {
             const output = await runtime.createBuffer({
                 label: 'browser read-write storage output',
                 size: 4,
-                usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.STORAGE,
+                usage: GPUBufferUsage.COPY_DST |
+                    GPUBufferUsage.COPY_SRC |
+                    GPUBufferUsage.STORAGE,
             })
             const layout = await runtime.createBindLayout({
                 group: 0,
@@ -618,17 +661,26 @@ async function verifyPersistentBindings(browser) {
                 5,
                 'browser initialize read-write storage texture'
             )
+            const initializeOutput = runtime.createUploadCommand({
+                label: 'browser initialize read-write storage output',
+                target: output.region(),
+                data: new Uint32Array([ 0 ]),
+            })
             const dispatch = runtime.createDispatchCommand({
                 pipeline,
                 bindSets: [ { set: bindSet } ],
                 count: { workgroups: [ 1 ] },
                 resources: {
-                    read: [ { resource: texture, contentEpoch: 1 } ],
+                    read: [
+                        { resource: texture, contentEpoch: 1 },
+                        { resource: output, contentEpoch: 1 },
+                    ],
                     write: [ texture, output ],
                 },
                 whenMissing: 'throw',
             })
             const work = runtime.createSubmission({ validation: 'throw' })
+                .upload(initializeOutput)
                 .compute(initializer.pass, [ initializer.dispatch ])
                 .compute(pass, [ dispatch ])
                 .submit()

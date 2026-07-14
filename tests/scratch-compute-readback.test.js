@@ -44,7 +44,7 @@ async function createComputeFixture() {
     const output = await runtime.createBuffer({
         label: 'compute output',
         size: 16,
-        usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
+        usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE,
     })
     const bindLayout = await runtime.createBindLayout({
         label: 'compute storage layout',
@@ -93,7 +93,7 @@ async function createComputeFixture() {
         bindSets: [ { set: bindSet } ],
         count: { workgroups: [ 1, 1, 1 ] },
         resources: {
-            read: [ readResource(input, 1) ],
+            read: [ readResource(input, 1), readResource(output, 1) ],
             write: [ output ],
         },
         whenMissing: 'throw',
@@ -105,6 +105,11 @@ async function createComputeFixture() {
         label: 'upload compute input',
         target: (input).region({ offset: 0 }),
         data: new Float32Array([ 1, 2, 3, 4 ]),
+    })
+    const initializeOutput = runtime.createUploadCommand({
+        label: 'initialize compute output',
+        target: output.region(),
+        data: new Float32Array(4),
     })
 
     return {
@@ -119,6 +124,7 @@ async function createComputeFixture() {
         dispatch,
         pass,
         upload,
+        initializeOutput,
     }
 }
 
@@ -203,6 +209,7 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
 
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.upload)
+            .upload(fixture.initializeOutput)
             .compute(fixture.pass, [ fixture.dispatch ])
             .submit()
 
@@ -210,8 +217,9 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
         expect(fixture.dispatch).to.be.instanceOf(DispatchCommand)
         expect(fixture.dispatch.resources.read).to.deep.equal([
             readResource(fixture.input, 1),
+            readResource(fixture.output, 1),
         ])
-        expect(fixture.output.contentEpoch).to.equal(1)
+        expect(fixture.output.contentEpoch).to.equal(2)
         expect(fixture.calls.computePasses[0].actions).to.deep.equal([
             { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
             {
@@ -235,6 +243,7 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
         const fixture = await createComputeFixture()
         const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
             .upload(fixture.upload)
+            .upload(fixture.initializeOutput)
             .compute(fixture.pass, [ fixture.dispatch ])
             .submit()
 
@@ -249,7 +258,7 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
 
         expect(readback).to.be.instanceOf(ReadbackOperation)
         expect(readback.source.buffer).to.equal(fixture.output)
-        expect(readback.contentEpoch).to.equal(1)
+        expect(readback.contentEpoch).to.equal(2)
         expect([ ...values ]).to.deep.equal([ 2, 4, 6, 8 ])
         expect(fixture.calls.copies[0]).to.deep.include({
             source: fixture.output.gpuBuffer,

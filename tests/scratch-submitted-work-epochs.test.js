@@ -163,7 +163,10 @@ async function createCompute(runtime, input, output, readContentEpoch = input.co
         bindSets: [ { set: bindSet } ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ readResource(input, readContentEpoch) ],
+            read: [
+                readResource(input, readContentEpoch),
+                readResource(output),
+            ],
             write: [ output ],
         },
         whenMissing: 'throw',
@@ -1291,7 +1294,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         await submitted.done
     })
 
-    it('does not let a same-command copy target write satisfy its own source required epoch', async() => {
+    it('rejects same-buffer copy before submission epoch analysis', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
         const buffer = await runtime.createBuffer({
@@ -1300,19 +1303,15 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
         })
         advanceResourceContentEpochForTest(buffer)
-        const copy = runtime.createCopyCommand({
-            label: 'self non-overlap copy',
-            source: copySource(buffer, 2, { offset: 0, size: 16 }),
+        await expectScratchDiagnostic(() => runtime.createCopyCommand({
+            label: 'self disjoint copy',
+            source: copySource(buffer, 1, { offset: 0, size: 16 }),
             target: copyDestination(buffer, { offset: 16, size: 16 }),
             whenMissing: 'throw',
-        })
-        const builder = runtime.createSubmission({ validation: 'throw' })
-            .copy(copy)
-
-        await expectScratchDiagnostic(() => builder.submit(), {
-            code: 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE',
+        }), {
+            code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
             severity: 'error',
-            phase: 'submission',
+            phase: 'command',
         })
 
         expect(buffer.contentEpoch).to.equal(1)
@@ -1381,6 +1380,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const { runtime, calls } = await createRuntimeFixture()
             const input = await createBuffer(runtime, `empty compute input ${validation}`)
             const output = await createBuffer(runtime, `empty compute output ${validation}`)
+            advanceResourceContentEpochForTest(output)
             const compute = await createCompute(runtime, input, output)
             const builder = runtime.createSubmission({ validation })
                 .compute(compute.pass, [ compute.dispatch ])
@@ -1409,9 +1409,9 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 whenMissing: 'throw',
             })
             expect(input.contentEpoch).to.equal(0)
-            expect(output.contentEpoch).to.equal(0)
+            expect(output.contentEpoch).to.equal(1)
             expect(input.state).to.equal('empty')
-            expect(output.state).to.equal('empty')
+            expect(output.state).to.equal('ready')
             expect(calls.commandEncoders).to.have.length(0)
             expect(calls.computePasses).to.have.length(0)
             expect(calls.dispatchCalls).to.have.length(0)
@@ -1425,6 +1425,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const staged = await createBuffer(runtime, 'simulated upload target')
         const input = await createBuffer(runtime, 'failing compute input')
         const output = await createBuffer(runtime, 'failing compute output')
+        advanceResourceContentEpochForTest(output)
         const upload = runtime.createUploadCommand({
             label: 'simulated upload',
             target: (staged).region(),
@@ -1443,10 +1444,10 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         expect(staged.contentEpoch).to.equal(0)
         expect(input.contentEpoch).to.equal(0)
-        expect(output.contentEpoch).to.equal(0)
+        expect(output.contentEpoch).to.equal(1)
         expect(staged.state).to.equal('empty')
         expect(input.state).to.equal('empty')
-        expect(output.state).to.equal('empty')
+        expect(output.state).to.equal('ready')
         expect(calls.queueWrites).to.have.length(0)
         expect(calls.commandEncoders).to.have.length(0)
         expect(calls.computePasses).to.have.length(0)
@@ -1460,6 +1461,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const input = await createBuffer(runtime, `future compute input ${validation}`)
             const output = await createBuffer(runtime, `future compute output ${validation}`)
             advanceResourceContentEpochForTest(input)
+            advanceResourceContentEpochForTest(output)
             const compute = await createCompute(runtime, input, output, 2)
             const builder = runtime.createSubmission({ validation })
                 .compute(compute.pass, [ compute.dispatch ])
@@ -1489,7 +1491,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                     whenMissing: 'throw',
                 })
                 expect(input.contentEpoch).to.equal(1)
-                expect(output.contentEpoch).to.equal(0)
+                expect(output.contentEpoch).to.equal(1)
                 expect(calls.commandEncoders).to.have.length(0)
                 expect(calls.computePasses).to.have.length(0)
                 expect(calls.dispatchCalls).to.have.length(0)
@@ -1511,7 +1513,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 expect(submitted.diagnostics).to.deep.equal([])
             }
             expect(input.contentEpoch).to.equal(1)
-            expect(output.contentEpoch).to.equal(1)
+            expect(output.contentEpoch).to.equal(2)
             expect(calls.computePasses).to.have.length(1)
             expect(calls.dispatchCalls).to.have.length(1)
             expect(calls.queueSubmissions).to.have.length(1)
@@ -1527,6 +1529,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             const input = await createBuffer(runtime, `stale compute input ${validation}`)
             const output = await createBuffer(runtime, `stale compute output ${validation}`)
             advanceResourceContentEpochForTest(input)
+            advanceResourceContentEpochForTest(output)
             const upload = runtime.createUploadCommand({
                 label: 'refresh stale input',
                 target: (input).region(),
@@ -1562,7 +1565,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                     whenMissing: 'throw',
                 })
                 expect(input.contentEpoch).to.equal(1)
-                expect(output.contentEpoch).to.equal(0)
+                expect(output.contentEpoch).to.equal(1)
                 expect(input.allocationVersion).to.equal(1)
                 expect(output.allocationVersion).to.equal(1)
                 expect(calls.queueWrites).to.have.length(0)
@@ -1587,7 +1590,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 expect(submitted.diagnostics).to.deep.equal([])
             }
             expect(input.contentEpoch).to.equal(2)
-            expect(output.contentEpoch).to.equal(1)
+            expect(output.contentEpoch).to.equal(2)
             expect(calls.queueWrites).to.have.length(1)
             expect(calls.computePasses).to.have.length(1)
             expect(calls.dispatchCalls).to.have.length(1)
@@ -1602,6 +1605,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const { runtime } = await createRuntimeFixture()
         const input = await createBuffer(runtime, 'same submission input')
         const output = await createBuffer(runtime, 'same submission output')
+        advanceResourceContentEpochForTest(output)
         const uploadInput = runtime.createUploadCommand({
             label: 'produce dispatch input',
             target: (input).region(),
@@ -1615,7 +1619,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
 
         expect(submitted.diagnostics).to.deep.equal([])
         expect(input.contentEpoch).to.equal(1)
-        expect(output.contentEpoch).to.equal(1)
+        expect(output.contentEpoch).to.equal(2)
         expect(submitted.resourceAccesses.map(access => ({
             stepIndex: access.stepIndex,
             stepKind: access.stepKind,
@@ -1647,10 +1651,19 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 stepIndex: 1,
                 stepKind: 'compute',
                 commandKind: 'dispatch',
+                access: 'read',
+                resourceId: output.id,
+                contentEpochBefore: 1,
+                contentEpochAfter: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'compute',
+                commandKind: 'dispatch',
                 access: 'write',
                 resourceId: output.id,
-                contentEpochBefore: 0,
-                contentEpochAfter: 1,
+                contentEpochBefore: 1,
+                contentEpochAfter: 2,
             },
         ])
 
@@ -1662,6 +1675,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const { runtime } = await createRuntimeFixture()
         const input = await createBuffer(runtime, 'compute input')
         const output = await createBuffer(runtime, 'compute output')
+        advanceResourceContentEpochForTest(output)
         const compute = await createCompute(runtime, input, output, 1)
         const uploadInput = runtime.createUploadCommand({
             label: 'upload compute input',
@@ -1717,9 +1731,24 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 resourceKind: 'BufferResource',
                 label: 'compute output',
                 subject: output.subject,
-                access: 'write',
-                contentEpochBefore: 0,
+                access: 'read',
+                contentEpochBefore: 1,
                 contentEpochAfter: 1,
+                allocationVersion: 1,
+            },
+            {
+                stepIndex: 1,
+                stepKind: 'compute',
+                commandKind: 'dispatch',
+                commandId: compute.dispatch.id,
+                passId: compute.pass.id,
+                resourceId: output.id,
+                resourceKind: 'BufferResource',
+                label: 'compute output',
+                subject: output.subject,
+                access: 'write',
+                contentEpochBefore: 1,
+                contentEpochAfter: 2,
                 allocationVersion: 1,
             },
         ])
@@ -1743,7 +1772,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
                 resourceKind: 'BufferResource',
                 label: 'compute output',
                 subject: output.subject,
-                contentEpoch: 1,
+                contentEpoch: 2,
                 allocationVersion: 1,
                 producedBy: {
                     stepIndex: 1,
@@ -1882,6 +1911,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         const uploadTarget = await createBuffer(runtime, 'ordered upload target')
         const copyTarget = await createBuffer(runtime, 'ordered copy target')
         const computeOutput = await createBuffer(runtime, 'ordered compute output')
+        advanceResourceContentEpochForTest(computeOutput)
         const renderTarget = await createTexture(runtime, 'ordered render target')
         const upload = runtime.createUploadCommand({
             target: (uploadTarget).region(),
@@ -1894,7 +1924,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
         })
         const compute = await createCompute(runtime, copyTarget, computeOutput, 1)
         const render = await createRender(runtime, renderTarget, {
-            read: [ readResource(computeOutput, 1) ],
+            read: [ readResource(computeOutput, 2) ],
             write: [],
         })
         const submitted = runtime.createSubmission({ validation: 'throw' })
@@ -1914,6 +1944,7 @@ describe('scratch SubmittedWork resource epoch ledger', () => {
             { stepIndex: 1, stepKind: 'copy', access: 'read', label: 'ordered upload target' },
             { stepIndex: 1, stepKind: 'copy', access: 'write', label: 'ordered copy target' },
             { stepIndex: 2, stepKind: 'compute', access: 'read', label: 'ordered copy target' },
+            { stepIndex: 2, stepKind: 'compute', access: 'read', label: 'ordered compute output' },
             { stepIndex: 2, stepKind: 'compute', access: 'write', label: 'ordered compute output' },
             { stepIndex: 3, stepKind: 'render', access: 'read', label: 'ordered compute output' },
             { stepIndex: 3, stepKind: 'render', access: 'write', label: 'ordered render target' },

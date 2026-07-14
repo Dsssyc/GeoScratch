@@ -46,6 +46,7 @@ type NormalizedBufferResourceDescriptor = BufferResourceDescriptor
 const bufferResourceToken = Symbol('BufferResource')
 const bufferRegionToken = Symbol('BufferRegion')
 const bufferRegions = new WeakSet<BufferRegion>()
+const GPU_FLAGS_MAX = 0xffff_ffff
 const REMOVED_BUFFER_RESOURCE_DESCRIPTOR_FIELDS = Object.freeze([
     'layout',
     'elementCount',
@@ -545,14 +546,18 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
         })
     }
 
-    if (typeof descriptor.size !== 'number' || !Number.isFinite(descriptor.size) || descriptor.size < 0) {
+    if (
+        typeof descriptor.size !== 'number' ||
+        !Number.isSafeInteger(descriptor.size) ||
+        descriptor.size < 0
+    ) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
             subject,
-            message: 'BufferResource size must be a finite non-negative number.',
-            expected: { size: 'finite non-negative number' },
+            message: 'BufferResource size must be an exact non-negative GPUSize64 value.',
+            expected: { size: 'non-negative safe integer' },
             actual: { size: descriptor.size },
         })
     }
@@ -569,15 +574,46 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
         })
     }
 
-    if (typeof descriptor.usage !== 'number' || !Number.isFinite(descriptor.usage)) {
+    if (
+        typeof descriptor.usage !== 'number' ||
+        !Number.isInteger(descriptor.usage) ||
+        descriptor.usage < 0 ||
+        descriptor.usage > GPU_FLAGS_MAX
+    ) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
             subject,
             message: 'BufferResource usage must be GPUBufferUsageFlags.',
-            expected: { usage: 'GPUBufferUsageFlags' },
+            expected: { usage: `GPUBufferUsageFlags integer in [0, ${GPU_FLAGS_MAX}]` },
             actual: { usage: descriptor.usage },
+        })
+    }
+
+    if (descriptor.label !== undefined && typeof descriptor.label !== 'string') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject,
+            message: 'BufferResource label must be a string when provided.',
+            expected: { label: 'string or undefined' },
+            actual: { label: descriptor.label },
+        })
+    }
+    if (
+        descriptor.mappedAtCreation !== undefined &&
+        typeof descriptor.mappedAtCreation !== 'boolean'
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject,
+            message: 'BufferResource mappedAtCreation must be boolean when provided.',
+            expected: { mappedAtCreation: 'boolean or undefined' },
+            actual: { mappedAtCreation: descriptor.mappedAtCreation },
         })
     }
 
@@ -586,8 +622,8 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
         usage: descriptor.usage,
     }
 
-    if (typeof descriptor.label === 'string') normalized.label = descriptor.label
-    if (typeof descriptor.mappedAtCreation === 'boolean') normalized.mappedAtCreation = descriptor.mappedAtCreation
+    if (descriptor.label !== undefined) normalized.label = descriptor.label
+    if (descriptor.mappedAtCreation !== undefined) normalized.mappedAtCreation = descriptor.mappedAtCreation
 
     return normalized
 }

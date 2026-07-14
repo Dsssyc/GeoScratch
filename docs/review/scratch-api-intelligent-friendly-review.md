@@ -240,8 +240,8 @@ The schema-v5 implementation, unit/type gates, bilingual contract, ordinary
 example migration, complete native-call inventory, long-run scope/budget
 evidence, real delayed-validation Chrome evidence, fixed-baseline parity, and
 the strict re-review are now recorded. The submission slice remains resolved by ADR-035; its
-diagnostic envelope is now governed by ADR-038 and
-`scratch-submission-native-final-parity-audit.md`.
+diagnostic envelope is now governed by ADR-038, and current fixed-baseline evidence
+is recorded in `scratch-persistent-binding-views-final-audit.md`.
 
 ## Update Rules
 

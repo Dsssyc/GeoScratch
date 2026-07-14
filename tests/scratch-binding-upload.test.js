@@ -457,13 +457,21 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         }
     })
 
-    it('rejects invalid and disposed uploads with structured diagnostics', async() => {
+    it('rejects invalid, unaligned, and disposed uploads with structured diagnostics', async() => {
 
         const fixture = await createUniformFixture()
 
         for (const descriptor of [
             { target: fixture.uniformBuffer, data: createUniformData() },
             { target: fixture.uniformBuffer.region(), data: 'not bytes' },
+            {
+                target: fixture.uniformBuffer.region({ offset: 2, size: 12 }),
+                data: new Uint8Array(12),
+            },
+            {
+                target: fixture.uniformBuffer.region({ size: 14 }),
+                data: new Uint8Array(14),
+            },
         ]) {
             try {
                 fixture.runtime.createUploadCommand(descriptor)

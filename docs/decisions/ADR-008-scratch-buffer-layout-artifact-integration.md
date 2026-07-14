@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by ADR-036.
 
 ## Date
 
@@ -10,58 +10,43 @@ Accepted
 
 ## Context
 
-ADR-007 introduced `LayoutCodec` as a runtime-independent preparation artifact. The codec could produce GPU-aligned upload bytes, readback views, and WGSL accessors, but `BufferResource` and `UploadCommand` still treated those artifacts as unrelated caller-side data.
+ADR-007 introduced `LayoutCodec` as a runtime-independent preparation artifact for
+GPU-aligned upload bytes, readback views, and WGSL accessors. This ADR originally
+attached one optional interpretation directly to each buffer. ADR-036 later replaced
+that one-to-one model with explicit many-to-many resource views.
 
-That left three correctness gaps:
+## Historical Decision (Superseded)
 
-- buffers could not declare which `LayoutArtifact` defined their logical byte interpretation;
-- uploads could not mechanically reject bytes produced for a different artifact;
-- a larger GPU allocation could accept writes outside the logical layout region even when the buffer was intended to hold a fixed number of layout elements.
+The superseded implementation made a `BufferResource` carry one layout, one element
+count, and one layout byte range. Upload validation compared a single combined hash
+owned by the buffer. Those public fields, their descriptor inputs, and that combined
+hash were removed by ADR-036. This historical section is not a usable API contract.
 
-The Scratch API vision keeps resources as logical handles and transfers as explicit commands. This decision connects layout artifacts to that model without adding resource-level `write()` or `toArray()` sugar.
+## Current Replacement
 
-## Decision
+`BufferResource` is a raw container. Interpretation belongs to immutable
+`BufferRegion` values:
 
-Extend `BufferResourceDescriptor` with optional layout metadata:
+- `buffer.region()` selects a byte range and may carry one `LayoutArtifact` witness.
+- One buffer may expose multiple typed or raw, overlapping or disjoint regions.
+- One layout may be used by regions from multiple buffers.
+- Layout identity is split into physical `abiHash` and semantic `schemaHash`.
+- Layout-aware uploads target a `BufferRegion`; byte range, ABI, and schema checks are
+  performed against that region rather than global buffer metadata.
+- Raw uploads remain explicit and certify no semantic schema.
 
-- `layout?: LayoutArtifact`
-- `elementCount?: number`
-
-When a layout is provided, `elementCount` defaults to `1`. The buffer records:
-
-- `layout`
-- `elementCount`
-- `layoutByteLength = layout.stride * elementCount`
-- `layoutSubject`, a diagnostic subject for the attached artifact
-
-Scratch-only descriptor fields remain logical metadata. They are not passed to `GPUDevice.createBuffer()`.
-
-Extend `UploadCommandDescriptor` so `data` may be either raw bytes or a `LayoutUploadView` from `LayoutCodec.uploadView(...)`. The command normalizes a `LayoutUploadView` into an ordinary byte source, stores its `LayoutArtifact`, and still executes with `queue.writeBuffer(...)`.
-
-Upload validation now checks:
-
-- source byte range fits the source bytes and target GPU buffer size;
-- if the target buffer has a layout, the written range fits `target.layoutByteLength`;
-- if the upload carries a layout artifact and the target has one, both `structuralHash` values match.
-
-Layout failures use existing `layout-codec` diagnostics:
-
-- `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT`
-- `SCRATCH_CODEC_BYTE_LENGTH_MISMATCH`
-- `SCRATCH_CODEC_STRUCTURAL_HASH_MISMATCH`
-
-Readback interpretation remains explicit. Returned bytes are still interpreted through `codec.createReadbackView(bytes)` or another caller-selected view factory; `BufferResource` does not gain `toArray()` or `toBytes()`.
+ADR-036 is the normative resource/layout decision.
 
 ## Consequences
 
-- `await runtime.createBuffer({ size, usage, layout: codec.artifact })` creates a typed logical buffer while preserving raw buffers.
-- `runtime.createUploadCommand({ target, data: codec.uploadView(values) })` validates the upload artifact against the target layout before writing bytes.
-- A buffer can allocate more GPU bytes than its logical layout region, but upload commands cannot write past the declared layout region unless no layout metadata is attached.
-- Program, BindSet, and shader accessor validation can later compare the same `LayoutArtifact.structuralHash` without changing this buffer/upload contract.
+- Buffer allocation is independent from interpretation and remains reusable across
+  multiple data models.
+- Upload and readback range ownership is explicit through `BufferRegion`.
+- Program and command validation compare region witnesses without mutating resources.
+- No compatibility alias restores resource-global layout fields.
 
 ## Non-Goals
 
-- Do not add shader reflection or Program-required codec validation.
 - Do not make `LayoutCodec` an upload command factory.
 - Do not add `BufferResource.write()`, `BufferResource.toArray()`, or `BufferResource.toBytes()`.
 - Do not add render graph, scheduler, examples migration, geo layer changes, or material/style/layer concepts to scratch core.

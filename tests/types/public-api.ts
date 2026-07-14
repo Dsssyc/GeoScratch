@@ -11,6 +11,30 @@ declare const typedVideoFrame: VideoFrame
 declare const typedCanvasElement: HTMLCanvasElement
 declare const typedOffscreenCanvas: OffscreenCanvas
 declare const typedPipelineCompilationReport: scr.PipelineCompilationReport
+declare const typedBufferResourceDescriptor: scr.BufferResourceDescriptor
+declare const typedDiagnosticInput: scr.ScratchDiagnosticInput
+declare const typedProgramDescriptor: scr.ProgramDescriptor
+declare const typedProgramEntryPoints: scr.ProgramEntryPoints
+declare const typedRenderPipelineDescriptor: scr.ScratchRenderPipelineDescriptor
+declare const typedComputePipelineDescriptor: scr.ScratchComputePipelineDescriptor
+declare const typedSurfaceFormat: scr.SurfaceFormat
+declare const typedSurfaceOptions: scr.SurfaceOptions
+declare const typedSurfaceSize: scr.SurfaceSize
+declare const typedTextureUploadLayout: scr.TextureUploadLayout
+declare const typedTextureUploadOrigin: scr.TextureUploadOrigin
+declare const typedTextureUploadSize: scr.TextureUploadSize
+const compatBufferResourceDescriptor: scratchCompat.BufferResourceDescriptor = typedBufferResourceDescriptor
+const compatDiagnosticInput: scratchCompat.ScratchDiagnosticInput = typedDiagnosticInput
+const compatProgramDescriptor: scratchCompat.ProgramDescriptor = typedProgramDescriptor
+const compatProgramEntryPoints: scratchCompat.ProgramEntryPoints = typedProgramEntryPoints
+const compatRenderPipelineDescriptor: scratchCompat.ScratchRenderPipelineDescriptor = typedRenderPipelineDescriptor
+const compatComputePipelineDescriptor: scratchCompat.ScratchComputePipelineDescriptor = typedComputePipelineDescriptor
+const compatSurfaceFormat: scratchCompat.SurfaceFormat = typedSurfaceFormat
+const compatSurfaceOptions: scratchCompat.SurfaceOptions = typedSurfaceOptions
+const compatSurfaceSize: scratchCompat.SurfaceSize = typedSurfaceSize
+const compatTextureUploadLayout: scratchCompat.TextureUploadLayout = typedTextureUploadLayout
+const compatTextureUploadOrigin: scratchCompat.TextureUploadOrigin = typedTextureUploadOrigin
+const compatTextureUploadSize: scratchCompat.TextureUploadSize = typedTextureUploadSize
 const typedPendingOperationKind: scr.ScratchPendingGpuOperationFact['kind'] = 'buffer-allocation'
 // @ts-expect-error Disposal records are instantaneous and cannot be pending
 const invalidPendingOperationKind: scr.ScratchPendingGpuOperationFact['kind'] = 'resource-disposal'
@@ -246,7 +270,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const storageOutput: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch storage output',
         size: 16,
-        usage: 0x4 | 0x80,
+        usage: 0x4 | 0x8 | 0x80,
     })
     const uniformRegion = uniformBuffer.region()
     const vertexRegion = vertexBuffer.region()
@@ -273,6 +297,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const storageInputRead: scr.CommandResourceReadDescriptor = {
         resource: storageInput,
         contentEpoch: storageInput.contentEpoch,
+    }
+    const storageOutputRead: scr.CommandResourceReadDescriptor = {
+        resource: storageOutput,
+        contentEpoch: storageOutput.contentEpoch,
     }
     const compatStorageInputRead: scratchCompat.CommandResourceReadDescriptor = {
         resource: storageInput,
@@ -1110,7 +1138,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         bindSets: [ { set: storageSet } ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ storageInputRead ],
+            read: [ storageInputRead, storageOutputRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',
@@ -1125,7 +1153,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         bindSets: [ { set: storageSet } ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ storageInputRead ],
+            read: [ storageInputRead, storageOutputRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'use-fallback',
@@ -1167,7 +1195,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         bindSets: [ { set: storageSet } ],
         count: dispatchCount,
         resources: {
-            read: [ storageInputRead, indirectRead ],
+            read: [ storageInputRead, storageOutputRead, indirectRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',
@@ -1183,7 +1211,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         } ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ storageInputRead ],
+            read: [ storageInputRead, storageOutputRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',
@@ -1193,7 +1221,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         bindSets: [ compatDynamicInvocation ],
         count: { workgroups: [ 1 ] },
         resources: {
-            read: [ compatStorageInputRead ],
+            read: [ compatStorageInputRead, storageOutputRead ],
             write: [ storageOutput ],
         },
         whenMissing: 'throw',

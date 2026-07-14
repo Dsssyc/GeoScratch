@@ -18,6 +18,10 @@ import {
     recheckSupportingObjectLifecycle,
 } from './supporting-object-creation.js'
 import { TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
+import {
+    runtimeSupportsTextureFormatRequirement,
+    storageTextureFormatCapabilities,
+} from './texture-format-capabilities.js'
 import { describeValue, getGlobalConstant, isRecord } from './type-utils.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -54,78 +58,6 @@ const TEXTURE_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([ '1d', '2d', '
 const SAMPLER_BINDING_TYPES = new Set<GPUSamplerBindingType>([ 'filtering', 'non-filtering', 'comparison' ])
 const STORAGE_TEXTURE_ACCESS = new Set<GPUStorageTextureAccess>([ 'write-only', 'read-only', 'read-write' ])
 const STORAGE_TEXTURE_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([ '1d', '2d', '2d-array', '3d' ])
-type StorageTextureFeatureRequirement =
-    | 'base'
-    | 'bgra8unorm-storage'
-    | 'core-features-and-limits'
-    | 'texture-formats-tier1'
-    | 'texture-formats-tier2'
-
-type StorageTextureFormatCapabilities = Readonly<Partial<
-    Record<GPUStorageTextureAccess, StorageTextureFeatureRequirement>
->>
-
-const BASE_STORAGE_TEXTURE_FORMATS = [
-    'rgba8unorm',
-    'rgba8snorm',
-    'rgba8uint',
-    'rgba8sint',
-    'rgba16uint',
-    'rgba16sint',
-    'rgba16float',
-    'r32uint',
-    'r32sint',
-    'r32float',
-    'rgba32uint',
-    'rgba32sint',
-    'rgba32float',
-] as const satisfies readonly GPUTextureFormat[]
-
-const TIER_1_STORAGE_TEXTURE_FORMATS = [
-    'r8unorm',
-    'r8snorm',
-    'r8uint',
-    'r8sint',
-    'rg8unorm',
-    'rg8snorm',
-    'rg8uint',
-    'rg8sint',
-    'r16unorm',
-    'r16snorm',
-    'r16uint',
-    'r16sint',
-    'r16float',
-    'rg16unorm',
-    'rg16snorm',
-    'rg16uint',
-    'rg16sint',
-    'rg16float',
-    'rgba16unorm',
-    'rgba16snorm',
-    'rgb10a2uint',
-    'rgb10a2unorm',
-    'rg11b10ufloat',
-] as const satisfies readonly GPUTextureFormat[]
-
-const TIER_2_READ_WRITE_STORAGE_TEXTURE_FORMATS = [
-    'r8unorm',
-    'r8uint',
-    'r8sint',
-    'rgba8unorm',
-    'rgba8uint',
-    'rgba8sint',
-    'r16uint',
-    'r16sint',
-    'r16float',
-    'rgba16uint',
-    'rgba16sint',
-    'rgba16float',
-    'rgba32uint',
-    'rgba32sint',
-    'rgba32float',
-] as const satisfies readonly GPUTextureFormat[]
-
-const STORAGE_TEXTURE_FORMAT_CAPABILITIES = createStorageTextureFormatCapabilities()
 const FILTERABLE_FLOAT_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
     'r8unorm',
     'r8snorm',
@@ -355,6 +287,12 @@ type BindSetPreparationSnapshot = Readonly<{
     signature: string
     hash: string
     facts: readonly Readonly<Record<string, unknown>>[]
+    dependencies: readonly BindSetPreparationDependency[]
+}>
+
+type BindSetPreparationDependency = Readonly<{
+    resource: BufferRegion | TextureViewSpec | SamplerResource
+    allocationVersion: number | undefined
 }>
 
 type PreparedBindSetCandidate = Readonly<{
@@ -410,6 +348,13 @@ type ScratchBindingSupportedLimits = GPUSupportedLimits & Readonly<{
     maxStorageBuffersInFragmentStage?: number
     maxStorageTexturesInVertexStage?: number
     maxStorageTexturesInFragmentStage?: number
+}>
+
+export type BindingLimitViolation = Readonly<{
+    limit: string
+    maximum: number
+    actual: number
+    stage?: BindVisibility
 }>
 
 export interface BindLayout {
@@ -700,8 +645,7 @@ export class BindSet {
         if (state.inFlight !== undefined) return 'preparing'
         if (
             state.committed !== undefined &&
-            bindSetDependenciesCurrent(this) &&
-            captureBindSetSnapshot(this).signature === state.committed.snapshot.signature
+            bindSetSnapshotCurrent(this, state.committed.snapshot)
         ) return 'prepared'
         return 'stale'
     }
@@ -777,9 +721,6 @@ export class BindSet {
 
         this.runtime.assertActive()
         this.layout.assertUsable()
-        for (const binding of this.bindings.values()) {
-            validateBindingResource(this, binding.entry, binding.resource)
-        }
         this.assertPrepared()
     }
 
@@ -824,6 +765,14 @@ export class BindSet {
             message: 'BindSet has been disposed.',
         })
 
+        if (
+            state.inFlight === undefined &&
+            state.committed !== undefined &&
+            bindSetSnapshotCurrent(this, state.committed.snapshot)
+        ) {
+            return state.cachedPreparedPromise!
+        }
+
         const snapshot = captureBindSetSnapshot(this)
         if (state.inFlight !== undefined) {
             if (state.inFlight.snapshot.signature === snapshot.signature) {
@@ -842,14 +791,6 @@ export class BindSet {
                 },
                 actual: { snapshotHash: snapshot.hash },
             })
-        }
-
-        if (
-            state.committed !== undefined &&
-            state.committed.snapshot.signature === snapshot.signature &&
-            bindSetDependenciesCurrent(this)
-        ) {
-            return state.cachedPreparedPromise!
         }
 
         return beginBindSetPreparation(this, snapshot)
@@ -901,7 +842,6 @@ export async function createBindSet(
 
 export function preparedBindGroupFor(bindSet: BindSet): GPUBindGroup {
 
-    bindSet.assertUsable()
     const candidate = bindSetStateFor(bindSet).committed
     if (candidate === undefined) throw new TypeError('Prepared BindSet candidate is unavailable.')
     return candidate.gpuBindGroup
@@ -1074,14 +1014,11 @@ async function executeBindSetPreparation(
     }
 
     const outcomes = await Promise.all(issues.map(issue => issue.attempt.settlement))
-    const nativeFailures = nativePreparationFailures(issues, outcomes)
-    if (nativeFailures.length > 0) {
-        return failBindSetPreparation(bindSet, inFlight, nativeFailures)
-    }
-
+    const failures = nativePreparationFailures(issues, outcomes)
     const lifecycleFailure = bindSetLifecycleFailure(bindSet)
-    if (lifecycleFailure !== undefined) {
-        return failBindSetPreparation(bindSet, inFlight, [ lifecycleFailure ])
+    if (lifecycleFailure !== undefined) failures.push(lifecycleFailure)
+    if (failures.length > 0) {
+        return failBindSetPreparation(bindSet, inFlight, failures)
     }
 
     const currentSnapshot = captureBindSetSnapshot(bindSet)
@@ -1360,7 +1297,8 @@ function bindSetOperationTarget(
 
 function captureBindSetSnapshot(bindSet: BindSet): BindSetPreparationSnapshot {
 
-    const facts = bindingsInNativeOrder(bindSet).map(binding => {
+    const orderedBindings = bindingsInNativeOrder(bindSet)
+    const facts = orderedBindings.map(binding => {
         const entry = binding.entry
         const resource = binding.resource
         const base = {
@@ -1405,6 +1343,10 @@ function captureBindSetSnapshot(bindSet: BindSet): BindSetPreparationSnapshot {
         })
     })
     Object.freeze(facts)
+    const dependencies = Object.freeze(orderedBindings.map(binding => Object.freeze({
+        resource: binding.resource,
+        allocationVersion: bindingResourceAllocationVersion(binding.resource),
+    })))
     const signature = JSON.stringify({
         bindLayoutId: bindSet.layout.id,
         bindLayoutGroup: bindSet.layout.group,
@@ -1416,6 +1358,7 @@ function captureBindSetSnapshot(bindSet: BindSet): BindSetPreparationSnapshot {
         signature,
         hash: `bind-set-snapshot-${fnv1a64(signature)}`,
         facts,
+        dependencies,
     })
 }
 
@@ -1536,15 +1479,33 @@ function uniqueTextureViewCount(bindSet: BindSet): number {
         .map(binding => textureViewCandidateKey(binding.resource as TextureViewSpec))).size
 }
 
-function bindSetDependenciesCurrent(bindSet: BindSet): boolean {
+function bindSetSnapshotCurrent(
+    bindSet: BindSet,
+    snapshot: BindSetPreparationSnapshot
+): boolean {
 
     if (
         bindSet.runtime.isDisposed ||
         bindSet.runtime.isDeviceLost ||
         bindSet.layout.isDisposed
     ) return false
-    return [ ...bindSet.bindings.values() ]
-        .every(binding => !bindingResourceDisposed(binding.resource))
+    for (let index = 0; index < snapshot.dependencies.length; index++) {
+        const dependency = snapshot.dependencies[index]!
+        if (
+            bindingResourceDisposed(dependency.resource) ||
+            bindingResourceAllocationVersion(dependency.resource) !== dependency.allocationVersion
+        ) return false
+    }
+    return true
+}
+
+function bindingResourceAllocationVersion(
+    resource: BufferRegion | TextureViewSpec | SamplerResource
+): number | undefined {
+
+    if (isBufferRegion(resource)) return resource.buffer.allocationVersion
+    if (isTextureViewSpec(resource)) return resource.texture.allocationVersion
+    return resource instanceof SamplerResource ? resource.allocationVersion : undefined
 }
 
 function bindingResourceDisposed(resource: BufferRegion | TextureViewSpec | SamplerResource): boolean {
@@ -2432,9 +2393,9 @@ function normalizeStorageTextureFormat(
         throwBindEntryDiagnostic(layout, entry)
     }
 
-    const capabilities = STORAGE_TEXTURE_FORMAT_CAPABILITIES.get(entry.format as GPUTextureFormat)
+    const capabilities = storageTextureFormatCapabilities(entry.format as GPUTextureFormat)
     const requirement = capabilities?.[access]
-    if (requirement === undefined || !runtimeSupportsStorageTextureRequirement(runtime, requirement)) {
+    if (requirement === undefined || !runtimeSupportsTextureFormatRequirement(runtime, requirement)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_STORAGE_TEXTURE_FORMAT_UNSUPPORTED',
             severity: 'error',
@@ -2502,83 +2463,87 @@ function validateBindingLimits(
     entries: readonly NormalizedBindLayoutEntry[]
 ): void {
 
-    const dynamicUniformCount = entries.filter(entry =>
-        entry.type === 'uniform' && entry.hasDynamicOffset
-    ).length
-    const dynamicStorageCount = entries.filter(entry =>
-        (entry.type === 'read-storage' || entry.type === 'storage') && entry.hasDynamicOffset
-    ).length
-    assertBindingLimit(
-        layout,
-        'maxDynamicUniformBuffersPerPipelineLayout',
-        runtime.deviceLimits.maxDynamicUniformBuffersPerPipelineLayout,
-        dynamicUniformCount
-    )
-    assertBindingLimit(
-        layout,
-        'maxDynamicStorageBuffersPerPipelineLayout',
-        runtime.deviceLimits.maxDynamicStorageBuffersPerPipelineLayout,
-        dynamicStorageCount
-    )
-
-    for (const stage of [ 'vertex', 'fragment', 'compute' ] as const) {
-        const visible = entries.filter(entry => entry.visibility.includes(stage))
-        assertBindingLimit(
-            layout,
-            'maxUniformBuffersPerShaderStage',
-            runtime.deviceLimits.maxUniformBuffersPerShaderStage,
-            visible.filter(entry => entry.type === 'uniform').length,
-            stage
-        )
-        assertBindingLimit(
-            layout,
-            'maxSamplersPerShaderStage',
-            runtime.deviceLimits.maxSamplersPerShaderStage,
-            visible.filter(entry => entry.type === 'sampler').length,
-            stage
-        )
-        assertBindingLimit(
-            layout,
-            'maxSampledTexturesPerShaderStage',
-            runtime.deviceLimits.maxSampledTexturesPerShaderStage,
-            visible.filter(entry => entry.type === 'texture').length,
-            stage
-        )
-        assertBindingLimit(
-            layout,
-            storageBufferLimitName(stage),
-            storageBufferLimit(runtime, stage),
-            visible.filter(entry => entry.type === 'read-storage' || entry.type === 'storage').length,
-            stage
-        )
-        assertBindingLimit(
-            layout,
-            storageTextureLimitName(stage),
-            storageTextureLimit(runtime, stage),
-            visible.filter(entry => entry.type === 'storage-texture').length,
-            stage
-        )
-    }
-}
-
-function assertBindingLimit(
-    layout: BindLayoutDiagnosticContext,
-    limit: string,
-    maximum: number,
-    actual: number,
-    stage?: BindVisibility
-): void {
-
-    if (actual <= maximum) return
+    const violation = firstBindingLimitViolation(runtime, entries)
+    if (violation === undefined) return
     throwScratchDiagnostic({
         code: 'SCRATCH_BIND_LAYOUT_LIMIT_EXCEEDED',
         severity: 'error',
         phase: 'binding',
         subject: layout.subject,
         message: 'BindLayout entries exceed a device binding-slot limit.',
-        expected: { limit, maximum, ...(stage !== undefined ? { stage } : {}) },
-        actual: { count: actual, ...(stage !== undefined ? { stage } : {}) },
+        expected: {
+            limit: violation.limit,
+            maximum: violation.maximum,
+            ...(violation.stage !== undefined ? { stage: violation.stage } : {}),
+        },
+        actual: {
+            count: violation.actual,
+            ...(violation.stage !== undefined ? { stage: violation.stage } : {}),
+        },
     })
+}
+
+export function firstBindingLimitViolation(
+    runtime: ScratchRuntime,
+    entries: readonly NormalizedBindLayoutEntry[]
+): BindingLimitViolation | undefined {
+
+    const checks: BindingLimitViolation[] = [
+        {
+            limit: 'maxDynamicUniformBuffersPerPipelineLayout',
+            maximum: runtime.deviceLimits.maxDynamicUniformBuffersPerPipelineLayout,
+            actual: entries.filter(entry =>
+                entry.type === 'uniform' && entry.hasDynamicOffset
+            ).length,
+        },
+        {
+            limit: 'maxDynamicStorageBuffersPerPipelineLayout',
+            maximum: runtime.deviceLimits.maxDynamicStorageBuffersPerPipelineLayout,
+            actual: entries.filter(entry =>
+                (entry.type === 'read-storage' || entry.type === 'storage') && entry.hasDynamicOffset
+            ).length,
+        },
+    ]
+
+    for (const stage of [ 'vertex', 'fragment', 'compute' ] as const) {
+        const visible = entries.filter(entry => entry.visibility.includes(stage))
+        checks.push(
+            {
+                limit: 'maxUniformBuffersPerShaderStage',
+                maximum: runtime.deviceLimits.maxUniformBuffersPerShaderStage,
+                actual: visible.filter(entry => entry.type === 'uniform').length,
+                stage,
+            },
+            {
+                limit: 'maxSamplersPerShaderStage',
+                maximum: runtime.deviceLimits.maxSamplersPerShaderStage,
+                actual: visible.filter(entry => entry.type === 'sampler').length,
+                stage,
+            },
+            {
+                limit: 'maxSampledTexturesPerShaderStage',
+                maximum: runtime.deviceLimits.maxSampledTexturesPerShaderStage,
+                actual: visible.filter(entry => entry.type === 'texture').length,
+                stage,
+            },
+            {
+                limit: storageBufferLimitName(stage),
+                maximum: storageBufferLimit(runtime, stage),
+                actual: visible.filter(entry =>
+                    entry.type === 'read-storage' || entry.type === 'storage'
+                ).length,
+                stage,
+            },
+            {
+                limit: storageTextureLimitName(stage),
+                maximum: storageTextureLimit(runtime, stage),
+                actual: visible.filter(entry => entry.type === 'storage-texture').length,
+                stage,
+            }
+        )
+    }
+
+    return checks.find(check => check.actual > check.maximum)
 }
 
 function storageBufferLimit(runtime: ScratchRuntime, stage: BindVisibility): number {
@@ -2617,66 +2582,6 @@ function storageTextureLimitName(stage: BindVisibility): string {
     if (stage === 'vertex') return 'maxStorageTexturesInVertexStage'
     if (stage === 'fragment') return 'maxStorageTexturesInFragmentStage'
     return 'maxStorageTexturesPerShaderStage'
-}
-
-function createStorageTextureFormatCapabilities(): ReadonlyMap<
-    GPUTextureFormat,
-    StorageTextureFormatCapabilities
-> {
-
-    const formats = new Map<GPUTextureFormat, Record<string, StorageTextureFeatureRequirement>>()
-    const addAccess = (
-        format: GPUTextureFormat,
-        access: GPUStorageTextureAccess,
-        requirement: StorageTextureFeatureRequirement
-    ) => {
-        const capabilities = formats.get(format) ?? {}
-        capabilities[access] = requirement
-        formats.set(format, capabilities)
-    }
-
-    for (const format of BASE_STORAGE_TEXTURE_FORMATS) {
-        addAccess(format, 'write-only', 'base')
-        addAccess(format, 'read-only', 'base')
-    }
-    for (const format of [ 'r32uint', 'r32sint', 'r32float' ] as const) {
-        addAccess(format, 'read-write', 'base')
-    }
-    for (const format of TIER_1_STORAGE_TEXTURE_FORMATS) {
-        addAccess(format, 'write-only', 'texture-formats-tier1')
-        addAccess(format, 'read-only', 'texture-formats-tier1')
-    }
-    for (const format of [ 'rg32uint', 'rg32sint', 'rg32float' ] as const) {
-        addAccess(format, 'write-only', 'core-features-and-limits')
-        addAccess(format, 'read-only', 'core-features-and-limits')
-    }
-    for (const format of TIER_2_READ_WRITE_STORAGE_TEXTURE_FORMATS) {
-        addAccess(format, 'read-write', 'texture-formats-tier2')
-    }
-    addAccess('bgra8unorm', 'write-only', 'bgra8unorm-storage')
-
-    return new Map([ ...formats ].map(([ format, capabilities ]) => [
-        format,
-        Object.freeze(capabilities),
-    ]))
-}
-
-function runtimeSupportsStorageTextureRequirement(
-    runtime: ScratchRuntime,
-    requirement: StorageTextureFeatureRequirement
-): boolean {
-
-    if (requirement === 'base') return true
-    if (requirement === 'texture-formats-tier1') {
-        return runtimeHasFeature(runtime, 'texture-formats-tier1') ||
-            runtimeHasFeature(runtime, 'texture-formats-tier2')
-    }
-    return runtimeHasFeature(runtime, requirement)
-}
-
-function runtimeHasFeature(runtime: ScratchRuntime, feature: string): boolean {
-
-    return runtime.deviceFeatures.has(feature as GPUFeatureName)
 }
 
 function normalizeTextureSampleType(

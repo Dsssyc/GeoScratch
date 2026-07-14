@@ -87,9 +87,13 @@ const pointCodec = scratch.layoutCodec(pointLayout, {
     usage: ['storage', 'readback'],
 })
 
-const points = await scratch.buffer({
+const pointBuffer = await scratch.buffer({
     label: 'points',
+    size: pointCodec.artifact.stride * pointCount,
     usage: ['storage', 'copyDst', 'copySrc'],
+})
+
+const points = pointBuffer.region({
     layout: pointCodec.artifact,
 })
 
@@ -186,10 +190,10 @@ This avoids both bad extremes:
 
 The runtime should be able to inspect artifact metadata and confirm that:
 
-- buffer resources use the layout artifact expected by the program accessor module
+- the `BufferRegion` bound to a Program requirement carries the layout artifact expected by the accessor module
 - bind layouts match shader declarations, with reflection as a warn-level guard
-- CPU writers produced byte lengths and ranges that match the target resource layout
-- readback views interpret the same layout version that produced the data
+- CPU writers produced byte lengths and ranges that match the target `BufferRegion` and its layout witness
+- readback views interpret the layout witness captured from the source `BufferRegion`
 
 Diagnostic payloads for these checks should use structured subjects such as `LayoutArtifact`, `LayoutField`, `Program`, `ShaderBinding`, and `BindLayoutEntry`, so tooling can repair the local artifact or declaration without parsing prose.
 

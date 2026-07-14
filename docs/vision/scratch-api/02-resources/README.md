@@ -21,6 +21,15 @@ Resource
 
 `BindLayout` and `BindSet` are acknowledged supporting objects, not Resource subclasses. Presentation current textures are submission-scoped borrowed targets, not persistent resources.
 
+Raw resource descriptors are canonical Scratch inputs, not values left for
+implicit Web IDL coercion. Buffer `size` must already be an exact non-negative
+safe-integer `GPUSize64`; texture extents, mip counts, and sample counts must
+already be positive safe-integer `GPUIntegerCoordinate` values within the native
+32-bit domain. Buffer and texture usage must already be integer
+`GPUFlagsConstant` values in `[0, 0xffffffff]`. Invalid labels and booleans are
+rejected instead of being silently omitted or coerced. This keeps the retained
+logical descriptor identical to the descriptor Scratch actually issues.
+
 ## Allocation And Content
 
 `allocationVersion` changes only when a logical resource installs a different physical native allocation. `contentEpoch` changes when bytes or texels are produced. These facts are independent:
@@ -114,6 +123,8 @@ const sampled = color.view({
 
 `TextureResource.view()` is synchronous. It normalizes all descriptor defaults and returns a frozen `TextureViewSpec`; it never calls native `createView()` and never exposes a `GPUTextureView`. The spec remains attached to the logical texture and is revalidated against every later allocation.
 
+View usage is validated as a real native contract, not only as a bit subset. A view of a transient attachment must retain the texture's exact usage. A view with `RENDER_ATTACHMENT` usage must use a device-enabled renderable format, while a view with `STORAGE_BINDING` usage must use a plain color format with at least one device-enabled storage access mode. Texture allocation preflight applies the same render/storage format capability facts. Scratch keeps those facts in one internal table shared with storage-texture BindLayout validation so the logical recipe cannot survive until native `createView()` with a deterministically invalid usage/format pair.
+
 BindSet preparation privately owns allocation-scoped native views for its candidate snapshot. Render attachments lower `TextureViewSpec` into submission-scoped native views and observe their native outcome through `SubmittedWork`; they are never cached across submissions. A raw `texture.gpuTexture.createView()` call is an explicit escape from Scratch ownership, versioning, diagnostics, and repair guarantees.
 
 `TextureResource.resize()` is a Promise-returning create-before-swap transaction. It keeps the old allocation current until the candidate is acknowledged, then atomically installs the replacement, advances `allocationVersion` once, preserves `contentEpoch`, marks content empty, and destroys the old texture. Failure or lifecycle cancellation leaves the old allocation installed. A normalized same-size resize is a true no-op.
@@ -151,10 +162,12 @@ Core query types are `timestamp` and `occlusion`. Timestamp requires the native 
 Buffer and Texture content state is:
 
 ```ts
-type ResourceState = 'empty' | 'ready' | 'indeterminate' | 'disposed'
+type ResourceState = 'empty' | 'ready' | 'indeterminate'
 ```
 
 `indeterminate` means a delayed native or queue failure prevents Scratch from proving that still-current content matches its historical epoch. It never rolls an epoch back. A later explicit producer advances a new epoch and restores `ready`. Indexed query slots use the same content-state vocabulary independently.
+
+Disposal is allocation lifecycle, exposed separately through `resource.isDisposed`; it is never folded into scalar or indexed content state.
 
 Indeterminate reads fail structurally as
 `SCRATCH_COMMAND_RESOURCE_CONTENT_INDETERMINATE`,

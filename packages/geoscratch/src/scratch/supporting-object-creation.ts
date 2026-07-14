@@ -1,5 +1,3 @@
-import { diagnosticsControllerFor } from './runtime-diagnostics.js'
-import type { ScratchRuntimeLifecycleChange } from './runtime-diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type SupportingObjectFailureKind =
@@ -38,10 +36,6 @@ type ScopeObservation = Readonly<{
     observation: PromiseObservation<GPUError | null>
 }>
 
-type LifecycleSettlement =
-    | Readonly<{ kind: 'device-lost', info: GPUDeviceLostInfo }>
-    | Readonly<{ kind: 'runtime-disposed' }>
-
 const filters = Object.freeze([
     'out-of-memory',
     'internal',
@@ -66,13 +60,6 @@ export function beginSupportingObjectCreation<T>(
     const pushed: ScopeFilter[] = []
     let candidate: T | undefined
     let synchronousFailure: unknown
-    let resolveLifecycle!: (settlement: LifecycleSettlement) => void
-    const lifecycle = new Promise<LifecycleSettlement>(resolve => {
-        resolveLifecycle = resolve
-    })
-    const unsubscribeLifecycle = diagnosticsControllerFor(runtime).subscribeLifecycle(change => {
-        resolveLifecycle(runtimeLifecycleSettlement(change))
-    })
 
     if (
         !device ||
@@ -111,42 +98,31 @@ export function beginSupportingObjectCreation<T>(
         .map(filter => popScope(device, filter))
     const scopes = Promise.all(pendingScopes)
 
-    const settlement = Promise.race([
-        scopes.then(observations => ({ kind: 'scopes-settled' as const, observations })),
-        lifecycle,
-    ]).then(settlement => {
+    const settlement = scopes.then(observations => {
         const failures = [ ...boundaryFailures ]
 
-        if (settlement.kind === 'device-lost') {
+        if (synchronousFailure !== undefined) {
+            failures.push(observedFailure('native-exception', synchronousFailure))
+        }
+        for (const scope of observations) {
+            failures.push(...scopeFailures(scope))
+        }
+        if (runtime.isDisposed) {
+            failures.push(observedFailure('runtime-disposed'))
+        } else if (runtime.isDeviceLost) {
             failures.push(Object.freeze({
                 kind: 'device-lost' as const,
-                deviceLostInfo: settlement.info,
+                ...(runtime.deviceLostInfo !== undefined
+                    ? { deviceLostInfo: runtime.deviceLostInfo }
+                    : {}),
             }))
-        } else if (settlement.kind === 'runtime-disposed') {
-            failures.push(observedFailure('runtime-disposed'))
-        } else {
-            if (synchronousFailure !== undefined) {
-                failures.push(observedFailure('native-exception', synchronousFailure))
-            }
-            for (const scope of settlement.observations) {
-                failures.push(...scopeFailures(scope))
-            }
-            if (runtime.isDisposed) failures.push(observedFailure('runtime-disposed'))
-            else if (runtime.isDeviceLost) {
-                failures.push(Object.freeze({
-                    kind: 'device-lost' as const,
-                    ...(runtime.deviceLostInfo !== undefined
-                        ? { deviceLostInfo: runtime.deviceLostInfo }
-                        : {}),
-                }))
-            }
         }
 
         return Object.freeze({
             ...(candidate !== undefined ? { candidate } : {}),
             failures: Object.freeze(failures),
         })
-    }).finally(unsubscribeLifecycle)
+    })
 
     return Object.freeze({
         ...(candidate !== undefined ? { candidate } : {}),
@@ -158,8 +134,6 @@ export function recheckSupportingObjectLifecycle<T>(
     runtime: ScratchRuntime,
     outcome: SupportingObjectCreationOutcome<T>
 ): SupportingObjectCreationOutcome<T> {
-
-    if (outcome.failures.length > 0) return outcome
 
     let failure: SupportingObjectObservedFailure | undefined
     if (runtime.isDisposed) {
@@ -173,10 +147,11 @@ export function recheckSupportingObjectLifecycle<T>(
         })
     }
     if (failure === undefined) return outcome
+    if (outcome.failures.some(existing => existing.kind === failure.kind)) return outcome
 
     return Object.freeze({
         ...(outcome.candidate !== undefined ? { candidate: outcome.candidate } : {}),
-        failures: Object.freeze([ failure ]),
+        failures: Object.freeze([ ...outcome.failures, failure ]),
     })
 }
 
@@ -238,13 +213,6 @@ function observedFailure(
         kind,
         ...(cause !== undefined ? { cause } : {}),
     })
-}
-
-function runtimeLifecycleSettlement(change: ScratchRuntimeLifecycleChange): LifecycleSettlement {
-
-    return change.kind === 'device-lost'
-        ? Object.freeze({ kind: 'device-lost', info: change.info })
-        : Object.freeze({ kind: 'runtime-disposed' })
 }
 
 function isObjectLike(value: unknown): value is object {

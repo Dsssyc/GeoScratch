@@ -630,7 +630,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         }
     })
 
-    it('rejects invalid vertex buffer bindings with structured diagnostics', async() => {
+    it('rejects invalid and unaligned vertex buffer bindings with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
@@ -675,6 +675,36 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             })
             expect(error.diagnostic.expected).to.deep.include({
                 region: 'non-empty BufferRegion',
+            })
+        }
+
+        const vertexBuffer = await runtime.createBuffer({
+            size: 24,
+            usage: GPU_BUFFER_USAGE_VERTEX,
+        })
+        try {
+            runtime.createDrawCommand({
+                pipeline,
+                vertexBuffers: [
+                    { slot: 0, region: vertexBuffer.region({ offset: 2, size: 16 }) },
+                ],
+                count: { vertexCount: 2 },
+                resources: {
+                    read: [ readResource(vertexBuffer) ],
+                    write: [],
+                },
+                whenMissing: 'throw',
+            })
+            throw new Error('expected unaligned vertex buffer binding to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_COMMAND_VERTEX_BUFFER_INVALID',
+                severity: 'error',
+                phase: 'command',
+            })
+            expect(error.diagnostic.expected).to.deep.include({
+                regionOffset: 'aligned to 4 bytes',
             })
         }
     })

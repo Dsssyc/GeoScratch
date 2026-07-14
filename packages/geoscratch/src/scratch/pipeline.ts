@@ -1,4 +1,5 @@
 import { UUID } from '../core/utils/uuid.js'
+import { firstBindingLimitViolation } from './binding.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
     issuePipelineCreation,
@@ -226,7 +227,7 @@ export async function createRenderPipeline(
         pipelineKind: 'render',
         sourceSnapshot: plan.sourceSnapshot,
         nativeLabels,
-        bindGroupLayouts: plan.bindLayouts.map(layout => layout.gpuBindGroupLayout),
+        bindGroupLayouts: nativeBindGroupLayouts(plan.bindLayouts),
         lowerPipelineDescriptor: (shaderModule, pipelineLayout) => {
             const nativeDescriptor: GPURenderPipelineDescriptor = {
                 label: nativeLabels.pipeline,
@@ -349,6 +350,7 @@ function prepareRenderPipeline(
     const depthStencil = input.depthStencil === undefined
         ? undefined
         : freezeDepthStencil(input.depthStencil)
+    validateRenderPipelineHasAttachment(context, targets, depthStencil)
     const multisample = input.multisample === undefined
         ? undefined
         : Object.freeze({ ...input.multisample })
@@ -892,7 +894,7 @@ export async function createComputePipeline(
         pipelineKind: 'compute',
         sourceSnapshot: plan.sourceSnapshot,
         nativeLabels,
-        bindGroupLayouts: plan.bindLayouts.map(layout => layout.gpuBindGroupLayout),
+        bindGroupLayouts: nativeBindGroupLayouts(plan.bindLayouts),
         lowerPipelineDescriptor: (shaderModule, pipelineLayout) => {
             const compute: GPUProgrammableStage = {
                 module: shaderModule,
@@ -1206,7 +1208,7 @@ function normalizeBindLayouts(
     }
 
     const groups = new Set<number>()
-    return bindLayouts.map((layout: BindLayout) => {
+    const normalized = bindLayouts.map((layout: BindLayout) => {
         if (!layout || typeof layout.assertRuntime !== 'function') {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
@@ -1237,18 +1239,58 @@ function normalizeBindLayouts(
 
         return layout
     })
+
+    const violation = firstBindingLimitViolation(
+        pipeline.runtime,
+        normalized.flatMap(layout => layout.entries)
+    )
+    if (violation !== undefined) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: pipeline.subject,
+            related: normalized.map(layout => layout.subject),
+            message: `${pipelineName} bindLayouts collectively exceed a device binding-slot limit.`,
+            expected: {
+                limit: violation.limit,
+                maximum: violation.maximum,
+                ...(violation.stage !== undefined ? { stage: violation.stage } : {}),
+            },
+            actual: {
+                count: violation.actual,
+                ...(violation.stage !== undefined ? { stage: violation.stage } : {}),
+            },
+        })
+    }
+
+    return normalized
+}
+
+function nativeBindGroupLayouts(
+    bindLayouts: readonly BindLayout[]
+): readonly (GPUBindGroupLayout | null)[] {
+
+    if (bindLayouts.length === 0) return []
+
+    const highestGroup = Math.max(...bindLayouts.map(layout => layout.group))
+    const nativeLayouts = Array<GPUBindGroupLayout | null>(highestGroup + 1).fill(null)
+    for (const layout of bindLayouts) {
+        nativeLayouts[layout.group] = layout.gpuBindGroupLayout
+    }
+    return nativeLayouts
 }
 
 function normalizeTargets(pipeline: PipelineValidationContext, targets: GPUColorTargetState[]): GPUColorTargetState[] {
 
-    if (!Array.isArray(targets) || targets.length === 0) {
+    if (!Array.isArray(targets)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
             subject: pipeline.subject,
-            message: 'RenderPipeline requires at least one color target format.',
-            expected: { targets: 'non-empty array' },
+            message: 'RenderPipeline color targets must be an array.',
+            expected: { targets: 'GPUColorTargetState[]' },
             actual: { targets },
         })
     }
@@ -1267,6 +1309,28 @@ function normalizeTargets(pipeline: PipelineValidationContext, targets: GPUColor
         }
 
         return { ...target }
+    })
+}
+
+function validateRenderPipelineHasAttachment(
+    pipeline: PipelineValidationContext,
+    targets: readonly GPUColorTargetState[],
+    depthStencil: Readonly<GPUDepthStencilState> | undefined
+): void {
+
+    if (targets.length > 0 || depthStencil !== undefined) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
+        severity: 'error',
+        phase: 'pipeline',
+        subject: pipeline.subject,
+        message: 'RenderPipeline requires at least one color or depth/stencil attachment format.',
+        expected: {
+            targets: 'at least one color target when depthStencil is absent',
+            depthStencil: 'GPUDepthStencilState when targets is empty',
+        },
+        actual: { targetCount: targets.length, depthStencil: undefined },
     })
 }
 

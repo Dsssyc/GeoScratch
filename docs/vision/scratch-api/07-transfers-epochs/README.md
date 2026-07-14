@@ -129,6 +129,11 @@ There is no core `positions.write(...)` method. A convenience helper may be adde
 
 An upload advances the target's `contentEpoch` for the written range and records the producing submission. If upload allocation requires replacing the physical GPU object, it also advances `allocationVersion`.
 
+The buffer upload path lowers to `GPUQueue.writeBuffer()`. Its target
+`BufferRegion` offset and selected byte length must both be 4-byte aligned.
+Scratch validates that native requirement before a direct queue call or a
+submission timeline can acquire effects.
+
 ### Queue-Side Upload Ordering
 
 Buffer and texture uploads are ordered submission actions, not preparation outside the submission. A queue write must physically appear at its declared `SubmissionBuilder` position relative to copy, ordered readback staging, resolve, compute, and render work.
@@ -199,6 +204,11 @@ Properties:
 - **Acknowledged auto staging.** The runtime owns `MAP_READ` staging resources and acknowledges native validation/OOM outcomes before use. User buffers do not need map usage for common readback, but the source needs the appropriate copy usage or an explicit resolve path.
 - **Buffer-specific mapping barrier.** Host materialization waits on the staging buffer's `mapAsync()` rather than inserting an extra whole-queue completion wait.
 - **Layout-derived views.** Buffer layout from `02-resources` decides whether the result is a `TypedArray`, bytes, or a layout-derived structured view. AoS fields are strided and should not be promised as one contiguous typed array unless explicitly deinterleaved.
+
+Both direct and ordered buffer readback lower through
+`copyBufferToBuffer()`. Their source `BufferRegion` offset and size must both be
+4-byte aligned before Scratch allocates or claims staging storage. The same
+alignment rule therefore applies regardless of where the readback is ordered.
 
 ## Staging Allocation And Mapping Transaction
 
@@ -379,12 +389,14 @@ Queue timeline segmentation preserves that declared staging point across queue-s
 
 GPU-to-GPU copies are explicit commands. `CopyCommand` should expose the same native copy directions that WebGPU command encoders expose:
 
-- buffer to buffer
-- texture to texture
-- buffer to texture
-- texture to buffer
+- buffer to buffer (`GPUCommandEncoder.copyBufferToBuffer()`)
+- texture to texture (`GPUCommandEncoder.copyTextureToTexture()`)
+- buffer to texture (`GPUCommandEncoder.copyBufferToTexture()`)
+- texture to buffer (`GPUCommandEncoder.copyTextureToBuffer()`)
 
 CPU uploads and CPU readbacks are separate transfer concepts. `TextureUploadCommand` expresses CPU bytes written through the queue; `ReadbackOperation` expresses host materialization through staging and mapping. Neither replaces a GPU-side `CopyCommand`.
+
+WebGPU requires buffer-to-buffer copy endpoints to be different `GPUBuffer` objects. Scratch therefore rejects every copy whose source and target regions share one parent buffer, even when the byte ranges are disjoint. Overlapping or disjoint `BufferRegion` values remain legal interpretation units; they simply cannot be used to bypass this native copy rule.
 
 ```ts
 const copyHistory = runtime.createCopyCommand({
@@ -402,6 +414,38 @@ const copyHistory = runtime.createCopyCommand({
 ```
 
 Buffer-texture copies use a WebGPU texel buffer layout instead of CPU data:
+
+The copy extent is expressed in texels, while the linear buffer layout is expressed in
+texel blocks. Scratch resolves the native block width, block height, and copy footprint
+for all 95 non-depth/stencil `GPUTextureFormat` values, validates block-aligned origins
+and extents, computes required buffer bytes in block rows, and interprets
+`rowsPerImage` as texel-block rows. Encoder copies still require `bytesPerRow` to be a
+multiple of 256. Both row fields use the native `GPUSize32` domain, so Scratch rejects
+values above `0xffffffff` before Web IDL conversion; texture-upload row layouts use the
+same `GPUSize32` bound without the encoder-only 256-byte row-alignment rule. These paths issue `copyBufferToTexture()` or
+`copyTextureToBuffer()` directly, with no CPU round trip.
+
+Depth/stencil buffer-texture copies refer to exactly one available aspect. `all` is
+valid only when the format has one aspect; combined formats require `depth-only` or
+`stencil-only`. Buffer offsets are 4-byte aligned and the copy covers the complete
+physical subresource. The native direction and footprint matrix is:
+
+| Format and aspect | Bytes per block | Texture to buffer | Buffer to texture |
+| --- | ---: | --- | --- |
+| `stencil8` stencil | 1 | Yes | Yes |
+| `depth16unorm` depth | 2 | Yes | Yes |
+| `depth24plus` depth | N/A | No | No |
+| `depth24plus-stencil8` depth | N/A | No | No |
+| `depth24plus-stencil8` stencil | 1 | Yes | Yes |
+| `depth32float` depth | 4 | Yes | No |
+| `depth32float-stencil8` depth | 4 | Yes | No |
+| `depth32float-stencil8` stencil | 1 | Yes | Yes |
+
+Compressed copies use their native 4x4 or ASTC block dimensions and 8-byte or 16-byte
+footprints. On a compatibility device without `core-features-and-limits`, compressed
+buffer-to-texture copy remains valid, while compressed texture-to-buffer and
+texture-to-texture copies are rejected. Core devices admit those directions subject to
+the same physical block rules.
 
 ```ts
 const uploadPreparedPixels = runtime.createCopyCommand({
@@ -557,19 +601,24 @@ const timingValues = await timingReadback.toArray(BigUint64Array)
 
 Pipeline statistics are not part of the current WebGPU core contract and must stay outside the scratch core design unless a future WebGPU target or explicit extension supports them.
 
-Potential query diagnostic codes using the shared envelope from `09-diagnostics-validation`:
+Current query-path diagnostic codes using the shared envelope from `09-diagnostics-validation`:
 
 ```ts
 type QueryDiagnosticCode =
-    | 'SCRATCH_QUERY_UNSUPPORTED_TYPE'
-    | 'SCRATCH_QUERY_FEATURE_UNAVAILABLE'
-    | 'SCRATCH_QUERY_INDEX_OUT_OF_RANGE'
-    | 'SCRATCH_QUERY_WRONG_PASS_KIND'
-    | 'SCRATCH_QUERY_WRONG_SET_TYPE'
-    | 'SCRATCH_QUERY_OCCLUSION_NESTED'
-    | 'SCRATCH_QUERY_OCCLUSION_NOT_ACTIVE'
+    | 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+    | 'SCRATCH_RUNTIME_FEATURE_UNAVAILABLE'
+    | 'SCRATCH_QUERY_SLOT_INDEX_INVALID'
+    | 'SCRATCH_QUERY_SET_ALLOCATION_VALIDATION_FAILED'
+    | 'SCRATCH_QUERY_SET_ALLOCATION_INTERNAL_FAILED'
+    | 'SCRATCH_QUERY_SET_ALLOCATION_OUT_OF_MEMORY'
+    | 'SCRATCH_QUERY_SET_ALLOCATION_NATIVE_FAILED'
+    | 'SCRATCH_PASS_TIMESTAMP_WRITES_INVALID'
+    | 'SCRATCH_PASS_OCCLUSION_QUERY_SET_INVALID'
+    | 'SCRATCH_COMMAND_OCCLUSION_QUERY_INVALID'
+    | 'SCRATCH_SUBMISSION_OCCLUSION_QUERY_STATE_INVALID'
     | 'SCRATCH_QUERY_RESOLVE_UNWRITTEN_RANGE'
-    | 'SCRATCH_QUERY_RESOLVE_DESTINATION_INVALID'
+    | 'SCRATCH_COMMAND_RESOLVE_QUERY_SET_INVALID'
+    | 'SCRATCH_QUERY_SLOT_CONTENT_INDETERMINATE'
 ```
 
 Query diagnostics should include query-set id, type, requested range, pass or command id, feature name where relevant, destination buffer id for resolve failures, and the producer submission id when a query slot was written. These details belong in `subject`, `related`, `expected`, `actual`, or compact evidence fields, not only in prose.

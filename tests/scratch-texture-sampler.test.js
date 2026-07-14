@@ -778,4 +778,47 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             })
         }
     })
+
+    it('enforces GPUSize32 bounds for texture upload row layouts', async() => {
+
+        const fixture = await createTextureFixture()
+        const maxGpuSize32 = 0xffffffff
+        const aboveGpuSize32 = 0x1_0000_0000
+        const valid = fixture.runtime.createTextureUploadCommand({
+            target: fixture.texture,
+            data: new Uint8Array(4),
+            layout: {
+                bytesPerRow: maxGpuSize32,
+                rowsPerImage: maxGpuSize32,
+            },
+            size: { width: 1, height: 1 },
+        })
+        expect(valid.layout).to.deep.equal({
+            offset: 0,
+            bytesPerRow: maxGpuSize32,
+            rowsPerImage: maxGpuSize32,
+        })
+
+        for (const layout of [
+            { bytesPerRow: aboveGpuSize32 },
+            { bytesPerRow: 4, rowsPerImage: aboveGpuSize32 },
+        ]) {
+            try {
+                fixture.runtime.createTextureUploadCommand({
+                    target: fixture.texture,
+                    data: new Uint8Array(4),
+                    layout,
+                    size: { width: 1, height: 1 },
+                })
+                throw new Error('expected GPUSize32 overflow to fail')
+            } catch (error) {
+                expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                expect(error.diagnostic).to.include({
+                    code: 'SCRATCH_COMMAND_TEXTURE_UPLOAD_INVALID',
+                    severity: 'error',
+                    phase: 'command',
+                })
+            }
+        }
+    })
 })

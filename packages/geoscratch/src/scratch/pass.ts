@@ -8,6 +8,7 @@ import type { ScratchRuntime } from './runtime.js'
 import type { Surface } from './surface.js'
 
 const TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
+const TEXTURE_USAGE_TRANSIENT_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'TRANSIENT_ATTACHMENT', 0x20)
 const LOAD_OPS = new Set<GPULoadOp>([ 'clear', 'load' ])
 const STORE_OPS = new Set<GPUStoreOp>([ 'store', 'discard' ])
 const DEPTH_FORMATS = new Set<GPUTextureFormat>([
@@ -98,6 +99,7 @@ export class RenderPassSpec {
         this.passKind = 'render'
         this.color = normalizeColorAttachments(this, descriptor.color)
         const depth = normalizeDepthStencilAttachment(this, descriptor.depth)
+        validateRenderPassHasAttachment(this, this.color, depth)
         const timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
         const occlusionQuerySet = normalizeOcclusionQuerySet(this, descriptor.occlusionQuerySet)
         if (depth !== undefined) this.depth = depth
@@ -444,14 +446,14 @@ function throwOcclusionQuerySetDiagnostic(pass: RenderPassSpec, querySet: unknow
 
 function normalizeColorAttachments(pass: RenderPassSpec, color: RenderPassColorAttachmentSpec[]): RenderPassColorAttachmentSpec[] {
 
-    if (!Array.isArray(color) || color.length === 0) {
+    if (!Array.isArray(color)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
             phase: 'submission',
             subject: pass.subject,
-            message: 'RenderPassSpec requires at least one color attachment.',
-            expected: { color: 'non-empty array' },
+            message: 'RenderPassSpec color attachments must be an array.',
+            expected: { color: 'RenderPassColorAttachmentSpec[]' },
             actual: { color },
         })
     }
@@ -484,13 +486,18 @@ function normalizeColorAttachment(
             })
         }
 
+        validateColorAttachmentFormat(pass, target.subject, attachment.format, target.descriptor.format)
+        const transient = (target.descriptor.usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0
+        const operations = normalizeColorAttachmentOperations(pass, target.subject, attachment, transient)
         const normalized: RenderPassColorAttachmentSpec = {
             target,
-            format: attachment.format ?? target.descriptor.format,
-            load: attachment.load ?? 'clear',
-            store: attachment.store ?? 'store',
+            format: target.descriptor.format,
+            load: operations.load,
+            store: operations.store,
         }
-        if (attachment.clear !== undefined) normalized.clear = attachment.clear
+        if (attachment.clear !== undefined) {
+            normalized.clear = normalizeColorClearValue(pass, target.subject, attachment.clear)
+        }
         const depthSlice = normalizeColorAttachmentDepthSlice(pass, target, attachment.depthSlice)
         if (depthSlice !== undefined) normalized.depthSlice = depthSlice
         return normalized
@@ -526,13 +533,22 @@ function normalizeColorAttachment(
         })
     }
 
+    const viewFormat = validateSurfaceAttachmentViewDescriptor(
+        pass,
+        target,
+        attachment.viewDescriptor
+    )
+    validateColorAttachmentFormat(pass, target.subject, attachment.format, viewFormat)
+    const operations = normalizeColorAttachmentOperations(pass, target.subject, attachment, false)
     const normalized: RenderPassColorAttachmentSpec = {
         target,
-        format: attachment.format ?? target.format,
-        load: attachment.load ?? 'clear',
-        store: attachment.store ?? 'store',
+        format: viewFormat,
+        load: operations.load,
+        store: operations.store,
     }
-    if (attachment.clear !== undefined) normalized.clear = attachment.clear
+    if (attachment.clear !== undefined) {
+        normalized.clear = normalizeColorClearValue(pass, target.subject, attachment.clear)
+    }
     if (attachment.depthSlice !== undefined) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
@@ -548,6 +564,75 @@ function normalizeColorAttachment(
     if (attachment.viewDescriptor !== undefined) normalized.viewDescriptor = attachment.viewDescriptor
 
     return normalized
+}
+
+function validateRenderPassHasAttachment(
+    pass: RenderPassSpec,
+    color: readonly RenderPassColorAttachmentSpec[],
+    depth: RenderPassDepthStencilAttachmentSpec | undefined
+): void {
+
+    if (color.length > 0 || depth !== undefined) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+        severity: 'error',
+        phase: 'submission',
+        subject: pass.subject,
+        message: 'RenderPassSpec requires at least one color or depth/stencil attachment.',
+        expected: {
+            color: 'at least one color attachment when depth is absent',
+            depth: 'depth/stencil attachment when color is empty',
+        },
+        actual: { colorAttachmentCount: color.length, depth: undefined },
+    })
+}
+
+function normalizeColorClearValue(
+    pass: RenderPassSpec,
+    subject: DiagnosticSubject,
+    value: unknown
+): GPUColor {
+
+    if (
+        value !== null &&
+        value !== undefined &&
+        typeof value !== 'string' &&
+        typeof (value as Iterable<unknown>)[Symbol.iterator] === 'function'
+    ) {
+        const components = [ ...(value as Iterable<unknown>) ]
+        if (components.length === 4 && components.every(isFiniteNumber)) {
+            return Object.freeze(components) as unknown as GPUColor
+        }
+    } else if (
+        isRecord(value) &&
+        [ value.r, value.g, value.b, value.a ].every(isFiniteNumber)
+    ) {
+        return Object.freeze({
+            r: value.r as number,
+            g: value.g as number,
+            b: value.b as number,
+            a: value.a as number,
+        })
+    }
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+        severity: 'error',
+        phase: 'resource',
+        subject,
+        related: [ pass.subject ],
+        message: 'RenderPassSpec color clear value must be a complete finite GPUColor.',
+        expected: {
+            clear: 'exactly four finite components or { r, g, b, a } with finite components',
+        },
+        actual: { clear: value },
+    })
+}
+
+function isFiniteNumber(value: unknown): value is number {
+
+    return typeof value === 'number' && Number.isFinite(value)
 }
 
 function createColorAttachmentView(
@@ -655,16 +740,36 @@ function normalizeDepthStencilAttachment(
     const usesDepth = hasDepth && (hasDepthFields || !hasStencilFields)
     const usesStencil = hasStencil && (hasStencilFields || !hasDepth)
     const normalized: RenderPassDepthStencilAttachmentSpec = { target }
+    const transient = (target.descriptor.usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0
 
     if (usesDepth) {
         normalized.depthLoad = normalizeDepthStencilLoadOp(pass, attachment.depthLoad ?? 'clear', attachment, 'depthLoad')
-        normalized.depthStore = normalizeDepthStencilStoreOp(pass, attachment.depthStore ?? 'store', attachment, 'depthStore')
-        if (attachment.depthClear !== undefined) normalized.depthClear = normalizeDepthClearValue(pass, attachment.depthClear, attachment)
+        normalized.depthStore = normalizeDepthStencilStoreOp(
+            pass,
+            attachment.depthStore ?? (transient ? 'discard' : 'store'),
+            attachment,
+            'depthStore'
+        )
+        const depthClear = attachment.depthClear ?? (normalized.depthLoad === 'clear' ? 1 : undefined)
+        if (depthClear !== undefined) {
+            normalized.depthClear = normalizeDepthClearValue(pass, depthClear, attachment)
+        }
     }
     if (usesStencil) {
         normalized.stencilLoad = normalizeDepthStencilLoadOp(pass, attachment.stencilLoad ?? 'clear', attachment, 'stencilLoad')
-        normalized.stencilStore = normalizeDepthStencilStoreOp(pass, attachment.stencilStore ?? 'store', attachment, 'stencilStore')
+        normalized.stencilStore = normalizeDepthStencilStoreOp(
+            pass,
+            attachment.stencilStore ?? (transient ? 'discard' : 'store'),
+            attachment,
+            'stencilStore'
+        )
         if (attachment.stencilClear !== undefined) normalized.stencilClear = normalizeStencilClearValue(pass, attachment.stencilClear, attachment)
+    }
+    if (transient && (
+        (usesDepth && (normalized.depthLoad !== 'clear' || normalized.depthStore !== 'discard')) ||
+        (usesStencil && (normalized.stencilLoad !== 'clear' || normalized.stencilStore !== 'discard'))
+    )) {
+        throwDepthStencilAttachmentDiagnostic(pass, attachment, 'transientLoadStore')
     }
 
     return normalized
@@ -700,7 +805,7 @@ function normalizeDepthClearValue(
     attachment: RenderPassDepthStencilAttachmentSpec
 ): number {
 
-    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1) return value
 
     throwDepthStencilAttachmentDiagnostic(pass, { ...attachment, depthClear: value }, 'depthClear')
 }
@@ -711,7 +816,12 @@ function normalizeStencilClearValue(
     attachment: RenderPassDepthStencilAttachmentSpec
 ): number {
 
-    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value
+    if (
+        typeof value === 'number' &&
+        Number.isInteger(value) &&
+        value >= 0 &&
+        value <= 0xffff_ffff
+    ) return value
 
     throwDepthStencilAttachmentDiagnostic(pass, { ...attachment, stencilClear: value }, 'stencilClear')
 }
@@ -744,6 +854,7 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
     for (const attachment of pass.color) {
         if (isTextureViewSpec(attachment.target)) {
             validateRenderAttachmentView(pass, attachment.target)
+            normalizeColorAttachmentDepthSlice(pass, attachment.target, attachment.depthSlice)
             extents.push(textureRenderAttachmentExtent(attachment.target))
             continue
         }
@@ -771,6 +882,18 @@ function validateRenderAttachmentView(
 
     view.texture.assertRuntime(pass.runtime)
     const prepared = prepareTextureViewSpecDescriptor(view)
+    if ((prepared.usage & TEXTURE_USAGE_RENDER_ATTACHMENT) === 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+            severity: 'error',
+            phase: 'resource',
+            subject: view.subject,
+            related: [ pass.subject, view.texture.subject ],
+            message: 'Render attachment TextureViewSpec usage requires GPUTextureUsage.RENDER_ATTACHMENT.',
+            expected: { usage: 'GPUTextureUsage.RENDER_ATTACHMENT' },
+            actual: { usage: prepared.usage },
+        })
+    }
     if (
         !(
             prepared.dimension === '2d' ||
@@ -802,6 +925,103 @@ function validateRenderAttachmentView(
         })
     }
 
+}
+
+function validateColorAttachmentFormat(
+    pass: RenderPassSpec,
+    subject: DiagnosticSubject,
+    requested: GPUTextureFormat | undefined,
+    actual: GPUTextureFormat
+): void {
+
+    if (requested === undefined || requested === actual) return
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+        severity: 'error',
+        phase: 'resource',
+        subject,
+        related: [ pass.subject ],
+        message: 'RenderPassSpec color attachment format must equal its actual view format.',
+        expected: { format: actual },
+        actual: { format: requested },
+    })
+}
+
+function validateSurfaceAttachmentViewDescriptor(
+    pass: RenderPassSpec,
+    surface: Surface,
+    descriptor: GPUTextureViewDescriptor | undefined
+): GPUTextureFormat {
+
+    if (descriptor === undefined) return surface.format
+    const valid = isRecord(descriptor) &&
+        (descriptor.label === undefined || typeof descriptor.label === 'string') &&
+        (descriptor.format === undefined || descriptor.format === surface.format) &&
+        (descriptor.dimension === undefined || descriptor.dimension === '2d') &&
+        (
+            descriptor.usage === undefined ||
+            descriptor.usage === 0 ||
+            descriptor.usage === TEXTURE_USAGE_RENDER_ATTACHMENT
+        ) &&
+        (descriptor.aspect === undefined || descriptor.aspect === 'all') &&
+        (descriptor.baseMipLevel === undefined || descriptor.baseMipLevel === 0) &&
+        (descriptor.mipLevelCount === undefined || descriptor.mipLevelCount === 1) &&
+        (descriptor.baseArrayLayer === undefined || descriptor.baseArrayLayer === 0) &&
+        (descriptor.arrayLayerCount === undefined || descriptor.arrayLayerCount === 1) &&
+        (descriptor.swizzle === undefined || descriptor.swizzle === 'rgba')
+    if (valid) return surface.format
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+        severity: 'error',
+        phase: 'resource',
+        subject: surface.subject,
+        related: [ pass.subject ],
+        message: 'Surface attachment view descriptor must describe its configured renderable canvas view.',
+        expected: {
+            format: surface.format,
+            dimension: '2d',
+            usage: '0 or GPUTextureUsage.RENDER_ATTACHMENT',
+            aspect: 'all',
+            baseMipLevel: 0,
+            mipLevelCount: 1,
+            baseArrayLayer: 0,
+            arrayLayerCount: 1,
+            swizzle: 'rgba',
+        },
+        actual: { viewDescriptor: describeValue(descriptor) },
+    })
+}
+
+function normalizeColorAttachmentOperations(
+    pass: RenderPassSpec,
+    subject: DiagnosticSubject,
+    attachment: RenderPassColorAttachmentSpec,
+    transient: boolean
+): Readonly<{ load: GPULoadOp, store: GPUStoreOp }> {
+
+    const load = attachment.load ?? 'clear'
+    const store = attachment.store ?? (transient ? 'discard' : 'store')
+    if (
+        !LOAD_OPS.has(load) ||
+        !STORE_OPS.has(store) ||
+        (transient && (load !== 'clear' || store !== 'discard'))
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+            subject,
+            related: [ pass.subject ],
+            message: 'RenderPassSpec color attachment load/store operations are invalid.',
+            expected: transient
+                ? { load: 'clear', store: 'discard' }
+                : { load: [ 'clear', 'load' ], store: [ 'store', 'discard' ] },
+            actual: { load, store, transient },
+        })
+    }
+
+    return Object.freeze({ load, store })
 }
 
 function textureRenderAttachmentExtent(

@@ -13,6 +13,22 @@ import {
 
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
+const GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT = 0x20
+
+const depthOnlyWgsl = `
+@vertex
+fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+    let positions = array<vec2f, 3>(
+        vec2f(0.0, 0.5),
+        vec2f(-0.5, -0.5),
+        vec2f(0.5, -0.5)
+    );
+    return vec4f(positions[vertexIndex], 0.5, 1.0);
+}
+
+@fragment
+fn fsMain() {}
+`
 
 async function createDepthFixture(depthFormat = 'depth24plus') {
 
@@ -307,7 +323,158 @@ describe('scratch depth/stencil render attachments', () => {
         await submitted.done
     })
 
-    it('rejects invalid depth/stencil attachment targets with structured diagnostics', async() => {
+    it('defaults depth clear to one and accepts inclusive unit-range boundaries', async() => {
+
+        const fixture = await createDepthFixture()
+        for (const [ depth, expectedClear ] of [
+            [ { target: fixture.depthTarget.view() }, 1 ],
+            [ { target: fixture.depthTarget.view(), depthClear: 0 }, 0 ],
+            [ { target: fixture.depthTarget.view(), depthClear: 1 }, 1 ],
+        ]) {
+            const pass = fixture.runtime.createRenderPass({
+                color: [ { target: fixture.colorTarget.view() } ],
+                depth,
+            })
+            expect(pass.depth).to.include({
+                depthLoad: 'clear',
+                depthStore: 'store',
+                depthClear: expectedClear,
+            })
+
+            const submitted = fixture.runtime.createSubmission({ validation: 'throw' })
+                .render(pass, [ fixture.draw ])
+                .submit()
+            const nativePass = fixture.calls.renderPasses[fixture.calls.renderPasses.length - 1]
+            expect(nativePass.descriptor.depthStencilAttachment).to.include({
+                depthLoadOp: 'clear',
+                depthStoreOp: 'store',
+                depthClearValue: expectedClear,
+            })
+            await submitted.done
+        }
+    })
+
+    it('accepts native-valid depth-only pipelines and render passes', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const depthTarget = await runtime.createTexture({
+            size: [ 32, 32 ],
+            format: 'depth24plus',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const program = runtime.createProgram({
+            modules: [ depthOnlyWgsl ],
+            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        })
+        const pipeline = await runtime.createRenderPipeline({
+            program,
+            targets: [],
+            depthStencil: {
+                format: 'depth24plus',
+                depthWriteEnabled: true,
+                depthCompare: 'less',
+            },
+        })
+        const draw = runtime.createDrawCommand({
+            pipeline,
+            count: { vertexCount: 3 },
+            resources: { read: [], write: [] },
+            whenMissing: 'throw',
+        })
+        const pass = runtime.createRenderPass({
+            color: [],
+            depth: { target: depthTarget.view() },
+        })
+
+        const submitted = runtime.submission().render(pass, [ draw ]).submit()
+
+        expect(fake.calls.asyncPipelineRequests[0].descriptor.fragment.targets).to.deep.equal([])
+        expect(fake.calls.renderPasses[0].descriptor.colorAttachments).to.deep.equal([])
+        expect(fake.calls.renderPasses[0].descriptor.depthStencilAttachment).to.include({
+            depthLoadOp: 'clear',
+            depthStoreOp: 'store',
+            depthClearValue: 1,
+        })
+        await submitted.done
+
+        await expectScratchDiagnostic(() => runtime.createRenderPass({ color: [] }), {
+            code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'submission',
+        })
+    })
+
+    it('normalizes only complete finite GPUColor values before encoder creation', async() => {
+
+        const fixture = await createDepthFixture()
+        const validClears = [
+            [ 0, 0.25, 1, 2 ],
+            { r: -1, g: 0, b: 0.5, a: 1 },
+        ]
+        for (const clear of validClears) {
+            const pass = fixture.runtime.createRenderPass({
+                color: [ { target: fixture.colorTarget.view(), clear } ],
+            })
+            expect(pass.color[0].clear).to.deep.equal(clear)
+        }
+
+        for (const clear of [
+            [ 0, 0, 0 ],
+            [ 0, 0, Number.NaN, 1 ],
+            [ 0, 0, Infinity, 1 ],
+            { r: 0, g: 0, b: 0 },
+            { r: 0, g: 0, b: 0, a: -Infinity },
+        ]) {
+            await expectScratchDiagnostic(() => fixture.runtime.createRenderPass({
+                color: [ { target: fixture.colorTarget.view(), clear } ],
+            }), {
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('accepts the GPUStencilValue maximum and rejects larger values before encoding', async() => {
+
+        const fixture = await createDepthFixture('depth24plus-stencil8')
+        const pass = fixture.runtime.createRenderPass({
+            color: [ { target: fixture.colorTarget.view() } ],
+            depth: {
+                target: fixture.depthTarget.view(),
+                depthLoad: 'load',
+                depthStore: 'store',
+                stencilLoad: 'clear',
+                stencilStore: 'store',
+                stencilClear: 0xffffffff,
+            },
+        })
+        const submitted = fixture.runtime.submission().render(pass, [ fixture.draw ]).submit()
+        expect(fixture.calls.renderPasses[0].descriptor.depthStencilAttachment.stencilClearValue)
+            .to.equal(0xffffffff)
+        await submitted.done
+
+        const encoderCount = fixture.calls.commandEncoders.length
+        await expectScratchDiagnostic(() => fixture.runtime.createRenderPass({
+            color: [ { target: fixture.colorTarget.view() } ],
+            depth: {
+                target: fixture.depthTarget.view(),
+                stencilClear: 0x1_0000_0000,
+            },
+        }), {
+            code: 'SCRATCH_PASS_DEPTH_STENCIL_ATTACHMENT_INVALID',
+            severity: 'error',
+            phase: 'submission',
+        })
+        expect(fixture.calls.commandEncoders).to.have.length(encoderCount)
+    })
+
+    it('rejects invalid depth attachment views, clear values, and transient operations', async() => {
 
         const fixtureA = await createDepthFixture()
         const fixtureB = await createDepthFixture()
@@ -368,6 +535,59 @@ describe('scratch depth/stencil render attachments', () => {
             severity: 'error',
             phase: 'submission',
         })
+
+        const narrowedDepth = await fixtureB.runtime.createTexture({
+            size: { width: 16, height: 16 },
+            format: 'depth24plus',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        await expectScratchDiagnostic(() => fixtureB.runtime.createRenderPass({
+            color: [ { target: fixtureB.colorTarget.view() } ],
+            depth: {
+                target: narrowedDepth.view({ usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING }),
+            },
+        }), {
+            code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        for (const depthClear of [ -0.01, 1.01, Number.NaN, Infinity, -Infinity ]) {
+            await expectScratchDiagnostic(() => fixtureB.runtime.createRenderPass({
+                color: [ { target: fixtureB.colorTarget.view() } ],
+                depth: { target: narrowedDepth.view(), depthClear },
+            }), {
+                code: 'SCRATCH_PASS_DEPTH_STENCIL_ATTACHMENT_INVALID',
+                severity: 'error',
+                phase: 'submission',
+            })
+        }
+
+        const transientDepth = await fixtureB.runtime.createTexture({
+            size: { width: 16, height: 16 },
+            format: 'depth24plus',
+            usage:
+                GPU_TEXTURE_USAGE_RENDER_ATTACHMENT |
+                GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT,
+        })
+        const transientPass = fixtureB.runtime.createRenderPass({
+            color: [ { target: fixtureB.colorTarget.view() } ],
+            depth: { target: transientDepth.view() },
+        })
+        expect(transientPass.depth).to.include({ depthLoad: 'clear', depthStore: 'discard' })
+        for (const depth of [
+            { target: transientDepth.view(), depthLoad: 'load' },
+            { target: transientDepth.view(), depthStore: 'store' },
+        ]) {
+            await expectScratchDiagnostic(() => fixtureB.runtime.createRenderPass({
+                color: [ { target: fixtureB.colorTarget.view() } ],
+                depth,
+            }), {
+                code: 'SCRATCH_PASS_DEPTH_STENCIL_ATTACHMENT_INVALID',
+                severity: 'error',
+                phase: 'submission',
+            })
+        }
     })
 
     it('records depth attachment writes as pass-level submitted work without changing allocationVersion', async() => {

@@ -38,7 +38,7 @@ async function main() {
     const output = await runtime.createBuffer({
         label: 'scratch compute readback output',
         size: 16,
-        usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.STORAGE,
+        usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
     })
     const bindLayout = await runtime.createBindLayout({
         label: 'scratch compute readback layout',
@@ -84,6 +84,11 @@ async function main() {
         target: input.region(),
         data: new Float32Array([ 1, 2, 3, 4 ]),
     })
+    const initializeOutput = runtime.createUploadCommand({
+        label: 'initialize scratch compute readback output',
+        target: output.region(),
+        data: new Float32Array(4),
+    })
     const dispatch = runtime.createDispatchCommand({
         label: 'dispatch scratch compute readback',
         pipeline,
@@ -92,6 +97,7 @@ async function main() {
         resources: {
             read: [
                 { resource: input, contentEpoch: 1 },
+                { resource: output, contentEpoch: 1 },
             ],
             write: [ output ],
         },
@@ -100,6 +106,7 @@ async function main() {
 
     const submitted = runtime.createSubmission({ validation: 'throw' })
         .upload(upload)
+        .upload(initializeOutput)
         .compute(pass, [ dispatch ])
         .submit()
 

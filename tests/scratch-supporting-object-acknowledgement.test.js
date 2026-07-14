@@ -125,6 +125,28 @@ describe('Scratch acknowledged supporting objects', () => {
             expect(facts.get(sampler.id).descriptorHash)
                 .not.to.equal(facts.get(differentLodSampler.id).descriptorHash)
 
+            for (const [ input, expected, linear ] of [
+                [ 0.6, 1, false ],
+                [ 1.1, 1, false ],
+                [ 1.5, 2, true ],
+                [ 2.5, 2, true ],
+                [ 3.5, 4, true ],
+                [ 100_000, 65_535, true ],
+                [ Number.POSITIVE_INFINITY, 65_535, true ],
+            ]) {
+                const normalizedSampler = await fixture.runtime.createSampler({
+                    maxAnisotropy: input,
+                    ...(linear ? {
+                        magFilter: 'linear',
+                        minFilter: 'linear',
+                        mipmapFilter: 'linear',
+                    } : {}),
+                })
+                expect(normalizedSampler.descriptor.maxAnisotropy, String(input)).to.equal(expected)
+                expect(fixture.calls.samplers.at(-1).descriptor.maxAnisotropy, String(input))
+                    .to.equal(expected)
+            }
+
             for (const descriptor of [
                 { addressModeV: 'invalid' },
                 { magFilter: 'cubic' },
@@ -133,6 +155,9 @@ describe('Scratch acknowledged supporting objects', () => {
                 { lodMinClamp: 4, lodMaxClamp: 3 },
                 { compare: 'approximately' },
                 { maxAnisotropy: 0 },
+                { maxAnisotropy: 0.5 },
+                { maxAnisotropy: Number.NaN },
+                { maxAnisotropy: Number.NEGATIVE_INFINITY },
                 { maxAnisotropy: 1.5 },
                 { maxAnisotropy: 2, magFilter: 'nearest', minFilter: 'linear', mipmapFilter: 'linear' },
             ]) {
@@ -548,24 +573,51 @@ describe('Scratch acknowledged supporting objects', () => {
         })
     }
 
-    it('cancels pending candidates on runtime disposal and device loss without registration', async() => {
+    it('settles scopes and preserves causal failures across lifecycle changes', async() => {
 
         const disposedFixture = await createFixture({ deferErrorScopePops: true })
         const disposedCreation = disposedFixture.runtime.createQuerySet({ type: 'occlusion', count: 2 })
         disposedFixture.runtime.dispose()
+        settleAllPops(disposedFixture)
         const disposedError = await rejectedDiagnostic(disposedCreation)
         expect(disposedError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
         expect(disposedFixture.calls.querySets[0].destroyed).to.equal(true)
         expect(disposedFixture.runtime._resources.size).to.equal(0)
-        settleAllPops(disposedFixture)
 
         const lostFixture = await createFixture({ deferErrorScopePops: true })
         const lostCreation = lostFixture.runtime.createSampler()
         lostFixture.errors.loseDevice({ reason: 'unknown', message: 'device vanished' })
+        settleAllPops(lostFixture)
         const lostError = await rejectedDiagnostic(lostCreation)
         expect(lostError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
         expect(lostFixture.runtime._resources.size).to.equal(0)
-        settleAllPops(lostFixture)
+
+        const nativeFixture = await createFixture({ deferErrorScopePops: true })
+        const nativeCause = new TypeError('sampler issue preceded disposal')
+        nativeFixture.errors.throwNext('createSampler', nativeCause)
+        const nativeCreation = nativeFixture.runtime.createSampler()
+        nativeFixture.runtime.dispose()
+        settleAllPops(nativeFixture)
+        const nativeError = await rejectedDiagnostic(nativeCreation)
+        expect(nativeError.diagnostic.code).to.equal('SCRATCH_SAMPLER_ALLOCATION_NATIVE_FAILED')
+        expect(nativeError.cause).to.equal(nativeCause)
+        expect(nativeError.incident.failureStage).to.equal('native-issue')
+        expect(nativeError.incident.outcomes).to.deep.include.members([
+            {
+                stage: 'native-issue',
+                diagnosticCode: 'SCRATCH_SAMPLER_ALLOCATION_NATIVE_FAILED',
+                nativeErrorCategory: 'native-exception',
+                subject: nativeError.incident.outcomes[0].subject,
+                nativeError: nativeError.incident.outcomes[0].nativeError,
+            },
+            {
+                stage: 'lifecycle-recheck',
+                diagnosticCode: 'SCRATCH_RUNTIME_DISPOSED',
+                nativeErrorCategory: 'none',
+                subject: nativeError.incident.outcomes[0].subject,
+            },
+        ])
+        expect(nativeFixture.runtime._resources.size).to.equal(0)
     })
 })
 

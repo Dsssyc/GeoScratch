@@ -29,7 +29,13 @@ import {
 } from './readback-staging.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import { advanceResourceContentEpoch, isContentResource } from './resource.js'
-import { TextureResource } from './texture.js'
+import {
+    TextureResource,
+    textureFormatBlockSize,
+    textureFormatCopyFootprint,
+    textureFormatIsCompressed,
+    textureFormatIsDepthStencil,
+} from './texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { BindSet, NormalizedBindLayoutEntry } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -448,9 +454,6 @@ type CopyDiagnosticInput = {
     runtime?: ScratchRuntime
     source?: unknown
     target?: unknown
-    sourceOffset?: unknown
-    targetOffset?: unknown
-    byteLength?: unknown
     sourceLayout?: unknown
     targetLayout?: unknown
     sourceOrigin?: unknown
@@ -467,9 +470,6 @@ type CopySourceDiagnosticInput = {
     runtime?: ScratchRuntime
     source?: unknown
     target?: unknown
-    sourceOffset?: unknown
-    targetOffset?: unknown
-    byteLength?: unknown
     sourceLayout?: unknown
     targetLayout?: unknown
     sourceOrigin?: unknown
@@ -1512,7 +1512,16 @@ export class CopyCommand {
             this.targetMipLevel = normalizeTextureCopyMipLevel(runtime, target, bufferToTextureDescriptor.targetMipLevel ?? 0, 'targetMipLevel')
             this.targetAspect = normalizeTextureCopyAspect(runtime, bufferToTextureDescriptor.targetAspect ?? 'all', 'targetAspect')
             this.size = normalizeTextureCopySize(runtime, source.region.buffer, target, bufferToTextureDescriptor.size, undefined, this.targetOrigin)
-            this.sourceLayout = normalizeTexelCopyBufferLayout(runtime, source.region, target, bufferToTextureDescriptor.sourceLayout, this.size, 'sourceLayout')
+            this.sourceLayout = normalizeTexelCopyBufferLayout(
+                runtime,
+                source.region,
+                target,
+                this.targetAspect,
+                'destination',
+                bufferToTextureDescriptor.sourceLayout,
+                this.size,
+                'sourceLayout'
+            )
             validateBufferCopyUsage(runtime, source.region.buffer, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
             validateTextureCopyUsage(runtime, target, GPU_TEXTURE_USAGE_COPY_DST, 'target', 'GPUTextureUsage.COPY_DST')
             validateBufferToTextureCopyRange(this)
@@ -1526,7 +1535,16 @@ export class CopyCommand {
             this.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, source.resource, textureToBufferDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
             this.sourceAspect = normalizeTextureCopyAspect(runtime, textureToBufferDescriptor.sourceAspect ?? 'all', 'sourceAspect')
             this.size = normalizeTextureCopySize(runtime, source.resource, target.buffer, textureToBufferDescriptor.size, this.sourceOrigin, undefined)
-            this.targetLayout = normalizeTexelCopyBufferLayout(runtime, target, source.resource, textureToBufferDescriptor.targetLayout, this.size, 'targetLayout')
+            this.targetLayout = normalizeTexelCopyBufferLayout(
+                runtime,
+                target,
+                source.resource,
+                this.sourceAspect,
+                'source',
+                textureToBufferDescriptor.targetLayout,
+                this.size,
+                'targetLayout'
+            )
             validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
             validateBufferCopyUsage(runtime, target.buffer, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
             validateTextureToBufferCopyRange(this)
@@ -2308,6 +2326,9 @@ function normalizeReadbackCommandSource(
     region.buffer.assertRuntime(runtime)
     region.assertUsable()
     if (region.size <= 0) throwReadbackCommandSourceDiagnostic(runtime, subject, source)
+    if (region.offset % 4 !== 0 || region.size % 4 !== 0) {
+        throwReadbackCommandSourceDiagnostic(runtime, subject, source, 'copyAlignment')
+    }
     if ((region.buffer.usage & GPU_BUFFER_USAGE_COPY_SRC) === 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
@@ -2326,7 +2347,8 @@ function normalizeReadbackCommandSource(
 function throwReadbackCommandSourceDiagnostic(
     runtime: ScratchRuntime,
     subject: DiagnosticSubject,
-    source: unknown
+    source: unknown,
+    reason = 'source'
 ): never {
 
     throwScratchDiagnostic({
@@ -2335,9 +2357,23 @@ function throwReadbackCommandSourceDiagnostic(
         phase: 'command',
         subject,
         related: [ runtime.subject ],
-        message: 'ReadbackCommand requires an explicit BufferRegion source content epoch.',
-        expected: { source: { region: 'non-empty BufferRegion', contentEpoch: 'non-negative integer' } },
-        actual: { source: describeValue(source) },
+        message: 'ReadbackCommand requires an explicit, copy-aligned BufferRegion source content epoch.',
+        expected: {
+            source: {
+                region: 'non-empty BufferRegion with 4-byte aligned offset and size',
+                contentEpoch: 'non-negative integer',
+            },
+        },
+        actual: {
+            reason,
+            source: describeValue(source),
+            offset: isRecord(source) && isBufferRegion(source.region)
+                ? source.region.offset
+                : undefined,
+            size: isRecord(source) && isBufferRegion(source.region)
+                ? source.region.size
+                : undefined,
+        },
     })
 }
 
@@ -3465,6 +3501,13 @@ function normalizeVertexBuffers(
                 related: [ region.subject, buffer.subject ],
             })
         }
+        if (region.offset % 4 !== 0) {
+            throwVertexBufferDiagnostic(command, {
+                expected: { regionOffset: 'aligned to 4 bytes' },
+                actual: { slot: binding.slot, offset: region.offset, size: region.size },
+                related: [ region.subject, buffer.subject ],
+            })
+        }
 
         if ((buffer.usage & GPU_BUFFER_USAGE_VERTEX) === 0) {
             throwScratchDiagnostic({
@@ -3724,7 +3767,7 @@ function boundResourceAccess(entry: NormalizedBindLayoutEntry): BoundResourceAcc
         case 'texture':
             return { read: true, write: false }
         case 'storage':
-            return { read: false, write: true }
+            return { read: true, write: true }
         case 'storage-texture':
             return {
                 read: entry.access === 'read-only' || entry.access === 'read-write',
@@ -4248,6 +4291,17 @@ function validateUploadRange(command: UploadCommand) {
             reason: 'range',
         })
     }
+    if (command.target.offset % 4 !== 0 || command.byteLength % 4 !== 0) {
+        throwUploadDiagnostic({
+            runtime: command.runtime,
+            target: command.target,
+            data: command.data,
+            offset: command.target.offset,
+            dataOffset: command.dataOffset,
+            size: command.byteLength,
+            reason: 'writeBufferAlignment',
+        })
+    }
 
     validateUploadLayout(command)
 }
@@ -4566,10 +4620,6 @@ function normalizeTextureCopyAspect(
         throwCopyDiagnostic({ runtime, [key]: aspect, reason: key })
     }
 
-    if (aspect !== 'all') {
-        throwCopyDiagnostic({ runtime, [key]: aspect, reason: key })
-    }
-
     return aspect
 }
 
@@ -4611,6 +4661,8 @@ function normalizeTexelCopyBufferLayout(
     runtime: ScratchRuntime,
     region: BufferRegion,
     texture: TextureResource,
+    aspect: GPUTextureAspect,
+    direction: 'source' | 'destination',
     layout: TexelCopyBufferLayout,
     size: { width: number, height: number, depthOrArrayLayers: number },
     key: 'sourceLayout' | 'targetLayout'
@@ -4620,32 +4672,37 @@ function normalizeTexelCopyBufferLayout(
         throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: key })
     }
 
-    const bytesPerPixel = getTextureBytesPerPixel(texture.format)
-    if (bytesPerPixel === undefined) {
+    const footprint = textureFormatCopyFootprint(texture.format, aspect, direction)
+    if (footprint === undefined) {
         throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: 'format' })
+    }
+    const widthInBlocks = size.width / footprint.blockWidth
+    const heightInBlocks = size.height / footprint.blockHeight
+    if (!Number.isInteger(widthInBlocks) || !Number.isInteger(heightInBlocks)) {
+        throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: 'blockAlignment' })
     }
 
     const bytesPerRow = layout.bytesPerRow
-    const rowsPerImage = layout.rowsPerImage ?? size.height
+    const rowsPerImage = layout.rowsPerImage ?? heightInBlocks
 
     for (const [ field, value ] of Object.entries({ bytesPerRow, rowsPerImage })) {
-        if (!Number.isInteger(value) || value <= 0) {
+        if (!Number.isInteger(value) || value <= 0 || value > GPU_SIZE_32_MAX) {
             throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: field })
         }
     }
 
-    if (bytesPerRow % 256 !== 0 || region.offset % bytesPerPixel !== 0) {
+    if (bytesPerRow % 256 !== 0 || region.offset % footprint.offsetAlignment !== 0) {
         throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: bytesPerRow % 256 !== 0 ? 'bytesPerRow' : 'regionOffset' })
     }
 
-    const rowBytes = size.width * bytesPerPixel
-    if (bytesPerRow < rowBytes || rowsPerImage < size.height) {
+    const rowBytes = widthInBlocks * footprint.bytesPerBlock
+    if (bytesPerRow < rowBytes || rowsPerImage < heightInBlocks) {
         throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: key })
     }
 
     const requiredBytes =
         bytesPerRow * rowsPerImage * (size.depthOrArrayLayers - 1) +
-        bytesPerRow * (size.height - 1) +
+        bytesPerRow * (heightInBlocks - 1) +
         rowBytes
 
     if (requiredBytes > region.size) {
@@ -4659,8 +4716,6 @@ function validateBufferCopyRange(command: CopyCommand) {
 
     const source = (command.source as BufferCopyCommandSourceDescriptor).region
     const target = command.target as BufferRegion
-    const sourceEnd = source.offset + source.size
-    const targetEnd = target.offset + target.size
 
     if (
         source.size <= 0 ||
@@ -4673,26 +4728,16 @@ function validateBufferCopyRange(command: CopyCommand) {
             runtime: command.runtime,
             source,
             target,
-            sourceOffset: source.offset,
-            targetOffset: target.offset,
-            byteLength: source.size,
             reason: 'range',
         })
     }
 
-    if (
-        source.buffer === target.buffer &&
-        source.offset < targetEnd &&
-        target.offset < sourceEnd
-    ) {
+    if (source.buffer === target.buffer) {
         throwCopyDiagnostic({
             runtime: command.runtime,
             source,
             target,
-            sourceOffset: source.offset,
-            targetOffset: target.offset,
-            byteLength: source.size,
-            reason: 'overlap',
+            reason: 'sameBuffer',
         })
     }
 }
@@ -4706,12 +4751,46 @@ function validateTextureCopyRange(command: CopyCommand) {
     const size = command.size!
     const sourceExtent = textureMipExtent(source, command.sourceMipLevel!)
     const targetExtent = textureMipExtent(target, command.targetMipLevel!)
+    const sourceBlockSize = textureFormatBlockSize(source.format)
+    const targetBlockSize = textureFormatBlockSize(target.format)
+    const subresourcesOverlap = textureCopySubresourcesOverlap(command)
+    const formatsCompatible = textureCopyFormatsCompatible(source.format, target.format)
+    const sampleCountsCompatible =
+        source.sampleCount === target.sampleCount &&
+        (source.sampleCount === 1 || command.runtime.deviceFeatures.has('core-features-and-limits'))
+    const requiresFullPhysicalSubresources =
+        source.sampleCount > 1 ||
+        target.sampleCount > 1 ||
+        textureFormatIsDepthStencil(source.format) ||
+        textureFormatIsDepthStencil(target.format)
+    const physicalSubresourcesCovered = !requiresFullPhysicalSubresources || (
+        size.width === sourceExtent.width &&
+        size.height === sourceExtent.height &&
+        size.depthOrArrayLayers === sourceExtent.depthOrArrayLayers &&
+        size.width === targetExtent.width &&
+        size.height === targetExtent.height &&
+        size.depthOrArrayLayers === targetExtent.depthOrArrayLayers
+    )
+    const compressedFormatsAllowed =
+        command.runtime.deviceFeatures.has('core-features-and-limits') ||
+        (!textureFormatIsCompressed(source.format) && !textureFormatIsCompressed(target.format))
+    const blockAligned =
+        sourceOrigin.x % sourceBlockSize.width === 0 &&
+        sourceOrigin.y % sourceBlockSize.height === 0 &&
+        targetOrigin.x % targetBlockSize.width === 0 &&
+        targetOrigin.y % targetBlockSize.height === 0 &&
+        size.width % sourceBlockSize.width === 0 &&
+        size.height % sourceBlockSize.height === 0 &&
+        size.width % targetBlockSize.width === 0 &&
+        size.height % targetBlockSize.height === 0
 
     if (
-        source === target ||
-        source.format !== target.format ||
-        source.sampleCount !== 1 ||
-        target.sampleCount !== 1 ||
+        subresourcesOverlap ||
+        !formatsCompatible ||
+        !compressedFormatsAllowed ||
+        !sampleCountsCompatible ||
+        !physicalSubresourcesCovered ||
+        !blockAligned ||
         command.sourceAspect !== 'all' ||
         command.targetAspect !== 'all' ||
         sourceOrigin.x + size.width > sourceExtent.width ||
@@ -4732,12 +4811,16 @@ function validateTextureCopyRange(command: CopyCommand) {
             sourceAspect: command.sourceAspect,
             targetAspect: command.targetAspect,
             size,
-            reason: source === target
+            reason: subresourcesOverlap
                 ? 'overlap'
-                : source.format !== target.format
+                : !formatsCompatible || !compressedFormatsAllowed
                     ? 'format'
-                    : source.sampleCount !== 1 || target.sampleCount !== 1
+                    : !sampleCountsCompatible
                         ? 'sampleCount'
+                        : !physicalSubresourcesCovered
+                            ? 'physicalSubresource'
+                        : !blockAligned
+                            ? 'blockAlignment'
                         : command.sourceAspect !== 'all' || command.targetAspect !== 'all'
                             ? 'aspect'
                         : 'range',
@@ -4752,10 +4835,24 @@ function validateBufferToTextureCopyRange(command: CopyCommand) {
     const targetOrigin = command.targetOrigin!
     const size = command.size!
     const targetExtent = textureMipExtent(target, command.targetMipLevel!)
+    const blockSize = textureFormatBlockSize(target.format)
+    const footprint = textureFormatCopyFootprint(target.format, command.targetAspect!, 'destination')
+    const blockAligned =
+        targetOrigin.x % blockSize.width === 0 &&
+        targetOrigin.y % blockSize.height === 0 &&
+        size.width % blockSize.width === 0 &&
+        size.height % blockSize.height === 0
+    const physicalSubresourceCovered = !textureFormatIsDepthStencil(target.format) || (
+        size.width === targetExtent.width &&
+        size.height === targetExtent.height &&
+        size.depthOrArrayLayers === targetExtent.depthOrArrayLayers
+    )
 
     if (
         target.sampleCount !== 1 ||
-        command.targetAspect !== 'all' ||
+        footprint === undefined ||
+        !blockAligned ||
+        !physicalSubresourceCovered ||
         targetOrigin.x + size.width > targetExtent.width ||
         targetOrigin.y + size.height > targetExtent.height ||
         targetOrigin.z + size.depthOrArrayLayers > targetExtent.depthOrArrayLayers
@@ -4771,8 +4868,12 @@ function validateBufferToTextureCopyRange(command: CopyCommand) {
             size,
             reason: target.sampleCount !== 1
                 ? 'sampleCount'
-                : command.targetAspect !== 'all'
+                : footprint === undefined
                     ? 'aspect'
+                    : !blockAligned
+                        ? 'blockAlignment'
+                        : !physicalSubresourceCovered
+                            ? 'physicalSubresource'
                     : 'range',
         })
     }
@@ -4785,10 +4886,28 @@ function validateTextureToBufferCopyRange(command: CopyCommand) {
     const sourceOrigin = command.sourceOrigin!
     const size = command.size!
     const sourceExtent = textureMipExtent(source, command.sourceMipLevel!)
+    const blockSize = textureFormatBlockSize(source.format)
+    const footprint = textureFormatCopyFootprint(source.format, command.sourceAspect!, 'source')
+    const blockAligned =
+        sourceOrigin.x % blockSize.width === 0 &&
+        sourceOrigin.y % blockSize.height === 0 &&
+        size.width % blockSize.width === 0 &&
+        size.height % blockSize.height === 0
+    const physicalSubresourceCovered = !textureFormatIsDepthStencil(source.format) || (
+        size.width === sourceExtent.width &&
+        size.height === sourceExtent.height &&
+        size.depthOrArrayLayers === sourceExtent.depthOrArrayLayers
+    )
+    const compressedFormatAllowed =
+        command.runtime.deviceFeatures.has('core-features-and-limits') ||
+        !textureFormatIsCompressed(source.format)
 
     if (
         source.sampleCount !== 1 ||
-        command.sourceAspect !== 'all' ||
+        footprint === undefined ||
+        !compressedFormatAllowed ||
+        !blockAligned ||
+        !physicalSubresourceCovered ||
         sourceOrigin.x + size.width > sourceExtent.width ||
         sourceOrigin.y + size.height > sourceExtent.height ||
         sourceOrigin.z + size.depthOrArrayLayers > sourceExtent.depthOrArrayLayers
@@ -4804,8 +4923,14 @@ function validateTextureToBufferCopyRange(command: CopyCommand) {
             size,
             reason: source.sampleCount !== 1
                 ? 'sampleCount'
-                : command.sourceAspect !== 'all'
+                : footprint === undefined
                     ? 'aspect'
+                    : !compressedFormatAllowed
+                        ? 'format'
+                        : !blockAligned
+                            ? 'blockAlignment'
+                            : !physicalSubresourceCovered
+                                ? 'physicalSubresource'
                     : 'range',
         })
     }
@@ -4813,20 +4938,49 @@ function validateTextureToBufferCopyRange(command: CopyCommand) {
 
 function textureMipExtent(texture: TextureResource, mipLevel: number): { width: number, height: number, depthOrArrayLayers: number } {
 
+    const blockSize = textureFormatBlockSize(texture.format)
+    const logicalWidth = Math.max(1, texture.width >> mipLevel)
+    const logicalHeight = Math.max(1, texture.height >> mipLevel)
     return {
-        width: Math.max(1, texture.width >> mipLevel),
-        height: Math.max(1, texture.height >> mipLevel),
-        depthOrArrayLayers: texture.depthOrArrayLayers,
+        width: Math.ceil(logicalWidth / blockSize.width) * blockSize.width,
+        height: Math.ceil(logicalHeight / blockSize.height) * blockSize.height,
+        depthOrArrayLayers: texture.dimension === '3d'
+            ? Math.max(1, texture.depthOrArrayLayers >> mipLevel)
+            : texture.depthOrArrayLayers,
     }
+}
+
+function textureCopySubresourcesOverlap(command: CopyCommand): boolean {
+
+    const source = (command.source as TextureCopyCommandSourceDescriptor).resource
+    const target = command.target as TextureResource
+    if (source !== target || command.sourceMipLevel !== command.targetMipLevel) return false
+    if (
+        command.sourceAspect !== 'all' &&
+        command.targetAspect !== 'all' &&
+        command.sourceAspect !== command.targetAspect
+    ) return false
+    if (source.dimension !== '2d') return true
+
+    const sourceStart = command.sourceOrigin!.z
+    const sourceEnd = sourceStart + command.size!.depthOrArrayLayers
+    const targetStart = command.targetOrigin!.z
+    const targetEnd = targetStart + command.size!.depthOrArrayLayers
+    return sourceStart < targetEnd && targetStart < sourceEnd
+}
+
+function textureCopyFormatsCompatible(
+    source: GPUTextureFormat,
+    target: GPUTextureFormat
+): boolean {
+
+    return source === target || source.replace(/-srgb$/, '') === target.replace(/-srgb$/, '')
 }
 
 function throwCopySourceDiagnostic({
     runtime,
     source,
     target,
-    sourceOffset,
-    targetOffset,
-    byteLength,
     sourceLayout,
     targetLayout,
     sourceOrigin,
@@ -4849,15 +5003,12 @@ function throwCopySourceDiagnostic({
             diagnosticSubjectOf(source),
             diagnosticSubjectOf(target),
         ].filter(isDefined),
-        message: 'CopyCommand source must declare a BufferResource or TextureResource and required content epoch.',
+        message: 'CopyCommand source must declare a BufferRegion or TextureResource and required content epoch.',
         expected: {
-            source: '{ resource: BufferResource or TextureResource with copy source usage, contentEpoch: non-negative integer }',
-            target: 'BufferResource or TextureResource with matching copy destination usage',
-            sourceOffset: 'non-negative integer aligned to 4 bytes',
-            targetOffset: 'non-negative integer aligned to 4 bytes',
-            byteLength: 'positive integer aligned to 4 bytes within source and target',
-            sourceLayout: '{ offset?: non-negative integer, bytesPerRow: positive 256-byte aligned integer, rowsPerImage?: positive integer }',
-            targetLayout: '{ offset?: non-negative integer, bytesPerRow: positive 256-byte aligned integer, rowsPerImage?: positive integer }',
+            source: '{ region: BufferRegion, contentEpoch: non-negative integer } or { resource: TextureResource, contentEpoch: non-negative integer }',
+            target: 'BufferRegion or TextureResource with matching copy destination usage',
+            sourceLayout: '{ bytesPerRow: positive 256-byte aligned GPUSize32, rowsPerImage?: positive GPUSize32 }',
+            targetLayout: '{ bytesPerRow: positive 256-byte aligned GPUSize32, rowsPerImage?: positive GPUSize32 }',
             sourceOrigin: '{ x?: non-negative integer, y?: non-negative integer, z?: non-negative integer }',
             targetOrigin: '{ x?: non-negative integer, y?: non-negative integer, z?: non-negative integer }',
             sourceMipLevel: 'non-negative integer within source texture mip levels',
@@ -4870,9 +5021,6 @@ function throwCopySourceDiagnostic({
             reason,
             source: describeValue(source),
             target: describeValue(target),
-            sourceOffset,
-            targetOffset,
-            byteLength,
             sourceLayout,
             targetLayout,
             sourceOrigin,
@@ -4890,9 +5038,6 @@ function throwCopyDiagnostic({
     runtime,
     source,
     target,
-    sourceOffset,
-    targetOffset,
-    byteLength,
     sourceLayout,
     targetLayout,
     sourceOrigin,
@@ -4917,13 +5062,10 @@ function throwCopyDiagnostic({
         ].filter(isDefined),
         message: 'CopyCommand requires compatible source and target resources with a valid copy range.',
         expected: {
-            source: 'BufferResource or TextureResource with copy source usage',
-            target: 'matching BufferResource or TextureResource with copy destination usage',
-            sourceOffset: 'non-negative integer aligned to 4 bytes',
-            targetOffset: 'non-negative integer aligned to 4 bytes',
-            byteLength: 'positive integer aligned to 4 bytes within source and target',
-            sourceLayout: '{ offset?: non-negative integer, bytesPerRow: positive 256-byte aligned integer, rowsPerImage?: positive integer }',
-            targetLayout: '{ offset?: non-negative integer, bytesPerRow: positive 256-byte aligned integer, rowsPerImage?: positive integer }',
+            source: 'BufferRegion or TextureResource with copy source usage',
+            target: 'matching BufferRegion or TextureResource with copy destination usage',
+            sourceLayout: '{ bytesPerRow: positive 256-byte aligned GPUSize32, rowsPerImage?: positive GPUSize32 }',
+            targetLayout: '{ bytesPerRow: positive 256-byte aligned GPUSize32, rowsPerImage?: positive GPUSize32 }',
             sourceOrigin: '{ x?: non-negative integer, y?: non-negative integer, z?: non-negative integer }',
             targetOrigin: '{ x?: non-negative integer, y?: non-negative integer, z?: non-negative integer }',
             sourceMipLevel: 'non-negative integer within source texture mip levels',
@@ -4936,9 +5078,6 @@ function throwCopyDiagnostic({
             reason,
             source: describeValue(source),
             target: describeValue(target),
-            sourceOffset,
-            targetOffset,
-            byteLength,
             sourceLayout,
             targetLayout,
             sourceOrigin,
@@ -5184,13 +5323,13 @@ function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size
             runtime?.subject,
             diagnosticSubjectOf(target),
         ].filter(isDefined),
-        message: 'UploadCommand requires a BufferResource target, byte data, and a valid byte range.',
+        message: 'UploadCommand requires a BufferRegion target, byte data, and a valid writeBuffer range.',
         expected: {
-            target: 'BufferResource',
+            target: 'BufferRegion',
             data: 'ArrayBuffer, ArrayBufferView, or LayoutUploadView',
-            offset: 'non-negative integer',
+            offset: 'non-negative integer aligned to 4 bytes',
             dataOffset: 'non-negative integer',
-            size: 'byte length within source and target',
+            size: 'byte length within source and target and a multiple of 4 bytes',
         },
         actual: {
             reason,
@@ -5321,7 +5460,11 @@ function normalizeTextureUploadLayout(
     const rowsPerImage = layout.rowsPerImage ?? size.height
 
     for (const [ key, value ] of Object.entries({ offset, bytesPerRow, rowsPerImage })) {
-        if (!Number.isInteger(value) || value < 0 || (key !== 'offset' && value === 0)) {
+        if (
+            !Number.isInteger(value) ||
+            value < 0 ||
+            (key !== 'offset' && (value === 0 || value > GPU_SIZE_32_MAX))
+        ) {
             throwTextureUploadDiagnostic({
                 runtime,
                 target,
@@ -5463,7 +5606,7 @@ function throwTextureUploadDiagnostic({
         expected: {
             target: 'TextureResource with GPUTextureUsage.COPY_DST',
             data: 'ArrayBuffer or ArrayBufferView',
-            layout: '{ offset?: number, bytesPerRow: number, rowsPerImage?: number }',
+            layout: '{ offset?: GPUSize64, bytesPerRow?: GPUSize32, rowsPerImage?: GPUSize32 }',
             origin: '{ x?: number, y?: number, z?: number }',
             size: '{ width: number, height: number, depthOrArrayLayers?: number }',
         },

@@ -9,7 +9,9 @@ import {
 import { createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
+const GPU_TEXTURE_USAGE_STORAGE_BINDING = 0x8
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
+const GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT = 0x20
 
 function particleCodec(name = 'Particle', positionName = 'position', massName = 'mass') {
 
@@ -160,9 +162,9 @@ describe('scratch logical resource views', () => {
         )
     })
 
-    it('creates complete immutable TextureViewSpecs without native view creation', async() => {
+    it('creates complete immutable TextureViewSpecs and preflights usage capabilities without native views', async() => {
 
-        const { runtime, calls } = await createRuntimeFixture()
+        const { runtime, device, calls } = await createRuntimeFixture()
         const texture = await runtime.createTexture({
             label: 'array texture',
             size: { width: 8, height: 4, depthOrArrayLayers: 2 },
@@ -194,6 +196,38 @@ describe('scratch logical resource views', () => {
         expect(Object.isExtensible(view)).to.equal(false)
         expect(view).to.not.have.property('gpuTextureView')
         expect(() => new TextureViewSpec()).to.throw(TypeError)
+
+        const transientTexture = await runtime.createTexture({
+            size: [ 4, 4 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        expectDiagnostic(
+            () => transientTexture.view({ usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT }),
+            'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+        )
+
+        device.features.add('core-features-and-limits')
+        const storageTexture = await runtime.createTexture({
+            size: [ 4, 4 ],
+            format: 'rgba8unorm',
+            viewFormats: [ 'rgba8unorm-srgb' ],
+            usage: GPU_TEXTURE_USAGE_STORAGE_BINDING,
+        })
+        expectDiagnostic(
+            () => storageTexture.view({
+                format: 'rgba8unorm-srgb',
+                usage: GPU_TEXTURE_USAGE_STORAGE_BINDING,
+            }),
+            'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+        )
+
+        await expectRejectedDiagnostic(runtime.createTexture({
+            size: [ 4, 4 ],
+            format: 'rg11b10ufloat',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        }), 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
+        expect(calls.textureViews).to.have.length(nativeViewCount)
     })
 
     it('freezes explicit texture view defaults and revalidates parent lifecycle', async() => {

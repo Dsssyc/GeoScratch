@@ -233,4 +233,48 @@ describe('scratch resources', () => {
         expect(buffer.isReady).to.equal(false)
         expect(texture.isReady).to.equal(false)
     })
+
+    it('rejects noncanonical raw resource descriptor integers before native issue', async() => {
+
+        const { gpu, buffers, textures } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+
+        for (const descriptor of [
+            { size: 4.5, usage: 1 },
+            { size: Number.MAX_SAFE_INTEGER + 1, usage: 1 },
+            { size: 16, usage: 1.5 },
+            { size: 16, usage: 0x1_0000_0000 },
+        ]) {
+            await expectResourceDiagnostic(runtime.createBuffer(descriptor))
+        }
+        for (const descriptor of [
+            { size: { width: 2, height: 2 }, usage: 4.5 },
+            { size: { width: 2, height: 2 }, usage: 0x1_0000_0000 },
+            { size: { width: Number.MAX_SAFE_INTEGER, height: 2 }, usage: 4 },
+        ]) {
+            await expectResourceDiagnostic(runtime.createTexture({
+                format: 'rgba8unorm',
+                ...descriptor,
+            }))
+        }
+
+        expect(buffers).to.have.length(0)
+        expect(textures).to.have.length(0)
+    })
 })
+
+async function expectResourceDiagnostic(promise) {
+
+    try {
+        await promise
+    } catch (error) {
+        expect(error).to.be.instanceOf(ScratchDiagnosticError)
+        expect(error.diagnostic).to.include({
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+        })
+        return
+    }
+    throw new Error('expected invalid resource descriptor to fail')
+}

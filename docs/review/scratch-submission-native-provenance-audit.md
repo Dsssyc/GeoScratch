@@ -29,10 +29,14 @@ The observation owner is a call-path fact, not a property of a native method:
 - persistent render attachments use submission-scoped `attachment-view`
   observation. Their native views are recreated for each submission and are not
   retained by `PassSpec`.
+- surface attachments acquire the current canvas texture and create its view
+  while `createRenderPassDescriptor()` executes inside the submission
+  `pass-begin` issue. A direct public `Surface.getCurrentTexture()` call remains
+  explicitly deferred and has no Scratch submission provenance.
 - raw runtime.device / runtime.queue calls remain outside Scratch provenance;
   this Goal does not monkey patch platform objects or infer ownership by time.
 
-The two explicitly deferred direct paths are preserved Goal-start behavior, not
+The three explicitly deferred direct paths are preserved Goal-start behavior, not
 unresolved source locations. They are reported as remaining native families for
 a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 
@@ -40,8 +44,8 @@ a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 
 | ID | Source call site | Native call | Declared owner or deferred path | Classification |
 | --- | --- | --- | --- | --- |
-| N1 | `packages/geoscratch/src/scratch/binding.ts:1028` | persistent binding `GPUTexture.createView()` | `bind-set-preparation` candidate transaction; committed atomically with its bind group. | Independently acknowledged before submission |
-| N2 | `packages/geoscratch/src/scratch/binding.ts:1065` | `GPUDevice.createBindGroup()` | `bind-set-preparation` transaction; committed before submission. | Independently acknowledged before submission |
+| N1 | `packages/geoscratch/src/scratch/binding.ts:968` | persistent binding `GPUTexture.createView()` | `bind-set-preparation` candidate transaction; committed atomically with its bind group. | Independently acknowledged before submission |
+| N2 | `packages/geoscratch/src/scratch/binding.ts:1005` | `GPUDevice.createBindGroup()` | `bind-set-preparation` transaction; committed before submission. | Independently acknowledged before submission |
 | N3 | `packages/geoscratch/src/scratch/command.ts:729` | render `setPipeline()` | `issuePassCommandEncoding()` on submission path; manual encode remains raw. | Observed command; manual encode deferred |
 | N4 | `packages/geoscratch/src/scratch/command.ts:734` | `setVertexBuffer()` | Same pass-command owner. | Observed command; manual encode deferred |
 | N5 | `packages/geoscratch/src/scratch/command.ts:742` | `setIndexBuffer()` | Same pass-command owner. | Observed command; manual encode deferred |
@@ -54,41 +58,45 @@ a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 | N12 | `packages/geoscratch/src/scratch/command.ts:1190` | compute `setPipeline()` | Same pass-command owner. | Observed command; manual encode deferred |
 | N13 | `packages/geoscratch/src/scratch/command.ts:1195` | `dispatchWorkgroupsIndirect()` | Same pass-command owner. | Observed command; manual encode deferred |
 | N14 | `packages/geoscratch/src/scratch/command.ts:1200` | `dispatchWorkgroups()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N15 | `packages/geoscratch/src/scratch/command.ts:1626` | `copyBufferToBuffer()` | `issueStandaloneCommandEncoding()` on submission path. | Observed command; manual encode deferred |
-| N16 | `packages/geoscratch/src/scratch/command.ts:1647` | `copyTextureToTexture()` | Same standalone-command owner. | Observed command; manual encode deferred |
-| N17 | `packages/geoscratch/src/scratch/command.ts:1676` | `copyBufferToTexture()` | Same standalone-command owner. | Observed command; manual encode deferred |
-| N18 | `packages/geoscratch/src/scratch/command.ts:1704` | `copyTextureToBuffer()` | Same standalone-command owner. | Observed command; manual encode deferred |
-| N19 | `packages/geoscratch/src/scratch/command.ts:2020` | ordered-readback `copyBufferToBuffer()` | Ordered readback step is one standalone command location. | Observed command; manual encode deferred |
-| N20 | `packages/geoscratch/src/scratch/command.ts:2523` | `resolveQuerySet()` | Resolve step is one standalone command location. | Observed command; manual encode deferred |
-| N21 | `packages/geoscratch/src/scratch/command.ts:2852` | `GPUQueue.writeBuffer()` | Submission replay uses one `queue-action`; direct upload execution shares this call site without an owner. | Observed submission; direct execute deferred |
-| N22 | `packages/geoscratch/src/scratch/command.ts:2859` | `GPUQueue.writeTexture()` | Same shared queue-action boundary. | Observed submission; direct execute deferred |
-| N23 | `packages/geoscratch/src/scratch/command.ts:3279` | dynamic-offset `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
-| N24 | `packages/geoscratch/src/scratch/command.ts:3283` | static `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
-| N25 | `packages/geoscratch/src/scratch/command.ts:5845` | `copyExternalImageToTexture()` | Submission replay uses one `queue-action`; direct execution shares this call site without an owner. | Observed submission; direct execute deferred |
-| N26 | `packages/geoscratch/src/scratch/readback.ts:481` | `createCommandEncoder()` | Direct-readback native observation, `encoder-create`. | Observed direct readback |
-| N27 | `packages/geoscratch/src/scratch/readback.ts:483` | `copyBufferToBuffer()` | Direct-readback native observation, `command-encode`. | Observed direct readback |
-| N28 | `packages/geoscratch/src/scratch/readback.ts:492` | `finish()` | Direct-readback native observation, `encoder-finish`. | Observed direct readback |
-| N29 | `packages/geoscratch/src/scratch/readback.ts:496` | `queue.submit()` | Direct-readback native observation, `queue-submit`. | Observed direct readback |
-| N30 | `packages/geoscratch/src/scratch/submission.ts:608` | `createCommandEncoder()` | Submission encoder-segment location, `encoder-create`. | Observed submission |
-| N31 | `packages/geoscratch/src/scratch/submission.ts:631` | `finish()` | Submission encoder-segment location, `encoder-finish`. | Observed submission |
-| N32 | `packages/geoscratch/src/scratch/submission.ts:756` | `beginComputePass()` | Compute pass location, `pass-begin`. | Observed submission |
-| N33 | `packages/geoscratch/src/scratch/submission.ts:777` | compute pass `end()` | Compute pass location, `pass-end`. | Observed submission |
-| N34 | `packages/geoscratch/src/scratch/submission.ts:802` | `beginRenderPass()` | Render pass location, `pass-begin`. | Observed submission |
-| N35 | `packages/geoscratch/src/scratch/submission.ts:848` | render pass `end()` | Render pass location, `pass-end`. | Observed submission |
-| N36 | `packages/geoscratch/src/scratch/submission.ts:876` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
-| N37 | `packages/geoscratch/src/scratch/submission.ts:1204` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
-| N38 | `packages/geoscratch/src/scratch/submission.ts:1209` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
-| N39 | `packages/geoscratch/src/scratch/texture.ts:403` | attachment `GPUTexture.createView()` | Called only inside the owning submission `attachment-view` issue with pass, slot, view, resource, and allocation facts. | Observed submission attachment |
+| N15 | `packages/geoscratch/src/scratch/command.ts:1644` | `copyBufferToBuffer()` | `issueStandaloneCommandEncoding()` on submission path. | Observed command; manual encode deferred |
+| N16 | `packages/geoscratch/src/scratch/command.ts:1665` | `copyTextureToTexture()` | Same standalone-command owner. | Observed command; manual encode deferred |
+| N17 | `packages/geoscratch/src/scratch/command.ts:1694` | `copyBufferToTexture()` | Same standalone-command owner. | Observed command; manual encode deferred |
+| N18 | `packages/geoscratch/src/scratch/command.ts:1722` | `copyTextureToBuffer()` | Same standalone-command owner. | Observed command; manual encode deferred |
+| N19 | `packages/geoscratch/src/scratch/command.ts:2038` | ordered-readback `copyBufferToBuffer()` | Ordered readback step is one standalone command location. | Observed command; manual encode deferred |
+| N20 | `packages/geoscratch/src/scratch/command.ts:2559` | `resolveQuerySet()` | Resolve step is one standalone command location. | Observed command; manual encode deferred |
+| N21 | `packages/geoscratch/src/scratch/command.ts:2888` | `GPUQueue.writeBuffer()` | Submission replay uses one `queue-action`; direct upload execution shares this call site without an owner. | Observed submission; direct execute deferred |
+| N22 | `packages/geoscratch/src/scratch/command.ts:2895` | `GPUQueue.writeTexture()` | Same shared queue-action boundary. | Observed submission; direct execute deferred |
+| N23 | `packages/geoscratch/src/scratch/command.ts:3315` | dynamic-offset `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
+| N24 | `packages/geoscratch/src/scratch/command.ts:3319` | static `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
+| N25 | `packages/geoscratch/src/scratch/command.ts:5988` | `copyExternalImageToTexture()` | Submission replay uses one `queue-action`; direct execution shares this call site without an owner. | Observed submission; direct execute deferred |
+| N26 | `packages/geoscratch/src/scratch/pass.ts:651` | current surface-texture `GPUTexture.createView()` | Render descriptor lowering runs inside the submission `pass-begin` issue. | Observed submission pass begin |
+| N27 | `packages/geoscratch/src/scratch/readback.ts:481` | `createCommandEncoder()` | Direct-readback native observation, `encoder-create`. | Observed direct readback |
+| N28 | `packages/geoscratch/src/scratch/readback.ts:483` | `copyBufferToBuffer()` | Direct-readback native observation, `command-encode`. | Observed direct readback |
+| N29 | `packages/geoscratch/src/scratch/readback.ts:492` | `finish()` | Direct-readback native observation, `encoder-finish`. | Observed direct readback |
+| N30 | `packages/geoscratch/src/scratch/readback.ts:496` | `queue.submit()` | Direct-readback native observation, `queue-submit`. | Observed direct readback |
+| N31 | `packages/geoscratch/src/scratch/submission.ts:608` | `createCommandEncoder()` | Submission encoder-segment location, `encoder-create`. | Observed submission |
+| N32 | `packages/geoscratch/src/scratch/submission.ts:631` | `finish()` | Submission encoder-segment location, `encoder-finish`. | Observed submission |
+| N33 | `packages/geoscratch/src/scratch/submission.ts:756` | `beginComputePass()` | Compute pass location, `pass-begin`. | Observed submission |
+| N34 | `packages/geoscratch/src/scratch/submission.ts:777` | compute pass `end()` | Compute pass location, `pass-end`. | Observed submission |
+| N35 | `packages/geoscratch/src/scratch/submission.ts:802` | `beginRenderPass()` | Render pass location, `pass-begin`. | Observed submission |
+| N36 | `packages/geoscratch/src/scratch/submission.ts:848` | render pass `end()` | Render pass location, `pass-end`. | Observed submission |
+| N37 | `packages/geoscratch/src/scratch/submission.ts:876` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
+| N38 | `packages/geoscratch/src/scratch/submission.ts:1204` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
+| N39 | `packages/geoscratch/src/scratch/submission.ts:1209` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
+| N40 | `packages/geoscratch/src/scratch/surface.ts:113` | `GPUCanvasContext.getCurrentTexture()` | Submission attachment lowering reaches it inside `pass-begin`; a direct public method call has no owner. | Observed submission; direct call deferred |
+| N41 | `packages/geoscratch/src/scratch/texture.ts:488` | persistent attachment `GPUTexture.createView()` | Called only inside the owning submission `attachment-view` issue with pass, slot, view, resource, and allocation facts. | Observed submission attachment |
 
 Inventory totals:
 
-- 39 source call sites, all classified.
+- 41 source call sites, all classified.
 - 9 calls physically owned by `submission.ts`.
 - 20 command-encoder/pass calls reached through submission command wrappers.
 - 3 shared queue-action calls observed in submission replay, with direct
   `execute(queue)` explicitly deferred.
 - 4 direct-readback calls owned by the readback observation.
 - 2 persistent binding calls independently acknowledged by BindSet preparation.
+- 2 surface current-texture acquisition/view calls observed at `pass-begin` on
+  the submission path; direct `Surface.getCurrentTexture()` remains deferred.
 - 1 submission-scoped persistent attachment view call observed per attachment slot.
 - 0 unresolved or unknown source call sites.
 
@@ -143,7 +151,7 @@ pages retained zero unexpected browser failures.
 
 ## Completion Link
 
-Task 10 evidence is closed. The fixed Goal-start `a69c79a` parity matrix,
-five-axis strict review, review fixes, fresh gates, and final verdict are in
-`scratch-submission-native-final-parity-audit.md`; they are not inferred from
-this source/runtime inventory.
+Task 10 evidence is closed. The Goal-start `a69c79a` parity matrix now remains
+as historical input to `scratch-persistent-binding-views-final-audit.md`, whose
+current fixed-baseline runner supersedes the old standalone submission parity
+runner. The verdict is not inferred from this source/runtime inventory.

@@ -1127,6 +1127,19 @@ function normalizeSource(operation: ReadbackOperation, source: BufferRegion): Bu
     source.buffer.assertRuntime(operation.runtime)
     source.assertUsable()
 
+    if (source.offset % 4 !== 0 || source.size % 4 !== 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_READBACK_SOURCE_INVALID',
+            severity: 'error',
+            phase: 'readback',
+            subject: operation.subject,
+            related: [ source.subject, source.buffer.subject ],
+            message: 'ReadbackOperation source must satisfy copyBufferToBuffer alignment.',
+            expected: { offset: 'multiple of 4 bytes', size: 'multiple of 4 bytes' },
+            actual: { offset: source.offset, size: source.size },
+        })
+    }
+
     if ((source.buffer.usage & BUFFER_USAGE_COPY_SRC) === 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',

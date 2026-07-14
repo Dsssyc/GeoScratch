@@ -60,7 +60,7 @@ function createDispatch(runtime, pipeline, bindSet, resources) {
 
 describe('Scratch Command bound resource access', () => {
 
-    it('requires writable storage buffers in write declarations without fabricating a read', async() => {
+    it('requires read-write storage buffers in both read and write declarations', async() => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
@@ -100,7 +100,7 @@ describe('Scratch Command bound resource access', () => {
             name: 'values',
         })
         expect(diagnostic.expected).to.deep.include({
-            access: { read: false, write: true },
+            access: { read: true, write: true },
             resourceId: buffer.id,
         })
         expect(diagnostic.actual.missing).to.deep.equal({
@@ -109,11 +109,59 @@ describe('Scratch Command bound resource access', () => {
         })
         expect(fake.calls.commandEncoders).to.have.length(0)
 
+        const missingRead = expectDiagnostic(() => {
+            createDispatch(runtime, pipeline, bindSet, {
+                read: [],
+                write: [ buffer ],
+            })
+        }, {
+            code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+            severity: 'error',
+            phase: 'command',
+        })
+        expect(missingRead.actual.missing).to.deep.equal({
+            read: true,
+            write: false,
+        })
+
         const command = createDispatch(runtime, pipeline, bindSet, {
-            read: [],
+            read: [ readResource(buffer) ],
             write: [ buffer ],
         })
         expect(command).to.be.instanceOf(DispatchCommand)
+    })
+
+    it('rejects empty read-write storage buffers during submission readiness validation', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const buffer = await runtime.createBuffer({
+            size: 256,
+            usage: GPU_BUFFER_USAGE_STORAGE,
+        })
+        const bindLayout = await runtime.createBindLayout({
+            group: 0,
+            entries: [ {
+                binding: 0,
+                name: 'values',
+                type: 'storage',
+                visibility: [ 'compute' ],
+            } ],
+        })
+        const bindSet = await runtime.createBindSet(bindLayout, { values: buffer.region() })
+        const pipeline = await createPipeline(runtime, bindLayout)
+        const command = createDispatch(runtime, pipeline, bindSet, {
+            read: [ readResource(buffer) ],
+            write: [ buffer ],
+        })
+
+        const pass = runtime.createComputePass()
+        const submission = runtime.createSubmission().compute(pass, [ command ])
+        expectDiagnostic(() => submission.submit(), {
+            code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
+            severity: 'error',
+        })
+        expect(fake.calls.commandEncoders).to.have.length(0)
     })
 
     it('requires sampled textures as parent-resource reads', async() => {

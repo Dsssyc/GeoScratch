@@ -118,7 +118,7 @@ describe('scratch ReadbackCommand', () => {
         expect(fake.calls.queueSubmissions).to.have.length(stagedSubmissionCount)
     })
 
-    it('rejects invalid descriptors with structured diagnostics', async () => {
+    it('rejects invalid descriptors and unaligned regions with structured diagnostics', async () => {
 
         const fake = createFakeGpu()
         const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
@@ -130,7 +130,13 @@ describe('scratch ReadbackCommand', () => {
             usage: 0x1,
         })
 
-        for (const invalidSource of [ source, { region: texture, contentEpoch: 0 }, { region: source.region(), contentEpoch: -1 } ]) {
+        for (const invalidSource of [
+            source,
+            { region: texture, contentEpoch: 0 },
+            { region: source.region(), contentEpoch: -1 },
+            { region: source.region({ offset: 2, size: 12 }), contentEpoch: 0 },
+            { region: source.region({ size: 14 }), contentEpoch: 0 },
+        ]) {
             await expectScratchDiagnostic(() => runtime.createReadbackCommand({
                 source: invalidSource,
                 whenMissing: 'throw',

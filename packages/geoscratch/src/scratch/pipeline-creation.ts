@@ -24,7 +24,7 @@ export type PipelineCreationIssueInput = Readonly<{
     pipelineKind: PipelineKind
     sourceSnapshot: PipelineSourceSnapshot
     nativeLabels: PipelineNativeLabels
-    bindGroupLayouts: readonly GPUBindGroupLayout[]
+    bindGroupLayouts: readonly (GPUBindGroupLayout | null)[]
     lowerPipelineDescriptor: (
         shaderModule: GPUShaderModule,
         pipelineLayout: GPUPipelineLayout

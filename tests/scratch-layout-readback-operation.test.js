@@ -117,6 +117,29 @@ describe('scratch layout-aware ReadbackOperation', () => {
         expect(readback.layout).to.equal(undefined)
     })
 
+    it('rejects unaligned direct readback regions before staging allocation', async() => {
+
+        const { runtime, calls } = await createRuntimeFixture()
+        const raw = await runtime.createBuffer({
+            label: 'unaligned readback buffer',
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_STORAGE,
+        })
+
+        for (const source of [
+            raw.region({ offset: 2, size: 12 }),
+            raw.region({ size: 14 }),
+        ]) {
+            await expectAsyncDiagnostic(() => runtime.createReadback({ source }), {
+                code: 'SCRATCH_READBACK_SOURCE_INVALID',
+                severity: 'error',
+                phase: 'readback',
+            })
+        }
+        expect(calls.commandEncoders).to.have.length(0)
+        expect(calls.buffers).to.have.length(1)
+    })
+
     it('returns a LayoutReadbackView through the normal readback path', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()

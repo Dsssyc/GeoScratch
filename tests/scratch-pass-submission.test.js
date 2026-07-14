@@ -17,6 +17,7 @@ import {
 
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
+const GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT = 0x20
 
 async function createTriangleScene(format = 'bgra8unorm') {
 
@@ -330,6 +331,40 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         expect(fake.calls.commandEncoders).to.have.length(0)
         expect(fake.calls.textureViews).to.have.length(0)
+    })
+
+    it('revalidates a persistent 3d attachment depthSlice after allocation replacement', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const volumeTexture = await runtime.createTexture({
+            dimension: '3d',
+            size: [ 8, 8, 4 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const pass = runtime.createRenderPass({
+            color: [ {
+                target: volumeTexture.view({ dimension: '3d' }),
+                depthSlice: 3,
+            } ],
+        })
+
+        await volumeTexture.resize([ 8, 8, 2 ])
+
+        await expectScratchDiagnostic(() => runtime.submission()
+            .render(pass)
+            .submit(), {
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        expect(fake.calls.textureViews).to.have.length(0)
+        expect(fake.calls.renderPasses).to.have.length(0)
+        expect(fake.calls.queueSubmissions).to.have.length(0)
+        expect(volumeTexture.contentEpoch).to.equal(0)
     })
 
     it('keeps compatibility render attachments valid after array-layer growth', async() => {
@@ -707,10 +742,10 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(fixture.calls.queueSubmissions).to.have.length(0)
     })
 
-    it('rejects target format mismatches with structured diagnostics', async() => {
+    it('rejects color attachment metadata and surface view descriptor divergence', async() => {
 
         const fixture = await createTriangleScene('bgra8unorm')
-        const mismatchedPass = fixture.runtime.createRenderPass({
+        const diagnostic = await expectScratchDiagnostic(() => fixture.runtime.createRenderPass({
             color: [
                 {
                     target: fixture.surface,
@@ -720,23 +755,29 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
                     clear: [ 0, 0, 0, 1 ],
                 },
             ],
+        }), {
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
         })
 
-        try {
-            fixture.runtime.createSubmission({ validation: 'throw' })
-                .render(mismatchedPass, [ fixture.draw ])
-                .submit()
-            throw new Error('expected target format mismatch to fail')
-        } catch (error) {
-            expect(error).to.be.instanceOf(ScratchDiagnosticError)
-            expect(error.diagnostic).to.include({
-                code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
+        expect(diagnostic.expected).to.deep.equal({ format: 'bgra8unorm' })
+        expect(diagnostic.actual).to.deep.equal({ format: 'rgba8unorm' })
+
+        for (const viewDescriptor of [
+            { format: 'rgba8unorm' },
+            { usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING },
+            { dimension: '2d-array' },
+        ]) {
+            await expectScratchDiagnostic(() => fixture.runtime.createRenderPass({
+                color: [ { target: fixture.surface, viewDescriptor } ],
+            }), {
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
                 severity: 'error',
-                phase: 'pipeline',
+                phase: 'resource',
             })
-            expect(error.diagnostic.expected).to.deep.equal({ format: 'rgba8unorm' })
-            expect(error.diagnostic.actual).to.deep.equal({ format: 'bgra8unorm' })
         }
+        expect(fixture.calls.commandEncoders).to.have.length(0)
     })
 
     it('rejects render pipeline target format mismatches against TextureResource attachments', async() => {
@@ -773,7 +814,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         }
     })
 
-    it('rejects invalid TextureResource render attachment targets with structured diagnostics', async() => {
+    it('rejects invalid TextureResource attachment views and transient operations', async() => {
 
         const fixtureA = await createRenderTargetScene()
         const fixtureB = await createRenderTargetScene()
@@ -841,6 +882,56 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             expect(error).to.be.instanceOf(ScratchDiagnosticError)
             expect(error.diagnostic).to.include({
                 code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        const narrowedAttachment = await fixtureB.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT | GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        await expectScratchDiagnostic(() => fixtureB.runtime.createRenderPass({
+            color: [ {
+                target: narrowedAttachment.view({ usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING }),
+            } ],
+        }), {
+            code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        await expectScratchDiagnostic(() => fixtureB.runtime.createRenderPass({
+            color: [ {
+                target: narrowedAttachment.view(),
+                format: 'bgra8unorm',
+            } ],
+        }), {
+            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        const transientAttachment = await fixtureB.runtime.createTexture({
+            size: { width: 4, height: 4 },
+            format: 'rgba8unorm',
+            usage:
+                GPU_TEXTURE_USAGE_RENDER_ATTACHMENT |
+                GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT,
+        })
+        const transientPass = fixtureB.runtime.createRenderPass({
+            color: [ { target: transientAttachment.view() } ],
+        })
+        expect(transientPass.color[0]).to.include({ load: 'clear', store: 'discard' })
+        for (const attachment of [
+            { target: transientAttachment.view(), load: 'load' },
+            { target: transientAttachment.view(), store: 'store' },
+        ]) {
+            await expectScratchDiagnostic(() => fixtureB.runtime.createRenderPass({
+                color: [ attachment ],
+            }), {
+                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
                 severity: 'error',
                 phase: 'resource',
             })

@@ -82,12 +82,12 @@ async function main() {
     const drawArguments = await runtime.createBuffer({
         label: 'draw arguments',
         size: 16,
-        usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
+        usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
     })
     const indexedArguments = await runtime.createBuffer({
         label: 'indexed draw arguments',
         size: 20,
-        usage: GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
+        usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_STORAGE | GPU_BUFFER_USAGE_INDIRECT,
     })
     const indexBuffer = await runtime.createBuffer({
         label: 'triangle indices',
@@ -158,6 +158,19 @@ async function main() {
         target: indexBuffer.region(),
         data: new Uint16Array([ 3, 4, 5, 0 ]),
     })
+    const initializeDrawArguments = runtime.createUploadCommand({
+        target: drawArguments.region(),
+        data: new Uint32Array(4),
+    })
+    const initializeIndexedArguments = runtime.createUploadCommand({
+        target: indexedArguments.region(),
+        data: new Uint32Array(5),
+    })
+    const initialized = runtime.createSubmission({ validation: 'throw' })
+        .upload(initializeDrawArguments)
+        .upload(initializeIndexedArguments)
+        .submit()
+    await requireObservedSubmission(initialized)
 
     function render() {
 
@@ -165,6 +178,8 @@ async function main() {
 
         const dispatchEpoch = dispatchArguments.contentEpoch + 1
         const indexEpoch = indexBuffer.contentEpoch + 1
+        const drawReadEpoch = drawArguments.contentEpoch
+        const indexedReadEpoch = indexedArguments.contentEpoch
         const drawEpoch = drawArguments.contentEpoch + 1
         const indexedEpoch = indexedArguments.contentEpoch + 1
         const produceArguments = runtime.createDispatchCommand({
@@ -173,7 +188,11 @@ async function main() {
             bindSets: [ { set: argumentSet } ],
             count: { indirect: dispatchArguments.region() },
             resources: {
-                read: [ { resource: dispatchArguments, contentEpoch: dispatchEpoch } ],
+                read: [
+                    { resource: dispatchArguments, contentEpoch: dispatchEpoch },
+                    { resource: drawArguments, contentEpoch: drawReadEpoch },
+                    { resource: indexedArguments, contentEpoch: indexedReadEpoch },
+                ],
                 write: [ drawArguments, indexedArguments ],
             },
             whenMissing: 'throw',

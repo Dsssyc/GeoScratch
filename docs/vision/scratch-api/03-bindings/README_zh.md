@@ -58,12 +58,34 @@ const terrainLayout = await runtime.createBindLayout({
 
 Scratch 会预检 name、binding index、visibility、device feature、limit、buffer type、dynamic-offset contract、`minBindingSize`、sampled-texture shape、storage-texture access/format/dimension 与 sampler type。Acknowledged transaction 只 issue 一次 native layout creation；validation、internal 与 OOM scope settle 且 lifecycle 事实复核通过后才注册对象。
 
+Supporting-object acknowledgement 会先 join 同一次 native issue 周围已经 issue
+的全部 scope，再选择结果。并发的 runtime disposal 或 device loss lifecycle fact
+不能与该 join 竞速、遮蔽已经观察到的 native/scope failure，也不能仅因更早
+settle 就成为 primary。Scratch 对完整证据采用固定顺序：同步 native issue、
+结构性 scope failure、validation、internal、OOM、runtime disposal、device loss；
+更晚的 lifecycle fact 作为有界 secondary evidence 保留。Sampler、QuerySet、
+BindLayout 与 BindSet preparation candidate 都使用同一规则。
+
+Pipeline lowering 把 `BindLayout.group` 视为 native pipeline-layout index，调用方数组顺序没有语义。Sparse group 会产生显式 `null` slot，因此 group `0` 与 `2` 会降低成 `[group0, null, group2]`。WebGPU 定义在完整 `GPUPipelineLayout` 上的 limit，会针对所有 group entry 的拼接结果再次校验。因此，即使两个 layout 各自没有超过 dynamic-buffer 或 per-stage slot limit，组合后仍可能在任何 native pipeline object issue 前被拒绝。
+
 持久 binding matrix 覆盖:
 
-- uniform、read-only storage 与 writable storage buffer；
+- uniform、read-only storage 与 read-write storage buffer；
 - filtering、non-filtering 与 comparison sampler；
 - float、unfilterable-float、depth、signed-integer 与 unsigned-integer sampled texture，包括全部 native-valid view dimension 与 multisampled 约束；
 - write-only、read-only 与 read-write storage texture，具有显式 format 和 native-valid `1d`、`2d`、`2d-array` 或 `3d` dimension。
+
+Sampler normalization 保留 WebGPU
+`[Clamp] unsigned short maxAnisotropy` 的数值语义：numeric input 会先 clamp 到
+`[0, 65535]`，再舍入到最近整数；恰好位于两个整数中间时选择偶数。该结果会用于
+descriptor hash 与 native issue，之后 Scratch 再校验 normalized value 至少为 `1`，
+且大于 `1` 时 mag、min 与 mipmap filter 均为 linear。Typed Scratch descriptor
+仍要求 JavaScript `number`，不会额外引入 string 或 object coercion。
+
+`storage` buffer binding 遵循 WebGPU 的 read-write storage contract。每个绑定它的
+command 都必须把 parent buffer 同时声明在 `resources.read` 和
+`resources.write` 中。所需 read epoch 必须已经存在，因此新 buffer 必须先经过
+显式 upload、copy 或更早的 GPU producer 初始化，之后 command 才能使用该 binding。
 
 `externalTexture` 在拥有独立 frame/task lifetime contract 前明确排除。Shader reflection 可以交叉检查显式 layout，但绝不是生产路径的真相来源。
 

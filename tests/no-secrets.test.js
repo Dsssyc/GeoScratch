@@ -9,9 +9,16 @@ describe('secret hygiene', () => {
 
     it('keeps Mapbox tokens out of tracked text files', () => {
 
-        const files = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' })
+        const files = execFileSync('git', [
+            'ls-files',
+            '--cached',
+            '--others',
+            '--exclude-standard',
+            '-z',
+        ], { encoding: 'utf8' })
             .split('\0')
             .filter(Boolean)
+            .filter(file => fs.existsSync(file))
 
         const offenders = []
 

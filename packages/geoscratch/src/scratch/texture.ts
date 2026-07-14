@@ -20,6 +20,10 @@ import {
     logicalTextureDescriptorFootprint,
 } from './runtime-diagnostics.js'
 import { getGlobalConstant, isRecord } from './type-utils.js'
+import {
+    textureFormatIsRenderable,
+    textureFormatSupportsStorageBinding,
+} from './texture-format-capabilities.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ResourceState, ScratchResourceIdentity } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -28,6 +32,8 @@ import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
 const GPU_TEXTURE_USAGE_STORAGE_BINDING = getGlobalConstant('GPUTextureUsage', 'STORAGE_BINDING', 0x8)
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
 const GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'TRANSIENT_ATTACHMENT', 0x20)
+const GPU_INTEGER_COORDINATE_MAX = 0xffff_ffff
+const GPU_FLAGS_MAX = 0xffff_ffff
 const TEXTURE_DIMENSIONS = new Set<GPUTextureDimension>([ '1d', '2d', '3d' ])
 const TEXTURE_BINDING_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([
     '1d',
@@ -49,6 +55,85 @@ const STENCIL_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
     'stencil8',
     'depth24plus-stencil8',
     'depth32float-stencil8',
+])
+const COLOR_TEXEL_COPY_FOOTPRINTS = new Map<GPUTextureFormat, number>([
+    [ 'r8unorm', 1 ],
+    [ 'r8snorm', 1 ],
+    [ 'r8uint', 1 ],
+    [ 'r8sint', 1 ],
+    [ 'r16unorm', 2 ],
+    [ 'r16snorm', 2 ],
+    [ 'r16uint', 2 ],
+    [ 'r16sint', 2 ],
+    [ 'r16float', 2 ],
+    [ 'rg8unorm', 2 ],
+    [ 'rg8snorm', 2 ],
+    [ 'rg8uint', 2 ],
+    [ 'rg8sint', 2 ],
+    [ 'r32uint', 4 ],
+    [ 'r32sint', 4 ],
+    [ 'r32float', 4 ],
+    [ 'rg16unorm', 4 ],
+    [ 'rg16snorm', 4 ],
+    [ 'rg16uint', 4 ],
+    [ 'rg16sint', 4 ],
+    [ 'rg16float', 4 ],
+    [ 'rgba8unorm', 4 ],
+    [ 'rgba8unorm-srgb', 4 ],
+    [ 'rgba8snorm', 4 ],
+    [ 'rgba8uint', 4 ],
+    [ 'rgba8sint', 4 ],
+    [ 'bgra8unorm', 4 ],
+    [ 'bgra8unorm-srgb', 4 ],
+    [ 'rgb9e5ufloat', 4 ],
+    [ 'rgb10a2uint', 4 ],
+    [ 'rgb10a2unorm', 4 ],
+    [ 'rg11b10ufloat', 4 ],
+    [ 'rg32uint', 8 ],
+    [ 'rg32sint', 8 ],
+    [ 'rg32float', 8 ],
+    [ 'rgba16unorm', 8 ],
+    [ 'rgba16snorm', 8 ],
+    [ 'rgba16uint', 8 ],
+    [ 'rgba16sint', 8 ],
+    [ 'rgba16float', 8 ],
+    [ 'rgba32uint', 16 ],
+    [ 'rgba32sint', 16 ],
+    [ 'rgba32float', 16 ],
+])
+type DepthStencilTexelCopyCapability = Readonly<{
+    source: boolean
+    destination: boolean
+    bytesPerBlock?: number
+}>
+type DepthStencilTexelCopyCapabilities = Readonly<{
+    depth?: DepthStencilTexelCopyCapability
+    stencil?: DepthStencilTexelCopyCapability
+}>
+const DEPTH_STENCIL_TEXEL_COPY_CAPABILITIES = new Map<
+    GPUTextureFormat,
+    DepthStencilTexelCopyCapabilities
+>([
+    [ 'stencil8', {
+        stencil: { source: true, destination: true, bytesPerBlock: 1 },
+    } ],
+    [ 'depth16unorm', {
+        depth: { source: true, destination: true, bytesPerBlock: 2 },
+    } ],
+    [ 'depth24plus', {
+        depth: { source: false, destination: false },
+    } ],
+    [ 'depth24plus-stencil8', {
+        depth: { source: false, destination: false },
+        stencil: { source: true, destination: true, bytesPerBlock: 1 },
+    } ],
+    [ 'depth32float', {
+        depth: { source: true, destination: false, bytesPerBlock: 4 },
+    } ],
+    [ 'depth32float-stencil8', {
+        depth: { source: true, destination: false, bytesPerBlock: 4 },
+        stencil: { source: true, destination: true, bytesPerBlock: 1 },
+    } ],
 ])
 const textureResourceToken = Symbol('TextureResource')
 const textureViewSpecToken = Symbol('TextureViewSpec')
@@ -551,6 +636,11 @@ function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: unknown
         subject,
         descriptor.textureBindingViewDimension
     )
+    if (descriptor.label !== undefined && typeof descriptor.label !== 'string') {
+        throwTextureDescriptorDiagnostic(subject, descriptor, {
+            label: 'string or undefined',
+        })
+    }
 
     const normalized = freezeTextureDescriptor({
         size,
@@ -560,7 +650,7 @@ function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: unknown
         mipLevelCount,
         sampleCount,
         viewFormats,
-        ...(typeof descriptor.label === 'string' ? { label: descriptor.label } : {}),
+        ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
         ...(textureBindingViewDimension !== undefined ? { textureBindingViewDimension } : {}),
     })
 
@@ -599,9 +689,14 @@ function normalizeTextureSize(subject: DiagnosticSubject, size: unknown): Normal
     }
 
     for (const [ key, value ] of Object.entries({ width, height, depthOrArrayLayers })) {
-        if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+        if (
+            typeof value !== 'number' ||
+            !Number.isSafeInteger(value) ||
+            value <= 0 ||
+            value > GPU_INTEGER_COORDINATE_MAX
+        ) {
             throwTextureDescriptorDiagnostic(subject, { size }, {
-                [key]: 'positive integer',
+                [key]: `integer in [1, ${GPU_INTEGER_COORDINATE_MAX}]`,
             })
         }
     }
@@ -638,9 +733,14 @@ function normalizeTextureUsage(subject: DiagnosticSubject, usage: unknown): GPUT
         })
     }
 
-    if (typeof usage !== 'number' || !Number.isFinite(usage)) {
+    if (
+        typeof usage !== 'number' ||
+        !Number.isInteger(usage) ||
+        usage < 0 ||
+        usage > GPU_FLAGS_MAX
+    ) {
         throwTextureDescriptorDiagnostic(subject, { usage }, {
-            usage: 'GPUTextureUsageFlags',
+            usage: `GPUTextureUsageFlags integer in [0, ${GPU_FLAGS_MAX}]`,
         })
     }
 
@@ -649,9 +749,14 @@ function normalizeTextureUsage(subject: DiagnosticSubject, usage: unknown): GPUT
 
 function normalizePositiveInteger(subject: DiagnosticSubject, value: unknown, key: string): number {
 
-    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value <= 0 ||
+        value > GPU_INTEGER_COORDINATE_MAX
+    ) {
         throwTextureDescriptorDiagnostic(subject, { [key]: value }, {
-            [key]: 'positive integer',
+            [key]: `integer in [1, ${GPU_INTEGER_COORDINATE_MAX}]`,
         })
     }
 
@@ -816,10 +921,35 @@ function validateNormalizedTextureViewDescriptor(
     if (
         !Number.isSafeInteger(descriptor.usage) ||
         descriptor.usage < 0 ||
+        descriptor.usage > GPU_FLAGS_MAX ||
         (descriptor.usage & texture.usage) !== descriptor.usage
     ) {
         throwTextureViewDescriptorDiagnostic(texture, actual, {
             usage: `GPUTextureUsageFlags subset of ${texture.usage}`,
+        })
+    }
+    if (
+        (texture.usage & GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0 &&
+        descriptor.usage !== texture.usage
+    ) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            usage: `exactly transient texture usage ${texture.usage}`,
+        })
+    }
+    if (
+        (descriptor.usage & GPU_TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0 &&
+        !textureFormatIsRenderable(texture.runtime, descriptor.format)
+    ) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            format: 'renderable for RENDER_ATTACHMENT view usage',
+        })
+    }
+    if (
+        (descriptor.usage & GPU_TEXTURE_USAGE_STORAGE_BINDING) !== 0 &&
+        !textureFormatSupportsStorageBinding(texture.runtime, descriptor.format)
+    ) {
+        throwTextureViewDescriptorDiagnostic(texture, actual, {
+            format: 'supports STORAGE_BINDING for at least one access mode',
         })
     }
     if (!TEXTURE_VIEW_ASPECTS.has(descriptor.aspect)) {
@@ -1201,6 +1331,24 @@ function validateTextureAllocationDescriptor(
     }
 
     if (
+        (descriptor.usage & GPU_TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0 &&
+        !textureFormatIsRenderable(runtime, descriptor.format)
+    ) {
+        throwTextureDescriptorDiagnostic(runtime.subject, actual, {
+            format: 'renderable for RENDER_ATTACHMENT texture usage',
+        })
+    }
+
+    if (
+        (descriptor.usage & GPU_TEXTURE_USAGE_STORAGE_BINDING) !== 0 &&
+        !textureFormatSupportsStorageBinding(runtime, descriptor.format)
+    ) {
+        throwTextureDescriptorDiagnostic(runtime.subject, actual, {
+            format: 'supports STORAGE_BINDING for at least one access mode',
+        })
+    }
+
+    if (
         (descriptor.usage & GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0 &&
         (
             descriptor.usage !==
@@ -1259,9 +1407,9 @@ function validateTextureBindingViewSize(
     }
 }
 
-function textureFormatBlockSize(format: GPUTextureFormat): { width: number, height: number } {
+export function textureFormatBlockSize(format: GPUTextureFormat): { width: number, height: number } {
 
-    if (/^(bc[1-7]|etc2|eac)-/.test(format)) {
+    if (/^(bc(?:[1-5]|6h|7)|etc2|eac)-/.test(format)) {
         return { width: 4, height: 4 }
     }
 
@@ -1276,15 +1424,87 @@ function textureFormatBlockSize(format: GPUTextureFormat): { width: number, heig
     return { width: 1, height: 1 }
 }
 
-function textureFormatIsCompressed(format: GPUTextureFormat): boolean {
+export function textureFormatIsCompressed(format: GPUTextureFormat): boolean {
 
     const block = textureFormatBlockSize(format)
     return block.width > 1 || block.height > 1
 }
 
+export type TextureFormatCopyFootprint = Readonly<{
+    blockWidth: number
+    blockHeight: number
+    bytesPerBlock: number
+    offsetAlignment: number
+}>
+
+export function textureFormatCopyFootprint(
+    format: GPUTextureFormat,
+    aspect: GPUTextureAspect,
+    direction: 'source' | 'destination'
+): TextureFormatCopyFootprint | undefined {
+
+    const depthStencilCapabilities = DEPTH_STENCIL_TEXEL_COPY_CAPABILITIES.get(format)
+    if (depthStencilCapabilities !== undefined) {
+        const availableAspects = [
+            depthStencilCapabilities.depth !== undefined ? 'depth' : undefined,
+            depthStencilCapabilities.stencil !== undefined ? 'stencil' : undefined,
+        ].filter((value): value is 'depth' | 'stencil' => value !== undefined)
+        const resolvedAspect = aspect === 'depth-only'
+            ? 'depth'
+            : aspect === 'stencil-only'
+                ? 'stencil'
+                : aspect === 'all' && availableAspects.length === 1
+                    ? availableAspects[0]
+                    : undefined
+        const capability = resolvedAspect === undefined
+            ? undefined
+            : depthStencilCapabilities[resolvedAspect]
+        if (
+            capability === undefined ||
+            capability[direction] !== true ||
+            capability.bytesPerBlock === undefined
+        ) return undefined
+
+        return Object.freeze({
+            blockWidth: 1,
+            blockHeight: 1,
+            bytesPerBlock: capability.bytesPerBlock,
+            offsetAlignment: 4,
+        })
+    }
+
+    if (aspect !== 'all') return undefined
+    const bytesPerBlock = colorTexelCopyFootprint(format)
+    if (bytesPerBlock === undefined) return undefined
+    const blockSize = textureFormatBlockSize(format)
+    return Object.freeze({
+        blockWidth: blockSize.width,
+        blockHeight: blockSize.height,
+        bytesPerBlock,
+        offsetAlignment: bytesPerBlock,
+    })
+}
+
+export function textureFormatIsDepthStencil(format: GPUTextureFormat): boolean {
+
+    return DEPTH_STENCIL_TEXEL_COPY_CAPABILITIES.has(format)
+}
+
+function colorTexelCopyFootprint(format: GPUTextureFormat): number | undefined {
+
+    const plainFootprint = COLOR_TEXEL_COPY_FOOTPRINTS.get(format)
+    if (plainFootprint !== undefined) return plainFootprint
+    if (/^bc(?:1|4)-/.test(format)) return 8
+    if (/^bc(?:2|3|5|6h|7)-/.test(format)) return 16
+    if (/^(?:etc2-(?:rgb8|rgb8a1)|eac-r11)/.test(format)) return 8
+    if (/^(?:etc2-rgba8|eac-rg11)/.test(format)) return 16
+    if (/^astc-/.test(format)) return 16
+    return undefined
+}
+
 function textureFormatSupports3D(runtime: ScratchRuntime, format: GPUTextureFormat): boolean {
 
-    if (/^bc[1-7]-/.test(format)) {
+    if (/^bc(?:[1-5]|6h|7)-/.test(format)) {
         return runtime.deviceFeatures.has('texture-compression-bc-sliced-3d')
     }
     if (/^astc-/.test(format)) {

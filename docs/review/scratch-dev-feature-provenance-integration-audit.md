@@ -19,8 +19,12 @@ repository guidance supplied for `dev-feature`.
 - High-level contributor-guidance checkpoint: `71717c4`
 - Verified feature head: `b9cd70d98a95724cf56aee736c55daabbc77a78e`
 - Local merge commit: `0057b88c0facca5b1afa27e83a847f84b541bf74`
-- Accepted implementation contract: ADR-035 and
-  `scratch-submission-native-final-parity-audit.md`
+- Accepted submission implementation contract: ADR-035
+- Current fixed-baseline evidence: `scratch-persistent-binding-views-final-audit.md`
+
+The former standalone submission final-parity check is superseded as an active
+audit. Its historical evidence remains available in Git history and is consumed
+through the current clean-cut audit instead of teaching the removed binding model.
 
 The feature branch was a linear 15-commit descendant of `a69c79a`. The local
 merge used the normal `ort` strategy and produced no textual conflict.

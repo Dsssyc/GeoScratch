@@ -21,6 +21,14 @@ Resource
 
 `BindLayout` 与 `BindSet` 是 acknowledged supporting object，不是 Resource 子类。Presentation current texture 是 submission-scoped borrowed target，不是持久 resource。
 
+原始 resource descriptor 是 canonical Scratch 输入，不是留给隐式 Web IDL
+coercion 的值。Buffer `size` 必须已经是精确、非负且位于 JavaScript
+safe-integer 范围内的 `GPUSize64`；texture extent、mip count 与 sample count
+必须已经是正的 safe-integer `GPUIntegerCoordinate`，并处于原生 32-bit domain。
+Buffer 与 texture usage 必须已经是 `[0, 0xffffffff]` 内的整数
+`GPUFlagsConstant`。非法 label 与 boolean 会被拒绝，不会被静默省略或转换。
+因此 Scratch 保留的逻辑 descriptor 与实际 issue 的 descriptor 完全一致。
+
 ## Allocation 与 Content
 
 只有逻辑 resource 安装不同 physical native allocation 时，`allocationVersion` 才变化。产生 bytes 或 texels 时，`contentEpoch` 才变化。二者彼此独立:
@@ -114,6 +122,8 @@ const sampled = color.view({
 
 `TextureResource.view()` 是同步的。它物化所有 descriptor default，并返回 frozen `TextureViewSpec`；它不会调用 native `createView()`，也不暴露 `GPUTextureView`。Spec 始终关联逻辑 texture，并针对每个后续 allocation 重新校验。
 
+View usage 会按真实 native contract 校验，而不只是检查 bit subset。Transient attachment 的 view 必须保留 texture 的 exact usage；包含 `RENDER_ATTACHMENT` usage 的 view 必须使用 device-enabled renderable format；包含 `STORAGE_BINDING` usage 的 view 必须使用至少支持一种 device-enabled storage access mode 的 plain color format。Texture allocation preflight 也使用同一组 render/storage format capability facts。Scratch 让这些事实与 storage-texture BindLayout validation 共用一个内部表，因此确定性非法的 usage/format 组合不会一直存活到 native `createView()`。
+
 BindSet preparation 私有拥有 candidate snapshot 的 allocation-scoped native view。Render attachment 在 submission 内把 `TextureViewSpec` 降低成 submission-scoped native view，并通过 `SubmittedWork` 观察 native outcome；不会跨 submission 缓存。直接调用 `texture.gpuTexture.createView()` 是显式逃离 Scratch ownership、versioning、diagnostics 与 repair guarantee。
 
 `TextureResource.resize()` 是返回 Promise 的 create-before-swap transaction。旧 allocation 保持 current，直到 candidate 被 acknowledgement；然后原子安装 replacement、推进一次 `allocationVersion`、保留 `contentEpoch`、把 content 标为 empty，并销毁旧 texture。Failure 或 lifecycle cancellation 会保留旧 allocation。Normalized same-size resize 是真正的 no-op。
@@ -151,10 +161,12 @@ const queries = await runtime.createQuerySet({
 Buffer 与 Texture content state 为:
 
 ```ts
-type ResourceState = 'empty' | 'ready' | 'indeterminate' | 'disposed'
+type ResourceState = 'empty' | 'ready' | 'indeterminate'
 ```
 
 `indeterminate` 表示迟到的 native 或 queue failure 使 Scratch 无法证明 still-current content 与其历史 epoch 一致。它绝不回滚 epoch。后续显式 producer 会推进新 epoch 并恢复 `ready`。Indexed query slot 独立使用同一套 content-state vocabulary。
+
+Disposal 属于 allocation lifecycle，通过独立的 `resource.isDisposed` 暴露；它不会混入 scalar 或 indexed content state。
 
 Indeterminate read 会根据 subject 分别以
 `SCRATCH_COMMAND_RESOURCE_CONTENT_INDETERMINATE`、

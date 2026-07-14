@@ -182,7 +182,7 @@ describe('scratch submission native outcome documentation', () => {
         const browser = read('tests', 'browser', 'scratch-submission-native-provenance.mjs')
 
         for (const marker of [
-            '39 source call sites',
+            '41 source call sites',
             'Chrome 150.0.7871.115',
             'encoder-finish',
             'There is no fabricated',
@@ -210,17 +210,17 @@ describe('scratch submission native outcome documentation', () => {
         expect(browser).to.include("stage === 'encoder-finish'")
     })
 
-    it('locks the fixed-baseline parity runner and resolved strict-review record', () => {
+    it('locks the current clean-cut parity runner and resolved integration record', () => {
 
         const runner = read(
             'tests',
             'audits',
-            'scratch-submission-native-final-parity.mjs'
+            'scratch-persistent-binding-views-final-parity.mjs'
         )
         const audit = read(
             'docs',
             'review',
-            'scratch-submission-native-final-parity-audit.md'
+            'scratch-persistent-binding-views-final-audit.md'
         )
         const integration = read(
             'docs',
@@ -229,27 +229,26 @@ describe('scratch submission native outcome documentation', () => {
         )
 
         for (const marker of [
-            'a69c79a2f6789330f108aff5031a6d5e11fd59c4',
-            'unchangedSourceChecks',
-            'preservedBehaviorChecks',
-            'intentionalReplacements',
-            'missingDiagnosticCodes',
-            'missingExports',
-            'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE',
-            'observeSubmissionLifecycleUntilQueueCompletion',
+            '26c6d8875caea7612e573dfb4e33e1340a016d46',
+            '20bb393df570ff1914a6789e9bd422d59ddfecc8',
+            'goalStartPublicMemberReplacements',
+            'goalStartChangedPublicMemberReplacements',
+            'productionEmitParity',
+            'officialSpecificationEvidence',
+            'behaviorTestContracts',
+            'nativeCopyQuadrants',
         ]) {
             expect(runner, marker).to.include(marker)
         }
         for (const marker of [
-            'Status: Complete and integrated into `dev-feature`',
-            '5/5',
-            '17/17',
-            '14/14',
-            '724 passing',
+            'Goal-start TypeScript behavior and public symbols',
+            'Historical JavaScript feature inventory',
+            'Target clean-cut behavior',
+            '20,000 + 20,000',
             'Chrome 150.0.7871.115',
-            'five RED/GREEN regressions',
-            'Neither returned a result',
-            'no remaining correctness',
+            'Apple Metal 3',
+            'Fresh-Context Strict Review',
+            '11 ordinary examples',
         ]) {
             expect(audit, marker).to.include(marker)
         }
@@ -270,6 +269,7 @@ describe('scratch submission native outcome documentation', () => {
         ]) {
             expect(integration, marker).to.include(marker)
         }
+        expect(integration).to.include('standalone submission final-parity check is superseded')
     })
 
     it('makes every ordinary completion proof inspect native outcome and done', () => {

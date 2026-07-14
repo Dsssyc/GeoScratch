@@ -127,6 +127,10 @@ runtime.createSubmission()
 
 Upload 会推进目标写入范围的 `contentEpoch`，并记录 producing submission。如果 upload 分配路径需要替换物理 GPU 对象，则还会推进 `allocationVersion`。
 
+Buffer upload path 会降低到 `GPUQueue.writeBuffer()`。其 target
+`BufferRegion` offset 与所选 byte length 都必须满足 4-byte alignment。Scratch
+会在直接 queue call 或 submission timeline 获得任何 effect 前校验这条原生规则。
+
 ### Queue-Side Upload 顺序
 
 Buffer 与 texture upload 是有序 submission action，不是 submission 之外的 preparation。queue write 必须相对 copy、ordered readback staging、resolve、compute 与 render work 出现在其声明的 `SubmissionBuilder` 位置。
@@ -197,6 +201,11 @@ const values = await readback.toArray(Float32Array)
 - **可确认的自动 staging。** runtime 持有 `MAP_READ` staging resources，并在使用前确认原生 validation/OOM outcome。常见 readback 下用户 buffer 不需要 map usage，但 source 需要合适的 copy usage 或显式 resolve 路径。
 - **Buffer-specific mapping barrier。** Host materialization 等待 staging buffer 自身的 `mapAsync()`，不会额外插入一次全 queue completion wait。
 - **由 layout 派生视图。** `02-resources` 的 buffer layout 决定结果是 `TypedArray`、bytes，还是 layout-derived structured view。AoS 字段是 strided 的，除非显式 deinterleave，否则不承诺为一个连续 typed array。
+
+Direct 与 ordered buffer readback 都通过 `copyBufferToBuffer()` 降低。Source
+`BufferRegion` offset 与 size 都必须在 Scratch 分配或 claim staging storage
+之前满足 4-byte alignment。因此，无论 readback 被安排在哪个位置，都使用同一
+alignment rule。
 
 ## Staging Allocation 与 Mapping Transaction
 
@@ -376,6 +385,8 @@ GPU-to-GPU copy 是显式 command。`CopyCommand` 应表达 WebGPU command encod
 
 CPU upload 与 CPU readback 是独立的 transfer 概念。`TextureUploadCommand` 表达通过 queue 写入 CPU bytes; `ReadbackOperation` 表达通过 staging 与 mapping 进行 host materialization。二者都不能替代 GPU-side `CopyCommand`。
 
+WebGPU 要求 buffer-to-buffer copy 的两个 endpoint 是不同的 `GPUBuffer` object。因此，只要 source 与 target region 共享同一个 parent buffer，Scratch 就会拒绝该 copy，即使两个 byte range 完全不相交。Overlapping 或 disjoint `BufferRegion` 仍是合法 interpretation unit；它们只是不能用来绕过这条 native copy rule。
+
 ```ts
 const copyHistory = runtime.createCopyCommand({
     label: 'copy color to history',
@@ -392,6 +403,38 @@ const copyHistory = runtime.createCopyCommand({
 ```
 
 Buffer-texture copy 使用 WebGPU texel buffer layout，而不是 CPU data:
+
+Copy extent 以 texel 表达，而 linear buffer layout 以 texel block 表达。Scratch
+为全部 95 个非 depth/stencil `GPUTextureFormat` 解析原生 block width、block
+height 与 copy footprint，校验 origin 和 extent 的 block alignment，以 block row
+计算所需 buffer bytes，并把 `rowsPerImage` 解释为 texel-block rows。Encoder copy
+仍要求 `bytesPerRow` 是 256 的倍数。两个 row field 都使用原生 `GPUSize32`
+数值域，因此 Scratch 会在 Web IDL conversion 前拒绝大于 `0xffffffff` 的值；
+texture-upload row layout 使用相同的 `GPUSize32` 上界，但不继承仅属于 encoder
+copy 的 256-byte row alignment rule。这些路径直接发出
+`copyBufferToTexture()` 或 `copyTextureToBuffer()`，no CPU round trip。
+
+Depth/stencil buffer-texture copy 必须精确指向一个可用 aspect。只有格式本身仅有
+一个 aspect 时才可使用 `all`；combined format 必须使用 `depth-only` 或
+`stencil-only`。Buffer offset 按 4 bytes 对齐，copy 必须覆盖完整 physical
+subresource。原生方向与 footprint 矩阵如下:
+
+| Format 与 aspect | Bytes per block | Texture 到 buffer | Buffer 到 texture |
+| --- | ---: | --- | --- |
+| `stencil8` stencil | 1 | 是 | 是 |
+| `depth16unorm` depth | 2 | 是 | 是 |
+| `depth24plus` depth | N/A | 否 | 否 |
+| `depth24plus-stencil8` depth | N/A | 否 | 否 |
+| `depth24plus-stencil8` stencil | 1 | 是 | 是 |
+| `depth32float` depth | 4 | 是 | 否 |
+| `depth32float-stencil8` depth | 4 | 是 | 否 |
+| `depth32float-stencil8` stencil | 1 | 是 | 是 |
+
+Compressed copy 使用其原生 4x4 或 ASTC block dimensions，以及 8-byte 或
+16-byte footprint。对于缺少 `core-features-and-limits` 的 compatibility device，
+compressed buffer-to-texture copy 仍然合法，而 compressed texture-to-buffer 与
+texture-to-texture copy 会被拒绝。Core device 在遵守相同 physical block 规则时
+允许后两种方向。
 
 ```ts
 const uploadPreparedPixels = runtime.createCopyCommand({
@@ -547,19 +590,24 @@ const timingValues = await timingReadback.toArray(BigUint64Array)
 
 Pipeline statistics 不是当前 WebGPU core contract 的一部分; 除非未来 WebGPU target 或显式 extension 支持，否则必须留在 scratch core 之外。
 
-使用 `09-diagnostics-validation` 共享 envelope 的候选 query diagnostic codes:
+使用 `09-diagnostics-validation` 共享 envelope 的当前 query-path diagnostic codes:
 
 ```ts
 type QueryDiagnosticCode =
-    | 'SCRATCH_QUERY_UNSUPPORTED_TYPE'
-    | 'SCRATCH_QUERY_FEATURE_UNAVAILABLE'
-    | 'SCRATCH_QUERY_INDEX_OUT_OF_RANGE'
-    | 'SCRATCH_QUERY_WRONG_PASS_KIND'
-    | 'SCRATCH_QUERY_WRONG_SET_TYPE'
-    | 'SCRATCH_QUERY_OCCLUSION_NESTED'
-    | 'SCRATCH_QUERY_OCCLUSION_NOT_ACTIVE'
+    | 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+    | 'SCRATCH_RUNTIME_FEATURE_UNAVAILABLE'
+    | 'SCRATCH_QUERY_SLOT_INDEX_INVALID'
+    | 'SCRATCH_QUERY_SET_ALLOCATION_VALIDATION_FAILED'
+    | 'SCRATCH_QUERY_SET_ALLOCATION_INTERNAL_FAILED'
+    | 'SCRATCH_QUERY_SET_ALLOCATION_OUT_OF_MEMORY'
+    | 'SCRATCH_QUERY_SET_ALLOCATION_NATIVE_FAILED'
+    | 'SCRATCH_PASS_TIMESTAMP_WRITES_INVALID'
+    | 'SCRATCH_PASS_OCCLUSION_QUERY_SET_INVALID'
+    | 'SCRATCH_COMMAND_OCCLUSION_QUERY_INVALID'
+    | 'SCRATCH_SUBMISSION_OCCLUSION_QUERY_STATE_INVALID'
     | 'SCRATCH_QUERY_RESOLVE_UNWRITTEN_RANGE'
-    | 'SCRATCH_QUERY_RESOLVE_DESTINATION_INVALID'
+    | 'SCRATCH_COMMAND_RESOLVE_QUERY_SET_INVALID'
+    | 'SCRATCH_QUERY_SLOT_CONTENT_INDETERMINATE'
 ```
 
 Query diagnostic 应携带 query-set id、type、requested range、pass 或 command id、相关 feature name、resolve 失败时的 destination buffer id，以及 query slot 被写入时的 producer submission id。这些细节应进入 `subject`、`related`、`expected`、`actual` 或 compact evidence fields，而不是只写在 prose 里。

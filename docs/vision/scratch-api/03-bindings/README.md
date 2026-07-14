@@ -58,12 +58,37 @@ const terrainLayout = await runtime.createBindLayout({
 
 Scratch preflights names, binding indices, visibility, device features, limits, buffer type, dynamic-offset contract, `minBindingSize`, sampled-texture shape, storage-texture access/format/dimension, and sampler type. The acknowledged transaction issues exactly one native layout creation call and registers the object only after validation, internal, and OOM scopes settle and lifecycle facts are rechecked.
 
+Supporting-object acknowledgement joins every scope issued around the same
+native issue before selecting a result. A concurrent runtime-disposal or
+device-loss lifecycle fact cannot race that join, hide an already observed
+native/scope failure, or become primary merely because it settled first. Scratch
+orders the complete evidence as synchronous native issue, structural scope
+failure, validation, internal, OOM, runtime disposal, then device loss; later
+lifecycle facts remain bounded secondary evidence. The same rule applies to
+sampler, QuerySet, BindLayout, and BindSet preparation candidates.
+
+Pipeline lowering treats `BindLayout.group` as the native pipeline-layout index. Caller array order is not semantic: sparse groups produce explicit `null` slots, so groups `0` and `2` lower to `[group0, null, group2]`. Limits that WebGPU defines across a complete `GPUPipelineLayout` are checked again over the concatenated entries from every group. Two layouts that are individually within a dynamic-buffer or per-stage slot limit can therefore still be rejected together before any native pipeline object is issued.
+
 The persistent matrix covers:
 
-- uniform, read-only storage, and writable storage buffers;
+- uniform, read-only storage, and read-write storage buffers;
 - filtering, non-filtering, and comparison samplers;
 - float, unfilterable-float, depth, signed-integer, and unsigned-integer sampled textures, including every native-valid view dimension and multisampled constraints;
 - write-only, read-only, and read-write storage textures with explicit format and native-valid `1d`, `2d`, `2d-array`, or `3d` dimensions.
+
+Sampler normalization preserves the numeric semantics of WebGPU's
+`[Clamp] unsigned short maxAnisotropy`: numeric inputs are clamped to
+`[0, 65535]` and rounded to the nearest integer with ties going to the even
+integer before descriptor hashing or native issue. Scratch then applies the
+WebGPU requirements that the normalized value is at least `1` and values above
+`1` use linear mag, min, and mipmap filters. The typed Scratch descriptor still
+requires a JavaScript `number`; it does not add string or object coercion.
+
+The `storage` buffer binding follows WebGPU's read-write storage contract. Every
+command that binds it must declare the parent buffer in both `resources.read` and
+`resources.write`. The required read epoch must already be available, so a new
+buffer must be initialized by an explicit upload, copy, or earlier GPU producer
+before the command can use the binding.
 
 `externalTexture` is deliberately excluded until its frame/task lifetime has a separate contract. Shader reflection may cross-check an explicit layout, but it is never the production source of truth.
 

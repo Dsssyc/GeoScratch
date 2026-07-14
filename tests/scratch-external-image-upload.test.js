@@ -452,10 +452,9 @@ describe('scratch external image upload', () => {
                 mipLevelCount: 1,
                 targetSize: { width: 8, height: 8, depthOrArrayLayers: 1 },
             }, 'target-sample-count' ],
-            [ { format: 'rgba8snorm' }, 'target-format' ],
+            [ { format: 'rgba8snorm', features: [ 'texture-formats-tier1' ] }, 'target-format' ],
             [ { format: 'rgba8uint' }, 'target-format' ],
             [ { format: 'depth24plus' }, 'target-format' ],
-            [ { format: 'rgb9e5ufloat' }, 'target-format' ],
         ]) {
             const fixture = await createFixture(options)
             expectDiagnostic(
@@ -464,6 +463,11 @@ describe('scratch external image upload', () => {
                 reason
             )
         }
+
+        await expectRejectedDiagnostic(
+            createFixture({ format: 'rgb9e5ufloat' }),
+            'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
+        )
 
         const dimensionFixture = await createFixture()
         dimensionFixture.target = await dimensionFixture.runtime.createTexture({
@@ -535,11 +539,9 @@ describe('scratch external image upload', () => {
             'rg16unorm',
             'rgba16unorm',
         ]) {
-            const fixture = await createFixture({ format })
-            expectDiagnostic(
-                () => createCommand(fixture),
-                'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
-                'target-format-feature'
+            await expectRejectedDiagnostic(
+                createFixture({ format }),
+                'SCRATCH_RESOURCE_DESCRIPTOR_INVALID'
             )
         }
     })
@@ -661,3 +663,17 @@ describe('scratch external image upload', () => {
         expect(fixture.calls.queueExternalImageCopies).to.have.length(0)
     })
 })
+
+async function expectRejectedDiagnostic(promise, code) {
+
+    let caught
+    try {
+        await promise
+    } catch (error) {
+        caught = error
+    }
+
+    expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+    expect(caught.diagnostic.code).to.equal(code)
+    return caught.diagnostic
+}

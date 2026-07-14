@@ -302,17 +302,56 @@ async function stressPersistentBindings(cycleCount) {
 function runSteadyState({ cycleCount, commands, pass, bindSet, expectedBindGroup }) {
 
     const publicNameMaps = new Set(commands.map(command => command.bindSets[0].dynamicOffsets))
+    const bindSetStateBefore = captureBindSetPublicState(bindSet)
     const nativeOffsetReferences = new Map()
     let activeCommand
     let nameMapReads = 0
+    let snapshotSerializations = 0
+    let bindingOrderSorts = 0
     let bindGroupIdentityChanges = 0
     let nativeOffsetIdentityChanges = 0
     let setBindGroupCalls = 0
     const originalObjectKeys = Object.keys
+    const originalObjectEntries = Object.entries
+    const originalObjectValues = Object.values
+    const originalReflectOwnKeys = Reflect.ownKeys
+    const originalStringify = JSON.stringify
+    const originalSort = Array.prototype.sort
     Object.keys = function(value) {
 
         if (publicNameMaps.has(value)) nameMapReads++
         return originalObjectKeys(value)
+    }
+    Object.entries = function(value) {
+
+        if (publicNameMaps.has(value)) nameMapReads++
+        return originalObjectEntries(value)
+    }
+    Object.values = function(value) {
+
+        if (publicNameMaps.has(value)) nameMapReads++
+        return originalObjectValues(value)
+    }
+    Reflect.ownKeys = function(value) {
+
+        if (publicNameMaps.has(value)) nameMapReads++
+        return originalReflectOwnKeys(value)
+    }
+    JSON.stringify = function(value, ...parameters) {
+
+        if (
+            value?.bindLayoutId === bindSet.layout.id &&
+            Array.isArray(value.bindings)
+        ) snapshotSerializations++
+        return originalStringify.call(JSON, value, ...parameters)
+    }
+    Array.prototype.sort = function(...parameters) {
+
+        if (
+            this.length > 0 &&
+            this.every(value => Number.isInteger(value?.entry?.binding))
+        ) bindingOrderSorts++
+        return originalSort.apply(this, parameters)
     }
 
     const encoder = {
@@ -341,14 +380,24 @@ function runSteadyState({ cycleCount, commands, pass, bindSet, expectedBindGroup
         }
     } finally {
         Object.keys = originalObjectKeys
+        Object.entries = originalObjectEntries
+        Object.values = originalObjectValues
+        Reflect.ownKeys = originalReflectOwnKeys
+        JSON.stringify = originalStringify
+        Array.prototype.sort = originalSort
     }
     const elapsedMs = performance.now() - startedAt
+    const bindSetStateAfter = captureBindSetPublicState(bindSet)
+    const bindSetMutated = !sameBindSetPublicState(bindSetStateBefore, bindSetStateAfter)
 
     assertStress(setBindGroupCalls === cycleCount, 'each steady-state cycle must bind exactly once')
     assertStress(bindGroupIdentityChanges === 0, 'steady-state native bind group identity changed')
     assertStress(nativeOffsetIdentityChanges === 0, 'native dynamic-offset sequence was reconstructed')
     assertStress(nativeOffsetReferences.size === commands.length, 'not every preconstructed Command encoded')
     assertStress(nameMapReads === 0, 'submission-time binding work read or sorted a dynamic-offset name map')
+    assertStress(snapshotSerializations === 0, 'steady-state binding work reconstructed a preparation snapshot')
+    assertStress(bindingOrderSorts === 0, 'steady-state binding work sorted bindings into native order')
+    assertStress(!bindSetMutated, 'steady-state use mutated public BindSet facts or identities')
     assertStress(bindSet.preparationState === 'prepared', 'steady-state use changed BindSet preparation state')
 
     return {
@@ -360,8 +409,51 @@ function runSteadyState({ cycleCount, commands, pass, bindSet, expectedBindGroup
         nativeOffsetIdentityChanges,
         stableNativeOffsetSequenceCount: nativeOffsetReferences.size,
         dynamicOffsetNameMapReads: nameMapReads,
-        bindSetMutated: false,
+        snapshotSerializations,
+        bindingOrderSorts,
+        bindSetMutated,
     }
+}
+
+function captureBindSetPublicState(bindSet) {
+
+    return {
+        bindSet,
+        bindings: bindSet.bindings,
+        bindingEntries: [ ...bindSet.bindings.entries() ].map(([ name, binding ]) => ({
+            name,
+            binding,
+            entry: binding.entry,
+            resource: binding.resource,
+        })),
+        preparationState: bindSet.preparationState,
+        prepareGeneration: bindSet.prepareGeneration,
+        preparedSnapshotHash: bindSet.preparedSnapshotHash,
+    }
+}
+
+function sameBindSetPublicState(left, right) {
+
+    if (
+        left.bindSet !== right.bindSet ||
+        left.bindings !== right.bindings ||
+        left.preparationState !== right.preparationState ||
+        left.prepareGeneration !== right.prepareGeneration ||
+        left.preparedSnapshotHash !== right.preparedSnapshotHash ||
+        left.bindingEntries.length !== right.bindingEntries.length
+    ) return false
+
+    for (let index = 0; index < left.bindingEntries.length; index++) {
+        const before = left.bindingEntries[index]
+        const after = right.bindingEntries[index]
+        if (
+            before.name !== after.name ||
+            before.binding !== after.binding ||
+            before.entry !== after.entry ||
+            before.resource !== after.resource
+        ) return false
+    }
+    return true
 }
 
 function captureBindingFacts(runtime, fake, bindSet) {

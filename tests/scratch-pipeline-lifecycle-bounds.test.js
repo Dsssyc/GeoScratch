@@ -154,6 +154,28 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         expect(calls.asyncPipelineRequests).to.have.length(0)
     })
 
+    it('allows empty color targets when a render pipeline has depth-stencil state', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const pipeline = await runtime.createRenderPipeline({
+            program: createRenderProgram(runtime),
+            targets: [],
+            depthStencil: {
+                format: 'depth24plus',
+                depthWriteEnabled: true,
+                depthCompare: 'less',
+            },
+        })
+
+        expect(pipeline.targets).to.deep.equal([])
+        expect(pipeline.depthStencilFormat).to.equal('depth24plus')
+        expect(fake.calls.asyncPipelineRequests[0].descriptor.fragment.targets).to.deep.equal([])
+        expect(fake.calls.asyncPipelineRequests[0].descriptor.depthStencil).to.deep.include({
+            format: 'depth24plus',
+        })
+    })
+
     it('bounds returned pipeline diagnostics and incidents without retaining WGSL', async() => {
 
         const oversized = 'x'.repeat(100_000)
@@ -239,6 +261,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
         const program = createRenderProgram(runtime)
         fake.device.limits.maxBindGroups = 80
+        fake.device.limits.maxUniformBuffersPerShaderStage = 80
         const bindLayouts = await Promise.all(Array.from({ length: 80 }, (_, group) =>
             runtime.createBindLayout({
                 group,

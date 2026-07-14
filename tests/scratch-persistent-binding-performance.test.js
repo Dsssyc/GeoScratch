@@ -20,6 +20,9 @@ describe('Scratch persistent binding performance gate', () => {
         expect(source).to.include('prepareGeneration')
         expect(source).to.include('nativeOffsetIdentityChanges')
         expect(source).to.include('dynamicOffsetNameMapReads')
+        expect(source).to.include('snapshotSerializations')
+        expect(source).to.include('bindingOrderSorts')
+        expect(source).to.include('sameBindSetPublicState')
         expect(source).to.include('SCRATCH_BIND_SET_STALE')
         expect(source).to.include('firstPrepare === sameSnapshotPrepare')
     })
@@ -47,6 +50,12 @@ describe('Scratch persistent binding performance gate', () => {
         expect(result.secondSteadyState.nativeOffsetIdentityChanges).to.equal(0)
         expect(result.firstSteadyState.dynamicOffsetNameMapReads).to.equal(0)
         expect(result.secondSteadyState.dynamicOffsetNameMapReads).to.equal(0)
+        expect(result.firstSteadyState.snapshotSerializations).to.equal(0)
+        expect(result.secondSteadyState.snapshotSerializations).to.equal(0)
+        expect(result.firstSteadyState.bindingOrderSorts).to.equal(0)
+        expect(result.secondSteadyState.bindingOrderSorts).to.equal(0)
+        expect(result.firstSteadyState.bindSetMutated).to.equal(false)
+        expect(result.secondSteadyState.bindSetMutated).to.equal(false)
         expect(result.replacement).to.deep.include({
             staleDiagnosticCode: 'SCRATCH_BIND_SET_STALE',
             commandEncodersCreatedByStaleSubmission: 0,

@@ -114,6 +114,50 @@ describe('Scratch BindSet preparation', () => {
         expect(bindSet.prepareGeneration).to.equal(2)
     })
 
+    it('keeps unchanged preparation checks free of snapshot reconstruction', async() => {
+
+        const fixture = await createTextureFixture()
+        const view = fixture.texture.view()
+        const bindSet = await fixture.runtime.createBindSet(fixture.layout, {
+            firstTexture: view,
+            secondTexture: view,
+        })
+        const cachedPreparation = bindSet.prepare()
+        const originalStringify = JSON.stringify
+        const originalSort = Array.prototype.sort
+        let snapshotSerializations = 0
+        let bindingSorts = 0
+
+        JSON.stringify = function(value, ...parameters) {
+            if (
+                value?.bindLayoutId === fixture.layout.id &&
+                Array.isArray(value.bindings)
+            ) snapshotSerializations++
+            return originalStringify.call(JSON, value, ...parameters)
+        }
+        Array.prototype.sort = function(...parameters) {
+            if (
+                this.length > 0 &&
+                this.every(value => Number.isInteger(value?.entry?.binding))
+            ) bindingSorts++
+            return originalSort.apply(this, parameters)
+        }
+
+        try {
+            for (let index = 0; index < 32; index++) {
+                expect(bindSet.preparationState).to.equal('prepared')
+                bindSet.assertUsable()
+                expect(bindSet.prepare()).to.equal(cachedPreparation)
+            }
+        } finally {
+            JSON.stringify = originalStringify
+            Array.prototype.sort = originalSort
+        }
+
+        expect(snapshotSerializations).to.equal(0)
+        expect(bindingSorts).to.equal(0)
+    })
+
     it('rejects a different snapshot during preparation without queueing or restarting', async() => {
 
         const fixture = await createUniformFixture({ deferErrorScopePops: true })
@@ -670,6 +714,41 @@ describe('Scratch BindSet preparation', () => {
             'SCRATCH_BIND_SET_PREPARATION_OUT_OF_MEMORY',
         ])
         expect(runtime.diagnostics.snapshot().bindSets).to.deep.equal([])
+    })
+
+    it('retains lifecycle recheck as secondary evidence beside a native preparation failure', async() => {
+
+        const fixture = await createUniformFixture({ deferErrorScopePops: true })
+        fixture.errors.resetHistory()
+        fixture.calls.bindGroups.length = 0
+        fixture.errors.failNext(
+            'createBindGroup',
+            'validation',
+            gpuError('GPUValidationError', 'bind group validation failure')
+        )
+
+        const creation = fixture.runtime.createBindSet(fixture.layout, {
+            uniforms: fixture.buffer.region({ size: 256 }),
+        })
+        fixture.runtime.dispose()
+        settleAllPops(fixture)
+
+        const error = await rejectedDiagnostic(creation)
+        expect(error.diagnostic.code).to.equal('SCRATCH_BIND_SET_PREPARATION_VALIDATION_FAILED')
+        expect(error.incident.failureStage).to.equal('bind-group-acknowledgement')
+        expect(error.incident.outcomes.map(outcome => ({
+            stage: outcome.stage,
+            code: outcome.diagnosticCode,
+        }))).to.deep.equal([
+            {
+                stage: 'bind-group-acknowledgement',
+                code: 'SCRATCH_BIND_SET_PREPARATION_VALIDATION_FAILED',
+            },
+            {
+                stage: 'lifecycle-recheck',
+                code: 'SCRATCH_RUNTIME_DISPOSED',
+            },
+        ])
     })
 
     it('cancels an initial candidate when a dependency is disposed during acknowledgement', async() => {

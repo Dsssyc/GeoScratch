@@ -23,7 +23,7 @@ describe('ScratchRuntime async compute pipeline creation', () => {
 
     it('rejects local validation through a Promise without native or operation effects', async() => {
 
-        const { gpu, calls } = createFakeGpu()
+        const { gpu, device, calls } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const promise = runtime.createComputePipeline({ program: null })
 
@@ -58,6 +58,84 @@ describe('ScratchRuntime async compute pipeline creation', () => {
         expect(bindLayoutError.diagnostic.message).to.include('ComputePipeline')
         expect(calls.nativeTimeline).to.deep.equal([])
         expect(runtime.diagnostics.operations()).to.have.length(0)
+
+        device.limits.maxSamplersPerShaderStage = 1
+        const firstLayout = await runtime.createBindLayout({
+            group: 0,
+            entries: [ {
+                binding: 0,
+                name: 'firstSampler',
+                type: 'sampler',
+                visibility: [ 'compute' ],
+            } ],
+        })
+        const secondLayout = await runtime.createBindLayout({
+            group: 1,
+            entries: [ {
+                binding: 0,
+                name: 'secondSampler',
+                type: 'sampler',
+                visibility: [ 'compute' ],
+            } ],
+        })
+        const pipelineLayoutCount = calls.pipelineLayouts.length
+        const asyncPipelineRequestCount = calls.asyncPipelineRequests.length
+        const aggregateLimitError = await rejectedDiagnostic(
+            runtime.createComputePipeline({
+                program: createProgram(runtime),
+                bindLayouts: [ firstLayout, secondLayout ],
+            })
+        )
+        expect(aggregateLimitError.diagnostic).to.deep.include({
+            code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
+            phase: 'pipeline',
+        })
+        expect(aggregateLimitError.diagnostic.expected).to.deep.include({
+            limit: 'maxSamplersPerShaderStage',
+            maximum: 1,
+            stage: 'compute',
+        })
+        expect(aggregateLimitError.diagnostic.actual).to.deep.include({
+            count: 2,
+            stage: 'compute',
+        })
+        expect(calls.pipelineLayouts).to.have.length(pipelineLayoutCount)
+        expect(calls.asyncPipelineRequests).to.have.length(asyncPipelineRequestCount)
+
+        device.limits.maxDynamicUniformBuffersPerPipelineLayout = 1
+        const firstDynamicLayout = await runtime.createBindLayout({
+            group: 0,
+            entries: [ {
+                binding: 0,
+                name: 'firstDynamicUniform',
+                type: 'uniform',
+                visibility: [ 'compute' ],
+                hasDynamicOffset: true,
+            } ],
+        })
+        const secondDynamicLayout = await runtime.createBindLayout({
+            group: 1,
+            entries: [ {
+                binding: 0,
+                name: 'secondDynamicUniform',
+                type: 'uniform',
+                visibility: [ 'compute' ],
+                hasDynamicOffset: true,
+            } ],
+        })
+        const dynamicLimitError = await rejectedDiagnostic(
+            runtime.createComputePipeline({
+                program: createProgram(runtime),
+                bindLayouts: [ firstDynamicLayout, secondDynamicLayout ],
+            })
+        )
+        expect(dynamicLimitError.diagnostic.expected).to.deep.include({
+            limit: 'maxDynamicUniformBuffersPerPipelineLayout',
+            maximum: 1,
+        })
+        expect(dynamicLimitError.diagnostic.actual).to.deep.include({ count: 2 })
+        expect(calls.pipelineLayouts).to.have.length(pipelineLayoutCount)
+        expect(calls.asyncPipelineRequests).to.have.length(asyncPipelineRequestCount)
     })
 
     it('creates one ready immutable wrapper through the native async compute path', async() => {
@@ -65,6 +143,12 @@ describe('ScratchRuntime async compute pipeline creation', () => {
         const fixture = await createComputeFixture({
             compilationMessages: [ compilationMessage('warning', 'portable warning') ],
         })
+        const sparseBindLayout = await fixture.runtime.createBindLayout({
+            group: 2,
+            entries: [],
+        })
+        fixture.errors.resetHistory()
+        fixture.descriptor.bindLayouts = [ sparseBindLayout, fixture.bindLayout ]
         const pipeline = await fixture.runtime.createComputePipeline(fixture.descriptor)
 
         expect(pipeline).to.be.instanceOf(ScratchComputePipeline)
@@ -95,6 +179,11 @@ describe('ScratchRuntime async compute pipeline creation', () => {
             .to.equal(`${fixture.descriptor.label} shader module [scratch:${pipeline.id}]`)
         expect(fixture.calls.pipelineLayouts[0].descriptor.label)
             .to.equal(`${fixture.descriptor.label} layout [scratch:${pipeline.id}]`)
+        expect(fixture.calls.pipelineLayouts[0].descriptor.bindGroupLayouts).to.deep.equal([
+            fixture.bindLayout.gpuBindGroupLayout,
+            null,
+            sparseBindLayout.gpuBindGroupLayout,
+        ])
         expect(Object.isExtensible(pipeline)).to.equal(false)
 
         const operations = fixture.runtime.diagnostics.operations({

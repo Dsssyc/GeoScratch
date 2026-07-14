@@ -87,9 +87,13 @@ const pointCodec = scratch.layoutCodec(pointLayout, {
     usage: ['storage', 'readback'],
 })
 
-const points = await scratch.buffer({
+const pointBuffer = await scratch.buffer({
     label: 'points',
+    size: pointCodec.artifact.stride * pointCount,
     usage: ['storage', 'copyDst', 'copySrc'],
+})
+
+const points = pointBuffer.region({
     layout: pointCodec.artifact,
 })
 
@@ -183,10 +187,10 @@ Codec 与 shader composition 可以发生在 runtime 之前，但 scratch 仍需
 
 runtime 应能 inspect artifact metadata，并确认:
 
-- buffer resource 使用的 layout artifact 与 program accessor module 期待的一致
+- 绑定到 Program requirement 的 `BufferRegion` 携带 accessor module 期待的 layout artifact
 - bind layout 与 shader 声明匹配，reflection 只作为 warn 级 guard
-- CPU writer 产出的 byte length 与 range 匹配目标 resource layout
-- readback view 使用的是产生数据的同一个 layout version
+- CPU writer 产出的 byte length 与 range 匹配目标 `BufferRegion` 及其 layout witness
+- readback view 解释从 source `BufferRegion` 捕获的 layout witness
 
 这些检查的 diagnostic payload 应使用 `LayoutArtifact`、`LayoutField`、`Program`、`ShaderBinding` 与 `BindLayoutEntry` 等结构化 subjects，使 tooling 无需解析 prose 也能修复局部 artifact 或声明。
 

@@ -88,7 +88,6 @@ export function throwSupportingObjectCreationFailure<T>(
         nativeErrorCategory,
     })
     const incidentOutcomes = Object.freeze(failures
-        .filter(failure => failure.kind !== 'runtime-disposed' && failure.kind !== 'device-lost')
         .map(failure => incidentOutcome(failure, codes, input.subject)))
     const incident = controller.recordIncident({
         kind: 'supporting-object-failure',
@@ -128,13 +127,13 @@ function selectPrimaryFailure(
 ): SupportingObjectObservedFailure {
 
     const priority: Record<SupportingObjectFailureKind, number> = {
-        'device-lost': 0,
-        'runtime-disposed': 1,
-        'scope-failure': 2,
-        'native-exception': 3,
-        validation: 4,
-        internal: 5,
-        'out-of-memory': 6,
+        'native-exception': 0,
+        'scope-failure': 1,
+        validation: 2,
+        internal: 3,
+        'out-of-memory': 4,
+        'runtime-disposed': 5,
+        'device-lost': 6,
     }
     return [ ...failures ].sort((left, right) => priority[left.kind] - priority[right.kind])[0]!
 }
