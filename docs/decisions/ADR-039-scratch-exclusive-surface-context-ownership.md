@@ -43,12 +43,15 @@ Each `GPUCanvasContext` has exactly one live Scratch `Surface` owner.
   original context, and release the original claim.
 - `Surface.configure()` snapshots and validates the complete exposed native candidate:
   device, format, usage, view formats, color space, optional tone mapping, alpha mode,
-  and canvas size. Iterable/dictionary inputs are materialized before native issue. It
-  resizes the canvas, calls native configure, then requires `getConfiguration()` and
-  the canvas dimensions to reflect the candidate before committing private state.
-  Observation failure produces `SCRATCH_SURFACE_CONFIGURATION_FAILED`, restores the
-  actual pre-call canvas dimensions and previous native configuration when possible,
-  verifies that restoration, and never publishes the candidate facts.
+  and canvas size. Iterable/dictionary inputs are materialized before native issue.
+  After materialization, Scratch rechecks exact context ownership, runtime lifecycle,
+  and the entry configuration version; reentrant disposal or reconfiguration therefore
+  fails before canvas or native configuration effects. It then resizes the canvas,
+  calls native configure, and requires `getConfiguration()` and the canvas dimensions
+  to reflect the candidate before committing private state. Observation failure
+  produces `SCRATCH_SURFACE_CONFIGURATION_FAILED`, restores the actual pre-call canvas
+  dimensions and previous native configuration when possible, verifies both through
+  readback, and never publishes the candidate facts.
 - Before a configured Surface is used, Scratch calls `getConfiguration()` and compares
   current device, format, usage, view formats, color space, tone mapping, alpha mode,
   and canvas size with the private committed state. External configure, unconfigure,
@@ -59,6 +62,11 @@ Each `GPUCanvasContext` has exactly one live Scratch `Surface` owner.
   receiver identity, format, and configuration version. Later `attachment-view` issue
   borrows the current texture and creates the requested native view without a second
   configuration query or a public-method branding path.
+- A Surface configured with `TRANSIENT_ATTACHMENT` follows the native texture-view
+  contract: an attachment view uses the exact Surface usage rather than a narrowed
+  subset. Its pass operations are `load: 'clear'` and `store: 'discard'`. Pass creation
+  normalizes that contract, and submission revalidates it against the current Surface
+  configuration before current-texture or encoder effects.
 - Failed construction releases its uncommitted claim.
 - Successful `Surface.dispose()` unconfigures the context, unregisters the Surface,
   and releases the claim. A replacement may then claim the context.
@@ -106,5 +114,8 @@ attribution and may create current-texture or encoder effects first.
 - Native canvas usage, compatible view formats, color space, tone mapping, and alpha
   mode remain explicit Surface capabilities rather than being reduced to a fixed
   render-attachment-only descriptor.
+- Reentrant option getters and iterators cannot make an obsolete configuration candidate
+  authoritative, and a rollback is reported as restored only after exact native/canvas
+  observations confirm it.
 - Scratch still does not claim that synchronous Surface validation captures every
   asynchronous WebGPU validation, OOM, or device-loss outcome.

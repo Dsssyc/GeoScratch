@@ -87,13 +87,16 @@ original runtime.
 
 `Surface.configure()` is a synchronous candidate transaction over format, usage,
 view formats, color space, optional tone mapping, alpha mode, and size. Iterable and
-dictionary inputs are materialized before native issue. After canvas resize and native
-configure return, Scratch requires `GPUCanvasContext.getConfiguration()` plus the
-canvas dimensions to reflect the candidate before committing private state. Failure
-produces `SCRATCH_SURFACE_CONFIGURATION_FAILED`, restores the actual pre-call canvas
-dimensions and previous native configuration when possible, verifies that restoration,
-and never publishes the candidate facts. Asynchronous native validation remains part
-of the WebGPU error model and is not fabricated as synchronous success/failure.
+dictionary inputs are materialized before native issue. Scratch then rechecks exact
+context ownership, runtime lifecycle, and the entry configuration version, so a getter
+or iterator that reentrantly disposes or reconfigures the Surface invalidates the
+candidate before canvas or native effects. After canvas resize and native configure
+return, Scratch requires `GPUCanvasContext.getConfiguration()` plus the canvas
+dimensions to reflect the candidate before committing private state. Failure produces
+`SCRATCH_SURFACE_CONFIGURATION_FAILED`, restores the actual pre-call canvas dimensions
+and previous native configuration when possible, verifies both by exact readback, and
+never publishes the candidate facts. Asynchronous native validation remains part of
+the WebGPU error model and is not fabricated as synchronous success/failure.
 
 Before managed use, Scratch calls `GPUCanvasContext.getConfiguration()` and compares
 its device, format, usage, view formats, color space, tone mapping, alpha mode, and

@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-twentieth-review fixes; clean acceptance and independent re-review pending
+Status: Post-twenty-first-review fixes; clean acceptance and independent re-review pending
 Decisions: ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -24,8 +24,8 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 417
-referenced behavior tests; requires the complete suite to report exactly 840 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 422
+referenced behavior tests; requires the complete suite to report exactly 845 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -682,6 +682,26 @@ These findings bring the reproduced or source-verified reviewer total to 66. Add
 rollback-verification, canvas-coercion, immutable view-descriptor, and complete native
 configuration cases are same-root proactive coverage rather than reviewer findings.
 
+The twentieth-review fixes were accepted on clean checkpoint `fafcfbf`. The next
+isolated review reported the three Surface transaction and transient-view defects below.
+
+Resolved twenty-first review findings:
+
+1. `Surface.configure()` now materializes option getters and iterables against the
+   call-entry configuration snapshot, then rechecks exact owner, runtime lifecycle, and
+   configuration version before canvas or native effects. Reentrant disposal reports the
+   disposed owner; reentrant successful configuration invalidates the outer candidate with
+   `SCRATCH_SURFACE_CONFIGURATION_STALE` instead of committing stale facts.
+2. A transient Surface attachment view now uses the exact configured Surface usage, not
+   a narrowed render-attachment subset. Color operations normalize to clear/discard at
+   pass creation, and submission revalidates both view usage and operations against the
+   current Surface configuration before current-texture or encoder effects.
+3. Canvas-size rollback success now requires exact width/height readback after assignment.
+   A non-throwing setter that rejects or coerces the rollback is reported truthfully as
+   `canvasRestored: false` while logical candidate facts remain uncommitted.
+
+These findings bring the reproduced or source-verified reviewer total to 69.
+
 ## Verification Record
 
 Prior v9 revalidation evidence before the tenth review is retained only as diagnostic
@@ -1050,7 +1070,42 @@ Post-twentieth-review pre-commit verification:
   texture and view creation are attributed to the submission `attachment-view` stage
 - `npm run typecheck` passed both the TypeScript 6 and canonical TypeScript 5.9/WebGPU
   declaration consumers; package build and generated declarations passed
-- clean-commit acceptance and a new isolated exact no-findings review remain required
+
+Clean twentieth-review checkpoint acceptance (`fafcfbf`):
+
+- initial and final repository evidence named exact commit
+  `fafcfbf9045d2f5200797f0ae08be0e2b0846da2` with an empty working tree
+- runner-owned typecheck, complete build, and diff checking passed in 6,784 ms,
+  5,556 ms, and 15 ms
+- focused acceptance passed 417/417; the complete suite reported 840 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- both 20,000-cycle steady-state phases passed at observed 1.91 and 1.52 microseconds
+  per cycle
+- Chrome 150.0.7871.115 on Apple Metal 3 passed the headed proof; all 11 ordinary
+  examples passed, the unavailable target failed with `ERR_CONNECTION_REFUSED`, and
+  the managed Vite server completed its 25,580 ms lifecycle and left port 4173 closed
+- the subsequent twenty-first isolated review found the three transaction/transient
+  issues recorded above, so this checkpoint is retained as history rather than approval
+
+Post-twenty-first-review pre-commit verification:
+
+- all five new reviewer regressions first failed for their intended reasons: stale-owner
+  and stale-version candidates reached the old path, rollback falsely reported success,
+  transient Surface defaults stored content, and submission missed usage drift
+- the same five regressions now pass without weakened assertions; exact owner disposal,
+  configuration-version invalidation, rollback readback, transient view usage, and
+  pre-encoder submission rejection are all directly observed
+- focused acceptance passes 422/422 with zero pending cases and every required behavior
+  title present; `npm test` reports exactly 845 passing with only the two exact
+  acceptance/browser gate identities pending
+- `npm run typecheck` passes both TypeScript 6 and the canonical TypeScript 5.9/WebGPU
+  declaration consumer; `npm run build` emits the package and all 14 runnable examples
+- fixed-history structural parity passes all capability, official binding, native copy,
+  behavior-title, documentation, example, and source-inventory gates while correctly
+  reporting `incomplete` for the dirty pre-commit tree
+- the native inventory still contains exactly 43 classified call sites, including the
+  reindexed Surface transaction/preparation sites
+- clean-commit acceptance and a fresh isolated exact no-findings review remain required
 
 The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.

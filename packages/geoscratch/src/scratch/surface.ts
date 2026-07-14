@@ -38,6 +38,16 @@ type SurfaceConfigurationSnapshot = Readonly<{
     alphaMode: GPUCanvasAlphaMode
 }>
 
+type SurfaceOptionsSnapshot = Readonly<{
+    format: unknown
+    usage: unknown
+    viewFormats: unknown
+    colorSpace: unknown
+    toneMapping: unknown
+    alphaMode: unknown
+    size: unknown
+}>
+
 type SurfaceState = {
     runtime: ScratchRuntime
     id: string
@@ -169,15 +179,23 @@ export class Surface {
         const state = assertSurfaceAliveOwner(this)
         state.runtime.assertActive()
 
-        const candidate = normalizeSurfaceConfigurationCandidate(this, state, options)
-        const candidateSize = options.size === undefined
-            ? state.size
-            : normalizeRequestedSurfaceSize(this, state, options.size)
         const previousConfiguration = state.configuration
+        const previousConfigurationVersion = state.configurationVersion
         const previousSize = state.size
         const previousConfigured = state.isConfigured
         const previousCanvasSize = currentCanvasSize(state.canvas)
+        const input = snapshotSurfaceOptions(options)
+        const candidate = normalizeSurfaceConfigurationCandidate(
+            this,
+            state,
+            previousConfiguration,
+            input
+        )
+        const candidateSize = input.size === undefined
+            ? previousSize
+            : normalizeRequestedSurfaceSize(this, state, input.size)
         const descriptor = nativeSurfaceConfiguration(candidate)
+        assertSurfaceConfigurationCandidateCurrent(this, state, previousConfigurationVersion)
 
         let configureIssued = false
         try {
@@ -410,6 +428,37 @@ function assertSurfaceUsable(surface: Surface): SurfaceState {
     return state
 }
 
+function assertSurfaceConfigurationCandidateCurrent(
+    surface: Surface,
+    state: SurfaceState,
+    configurationVersion: number
+): void {
+
+    const currentState = assertSurfaceAliveOwner(surface)
+    currentState.runtime.assertActive()
+    if (currentState === state && currentState.configurationVersion === configurationVersion) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_SURFACE_CONFIGURATION_STALE',
+        severity: 'error',
+        phase: 'runtime',
+        subject: surfaceSubject(surface, currentState),
+        related: [ currentState.runtime.subject ],
+        message: 'Surface configuration candidate became stale while materializing its input.',
+        expected: {
+            surfaceId: state.id,
+            configurationVersion,
+            owner: 'same exact live Surface',
+        },
+        actual: {
+            reason: 'candidate-invalidated-before-native-issue',
+            surfaceId: currentState.id,
+            configurationVersion: currentState.configurationVersion,
+            exactState: currentState === state,
+        },
+    })
+}
+
 function claimSurfaceContext(surface: Surface, state: SurfaceState): void {
 
     const owner = surfaceContextOwners.get(state.context)
@@ -567,10 +616,10 @@ function releaseSurfaceContext(surface: Surface, state: SurfaceState): void {
 function normalizeSurfaceConfigurationCandidate(
     surface: Surface,
     state: SurfaceState,
-    options: SurfaceOptions
+    current: SurfaceConfigurationSnapshot,
+    options: SurfaceOptionsSnapshot
 ): SurfaceConfigurationSnapshot {
 
-    const current = state.configuration
     const format = options.format === undefined
         ? current.format
         : normalizeSurfaceFormat(surface, state, options.format)
@@ -598,6 +647,19 @@ function normalizeSurfaceConfigurationCandidate(
         colorSpace,
         ...(toneMapping === undefined ? {} : { toneMapping }),
         alphaMode,
+    })
+}
+
+function snapshotSurfaceOptions(options: SurfaceOptions): SurfaceOptionsSnapshot {
+
+    return Object.freeze({
+        format: options.format,
+        usage: options.usage,
+        viewFormats: options.viewFormats,
+        colorSpace: options.colorSpace,
+        toneMapping: options.toneMapping,
+        alphaMode: options.alphaMode,
+        size: options.size,
     })
 }
 
@@ -1018,7 +1080,8 @@ function restoreCanvasSize(canvas: ScratchCanvas, size: Readonly<SurfaceSize>): 
 
     try {
         applyCanvasSize(canvas, size)
-        return true
+        const restored = currentCanvasSize(canvas)
+        return restored.width === size.width && restored.height === size.height
     } catch {
         return false
     }

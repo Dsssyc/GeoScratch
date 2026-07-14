@@ -66,11 +66,15 @@ color slot requires a color-renderable format, while depth/stencil renderable
 formats belong only in the depth/stencil attachment. An explicit Surface view
 descriptor may use the configured format or one configured compatible view format.
 It remains a `2d` single-mip/single-layer all-aspect RGBA view; usage is `0` or a
-configured Surface usage subset containing `RENDER_ATTACHMENT`. A view with
+configured Surface usage subset containing `RENDER_ATTACHMENT`. When the Surface
+usage includes `TRANSIENT_ATTACHMENT`, its view usage instead resolves to the exact
+Surface usage, matching the native transient-view rule. A view with
 `TRANSIENT_ATTACHMENT` usage requires
 `load: 'clear'` and `store: 'discard'` for color and for every writable
 depth/stencil aspect. Scratch chooses those operations as transient defaults and
-rejects incompatible explicit values. A provided `depthClear` must be finite and
+rejects incompatible explicit values. Pass construction normalizes these facts and
+submission revalidates them against the current Surface usage before presentation or
+encoder effects. A provided `depthClear` must be finite and
 inside `[0, 1]`. When writable depth defaults or explicitly resolves to
 `depthLoad: 'clear'` and no value is provided, Scratch normalizes `depthClear` to
 `1`; it never emits a clear operation without the required native clear value.

@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 417
-const expectedFullSuitePasses = 840
+const expectedFocusedAcceptancePasses = 422
+const expectedFullSuitePasses = 845
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -562,7 +562,10 @@ const behaviorTestContracts = [
         'releases an uncommitted canvas-context claim after configure fails',
         'rolls back logical and canvas facts after synchronous reconfigure failure',
         'verifies and rolls back native state when post-configure observation fails',
+        'revalidates exact ownership after materializing Surface configuration inputs',
+        'rejects a configuration candidate invalidated by reentrant reconfiguration',
         'rejects a silently coerced canvas size without publishing candidate facts',
+        'reports a silently rejected canvas rollback as incomplete',
         'commits reconfiguration through private state when public observations are frozen',
         'rejects forged Surface aliases before lifecycle or presentation effects',
         'keeps private ownership authoritative when public identity and lifecycle writes are attempted',
@@ -608,6 +611,8 @@ const behaviorTestContracts = [
         'rejects a forged Surface alias with shadowed public methods before pass effects',
         'performs the final Surface configuration read before encoder creation',
         'preserves native Surface usage, view format, color, and tone-mapping capabilities',
+        'enforces clear-discard operations for transient Surface attachment views',
+        'revalidates transient Surface operations after usage reconfiguration',
         'snapshots Surface attachment view descriptors when the PassSpec is created',
         'rejects depth-stencil formats in color attachment slots before encoder creation',
     ]),

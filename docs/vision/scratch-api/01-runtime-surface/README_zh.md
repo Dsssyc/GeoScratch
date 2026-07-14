@@ -86,12 +86,15 @@ configuration、伪造 live owner 可替换状态或阻止 cleanup；`dispose()`
 
 `Surface.configure()` 是覆盖 format、usage、view formats、color space、optional
 tone mapping、alpha mode 与 size 的同步 candidate transaction。Iterable 与
-dictionary input 会在 native issue 前完成 materialize。Canvas resize 与 native
-configure 返回后，Scratch 要求 `GPUCanvasContext.getConfiguration()` 及 canvas
-尺寸都反映 candidate，之后才 commit 私有状态。失败会产生
-`SCRATCH_SURFACE_CONFIGURATION_FAILED`，尽可能恢复调用前的真实 canvas 尺寸与
-previous native configuration，验证恢复结果，并且绝不发布 candidate facts。
-异步 native validation 仍遵循 WebGPU error model，Scratch 不会虚构同步成功或失败。
+dictionary input 会在 native issue 前完成 materialize。随后 Scratch 会重新核对
+精确 context ownership、runtime lifecycle 与入口 configuration version；getter 或
+iterator 若重入 dispose 或 reconfigure Surface，会在 canvas/native effect 前令该
+candidate 失效。Canvas resize 与 native configure 返回后，Scratch 要求
+`GPUCanvasContext.getConfiguration()` 及 canvas 尺寸都反映 candidate，之后才
+commit 私有状态。失败会产生 `SCRATCH_SURFACE_CONFIGURATION_FAILED`，尽可能恢复
+调用前的真实 canvas 尺寸与 previous native configuration，通过精确 readback
+验证两者，并且绝不发布 candidate facts。异步 native validation 仍遵循 WebGPU
+error model，Scratch 不会虚构同步成功或失败。
 
 每次 managed use 前，Scratch 都会调用
 `GPUCanvasContext.getConfiguration()`，把其中的 device、format、usage、view

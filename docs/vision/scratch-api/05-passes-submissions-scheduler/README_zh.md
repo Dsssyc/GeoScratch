@@ -65,11 +65,14 @@ pass metadata 必须与它精确一致。Color slot 要求 color-renderable form
 depth/stencil renderable format 只能用于 depth/stencil attachment。显式 Surface
 view descriptor 可以使用 configured format 或一个已配置的 compatible view
 format。它仍必须是 `2d` single-mip/single-layer all-aspect RGBA view；usage 为
-`0` 或一个包含 `RENDER_ATTACHMENT` 的 configured Surface usage subset。带
-`TRANSIENT_ATTACHMENT` usage 的 view 对 color
+`0` 或一个包含 `RENDER_ATTACHMENT` 的 configured Surface usage subset。当
+Surface usage 包含 `TRANSIENT_ATTACHMENT` 时，view usage 必须解析为精确的
+Surface usage，以符合 native transient-view 规则。带 `TRANSIENT_ATTACHMENT`
+usage 的 view 对 color
 以及每个可写 depth/stencil aspect 都要求 `load: 'clear'` 和
 `store: 'discard'`。Scratch 会把它们作为 transient default，并拒绝冲突的显式
-值。提供的 `depthClear` 必须有限且位于 `[0, 1]`。
+值。Pass construction 会归一化这些事实，submission 则会在 presentation 或
+encoder effect 前针对 current Surface usage 重新校验。提供的 `depthClear` 必须有限且位于 `[0, 1]`。
 当可写 depth 默认或显式解析为 `depthLoad: 'clear'` 且调用方没有提供值时，
 Scratch 会把 `depthClear` 归一化为 `1`；它绝不会发出缺少所需原生 clear value
 的 clear operation。

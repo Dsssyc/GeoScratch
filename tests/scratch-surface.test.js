@@ -412,6 +412,85 @@ describe('Surface', () => {
         expect(surface.getCurrentTexture()).to.equal(context.texture)
     })
 
+    it('revalidates exact ownership after materializing Surface configuration inputs', async() => {
+
+        const { gpu } = createFakeGpu()
+        const { canvas, context } = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const surface = runtime.createSurface(canvas, {
+            format: 'rgba8unorm',
+            size: { width: 4, height: 4 },
+        })
+        let replacement
+        let formatReads = 0
+        const options = {}
+        Object.defineProperty(options, 'format', {
+            get() {
+                formatReads++
+                if (formatReads === 1) {
+                    surface.dispose()
+                    replacement = runtime.createSurface(canvas, {
+                        format: 'bgra8unorm',
+                        size: { width: 4, height: 4 },
+                    })
+                }
+                return 'rgba8unorm'
+            },
+        })
+
+        try {
+            surface.configure(options)
+            throw new Error('expected stale Surface configuration candidate to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic.code).to.equal('SCRATCH_SURFACE_DISPOSED')
+        }
+
+        expect(formatReads).to.equal(1)
+        expect(context.configureCalls).to.have.length(2)
+        expect(surface.isDisposed).to.equal(true)
+        expect(replacement.format).to.equal('bgra8unorm')
+        expect(replacement.getCurrentTexture()).to.equal(context.texture)
+    })
+
+    it('rejects a configuration candidate invalidated by reentrant reconfiguration', async() => {
+
+        const { gpu } = createFakeGpu()
+        const { canvas, context } = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const surface = runtime.createSurface(canvas, {
+            format: 'rgba8unorm',
+            size: { width: 4, height: 4 },
+        })
+        let usageReads = 0
+        const options = { format: 'rgba8unorm' }
+        Object.defineProperty(options, 'usage', {
+            get() {
+                usageReads++
+                if (usageReads === 1) surface.configure({ format: 'bgra8unorm' })
+                return 0x10
+            },
+        })
+
+        try {
+            surface.configure(options)
+            throw new Error('expected reentrant Surface configuration candidate to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_SURFACE_CONFIGURATION_STALE',
+                severity: 'error',
+                phase: 'runtime',
+            })
+            expect(error.diagnostic.actual.reason).to.equal('candidate-invalidated-before-native-issue')
+        }
+
+        expect(usageReads).to.equal(1)
+        expect(context.configureCalls).to.have.length(2)
+        expect(surface.format).to.equal('bgra8unorm')
+        expect(surface.getCurrentTexture()).to.equal(context.texture)
+    })
+
     it('rejects a silently coerced canvas size without publishing candidate facts', async() => {
 
         const { gpu } = createFakeGpu()
@@ -456,6 +535,49 @@ describe('Surface', () => {
         expect(surface.size).to.deep.equal({ width: 4, height: 4 })
         expect(canvas.width).to.equal(4)
         expect(canvas.height).to.equal(4)
+        expect(context.getConfiguration().format).to.equal('rgba8unorm')
+    })
+
+    it('reports a silently rejected canvas rollback as incomplete', async() => {
+
+        const { gpu } = createFakeGpu()
+        const { canvas, context } = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const surface = runtime.createSurface(canvas, {
+            format: 'rgba8unorm',
+            size: { width: 4, height: 4 },
+        })
+        let physicalWidth = canvas.width
+        Object.defineProperty(canvas, 'width', {
+            get() {
+                return physicalWidth
+            },
+            set(value) {
+                if (value === 8) physicalWidth = 7
+                else if (value === 4) physicalWidth = 5
+                else physicalWidth = value
+            },
+            configurable: true,
+        })
+
+        try {
+            surface.configure({
+                format: 'bgra8unorm',
+                size: { width: 8, height: 8 },
+            })
+            throw new Error('expected rejected Surface size rollback to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic.actual).to.include({
+                reason: 'native-configuration-observation-failed',
+                canvasRestored: false,
+                nativeConfigurationRestored: true,
+            })
+        }
+
+        expect(surface.format).to.equal('rgba8unorm')
+        expect(surface.size).to.deep.equal({ width: 4, height: 4 })
+        expect(canvas.width).to.equal(5)
         expect(context.getConfiguration().format).to.equal('rgba8unorm')
     })
 

@@ -88,6 +88,12 @@ type RenderAttachmentRegion = {
     depthSlice?: number
 }
 
+type SurfaceAttachmentViewFacts = Readonly<{
+    format: GPUTextureFormat
+    effectiveUsage: GPUTextureUsageFlags
+    transient: boolean
+}>
+
 export interface RenderPassSpec {
     runtime: ScratchRuntime
     id: string
@@ -550,17 +556,17 @@ function normalizeColorAttachment(
     }
 
     const viewDescriptor = snapshotSurfaceAttachmentViewDescriptor(attachment.viewDescriptor)
-    const viewFormat = validateSurfaceAttachmentViewDescriptor(
+    const view = validateSurfaceAttachmentViewDescriptor(
         pass,
         surface,
         viewDescriptor
     )
-    validateColorRenderableAttachmentFormat(pass, surface.subject, viewFormat)
-    validateColorAttachmentFormat(pass, surface.subject, attachment.format, viewFormat)
-    const operations = normalizeColorAttachmentOperations(pass, surface.subject, attachment, false)
+    validateColorRenderableAttachmentFormat(pass, surface.subject, view.format)
+    validateColorAttachmentFormat(pass, surface.subject, attachment.format, view.format)
+    const operations = normalizeColorAttachmentOperations(pass, surface.subject, attachment, view.transient)
     const normalized: RenderPassColorAttachmentSpec = {
         target,
-        format: viewFormat,
+        format: view.format,
         load: operations.load,
         store: operations.store,
     }
@@ -874,18 +880,19 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
         }
 
         const surface = surfaceFactsFor(attachment.target)
-        const viewFormat = validateSurfaceAttachmentViewDescriptor(
+        const view = validateSurfaceAttachmentViewDescriptor(
             pass,
             surface,
             attachment.viewDescriptor
         )
-        validateColorRenderableAttachmentFormat(pass, surface.subject, viewFormat)
+        validateColorRenderableAttachmentFormat(pass, surface.subject, view.format)
         validateColorAttachmentFormat(
             pass,
             surface.subject,
             attachment.format,
-            viewFormat
+            view.format
         )
+        normalizeColorAttachmentOperations(pass, surface.subject, attachment, view.transient)
         extents.push({
             subject: surface.subject,
             width: surface.size.width,
@@ -1005,7 +1012,7 @@ function validateSurfaceAttachmentViewDescriptor(
     pass: RenderPassSpec,
     surface: SurfaceFacts,
     descriptor: GPUTextureViewDescriptor | undefined
-): GPUTextureFormat {
+): SurfaceAttachmentViewFacts {
 
     const record = isRecord(descriptor) ? descriptor : {}
     const format = record.format ?? surface.format
@@ -1013,6 +1020,7 @@ function validateSurfaceAttachmentViewDescriptor(
         ? record.usage
         : record.usage === undefined ? 0 : Number.NaN
     const effectiveUsage = requestedUsage === 0 ? surface.usage : requestedUsage
+    const transient = (surface.usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0
     const valid = (descriptor === undefined || isRecord(descriptor)) &&
         (record.label === undefined || typeof record.label === 'string') &&
         (format === surface.format || surface.viewFormats.includes(format as GPUTextureFormat)) &&
@@ -1021,6 +1029,7 @@ function validateSurfaceAttachmentViewDescriptor(
         requestedUsage >= 0 &&
         requestedUsage <= GPU_FLAGS_MAX &&
         (requestedUsage === 0 || (requestedUsage & ~surface.usage) === 0) &&
+        (!transient || effectiveUsage === surface.usage) &&
         (effectiveUsage & TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0 &&
         (record.aspect === undefined || record.aspect === 'all') &&
         (record.baseMipLevel === undefined || record.baseMipLevel === 0) &&
@@ -1028,7 +1037,11 @@ function validateSurfaceAttachmentViewDescriptor(
         (record.baseArrayLayer === undefined || record.baseArrayLayer === 0) &&
         (record.arrayLayerCount === undefined || record.arrayLayerCount === 1) &&
         (record.swizzle === undefined || record.swizzle === 'rgba')
-    if (valid) return format as GPUTextureFormat
+    if (valid) return Object.freeze({
+        format: format as GPUTextureFormat,
+        effectiveUsage,
+        transient,
+    })
 
     throwScratchDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
@@ -1040,7 +1053,9 @@ function validateSurfaceAttachmentViewDescriptor(
         expected: {
             format: [ surface.format, ...surface.viewFormats ],
             dimension: '2d',
-            usage: '0 or a Surface usage subset containing GPUTextureUsage.RENDER_ATTACHMENT',
+            usage: transient
+                ? `0 or exactly transient Surface usage ${surface.usage}`
+                : '0 or a Surface usage subset containing GPUTextureUsage.RENDER_ATTACHMENT',
             aspect: 'all',
             baseMipLevel: 0,
             mipLevelCount: 1,
