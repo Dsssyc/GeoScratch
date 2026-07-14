@@ -149,6 +149,9 @@ lifecycle failures. The first fact is primary and every remaining independent or
 derivative fact is retained as bounded related evidence. Lifecycle collection does
 not return after its first match: it records every applicable runtime, device, object,
 layout, and distinct bound-resource fact, then applies the fixed ordering once.
+If device loss is primary, the runtime-wide `device-loss` incident and the cancelled
+operation's `exact-operation` `supporting-object-failure` incident are both retained;
+the rejected Promise exposes the latter and relates the former.
 
 ### Persistent binding parity
 
@@ -163,6 +166,12 @@ Scratch supports every core persistent WebGPU binding family except
   and
 - write-only, read-only, and read-write storage textures with explicit format
   and native-valid `1d`, `2d`, `2d-array`, and `3d` dimensions.
+
+On devices without `core-features-and-limits`, a sampled or storage texture view
+used in a bind group must cover the parent texture's complete array-layer range:
+`baseArrayLayer` is `0` and `arrayLayerCount` equals `depthOrArrayLayers`. This is
+a native binding restriction, not a blanket prohibition on constructing logical
+layer-subset views for other operations.
 
 Unsupported combinations are rejected, not normalized to convenient defaults.
 Scratch performs deterministic feature, format, stage, limit, usage, range, and

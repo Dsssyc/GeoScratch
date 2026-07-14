@@ -12,6 +12,7 @@ import { createFakeCanvas, createFakeGpu } from './scratch-test-utils.js'
 
 const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x4
+const GPU_TEXTURE_USAGE_STORAGE_BINDING = 0x8
 
 function checkerboardPixels() {
 
@@ -256,7 +257,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         expect(fixture.calls.bindGroups).to.have.length(bindGroupCount)
     })
 
-    it('preserves an explicit 2d-array binding dimension on compatibility devices', async() => {
+    it('preserves full 2d-array bindings and rejects layer subsets on compatibility devices', async() => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
@@ -280,6 +281,53 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             arrayTexture: texture.view({ dimension: '2d-array' }),
         })
         const firstBindGroup = fake.calls.bindGroups[0]
+
+        const storageTexture = await runtime.createTexture({
+            size: [ 2, 2, 3 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_STORAGE_BINDING,
+            textureBindingViewDimension: '2d-array',
+        })
+        const storageLayout = await runtime.createBindLayout({
+            group: 1,
+            entries: [ {
+                binding: 0,
+                name: 'arrayStorage',
+                type: 'storage-texture',
+                visibility: [ 'compute' ],
+                access: 'write-only',
+                format: 'rgba8unorm',
+                viewDimension: '2d-array',
+            } ],
+        })
+        for (const [ partialLayout, name, partialTexture ] of [
+            [ layout, 'arrayTexture', texture ],
+            [ storageLayout, 'arrayStorage', storageTexture ],
+        ]) {
+            const viewCount = fake.calls.textureViews.length
+            const bindGroupCount = fake.calls.bindGroups.length
+            try {
+                await runtime.createBindSet(partialLayout, {
+                    [name]: partialTexture.view({
+                        dimension: '2d-array',
+                        baseArrayLayer: 1,
+                        arrayLayerCount: 1,
+                    }),
+                })
+                throw new Error('expected compatibility-mode texture layer subset to fail')
+            } catch (error) {
+                expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                expect(error.diagnostic).to.deep.include({
+                    code: 'SCRATCH_BIND_TEXTURE_COMPATIBILITY_MODE_MISMATCH',
+                    severity: 'error',
+                    phase: 'binding',
+                    expected: { baseArrayLayer: 0, arrayLayerCount: 3 },
+                    actual: { baseArrayLayer: 1, arrayLayerCount: 1 },
+                })
+            }
+            expect(fake.calls.textureViews).to.have.length(viewCount)
+            expect(fake.calls.bindGroups).to.have.length(bindGroupCount)
+        }
 
         await texture.resize([ 4, 2, 3 ])
         await bindSet.prepare()

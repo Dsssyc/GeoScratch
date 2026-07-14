@@ -700,6 +700,7 @@ const behaviorTestContracts = [
         'rejects invalid copy ranges and every same-buffer copy',
     ]),
     behaviorTestContract('tests/scratch-texture-sampler.test.js', [
+        'preserves full 2d-array bindings and rejects layer subsets on compatibility devices',
         'enforces GPUSize32 bounds for texture upload row layouts',
     ]),
     behaviorTestContract('tests/scratch-command-binding-access.test.js', [
@@ -880,7 +881,35 @@ const documentationAudit = Object.freeze({
         hasAll(source, [ 'native issue', 'scope', 'lifecycle', 'secondary' ])
     ) && finalDocs.bindings.includes('not mutually exclusive') &&
         finalDocs.bindingsZh.includes('不是互斥') &&
-        hasAll(finalDocs.bindingDecision, [ 'cannot short-circuit', 'secondary evidence' ]),
+        [ finalDocs.bindings, finalDocs.bindingsZh, finalDocs.diagnostics, finalDocs.diagnosticsZh ]
+            .every(source => hasAll(source, [
+                'device-loss',
+                'exact-operation',
+                'supporting-object-failure',
+                'cancelled',
+            ])) &&
+        hasAll(finalDocs.bindingDecision, [
+            'cannot short-circuit',
+            'secondary evidence',
+            'runtime-wide `device-loss` incident',
+            '`exact-operation` `supporting-object-failure` incident',
+        ]),
+    compatibilityTextureLayerBindings: [ finalDocs.bindings, finalDocs.bindingsZh ].every(source =>
+        hasAll(source, [
+            'core-features-and-limits',
+            'sampled',
+            'storage',
+            'baseArrayLayer: 0',
+            'arrayLayerCount',
+            'layer-subset',
+        ])
+    ) && hasAll(finalDocs.bindingDecision, [
+        'core-features-and-limits',
+        'baseArrayLayer',
+        'arrayLayerCount',
+        'depthOrArrayLayers',
+        'layer-subset views',
+    ]),
     nativeRegionAlignment: [
         finalDocs.commands,
         finalDocs.commandsZh,
@@ -1617,6 +1646,8 @@ async function fetchOfficialSpecificationEvidence(canonicalTypes) {
             '{{GPUTextureDimension/"1d"}} textures cannot have mipmaps, be multisampled, use compressed or depth/stencil formats, or be used as a render target.',
         oneDimensionalMaximumMipLevelCount:
             ': {{GPUTextureDimension/"1d"}} :: Return 1.',
+        compatibilityBoundTextureFullArrayLayers:
+            '- |descriptor|.{{GPUTextureViewDescriptor/baseArrayLayer}} must be `0`. - |descriptor|.{{GPUTextureViewDescriptor/arrayLayerCount}} must be equal to |textureView|.{{GPUTextureView/[[texture]]}}.{{GPUTexture/depthOrArrayLayers}}.',
         timestampWriteIndicesDistinct:
             '- No two may be equal. - Each must be &lt; |timestampWrites|.`querySet`.{{GPUQuerySet/count}}.',
         writeBufferContentsAlignment:

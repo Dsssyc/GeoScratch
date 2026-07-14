@@ -606,10 +606,42 @@ describe('Scratch acknowledged supporting objects', () => {
 
         const lostFixture = await createFixture({ deferErrorScopePops: true })
         const lostCreation = lostFixture.runtime.createSampler()
+        const lostPendingOperation = lostFixture.runtime.diagnostics.snapshot().pendingOperations[0]
         lostFixture.errors.loseDevice({ reason: 'unknown', message: 'device vanished' })
         settleAllPops(lostFixture)
         const lostError = await rejectedDiagnostic(lostCreation)
         expect(lostError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
+        expect(lostError.incident).to.deep.include({
+            kind: 'supporting-object-failure',
+            diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+            nativeErrorCategory: 'device-lost',
+            attribution: 'exact-operation',
+            target: lostPendingOperation.target,
+            operationId: lostPendingOperation.id,
+            failureStage: 'lifecycle-recheck',
+        })
+        expect(lostError.incident.triggerOperation).to.deep.include({
+            id: lostPendingOperation.id,
+            status: 'cancelled',
+            target: lostPendingOperation.target,
+            nativeErrorCategory: 'device-lost',
+        })
+        expect(lostError.diagnostic.actual.failures).to.deep.equal(lostError.incident.outcomes)
+        expect(causalOutcomeFacts(lostError)).to.deep.equal([ {
+            stage: 'lifecycle-recheck',
+            diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+            nativeErrorCategory: 'device-lost',
+        } ])
+        const lostIncidents = lostFixture.runtime.diagnostics.incidents()
+        const deviceLossIncident = lostIncidents.find(incident => incident.kind === 'device-loss')
+        expect(deviceLossIncident).not.to.equal(undefined)
+        expect(deviceLossIncident.id).not.to.equal(lostError.incident.id)
+        expect(lostError.diagnostic.related).to.deep.include(deviceLossIncident.subject)
+        expect(lostError.diagnostic.related).to.deep.include(lostError.incident.subject)
+        expect(lostIncidents.filter(incident => incident.kind === 'supporting-object-failure'))
+            .to.deep.equal([ lostError.incident ])
+        expect(lostFixture.runtime.diagnostics.operation(lostPendingOperation.id).incidentId)
+            .to.equal(lostError.incident.id)
         expect(lostFixture.runtime._resources.size).to.equal(0)
 
         const recheckFixture = await createFixture({ deferErrorScopePops: true })

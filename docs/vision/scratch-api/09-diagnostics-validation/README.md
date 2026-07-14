@@ -674,7 +674,10 @@ structural scope failure, validation, internal, OOM, runtime disposal, then
 device loss. A lifecycle notification cannot short-circuit scope settlement or
 erase an earlier fact; the lifecycle recheck is retained as secondary incident
 evidence when another failure is primary. Settlement timing and native prose do
-not alter that order.
+not alter that order. If device loss is primary, the runtime-wide `device-loss`
+incident remains separate from the `exact-operation` `supporting-object-failure`
+incident linked to the cancelled operation. The rejected Promise exposes the
+operation-specific incident while the ledger retains both bounded reports.
 
 Submission issue provenance uses a `submission-native-observation` operation
 and `submission-failure` incidents. Its version 5 outcome records one of the

@@ -69,6 +69,12 @@ sampler, QuerySet, BindLayout, and BindSet preparation candidates. Runtime
 disposal and device loss are not mutually exclusive: when both are observed,
 both remain in that fixed order.
 
+When device loss is the primary supporting-object failure, Scratch retains two
+different scopes of evidence: the runtime-wide `device-loss` incident and an
+`exact-operation` `supporting-object-failure` incident linked to the cancelled
+creation/preparation operation. The thrown diagnostic points to the latter and
+relates the former; neither incident substitutes for the other.
+
 Pipeline lowering treats `BindLayout.group` as the native pipeline-layout index. Caller array order is not semantic: sparse groups produce explicit `null` slots, so groups `0` and `2` lower to `[group0, null, group2]`. Limits that WebGPU defines across a complete `GPUPipelineLayout` are checked again over the concatenated entries from every group. Two layouts that are individually within a dynamic-buffer or per-stage slot limit can therefore still be rejected together before any native pipeline object is issued.
 
 The persistent matrix covers:
@@ -77,6 +83,12 @@ The persistent matrix covers:
 - filtering, non-filtering, and comparison samplers;
 - float, unfilterable-float, depth, signed-integer, and unsigned-integer sampled textures, including every native-valid view dimension and multisampled constraints;
 - write-only, read-only, and read-write storage textures with explicit format and native-valid `1d`, `2d`, `2d-array`, or `3d` dimensions.
+
+On a device without `core-features-and-limits`, WebGPU bind-group validation
+requires every bound sampled or storage texture view to use `baseArrayLayer: 0`
+and an `arrayLayerCount` equal to the parent texture's complete layer count. A
+layer-subset `TextureViewSpec` can remain a valid logical/native view for other
+operations, but Scratch rejects it as a persistent binding on such a device.
 
 Sampler normalization preserves the numeric semantics of WebGPU's
 `[Clamp] unsigned short maxAnisotropy`: numeric inputs are clamped to

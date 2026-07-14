@@ -50,31 +50,17 @@ export function throwSupportingObjectCreationFailure<T>(
     const incidentOutcomes = Object.freeze(failures
         .map(failure => incidentOutcome(failure, codes, input.subject)))
 
-    if (primary.kind === 'device-lost') {
-        const info = primary.deviceLostInfo ?? runtime.deviceLostInfo ?? {
+    const deviceLossIncident = primary.kind === 'device-lost'
+        ? controller.recordDeviceLoss((primary.deviceLostInfo ?? runtime.deviceLostInfo ?? {
             reason: 'unknown',
             message: 'GPU device was lost while supporting-object scopes were settling.',
-        }
-        const incident = controller.recordDeviceLoss(info as GPUDeviceLostInfo)
-        controller.completeOperation(operation, {
-            status: 'cancelled',
-            nativeErrorCategory: 'device-lost',
-            ...(incident !== undefined ? { incidentId: incident.id } : {}),
-        })
-        throwScratchDiagnostic({
-            code: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
-            severity: 'error',
-            phase: 'runtime',
-            subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
-            related: [ runtime.subject, input.subject, ...(input.related ?? []) ],
-            message: `GPU device was lost while ${input.operationName} was pending.`,
-            actual: { operationId: operation.id, failures: incidentOutcomes },
-        }, { ...(incident !== undefined ? { incident } : {}) })
-    }
-
+        }) as GPUDeviceLostInfo)
+        : undefined
     const record = controller.completeOperation(operation, primary.kind === 'runtime-disposed'
         ? { status: 'cancelled' }
-        : { status: 'failed', nativeErrorCategory })
+        : primary.kind === 'device-lost'
+            ? { status: 'cancelled', nativeErrorCategory }
+            : { status: 'failed', nativeErrorCategory })
     const incident = controller.recordIncident({
         kind: 'supporting-object-failure',
         diagnosticCode: code,
@@ -83,13 +69,35 @@ export function throwSupportingObjectCreationFailure<T>(
         target: operation.target,
         operationId: operation.id,
         triggerOperation: record,
-        related: [ input.subject, ...(input.related ?? []) ],
+        related: [
+            input.subject,
+            ...(input.related ?? []),
+            ...(deviceLossIncident !== undefined ? [ deviceLossIncident.subject ] : []),
+        ],
         ...(primary.cause !== undefined
             ? { nativeError: serializeNativeGpuError(primary.cause) }
             : {}),
         failureStage: failureStage(primary.kind),
         outcomes: incidentOutcomes,
     })
+
+    if (primary.kind === 'device-lost') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+            severity: 'error',
+            phase: 'runtime',
+            subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+            related: [
+                runtime.subject,
+                input.subject,
+                ...(input.related ?? []),
+                ...(deviceLossIncident !== undefined ? [ deviceLossIncident.subject ] : []),
+                incident.subject,
+            ],
+            message: `GPU device was lost while ${input.operationName} was pending.`,
+            actual: { operationId: operation.id, failures: incidentOutcomes },
+        }, { incident })
+    }
 
     if (primary.kind === 'runtime-disposed') {
         throwScratchDiagnostic({

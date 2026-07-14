@@ -671,7 +671,10 @@ Supporting-object factory 会先 settle candidate 周围已经 issue 的全部 s
 validation、internal、OOM、runtime disposal、device loss。Lifecycle notification
 不能 short-circuit scope settlement，也不能抹除更早的 fact；如果其他 failure
 是 primary，lifecycle recheck 会作为 secondary incident evidence 保留。Settlement
-timing 与 native prose 都不能改变该顺序。
+timing 与 native prose 都不能改变该顺序。若 device loss 是 primary，runtime-wide
+`device-loss` incident 与关联到 `cancelled` operation 的 `exact-operation`
+`supporting-object-failure` incident 仍彼此独立。被 reject 的 Promise 暴露操作级
+incident，ledger 则保留这两份有界 report。
 
 Submission issue provenance 使用 `submission-native-observation` operation 与
 `submission-failure` incident。其 version 5 outcome 记录 summary、detailed 或

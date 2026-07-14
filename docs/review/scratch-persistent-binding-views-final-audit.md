@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-twenty-ninth-review fixes pending acceptance
+Status: Post-thirtieth-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -322,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Twenty-six isolated review passes have examined the fixed-baseline diff and working tree.
+Thirty isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -349,7 +349,13 @@ twenty-fourth review confirmed one P1 pass-owned query lifecycle defect, two P2 
 documentation defects, and the still-required feature-branch push gate. The twenty-fifth
 review confirmed one P2 clean-checkout acceptance reproducibility defect. No Critical
 issue was reported. The twenty-sixth review examined the accepted implementation
-checkpoint and returned exactly `No findings.`
+checkpoint and returned exactly `No findings.` The twenty-seventh review found the
+native one-dimensional mip defect; the twenty-eighth review returned exactly
+`No findings.` The twenty-ninth review found incomplete simultaneous lifecycle
+evidence. The thirtieth review reported two P1 claims: source and executable
+verification confirmed the operation-specific device-loss incident defect, while the
+current official GPUWeb bind-group validation disproved the claimed compatibility-mode
+array-layer-subset support.
 
 Resolved core finding:
 
@@ -838,6 +844,33 @@ Resolved twenty-ninth review finding:
    exact causal order. The regression uses exact equality rather than a permissive subset.
 
 This finding brings the reproduced or source-verified reviewer total to 84.
+
+The twenty-ninth-review implementation passed clean acceptance at exact checkpoint
+`fac24078bb1327dd31d1dea56dbf204c75c97e1e`, but the required thirtieth fresh-context
+review found one confirmed defect and made one native-capability claim that required
+official-source verification.
+
+Resolved thirtieth review finding:
+
+1. A device-loss-primary supporting-object cancellation no longer exits after recording
+   only the runtime-wide `device-loss` incident. It also records an `exact-operation`
+   `supporting-object-failure` incident with the precise candidate target, cancelled
+   trigger operation, lifecycle-recheck stage, and complete ordered outcomes. The thrown
+   diagnostic exposes that operation-specific incident and relates the separate global
+   incident; the bounded ledger retains both.
+
+Rejected thirtieth review claim:
+
+1. The review claimed that compatibility-mode bind groups must accept in-bounds
+   `2d-array` layer-subset views. Current official GPUWeb bind-group validation states
+   the opposite for devices without `core-features-and-limits`: every bound
+   `GPUTextureView`, sampled or storage, must have `baseArrayLayer` `0` and
+   `arrayLayerCount` equal to the parent texture's `depthOrArrayLayers`. Scratch's
+   existing binding rejection is therefore preserved. The existing compatibility test
+   now locks full-range success and sampled/storage subset rejection before native view
+   or bind-group issue, and the executable audit locks the exact official source rule.
+
+The confirmed finding brings the reproduced or source-verified reviewer total to 85.
 
 ## Verification Record
 
@@ -1409,6 +1442,47 @@ Post-twenty-ninth-review pre-commit verification:
 - `npm run typecheck` passed both TypeScript consumers; `npm test` reported exactly 853
   passing with only the two exact browser/final-acceptance identities pending; `npm run
   build` emitted the package and all 14 runnable examples
+- `git diff --check`, clean-commit acceptance, and a new isolated exact no-findings review
+  remain required before audit closure
+
+Clean twenty-ninth-review checkpoint acceptance (`fac2407`):
+
+- initial and final repository evidence named exact commit
+  `fac24078bb1327dd31d1dea56dbf204c75c97e1e` with an empty working tree
+- focused acceptance passed 455/455; the complete suite reported 853 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- both 20,000-cycle steady-state phases passed at observed 1.325 and 1.071 microseconds
+  per cycle with zero binding-order sorts
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the browser proof; all 11 ordinary
+  examples passed, the unavailable target failed with `ERR_CONNECTION_REFUSED`, and the
+  managed Vite server stopped successfully with port 4173 closed
+- production bootstrap, both TypeScript consumers, complete package/example build, and
+  diff check passed; the thirtieth review then found the device-loss incident defect, so
+  this checkpoint remains historical evidence rather than final approval
+
+Post-thirtieth-review pre-commit verification:
+
+- the strengthened device-loss-primary regression first failed because the rejected
+  Promise exposed the runtime-wide `device-loss` incident instead of a bounded
+  operation-specific `supporting-object-failure` incident
+- after implementation, the complete supporting-object acknowledgement file passes
+  13/13; the exact target, operation ID, cancelled trigger, lifecycle stage, outcomes,
+  global incident, and operation-specific incident are all asserted
+- the compatibility-mode review claim was checked against the current official GPUWeb
+  Bikeshed main source. Its bind-group rule explicitly requires full array-layer range;
+  a sampled/storage regression therefore passed without changing `binding.ts`
+- the texture/sampler file passes 15/15 and proves both layer-subset cases fail with
+  `SCRATCH_BIND_TEXTURE_COMPATIBILITY_MODE_MISMATCH` before native view or bind-group
+  issue
+- the complete affected supporting-object, BindSet, GPU-provenance, texture-binding, and
+  final-contract collection reports 90 passing with only its explicit final-acceptance
+  identity pending
+- `npm run typecheck` passes both TypeScript consumers; `npm test` reports exactly 853
+  passing with only the two exact browser/final-acceptance identities pending
+- `npm run build` emits the package and all 14 runnable examples; fixed-history
+  structural parity passes the official-marker, behavior-title, bilingual-documentation,
+  ADR, production-emit, public-surface, and historical-baseline contracts while correctly
+  reporting `incomplete` for the dirty tree
 - `git diff --check`, clean-commit acceptance, and a new isolated exact no-findings review
   remain required before audit closure
 
