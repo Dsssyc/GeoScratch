@@ -3,7 +3,11 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
 } from 'geoscratch'
-import { createFakeCanvas, createFakeGpu } from './scratch-test-utils.js'
+import {
+    createFakeCanvas,
+    createFakeGpu,
+    replaceResourceAllocationForTest,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_BUFFER_USAGE_UNIFORM = 0x40
@@ -851,5 +855,43 @@ describe('scratch dynamic buffer bind offsets', () => {
         ])
 
         await submitted.done
+    })
+
+    it('revalidates frozen dynamic offsets against the current replacement allocation', async() => {
+
+        const fixture = await createRenderFixture()
+        const draw = createDrawCommand(fixture, {
+            bindSets: [ bindSetInvocation(fixture.bindSet, { uniforms: 256 }) ],
+        })
+        const buffer = fixture.buffers[0]
+        replaceResourceAllocationForTest(buffer, {
+            ...buffer.descriptor,
+            size: 264,
+        })
+        await fixture.bindSet.prepare()
+        const queueWriteCount = fixture.calls.queueWrites.length
+        const encoderCount = fixture.calls.commandEncoders.length
+        const passCount = fixture.calls.renderPasses.length
+
+        const diagnostic = expectDiagnostic(() => submitRender(fixture, [ draw ]), {
+            code: 'SCRATCH_BIND_DYNAMIC_OFFSET_OUT_OF_BOUNDS',
+            severity: 'error',
+            phase: 'binding',
+        })
+
+        expect(diagnostic.expected).to.deep.equal({
+            bufferSize: 264,
+            effectiveEnd: '<= bufferSize',
+        })
+        expect(diagnostic.actual).to.deep.include({
+            regionOffset: 0,
+            dynamicOffset: 256,
+            effectiveOffset: 256,
+            effectiveSize: 16,
+            effectiveEnd: 272,
+        })
+        expect(fixture.calls.queueWrites).to.have.length(queueWriteCount)
+        expect(fixture.calls.commandEncoders).to.have.length(encoderCount)
+        expect(fixture.calls.renderPasses).to.have.length(passCount)
     })
 })

@@ -11,6 +11,7 @@ import {
 import {
     advanceQuerySlotContentEpochForTest,
     createFakeGpu,
+    replaceResourceAllocationForTest,
     triangleWgsl,
 } from './scratch-test-utils.js'
 
@@ -756,12 +757,42 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         })
     })
 
+    it('revalidates query resolve usage against replacement allocations before encoder effects', async() => {
+
+        const fixture = await createQueryFixture()
+        advanceQuerySlotContentEpochForTest(fixture.querySet, 1)
+        advanceQuerySlotContentEpochForTest(fixture.querySet, 2)
+        replaceResourceAllocationForTest(fixture.destination, {
+            ...fixture.destination.descriptor,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_UNIFORM,
+        })
+        const encoderCount = fixture.calls.commandEncoders.length
+        const resolveCount = fixture.calls.resolveQueries.length
+        const submissionCount = fixture.calls.queueSubmissions.length
+
+        await expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
+            .resolve(fixture.resolve)
+            .submit(), {
+            code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(fixture.calls.commandEncoders).to.have.length(encoderCount)
+        expect(fixture.calls.resolveQueries).to.have.length(resolveCount)
+        expect(fixture.calls.queueSubmissions).to.have.length(submissionCount)
+    })
+
     it('rejects invalid resolve submission steps with structured diagnostics', async() => {
 
         const fixtureA = await createQueryFixture()
         const fixtureB = await createQueryFixture()
+        const uploadTarget = await fixtureA.runtime.createBuffer({
+            size: 8,
+            usage: GPU_BUFFER_USAGE_COPY_DST,
+        })
         const upload = fixtureA.runtime.createUploadCommand({
-            target: fixtureA.destination.region({ size: 8 }),
+            target: uploadTarget.region(),
             data: new Uint8Array(8),
         })
 

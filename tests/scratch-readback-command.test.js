@@ -1,6 +1,10 @@
 import { expect } from 'chai'
 import * as scr from 'geoscratch'
-import { advanceResourceContentEpochForTest, createFakeGpu } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeGpu,
+    replaceResourceAllocationForTest,
+} from './scratch-test-utils.js'
 
 const COPY_SRC = 0x4
 const COPY_DST = 0x8
@@ -182,6 +186,35 @@ describe('scratch ReadbackCommand', () => {
             severity: 'error',
             phase: 'command',
         })
+    })
+
+    it('revalidates readback source usage against replacement allocations before staging copy effects', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
+        const command = await runtime.createReadbackCommand({
+            source: { region: source.region(), contentEpoch: 0 },
+            whenMissing: 'throw',
+        })
+        replaceResourceAllocationForTest(source, {
+            ...source.descriptor,
+            usage: COPY_DST,
+        })
+        const encoderCount = fake.calls.commandEncoders.length
+        const copyCount = fake.calls.copies.length
+        const submissionCount = fake.calls.queueSubmissions.length
+
+        await expectScratchDiagnostic(() => runtime.submission().readback(command).submit(), {
+            code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+            severity: 'error',
+            phase: 'command',
+        })
+
+        expect(fake.calls.commandEncoders).to.have.length(encoderCount)
+        expect(fake.calls.copies).to.have.length(copyCount)
+        expect(fake.calls.queueSubmissions).to.have.length(submissionCount)
+        expect(command.state).to.equal('idle')
     })
 
     it('requires an explicit submitted work that included the command', async () => {

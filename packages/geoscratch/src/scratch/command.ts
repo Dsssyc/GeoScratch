@@ -688,11 +688,24 @@ export class DrawCommand {
         for (const invocation of this.bindSets) {
             invocation.set.assertUsable()
         }
+        validateCurrentDynamicOffsets(this)
         for (const binding of this.vertexBuffers) {
-            binding.region.assertUsable()
+            validateCurrentVertexBufferBinding(this, binding)
         }
-        this.indexBuffer?.region.assertUsable()
-        if ('indirect' in this.count) this.count.indirect.assertUsable()
+        if (this.indexBuffer !== undefined) {
+            validateCurrentIndexBufferBinding(this, this.indexBuffer)
+            if ('indexCount' in this.count) {
+                validateStaticIndexedDrawRange(this, this.count, this.indexBuffer)
+            }
+        }
+        if ('indirect' in this.count) {
+            validateCurrentIndirectCommandRegion(
+                this,
+                this.count.indirect,
+                this.indexBuffer === undefined ? DRAW_INDIRECT_BYTE_LENGTH : DRAW_INDEXED_INDIRECT_BYTE_LENGTH,
+                this.indexBuffer === undefined ? 'draw' : 'draw-indexed'
+            )
+        }
         for (const resource of [
             ...this.resources.read.map(read => read.resource),
             ...this.resources.write,
@@ -1153,7 +1166,15 @@ export class DispatchCommand {
         for (const invocation of this.bindSets) {
             invocation.set.assertUsable()
         }
-        if ('indirect' in this.count) this.count.indirect.assertUsable()
+        validateCurrentDynamicOffsets(this)
+        if ('indirect' in this.count) {
+            validateCurrentIndirectCommandRegion(
+                this,
+                this.count.indirect,
+                DISPATCH_INDIRECT_BYTE_LENGTH,
+                'dispatch'
+            )
+        }
         for (const resource of [
             ...this.resources.read.map(read => read.resource),
             ...this.resources.write,
@@ -1355,6 +1376,7 @@ export class UploadCommand {
 
         target.buffer.assertRuntime(runtime)
         target.assertUsable()
+        validateBufferUploadUsage(runtime, target)
         const uploadSource = normalizeUploadSource(runtime, descriptor)
 
         this.runtime = runtime
@@ -1611,6 +1633,7 @@ export class CopyCommand {
     validateCurrentRange(): void {
 
         this.assertUsable()
+        validateCurrentCopyUsage(this)
 
         if (this.copyKind === 'buffer-to-buffer') {
             validateBufferCopyRange(this)
@@ -1861,7 +1884,7 @@ export class ReadbackCommand {
 
         this._assertNotDisposed()
         this.runtime.assertActive()
-        this.source.region.assertUsable()
+        validateCurrentReadbackCommandSource(this.runtime, this.subject, this.source)
     }
 
     result(options: ReadbackCommandResultOptions): ReadbackOperation {
@@ -2323,6 +2346,18 @@ function normalizeReadbackCommandSource(
     ) {
         throwReadbackCommandSourceDiagnostic(runtime, subject, source)
     }
+    const normalized = Object.freeze({ region, contentEpoch })
+    validateCurrentReadbackCommandSource(runtime, subject, normalized)
+    return normalized
+}
+
+function validateCurrentReadbackCommandSource(
+    runtime: ScratchRuntime,
+    subject: DiagnosticSubject,
+    source: BufferCopyCommandSourceDescriptor
+): void {
+
+    const region = source.region
     region.buffer.assertRuntime(runtime)
     region.assertUsable()
     if (region.size <= 0) throwReadbackCommandSourceDiagnostic(runtime, subject, source)
@@ -2341,7 +2376,6 @@ function normalizeReadbackCommandSource(
             actual: { usage: region.buffer.usage },
         })
     }
-    return Object.freeze({ region, contentEpoch })
 }
 
 function throwReadbackCommandSourceDiagnostic(
@@ -2537,6 +2571,8 @@ export class ResolveQuerySetCommand {
         this.runtime.assertActive()
         this.querySet.assertUsable()
         this.destination.assertUsable()
+        validateResolveDestinationUsage(this.runtime, this.destination.buffer)
+        validateResolveQuerySetRange(this)
     }
 
     encode(commandEncoder: GPUCommandEncoder) {
@@ -2841,6 +2877,7 @@ export function validateUploadCommandQueueAction(
 
     switch (command.uploadKind) {
         case 'buffer':
+            validateBufferUploadUsage(command.runtime, command.target)
             if (!queue || typeof queue.writeBuffer !== 'function') {
                 throwScratchDiagnostic({
                     code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
@@ -3275,6 +3312,18 @@ function validateDynamicOffsetValue(
     }
 }
 
+function validateCurrentDynamicOffsets(command: DynamicOffsetCommand): void {
+
+    const offsetsByGroup = commandNativeDynamicOffsets.get(command)
+    for (const invocation of command.bindSets) {
+        const entries = dynamicBufferEntries(invocation.set)
+        const nativeOffsets = offsetsByGroup?.get(invocation.set.layout.group) ?? []
+        entries.forEach((entry, index) => {
+            validateDynamicOffsetValue(command, invocation.set, entry, nativeOffsets[index])
+        })
+    }
+}
+
 function dynamicOffsetAlignment(command: DynamicOffsetCommand, entry: DynamicBufferBindLayoutEntry): number {
 
     const limits = command.runtime.device.limits
@@ -3491,36 +3540,7 @@ function normalizeVertexBuffers(
             })
         }
 
-        const buffer = region.buffer
-        buffer.assertRuntime(command.runtime)
-        region.assertUsable()
-        if (region.size <= 0) {
-            throwVertexBufferDiagnostic(command, {
-                expected: { region: 'non-empty BufferRegion' },
-                actual: { slot: binding.slot, size: region.size },
-                related: [ region.subject, buffer.subject ],
-            })
-        }
-        if (region.offset % 4 !== 0) {
-            throwVertexBufferDiagnostic(command, {
-                expected: { regionOffset: 'aligned to 4 bytes' },
-                actual: { slot: binding.slot, offset: region.offset, size: region.size },
-                related: [ region.subject, buffer.subject ],
-            })
-        }
-
-        if ((buffer.usage & GPU_BUFFER_USAGE_VERTEX) === 0) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_RESOURCE_USAGE_MISSING',
-                severity: 'error',
-                phase: 'resource',
-                subject: buffer.subject,
-                related: [ command.subject, command.pipeline.subject ],
-                message: 'DrawCommand vertex buffer binding requires GPUBufferUsage.VERTEX.',
-                expected: { usage: 'GPUBufferUsage.VERTEX' },
-                actual: { usage: buffer.usage },
-            })
-        }
+        validateCurrentVertexBufferBinding(command, binding)
 
         const normalized: NormalizedDrawVertexBufferBinding = { slot: binding.slot, region }
 
@@ -3563,52 +3583,9 @@ function normalizeIndexBuffer(
         })
     }
 
-    const buffer = region.buffer
-    buffer.assertRuntime(command.runtime)
-    region.assertUsable()
+    validateCurrentIndexBufferBinding(command, binding)
 
-    const format = binding.format
-    if (format !== 'uint16' && format !== 'uint32') {
-        throwIndexBufferDiagnostic(command, binding, {
-            expected: { format: [ 'uint16', 'uint32' ] },
-            actual: { format },
-            related: [ buffer.subject ],
-        })
-    }
-
-    validateIndexFormatForPipeline(command, format, buffer)
-
-    const elementByteLength = format === 'uint16' ? 2 : 4
-    if (region.offset % elementByteLength !== 0) {
-        throwIndexBufferDiagnostic(command, binding, {
-            expected: { regionOffset: `aligned to ${elementByteLength} bytes` },
-            actual: { offset: region.offset, format },
-            related: [ region.subject, buffer.subject ],
-        })
-    }
-
-    if (region.size % elementByteLength !== 0) {
-        throwIndexBufferDiagnostic(command, binding, {
-            expected: { regionSize: `multiple of ${elementByteLength} bytes` },
-            actual: { size: region.size, format },
-            related: [ region.subject, buffer.subject ],
-        })
-    }
-
-    if ((buffer.usage & GPU_BUFFER_USAGE_INDEX) === 0) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_RESOURCE_USAGE_MISSING',
-            severity: 'error',
-            phase: 'resource',
-            subject: buffer.subject,
-            related: [ command.subject, command.pipeline.subject ],
-            message: 'DrawCommand index buffer binding requires GPUBufferUsage.INDEX.',
-            expected: { usage: 'GPUBufferUsage.INDEX' },
-            actual: { usage: buffer.usage },
-        })
-    }
-
-    return { region, format }
+    return { region, format: binding.format }
 }
 
 function normalizeDispatchCount(command: DispatchCommand, count: DispatchCount): { workgroups: [number, number, number] } | NormalizedIndirectCommandCount {
@@ -4084,6 +4061,93 @@ function validateIndexFormatForPipeline(
     })
 }
 
+function validateCurrentVertexBufferBinding(
+    command: DrawCommand,
+    binding: Readonly<NormalizedDrawVertexBufferBinding>
+): void {
+
+    const region = binding.region
+    const buffer = region.buffer
+    buffer.assertRuntime(command.runtime)
+    region.assertUsable()
+    if (region.size <= 0) {
+        throwVertexBufferDiagnostic(command, {
+            expected: { region: 'non-empty BufferRegion' },
+            actual: { slot: binding.slot, size: region.size },
+            related: [ region.subject, buffer.subject ],
+        })
+    }
+    if (region.offset % 4 !== 0) {
+        throwVertexBufferDiagnostic(command, {
+            expected: { regionOffset: 'aligned to 4 bytes' },
+            actual: { slot: binding.slot, offset: region.offset, size: region.size },
+            related: [ region.subject, buffer.subject ],
+        })
+    }
+    if ((buffer.usage & GPU_BUFFER_USAGE_VERTEX) !== 0) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+        severity: 'error',
+        phase: 'resource',
+        subject: buffer.subject,
+        related: [ command.subject, command.pipeline.subject ],
+        message: 'DrawCommand vertex buffer binding requires GPUBufferUsage.VERTEX.',
+        expected: { usage: 'GPUBufferUsage.VERTEX' },
+        actual: { usage: buffer.usage },
+    })
+}
+
+function validateCurrentIndexBufferBinding(
+    command: DrawCommand,
+    binding: Readonly<NormalizedDrawIndexBufferBinding>
+): void {
+
+    const region = binding.region
+    const buffer = region.buffer
+    buffer.assertRuntime(command.runtime)
+    region.assertUsable()
+
+    const format = binding.format
+    if (format !== 'uint16' && format !== 'uint32') {
+        throwIndexBufferDiagnostic(command, binding, {
+            expected: { format: [ 'uint16', 'uint32' ] },
+            actual: { format },
+            related: [ buffer.subject ],
+        })
+    }
+
+    validateIndexFormatForPipeline(command, format, buffer)
+
+    const elementByteLength = format === 'uint16' ? 2 : 4
+    if (region.offset % elementByteLength !== 0) {
+        throwIndexBufferDiagnostic(command, binding, {
+            expected: { regionOffset: `aligned to ${elementByteLength} bytes` },
+            actual: { offset: region.offset, format },
+            related: [ region.subject, buffer.subject ],
+        })
+    }
+    if (region.size % elementByteLength !== 0) {
+        throwIndexBufferDiagnostic(command, binding, {
+            expected: { regionSize: `multiple of ${elementByteLength} bytes` },
+            actual: { size: region.size, format },
+            related: [ region.subject, buffer.subject ],
+        })
+    }
+    if ((buffer.usage & GPU_BUFFER_USAGE_INDEX) !== 0) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+        severity: 'error',
+        phase: 'resource',
+        subject: buffer.subject,
+        related: [ command.subject, command.pipeline.subject ],
+        message: 'DrawCommand index buffer binding requires GPUBufferUsage.INDEX.',
+        expected: { usage: 'GPUBufferUsage.INDEX' },
+        actual: { usage: buffer.usage },
+    })
+}
+
 function normalizeIndirectCommandCount(
     command: DrawCommand | DispatchCommand,
     count: Record<string, unknown>,
@@ -4102,6 +4166,18 @@ function normalizeIndirectCommandCount(
             },
         })
     }
+
+    validateCurrentIndirectCommandRegion(command, region, requiredByteLength, operation)
+
+    return { indirect: region }
+}
+
+function validateCurrentIndirectCommandRegion(
+    command: DrawCommand | DispatchCommand,
+    region: BufferRegion,
+    requiredByteLength: number,
+    operation: 'draw' | 'draw-indexed' | 'dispatch'
+): void {
 
     const buffer = region.buffer
     buffer.assertRuntime(command.runtime)
@@ -4147,7 +4223,6 @@ function normalizeIndirectCommandCount(
         })
     }
 
-    return { indirect: region }
 }
 
 function normalizeUploadSource(runtime: ScratchRuntime, descriptor: UploadCommandDescriptor): NormalizedUploadSource {
@@ -4306,6 +4381,22 @@ function validateUploadRange(command: UploadCommand) {
     validateUploadLayout(command)
 }
 
+function validateBufferUploadUsage(runtime: ScratchRuntime, target: BufferRegion): void {
+
+    if ((target.buffer.usage & GPU_BUFFER_USAGE_COPY_DST) !== 0) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+        severity: 'error',
+        phase: 'resource',
+        subject: target.buffer.subject,
+        related: [ runtime.subject, target.subject ],
+        message: 'UploadCommand target requires GPUBufferUsage.COPY_DST.',
+        expected: { usage: 'GPUBufferUsage.COPY_DST' },
+        actual: { usage: target.buffer.usage },
+    })
+}
+
 function validateUploadLayout(command: UploadCommand) {
 
     const targetLayout = command.target.layout
@@ -4409,6 +4500,84 @@ function validateTextureCopyUsage(
         expected: { usage: usageName },
         actual: { usage: texture.usage },
     })
+}
+
+function validateCurrentCopyUsage(command: CopyCommand): void {
+
+    if (command.copyKind === 'buffer-to-buffer') {
+        const source = (command.source as BufferCopyCommandSourceDescriptor).region.buffer
+        const target = (command.target as BufferRegion).buffer
+        validateBufferCopyUsage(
+            command.runtime,
+            source,
+            GPU_BUFFER_USAGE_COPY_SRC,
+            'source',
+            'GPUBufferUsage.COPY_SRC'
+        )
+        validateBufferCopyUsage(
+            command.runtime,
+            target,
+            GPU_BUFFER_USAGE_COPY_DST,
+            'target',
+            'GPUBufferUsage.COPY_DST'
+        )
+        return
+    }
+    if (command.copyKind === 'texture-to-texture') {
+        const source = (command.source as TextureCopyCommandSourceDescriptor).resource
+        const target = command.target as TextureResource
+        validateTextureCopyUsage(
+            command.runtime,
+            source,
+            GPU_TEXTURE_USAGE_COPY_SRC,
+            'source',
+            'GPUTextureUsage.COPY_SRC'
+        )
+        validateTextureCopyUsage(
+            command.runtime,
+            target,
+            GPU_TEXTURE_USAGE_COPY_DST,
+            'target',
+            'GPUTextureUsage.COPY_DST'
+        )
+        return
+    }
+    if (command.copyKind === 'buffer-to-texture') {
+        const source = (command.source as BufferCopyCommandSourceDescriptor).region.buffer
+        const target = command.target as TextureResource
+        validateBufferCopyUsage(
+            command.runtime,
+            source,
+            GPU_BUFFER_USAGE_COPY_SRC,
+            'source',
+            'GPUBufferUsage.COPY_SRC'
+        )
+        validateTextureCopyUsage(
+            command.runtime,
+            target,
+            GPU_TEXTURE_USAGE_COPY_DST,
+            'target',
+            'GPUTextureUsage.COPY_DST'
+        )
+        return
+    }
+
+    const source = (command.source as TextureCopyCommandSourceDescriptor).resource
+    const target = (command.target as BufferRegion).buffer
+    validateTextureCopyUsage(
+        command.runtime,
+        source,
+        GPU_TEXTURE_USAGE_COPY_SRC,
+        'source',
+        'GPUTextureUsage.COPY_SRC'
+    )
+    validateBufferCopyUsage(
+        command.runtime,
+        target,
+        GPU_BUFFER_USAGE_COPY_DST,
+        'target',
+        'GPUBufferUsage.COPY_DST'
+    )
 }
 
 function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDescriptor): CopyCommandSourceDescriptor {

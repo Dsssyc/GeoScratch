@@ -5,7 +5,11 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
 } from 'geoscratch'
-import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    createFakeGpu,
+    replaceResourceAllocationForTest,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x08
 const GPU_BUFFER_USAGE_INDEX = 0x10
@@ -913,6 +917,106 @@ describe('scratch native indexed and indirect execution', () => {
             resources: { read: [ readResource(disposed) ], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_RESOURCE_DISPOSED')
+    })
+
+    it('revalidates every fixed-function buffer usage against replacement allocations before encoder effects', async() => {
+
+        const render = await createRenderFixture()
+        const vertexPipeline = await render.runtime.createRenderPipeline({
+            program: render.program,
+            vertexBuffers: [ {
+                arrayStride: 8,
+                attributes: [ { shaderLocation: 0, offset: 0, format: 'float32x2' } ],
+            } ],
+            targets: [ { format: 'rgba8unorm' } ],
+        })
+        const vertex = await render.runtime.createBuffer({
+            size: 24,
+            usage: GPU_BUFFER_USAGE_VERTEX | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const index = await render.runtime.createBuffer({
+            size: 8,
+            usage: GPU_BUFFER_USAGE_INDEX | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const drawArguments = await render.runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const vertexDraw = render.runtime.createDrawCommand({
+            pipeline: vertexPipeline,
+            vertexBuffers: [ { slot: 0, region: vertex.region() } ],
+            count: { vertexCount: 3 },
+            resources: { read: [ readResource(vertex) ], write: [] },
+            whenMissing: 'throw',
+        })
+        const indexedDraw = render.runtime.createDrawCommand({
+            pipeline: render.pipeline,
+            indexBuffer: { region: index.region(), format: 'uint16' },
+            count: { indexCount: 3 },
+            resources: { read: [ readResource(index) ], write: [] },
+            whenMissing: 'throw',
+        })
+        const indirectDraw = render.runtime.createDrawCommand({
+            pipeline: render.pipeline,
+            count: { indirect: drawArguments.region() },
+            resources: { read: [ readResource(drawArguments) ], write: [] },
+            whenMissing: 'throw',
+        })
+
+        const compute = await createComputeFixture()
+        const dispatchArguments = await compute.runtime.createBuffer({
+            size: 12,
+            usage: GPU_BUFFER_USAGE_INDIRECT | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const indirectDispatch = compute.runtime.createDispatchCommand({
+            pipeline: compute.pipeline,
+            count: { indirect: dispatchArguments.region() },
+            resources: { read: [ readResource(dispatchArguments) ], write: [] },
+            whenMissing: 'throw',
+        })
+
+        const cases = [
+            {
+                fixture: render,
+                resource: vertex,
+                submit: () => render.runtime.createSubmission({ validation: 'throw' })
+                    .render(render.pass, [ vertexDraw ])
+                    .submit(),
+            },
+            {
+                fixture: render,
+                resource: index,
+                submit: () => render.runtime.createSubmission({ validation: 'throw' })
+                    .render(render.pass, [ indexedDraw ])
+                    .submit(),
+            },
+            {
+                fixture: render,
+                resource: drawArguments,
+                submit: () => render.runtime.createSubmission({ validation: 'throw' })
+                    .render(render.pass, [ indirectDraw ])
+                    .submit(),
+            },
+            {
+                fixture: compute,
+                resource: dispatchArguments,
+                submit: () => compute.runtime.createSubmission({ validation: 'throw' })
+                    .compute(compute.pass, [ indirectDispatch ])
+                    .submit(),
+            },
+        ]
+
+        for (const testCase of cases) {
+            replaceResourceAllocationForTest(testCase.resource, {
+                ...testCase.resource.descriptor,
+                usage: GPU_BUFFER_USAGE_COPY_DST,
+            })
+            const encoderCount = testCase.fixture.calls.commandEncoders.length
+            const submissionCount = testCase.fixture.calls.queueSubmissions.length
+            await expectDiagnostic(testCase.submit, 'SCRATCH_RESOURCE_USAGE_MISSING')
+            expect(testCase.fixture.calls.commandEncoders).to.have.length(encoderCount)
+            expect(testCase.fixture.calls.queueSubmissions).to.have.length(submissionCount)
+        }
     })
 
     it('requires explicit epoch reads for every fixed-function buffer role', async() => {

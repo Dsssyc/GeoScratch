@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 370
-const expectedFullSuitePasses = 811
+const expectedFocusedAcceptancePasses = 394
+const expectedFullSuitePasses = 817
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -342,7 +342,7 @@ const capabilityRows = [
             ]) &&
             hasAll(current.command, [ 'region.offset % 4 !== 0', "reason: 'writeBufferAlignment'" ]),
         implementation: 'scratch/command.ts, scratch/pass.ts, scratch/submission.ts',
-        tests: 'scratch-submission-queue-order.test.js, scratch-submitted-work-epochs.test.js, scratch-pass-submission.test.js, scratch-depth-stencil-attachments.test.js, scratch-pipeline-command.test.js',
+        tests: 'scratch-submission-queue-order.test.js, scratch-submitted-work-epochs.test.js, scratch-pass-submission.test.js, scratch-depth-stencil-attachments.test.js, scratch-pipeline-command.test.js, scratch-native-indirect-execution.test.js',
         docs: 'scratch-api/05-passes-submissions-scheduler',
         replacement: 'buffer ranges and pass targets migrated to BufferRegion/TextureViewSpec',
     }),
@@ -538,6 +538,9 @@ const referencedTestEvidence = referencedTestFiles.map(file => Object.freeze({
     status: fs.existsSync(`tests/${file}`) ? 'passed' : 'failed',
 }))
 const behaviorTestContracts = [
+    behaviorTestContract('tests/scratch-bind-dynamic-offsets.test.js', [
+        'revalidates frozen dynamic offsets against the current replacement allocation',
+    ]),
     behaviorTestContract('tests/scratch-bind-set-preparation.test.js', [
         'prepares the complete core buffer, sampler, sampled-texture, and storage-texture families',
         'supports storage textures across every native-valid view dimension',
@@ -576,9 +579,17 @@ const behaviorTestContracts = [
     ]),
     behaviorTestContract('tests/scratch-binding-upload.test.js', [
         'rejects invalid, unaligned, and disposed uploads with structured diagnostics',
+        'requires COPY_DST and revalidates replacement usage before upload queue effects',
     ]),
     behaviorTestContract('tests/scratch-readback-command.test.js', [
         'rejects invalid descriptors and unaligned regions with structured diagnostics',
+        'revalidates readback source usage against replacement allocations before staging copy effects',
+    ]),
+    behaviorTestContract('tests/scratch-query-set.test.js', [
+        'revalidates query resolve usage against replacement allocations before encoder effects',
+    ]),
+    behaviorTestContract('tests/scratch-native-indirect-execution.test.js', [
+        'revalidates every fixed-function buffer usage against replacement allocations before encoder effects',
     ]),
     behaviorTestContract('tests/scratch-layout-readback-operation.test.js', [
         'rejects unaligned direct readback regions before staging allocation',
@@ -602,6 +613,7 @@ const behaviorTestContracts = [
         'applies native depth-stencil aspect footprints and direction limits',
         'enforces GPUSize32 bounds for both native buffer-texture copy layouts',
         'describes only BufferRegion-based copy shapes in structured diagnostics',
+        'revalidates every buffer copy usage against replacement allocations before encoder effects',
         'rejects invalid copy ranges and every same-buffer copy',
     ]),
     behaviorTestContract('tests/scratch-texture-sampler.test.js', [
@@ -1527,9 +1539,7 @@ function stripBikeshedComments(source) {
 async function runAcceptanceEvidence(testFiles, contracts) {
 
     const managedBaseUrl = 'http://127.0.0.1:4173'
-    const negativeBrowserBaseUrl = process.env.SCRATCH_FINAL_AUDIT_NEGATIVE_BROWSER_BASE_URL
-    const browserBaseUrl = negativeBrowserBaseUrl ??
-        managedBaseUrl
+    const unavailableBrowserBaseUrl = 'http://127.0.0.1:65534'
     const serverPreflight = await auditManagedServerEndpoint(managedBaseUrl)
     if (serverPreflight.status === 'failed') {
         return Object.freeze({
@@ -1559,9 +1569,12 @@ async function runAcceptanceEvidence(testFiles, contracts) {
 
     const browserEvidence = await withManagedExamplesServer(
         managedBaseUrl,
-        () => runBrowserAcceptance(browserBaseUrl)
+        () => Object.freeze({
+            ...runBrowserAcceptance(managedBaseUrl),
+            negativeBrowserTarget: runNegativeBrowserTargetProbe(unavailableBrowserBaseUrl),
+        })
     )
-    const { browser, exampleMatrix, server } = browserEvidence
+    const { browser, exampleMatrix, negativeBrowserTarget, server } = browserEvidence
 
     const focusedTestFiles = testFiles.map(file => `tests/${file}`)
     const mochaReport = runMochaJson(focusedTestFiles)
@@ -1644,7 +1657,7 @@ async function runAcceptanceEvidence(testFiles, contracts) {
         status: finalCommit === auditTarget.commit && finalWorkingTree.clean
             ? 'passed'
             : 'failed',
-        requirement: 'acceptance requires the same clean Git target after every execution gate',
+        requirement: 'acceptance requires the same clean Git target after the complete execution sequence',
     })
 
     return Object.freeze({
@@ -1655,15 +1668,15 @@ async function runAcceptanceEvidence(testFiles, contracts) {
         stress,
         browser,
         exampleMatrix,
+        negativeBrowserTarget,
         server,
         finalRepository,
         status: commandGates.status === 'passed' &&
-            [ browser, exampleMatrix, mocha, fullSuite, stress ].every(
+            [ browser, exampleMatrix, negativeBrowserTarget, mocha, fullSuite, stress ].every(
                 entry => entry.status === 'passed'
             ) &&
             server.status === 'passed' &&
-            finalRepository.status === 'passed' &&
-            negativeBrowserBaseUrl === undefined
+            finalRepository.status === 'passed'
             ? 'passed'
             : 'failed',
     })
@@ -1748,6 +1761,47 @@ function runBrowserAcceptance(baseUrl) {
     })
 
     return Object.freeze({ browser, exampleMatrix })
+}
+
+function runNegativeBrowserTargetProbe(baseUrl) {
+
+    const startedAt = Date.now()
+    const result = spawnSync(process.execPath, [
+        path.resolve('tests/browser/scratch-persistent-binding-views.mjs'),
+    ], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        env: {
+            ...process.env,
+            SCRATCH_BINDING_BROWSER_HEADLESS: '0',
+            SCRATCH_BINDING_BROWSER_BASE_URL: baseUrl,
+        },
+    })
+    const stdout = result.stdout ?? ''
+    const stderr = result.stderr ?? ''
+    const combinedOutput = `${stdout}\n${stderr}`
+    const connectionRefused = combinedOutput.includes('ERR_CONNECTION_REFUSED')
+    const passed = result.error === undefined &&
+        result.status !== null &&
+        result.status !== 0 &&
+        connectionRefused
+
+    return Object.freeze({
+        status: passed ? 'passed' : 'failed',
+        baseUrl,
+        exitCode: result.status,
+        signal: result.signal,
+        connectionRefused,
+        durationMs: Date.now() - startedAt,
+        stdoutSha256: sha256(stdout),
+        stderrSha256: sha256(stderr),
+        ...(passed ? {} : {
+            error: result.error?.message,
+            stdoutTail: stdout.slice(-4_096),
+            stderrTail: stderr.slice(-4_096),
+        }),
+    })
 }
 
 async function auditManagedServerEndpoint(baseUrl) {

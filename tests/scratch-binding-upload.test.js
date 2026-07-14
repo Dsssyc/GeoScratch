@@ -502,4 +502,60 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
             })
         }
     })
+
+    it('requires COPY_DST and revalidates replacement usage before upload queue effects', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const invalidTarget = await runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_UNIFORM,
+        })
+
+        try {
+            runtime.createUploadCommand({
+                target: invalidTarget.region(),
+                data: createUniformData(),
+            })
+            throw new Error('expected missing COPY_DST usage to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        const target = await runtime.createBuffer({
+            size: 16,
+            usage: GPU_BUFFER_USAGE_COPY_DST | GPU_BUFFER_USAGE_UNIFORM,
+        })
+        const upload = runtime.createUploadCommand({
+            target: target.region(),
+            data: createUniformData(),
+        })
+        replaceResourceAllocationForTest(target, {
+            ...target.descriptor,
+            usage: GPU_BUFFER_USAGE_UNIFORM,
+        })
+        const queueWriteCount = fake.calls.queueWrites.length
+        const queueSubmissionCount = fake.calls.queueSubmissions.length
+
+        try {
+            runtime.createSubmission({ validation: 'throw' }).upload(upload).submit()
+            throw new Error('expected replacement usage drift to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+                severity: 'error',
+                phase: 'resource',
+            })
+        }
+
+        expect(fake.calls.queueWrites).to.have.length(queueWriteCount)
+        expect(fake.calls.queueSubmissions).to.have.length(queueSubmissionCount)
+        expect(target.state).to.equal('empty')
+    })
 })

@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-fifteenth-review fixes; clean acceptance and independent re-review pending
+Status: Post-sixteenth-review fixes; clean acceptance and independent re-review pending
 Decisions: ADR-036, ADR-037, ADR-038
 
 ## Fixed Evidence
@@ -24,14 +24,16 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 370
-referenced behavior tests; requires the complete suite to report exactly 811 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 394
+referenced behavior tests; requires the complete suite to report exactly 817 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
-proof and the 11-page ordinary-example matrix. It accepts no external-server mode and
-rechecks the exact HEAD plus clean working tree after every execution gate. A negative
-browser-target override still runs inside the managed lifecycle and exits non-zero with
-`ERR_CONNECTION_REFUSED`.
+proof and the 11-page ordinary-example matrix. During that same managed-server
+lifecycle it launches a fixed unavailable-target probe and requires a non-zero
+`ERR_CONNECTION_REFUSED` result. It accepts no external-server mode or environment
+override. After browser, negative-target, focused/full Mocha, and stress work has
+finished, it rechecks the exact HEAD plus clean working tree once for the complete
+execution sequence.
 
 The Goal-start commit is the behavioral and public-symbol baseline. The historical
 JavaScript commit is evidence for behavior that had already survived the TypeScript
@@ -550,12 +552,13 @@ Resolved fifteenth review findings:
    observes distinct native identity, current bounds/usage/alignment failures, and a
    repaired retry that binds the replacement candidate itself.
 2. Final acceptance always preflights, starts, and stops its own Vite server. The former
-   external-server success branch is removed; the unavailable-browser negative case is
-   only a target override inside that managed lifecycle, and any use of that override
-   makes overall acceptance fail even if the target unexpectedly responds successfully.
-3. Final acceptance records and requires the same HEAD plus a clean complete working tree
-   after browser, focused/full Mocha, and stress gates. A clean check only at startup can
-   no longer certify files changed by later commands.
+   external-server success branch is removed. This checkpoint still used a separate
+   unavailable-browser target override; the sixteenth-review fix below replaces that
+   override with first-class evidence in the normal acceptance sequence.
+3. Final acceptance added one post-sequence HEAD and clean-tree snapshot after browser,
+   focused/full Mocha, and stress work. Its requirement text overstated this as a check
+   after every gate; the sixteenth-review fix below narrows the claim to the evidence
+   actually collected.
 4. Copy diagnostic expectations now state direction-dependent layout requirements,
    optional texture-only origins/mips/aspects, all three native texture aspects, and the
    distinct buffer-to-buffer size rule. They no longer claim every copy needs both linear
@@ -564,6 +567,35 @@ Resolved fifteenth review findings:
 A further new isolated reviewer must re-review these fixes and the remaining Goal
 surface. This section is not an approval until that reviewer reports no unresolved
 correctness finding.
+
+Resolved sixteenth review findings:
+
+1. Buffer `UploadCommand` now requires `GPUBufferUsage.COPY_DST` at construction and
+   revalidates it against the current replacement allocation during queue preflight,
+   before any queue write, submission, or logical content effect.
+2. Every buffer endpoint in all four `CopyCommand` directions now revalidates its
+   current `COPY_SRC` or `COPY_DST` usage together with current range validation before
+   command encoder creation.
+3. Frozen named dynamic offsets remain immutable command data, but every draw and
+   dispatch now reapplies those native offsets to the current replacement allocation's
+   effective range and device alignment limits before encoding.
+4. The unavailable-browser case is now a first-class `negativeBrowserTarget` result in
+   the same normal managed-server acceptance lifecycle. The environment override and
+   second independent full-run path are removed. Overall acceptance requires that probe,
+   server shutdown, and one final same-commit clean-tree snapshot after the complete
+   execution sequence; the report no longer claims a clean snapshot after each gate.
+
+The same-root allocation audit also covered every remaining `BufferRegion` command
+consumer. Draw vertex/index bindings, draw/dispatch indirect arguments, ordered
+`ReadbackCommand` sources, and query-resolve destinations now revalidate current bounds,
+role usage, and operation-specific alignment in each command's `assertUsable()` path.
+These checks precede encoder, staging-copy, queue, submission, and logical content
+effects. This proactive coverage is separate from the four reviewer findings.
+
+The first fifteen review rounds contained 50 reproduced or source-verified actionable
+findings. The sixteenth review adds four, for 54 reviewer findings fixed before the next
+fresh-context approval. Proactive same-root cases are recorded separately rather than
+inflating that reviewer count.
 
 ## Verification Record
 
@@ -729,6 +761,43 @@ Post-fifteenth-review pre-commit verification:
 - `npm run typecheck`: passed, including canonical WebGPU declarations
 - `npm run build`: passed for the package and all 14 runnable examples
 - clean-commit headed acceptance and the next isolated no-findings review remain pending
+
+Clean checkpoint acceptance at `95c4f3dd19a43a3c135786a6fddc3498f22e13dd`:
+
+- runner verification: `acceptance` / `passed`; start and final target commit both
+  matched `95c4f3d`, and both working-tree snapshots were empty
+- live GPUWeb main, copy-rules, and Web IDL sources matched the previously recorded byte
+  lengths and SHA-256 hashes
+- runner-owned typecheck, build, and diff gates passed in 6,487 ms, 5,324 ms, and 20 ms
+- focused acceptance passed 370/370; the complete suite reported 811 passing and the two
+  exact pending browser/final-acceptance gate identities
+- both 20,000-cycle steady-state phases passed at 1.42 and 1.00 microseconds per cycle
+- Chrome 150.0.7871.115 on Apple Metal 3 passed the headed persistent-binding proof and
+  all 11 ordinary examples
+- the managed Vite server became ready in 235 ms, completed its 19,335 ms lifecycle,
+  stopped cleanly, and left the port closed
+- a separate unavailable-target run exited non-zero with `ERR_CONNECTION_REFUSED`; the
+  sixteenth review correctly rejected treating that second run as evidence inside the
+  accepted report
+
+Post-sixteenth-review pre-commit verification:
+
+- the three allocation-revalidation findings produced three expected failures before
+  implementation; Upload, Copy, and dynamic-offset focused regressions passed afterward
+- the same-root fixed-function, ordered-readback, and query-resolve audit produced three
+  additional expected failures before implementation and passed after all command roles
+  shared current-allocation validation
+- the six directly affected behavior files passed 112/112 after a fresh TypeScript emit
+- focused acceptance inventory passed 394/394 with zero pending cases and zero missing
+  required titles; native indexed/indirect execution is now part of that focused set
+- fixed-history structural parity passed all capability, behavior-title, public-surface,
+  documentation, production-emit, and baseline/historical contracts while correctly
+  reporting `incomplete` on the dirty tree
+- the exact submission-native inventory was re-derived after source movement and passed
+  all 41 call sites, including all 23 `command.ts` sites
+- `npm test`: 817 passing with only the two exact browser/final-acceptance gate
+  identities pending; `npm run typecheck` and the package build passed
+- clean commit acceptance remains required before the next isolated no-findings review
 
 The exact no-findings re-review, clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.

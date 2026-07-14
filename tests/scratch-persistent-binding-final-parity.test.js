@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -48,15 +48,16 @@ describe('Scratch persistent binding final parity', () => {
             'runAcceptanceEvidence',
             'workingTreeEvidence',
             'acceptance requires a clean Git working tree',
-            'acceptance requires the same clean Git target after every execution gate',
-            'SCRATCH_FINAL_AUDIT_NEGATIVE_BROWSER_BASE_URL',
-            'negativeBrowserBaseUrl === undefined',
+            'acceptance requires the same clean Git target after the complete execution sequence',
+            'runNegativeBrowserTargetProbe',
+            'negativeBrowserTarget',
+            'ERR_CONNECTION_REFUSED',
             'finalRepository',
             'officialWebIdlSource',
             'clampedUnsignedShort',
             'nearestEvenInteger',
-            'const expectedFocusedAcceptancePasses = 370',
-            'const expectedFullSuitePasses = 811',
+            'const expectedFocusedAcceptancePasses = 394',
+            'const expectedFullSuitePasses = 817',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -78,6 +79,9 @@ describe('Scratch persistent binding final parity', () => {
             'rejects invalid depth attachment views, clear values, and transient operations',
             'rejects invalid, unaligned, and disposed uploads with structured diagnostics',
             'rejects invalid descriptors and unaligned regions with structured diagnostics',
+            'revalidates readback source usage against replacement allocations before staging copy effects',
+            'revalidates query resolve usage against replacement allocations before encoder effects',
+            'revalidates every fixed-function buffer usage against replacement allocations before encoder effects',
             'rejects unaligned direct readback regions before staging allocation',
             'rejects invalid and unaligned vertex buffer bindings with structured diagnostics',
             'defaults depth clear to one and accepts inclusive unit-range boundaries',
@@ -130,6 +134,8 @@ describe('Scratch persistent binding final parity', () => {
         ]) {
             expect(source, marker).to.include(marker)
         }
+        expect(source).not.to.include('SCRATCH_FINAL_AUDIT_NEGATIVE_BROWSER_BASE_URL')
+        expect(source).not.to.include('negativeBrowserBaseUrl')
         expect(source).not.to.include("status: 'external'")
         expect(source).not.to.include('const explicitBaseUrl')
 
@@ -376,15 +382,15 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence.mocha).to.deep.include({
             status: 'passed',
-            tests: 370,
-            passes: 370,
+            tests: 394,
+            passes: 394,
             failures: 0,
             pending: 0,
         })
         expect(result.executionEvidence.fullSuite).to.deep.include({
             status: 'passed',
-            tests: 813,
-            passes: 811,
+            tests: 819,
+            passes: 817,
             failures: 0,
             pending: 2,
         })
@@ -417,6 +423,12 @@ describe('Scratch persistent binding final parity', () => {
             mode: 'managed',
         })
         expect(result.executionEvidence.server.stop.status).to.equal('passed')
+        expect(result.executionEvidence.negativeBrowserTarget).to.deep.include({
+            status: 'passed',
+            baseUrl: 'http://127.0.0.1:65534',
+            connectionRefused: true,
+        })
+        expect(result.executionEvidence.negativeBrowserTarget.exitCode).to.not.equal(0)
         expect(result.executionEvidence.finalRepository).to.deep.include({
             status: 'passed',
             commit: result.target.commit,
@@ -426,19 +438,6 @@ describe('Scratch persistent binding final parity', () => {
             entries: [],
         })
 
-        const unavailableBrowser = spawnSync(process.execPath, [ runner ], {
-            cwd: root,
-            encoding: 'utf8',
-            maxBuffer: 64 * 1024 * 1024,
-            env: {
-                ...process.env,
-                SCRATCH_FINAL_AUDIT: '1',
-                SCRATCH_FINAL_AUDIT_NEGATIVE_BROWSER_BASE_URL: 'http://127.0.0.1:65534',
-            },
-        })
-        expect(unavailableBrowser.error).to.equal(undefined)
-        expect(unavailableBrowser.status).to.not.equal(0)
-        expect(unavailableBrowser.stderr).to.include('ERR_CONNECTION_REFUSED')
     })
 })
 

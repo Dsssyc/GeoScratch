@@ -7,7 +7,10 @@ import {
     ScratchRuntime,
     TextureResource,
 } from 'geoscratch'
-import { createFakeGpu } from './scratch-test-utils.js'
+import {
+    createFakeGpu,
+    replaceResourceAllocationForTest,
+} from './scratch-test-utils.js'
 
 const webGpuTypesSource = fs.readFileSync(
     new URL('../node_modules/@webgpu/types/dist/index.d.ts', import.meta.url),
@@ -1583,6 +1586,59 @@ describe('scratch CopyCommand', () => {
             expect(diagnostic.expected.size).to.equal(
                 'required positive texture extent for copies involving a texture; buffer-to-buffer copies use equal positive BufferRegion sizes'
             )
+        }
+    })
+
+    it('revalidates every buffer copy usage against replacement allocations before encoder effects', async() => {
+
+        const bufferToBufferSource = await createCopyFixture()
+        const bufferToBufferTarget = await createCopyFixture()
+        const bufferToTexture = await createBufferToTextureCopyFixture()
+        const textureToBuffer = await createTextureToBufferCopyFixture()
+        const cases = [
+            {
+                fixture: bufferToBufferSource,
+                resource: bufferToBufferSource.source,
+                usage: GPU_BUFFER_USAGE_COPY_DST,
+                command: bufferToBufferSource.copy,
+            },
+            {
+                fixture: bufferToBufferTarget,
+                resource: bufferToBufferTarget.target,
+                usage: GPU_BUFFER_USAGE_UNIFORM,
+                command: bufferToBufferTarget.copy,
+            },
+            {
+                fixture: bufferToTexture,
+                resource: bufferToTexture.source,
+                usage: GPU_BUFFER_USAGE_COPY_DST,
+                command: bufferToTexture.copy,
+            },
+            {
+                fixture: textureToBuffer,
+                resource: textureToBuffer.target,
+                usage: GPU_BUFFER_USAGE_COPY_SRC,
+                command: textureToBuffer.copy,
+            },
+        ]
+
+        for (const { fixture, resource, usage, command } of cases) {
+            replaceResourceAllocationForTest(resource, {
+                ...resource.descriptor,
+                usage,
+            })
+            const encoderCount = fixture.calls.commandEncoders.length
+            const submissionCount = fixture.calls.queueSubmissions.length
+            await expectScratchDiagnostic(() => fixture.runtime
+                .createSubmission({ validation: 'throw' })
+                .copy(command)
+                .submit(), {
+                code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+                severity: 'error',
+                phase: 'resource',
+            })
+            expect(fixture.calls.commandEncoders).to.have.length(encoderCount)
+            expect(fixture.calls.queueSubmissions).to.have.length(submissionCount)
         }
     })
 
