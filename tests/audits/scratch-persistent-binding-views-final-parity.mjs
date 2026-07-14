@@ -142,6 +142,11 @@ if (acceptanceMode) {
         'acceptance requires a clean Git working tree so the reported commit identifies every audited byte'
     )
 }
+const productionBootstrap = await prepareProductionBootstrap()
+assertParity(
+    productionBootstrap.status === 'passed' || productionBootstrap.status === 'not-needed',
+    `production bootstrap failed: ${JSON.stringify(productionBootstrap)}`
+)
 
 const baseline = loadSourcesAt(goalBaseline, baselinePaths)
 const historical = loadSourcesAt(historicalJavaScript, historicalPaths)
@@ -1017,7 +1022,11 @@ const officialSpecificationEvidence = acceptanceMode
         webIdlSource: officialWebIdlSource,
     })
 const executionEvidence = acceptanceMode
-    ? await runAcceptanceEvidence(referencedTestFiles, behaviorTestContracts)
+    ? await runAcceptanceEvidence(
+        referencedTestFiles,
+        behaviorTestContracts,
+        productionBootstrap
+    )
     : Object.freeze({ status: 'not-run' })
 
 assertParity(
@@ -1093,6 +1102,7 @@ const result = {
     baseline: goalBaseline,
     historicalJavaScript,
     target: auditTarget,
+    productionBootstrap,
     officialSpecification,
     capabilityRows,
     publicSurface: {
@@ -1718,7 +1728,45 @@ function stripBikeshedComments(source) {
         .replace(/\/\/.*$/gm, '')
 }
 
-async function runAcceptanceEvidence(testFiles, contracts) {
+async function prepareProductionBootstrap() {
+
+    const distRoot = path.resolve('packages/geoscratch/dist')
+    const reason = acceptanceMode
+        ? 'acceptance'
+        : fs.existsSync(distRoot)
+            ? 'dist-present'
+            : 'dist-missing'
+    if (reason === 'dist-present') {
+        return Object.freeze({
+            status: 'not-needed',
+            reason,
+        })
+    }
+
+    const serverPreflight = await auditManagedServerEndpoint('http://127.0.0.1:4173')
+    if (serverPreflight.status === 'failed') {
+        return Object.freeze({
+            status: 'failed',
+            reason,
+            serverPreflight,
+        })
+    }
+
+    const productionBootstrapBuild = runCommandGate('npm', [
+        '--workspace',
+        'geoscratch',
+        'run',
+        'build',
+    ])
+    return Object.freeze({
+        status: productionBootstrapBuild.status,
+        reason,
+        serverPreflight,
+        productionBootstrapBuild,
+    })
+}
+
+async function runAcceptanceEvidence(testFiles, contracts, productionBootstrap) {
 
     const managedBaseUrl = 'http://127.0.0.1:4173'
     const unavailableBrowserBaseUrl = 'http://127.0.0.1:65534'
@@ -1734,10 +1782,16 @@ async function runAcceptanceEvidence(testFiles, contracts) {
     const build = runCommandGate('npm', [ 'run', 'build' ])
     const diffCheck = runCommandGate('git', [ 'diff', '--check' ])
     const commandGates = Object.freeze({
+        productionBootstrapBuild: productionBootstrap.productionBootstrapBuild,
         typecheck,
         build,
         diffCheck,
-        status: [ typecheck, build, diffCheck ].every(gate => gate.status === 'passed')
+        status: [
+            productionBootstrap.productionBootstrapBuild,
+            typecheck,
+            build,
+            diffCheck,
+        ].every(gate => gate?.status === 'passed')
             ? 'passed'
             : 'failed',
     })

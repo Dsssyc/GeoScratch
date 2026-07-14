@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-twenty-fourth-review fixes; clean acceptance and independent re-review pending
+Status: Post-twenty-fifth-review fixes; clean acceptance and independent re-review pending
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -21,10 +21,14 @@ with `dist`; native copy calls and binding lowering are also AST-resolved.
 
 Structural mode deliberately reports `verification.status: incomplete`. Acceptance
 mode first requires a clean Git working tree and reports the exact HEAD commit, empty
-porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
-source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
-first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 455
+porcelain inventory, and porcelain hash. It next verifies that its managed browser port
+is unoccupied and records a package production bootstrap build before inspecting
+generated `dist` parity. It then downloads the GPUWeb Bikeshed main source, copy-rules
+source, and WHATWG Web IDL source and derives the native enum matrices. It later rechecks
+the managed port and explicitly executes `npm run typecheck`, the complete `npm run
+build`, and `git diff --check`. Structural mode preserves existing `dist` so stale
+output remains detectable, but performs the same recorded package bootstrap when `dist`
+is absent. It executes exactly 455
 referenced behavior tests; requires the complete suite to report exactly 853 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
@@ -318,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Twenty-four isolated review passes have examined the fixed-baseline diff and working tree.
+Twenty-five isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -342,7 +346,8 @@ twenty-second review confirmed three P1 immutable-contract/native-capability def
 two P2 lifecycle/texture-capability defects. The twenty-third review confirmed two P1
 timestamp/performance-contract defects and one P2 living-document defect. The
 twenty-fourth review confirmed one P1 pass-owned query lifecycle defect, two P2 current
-documentation defects, and the still-required feature-branch push gate. No Critical
+documentation defects, and the still-required feature-branch push gate. The twenty-fifth
+review confirmed one P2 clean-checkout acceptance reproducibility defect. No Critical
 issue was reported.
 
 Resolved core finding:
@@ -788,6 +793,17 @@ Resolved twenty-fourth review findings:
    the push only after clean acceptance and an exact no-findings re-review.
 
 These findings bring the reproduced or source-verified reviewer total to 81.
+
+Resolved twenty-fifth review finding:
+
+1. The executable audit no longer reads ignored `packages/geoscratch/dist` before its
+   first build on a clean checkout. Acceptance always performs and records a package
+   production bootstrap after its clean-tree and managed-port preflight, then inspects
+   exact emitted JavaScript/declaration parity; the later complete build remains an
+   independent gate. Structural mode bootstraps only when `dist` is absent, preserving
+   stale-output detection when generated output already exists.
+
+This finding brings the reproduced or source-verified reviewer total to 82.
 
 ## Verification Record
 
@@ -1270,6 +1286,22 @@ focused set reported 445/445 but omitted `scratch-occlusion-query.test.js`, so t
 required occlusion lifecycle title was absent. The resource/query capability row now
 includes that complete 10-test suite and the executable focused count is 455. Evidence
 from the rejected attempt is not treated as acceptance.
+
+Post-twenty-fifth-review pre-commit verification:
+
+- a detached clean worktree with no `packages/geoscratch/dist` reproduced the exact
+  pre-fix `ENOENT` before acceptance could reach its internal build gate
+- the final-contract source test first failed on the absent bootstrap contract and now
+  passes with explicit `prepareProductionBootstrap`, `productionBootstrapBuild`, and
+  `dist-missing` evidence markers
+- structural execution with existing generated output passes while reporting
+  `productionBootstrap: { status: 'not-needed', reason: 'dist-present' }`, preserving
+  stale-output inspection rather than rebuilding over it
+- `npm run typecheck` passes both TypeScript consumers; `npm test` reports exactly 853
+  passing with only the two exact browser/final-acceptance identities pending; `npm run
+  build` emits the package and all 14 runnable examples
+- a new clean-checkout execution, clean acceptance, and fresh exact no-findings review
+  remain required
 
 The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.

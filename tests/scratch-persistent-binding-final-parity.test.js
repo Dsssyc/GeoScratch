@@ -46,6 +46,9 @@ describe('Scratch persistent binding final parity', () => {
             'fetchOfficialSpecificationEvidence',
             'stripBikeshedComments',
             'runAcceptanceEvidence',
+            'prepareProductionBootstrap',
+            'productionBootstrapBuild',
+            'dist-missing',
             'workingTreeEvidence',
             'acceptance requires a clean Git working tree',
             'acceptance requires the same clean Git target after the complete execution sequence',
@@ -201,6 +204,7 @@ describe('Scratch persistent binding final parity', () => {
             '3 legacy examples',
             '`externalTexture`',
             'Fresh-Context Strict Review',
+            'production bootstrap build',
         ]) {
             expect(audit, marker).to.include(marker)
         }
@@ -437,6 +441,14 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence).to.deep.include({ status: 'passed' })
         expect(result.executionEvidence.commandGates).to.deep.include({ status: 'passed' })
+        expect(result.productionBootstrap).to.deep.include({
+            status: 'passed',
+            reason: 'acceptance',
+        })
+        expect(result.executionEvidence.commandGates.productionBootstrapBuild).to.deep.include({
+            status: 'passed',
+            exitCode: 0,
+        })
         expect(result.executionEvidence.commandGates.typecheck).to.deep.include({
             status: 'passed',
             exitCode: 0,
