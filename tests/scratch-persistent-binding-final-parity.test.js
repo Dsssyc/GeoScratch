@@ -92,6 +92,7 @@ describe('Scratch persistent binding final parity', () => {
             'rejects identical render timestamp write indices before encoder creation',
             'rejects a disposed compute timestamp query set before encoder creation',
             'rejects a disposed render timestamp query set before attachment or encoder creation',
+            'executes the documented all-aspect occlusion pass contract',
             'rejects a disposed render occlusion query set before attachment or encoder creation',
             'SCRATCH_SURFACE_CONTEXT_IN_USE',
             'SCRATCH_SURFACE_CONTEXT_NOT_OWNED',

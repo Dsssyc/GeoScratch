@@ -556,7 +556,7 @@ const scenePass = runtime.createRenderPass({
         },
     ],
     depth: {
-        target: depth.view({ aspect: 'depth-only' }),
+        target: depth.view(),
         depthLoad: 'load',
         depthStore: 'store',
     },

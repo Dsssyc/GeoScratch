@@ -1,4 +1,5 @@
 import { expect } from 'chai'
+import { readFileSync } from 'node:fs'
 import {
     BeginOcclusionQueryCommand,
     BindSet,
@@ -125,9 +126,41 @@ async function expectScratchDiagnostic(action, expected) {
 
 describe('scratch occlusion query bracket commands', () => {
 
-    it('creates public begin/end commands and retains the pass query set', async() => {
+    it('executes the documented all-aspect occlusion pass contract', async() => {
 
         const fixture = await createOcclusionFixture()
+        const depth = await fixture.runtime.createTexture({
+            label: 'documented scene depth',
+            size: { width: 4, height: 4 },
+            format: 'depth24plus',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        for (const language of [ 'README.md', 'README_zh.md' ]) {
+            const document = readFileSync(new URL(
+                `../docs/vision/scratch-api/07-transfers-epochs/${language}`,
+                import.meta.url
+            ), 'utf8')
+            const snippet = document.slice(
+                document.indexOf('const visibilityQueries'),
+                document.indexOf('const drawTileWithVisibility')
+            )
+            expect(snippet, language).to.include('target: depth.view(),')
+            expect(snippet, language).not.to.include("aspect: 'depth-only'")
+        }
+        const scenePass = fixture.runtime.createRenderPass({
+            label: 'documented scene',
+            color: [ {
+                target: fixture.target.view(),
+                load: 'load',
+                store: 'store',
+            } ],
+            depth: {
+                target: depth.view(),
+                depthLoad: 'load',
+                depthStore: 'store',
+            },
+            occlusionQuerySet: fixture.querySet,
+        })
 
         expect(fixture.querySet).to.be.instanceOf(QuerySetResource)
         expect(fixture.querySet.type).to.equal('occlusion')
@@ -143,6 +176,8 @@ describe('scratch occlusion query bracket commands', () => {
         })).to.be.instanceOf(BeginOcclusionQueryCommand)
         expect(fixture.runtime.endOcclusionQueryCommand()).to.be.instanceOf(EndOcclusionQueryCommand)
         expect(fixture.pass.occlusionQuerySet).to.equal(fixture.querySet)
+        expect(scenePass.depth.target.descriptor.aspect).to.equal('all')
+        expect(scenePass.occlusionQuerySet).to.equal(fixture.querySet)
     })
 
     it('records begin, draw, and end in explicit render command order', async() => {

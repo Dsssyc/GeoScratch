@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-thirty-second-review evidence pending acceptance
+Status: Post-thirty-third-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -322,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Thirty-two isolated review passes have examined the fixed-baseline diff and working tree.
+Thirty-three isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -360,6 +360,8 @@ device-loss-primary failure path created both incident scopes but did not relate
 operation-specific report back to the runtime-wide incident. The thirty-second review
 claimed that sparse pipeline-layout `null` slots were invalid; current GPUWeb IDL,
 creation steps, generated WebGPU types, and a headed real-device dispatch disproved it.
+The thirty-third review found that the bilingual occlusion-query example selected a
+`depth-only` view even though renderable texture views must refer to all aspects.
 
 Resolved core finding:
 
@@ -908,6 +910,22 @@ Rejected thirty-second review claim:
    storage binding and reads back the exact value `73` without uncaptured or page errors.
 
 The rejected claim does not change the reproduced or source-verified finding total of 86.
+
+The thirty-second-review implementation passed clean acceptance at exact checkpoint
+`19b2d15a654d840f2d50a743cf882e3856da3ad9`, but the required thirty-third
+fresh-context review found the documentation-contract defect below.
+
+Resolved thirty-third review finding:
+
+1. The bilingual occlusion-query example now uses the all-aspect `depth.view()` required
+   for a render-pass depth attachment. Its existing public-command test is strengthened
+   into an executable documentation contract: it checks both snippets, constructs the
+   documented color/depth/occlusion pass through the public runtime, and proves that the
+   normalized persistent target has `aspect: 'all'`. The structural audit also rejects
+   any return of `depth-only` in either snippet and locks the current official GPUWeb
+   renderable-view all-aspects rule.
+
+This finding brings the reproduced or source-verified reviewer total to 87.
 
 ## Verification Record
 
@@ -1583,10 +1601,46 @@ Post-thirty-second-review source and browser verification:
 - `npm run typecheck`, `npm run build`, the async pipeline/final-contract tests, structural
   parity, and `git diff --check` pass; the managed test server was stopped and port 4173
   is closed
-- clean acceptance and a new isolated exact no-findings review remain required before
-  audit closure
+- clean acceptance and a new isolated review remained required before audit closure
 
-The source-verified evidence must pass clean acceptance and a new exact no-findings review
+Clean thirty-second-review checkpoint acceptance (`19b2d15`):
+
+- initial and final repository evidence named exact commit
+  `19b2d15a654d840f2d50a743cf882e3856da3ad9` with an empty working tree
+- focused acceptance passed 455/455; the complete suite reported 853 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- current official GPUWeb evidence passed with exact main/copy/WebIDL hashes and the
+  nullable-layout, null-initialization, full-layer, and renderable-view markers
+- both 20,000-cycle steady-state phases passed at observed 1.233425 and 1.022044
+  microseconds per cycle with zero binding-order sorts
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the browser proof, including the
+  sparse group-2 dispatch and exact value `73`; all 11 ordinary examples passed with no
+  uncaptured, console, page, or request failures
+- the unavailable target failed with `ERR_CONNECTION_REFUSED`; the managed Vite server
+  stopped successfully with port 4173 closed; production bootstrap, both TypeScript
+  consumers, complete package/example build, diff check, and final clean-repository
+  recheck passed
+- the thirty-third review then found the occlusion documentation defect, so this
+  checkpoint remains historical evidence rather than final approval
+
+Post-thirty-third-review targeted verification:
+
+- the strengthened executable documentation contract first failed because the English
+  snippet still contained `target: depth.view({ aspect: 'depth-only' })`
+- after correcting both language variants, the focused RED/GREEN identity passes and
+  constructs the documented render pass with normalized `aspect: 'all'`
+- the structural audit now requires both bilingual snippets and the current official
+  GPUWeb renderable-view all-aspects marker
+- the affected occlusion/final-contract collection reports 13 passing with only its
+  explicit final-acceptance identity pending; the dirty-tree structural audit passes and
+  correctly reports `incomplete`
+- `npm run typecheck` passes both TypeScript consumers; `npm test` reports exactly 853
+  passing with only the two exact browser/final-acceptance identities pending; `npm run
+  build` emits the package and all 14 runnable examples; `git diff --check` passes
+- clean-commit acceptance and a new isolated exact no-findings review remain required
+  before audit closure
+
+The corrected evidence must pass clean acceptance and a new exact no-findings review
 before this audit can return to Accepted status. The required feature-branch push remains
 ordered after that closure.
 

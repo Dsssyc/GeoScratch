@@ -668,6 +668,7 @@ const behaviorTestContracts = [
         'revalidates query resolve usage against replacement allocations before encoder effects',
     ]),
     behaviorTestContract('tests/scratch-occlusion-query.test.js', [
+        'executes the documented all-aspect occlusion pass contract',
         'rejects a disposed render occlusion query set before attachment or encoder creation',
     ]),
     behaviorTestContract('tests/scratch-native-indirect-execution.test.js', [
@@ -956,6 +957,18 @@ const documentationAudit = Object.freeze({
         hasAll(source, [ 'Pipeline', 'layoutRequirements', 'snapshot', 'Command' ])
     ) && hasAll(finalDocs.bindingDecision, [ 'Pipeline requirement snapshot', 'mutable Program property' ]),
     nativeCopies: hasAll(finalDocs.transfers, [ 'copyBufferToBuffer', 'copyTextureToTexture', 'copyBufferToTexture', 'copyTextureToBuffer' ]),
+    occlusionDocumentationUsesRenderableDepthView: [
+        finalDocs.transfers,
+        finalDocs.transfersZh,
+    ].every(source => {
+        const start = source.indexOf('const visibilityQueries')
+        const end = source.indexOf('const drawTileWithVisibility')
+        const snippet = source.slice(start, end)
+        return start >= 0 &&
+            end > start &&
+            snippet.includes('target: depth.view(),') &&
+            !snippet.includes("aspect: 'depth-only'")
+    }),
     nativeTexelBlockCopies: [ finalDocs.transfers, finalDocs.transfersZh ].every(source =>
         hasAll(source, [
             '95',
@@ -1620,6 +1633,8 @@ async function fetchOfficialSpecificationEvidence(canonicalTypes) {
             'with {{GPUTextureUsage/STORAGE_BINDING}} capability for at least one access mode.',
         renderableTextureViewUsage:
             '|descriptor|.{{GPUTextureViewDescriptor/usage}} must contain {{GPUTextureUsage/RENDER_ATTACHMENT}}.',
+        renderableTextureViewAllAspects:
+            '|descriptor|.{{GPUTextureViewDescriptor/aspect}} must refer to all [=aspects=]',
         transientColorAttachmentOperations:
             '|this|.{{GPURenderPassColorAttachment/loadOp}} |must| be {{GPULoadOp/"clear"}}. 1. |this|.{{GPURenderPassColorAttachment/storeOp}} |must| be {{GPUStoreOp/"discard"}}.',
         transientDepthAttachmentOperations:
