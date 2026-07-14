@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-twenty-seventh-review fixes pending acceptance
+Status: Accepted
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -1354,9 +1354,28 @@ Post-twenty-seventh-review pre-commit verification:
 - `git diff --check`, clean-commit acceptance, and a fresh isolated exact no-findings
   review remain required before audit closure
 
-The twenty-seventh-review correction must now pass targeted and full verification,
-clean acceptance, and a fresh exact no-findings review before this audit can return to
-Accepted status. The required feature-branch push remains ordered after that closure.
+Clean twenty-seventh-review checkpoint acceptance (`af99e37`):
+
+- initial and final repository evidence named exact commit
+  `af99e37670960f08dab305bcc032f742120a0c0b` with an empty working tree
+- production bootstrap, both TypeScript consumers, complete package/example build, and
+  diff check passed in 3,046 ms, 4,982 ms, 4,785 ms, and 14 ms
+- focused acceptance passed 455/455; the complete suite reported 853 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- both official 1D texture markers passed; all capability, binding, copy, diagnostic,
+  baseline, historical-JavaScript, declaration, documentation, and example matrices passed
+- both 20,000-cycle steady-state phases passed at observed 1.246 and 0.997 microseconds
+  per cycle with zero binding-order sorts or preparation work
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the browser proof; all 11 ordinary
+  examples passed, the unavailable target failed with `ERR_CONNECTION_REFUSED`, and the
+  managed Vite server stopped successfully with port 4173 closed
+- the twenty-eighth isolated strict review of that exact accepted checkpoint returned
+  exactly `No findings.`
+
+This audit accepts the implementation checkpoint above. The audit-only closure commit
+must repeat clean acceptance and receive a new exact no-findings review; the final
+handoff records that commit and the required feature-branch push without recursively
+editing this document after its own review.
 
 ## Explicit Non-Goals
 
