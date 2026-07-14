@@ -20,7 +20,8 @@ Resolved direction:
 - Default recording omits stacks, full descriptors, command payloads, and retained `SubmittedWork` values. Deep capture may add stacks/descriptors but stops by operation count, duration, evidence bytes, or explicit stop.
 - OOM incidents identify the exact trigger operation while reporting other Scratch-owned allocations only as pressure contributors. Logical footprint is not physical VRAM, and non-Scratch browser/driver/system allocations remain unknown.
 - Uncaptured errors coexist with application listeners and receive temporal or unknown attribution. Device loss freezes pending/current context without claiming the latest operation caused loss or that rollback restored usable resources.
-- Internal staging allocation, samplers, query sets, bindings, pipelines, encoders, queue operations, mapping, and submission-level native attribution remain explicit deferred families.
+- Historical phase statement (superseded): internal staging allocation, samplers, query sets, bindings, pipelines, encoders, queue operations, mapping, and submission-level native attribution were deferred by the first allocation-only slice.
+- Current replacement: supporting-object and pipeline creation use acknowledged operations. Sampler, QuerySet, BindLayout, BindSet, and async pipeline candidates settle scoped native evidence before becoming public; submission and queue work use the bounded native-observation model. Mapping remains represented through explicit readback-operation lifecycles rather than a blanket claim over every browser-owned native action.
 
 This closes the first native asynchronous error-model slice without turning `SubmittedWork` history into a runtime log or adding instrumentation to the command hot path. See ADR-032 and `scratch-gpu-operation-provenance-audit.md`.
 
@@ -32,12 +33,12 @@ Resolved direction:
 - Construction snapshots the complete recreation descriptor, including immutable normalized size and materialized `viewFormats`; replacement follows create-before-swap failure atomicity.
 - Concrete texture handles use private slots, reject field/prototype shadowing and subclass construction, and default optional dimensions only from `undefined`, never `null`.
 - Changed resize keeps the old allocation current while a scoped candidate settles, then advances `allocationVersion` once, preserves `contentEpoch`, marks the replacement empty, clears allocation-scoped views, and destroys the old texture without a queue-completion wait.
-- Bind sets derive views from their layout dimension; color/depth attachments select one 2D mip/layer and preflight it plus cross-attachment render extents/sample counts before encoder creation. Uploads, external-image uploads, every native texture copy direction, draw, and dispatch resolve or validate the current allocation at use time. Stable logical commands remain reusable; stale ranges and readiness still fail.
-- Compatibility-mode bind preflight re-derives omitted `textureBindingViewDimension` per allocation (`2d` for one layer, `2d-array` for multiple); binding consumers that no longer match fail synchronously, while explicit compatible binding contracts and core-feature single-layer bindings remain reusable. Raw views and render attachments remain governed by texture-view and pass rules rather than this binding-only constraint.
+- Current replacement: persistent bindings use explicit `TextureViewSpec` values and acknowledged `BindSet.prepare()`. BindLayout dimensions remain explicit, prepared native views are allocation-scoped, replacement makes the BindSet stale, and submission never infers a new dimension or repairs the set. Color/depth attachments independently lower their logical views per submission and preflight current render extents, sample counts, usage, and overlap before native work.
+- Uploads, external-image uploads, every native texture copy direction, draw, dispatch, and pass-owned query sets resolve or validate current-use lifecycle and allocation facts before native effects. Stable logical commands and pass specs remain reusable; stale or disposed dependencies still fail.
 - Surface coordination is explicit through `surface.resize(...)` followed by `await texture.resize(surface.size)`. Core owns no observer, size-provider closure, runtime texture scan, or hidden surface relationship.
 - The deterministic `Texture Resize` browser proof reuses one logical texture, pass spec, bind set, and draw command, then verifies physical identity replacement, exact epochs, destruction, visible rendering, and exact padded readback bytes.
 
-This closes the resize-invalidation gap without promoting surface policy or a second persistent logical view abstraction into Scratch core. See ADR-031 and `scratch-texture-resize-audit.md`.
+This closes the resize-invalidation gap without promoting surface policy or native texture-view ownership into logical resources. See ADR-031, ADR-036, ADR-037, and `scratch-texture-resize-audit.md`.
 
 ### Physical Queue Timeline Ordering
 

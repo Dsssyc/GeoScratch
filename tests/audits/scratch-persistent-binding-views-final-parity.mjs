@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 443
-const expectedFullSuitePasses = 850
+const expectedFocusedAcceptancePasses = 446
+const expectedFullSuitePasses = 853
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -656,9 +656,14 @@ const behaviorTestContracts = [
         'revalidates readback source usage against replacement allocations before staging copy effects',
     ]),
     behaviorTestContract('tests/scratch-query-set.test.js', [
+        'rejects a disposed compute timestamp query set before encoder creation',
+        'rejects a disposed render timestamp query set before attachment or encoder creation',
         'rejects identical compute timestamp write indices before encoder creation',
         'rejects identical render timestamp write indices before encoder creation',
         'revalidates query resolve usage against replacement allocations before encoder effects',
+    ]),
+    behaviorTestContract('tests/scratch-occlusion-query.test.js', [
+        'rejects a disposed render occlusion query set before attachment or encoder creation',
     ]),
     behaviorTestContract('tests/scratch-native-indirect-execution.test.js', [
         'revalidates every fixed-function buffer usage against replacement allocations before encoder effects',
@@ -901,6 +906,16 @@ const documentationAudit = Object.freeze({
     timestampWriteIndices: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
         hasAll(source, [ 'timestampWrites', 'begin', 'end', 'distinct' ])
     ),
+    querySetLifecyclePreflight: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
+        hasAll(source, [
+            'pass-owned',
+            'QuerySetResource',
+            'lifecycle',
+            'attachment view',
+            'command encoder',
+            'current-use',
+        ])
+    ),
     programRequirementSnapshots: [ finalDocs.programs, finalDocs.programsZh ].every(source =>
         hasAll(source, [ 'Pipeline', 'layoutRequirements', 'snapshot', 'Command' ])
     ) && hasAll(finalDocs.bindingDecision, [ 'Pipeline requirement snapshot', 'mutable Program property' ]),
@@ -961,12 +976,37 @@ const documentationAudit = Object.freeze({
         activeReviewSource.includes(
             'Current replacement: schema v5 and acknowledged explicit BindSet preparation.'
         ) &&
+        activeReviewSource.includes(
+            'Current replacement: supporting-object and pipeline creation use acknowledged operations.'
+        ) &&
+        activeReviewSource.includes(
+            'Current replacement: persistent bindings use explicit `TextureViewSpec` values and acknowledged `BindSet.prepare()`.'
+        ) &&
         !activeReviewSource.includes(
             '- schema-v4 submission targets, discriminated native locations, bounded current'
         ) &&
         !activeReviewSource.includes(
             '- explicit deferred sampler/query-set/bind-layout and independent lazy'
+        ) &&
+        !activeReviewSource.includes(
+            'Internal staging allocation, samplers, query sets, bindings, pipelines, encoders, queue operations, mapping, and submission-level native attribution remain explicit deferred families.'
+        ) &&
+        !activeReviewSource.includes(
+            'Bind sets derive views from their layout dimension'
+        ) &&
+        !activeReviewSource.includes(
+            'Compatibility-mode bind preflight re-derives omitted `textureBindingViewDimension`'
         ),
+    submissionViewOwnership: [ finalDocs.commands, finalDocs.commandsZh ].every(source =>
+        hasAll(source, [
+            'persistent binding',
+            'attachment',
+            'submission-scoped',
+            'TextureViewSpec',
+        ]) &&
+        !source.includes('Submission never creates a texture view or bind group') &&
+        !source.includes('Submission\n\u7edd\u4e0d\u521b\u5efa texture view \u6216 bind group')
+    ),
 })
 const documentationStatus = Object.values(documentationAudit).every(Boolean)
 const officialSpecificationEvidence = acceptanceMode

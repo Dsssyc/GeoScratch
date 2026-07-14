@@ -113,9 +113,10 @@ attribution 指向该 location。
 每个被引用的 BindSet 都必须已经处于 `prepared`。Command preflight 会在
 encoder creation 前校验其不可变 slot table、prepared allocation snapshot、
 Program requirement、named dynamic offset 与显式 resource access。Submission
-绝不创建 texture view 或 bind group，不调用 `prepare()`，也不等待、重试或修复
-stale state。BindSet preparation 是独立 acknowledged
-`bind-set-preparation` operation。
+可以把 pass-owned `TextureViewSpec` 针对 current allocation 降低成
+submission-scoped attachment view；但绝不创建 persistent binding texture view
+或 bind group，不调用 `prepare()`，也不等待、重试或修复 stale binding state。
+BindSet preparation 是独立 acknowledged `bind-set-preparation` operation。
 
 Draw 与 dispatch execution contract 会在构造时完成 normalization 并锁定。它们的 pipeline、bind/index/vertex state、count、dynamic offsets、resource declarations、readiness policy 与 fallback reference 不能在 validation 和 encoding 之间漂移; 被引用的 bind set 也会暴露同一份不可变的 normalized binding table。`dispose()` 仍是显式可变的 lifecycle transition，并通过只读 `isDisposed` state 暴露，而不是可写 flag。
 

@@ -193,6 +193,8 @@ export class RenderPassSpec {
         }
 
         this.runtime.assertActive()
+        this.timestampWrites?.querySet.assertUsable()
+        this.occlusionQuerySet?.assertUsable()
     }
 
     hasEncoderSideEffects(): boolean {
@@ -324,6 +326,7 @@ export class ComputePassSpec {
         }
 
         this.runtime.assertActive()
+        this.timestampWrites?.querySet.assertUsable()
     }
 
     createComputePassDescriptor(): GPUComputePassDescriptor {

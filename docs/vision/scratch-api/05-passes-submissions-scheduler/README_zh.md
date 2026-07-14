@@ -61,7 +61,9 @@ const simulationPass = runtime.createComputePass({
 query index 必须 distinct。Scratch 在创建 `PassSpec` 时、encoder creation 之前
 拒绝重复 index。`occlusionQuerySet` 仅用于 render pass，并要求 `occlusion`
 query set。Query result transfer 不隐含在 pass spec 中；resolve 与 readback
-仍然是显式 command 或 operation。
+仍然是显式 command 或 operation。Submission preflight 会在创建任何
+attachment view 或 command encoder 前重新校验每个 pass-owned
+`QuerySetResource` 的 lifecycle；构造时校验不能替代 current-use validation。
 
 Attachment 按实际逻辑 view 校验，而不是只看 parent texture。持久
 `TextureViewSpec` 必须包含 `RENDER_ATTACHMENT` view usage，并满足完整的

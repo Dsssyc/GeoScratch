@@ -113,9 +113,11 @@ bundle around a standalone or pass-command location and report
 Every referenced BindSet must already be `prepared`. Command preflight checks
 its immutable slot table, prepared allocation snapshot, Program requirements,
 named dynamic offsets, and declared resource access before encoder creation.
-Submission never creates a texture view or bind group, calls `prepare()`, waits,
-retries, or repairs stale state. BindSet preparation is an independently
-acknowledged `bind-set-preparation` operation.
+Submission may create submission-scoped attachment views by lowering a pass-owned
+`TextureViewSpec` against the current allocation. It never creates a persistent binding
+texture view or bind group, calls `prepare()`, waits, retries, or repairs stale binding
+state. BindSet preparation is an independently acknowledged
+`bind-set-preparation` operation.
 
 Draw and dispatch execution contracts are normalized and locked at construction. Their pipeline, bind/index/vertex state, count, dynamic offsets, resource declarations, readiness policy, and fallback reference cannot drift between validation and encoding; referenced bind sets expose the same immutable normalized binding table. `dispose()` remains the explicit mutable lifecycle transition, exposed through a read-only `isDisposed` state rather than a writable flag.
 

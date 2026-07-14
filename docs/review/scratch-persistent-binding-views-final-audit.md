@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-twenty-third-review fixes; clean acceptance and independent re-review pending
+Status: Post-twenty-fourth-review fixes; clean acceptance and independent re-review pending
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -24,8 +24,8 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 443
-referenced behavior tests; requires the complete suite to report exactly 850 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 446
+referenced behavior tests; requires the complete suite to report exactly 853 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -318,7 +318,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Twenty-three isolated review passes have examined the fixed-baseline diff and working tree.
+Twenty-four isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -340,7 +340,9 @@ Reviews fifteen through twenty-one confirmed allocation-replacement, acceptance,
 current-use validation, Surface ownership/authority, and transaction defects. The
 twenty-second review confirmed three P1 immutable-contract/native-capability defects and
 two P2 lifecycle/texture-capability defects. The twenty-third review confirmed two P1
-timestamp/performance-contract defects and one P2 living-document defect. No Critical
+timestamp/performance-contract defects and one P2 living-document defect. The
+twenty-fourth review confirmed one P1 pass-owned query lifecycle defect, two P2 current
+documentation defects, and the still-required feature-branch push gate. No Critical
 issue was reported.
 
 Resolved core finding:
@@ -765,6 +767,27 @@ Resolved twenty-third review findings:
    or lazy bind-group creation as retained current behavior.
 
 These findings bring the reproduced or source-verified reviewer total to 77.
+
+Resolved twenty-fourth review findings:
+
+1. Render and compute `PassSpec.assertUsable()` now revalidate every retained timestamp
+   or occlusion `QuerySetResource`. Submission already invokes that contract during its
+   complete preflight, so disposal after pass construction fails before attachment-view,
+   command-encoder, pass, queue, or logical-write effects. Three regressions independently
+   cover compute timestamp, render timestamp, and attachment-only render occlusion use.
+2. The command vision now distinguishes submission-scoped attachment views, which are
+   lowered from logical `TextureViewSpec` values, from allocation-scoped persistent
+   binding views, which only acknowledged BindSet preparation may create. It no longer
+   makes the false blanket claim that submission creates no texture views.
+3. The living intelligent-friendly review now marks its allocation-only provenance phase
+   as superseded and records the acknowledged supporting-object/pipeline, explicit
+   `TextureViewSpec`, and `BindSet.prepare()` contracts. It no longer presents inferred
+   binding dimensions or deferred supporting objects as current behavior.
+4. The reviewer correctly observed that the feature branch was not yet remote. That is
+   an ordered completion gate rather than an implementation repair: the Goal requires
+   the push only after clean acceptance and an exact no-findings re-review.
+
+These findings bring the reproduced or source-verified reviewer total to 81.
 
 ## Verification Record
 
@@ -1219,6 +1242,27 @@ Post-twenty-third-review pre-commit verification:
 - `npm run build` emits the package and all 14 runnable examples; the exact native
   inventory passes all 43 call sites after reindexing the three shifted command sites
 - clean-commit acceptance and a fresh isolated exact no-findings review remain required
+
+Post-twenty-fourth-review pre-commit verification:
+
+- three pass-owned QuerySet regressions first produced two missing diagnostics and one
+  render path that created an attachment view before rejecting a disposed occlusion set;
+  all three now pass with zero native view, encoder, pass, queue, or submission effects
+- the strengthened documentation audit first failed both the living-review and
+  submission-view-ownership contracts; both now pass, and the older resize-documentation
+  test was updated after it correctly exposed its obsolete blanket no-view assertion
+- the complete affected query, pass, readiness, indeterminacy, and final-contract set
+  passed 97 tests with only the explicit final-acceptance identity pending before the
+  full-suite run
+- `npm run typecheck` passes both TypeScript consumers; `npm test` reports exactly 853
+  passing with only the two exact browser/final-acceptance identities pending
+- `npm run build` emits the package and all 14 runnable examples; fixed-history
+  structural parity locks the 446-test focused acceptance count and passes every
+  capability, official binding, native-copy, behavior-title, bilingual-documentation,
+  ADR, production-emit, and historical-baseline gate while correctly reporting
+  `incomplete` for the dirty pre-commit tree
+- `git diff --check` passes; clean-commit acceptance, a new isolated exact no-findings
+  review, final audit closure, and the required feature-branch push remain pending
 
 The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.

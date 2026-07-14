@@ -270,6 +270,48 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         await submitted.done
     })
 
+    it('rejects a disposed compute timestamp query set before encoder creation', async() => {
+
+        const fixture = await createQueryFixture()
+        fixture.querySet.dispose()
+
+        const diagnostic = await expectScratchDiagnostic(() => fixture.runtime
+            .createSubmission({ validation: 'throw' })
+            .compute(fixture.pass, [])
+            .submit(), {
+            code: 'SCRATCH_RESOURCE_DISPOSED',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(diagnostic.subject).to.deep.equal(fixture.querySet.subject)
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.computePasses).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
+    it('rejects a disposed render timestamp query set before attachment or encoder creation', async() => {
+
+        const fixture = await createRenderTimestampFixture()
+        const draw = await createRenderCommandFixture(fixture.runtime, fixture.pass)
+        fixture.querySet.dispose()
+
+        const diagnostic = await expectScratchDiagnostic(() => fixture.runtime
+            .createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [ draw ])
+            .submit(), {
+            code: 'SCRATCH_RESOURCE_DISPOSED',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(diagnostic.subject).to.deep.equal(fixture.querySet.subject)
+        expect(fixture.calls.textureViews).to.have.length(0)
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
     it('rejects identical compute timestamp write indices before encoder creation', async() => {
 
         const fixture = await createQueryFixture()

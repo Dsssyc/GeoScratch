@@ -62,7 +62,9 @@ provided, their in-range query indices must be distinct. Scratch rejects duplica
 indices while creating the `PassSpec`, before encoder creation. `occlusionQuerySet`
 is render-pass-only and requires an `occlusion` query set. Query result transfer is
 not implicit in pass specs; resolve and readback remain explicit commands or
-operations.
+operations. Submission preflight revalidates every pass-owned `QuerySetResource`
+lifecycle before creating any attachment view or command encoder; construction-time
+validation never substitutes for current-use validation.
 
 An attachment is validated against its actual logical view, not only its parent
 texture. A persistent `TextureViewSpec` must include `RENDER_ATTACHMENT` view

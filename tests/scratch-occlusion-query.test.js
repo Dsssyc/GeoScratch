@@ -174,6 +174,27 @@ describe('scratch occlusion query bracket commands', () => {
         await submitted.done
     })
 
+    it('rejects a disposed render occlusion query set before attachment or encoder creation', async() => {
+
+        const fixture = await createOcclusionFixture()
+        fixture.querySet.dispose()
+
+        const diagnostic = await expectScratchDiagnostic(() => fixture.runtime
+            .createSubmission({ validation: 'throw' })
+            .render(fixture.pass, [])
+            .submit(), {
+            code: 'SCRATCH_RESOURCE_DISPOSED',
+            severity: 'error',
+            phase: 'resource',
+        })
+
+        expect(diagnostic.subject).to.deep.equal(fixture.querySet.subject)
+        expect(fixture.calls.textureViews).to.have.length(0)
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+        expect(fixture.calls.queueSubmissions).to.have.length(0)
+    })
+
     it('keeps occlusion results GPU-side until explicit resolve and readback', async() => {
 
         const fixture = await createOcclusionFixture()

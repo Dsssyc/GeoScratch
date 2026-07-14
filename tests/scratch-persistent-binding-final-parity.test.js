@@ -56,8 +56,8 @@ describe('Scratch persistent binding final parity', () => {
             'officialWebIdlSource',
             'clampedUnsignedShort',
             'nearestEvenInteger',
-            'const expectedFocusedAcceptancePasses = 443',
-            'const expectedFullSuitePasses = 850',
+            'const expectedFocusedAcceptancePasses = 446',
+            'const expectedFullSuitePasses = 853',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -87,6 +87,9 @@ describe('Scratch persistent binding final parity', () => {
             'snapshots Surface attachment view descriptors when the PassSpec is created',
             'rejects identical compute timestamp write indices before encoder creation',
             'rejects identical render timestamp write indices before encoder creation',
+            'rejects a disposed compute timestamp query set before encoder creation',
+            'rejects a disposed render timestamp query set before attachment or encoder creation',
+            'rejects a disposed render occlusion query set before attachment or encoder creation',
             'SCRATCH_SURFACE_CONTEXT_IN_USE',
             'SCRATCH_SURFACE_CONTEXT_NOT_OWNED',
             'SCRATCH_SURFACE_CONFIGURATION_FAILED',
@@ -448,15 +451,15 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence.mocha).to.deep.include({
             status: 'passed',
-            tests: 443,
-            passes: 443,
+            tests: 446,
+            passes: 446,
             failures: 0,
             pending: 0,
         })
         expect(result.executionEvidence.fullSuite).to.deep.include({
             status: 'passed',
-            tests: 852,
-            passes: 850,
+            tests: 855,
+            passes: 853,
             failures: 0,
             pending: 2,
         })
