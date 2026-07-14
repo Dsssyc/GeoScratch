@@ -10,7 +10,8 @@ const nativeCalls = Object.freeze([
     [ 'GPUDevice.createCommandEncoder', /\b(?:device|this\.runtime\.device)\.createCommandEncoder\(/ ],
     [ 'GPUDevice.createBindGroup', /\b(?:this|bindSet)\.runtime\.device\.createBindGroup\(/ ],
     [ 'GPUTexture.createView', /(?:\.gpuTexture|\.getCurrentTexture\(\))\.createView\(/ ],
-    [ 'GPUCanvasContext.getCurrentTexture', /\bthis\.context\.getCurrentTexture\(/ ],
+    [ 'GPUCanvasContext.getConfiguration', /\b(?:surface|identity)\.context\.getConfiguration\(/ ],
+    [ 'GPUCanvasContext.getCurrentTexture', /\b(?:this|identity)\.context\.getCurrentTexture\(/ ],
     [ 'GPUCommandEncoder.finish', /\bencoder!?\.finish\(/ ],
     [ 'GPUCommandEncoder.copyBufferToBuffer', /\b(?:commandEncoder|encoder)\.copyBufferToBuffer\(/ ],
     [ 'GPUCommandEncoder.copyTextureToTexture', /\bcommandEncoder\.copyTextureToTexture\(/ ],
@@ -57,14 +58,14 @@ describe('scratch submission native source audit', () => {
         const callSites = scanNativeCallSites(scratchRoot)
         const inventoryRows = audit.match(/^\| N\d+ \|.*\|$/gm) ?? []
 
-        expect(callSites).to.have.length(41)
+        expect(callSites).to.have.length(42)
         expect(countByFile(callSites)).to.deep.equal({
             'packages/geoscratch/src/scratch/binding.ts': 2,
             'packages/geoscratch/src/scratch/command.ts': 23,
             'packages/geoscratch/src/scratch/pass.ts': 1,
             'packages/geoscratch/src/scratch/readback.ts': 4,
             'packages/geoscratch/src/scratch/submission.ts': 9,
-            'packages/geoscratch/src/scratch/surface.ts': 1,
+            'packages/geoscratch/src/scratch/surface.ts': 2,
             'packages/geoscratch/src/scratch/texture.ts': 1,
         })
         expect(inventoryRows).to.have.length(callSites.length)
@@ -106,7 +107,7 @@ describe('scratch submission native source audit', () => {
             /nativeObservation\.issue\(\s*'pass-begin',[\s\S]{0,350}\(\) => encoder\.beginRenderPass\(createRenderPassDescriptor/
         )
         expect(pass).to.include('target.getCurrentTexture().createView(attachment.viewDescriptor)')
-        expect(surface).to.include('return this.context.getCurrentTexture()')
+        expect(surface).to.include('return identity.context.getCurrentTexture()')
 
         for (const nativeCall of [
             'device.createCommandEncoder',

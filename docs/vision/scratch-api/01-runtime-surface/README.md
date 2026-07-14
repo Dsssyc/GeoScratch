@@ -74,13 +74,41 @@ calling `GPUCanvasContext.configure()`. A second live `Surface` for that context
 is rejected with `SCRATCH_SURFACE_CONTEXT_IN_USE`, whether it comes from the same
 runtime or another runtime. The diagnostic identifies both the attempted Surface
 and the current owner; rejection performs no canvas, configure, or runtime-registry
-effect.
+effect. Every later Surface operation rechecks exact receiver identity; forged or
+stale aliases fail with `SCRATCH_SURFACE_CONTEXT_NOT_OWNED` before lifecycle or
+presentation effects.
+
+Surface ownership, configuration, and lifecycle fields are read-only observations.
+Scratch captures ownership facts in a private receiver record and keeps terminal
+disposal private. Ordinary untyped JavaScript field writes cannot transfer the claim,
+make a live owner replaceable, or suppress cleanup: managed use rejects identity
+drift, while `dispose()` still cleans the originally claimed context and unregisters
+from the original runtime.
+
+`Surface.configure()` is a synchronous candidate transaction. Candidate format,
+alpha mode, and size remain local until canvas resize and native configure return.
+A synchronous native failure produces `SCRATCH_SURFACE_CONFIGURATION_FAILED`,
+restores the previous canvas dimensions when possible, and does not publish the
+candidate facts. WebGPU performs synchronous format/usage checks before replacing
+the context's current configuration, so the prior native configuration remains the
+matching current state at this boundary. Asynchronous native validation remains part
+of the WebGPU error model and is not fabricated as synchronous success/failure.
+
+Before managed use, Scratch calls `GPUCanvasContext.getConfiguration()` and compares
+its device, format, alpha mode, render-attachment usage, and current canvas size with
+the Surface facts. Direct native configure/unconfigure or canvas-size drift therefore
+produces `SCRATCH_SURFACE_CONFIGURATION_STALE` before current-texture or encoder
+effects. An explicit `surface.configure()` or `surface.resize()` may restore the
+owned configuration; submission never repairs it implicitly.
 
 `Surface.dispose()` unconfigures the context and releases the claim. A replacement
 Surface may claim it only after that explicit lifecycle transition. Construction
-that fails after claiming also releases its uncommitted claim. Scratch does not
-maintain multiple wrappers with hidden shared configuration or attempt to infer the
-current configuration from a borrowed presentation texture at submission time.
+that fails after claiming also releases its uncommitted claim. Logical disposal,
+runtime unregister, and claim release complete even if a non-conforming native
+`unconfigure()` throws; the structured `SCRATCH_SURFACE_UNCONFIGURE_FAILED` is
+reported after cleanup. Runtime disposal retains that failure, completes every other
+owned cleanup and device destruction, then rethrows the first retained failure.
+Scratch does not maintain multiple wrappers with hidden shared configuration.
 
 ## Surface Is Not A TextureResource
 

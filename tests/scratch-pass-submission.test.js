@@ -388,15 +388,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         const overlappingSurfacePass = runtime.createRenderPass({
             color: [ { target: surface }, { target: surface } ],
         })
-        const aliasedSurface = Object.assign(Object.create(surface), {
-            id: 'forged-surface-alias',
-            label: 'forged Surface alias',
-        })
-        const overlappingContextPass = runtime.createRenderPass({
-            color: [ { target: surface }, { target: aliasedSurface } ],
-        })
-
-        for (const pass of [ overlappingViewPass, overlappingSurfacePass, overlappingContextPass ]) {
+        for (const pass of [ overlappingViewPass, overlappingSurfacePass ]) {
             await expectScratchDiagnostic(() => runtime.submission().render(pass).submit(), {
                 code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
                 severity: 'error',
@@ -431,6 +423,36 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         expect(fake.calls.queueSubmissions).to.have.length(1)
 
         await submitted.done
+    })
+
+    it('rejects a non-owner Surface alias before presentation effects', async() => {
+
+        const fake = createFakeGpu()
+        const canvas = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const owner = runtime.createSurface(canvas.canvas, {
+            format: 'bgra8unorm',
+            size: { width: 8, height: 8 },
+        })
+        const alias = Object.assign(Object.create(owner), {
+            id: 'forged-pass-surface-alias',
+            label: 'forged pass Surface alias',
+        })
+
+        await expectScratchDiagnostic(() => runtime.createRenderPass({
+            color: [ { target: alias } ],
+        }), {
+            code: 'SCRATCH_SURFACE_CONTEXT_NOT_OWNED',
+            severity: 'error',
+            phase: 'runtime',
+        })
+
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        expect(fake.calls.textureViews).to.have.length(0)
+        expect(fake.calls.renderPasses).to.have.length(0)
+        expect(fake.calls.queueSubmissions).to.have.length(0)
+        expect(canvas.context.getConfigurationCalls).to.equal(0)
+        expect(canvas.context.currentTextureCalls).to.equal(0)
     })
 
     it('rejects depth-stencil formats in color attachment slots before encoder creation', async() => {

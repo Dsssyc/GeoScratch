@@ -221,6 +221,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         alphaMode: 'opaque',
         size: { width: 2, height: 2 },
     })
+    // @ts-expect-error Surface context ownership is read-only
+    surface.context = surface.context
+    // @ts-expect-error Surface runtime ownership is read-only
+    surface.runtime = runtime
+    // @ts-expect-error Surface configuration observations are read-only
+    surface.format = 'rgba8unorm'
+    // @ts-expect-error Surface lifecycle observations are read-only
+    surface.isDisposed = false
 
     const buffer: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch buffer',

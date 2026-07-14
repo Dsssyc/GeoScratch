@@ -83,12 +83,13 @@ a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 | N37 | `packages/geoscratch/src/scratch/submission.ts:876` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
 | N38 | `packages/geoscratch/src/scratch/submission.ts:1204` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
 | N39 | `packages/geoscratch/src/scratch/submission.ts:1209` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
-| N40 | `packages/geoscratch/src/scratch/surface.ts:121` | `GPUCanvasContext.getCurrentTexture()` | Submission attachment lowering reaches it inside `pass-begin`; a direct public method call has no owner. | Observed submission; direct call deferred |
-| N41 | `packages/geoscratch/src/scratch/texture.ts:488` | persistent attachment `GPUTexture.createView()` | Called only inside the owning submission `attachment-view` issue with pass, slot, view, resource, and allocation facts. | Observed submission attachment |
+| N40 | `packages/geoscratch/src/scratch/surface.ts:332` | `GPUCanvasContext.getConfiguration()` | Surface/pass preflight synchronously compares current native configuration with the private logical-owner identity before presentation effects; thrown inspection is wrapped as a structured stale diagnostic. | Deterministic Surface preflight |
+| N41 | `packages/geoscratch/src/scratch/surface.ts:161` | `GPUCanvasContext.getCurrentTexture()` | Submission attachment lowering reaches the privately claimed context inside `pass-begin`; a direct public method call has no owner. | Observed submission; direct call deferred |
+| N42 | `packages/geoscratch/src/scratch/texture.ts:488` | persistent attachment `GPUTexture.createView()` | Called only inside the owning submission `attachment-view` issue with pass, slot, view, resource, and allocation facts. | Observed submission attachment |
 
 Inventory totals:
 
-- 41 source call sites, all classified.
+- 42 source call sites, all classified.
 - 9 calls physically owned by `submission.ts`.
 - 20 command-encoder/pass calls reached through submission command wrappers.
 - 3 shared queue-action calls observed in submission replay, with direct
@@ -97,6 +98,8 @@ Inventory totals:
 - 2 persistent binding calls independently acknowledged by BindSet preparation.
 - 2 surface current-texture acquisition/view calls observed at `pass-begin` on
   the submission path; direct `Surface.getCurrentTexture()` remains deferred.
+- 1 synchronous Surface configuration-inspection call executes during owner/current
+  preflight before any current-texture or encoder effect.
 - 1 submission-scoped persistent attachment view call observed per attachment slot.
 - 0 unresolved or unknown source call sites.
 

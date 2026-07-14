@@ -85,8 +85,11 @@ depth/stencil attachments. Submission preflight requires color attachment region
 to be pairwise disjoint. Views of one texture overlap when they select the same
 mip and array layer, or the same 3D `depthSlice`; distinct layers and slices remain
 valid. Surface creation separately enforces one live owner per canvas context.
-Submission still compares Surface context identity defensively and rejects an alias
-before borrowing a current texture or creating an encoder.
+Pass creation and submission both require the exact owner and compare the current
+`GPUCanvasContext.getConfiguration()` device, format, alpha mode, render-attachment
+usage, and canvas size with Surface facts. A forged alias or external configuration
+drift fails before borrowing a current texture or creating an encoder. Submission
+still compares Surface context identity defensively when checking region overlap.
 
 Pass specs do not store commands. This prevents stale command lists from surviving across submissions.
 

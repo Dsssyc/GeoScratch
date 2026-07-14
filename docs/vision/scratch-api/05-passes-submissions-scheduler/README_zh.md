@@ -82,8 +82,11 @@ view，并要求单个 mip 与单个选定 array layer。`2d-array` view 通过
 attachment region pairwise disjoint。同一 texture 上选择相同 mip 与 array layer，
 或相同 3D `depthSlice` 的 view 会重叠；不同 layer 与 slice 仍然合法。同一个
 canvas context 在 Surface 创建阶段另有单一 live owner 门禁。Submission 仍会
-防御性比较 Surface context identity，并在借用 current texture 或创建 encoder
-之前拒绝 alias。
+在 pass 创建与提交阶段要求精确 owner，并把 current
+`GPUCanvasContext.getConfiguration()` 的 device、format、alpha mode、
+render-attachment usage 与 canvas size 同 Surface facts 比较。Forged alias 或
+外部 configuration drift 会在借用 current texture 或创建 encoder 前失败。
+Submission 在检查 region overlap 时仍会防御性比较 Surface context identity。
 
 Pass spec 不存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
 

@@ -916,12 +916,27 @@ export function createFakeCanvas() {
     const context = {
         configureCalls: [],
         unconfigureCalls: 0,
+        getConfigurationCalls: 0,
+        configuration: null,
         currentTextureCalls: 0,
         configure(descriptor) {
             this.configureCalls.push(descriptor)
+            this.configuration = {
+                usage: 0x10,
+                viewFormats: [],
+                colorSpace: 'srgb',
+                ...descriptor,
+            }
         },
         unconfigure() {
             this.unconfigureCalls++
+            this.configuration = null
+        },
+        getConfiguration() {
+            this.getConfigurationCalls++
+            return this.configuration === null
+                ? null
+                : { ...this.configuration, viewFormats: [ ...this.configuration.viewFormats ] }
         },
         getCurrentTexture() {
             this.currentTextureCalls++

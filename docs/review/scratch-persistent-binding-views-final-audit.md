@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-eighteenth-review fixes; clean acceptance and independent re-review pending
+Status: Post-nineteenth-review fixes; clean acceptance and independent re-review pending
 Decisions: ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -24,8 +24,8 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 399
-referenced behavior tests; requires the complete suite to report exactly 822 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 406
+referenced behavior tests; requires the complete suite to report exactly 829 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -202,7 +202,7 @@ admits both. Every path is a direct encoder copy with no CPU round trip.
 ## Diagnostics Evidence
 
 - Goal-start diagnostic code inventory: 158
-- Final diagnostic code inventory: 197
+- Final diagnostic code inventory: 201
 - Unexpected missing codes: 0
 - `SCRATCH_CODEC_STRUCTURAL_HASH_MISMATCH` is intentionally replaced by
   `SCRATCH_LAYOUT_ABI_MISMATCH` and `SCRATCH_CODEC_SCHEMA_MISMATCH`.
@@ -318,7 +318,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Eighteen isolated review passes have examined the fixed-baseline diff and working tree.
+Nineteen isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -626,7 +626,31 @@ Resolved eighteenth review finding:
    an explicit replacement can be created. Submission retains its context-identity
    overlap check as defense against forged JavaScript aliases.
 
-These findings bring the reproduced or source-verified reviewer total to 58.
+The eighteenth-review ownership fix was accepted on clean checkpoint `aab9630`.
+The next isolated review reported the three lifecycle defects below.
+
+Resolved nineteenth review findings:
+
+1. `Surface.dispose()` now completes logical disposal, runtime unregister, and weak
+   claim release in `finally`. A non-conforming `unconfigure()` throw becomes
+   `SCRATCH_SURFACE_UNCONFIGURE_FAILED` only after those facts commit. Runtime disposal
+   retains the first cleanup failure, continues surfaces, pipelines, BindSets, layouts,
+   readbacks, resources, diagnostics, and device destruction, then rethrows it.
+2. `Surface.configure()` now keeps candidate format, alpha mode, and size local until
+   synchronous native success. On synchronous failure it restores the prior canvas
+   dimensions when possible, preserves prior committed facts, and emits
+   `SCRATCH_SURFACE_CONFIGURATION_FAILED` with the native cause. Managed use additionally
+   compares `GPUCanvasContext.getConfiguration()` and canvas size against current Surface
+   facts; external configure, unconfigure, or resize drift emits
+   `SCRATCH_SURFACE_CONFIGURATION_STALE` before current-texture or encoder effects.
+3. Every Surface lifecycle and presentation path verifies exact weak-claim owner
+   identity. Forged aliases now emit `SCRATCH_SURFACE_CONTEXT_NOT_OWNED` before
+   configure, dispose, current-texture, pass, or encoder effects, even when used as the
+   pass's only attachment.
+
+These findings bring the reproduced or source-verified reviewer total to 61. The
+`getConfiguration()`-driven external-drift and private-identity cleanup regressions are
+recorded as same-root proactive coverage rather than additional reviewer findings.
 
 ## Verification Record
 
@@ -907,6 +931,55 @@ Post-eighteenth-review pre-commit verification:
   identities pending; `git diff --check` passed
 - the acceptance runner now locks 399 focused cases and the exact 822 + 2 full-suite
   total; a clean checkpoint and new isolated no-findings review remain required
+
+Clean checkpoint acceptance at `aab9630738010fe110d6a9cfdcf9517dcd65c9b7`:
+
+- runner verification was `acceptance` / `passed`; initial and final repository
+  evidence named the same exact commit and an empty working tree
+- live GPUWeb main, copy-rules, and Web IDL evidence passed all enum, texture-format,
+  and 50 required native markers with the recorded source hashes
+- runner-owned typecheck, complete build, and diff checking passed in 5,278 ms,
+  4,966 ms, and 19 ms
+- focused acceptance passed 399/399; the complete suite reported 822 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- both 20,000-cycle steady-state phases passed at observed 1.75 and 1.46 microseconds
+  per cycle
+- Chrome 150.0.7871.115 on Apple Metal 3 passed the headed persistent-binding proof;
+  all 11 ordinary examples passed with zero matrix failures
+- the managed Vite server started in 235 ms, completed its 18,398 ms lifecycle, stopped
+  cleanly, and left port 4173 closed; the unavailable target produced the required
+  non-zero `ERR_CONNECTION_REFUSED` result
+- the subsequent nineteenth isolated review found the three lifecycle issues recorded
+  above, so this checkpoint is evidence history rather than final approval
+
+Post-nineteenth-review pre-commit verification:
+
+- the five reviewer regressions first produced exactly five targeted RED failures:
+  stale reconfiguration metadata, forged lifecycle alias, direct unconfigure cleanup,
+  runtime-disposal continuation, and forged sole pass attachment
+- a sixth proactive RED proved direct native configure/unconfigure and canvas resize
+  drift reached `getCurrentTexture()` without a Scratch diagnostic
+- a seventh proactive RED proved mutating public context and lifecycle observations
+  could make a live owner appear replaceable and strand its original private claim
+- all seven new regressions plus the strengthened initial-configure rollback case passed
+  8/8 after implementation; Surface observations are now read-only in TypeScript,
+  managed use rejects public identity drift, and private lifecycle facts govern claim
+  replacement and disposal cleanup
+- current GPUWeb source and installed canonical types confirm
+  `GPUCanvasContext.getConfiguration()`; the final acceptance source gate now locks the
+  configure commit and unconfigure clear algorithms instead of repeating the superseded
+  claim that current configuration cannot be queried
+- fixed-history structural parity passed every capability, behavior-title, bilingual
+  documentation, ADR, production-emit, and baseline/historical contract while correctly
+  reporting `incomplete` on the dirty tree
+- the expanded submission-native inventory passed all 42 classified call sites,
+  including synchronous Surface configuration inspection
+- `npm run typecheck` passed, including the canonical WebGPU declaration consumer;
+  the complete package and all 14 runnable examples built successfully
+- `npm test` reported 829 passing with only the two exact browser/final-acceptance gate
+  identities pending
+- `git diff --check` passed; clean-commit acceptance and a new isolated no-findings
+  review remain required
 
 The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.

@@ -73,13 +73,40 @@ const surface = scratch.surface(canvas, {
 尺寸或调用 `GPUCanvasContext.configure()`。无论来自同一个 runtime 还是另一个
 runtime，同一 context 上的第二个 live `Surface` 都会收到
 `SCRATCH_SURFACE_CONTEXT_IN_USE`。Diagnostic 同时标识 attempted Surface 与当前
-owner；拒绝过程不产生 canvas、configure 或 runtime registry 副作用。
+owner；拒绝过程不产生 canvas、configure 或 runtime registry 副作用。后续每个
+Surface operation 都会重新核对 receiver 是否为精确 owner；forged 或 stale alias
+会在 lifecycle 或 presentation effect 前收到
+`SCRATCH_SURFACE_CONTEXT_NOT_OWNED`。
+
+Surface 的 ownership、configuration 与 lifecycle 字段都是只读 observation。
+Scratch 会把 ownership facts 记录到 receiver 私有记录中，并把 terminal disposal
+保留为私有事实。未类型化 JavaScript 的字段改写不能转移 claim、伪造 live owner
+可替换状态或通过普通字段写入阻止 cleanup：managed use 会拒绝 identity drift，
+而 `dispose()` 仍会清理最初 claim 的 context，并从最初的 runtime unregister。
+
+`Surface.configure()` 是同步 candidate transaction。Candidate format、alpha mode
+与 size 在 canvas resize 和 native configure 返回之前都只保留在局部。同步 native
+失败会产生 `SCRATCH_SURFACE_CONFIGURATION_FAILED`，尽可能恢复之前的 canvas
+尺寸，并且不发布 candidate facts。WebGPU 会在替换 context current configuration
+之前完成同步 format/usage 检查，因此在该边界上，之前的 native configuration
+仍是与逻辑事实匹配的 current state。异步 native validation 仍遵循 WebGPU error
+model，Scratch 不会虚构同步成功或失败。
+
+每次 managed use 前，Scratch 都会调用
+`GPUCanvasContext.getConfiguration()`，把其中的 device、format、alpha mode、
+render-attachment usage 与 current canvas size 同 Surface facts 比较。直接 native
+configure/unconfigure 或 canvas-size drift 因此会在 current-texture/encoder effect
+前产生 `SCRATCH_SURFACE_CONFIGURATION_STALE`。应用可显式调用
+`surface.configure()` 或 `surface.resize()` 修复 owned configuration；submission
+绝不隐式修复。
 
 `Surface.dispose()` 会 unconfigure context 并释放 claim。只有完成这次显式
 lifecycle transition 后，replacement Surface 才能重新 claim。构造过程若在
-claim 后失败，也会释放尚未 commit 的 claim。Scratch 不维护带隐式共享配置的
-多个 wrapper，也不会在 submission 时尝试从 borrowed presentation texture
-反推出 current configuration。
+claim 后失败，也会释放尚未 commit 的 claim。即使不符合规范的 native
+`unconfigure()` 抛错，logical disposal、runtime unregister 与 claim release 仍会
+完成，之后再报告结构化 `SCRATCH_SURFACE_UNCONFIGURE_FAILED`。Runtime disposal
+会保留该 failure，继续完成其余 owned cleanup 与 device destruction，最后重新
+抛出第一个 retained failure。Scratch 不维护带隐式共享配置的多个 wrapper。
 
 ## Surface 不是 TextureResource
 

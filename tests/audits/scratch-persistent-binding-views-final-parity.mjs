@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 399
-const expectedFullSuitePasses = 822
+const expectedFocusedAcceptancePasses = 406
+const expectedFullSuitePasses = 829
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -195,6 +195,11 @@ const capabilityRows = [
                 'claimSurfaceContext(',
                 'SCRATCH_SURFACE_CONTEXT_IN_USE',
                 'releaseSurfaceContext(',
+                'assertSurfaceContextOwner(',
+                'assertSurfaceConfigurationCurrent(',
+                "ReturnType<GPUCanvasContext['getConfiguration']>",
+                'SCRATCH_SURFACE_CONFIGURATION_FAILED',
+                'SCRATCH_SURFACE_UNCONFIGURE_FAILED',
             ]),
         implementation: 'scratch/runtime.ts, scratch/surface.ts, scratch/submission.ts',
         tests: 'scratch-runtime.test.js, scratch-surface.test.js, scratch-submitted-work-epochs.test.js',
@@ -553,6 +558,12 @@ const behaviorTestContracts = [
     behaviorTestContract('tests/scratch-surface.test.js', [
         'claims each canvas context exclusively until the owning Surface is disposed',
         'releases an uncommitted canvas-context claim after configure fails',
+        'rolls back logical and canvas facts after synchronous reconfigure failure',
+        'rejects forged Surface aliases before lifecycle or presentation effects',
+        'releases the privately claimed context after public identity and lifecycle drift',
+        'rejects external canvas-context drift before borrowing a current texture',
+        'releases Surface ownership even when native unconfigure fails',
+        'continues runtime cleanup after Surface unconfigure fails',
     ]),
     behaviorTestContract('tests/scratch-bind-dynamic-offsets.test.js', [
         'revalidates frozen dynamic offsets against the current replacement allocation',
@@ -586,6 +597,7 @@ const behaviorTestContracts = [
         'rejects invalid TextureResource attachment views and transient operations',
         'revalidates a persistent 3d attachment depthSlice after allocation replacement',
         'rejects overlapping color attachment regions while permitting disjoint 3d slices',
+        'rejects a non-owner Surface alias before presentation effects',
         'rejects depth-stencil formats in color attachment slots before encoder creation',
     ]),
     behaviorTestContract('tests/scratch-depth-stencil-attachments.test.js', [
@@ -778,7 +790,13 @@ const documentationAudit = Object.freeze({
     exclusiveSurfaceOwnership: [ finalDocs.runtimeSurface, finalDocs.runtimeSurfaceZh ].every(source =>
         hasAll(source, [
             'GPUCanvasContext',
+            'getConfiguration()',
             'SCRATCH_SURFACE_CONTEXT_IN_USE',
+            'SCRATCH_SURFACE_CONTEXT_NOT_OWNED',
+            'SCRATCH_SURFACE_CONFIGURATION_FAILED',
+            'SCRATCH_SURFACE_CONFIGURATION_STALE',
+            'SCRATCH_SURFACE_UNCONFIGURE_FAILED',
+            'candidate transaction',
             'dispose',
         ])
     ) && finalDocs.runtimeSurface.includes('exactly one live `Surface`') &&
@@ -790,6 +808,8 @@ const documentationAudit = Object.freeze({
         'Accepted',
         'WeakMap<GPUCanvasContext, Surface>',
         'exactly one live Scratch `Surface` owner',
+        'getConfiguration()',
+        'finally',
     ]),
     resourceViews: hasAll(finalDocs.resources, [ 'BufferRegion', 'TextureViewSpec', 'abiHash', 'schemaHash' ]),
     canonicalResourceDescriptors: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
@@ -1463,6 +1483,12 @@ async function fetchOfficialSpecificationEvidence(canonicalTypes) {
             '|renderViewDescriptor|.{{GPUTextureViewDescriptor/format}} |must| be a [=color renderable format=].',
         pairwiseColorAttachmentRegions:
             'The set of texture regions in |attachmentRegions| must be pairwise disjoint. That is, no two texture regions may overlap.',
+        canvasContextGetConfiguration:
+            'GPUCanvasConfiguration? getConfiguration();',
+        canvasConfigureCommitsConfiguration:
+            'Set |this|.{{GPUCanvasContext/[[configuration]]}} to |configuration|.',
+        canvasUnconfigureClearsConfiguration:
+            'Set |this|.{{GPUCanvasContext/[[configuration]]}} to `null`.',
         writeBufferContentsAlignment:
             '|contentsSize|, converted to bytes, is a multiple of 4 bytes.',
         writeBufferOffsetAlignment:

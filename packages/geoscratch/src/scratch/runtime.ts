@@ -567,39 +567,50 @@ export class ScratchRuntime {
         if (this.isDisposed) return
         this.#isDisposed = true
 
+        const failures: unknown[] = []
+        const dispose = (action: () => void) => {
+            try {
+                action()
+            } catch (error) {
+                failures.push(error)
+            }
+        }
+
         for (const surface of [ ...this._surfaces ]) {
-            surface.dispose()
+            dispose(() => surface.dispose())
         }
 
         for (const pipeline of runtimePipelineSnapshot(this)) {
-            pipeline.dispose()
+            dispose(() => pipeline.dispose())
         }
 
         for (const bindSet of runtimeBindSetSnapshot(this)) {
-            bindSet.dispose()
+            dispose(() => bindSet.dispose())
         }
 
         for (const layout of runtimeBindLayoutSnapshot(this)) {
-            layout.dispose()
+            dispose(() => layout.dispose())
         }
 
         for (const readback of runtimeReadbackOperationSnapshot(this)) {
-            readback.dispose()
+            dispose(() => readback.dispose())
         }
 
         for (const command of runtimeReadbackCommandSnapshot(this)) {
-            command.dispose()
+            dispose(() => command.dispose())
         }
 
         for (const resource of [ ...this._resources ]) {
-            resource.dispose()
+            dispose(() => resource.dispose())
         }
 
-        this.#diagnosticsController.dispose()
+        dispose(() => this.#diagnosticsController.dispose())
 
         if (this.device && typeof this.device.destroy === 'function') {
-            this.device.destroy()
+            dispose(() => this.device.destroy())
         }
+
+        if (failures.length > 0) throw failures[0]
     }
 
     _registerResource(resource: Resource): void {
