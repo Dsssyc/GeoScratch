@@ -101,6 +101,8 @@ validity, retained sample-count constraints, transient-attachment descriptor
 constraints, and format block dimensions. Only `undefined` optional size
 members receive WebGPU defaults; `null` is invalid input. It also validates the
 resource, runtime, device lifecycle, and native `createTexture()` capability.
+One-dimensional textures use the ordinary native maximum-mip calculation; Scratch
+does not impose a single-mip restriction that WebGPU does not have.
 
 Deterministic size failures use
 `SCRATCH_RESOURCE_DESCRIPTOR_INVALID`. ADR-032 adds operation-specific

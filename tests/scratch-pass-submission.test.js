@@ -568,15 +568,34 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         await submitted.done
     })
 
-    it('enforces clear-discard operations for transient Surface attachment views', async() => {
+    it('deep-locks normalized PassSpec attachments before reusable submission', async() => {
 
         const fixture = await createTriangleScene()
-        fixture.surface.configure({
+        const transientAttachment = await fixture.runtime.createTexture({
+            size: [ 64, 64 ],
+            format: 'bgra8unorm',
             usage: GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
         })
         const pass = fixture.runtime.createRenderPass({
-            color: [ { target: fixture.surface } ],
+            color: [ {
+                target: transientAttachment.view(),
+                clear: [ 0, 0, 0, 1 ],
+            } ],
         })
+
+        expect(Object.isExtensible(pass)).to.equal(false)
+        expect(Object.isFrozen(pass.color)).to.equal(true)
+        expect(Object.isFrozen(pass.color[0])).to.equal(true)
+        expect(Object.isFrozen(pass.color[0].clear)).to.equal(true)
+        expect(() => {
+            pass.color = []
+        }).to.throw(TypeError)
+        expect(() => {
+            pass.color.push({ target: fixture.surface })
+        }).to.throw(TypeError)
+        expect(() => {
+            pass.color[0].store = 'store'
+        }).to.throw(TypeError)
 
         expect(pass.color[0]).to.include({ load: 'clear', store: 'discard' })
         const submitted = fixture.runtime.submission().render(pass).submit()
@@ -585,43 +604,6 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
             storeOp: 'discard',
         })
         await submitted.done
-
-        for (const attachment of [
-            { target: fixture.surface, load: 'load' },
-            { target: fixture.surface, store: 'store' },
-            {
-                target: fixture.surface,
-                viewDescriptor: { usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT },
-            },
-        ]) {
-            await expectScratchDiagnostic(() => fixture.runtime.createRenderPass({
-                color: [ attachment ],
-            }), {
-                code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
-                severity: 'error',
-                phase: 'resource',
-            })
-        }
-    })
-
-    it('revalidates transient Surface operations after usage reconfiguration', async() => {
-
-        const fixture = await createTriangleScene()
-        fixture.surface.configure({
-            usage: GPU_TEXTURE_USAGE_TRANSIENT_ATTACHMENT | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
-        })
-
-        await expectScratchDiagnostic(() => fixture.runtime.submission()
-            .render(fixture.pass)
-            .submit(), {
-            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
-            severity: 'error',
-            phase: 'resource',
-        })
-        expect(fixture.context.currentTextureCalls).to.equal(0)
-        expect(fixture.calls.commandEncoders).to.have.length(0)
-        expect(fixture.calls.renderPasses).to.have.length(0)
-        expect(fixture.calls.queueSubmissions).to.have.length(0)
     })
 
     it('snapshots Surface attachment view descriptors when the PassSpec is created', async() => {

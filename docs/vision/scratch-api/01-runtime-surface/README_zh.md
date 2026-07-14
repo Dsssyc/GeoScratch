@@ -93,8 +93,11 @@ candidate 失效。Canvas resize 与 native configure 返回后，Scratch 要求
 `GPUCanvasContext.getConfiguration()` 及 canvas 尺寸都反映 candidate，之后才
 commit 私有状态。失败会产生 `SCRATCH_SURFACE_CONFIGURATION_FAILED`，尽可能恢复
 调用前的真实 canvas 尺寸与 previous native configuration，通过精确 readback
-验证两者，并且绝不发布 candidate facts。异步 native validation 仍遵循 WebGPU
-error model，Scratch 不会虚构同步成功或失败。
+验证两者，并且绝不发布 candidate facts。`GPUCanvasContext.configure()` 禁止 usage
+包含 `GPUTextureUsage.TRANSIENT_ATTACHMENT`，因此 Surface normalization 会在任何
+canvas 或 native configuration effect 前同步拒绝该 bit。Transient attachment 仍可
+通过普通 `TextureResource` descriptor 完整表达。异步 native validation 仍遵循
+WebGPU error model，Scratch 不会虚构同步成功或失败。
 
 每次 managed use 前，Scratch 都会调用
 `GPUCanvasContext.getConfiguration()`，把其中的 device、format、usage、view

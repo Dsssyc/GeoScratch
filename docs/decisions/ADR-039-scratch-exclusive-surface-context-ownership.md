@@ -62,11 +62,11 @@ Each `GPUCanvasContext` has exactly one live Scratch `Surface` owner.
   receiver identity, format, and configuration version. Later `attachment-view` issue
   borrows the current texture and creates the requested native view without a second
   configuration query or a public-method branding path.
-- A Surface configured with `TRANSIENT_ATTACHMENT` follows the native texture-view
-  contract: an attachment view uses the exact Surface usage rather than a narrowed
-  subset. Its pass operations are `load: 'clear'` and `store: 'discard'`. Pass creation
-  normalizes that contract, and submission revalidates it against the current Surface
-  configuration before current-texture or encoder effects.
+- `GPUCanvasContext.configure()` synchronously forbids usage containing
+  `TRANSIENT_ATTACHMENT`. Surface normalization therefore rejects that bit with
+  `SCRATCH_SURFACE_CONFIGURATION_FAILED` before canvas resize or native configure.
+  Ordinary `TextureResource` attachments retain the native transient texture/view and
+  clear/discard contracts; Surface does not fabricate a Canvas capability.
 - Failed construction releases its uncommitted claim.
 - Successful `Surface.dispose()` unconfigures the context, unregisters the Surface,
   and releases the claim. A replacement may then claim the context.

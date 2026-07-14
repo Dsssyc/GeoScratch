@@ -33,6 +33,10 @@ const renderPipelineToken = Symbol('RenderPipeline')
 const renderPipelineStates = new WeakMap<RenderPipeline, { isDisposed: boolean }>()
 const computePipelineToken = Symbol('ComputePipeline')
 const computePipelineStates = new WeakMap<ComputePipeline, { isDisposed: boolean }>()
+const pipelineProgramLayoutRequirements = new WeakMap<
+    RenderPipeline | ComputePipeline,
+    readonly ProgramBufferLayoutRequirement[]
+>()
 
 export type RenderPipelineDescriptor = {
     label?: string
@@ -92,6 +96,7 @@ export class RenderPipeline {
             })
         }
         renderPipelineStates.set(this, { isDisposed: false })
+        pipelineProgramLayoutRequirements.set(this, state.layoutRequirements)
         defineImmutableRenderProperties(this, state)
         Object.preventExtensions(this)
     }
@@ -171,6 +176,7 @@ type PipelineValidationContext = {
     subject: DiagnosticSubject
     bindLayouts: readonly BindLayout[]
     bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
+    layoutRequirements: readonly ProgramBufferLayoutRequirement[]
 }
 
 type PipelineCreationPlan = PipelineValidationContext & Readonly<{
@@ -317,6 +323,7 @@ function prepareRenderPipeline(
         })
     }
     program.assertRuntime(runtime)
+    const layoutRequirements = Object.freeze([ ...program.layoutRequirements ])
 
     const id = `scratch-pipeline-${UUID()}`
     const subject = Object.freeze({
@@ -336,6 +343,7 @@ function prepareRenderPipeline(
         subject,
         bindLayouts: Object.freeze([]),
         bindLayoutsByGroup: readonlyMapSnapshot(new Map()),
+        layoutRequirements,
     }
     const bindLayouts = Object.freeze(normalizeBindLayouts(context, input.bindLayouts))
     const bindLayoutsByGroup = readonlyMapSnapshot(
@@ -782,6 +790,7 @@ export class ComputePipeline {
             })
         }
         computePipelineStates.set(this, { isDisposed: false })
+        pipelineProgramLayoutRequirements.set(this, state.layoutRequirements)
         defineImmutableComputeProperties(this, state)
         Object.preventExtensions(this)
     }
@@ -976,6 +985,7 @@ function prepareComputePipeline(
         })
     }
     program.assertRuntime(runtime)
+    const layoutRequirements = Object.freeze([ ...program.layoutRequirements ])
 
     const id = `scratch-pipeline-${UUID()}`
     const subject = Object.freeze({
@@ -995,6 +1005,7 @@ function prepareComputePipeline(
         subject,
         bindLayouts: Object.freeze([]),
         bindLayoutsByGroup: readonlyMapSnapshot(new Map()),
+        layoutRequirements,
     }
     const bindLayouts = Object.freeze(normalizeBindLayouts(context, input.bindLayouts))
     const bindLayoutsByGroup = readonlyMapSnapshot(
@@ -1334,9 +1345,18 @@ function validateRenderPipelineHasAttachment(
     })
 }
 
+export function programLayoutRequirementsForPipeline(
+    pipeline: RenderPipeline | ComputePipeline
+): readonly ProgramBufferLayoutRequirement[] {
+
+    const requirements = pipelineProgramLayoutRequirements.get(pipeline)
+    if (requirements === undefined) throw new TypeError('Pipeline Program layout requirement snapshot is unavailable.')
+    return requirements
+}
+
 function validateProgramLayoutRequirements(pipeline: PipelineValidationContext): void {
 
-    for (const requirement of pipeline.program.layoutRequirements) {
+    for (const requirement of pipeline.layoutRequirements) {
         const bindLayout = pipeline.bindLayoutsByGroup.get(requirement.group)
         if (bindLayout === undefined) {
             throwProgramLayoutMismatch(pipeline, requirement, {

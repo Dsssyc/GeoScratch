@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 422
-const expectedFullSuitePasses = 845
+const expectedFocusedAcceptancePasses = 441
+const expectedFullSuitePasses = 848
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -202,6 +202,8 @@ const capabilityRows = [
                 'prepareSurfaceAttachment(',
                 'SCRATCH_SURFACE_CONFIGURATION_FAILED',
                 'SCRATCH_SURFACE_UNCONFIGURE_FAILED',
+                'TEXTURE_USAGE_TRANSIENT_ATTACHMENT',
+                '(usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) === 0',
             ]),
         implementation: 'scratch/runtime.ts, scratch/surface.ts, scratch/submission.ts',
         tests: 'scratch-runtime.test.js, scratch-surface.test.js, scratch-submitted-work-epochs.test.js',
@@ -310,7 +312,11 @@ const capabilityRows = [
         historical: hasAll(historical.binding, [ 'getBindGroup()', 'hasStaleAllocationVersions()', 'createBindGroup(' ]),
         target: 'Initially prepared BindSet with explicit allocation-bound prepare and no submission repair',
         final: hasAll(current.binding, [ 'prepare(): Promise<void>', 'captureBindSetSnapshot(', 'preparedBindGroupFor(', 'await bindSet.prepare()' ]) &&
-            current.binding.includes('if (lifecycleFailure !== undefined) failures.push(lifecycleFailure)') &&
+            hasAll(current.binding, [
+                'failures.push(...bindSetLifecycleFailures(bindSet))',
+                'function bindSetLifecycleFailures(',
+                'seenResources',
+            ]) &&
             !current.binding.includes('getBindGroup()') &&
             !current.submission.includes('.prepare()'),
         implementation: 'scratch/binding.ts and scratch/command.ts',
@@ -324,12 +330,22 @@ const capabilityRows = [
             baseline.command.includes('CommandDynamicOffsets'),
         historical: hasAll(historical.program, [ 'export class Program', 'this.modules', 'this.entryPoints', 'this.requiredFeatures' ]),
         historicalNote: 'Program ownership and entry-point behavior are preserved; layout requirements were added after the JavaScript snapshot.',
-        target: 'Program schema requirements plus immutable command-owned named dynamic offsets',
+        target: 'Pipeline-snapshotted Program schema requirements plus immutable command-owned named dynamic offsets',
         final: hasAll(current.program, [ 'abiHash', 'schemaHash', 'ProgramBufferLayoutRequirement' ]) &&
-            hasAll(current.command, [ 'CommandBindSetInvocation', 'dynamicOffsets', 'commandNativeDynamicOffsets' ]) &&
+            hasAll(current.pipeline, [
+                'pipelineProgramLayoutRequirements',
+                'layoutRequirements: readonly ProgramBufferLayoutRequirement[]',
+                'programLayoutRequirementsForPipeline(',
+            ]) &&
+            hasAll(current.command, [
+                'CommandBindSetInvocation',
+                'dynamicOffsets',
+                'commandNativeDynamicOffsets',
+                'programLayoutRequirementsForPipeline(command.pipeline)',
+            ]) &&
             !exportedTypeNames(current.scratchIndex).includes('CommandDynamicOffsets'),
         implementation: 'scratch/program.ts, scratch/command.ts, scratch/binding.ts',
-        tests: 'scratch-bind-dynamic-offsets.test.js, scratch-command-binding-access.test.js, and scratch-compute-pipeline-async.test.js',
+        tests: 'scratch-bind-dynamic-offsets.test.js, scratch-command-binding-access.test.js, scratch-program-layout-requirements.test.js, and scratch-compute-pipeline-async.test.js',
         docs: 'scratch-api/03-bindings and ADR-036/ADR-037',
         replacement: 'structural hash and descriptor-level offsets -> schema-aware command invocation',
     }),
@@ -354,6 +370,9 @@ const capabilityRows = [
                 'validateDisjointColorAttachmentRegions(pass, regions)',
                 'normalizeDepthClearValue(',
                 "normalized.depthLoad === 'clear' ? 1 : undefined",
+                'lockRenderPassSpecContract(',
+                'lockComputePassSpecContract(',
+                'Object.preventExtensions(pass)',
             ]) &&
             hasAll(current.pipeline, [
                 'validateRenderPipelineHasAttachment(',
@@ -558,6 +577,7 @@ const referencedTestEvidence = referencedTestFiles.map(file => Object.freeze({
 }))
 const behaviorTestContracts = [
     behaviorTestContract('tests/scratch-surface.test.js', [
+        'rejects transient Surface usage before native canvas configuration',
         'claims each canvas context exclusively until the owning Surface is disposed',
         'releases an uncommitted canvas-context claim after configure fails',
         'rolls back logical and canvas facts after synchronous reconfigure failure',
@@ -585,6 +605,7 @@ const behaviorTestContracts = [
         'rejects incompatible sampler, sampled texture, and storage texture shapes before native issue',
         'keeps unchanged preparation checks free of snapshot reconstruction',
         'retains lifecycle recheck as secondary evidence beside a native preparation failure',
+        'retains every simultaneous lifecycle failure in deterministic order',
         'revalidates buffer bounds, usage, and alignment before binding a replacement allocation',
     ]),
     behaviorTestContract('tests/scratch-supporting-object-acknowledgement.test.js', [
@@ -598,6 +619,8 @@ const behaviorTestContracts = [
     ]),
     behaviorTestContract('tests/scratch-resource-views.test.js', [
         'creates complete immutable TextureViewSpecs and preflights usage capabilities without native views',
+        'accepts mipmapped one-dimensional textures and persistent mip views',
+        'rejects render-attachment one-dimensional textures',
     ]),
     behaviorTestContract('tests/scratch-resource.test.js', [
         'rejects noncanonical raw resource descriptor integers before native issue',
@@ -611,8 +634,7 @@ const behaviorTestContracts = [
         'rejects a forged Surface alias with shadowed public methods before pass effects',
         'performs the final Surface configuration read before encoder creation',
         'preserves native Surface usage, view format, color, and tone-mapping capabilities',
-        'enforces clear-discard operations for transient Surface attachment views',
-        'revalidates transient Surface operations after usage reconfiguration',
+        'deep-locks normalized PassSpec attachments before reusable submission',
         'snapshots Surface attachment view descriptors when the PassSpec is created',
         'rejects depth-stencil formats in color attachment slots before encoder creation',
     ]),
@@ -669,6 +691,9 @@ const behaviorTestContracts = [
     behaviorTestContract('tests/scratch-command-binding-access.test.js', [
         'requires read-write storage buffers in both read and write declarations',
         'rejects empty read-write storage buffers during submission readiness validation',
+    ]),
+    behaviorTestContract('tests/scratch-program-layout-requirements.test.js', [
+        'snapshots Program layout requirements into immutable pipeline command contracts',
     ]),
 ]
 const packageTestScript = JSON.parse(fs.readFileSync('package.json', 'utf8')).scripts?.test
@@ -812,6 +837,7 @@ const documentationAudit = Object.freeze({
             'SCRATCH_SURFACE_CONFIGURATION_FAILED',
             'SCRATCH_SURFACE_CONFIGURATION_STALE',
             'SCRATCH_SURFACE_UNCONFIGURE_FAILED',
+            'TRANSIENT_ATTACHMENT',
             'candidate transaction',
             'dispose',
         ])
@@ -825,9 +851,13 @@ const documentationAudit = Object.freeze({
         'WeakMap<GPUCanvasContext, Surface>',
         'exactly one live Scratch `Surface` owner',
         'getConfiguration()',
+        'synchronously forbids usage containing',
         'finally',
     ]),
     resourceViews: hasAll(finalDocs.resources, [ 'BufferRegion', 'TextureViewSpec', 'abiHash', 'schemaHash' ]),
+    oneDimensionalMips: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
+        hasAll(source, [ '`1d`', 'maximum-mip', 'mip level' ])
+    ),
     canonicalResourceDescriptors: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
         hasAll(source, [ 'GPUSize64', 'GPUIntegerCoordinate', 'GPUFlagsConstant', 'canonical' ])
     ),
@@ -861,6 +891,12 @@ const documentationAudit = Object.freeze({
         !source.includes('single 2D mip/layer view') &&
         !source.includes('one `2d` mip-level array layer')
     ),
+    passSpecImmutability: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
+        hasAll(source, [ 'PassSpec', 'timestamp', 'lifecycle', 'mutation' ])
+    ),
+    programRequirementSnapshots: [ finalDocs.programs, finalDocs.programsZh ].every(source =>
+        hasAll(source, [ 'Pipeline', 'layoutRequirements', 'snapshot', 'Command' ])
+    ) && hasAll(finalDocs.bindingDecision, [ 'Pipeline requirement snapshot', 'mutable Program property' ]),
     nativeCopies: hasAll(finalDocs.transfers, [ 'copyBufferToBuffer', 'copyTextureToTexture', 'copyBufferToTexture', 'copyTextureToBuffer' ]),
     nativeTexelBlockCopies: [ finalDocs.transfers, finalDocs.transfersZh ].every(source =>
         hasAll(source, [
@@ -1501,10 +1537,14 @@ async function fetchOfficialSpecificationEvidence(canonicalTypes) {
             'The set of texture regions in |attachmentRegions| must be pairwise disjoint. That is, no two texture regions may overlap.',
         canvasContextGetConfiguration:
             'GPUCanvasConfiguration? getConfiguration();',
+        canvasTransientAttachmentRejected:
+            '|configuration|.{{GPUCanvasConfiguration/usage}} includes the {{GPUTextureUsage/TRANSIENT_ATTACHMENT}} bit, throw a {{TypeError}}.',
         canvasConfigureCommitsConfiguration:
             'Set |this|.{{GPUCanvasContext/[[configuration]]}} to |configuration|.',
         canvasUnconfigureClearsConfiguration:
             'Set |this|.{{GPUCanvasContext/[[configuration]]}} to `null`.',
+        textureMaximumMipLevelCount:
+            '|descriptor|.{{GPUTextureDescriptor/mipLevelCount}} must be &le; [$maximum mipLevel count$](|descriptor|.{{GPUTextureDescriptor/dimension}}, |descriptor|.{{GPUTextureDescriptor/size}}).',
         writeBufferContentsAlignment:
             '|contentsSize|, converted to bytes, is a multiple of 4 bytes.',
         writeBufferOffsetAlignment:

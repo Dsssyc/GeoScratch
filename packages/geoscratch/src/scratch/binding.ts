@@ -1015,8 +1015,7 @@ async function executeBindSetPreparation(
 
     const outcomes = await Promise.all(issues.map(issue => issue.attempt.settlement))
     const failures = nativePreparationFailures(issues, outcomes)
-    const lifecycleFailure = bindSetLifecycleFailure(bindSet)
-    if (lifecycleFailure !== undefined) failures.push(lifecycleFailure)
+    failures.push(...bindSetLifecycleFailures(bindSet))
     if (failures.length > 0) {
         return failBindSetPreparation(bindSet, inFlight, failures)
     }
@@ -1108,63 +1107,70 @@ function preparationFailureForNativeIssue(
     })
 }
 
-function bindSetLifecycleFailure(bindSet: BindSet): BindSetPreparationFailure | undefined {
+function bindSetLifecycleFailures(bindSet: BindSet): BindSetPreparationFailure[] {
+
+    const failures: BindSetPreparationFailure[] = []
 
     if (bindSet.runtime.isDisposed) {
-        return lifecyclePreparationFailure(
+        failures.push(lifecyclePreparationFailure(
             bindSet,
             'runtime-disposed',
             'SCRATCH_RUNTIME_DISPOSED',
             bindSet.runtime.subject
-        )
+        ))
     }
     if (bindSet.runtime.isDeviceLost) {
-        return lifecyclePreparationFailure(
+        failures.push(lifecyclePreparationFailure(
             bindSet,
             'device-lost',
             'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             bindSet.runtime.subject
-        )
+        ))
     }
     if (bindSet.isDisposed) {
-        return lifecyclePreparationFailure(
+        failures.push(lifecyclePreparationFailure(
             bindSet,
             'bind-set-disposed',
             'SCRATCH_BIND_DISPOSED',
             bindSet.subject
-        )
+        ))
     }
     if (bindSet.layout.isDisposed) {
-        return lifecyclePreparationFailure(
+        failures.push(lifecyclePreparationFailure(
             bindSet,
             'bind-layout-disposed',
             'SCRATCH_BIND_DISPOSED',
             bindSet.layout.subject
-        )
+        ))
     }
-    for (const binding of bindingsInNativeOrder(bindSet)) {
+    const seenResources = new Set<BufferRegion | TextureViewSpec | SamplerResource>()
+    for (const [ index, binding ] of bindingsInNativeOrder(bindSet).entries()) {
         if (!bindingResourceDisposed(binding.resource)) continue
-        return lifecyclePreparationFailure(
+        if (seenResources.has(binding.resource)) continue
+        seenResources.add(binding.resource)
+        failures.push(lifecyclePreparationFailure(
             bindSet,
             'bound-resource-disposed',
             'SCRATCH_RESOURCE_DISPOSED',
-            bindingResourceSubject(binding.resource)
-        )
+            bindingResourceSubject(binding.resource),
+            lifecycleFailureOrder('bound-resource-disposed') + index
+        ))
     }
-    return undefined
+    return failures
 }
 
 function lifecyclePreparationFailure(
     bindSet: BindSet,
     kind: BindSetPreparationFailure['kind'],
     code: string,
-    subject: DiagnosticSubject
+    subject: DiagnosticSubject,
+    scopeOrder = lifecycleFailureOrder(kind)
 ): BindSetPreparationFailure {
 
     return Object.freeze({
         stage: 'lifecycle-recheck',
         issueSequence: Number.MAX_SAFE_INTEGER,
-        scopeOrder: lifecycleFailureOrder(kind),
+        scopeOrder,
         kind,
         code,
         nativeErrorCategory: kind === 'device-lost' ? 'device-lost' : 'none',

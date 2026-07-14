@@ -95,8 +95,12 @@ return, Scratch requires `GPUCanvasContext.getConfiguration()` plus the canvas
 dimensions to reflect the candidate before committing private state. Failure produces
 `SCRATCH_SURFACE_CONFIGURATION_FAILED`, restores the actual pre-call canvas dimensions
 and previous native configuration when possible, verifies both by exact readback, and
-never publishes the candidate facts. Asynchronous native validation remains part of
-the WebGPU error model and is not fabricated as synchronous success/failure.
+never publishes the candidate facts. `GPUCanvasContext.configure()` forbids usage that
+contains `GPUTextureUsage.TRANSIENT_ATTACHMENT`, so Surface normalization rejects that
+bit synchronously before canvas or native configuration effects. Transient attachments
+remain available through ordinary `TextureResource` descriptors. Asynchronous native
+validation remains part of the WebGPU error model and is not fabricated as synchronous
+success/failure.
 
 Before managed use, Scratch calls `GPUCanvasContext.getConfiguration()` and compares
 its device, format, usage, view formats, color space, tone mapping, alpha mode, and

@@ -157,6 +157,12 @@ transaction. The snapshot is combined with one explicit separator contract and
 uses JavaScript UTF-16 code-unit offsets so native compilation locations can be
 mapped back to a Program module when the location is actually known.
 
+The successful Pipeline retains the exact immutable required-layout snapshot used by
+its creation transaction. Draw and dispatch command preflight consume that Pipeline
+snapshot, never the later live `Program.layoutRequirements` property. Caller-owned
+Program mutation may affect a future Pipeline, but it cannot rewrite an existing
+Pipeline's shader/binding contract.
+
 The resulting pipeline compilation report retains combined and per-module
 hashes, module spans, counts, and bounded native messages. It does not retain
 complete WGSL or source excerpts in default history, incidents, exported

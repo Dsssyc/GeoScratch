@@ -66,15 +66,14 @@ color slot requires a color-renderable format, while depth/stencil renderable
 formats belong only in the depth/stencil attachment. An explicit Surface view
 descriptor may use the configured format or one configured compatible view format.
 It remains a `2d` single-mip/single-layer all-aspect RGBA view; usage is `0` or a
-configured Surface usage subset containing `RENDER_ATTACHMENT`. When the Surface
-usage includes `TRANSIENT_ATTACHMENT`, its view usage instead resolves to the exact
-Surface usage, matching the native transient-view rule. A view with
-`TRANSIENT_ATTACHMENT` usage requires
+configured Surface usage subset containing `RENDER_ATTACHMENT`. Canvas configuration
+cannot contain `TRANSIENT_ATTACHMENT`; Surface rejects that bit before native issue.
+An ordinary texture view with `TRANSIENT_ATTACHMENT` usage requires
 `load: 'clear'` and `store: 'discard'` for color and for every writable
 depth/stencil aspect. Scratch chooses those operations as transient defaults and
-rejects incompatible explicit values. Pass construction normalizes these facts and
-submission revalidates them against the current Surface usage before presentation or
-encoder effects. A provided `depthClear` must be finite and
+rejects incompatible explicit values. Pass construction normalizes these facts, and
+submission revalidates the current texture allocation and view before encoder effects.
+A provided `depthClear` must be finite and
 inside `[0, 1]`. When writable depth defaults or explicitly resolves to
 `depthLoad: 'clear'` and no value is provided, Scratch normalizes `depthClear` to
 `1`; it never emits a clear operation without the required native clear value.
@@ -100,7 +99,11 @@ configuration read. A forged alias or external configuration drift therefore fai
 before presentation or encoder effects. Submission still compares Surface context
 identity defensively when checking region overlap.
 
-Pass specs do not store commands. This prevents stale command lists from surviving across submissions.
+Normalized pass attachments, clear values, timestamp writes, and top-level references
+are deeply locked when a `PassSpec` is created. Disposal remains private lifecycle
+state. Reusing a pass therefore cannot bypass validated load/store, query-slot, or view
+facts through later JavaScript mutation. Pass specs do not store commands. This prevents
+stale command lists from surviving across submissions.
 
 ## Submission
 

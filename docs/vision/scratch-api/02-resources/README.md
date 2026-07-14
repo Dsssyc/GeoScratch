@@ -28,7 +28,9 @@ already be positive safe-integer `GPUIntegerCoordinate` values within the native
 32-bit domain. Buffer and texture usage must already be integer
 `GPUFlagsConstant` values in `[0, 0xffffffff]`. Invalid labels and booleans are
 rejected instead of being silently omitted or coerced. This keeps the retained
-logical descriptor identical to the descriptor Scratch actually issues.
+logical descriptor identical to the descriptor Scratch actually issues. A `1d`
+texture may retain every mip level permitted by the native maximum-mip calculation;
+only its native dimension, extent, sample, format, and usage constraints are applied.
 
 ## Allocation And Content
 

@@ -92,6 +92,7 @@ type PreparedSurfaceAttachmentState = Readonly<{
 }>
 
 const TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
+const TEXTURE_USAGE_TRANSIENT_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'TRANSIENT_ATTACHMENT', 0x20)
 const GPU_FLAGS_MAX = 0xffff_ffff
 const COLOR_SPACES = new Set<PredefinedColorSpace>([ 'srgb', 'display-p3' ])
 const TONE_MAPPING_MODES = new Set<GPUCanvasToneMappingMode>([ 'standard', 'extended' ])
@@ -710,11 +711,12 @@ function normalizeSurfaceUsage(surface: Surface, state: SurfaceState, usage: unk
         typeof usage === 'number' &&
         Number.isInteger(usage) &&
         usage >= 0 &&
-        usage <= GPU_FLAGS_MAX
+        usage <= GPU_FLAGS_MAX &&
+        (usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) === 0
     ) return usage
 
     return throwSurfaceConfigurationInputInvalid(surface, state, { usage }, {
-        usage: `GPUTextureUsageFlags integer in [0, ${GPU_FLAGS_MAX}]`,
+        usage: `GPUTextureUsageFlags integer in [0, ${GPU_FLAGS_MAX}] excluding GPUTextureUsage.TRANSIENT_ATTACHMENT`,
     })
 }
 

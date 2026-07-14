@@ -65,14 +65,13 @@ pass metadata 必须与它精确一致。Color slot 要求 color-renderable form
 depth/stencil renderable format 只能用于 depth/stencil attachment。显式 Surface
 view descriptor 可以使用 configured format 或一个已配置的 compatible view
 format。它仍必须是 `2d` single-mip/single-layer all-aspect RGBA view；usage 为
-`0` 或一个包含 `RENDER_ATTACHMENT` 的 configured Surface usage subset。当
-Surface usage 包含 `TRANSIENT_ATTACHMENT` 时，view usage 必须解析为精确的
-Surface usage，以符合 native transient-view 规则。带 `TRANSIENT_ATTACHMENT`
-usage 的 view 对 color
+`0` 或一个包含 `RENDER_ATTACHMENT` 的 configured Surface usage subset。Canvas
+configuration 不能包含 `TRANSIENT_ATTACHMENT`；Surface 会在 native issue 前拒绝
+该 bit。普通 texture view 带 `TRANSIENT_ATTACHMENT` usage 时，对 color
 以及每个可写 depth/stencil aspect 都要求 `load: 'clear'` 和
 `store: 'discard'`。Scratch 会把它们作为 transient default，并拒绝冲突的显式
-值。Pass construction 会归一化这些事实，submission 则会在 presentation 或
-encoder effect 前针对 current Surface usage 重新校验。提供的 `depthClear` 必须有限且位于 `[0, 1]`。
+值。Pass construction 会归一化这些事实，submission 则会在 encoder effect 前
+重新校验 current texture allocation 与 view。提供的 `depthClear` 必须有限且位于 `[0, 1]`。
 当可写 depth 默认或显式解析为 `depthLoad: 'clear'` 且调用方没有提供值时，
 Scratch 会把 `depthClear` 归一化为 `1`；它绝不会发出缺少所需原生 clear value
 的 clear operation。
@@ -96,7 +95,10 @@ texture 并创建 view，不会再次读取 configuration。因此 forged alias 
 configuration drift 会在 presentation/encoder effect 前失败。Submission 在检查
 region overlap 时仍会防御性比较 Surface context identity。
 
-Pass spec 不存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
+创建 `PassSpec` 时，归一化 attachment、clear value、timestamp writes 与顶层引用
+都会被深度锁定；disposal 保留为私有 lifecycle state。复用 pass 时，后续 JavaScript
+mutation 因此不能绕过已验证的 load/store、query slot 或 view facts。Pass spec 不
+存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
 
 ## Submission
 

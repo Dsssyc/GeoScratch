@@ -572,6 +572,42 @@ describe('scratch Program buffer layout requirements', () => {
         expect(dispatch).to.be.instanceOf(DispatchCommand)
     })
 
+    it('snapshots Program layout requirements into immutable pipeline command contracts', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const codec = createParticleCodec()
+        const layout = await createBindLayout(runtime)
+        const program = createProgram(runtime, codec)
+        const pipeline = await runtime.createComputePipeline({
+            program,
+            bindLayouts: [ layout ],
+        })
+        const bindSet = await runtime.createBindSet(layout, {
+            particles: await createRawBuffer(runtime),
+        })
+
+        program.layoutRequirements = []
+
+        const diagnostic = expectProgramLayoutDiagnostic(() => {
+            runtime.createDispatchCommand({
+                pipeline,
+                bindSets: [ { set: bindSet } ],
+                count: { workgroups: [ 1 ] },
+                resources: {
+                    read: [ readResource(bindSet.bindings.get('particles').resource.buffer) ],
+                    write: [ bindSet.bindings.get('particles').resource.buffer ],
+                },
+                whenMissing: 'throw',
+            })
+        })
+
+        expect(diagnostic.expected).to.include({
+            abiHash: codec.artifact.abiHash,
+            schemaHash: codec.artifact.schemaHash,
+        })
+        expect(diagnostic.actual).to.deep.equal({ abiHash: undefined, schemaHash: undefined })
+    })
+
     it('rejects draw and dispatch commands when a required bind set group is missing', async() => {
 
         const { runtime } = await createRuntimeFixture()

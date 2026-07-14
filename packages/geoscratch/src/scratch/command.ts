@@ -11,6 +11,7 @@ import {
     layoutArtifactsSchemaCompatible,
 } from './layout-codec.js'
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
+import { programLayoutRequirementsForPipeline } from './pipeline.js'
 import { QuerySetResource } from './query-set.js'
 import {
     registerRuntimeReadbackCommand,
@@ -3374,7 +3375,7 @@ function setBindGroupWithDynamicOffsets(
 
 function validateProgramLayoutRequirementsForCommand(command: DrawCommand | DispatchCommand): void {
 
-    for (const requirement of command.pipeline.program.layoutRequirements) {
+    for (const requirement of programLayoutRequirementsForPipeline(command.pipeline)) {
         const invocation = command.bindSets.find(candidate => candidate.set.layout.group === requirement.group)
         if (invocation === undefined) {
             throwCommandProgramLayoutMismatch(command, requirement, {

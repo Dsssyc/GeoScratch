@@ -146,7 +146,9 @@ message text. It sorts complete unbounded transaction facts by this fixed tuple:
 Within lifecycle recheck, runtime disposal precedes device loss, BindSet and
 BindLayout disposal, then bound-resource disposal. Snapshot drift follows all
 lifecycle failures. The first fact is primary and every remaining independent or
-derivative fact is retained as bounded related evidence.
+derivative fact is retained as bounded related evidence. Lifecycle collection does
+not return after its first match: it records every applicable runtime, device, object,
+layout, and distinct bound-resource fact, then applies the fixed ordering once.
 
 ### Persistent binding parity
 
@@ -169,11 +171,12 @@ for implementation-dependent validation.
 
 ### Program requirements and dynamic offsets
 
-Program layout requirements own typed shader expectations. Pipeline creation
-joins Program requirements with BindLayout ABI: group/binding, binding type,
+Program layout requirements own typed shader expectations. Pipeline creation snapshots
+those requirements and joins them with BindLayout ABI: group/binding, binding type,
 visibility, dynamic-offset contract, nonzero `minBindingSize`, ABI lower bound,
-features, and limits. Command preflight joins the Program requirement with the
-actual BufferRegion: ownership, lifecycle, range, usage, alignment, canonical
+features, and limits. The successful Pipeline retains that immutable snapshot. Command
+preflight joins the Pipeline requirement snapshot, not a later mutable Program property,
+with the actual BufferRegion: ownership, lifecycle, range, usage, alignment, canonical
 ABI compatibility, exact schema compatibility, and current allocation snapshot.
 `LayoutArtifact` is not moved into BindLayout.
 

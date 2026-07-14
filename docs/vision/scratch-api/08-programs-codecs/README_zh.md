@@ -156,6 +156,11 @@ snapshot 它的 module strings、entry points、required layouts 与 identity；
 separator contract 合并，并使用 JavaScript UTF-16 code-unit offset，使原生
 compilation location 在确实已知时能够映射回 Program module。
 
+成功的 Pipeline 会保留创建 transaction 使用的精确 immutable required-layout
+snapshot。Draw/dispatch command preflight 只消费该 Pipeline snapshot，绝不读取后续
+live `Program.layoutRequirements`。调用方对 Program 的 mutation 可以影响未来
+Pipeline，但不能重写已有 Pipeline 的 shader/binding contract。
+
 最终 pipeline compilation report 保留 combined/per-module hash、module span、
 计数与有界 native messages。default history、incident、exported evidence 与
 deep descriptor capture 都不保留完整 WGSL 或 source excerpt。由于

@@ -1,8 +1,8 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-twenty-first-review fixes; clean acceptance and independent re-review pending
-Decisions: ADR-036, ADR-037, ADR-038, ADR-039
+Status: Post-twenty-second-review fixes; clean acceptance and independent re-review pending
+Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
 
@@ -24,8 +24,8 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 422
-referenced behavior tests; requires the complete suite to report exactly 845 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 441
+referenced behavior tests; requires the complete suite to report exactly 848 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -318,7 +318,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Nineteen isolated review passes have examined the fixed-baseline diff and working tree.
+Twenty-two isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -336,6 +336,10 @@ lifecycle evidence plus one P2 test-evidence overstatement. No Critical issue wa
 reported. The fourteenth review confirmed five P1 and two P2 defects in current
 `depthSlice` validation, Web IDL numeric/clear normalization, depth-only rendering,
 acceptance execution, copy diagnostics, and attachment-dimension documentation.
+Reviews fifteen through twenty-one confirmed allocation-replacement, acceptance,
+current-use validation, Surface ownership/authority, and transaction defects. The
+twenty-second review confirmed three P1 immutable-contract/native-capability defects and
+two P2 lifecycle/texture-capability defects. No Critical issue was reported.
 
 Resolved core finding:
 
@@ -692,15 +696,47 @@ Resolved twenty-first review findings:
    configuration version before canvas or native effects. Reentrant disposal reports the
    disposed owner; reentrant successful configuration invalidates the outer candidate with
    `SCRATCH_SURFACE_CONFIGURATION_STALE` instead of committing stale facts.
-2. A transient Surface attachment view now uses the exact configured Surface usage, not
-   a narrowed render-attachment subset. Color operations normalize to clear/discard at
-   pass creation, and submission revalidates both view usage and operations against the
-   current Surface configuration before current-texture or encoder effects.
+2. The checkpoint normalized transient Surface views to exact Surface usage and
+   clear/discard instead of narrowing them. The twenty-second review subsequently proved
+   that the premise itself violated the Canvas configure contract; this provisional fix
+   is superseded by the explicit Surface rejection below.
 3. Canvas-size rollback success now requires exact width/height readback after assignment.
    A non-throwing setter that rejects or coerces the rollback is reported truthfully as
    `canvasRestored: false` while logical candidate facts remain uncommitted.
 
 These findings bring the reproduced or source-verified reviewer total to 69.
+
+The twenty-first-review implementation received clean mechanical acceptance at exact
+commit `76022adb856be01eae8b3f531652b73d6d061e89`: 422/422 focused tests, 845 passing plus
+the two exact pending gates, both TypeScript consumers, all 14 builds, both 20,000-cycle
+stress phases, headed Chrome on Apple Metal 3, and all 11 ordinary examples passed. The
+next isolated review did not approve that checkpoint and reported the five defects below,
+so `76022ad` remains evidence history rather than final approval.
+
+Resolved twenty-second review findings:
+
+1. Surface normalization now rejects any usage containing
+   `GPUTextureUsage.TRANSIENT_ATTACHMENT` before canvas resize or native configure, as
+   required by `GPUCanvasContext.configure()`. Ordinary TextureResource attachments keep
+   native transient allocation/view and clear/discard behavior.
+2. Render and compute PassSpec normalized state is now immutable at runtime and in the
+   public type contract. Attachment arrays/objects, clear values, depth/stencil facts,
+   timestamp writes, and top-level references are locked, while disposal uses private
+   lifecycle state. A valid transient texture pass cannot be mutated into store/load
+   operations that bypass construction validation.
+3. Pipeline creation snapshots normalized Program layout requirements together with its
+   source contract. The successful Pipeline privately retains that immutable snapshot,
+   and draw/dispatch command preflight consumes it rather than a later replacement of
+   `Program.layoutRequirements`.
+4. BindSet acknowledgement lifecycle recheck no longer returns after one match. It
+   retains runtime disposal, device loss, BindSet/BindLayout disposal, and every distinct
+   disposed bound-resource fact in the ADR-defined deterministic order before choosing
+   the primary outcome.
+5. One-dimensional textures now accept every mip count within the ordinary native
+   maximum-mip calculation. The native 1D render-attachment prohibition remains enforced
+   independently, and persistent 1D mip views have direct positive coverage.
+
+These findings bring the reproduced or source-verified reviewer total to 74.
 
 ## Verification Record
 
@@ -1105,6 +1141,32 @@ Post-twenty-first-review pre-commit verification:
   reporting `incomplete` for the dirty pre-commit tree
 - the native inventory still contains exactly 43 classified call sites, including the
   reindexed Surface transaction/preparation sites
+- clean-commit acceptance and a fresh isolated exact no-findings review remain required
+
+Post-twenty-second-review pre-commit verification:
+
+- the five new reviewer regressions first failed for their intended reasons: Canvas
+  transient-attachment usage reached native configuration, mutable PassSpec attachment
+  descriptors bypassed submission validation, live Program requirement replacement
+  weakened an existing pipeline contract, BindSet preparation retained only one of
+  several concurrent lifecycle failures, and valid one-dimensional mip chains were
+  rejected before native texture creation
+- seven public type assertions also failed before implementation because normalized
+  pass attachment, timestamp-write, and descriptor collections were still mutable
+- all five targeted regressions now pass 5/5; the complete affected Surface, PassSpec,
+  BindSet, resource-view, Program-requirement, pipeline-command, texture-resize, and
+  final-contract collection reports 143 passing with only its final-acceptance identity
+  pending, without weakened assertions
+- `npm run typecheck` passes both the TypeScript 6 package consumer and the canonical
+  TypeScript 5.9/WebGPU declaration consumer; immutable pipeline snapshots and deeply
+  locked PassSpec observations are part of the public contract
+- `npm test` reports exactly 848 passing with only the two exact browser/final-acceptance
+  gate identities pending; the submission-native inventory passes all 43 classified
+  call sites
+- `npm run build` emits the package and all 14 runnable examples; fixed-history
+  structural parity passes the expanded capability, official-source, behavior-title,
+  bilingual-documentation, ADR, production-emit, and historical-baseline contract while
+  correctly reporting `incomplete` for the dirty pre-commit tree
 - clean-commit acceptance and a fresh isolated exact no-findings review remain required
 
 The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree

@@ -27,7 +27,9 @@ safe-integer 范围内的 `GPUSize64`；texture extent、mip count 与 sample co
 必须已经是正的 safe-integer `GPUIntegerCoordinate`，并处于原生 32-bit domain。
 Buffer 与 texture usage 必须已经是 `[0, 0xffffffff]` 内的整数
 `GPUFlagsConstant`。非法 label 与 boolean 会被拒绝，不会被静默省略或转换。
-因此 Scratch 保留的逻辑 descriptor 与实际 issue 的 descriptor 完全一致。
+因此 Scratch 保留的逻辑 descriptor 与实际 issue 的 descriptor 完全一致。`1d`
+texture 可保留 native maximum-mip 计算允许的全部 mip level；Scratch 只施加原生的
+dimension、extent、sample、format 与 usage 约束，不虚构单 mip 限制。
 
 ## Allocation 与 Content
 

@@ -26,24 +26,26 @@ const STENCIL_FORMATS = new Set<GPUTextureFormat>([
     'depth24plus-stencil8',
     'depth32float-stencil8',
 ])
+const renderPassStates = new WeakMap<RenderPassSpec, { isDisposed: boolean }>()
+const computePassStates = new WeakMap<ComputePassSpec, { isDisposed: boolean }>()
 
-export type TimestampWritesSpec = {
+export type TimestampWritesSpec = Readonly<{
     querySet: QuerySetResource
     begin?: number
     end?: number
-}
+}>
 
-export type RenderPassColorAttachmentSpec = {
+export type RenderPassColorAttachmentSpec = Readonly<{
     target: Surface | TextureViewSpec
     format?: GPUTextureFormat
     load?: GPULoadOp
     store?: GPUStoreOp
-    clear?: GPUColor
+    clear?: Readonly<GPUColor>
     depthSlice?: number
-    viewDescriptor?: GPUTextureViewDescriptor
-}
+    viewDescriptor?: Readonly<GPUTextureViewDescriptor>
+}>
 
-export type RenderPassDepthStencilAttachmentSpec = {
+export type RenderPassDepthStencilAttachmentSpec = Readonly<{
     target: TextureViewSpec
     depthLoad?: GPULoadOp
     depthStore?: GPUStoreOp
@@ -51,11 +53,11 @@ export type RenderPassDepthStencilAttachmentSpec = {
     stencilLoad?: GPULoadOp
     stencilStore?: GPUStoreOp
     stencilClear?: number
-}
+}>
 
 export type RenderPassSpecDescriptor = {
     label?: string
-    color: RenderPassColorAttachmentSpec[]
+    color: readonly RenderPassColorAttachmentSpec[]
     depth?: RenderPassDepthStencilAttachmentSpec
     timestampWrites?: TimestampWritesSpec
     occlusionQuerySet?: QuerySetResource
@@ -64,6 +66,18 @@ export type RenderPassSpecDescriptor = {
 export type ComputePassSpecDescriptor = {
     label?: string
     timestampWrites?: TimestampWritesSpec
+}
+
+type MutableTimestampWritesSpec = {
+    -readonly [Key in keyof TimestampWritesSpec]: TimestampWritesSpec[Key]
+}
+
+type MutableRenderPassColorAttachmentSpec = {
+    -readonly [Key in keyof RenderPassColorAttachmentSpec]: RenderPassColorAttachmentSpec[Key]
+}
+
+type MutableRenderPassDepthStencilAttachmentSpec = {
+    -readonly [Key in keyof RenderPassDepthStencilAttachmentSpec]: RenderPassDepthStencilAttachmentSpec[Key]
 }
 
 export type RenderPassNativeAttachments = Readonly<{
@@ -91,19 +105,18 @@ type RenderAttachmentRegion = {
 type SurfaceAttachmentViewFacts = Readonly<{
     format: GPUTextureFormat
     effectiveUsage: GPUTextureUsageFlags
-    transient: boolean
 }>
 
 export interface RenderPassSpec {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    passKind: 'render'
-    color: RenderPassColorAttachmentSpec[]
-    depth?: RenderPassDepthStencilAttachmentSpec
-    timestampWrites?: TimestampWritesSpec
-    occlusionQuerySet?: QuerySetResource
-    isDisposed: boolean
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly passKind: 'render'
+    readonly color: readonly RenderPassColorAttachmentSpec[]
+    readonly depth?: RenderPassDepthStencilAttachmentSpec
+    readonly timestampWrites?: TimestampWritesSpec
+    readonly occlusionQuerySet?: QuerySetResource
+    readonly isDisposed: boolean
 }
 
 export class RenderPassSpec {
@@ -112,19 +125,26 @@ export class RenderPassSpec {
 
         runtime.assertActive()
 
-        this.runtime = runtime
-        this.id = `scratch-pass-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.passKind = 'render'
-        this.color = normalizeColorAttachments(this, descriptor.color)
+        const state = { isDisposed: false }
+        renderPassStates.set(this, state)
+        defineImmutablePassSpecProperties(this, {
+            runtime,
+            id: `scratch-pass-${UUID()}`,
+            ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
+            passKind: 'render',
+        })
+        installPassSpecLifecycleObservation(this, state)
+        const color = normalizeColorAttachments(this, descriptor.color)
         const depth = normalizeDepthStencilAttachment(this, descriptor.depth)
-        validateRenderPassHasAttachment(this, this.color, depth)
+        validateRenderPassHasAttachment(this, color, depth)
         const timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
         const occlusionQuerySet = normalizeOcclusionQuerySet(this, descriptor.occlusionQuerySet)
-        if (depth !== undefined) this.depth = depth
-        if (timestampWrites !== undefined) this.timestampWrites = timestampWrites
-        if (occlusionQuerySet !== undefined) this.occlusionQuerySet = occlusionQuerySet
-        this.isDisposed = false
+        lockRenderPassSpecContract(this, {
+            color,
+            ...(depth !== undefined ? { depth } : {}),
+            ...(timestampWrites !== undefined ? { timestampWrites } : {}),
+            ...(occlusionQuerySet !== undefined ? { occlusionQuerySet } : {}),
+        })
     }
 
     get subject(): DiagnosticSubject {
@@ -187,7 +207,7 @@ export class RenderPassSpec {
 
     dispose(): void {
 
-        this.isDisposed = true
+        renderPassStateFor(this).isDisposed = true
     }
 }
 
@@ -209,7 +229,7 @@ export function createRenderPassDescriptor(
                 loadOp: attachment.load ?? 'clear',
                 storeOp: attachment.store ?? 'store',
             }
-            if (attachment.clear !== undefined) colorAttachment.clearValue = attachment.clear
+            if (attachment.clear !== undefined) colorAttachment.clearValue = attachment.clear as GPUColor
             if (attachment.depthSlice !== undefined) colorAttachment.depthSlice = attachment.depthSlice
 
             return colorAttachment
@@ -229,12 +249,12 @@ export function createRenderPassDescriptor(
 }
 
 export interface ComputePassSpec {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    passKind: 'compute'
-    timestampWrites?: TimestampWritesSpec
-    isDisposed: boolean
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly passKind: 'compute'
+    readonly timestampWrites?: TimestampWritesSpec
+    readonly isDisposed: boolean
 }
 
 export class ComputePassSpec {
@@ -243,13 +263,19 @@ export class ComputePassSpec {
 
         runtime.assertActive()
 
-        this.runtime = runtime
-        this.id = `scratch-pass-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.passKind = 'compute'
+        const state = { isDisposed: false }
+        computePassStates.set(this, state)
+        defineImmutablePassSpecProperties(this, {
+            runtime,
+            id: `scratch-pass-${UUID()}`,
+            ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
+            passKind: 'compute',
+        })
+        installPassSpecLifecycleObservation(this, state)
         const timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
-        if (timestampWrites !== undefined) this.timestampWrites = timestampWrites
-        this.isDisposed = false
+        lockComputePassSpecContract(this, {
+            ...(timestampWrites !== undefined ? { timestampWrites } : {}),
+        })
     }
 
     get subject(): DiagnosticSubject {
@@ -323,7 +349,7 @@ export class ComputePassSpec {
 
     dispose(): void {
 
-        this.isDisposed = true
+        computePassStateFor(this).isDisposed = true
     }
 }
 
@@ -352,7 +378,7 @@ function normalizeTimestampWrites(
         throwTimestampWritesDiagnostic(pass, timestampWrites, 'empty')
     }
 
-    const normalized: TimestampWritesSpec = {
+    const normalized: MutableTimestampWritesSpec = {
         querySet,
     }
     if (begin !== undefined) normalized.begin = begin
@@ -460,7 +486,10 @@ function throwOcclusionQuerySetDiagnostic(pass: RenderPassSpec, querySet: unknow
     })
 }
 
-function normalizeColorAttachments(pass: RenderPassSpec, color: RenderPassColorAttachmentSpec[]): RenderPassColorAttachmentSpec[] {
+function normalizeColorAttachments(
+    pass: RenderPassSpec,
+    color: readonly RenderPassColorAttachmentSpec[]
+): RenderPassColorAttachmentSpec[] {
 
     if (!Array.isArray(color)) {
         throwScratchDiagnostic({
@@ -511,7 +540,7 @@ function normalizeColorAttachment(
         validateColorAttachmentFormat(pass, target.subject, attachment.format, target.descriptor.format)
         const transient = (target.descriptor.usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0
         const operations = normalizeColorAttachmentOperations(pass, target.subject, attachment, transient)
-        const normalized: RenderPassColorAttachmentSpec = {
+        const normalized: MutableRenderPassColorAttachmentSpec = {
             target,
             format: target.descriptor.format,
             load: operations.load,
@@ -563,8 +592,8 @@ function normalizeColorAttachment(
     )
     validateColorRenderableAttachmentFormat(pass, surface.subject, view.format)
     validateColorAttachmentFormat(pass, surface.subject, attachment.format, view.format)
-    const operations = normalizeColorAttachmentOperations(pass, surface.subject, attachment, view.transient)
-    const normalized: RenderPassColorAttachmentSpec = {
+    const operations = normalizeColorAttachmentOperations(pass, surface.subject, attachment, false)
+    const normalized: MutableRenderPassColorAttachmentSpec = {
         target,
         format: view.format,
         load: operations.load,
@@ -747,7 +776,7 @@ function normalizeDepthStencilAttachment(
 
     const usesDepth = hasDepth && (hasDepthFields || !hasStencilFields)
     const usesStencil = hasStencil && (hasStencilFields || !hasDepth)
-    const normalized: RenderPassDepthStencilAttachmentSpec = { target }
+    const normalized: MutableRenderPassDepthStencilAttachmentSpec = { target }
     const transient = (target.descriptor.usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0
 
     if (usesDepth) {
@@ -892,7 +921,7 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
             attachment.format,
             view.format
         )
-        normalizeColorAttachmentOperations(pass, surface.subject, attachment, view.transient)
+        normalizeColorAttachmentOperations(pass, surface.subject, attachment, false)
         extents.push({
             subject: surface.subject,
             width: surface.size.width,
@@ -1020,7 +1049,6 @@ function validateSurfaceAttachmentViewDescriptor(
         ? record.usage
         : record.usage === undefined ? 0 : Number.NaN
     const effectiveUsage = requestedUsage === 0 ? surface.usage : requestedUsage
-    const transient = (surface.usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0
     const valid = (descriptor === undefined || isRecord(descriptor)) &&
         (record.label === undefined || typeof record.label === 'string') &&
         (format === surface.format || surface.viewFormats.includes(format as GPUTextureFormat)) &&
@@ -1029,7 +1057,6 @@ function validateSurfaceAttachmentViewDescriptor(
         requestedUsage >= 0 &&
         requestedUsage <= GPU_FLAGS_MAX &&
         (requestedUsage === 0 || (requestedUsage & ~surface.usage) === 0) &&
-        (!transient || effectiveUsage === surface.usage) &&
         (effectiveUsage & TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0 &&
         (record.aspect === undefined || record.aspect === 'all') &&
         (record.baseMipLevel === undefined || record.baseMipLevel === 0) &&
@@ -1040,7 +1067,6 @@ function validateSurfaceAttachmentViewDescriptor(
     if (valid) return Object.freeze({
         format: format as GPUTextureFormat,
         effectiveUsage,
-        transient,
     })
 
     throwScratchDiagnostic({
@@ -1053,9 +1079,7 @@ function validateSurfaceAttachmentViewDescriptor(
         expected: {
             format: [ surface.format, ...surface.viewFormats ],
             dimension: '2d',
-            usage: transient
-                ? `0 or exactly transient Surface usage ${surface.usage}`
-                : '0 or a Surface usage subset containing GPUTextureUsage.RENDER_ATTACHMENT',
+            usage: '0 or a Surface usage subset containing GPUTextureUsage.RENDER_ATTACHMENT',
             aspect: 'all',
             baseMipLevel: 0,
             mipLevelCount: 1,
@@ -1120,6 +1144,75 @@ function normalizeColorAttachmentOperations(
     }
 
     return Object.freeze({ load, store })
+}
+
+function lockRenderPassSpecContract(
+    pass: RenderPassSpec,
+    normalized: Readonly<{
+        color: RenderPassColorAttachmentSpec[]
+        depth?: RenderPassDepthStencilAttachmentSpec
+        timestampWrites?: TimestampWritesSpec
+        occlusionQuerySet?: QuerySetResource
+    }>
+): void {
+
+    for (const attachment of normalized.color) Object.freeze(attachment)
+    Object.freeze(normalized.color)
+    if (normalized.depth !== undefined) Object.freeze(normalized.depth)
+    if (normalized.timestampWrites !== undefined) Object.freeze(normalized.timestampWrites)
+    defineImmutablePassSpecProperties(pass, normalized)
+    Object.preventExtensions(pass)
+}
+
+function lockComputePassSpecContract(
+    pass: ComputePassSpec,
+    normalized: Readonly<{ timestampWrites?: TimestampWritesSpec }>
+): void {
+
+    if (normalized.timestampWrites !== undefined) Object.freeze(normalized.timestampWrites)
+    defineImmutablePassSpecProperties(pass, normalized)
+    Object.preventExtensions(pass)
+}
+
+function defineImmutablePassSpecProperties(
+    pass: object,
+    values: Readonly<Record<string, unknown>>
+): void {
+
+    Object.defineProperties(pass, Object.fromEntries(
+        Object.entries(values).map(([ property, value ]) => [ property, {
+            value,
+            enumerable: true,
+            configurable: false,
+            writable: false,
+        } ])
+    ))
+}
+
+function installPassSpecLifecycleObservation(
+    pass: object,
+    state: { isDisposed: boolean }
+): void {
+
+    Object.defineProperty(pass, 'isDisposed', {
+        get: () => state.isDisposed,
+        enumerable: true,
+        configurable: false,
+    })
+}
+
+function renderPassStateFor(pass: RenderPassSpec): { isDisposed: boolean } {
+
+    const state = renderPassStates.get(pass)
+    if (state === undefined) throw new TypeError('RenderPassSpec state is unavailable.')
+    return state
+}
+
+function computePassStateFor(pass: ComputePassSpec): { isDisposed: boolean } {
+
+    const state = computePassStates.get(pass)
+    if (state === undefined) throw new TypeError('ComputePassSpec state is unavailable.')
+    return state
 }
 
 function textureRenderAttachmentExtent(

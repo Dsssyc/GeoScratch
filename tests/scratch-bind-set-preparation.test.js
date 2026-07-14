@@ -804,6 +804,52 @@ describe('Scratch BindSet preparation', () => {
                 stage: 'lifecycle-recheck',
                 code: 'SCRATCH_RUNTIME_DISPOSED',
             },
+            {
+                stage: 'lifecycle-recheck',
+                code: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+            },
+            {
+                stage: 'lifecycle-recheck',
+                code: 'SCRATCH_BIND_DISPOSED',
+            },
+            {
+                stage: 'lifecycle-recheck',
+                code: 'SCRATCH_RESOURCE_DISPOSED',
+            },
+        ])
+    })
+
+    it('retains every simultaneous lifecycle failure in deterministic order', async() => {
+
+        const fixture = await createUniformFixture({ deferErrorScopePops: true })
+        fixture.errors.resetHistory()
+        fixture.calls.bindGroups.length = 0
+
+        const creation = fixture.runtime.createBindSet(fixture.layout, {
+            uniforms: fixture.buffer.region({ size: 256 }),
+        })
+        fixture.layout.dispose()
+        fixture.buffer.dispose()
+        settleAllPops(fixture)
+
+        const error = await rejectedDiagnostic(creation)
+        expect(error.diagnostic.code).to.equal('SCRATCH_BIND_DISPOSED')
+        expect(error.incident.failureStage).to.equal('lifecycle-recheck')
+        expect(error.incident.outcomes.map(outcome => ({
+            stage: outcome.stage,
+            code: outcome.diagnosticCode,
+            subjectKind: outcome.subject.kind,
+        }))).to.deep.equal([
+            {
+                stage: 'lifecycle-recheck',
+                code: 'SCRATCH_BIND_DISPOSED',
+                subjectKind: 'BindLayout',
+            },
+            {
+                stage: 'lifecycle-recheck',
+                code: 'SCRATCH_RESOURCE_DISPOSED',
+                subjectKind: 'BufferRegion',
+            },
         ])
     })
 

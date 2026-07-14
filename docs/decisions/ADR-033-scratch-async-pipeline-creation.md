@@ -66,7 +66,7 @@ Before the first native call, Scratch:
 
 1. validates the descriptor deterministically;
 2. allocates the stable pipeline ID and pending operation ID;
-3. snapshots Program module strings and entry points;
+3. snapshots Program module strings, entry points, and normalized layout requirements;
 4. snapshots normalized render or compute state;
 5. snapshots Program and BindLayout identities and lifecycle state;
 6. computes bounded descriptor and source hashes; and
@@ -85,9 +85,11 @@ mappable code-unit interval. A native location maps only when its specific
 offset falls inside one module interval. Unknown all-zero locations and
 separator locations remain explicitly unmapped.
 
-The snapshot prevents mutable descriptor arrays or Program module arrays from
-changing the transaction after native work starts. It does not redesign the
-Program authoring API. Existing render targets, vertex layouts, primitive,
+The snapshot prevents mutable descriptor arrays, Program module arrays, or replacement
+of `Program.layoutRequirements` from changing the transaction after native work starts.
+The successful Pipeline retains the immutable layout-requirement snapshot, and Command
+preflight consumes that snapshot instead of the later live Program property. This does
+not redesign the Program authoring API. Existing render targets, vertex layouts, primitive,
 depth/stencil, multisample, compute constants, entry points, bind layouts,
 Program requirements, required features, and limits are lowered one-to-one.
 

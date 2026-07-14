@@ -1068,6 +1068,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         },
         occlusionQuerySet: querySetAlias,
     })
+    // @ts-expect-error normalized render pass attachment arrays are immutable
+    passSpec.color = []
+    // @ts-expect-error normalized render pass attachments are immutable
+    passSpec.color[0].store = 'discard'
+    // @ts-expect-error normalized render pass timestamp writes are immutable
+    passSpec.timestampWrites!.begin = 1
+    // @ts-expect-error render pass disposal state is read-only
+    passSpec.isDisposed = false
     const textureTargetPass: scr.RenderPassSpec = runtime.createRenderPass({
         color: [ {
             target: defaultTextureViewSpec,
@@ -1096,6 +1104,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const depthPassTarget: scr.TextureViewSpec | undefined = depthPass.depth?.target
     const depthPassLoad: GPULoadOp | undefined = depthPass.depth?.depthLoad
     const compatDepthPass: scratchCompat.RenderPassSpec = runtime.createRenderPass(compatDepthPassDescriptor)
+    // @ts-expect-error normalized depth attachments are immutable
+    depthPass.depth!.depthStore = 'discard'
     const compatDepthPassTarget: scratchCompat.TextureViewSpec | undefined = compatDepthPass.depth?.target
     const compatDepthLoad: GPULoadOp | undefined = compatDepthAttachment.depthLoad
     const computeProgram: scr.Program = runtime.createProgram({
@@ -1261,6 +1271,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             begin: 0,
         },
     })
+    // @ts-expect-error normalized compute pass timestamp writes are immutable
+    computePass.timestampWrites!.begin = 1
+    // @ts-expect-error compute pass disposal state is read-only
+    computePass.isDisposed = false
     const renderCommands: scr.RenderCommand[] = [ beginOcclusion, draw, endOcclusion ]
     const validationMode: scr.SubmissionValidationMode = 'warn'
     const compatValidationMode: scratchCompat.SubmissionValidationMode = 'off'

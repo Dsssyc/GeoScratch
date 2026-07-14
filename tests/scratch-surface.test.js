@@ -227,6 +227,44 @@ describe('Surface', () => {
         }
     })
 
+    it('rejects transient Surface usage before native canvas configuration', async() => {
+
+        const transientUsage = 0x20 | 0x10
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const rejectedCanvas = createFakeCanvas()
+
+        try {
+            runtime.createSurface(rejectedCanvas.canvas, { usage: transientUsage })
+            throw new Error('expected transient Surface construction to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_SURFACE_CONFIGURATION_FAILED',
+                severity: 'error',
+                phase: 'runtime',
+            })
+            expect(error.diagnostic.actual).to.deep.equal({
+                reason: 'descriptor-invalid',
+                usage: transientUsage,
+            })
+        }
+        expect(rejectedCanvas.context.configureCalls).to.have.length(0)
+
+        const configuredCanvas = createFakeCanvas()
+        const surface = runtime.createSurface(configuredCanvas.canvas)
+        try {
+            surface.configure({ usage: transientUsage })
+            throw new Error('expected transient Surface reconfiguration to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic.code).to.equal('SCRATCH_SURFACE_CONFIGURATION_FAILED')
+            expect(error.diagnostic.actual.reason).to.equal('descriptor-invalid')
+        }
+        expect(configuredCanvas.context.configureCalls).to.have.length(1)
+        expect(surface.usage).to.equal(0x10)
+    })
+
     it('claims each canvas context exclusively until the owning Surface is disposed', async() => {
 
         for (const contenderKind of [ 'same-runtime', 'different-runtime' ]) {

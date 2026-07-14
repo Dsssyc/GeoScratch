@@ -285,17 +285,36 @@ describe('scratch logical resource views', () => {
         }
     })
 
-    it('rejects mipmapped and render-attachment one-dimensional textures', async() => {
+    it('accepts mipmapped one-dimensional textures and persistent mip views', async() => {
+
+        const { runtime, calls } = await createRuntimeFixture()
+        const texture = await runtime.createTexture({
+            dimension: '1d',
+            size: [ 8 ],
+            mipLevelCount: 4,
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const view = texture.view({
+            baseMipLevel: 1,
+            mipLevelCount: 2,
+        })
+
+        expect(calls.textures.at(-1).descriptor).to.include({
+            dimension: '1d',
+            mipLevelCount: 4,
+        })
+        expect(view.descriptor).to.include({
+            dimension: '1d',
+            baseMipLevel: 1,
+            mipLevelCount: 2,
+        })
+    })
+
+    it('rejects render-attachment one-dimensional textures', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
         const cases = [
-            {
-                dimension: '1d',
-                size: [ 4 ],
-                mipLevelCount: 2,
-                format: 'rgba8unorm',
-                usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
-            },
             {
                 dimension: '1d',
                 size: [ 4 ],
