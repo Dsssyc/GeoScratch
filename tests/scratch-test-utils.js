@@ -2,6 +2,9 @@ import {
     advanceResourceContentEpoch,
     replaceResourceAllocation,
 } from '../packages/geoscratch/dist/scratch/resource.js'
+import {
+    commitBufferResourceAllocation,
+} from '../packages/geoscratch/dist/scratch/buffer.js'
 import { advanceQuerySlotContentEpoch } from '../packages/geoscratch/dist/scratch/query-set.js'
 
 const fakeExternalImageSourcePlatforms = new Map()
@@ -24,7 +27,13 @@ export function createFakePipelineError(reason = 'validation', message = 'fake p
 
 export function replaceResourceAllocationForTest(resource, descriptor = resource.descriptor) {
 
+    if (resource.resourceKind === 'BufferResource') {
+        const gpuBuffer = resource.runtime.device.createBuffer(descriptor)
+        commitBufferResourceAllocation(resource, descriptor, gpuBuffer)
+        return gpuBuffer
+    }
     replaceResourceAllocation(resource, descriptor)
+    return undefined
 }
 
 export function advanceResourceContentEpochForTest(resource) {

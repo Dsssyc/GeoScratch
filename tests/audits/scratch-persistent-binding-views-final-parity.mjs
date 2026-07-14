@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 369
-const expectedFullSuitePasses = 810
+const expectedFocusedAcceptancePasses = 370
+const expectedFullSuitePasses = 811
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -545,6 +545,7 @@ const behaviorTestContracts = [
         'rejects incompatible sampler, sampled texture, and storage texture shapes before native issue',
         'keeps unchanged preparation checks free of snapshot reconstruction',
         'retains lifecycle recheck as secondary evidence beside a native preparation failure',
+        'revalidates buffer bounds, usage, and alignment before binding a replacement allocation',
     ]),
     behaviorTestContract('tests/scratch-supporting-object-acknowledgement.test.js', [
         'normalizes every native field and rejects deterministic sampler violations before native issue',
@@ -1526,10 +1527,10 @@ function stripBikeshedComments(source) {
 async function runAcceptanceEvidence(testFiles, contracts) {
 
     const managedBaseUrl = 'http://127.0.0.1:4173'
-    const explicitBaseUrl = process.env.SCRATCH_BINDING_BROWSER_BASE_URL
-    const serverPreflight = explicitBaseUrl === undefined
-        ? await auditManagedServerEndpoint(managedBaseUrl)
-        : Object.freeze({ status: 'not-applicable', mode: 'external', baseUrl: explicitBaseUrl })
+    const negativeBrowserBaseUrl = process.env.SCRATCH_FINAL_AUDIT_NEGATIVE_BROWSER_BASE_URL
+    const browserBaseUrl = negativeBrowserBaseUrl ??
+        managedBaseUrl
+    const serverPreflight = await auditManagedServerEndpoint(managedBaseUrl)
     if (serverPreflight.status === 'failed') {
         return Object.freeze({
             serverPreflight,
@@ -1556,16 +1557,10 @@ async function runAcceptanceEvidence(testFiles, contracts) {
         })
     }
 
-    const browserEvidence = explicitBaseUrl === undefined
-        ? await withManagedExamplesServer(managedBaseUrl, runBrowserAcceptance)
-        : {
-            ...runBrowserAcceptance(explicitBaseUrl),
-            server: Object.freeze({
-                status: 'external',
-                mode: 'external',
-                baseUrl: explicitBaseUrl,
-            }),
-        }
+    const browserEvidence = await withManagedExamplesServer(
+        managedBaseUrl,
+        () => runBrowserAcceptance(browserBaseUrl)
+    )
     const { browser, exampleMatrix, server } = browserEvidence
 
     const focusedTestFiles = testFiles.map(file => `tests/${file}`)
@@ -1641,6 +1636,16 @@ async function runAcceptanceEvidence(testFiles, contracts) {
         secondSteadyState: stressReport.secondSteadyState,
         terminal: stressReport.terminal,
     })
+    const finalWorkingTree = workingTreeEvidence()
+    const finalCommit = currentCommit()
+    const finalRepository = Object.freeze({
+        commit: finalCommit,
+        workingTree: finalWorkingTree,
+        status: finalCommit === auditTarget.commit && finalWorkingTree.clean
+            ? 'passed'
+            : 'failed',
+        requirement: 'acceptance requires the same clean Git target after every execution gate',
+    })
 
     return Object.freeze({
         serverPreflight,
@@ -1651,11 +1656,14 @@ async function runAcceptanceEvidence(testFiles, contracts) {
         browser,
         exampleMatrix,
         server,
+        finalRepository,
         status: commandGates.status === 'passed' &&
             [ browser, exampleMatrix, mocha, fullSuite, stress ].every(
                 entry => entry.status === 'passed'
             ) &&
-            [ 'passed', 'external' ].includes(server.status)
+            server.status === 'passed' &&
+            finalRepository.status === 'passed' &&
+            negativeBrowserBaseUrl === undefined
             ? 'passed'
             : 'failed',
     })

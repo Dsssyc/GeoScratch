@@ -16,6 +16,7 @@ import {
     contentBearingResourceOptions,
     createScratchResourceIdentity,
     registerResource,
+    replaceResourceAllocation,
     Resource,
     resourceContentEpoch,
     resourceContentState,
@@ -41,11 +42,22 @@ export type BufferSubregionDescriptor = Readonly<{
     layout?: LayoutArtifact
 }>
 
-type NormalizedBufferResourceDescriptor = BufferResourceDescriptor
+type NormalizedBufferResourceDescriptor = Readonly<{
+    label?: string
+    size: number
+    usage: GPUBufferUsageFlags
+    mappedAtCreation?: boolean
+}>
+
+type BufferAllocationInstaller = (
+    descriptor: NormalizedBufferResourceDescriptor,
+    gpuBuffer: GPUBuffer
+) => void
 
 const bufferResourceToken = Symbol('BufferResource')
 const bufferRegionToken = Symbol('BufferRegion')
 const bufferRegions = new WeakSet<BufferRegion>()
+const bufferAllocationInstallers = new WeakMap<BufferResource, BufferAllocationInstaller>()
 const GPU_FLAGS_MAX = 0xffff_ffff
 const REMOVED_BUFFER_RESOURCE_DESCRIPTOR_FIELDS = Object.freeze([
     'layout',
@@ -61,8 +73,9 @@ const BUFFER_ALLOCATION_CODES = Object.freeze({
 export class BufferResource extends Resource {
 
     #gpuBuffer: GPUBuffer
-    readonly size: number
-    readonly usage: GPUBufferUsageFlags
+    #physicalDescriptor: NormalizedBufferResourceDescriptor
+    readonly size!: number
+    readonly usage!: GPUBufferUsageFlags
 
     private constructor(
         token: symbol,
@@ -83,9 +96,35 @@ export class BufferResource extends Resource {
             ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
         }))
 
-        this.size = descriptor.size
-        this.usage = descriptor.usage
+        this.#physicalDescriptor = descriptor
         this.#gpuBuffer = gpuBuffer
+        Object.defineProperties(this, {
+            size: {
+                get: () => this.#physicalDescriptor.size,
+                enumerable: true,
+                configurable: false,
+            },
+            usage: {
+                get: () => this.#physicalDescriptor.usage,
+                enumerable: true,
+                configurable: false,
+            },
+        })
+        bufferAllocationInstallers.set(this, (nextDescriptor, nextGpuBuffer) => {
+            const previousDescriptor = this.#physicalDescriptor
+            const previousGpuBuffer = this.#gpuBuffer
+            this.#physicalDescriptor = nextDescriptor
+            this.#gpuBuffer = nextGpuBuffer
+            try {
+                replaceResourceAllocation(this, nextDescriptor)
+            } catch (cause) {
+                this.#physicalDescriptor = previousDescriptor
+                this.#gpuBuffer = previousGpuBuffer
+                destroyNativeCandidate(nextGpuBuffer)
+                throw cause
+            }
+            destroyNativeCandidate(previousGpuBuffer)
+        })
         registerResource(this)
         Object.preventExtensions(this)
     }
@@ -264,6 +303,49 @@ Object.freeze(BufferRegion.prototype)
 export function isBufferRegion(value: unknown): value is BufferRegion {
 
     return typeof value === 'object' && value !== null && bufferRegions.has(value as BufferRegion)
+}
+
+export function commitBufferResourceAllocation(
+    resource: BufferResource,
+    descriptor: BufferResourceDescriptor,
+    gpuBuffer: GPUBuffer
+): void {
+
+    if (!(resource instanceof BufferResource)) {
+        destroyNativeCandidate(gpuBuffer)
+        throw new TypeError('Buffer allocation commit requires a BufferResource.')
+    }
+    if (gpuBuffer === undefined || gpuBuffer === null || typeof gpuBuffer !== 'object') {
+        throw new TypeError('Buffer allocation commit requires a GPUBuffer candidate.')
+    }
+    try {
+        resource.assertUsable()
+    } catch (cause) {
+        destroyNativeCandidate(gpuBuffer)
+        throw cause
+    }
+    if (gpuBuffer === resource.gpuBuffer) {
+        throw new TypeError('Buffer allocation commit requires a distinct GPUBuffer candidate.')
+    }
+
+    let normalizedDescriptor: NormalizedBufferResourceDescriptor
+    try {
+        normalizedDescriptor = normalizeBufferDescriptor(resource.runtime, descriptor)
+    } catch (cause) {
+        destroyNativeCandidate(gpuBuffer)
+        throw cause
+    }
+    if (normalizedDescriptor.label !== resource.label) {
+        destroyNativeCandidate(gpuBuffer)
+        throw new TypeError('Buffer replacement cannot change logical resource label identity.')
+    }
+
+    const install = bufferAllocationInstallers.get(resource)
+    if (install === undefined) {
+        destroyNativeCandidate(gpuBuffer)
+        throw new TypeError('Buffer allocation commit is unavailable.')
+    }
+    install(normalizedDescriptor, gpuBuffer)
 }
 
 export function bufferRegionSubject(region: BufferRegion): DiagnosticSubject {
@@ -617,15 +699,14 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
         })
     }
 
-    const normalized: NormalizedBufferResourceDescriptor = {
+    return Object.freeze({
         size: descriptor.size,
         usage: descriptor.usage,
-    }
-
-    if (descriptor.label !== undefined) normalized.label = descriptor.label
-    if (descriptor.mappedAtCreation !== undefined) normalized.mappedAtCreation = descriptor.mappedAtCreation
-
-    return normalized
+        ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
+        ...(descriptor.mappedAtCreation !== undefined
+            ? { mappedAtCreation: descriptor.mappedAtCreation }
+            : {}),
+    })
 }
 
 function createGpuBufferDescriptor(

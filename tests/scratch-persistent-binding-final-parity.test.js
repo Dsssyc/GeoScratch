@@ -48,11 +48,15 @@ describe('Scratch persistent binding final parity', () => {
             'runAcceptanceEvidence',
             'workingTreeEvidence',
             'acceptance requires a clean Git working tree',
+            'acceptance requires the same clean Git target after every execution gate',
+            'SCRATCH_FINAL_AUDIT_NEGATIVE_BROWSER_BASE_URL',
+            'negativeBrowserBaseUrl === undefined',
+            'finalRepository',
             'officialWebIdlSource',
             'clampedUnsignedShort',
             'nearestEvenInteger',
-            'const expectedFocusedAcceptancePasses = 369',
-            'const expectedFullSuitePasses = 810',
+            'const expectedFocusedAcceptancePasses = 370',
+            'const expectedFullSuitePasses = 811',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -78,6 +82,7 @@ describe('Scratch persistent binding final parity', () => {
             'rejects invalid and unaligned vertex buffer bindings with structured diagnostics',
             'defaults depth clear to one and accepts inclusive unit-range boundaries',
             'retains lifecycle recheck as secondary evidence beside a native preparation failure',
+            'revalidates buffer bounds, usage, and alignment before binding a replacement allocation',
             'revalidates a persistent 3d attachment depthSlice after allocation replacement',
             'accepts native-valid depth-only pipelines and render passes',
             'normalizes only complete finite GPUColor values before encoder creation',
@@ -125,6 +130,8 @@ describe('Scratch persistent binding final parity', () => {
         ]) {
             expect(source, marker).to.include(marker)
         }
+        expect(source).not.to.include("status: 'external'")
+        expect(source).not.to.include('const explicitBaseUrl')
 
         for (const marker of [
             'Goal-start TypeScript behavior and public symbols',
@@ -369,15 +376,15 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence.mocha).to.deep.include({
             status: 'passed',
-            tests: 369,
-            passes: 369,
+            tests: 370,
+            passes: 370,
             failures: 0,
             pending: 0,
         })
         expect(result.executionEvidence.fullSuite).to.deep.include({
             status: 'passed',
-            tests: 812,
-            passes: 810,
+            tests: 813,
+            passes: 811,
             failures: 0,
             pending: 2,
         })
@@ -410,6 +417,14 @@ describe('Scratch persistent binding final parity', () => {
             mode: 'managed',
         })
         expect(result.executionEvidence.server.stop.status).to.equal('passed')
+        expect(result.executionEvidence.finalRepository).to.deep.include({
+            status: 'passed',
+            commit: result.target.commit,
+        })
+        expect(result.executionEvidence.finalRepository.workingTree).to.deep.include({
+            clean: true,
+            entries: [],
+        })
 
         const unavailableBrowser = spawnSync(process.execPath, [ runner ], {
             cwd: root,
@@ -418,7 +433,7 @@ describe('Scratch persistent binding final parity', () => {
             env: {
                 ...process.env,
                 SCRATCH_FINAL_AUDIT: '1',
-                SCRATCH_BINDING_BROWSER_BASE_URL: 'http://127.0.0.1:65534',
+                SCRATCH_FINAL_AUDIT_NEGATIVE_BROWSER_BASE_URL: 'http://127.0.0.1:65534',
             },
         })
         expect(unavailableBrowser.error).to.equal(undefined)

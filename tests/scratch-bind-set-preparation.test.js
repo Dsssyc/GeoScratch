@@ -206,6 +206,62 @@ describe('Scratch BindSet preparation', () => {
         expect(fixture.calls.bindGroups).to.have.length(2)
     })
 
+    it('revalidates buffer bounds, usage, and alignment before binding a replacement allocation', async() => {
+
+        const fixture = await createUniformFixture()
+        const region = fixture.buffer.region({ offset: 256, size: 256 })
+        const bindSet = await fixture.runtime.createBindSet(fixture.layout, {
+            uniforms: region,
+        })
+        const originalBuffer = fixture.buffer.gpuBuffer
+
+        const undersizedBuffer = replaceResourceAllocationForTest(fixture.buffer, {
+            ...fixture.buffer.descriptor,
+            size: 384,
+        })
+        expect(undersizedBuffer).not.to.equal(originalBuffer)
+        expect(fixture.buffer.gpuBuffer).to.equal(undersizedBuffer)
+        expect(fixture.buffer.size).to.equal(384)
+        expect(originalBuffer.destroyed).to.equal(true)
+        const boundsFailure = await rejectedDiagnostic(bindSet.prepare())
+        expect(boundsFailure.diagnostic.code).to.equal('SCRATCH_BUFFER_REGION_RANGE_INVALID')
+        expect(bindSet.preparationState).to.equal('stale')
+        expect(fixture.calls.bindGroups).to.have.length(1)
+
+        const wrongUsageBuffer = replaceResourceAllocationForTest(fixture.buffer, {
+            ...fixture.buffer.descriptor,
+            size: 512,
+            usage: GPU_BUFFER_USAGE_STORAGE,
+        })
+        expect(fixture.buffer.gpuBuffer).to.equal(wrongUsageBuffer)
+        expect(fixture.buffer.usage).to.equal(GPU_BUFFER_USAGE_STORAGE)
+        expect(undersizedBuffer.destroyed).to.equal(true)
+        const usageFailure = await rejectedDiagnostic(bindSet.prepare())
+        expect(usageFailure.diagnostic.code).to.equal('SCRATCH_BIND_RESOURCE_USAGE_MISSING')
+        expect(bindSet.preparationState).to.equal('stale')
+        expect(fixture.calls.bindGroups).to.have.length(1)
+
+        const replacementBuffer = replaceResourceAllocationForTest(fixture.buffer, {
+            ...fixture.buffer.descriptor,
+            usage: GPU_BUFFER_USAGE_UNIFORM,
+        })
+        fixture.device.limits.minUniformBufferOffsetAlignment = 512
+        const alignmentFailure = await rejectedDiagnostic(bindSet.prepare())
+        expect(alignmentFailure.diagnostic.code).to.equal('SCRATCH_BIND_RESOURCE_OFFSET_UNALIGNED')
+        expect(bindSet.preparationState).to.equal('stale')
+        expect(fixture.calls.bindGroups).to.have.length(1)
+
+        fixture.device.limits.minUniformBufferOffsetAlignment = 256
+        await bindSet.prepare()
+        expect(bindSet.preparationState).to.equal('prepared')
+        expect(bindSet.prepareGeneration).to.equal(2)
+        expect(fixture.calls.bindGroups).to.have.length(2)
+        expect(fixture.calls.bindGroups[1].descriptor.entries[0].resource.buffer)
+            .to.equal(replacementBuffer)
+        expect(wrongUsageBuffer.destroyed).to.equal(true)
+        expect(replacementBuffer.destroyed).to.equal(false)
+    })
+
     it('deduplicates logical texture views only inside one preparation candidate', async() => {
 
         const fixture = await createTextureFixture()

@@ -52,7 +52,7 @@ device calls and are excluded. Every actual `device.createBuffer()` and
 
 | ID | Native call site | Native object | Classification | Fact |
 | --- | --- | --- | --- | --- |
-| N1 | `packages/geoscratch/src/scratch/buffer.ts:454` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
+| N1 | `packages/geoscratch/src/scratch/buffer.ts:536` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
 | N2 | `packages/geoscratch/src/scratch/readback-staging.ts:142` | Buffer | Acknowledged readback staging | Shared direct and ordered staging allocation transaction covered by ADR-034. |
 | N3 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:4674` | Buffer | Raw native escape hatch | Legacy/vendored uniform-buffer utility outside Scratch operation provenance. |
 | N4 | `packages/geoscratch/src/core/utils/webgpu-utils.module.js:5073` | Buffer | Raw native escape hatch | Legacy/vendored generic vertex-buffer utility. |

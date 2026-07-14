@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Final acceptance revalidation in progress; final independent re-review pending
+Status: Post-fifteenth-review fixes; clean acceptance and independent re-review pending
 Decisions: ADR-036, ADR-037, ADR-038
 
 ## Fixed Evidence
@@ -24,12 +24,14 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 369
-referenced behavior tests; requires the complete suite to report exactly 810 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 370
+referenced behavior tests; requires the complete suite to report exactly 811 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
-proof and the 11-page ordinary-example matrix. An explicit unreachable browser URL
-still exits non-zero with `ERR_CONNECTION_REFUSED`.
+proof and the 11-page ordinary-example matrix. It accepts no external-server mode and
+rechecks the exact HEAD plus clean working tree after every execution gate. A negative
+browser-target override still runs inside the managed lifecycle and exits non-zero with
+`ERR_CONNECTION_REFUSED`.
 
 The Goal-start commit is the behavioral and public-symbol baseline. The historical
 JavaScript commit is evidence for behavior that had already survived the TypeScript
@@ -83,7 +85,7 @@ The executable audit reports 36 Goal-start value exports, 29 historical JavaScri
 value exports, and 38 final value exports. None is silently missing. The production
 compiler emits 102 JavaScript files and 102 declaration files; every one matches
 `dist` exactly, with no missing, stale, or mismatched transitive output. The declaration
-AST manifest covers 4,717 declaration/member nodes. Scratch source contains only `.ts`
+AST manifest covers 4,718 declaration/member nodes. Scratch source contains only `.ts`
 and no hand-written `.d.ts` or same-source `.js`.
 
 ## AST-Derived Public Member Disposition
@@ -273,6 +275,9 @@ not performance thresholds. The zero-allocation claim applies only to persistent
 binding preparation/preflight bookkeeping, not to complete browser submission or
 native driver work.
 
+The clean fourteenth-review acceptance measured 1.16 and 0.74 microseconds per cycle
+for the two 20,000-cycle phases. These are likewise observations, not thresholds.
+
 Steady-state staleness checking is an allocation-free indexed scan of the immutable
 dependency/version array captured by preparation. No O(1) claim is made: the Goal
 explicitly forbids a Resource-to-BindSet reverse graph, so exact staleness detection
@@ -363,7 +368,7 @@ Resolved second parity findings:
    browser proof. The disabled Mocha gates use `this.skip()` and no-server acceptance
    fails non-zero.
 3. Production emit parity covers all 102 JavaScript plus 102 declaration files, rejects
-   stale transitive files, and fingerprints 4,717 declaration/member signatures.
+   stale transitive files, and fingerprints 4,718 declaration/member signatures.
    Goal-start public properties and complete member signatures are explicitly audited.
 4. English and Chinese canon now match the three-state `ResourceState` and
    `QuerySetSlotState`; disposal remains the separate `resource.isDisposed` lifecycle.
@@ -535,6 +540,27 @@ Resolved fourteenth review findings:
    attachment views, including current-allocation `depthSlice` validation; the final
    documentation audit rejects the contradictory single-2D wording.
 
+Resolved fifteenth review findings:
+
+1. Buffer replacement tests no longer increment only the generic logical allocation
+   version while retaining the same native object and stale physical facts. The internal
+   candidate-commit transaction atomically replaces `GPUBuffer`,
+   size, usage, descriptor, allocation version, and content state, then destroys the old
+   candidate. It is not exported from either public package entry point. BindSet coverage
+   observes distinct native identity, current bounds/usage/alignment failures, and a
+   repaired retry that binds the replacement candidate itself.
+2. Final acceptance always preflights, starts, and stops its own Vite server. The former
+   external-server success branch is removed; the unavailable-browser negative case is
+   only a target override inside that managed lifecycle, and any use of that override
+   makes overall acceptance fail even if the target unexpectedly responds successfully.
+3. Final acceptance records and requires the same HEAD plus a clean complete working tree
+   after browser, focused/full Mocha, and stress gates. A clean check only at startup can
+   no longer certify files changed by later commands.
+4. Copy diagnostic expectations now state direction-dependent layout requirements,
+   optional texture-only origins/mips/aspects, all three native texture aspects, and the
+   distinct buffer-to-buffer size rule. They no longer claim every copy needs both linear
+   layouts or that only `all` is supported.
+
 A further new isolated reviewer must re-review these fixes and the remaining Goal
 surface. This section is not an approval until that reviewer reports no unresolved
 correctness finding.
@@ -565,7 +591,7 @@ audited working tree was dirty:
 - steady-state binding gate: passed
 - AST public members: 357 Goal-start / 173 historical methods / 378 final; 21 missing
   and 10 changed Goal-start contracts classified
-- reviews before final re-review: 46 actionable findings reproduced or source-verified and fixed
+- reviews before final re-review: 50 actionable findings reproduced or source-verified and fixed
 - `npm test`: 798 passing, 2 exact acceptance/browser pending identities
 - `npm run typecheck`: passed
 - `npm run build`: passed
@@ -657,6 +683,52 @@ Post-fourteenth-review pre-commit verification:
 - `git diff --check`: passed
 - managed-server headed acceptance is intentionally deferred until the reviewed tree is
   committed and therefore eligible for the clean-tree gate
+
+Clean checkpoint acceptance at `7c6e722102b10b783692174d8593fbb786072423`:
+
+- runner verification: `acceptance` / `passed`; the audited commit and empty porcelain
+  inventory were recorded before any expensive gate
+- live GPUWeb main source: 847,267 bytes, SHA-256
+  `932662674acc613000f29cb1b087d8f5e66156e9b37f7ea0ba3eed9130c71283`; all six
+  binding/query enum rows, all 101 texture formats, and 48 required native markers
+  passed
+- live copy-rules source: 27,111 bytes, SHA-256
+  `ff03e128d21f18ecbb30b9fea9e3fbd61718c73cc6636ace718907a4cebcf1d8`;
+  live Web IDL source: 692,999 bytes, SHA-256
+  `d571871f07a5c992d354d985a02361a9e005bec0748213a66beaee3d10202ced`
+- runner-owned command gates: `npm run typecheck` passed in 5,892 ms, `npm run build`
+  passed in 5,817 ms, and `git diff --check` passed in 14 ms
+- managed Vite server became ready in 238 ms, served both headed browser gates, and
+  exited normally; its complete managed lifecycle was 26,247 ms and port 4173 was
+  closed afterward
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the persistent-binding probe;
+  the ordinary example matrix passed 11/11 with nonblank pixel assertions and zero
+  console, page, request, or matrix failures
+- focused acceptance: 369/369 passing, zero pending, and zero missing required titles
+- complete suite: 812 tests, 810 passing, zero failures, and only the two exact
+  browser/final-acceptance gate identities pending
+- steady-state gate: 20,000 + 20,000 cycles passed at observed 1.16 and 0.74
+  microseconds per cycle
+- explicit unavailable browser URL: non-zero exit with `ERR_CONNECTION_REFUSED`
+- the runner stopped its child server; the working tree and port 4173 were clean after
+  acceptance
+
+Post-fifteenth-review pre-commit verification:
+
+- the real buffer-allocation, copy-diagnostic, and final-runner regressions produced three
+  expected failing cases before implementation; the existing resource assertion was then
+  exercised explicitly rather than accepted through an unrelated title filter
+- every suite using the allocation-replacement test transaction, plus copy and structural
+  parity, passed 82/82; only the explicitly disabled final-acceptance gate remained pending
+- fixed-history structural parity passed all capability, public-surface, documentation,
+  production-emit, and behavior-title contracts; the current declaration manifest contains
+  4,718 nodes while the public class-member inventory remains 378
+- the first complete-suite run rejected the stale exact native-allocation source location;
+  the 16-site provenance inventory was re-derived and passed after updating `buffer.ts:536`
+- `npm test`: 811 passing, 2 exact acceptance/browser pending identities
+- `npm run typecheck`: passed, including canonical WebGPU declarations
+- `npm run build`: passed for the package and all 14 runnable examples
+- clean-commit headed acceptance and the next isolated no-findings review remain pending
 
 The exact no-findings re-review, clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.

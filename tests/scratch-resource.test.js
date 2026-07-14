@@ -220,8 +220,13 @@ describe('scratch resources', () => {
 
         const bufferAllocationVersion = buffer.allocationVersion
         const textureAllocationVersion = texture.allocationVersion
+        const originalGpuBuffer = buffer.gpuBuffer
 
-        replaceResourceAllocationForTest(buffer)
+        const replacementGpuBuffer = replaceResourceAllocationForTest(buffer, {
+            ...buffer.descriptor,
+            size: 32,
+            usage: 2,
+        })
         replaceResourceAllocationForTest(texture)
 
         expect(buffer.allocationVersion).to.equal(bufferAllocationVersion + 1)
@@ -232,6 +237,16 @@ describe('scratch resources', () => {
         expect(texture.state).to.equal('empty')
         expect(buffer.isReady).to.equal(false)
         expect(texture.isReady).to.equal(false)
+        expect(buffer.gpuBuffer).to.equal(replacementGpuBuffer)
+        expect(replacementGpuBuffer).not.to.equal(originalGpuBuffer)
+        expect(originalGpuBuffer.destroyed).to.equal(true)
+        expect(buffer.size).to.equal(32)
+        expect(buffer.usage).to.equal(2)
+        expect(buffer.descriptor).to.deep.equal({
+            label: 'readiness buffer',
+            size: 32,
+            usage: 2,
+        })
     })
 
     it('rejects noncanonical raw resource descriptor integers before native issue', async() => {

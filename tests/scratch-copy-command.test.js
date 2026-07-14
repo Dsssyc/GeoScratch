@@ -1568,6 +1568,21 @@ describe('scratch CopyCommand', () => {
             )
             expect(diagnostic.expected.sourceLayout).to.not.include('offset')
             expect(diagnostic.expected.targetLayout).to.not.include('offset')
+            expect(diagnostic.expected.sourceLayout).to.equal(
+                'required only for buffer-to-texture copies; bytesPerRow is a positive 256-byte aligned GPUSize32 and rowsPerImage is an optional positive GPUSize32'
+            )
+            expect(diagnostic.expected.targetLayout).to.equal(
+                'required only for texture-to-buffer copies; bytesPerRow is a positive 256-byte aligned GPUSize32 and rowsPerImage is an optional positive GPUSize32'
+            )
+            expect(diagnostic.expected.sourceAspect).to.equal(
+                "optional 'all', 'depth-only', or 'stencil-only' for a texture source, compatible with its format and copy direction"
+            )
+            expect(diagnostic.expected.targetAspect).to.equal(
+                "optional 'all', 'depth-only', or 'stencil-only' for a texture target, compatible with its format and copy direction"
+            )
+            expect(diagnostic.expected.size).to.equal(
+                'required positive texture extent for copies involving a texture; buffer-to-buffer copies use equal positive BufferRegion sizes'
+            )
         }
     })
 
