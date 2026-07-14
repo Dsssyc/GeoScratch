@@ -56,7 +56,7 @@ describe('Scratch persistent binding final parity', () => {
             'officialWebIdlSource',
             'clampedUnsignedShort',
             'nearestEvenInteger',
-            'const expectedFocusedAcceptancePasses = 446',
+            'const expectedFocusedAcceptancePasses = 455',
             'const expectedFullSuitePasses = 853',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
@@ -451,8 +451,8 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence.mocha).to.deep.include({
             status: 'passed',
-            tests: 446,
-            passes: 446,
+            tests: 455,
+            passes: 455,
             failures: 0,
             pending: 0,
         })

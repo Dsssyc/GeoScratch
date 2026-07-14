@@ -9,7 +9,7 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 446
+const expectedFocusedAcceptancePasses = 455
 const expectedFullSuitePasses = 853
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
@@ -228,7 +228,7 @@ const capabilityRows = [
                 'usage > GPU_FLAGS_MAX',
             ]),
         implementation: 'scratch/resource.ts, scratch/sampler.ts, scratch/query-set.ts',
-        tests: 'scratch-resource.test.js, scratch-query-set.test.js, scratch-supporting-object-acknowledgement.test.js',
+        tests: 'scratch-resource.test.js, scratch-query-set.test.js, scratch-occlusion-query.test.js, scratch-supporting-object-acknowledgement.test.js',
         docs: 'scratch-api/02-resources and ADR-036',
         replacement: 'universal ResourceState narrowed to content-bearing resources',
     }),

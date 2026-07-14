@@ -24,7 +24,7 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 446
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 455
 referenced behavior tests; requires the complete suite to report exactly 853 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
@@ -1257,12 +1257,19 @@ Post-twenty-fourth-review pre-commit verification:
 - `npm run typecheck` passes both TypeScript consumers; `npm test` reports exactly 853
   passing with only the two exact browser/final-acceptance identities pending
 - `npm run build` emits the package and all 14 runnable examples; fixed-history
-  structural parity locks the 446-test focused acceptance count and passes every
+  structural parity locks the 455-test focused acceptance count and passes every
   capability, official binding, native-copy, behavior-title, bilingual-documentation,
   ADR, production-emit, and historical-baseline gate while correctly reporting
   `incomplete` for the dirty pre-commit tree
 - `git diff --check` passes; clean-commit acceptance, a new isolated exact no-findings
   review, final audit closure, and the required feature-branch push remain pending
+
+The first clean acceptance attempt at `795ebbb6462a39967900545cf62bf7aeb71b1f86`
+correctly failed overall even though its full suite and browser work completed: the
+focused set reported 445/445 but omitted `scratch-occlusion-query.test.js`, so the new
+required occlusion lifecycle title was absent. The resource/query capability row now
+includes that complete 10-test suite and the executable focused count is 455. Evidence
+from the rejected attempt is not treated as acceptance.
 
 The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.
