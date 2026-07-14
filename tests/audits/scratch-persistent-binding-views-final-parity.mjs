@@ -626,7 +626,7 @@ const behaviorTestContracts = [
     ]),
     behaviorTestContract('tests/scratch-resource-views.test.js', [
         'creates complete immutable TextureViewSpecs and preflights usage capabilities without native views',
-        'accepts mipmapped one-dimensional textures and persistent mip views',
+        'rejects mipmapped one-dimensional textures before native issue',
         'rejects render-attachment one-dimensional textures',
     ]),
     behaviorTestContract('tests/scratch-resource.test.js', [
@@ -869,9 +869,9 @@ const documentationAudit = Object.freeze({
         'finally',
     ]),
     resourceViews: hasAll(finalDocs.resources, [ 'BufferRegion', 'TextureViewSpec', 'abiHash', 'schemaHash' ]),
-    oneDimensionalMips: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
-        hasAll(source, [ '`1d`', 'maximum-mip', 'mip level' ])
-    ),
+    oneDimensionalSingleMip:
+        hasAll(finalDocs.resources, [ '`1d`', 'cannot have mipmaps', '`mipLevelCount` must be `1`' ]) &&
+        hasAll(finalDocs.resourcesZh, [ '`1d`', '不能拥有 mipmap', '`mipLevelCount` 必须为 `1`' ]),
     canonicalResourceDescriptors: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
         hasAll(source, [ 'GPUSize64', 'GPUIntegerCoordinate', 'GPUFlagsConstant', 'canonical' ])
     ),
@@ -1611,6 +1611,10 @@ async function fetchOfficialSpecificationEvidence(canonicalTypes) {
             'Set |this|.{{GPUCanvasContext/[[configuration]]}} to `null`.',
         textureMaximumMipLevelCount:
             '|descriptor|.{{GPUTextureDescriptor/mipLevelCount}} must be &le; [$maximum mipLevel count$](|descriptor|.{{GPUTextureDescriptor/dimension}}, |descriptor|.{{GPUTextureDescriptor/size}}).',
+        oneDimensionalTextureMipmapRestriction:
+            '{{GPUTextureDimension/"1d"}} textures cannot have mipmaps, be multisampled, use compressed or depth/stencil formats, or be used as a render target.',
+        oneDimensionalMaximumMipLevelCount:
+            ': {{GPUTextureDimension/"1d"}} :: Return 1.',
         timestampWriteIndicesDistinct:
             '- No two may be equal. - Each must be &lt; |timestampWrites|.`querySet`.{{GPUQuerySet/count}}.',
         writeBufferContentsAlignment:

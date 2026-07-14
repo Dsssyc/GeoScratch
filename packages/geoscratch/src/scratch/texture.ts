@@ -1248,6 +1248,7 @@ function validateTextureAllocationDescriptor(
     if (descriptor.dimension === '1d' && (
         size.height !== 1 ||
         size.depthOrArrayLayers !== 1 ||
+        descriptor.mipLevelCount !== 1 ||
         descriptor.sampleCount !== 1 ||
         (descriptor.usage & GPU_TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0 ||
         DEPTH_TEXTURE_FORMATS.has(descriptor.format) ||
@@ -1260,6 +1261,7 @@ function validateTextureAllocationDescriptor(
             width: `positive integer <= ${String(maxTextureDimension1D)}`,
             height: 1,
             depthOrArrayLayers: 1,
+            mipLevelCount: 1,
             sampleCount: 1,
             usage: 'excludes RENDER_ATTACHMENT',
             format: 'non-compressed color format',
@@ -1297,11 +1299,13 @@ function validateTextureAllocationDescriptor(
         })
     }
 
-    const maxMipLevelCount = Math.floor(Math.log2(Math.max(
-        size.width,
-        size.height,
-        descriptor.dimension === '3d' ? size.depthOrArrayLayers : 1
-    ))) + 1
+    const maxMipLevelCount = descriptor.dimension === '1d'
+        ? 1
+        : Math.floor(Math.log2(Math.max(
+            size.width,
+            size.height,
+            descriptor.dimension === '3d' ? size.depthOrArrayLayers : 1
+        ))) + 1
     if (descriptor.mipLevelCount > maxMipLevelCount) {
         throwTextureDescriptorDiagnostic(runtime.subject, actual, {
             mipLevelCount: `<= ${maxMipLevelCount} for the requested texture extent`,

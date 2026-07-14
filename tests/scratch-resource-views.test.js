@@ -285,30 +285,23 @@ describe('scratch logical resource views', () => {
         }
     })
 
-    it('accepts mipmapped one-dimensional textures and persistent mip views', async() => {
+    it('rejects mipmapped one-dimensional textures before native issue', async() => {
 
         const { runtime, calls } = await createRuntimeFixture()
-        const texture = await runtime.createTexture({
+        const textureCount = calls.textures.length
+        const errorScopeCount = calls.errorScopes.length
+
+        const diagnostic = await expectRejectedDiagnostic(runtime.createTexture({
             dimension: '1d',
             size: [ 8 ],
             mipLevelCount: 4,
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
-        })
-        const view = texture.view({
-            baseMipLevel: 1,
-            mipLevelCount: 2,
-        })
+        }), 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID')
 
-        expect(calls.textures.at(-1).descriptor).to.include({
-            dimension: '1d',
-            mipLevelCount: 4,
-        })
-        expect(view.descriptor).to.include({
-            dimension: '1d',
-            baseMipLevel: 1,
-            mipLevelCount: 2,
-        })
+        expect(diagnostic.expected).to.include({ mipLevelCount: 1 })
+        expect(calls.textures).to.have.length(textureCount)
+        expect(calls.errorScopes).to.have.length(errorScopeCount)
     })
 
     it('rejects render-attachment one-dimensional textures', async() => {

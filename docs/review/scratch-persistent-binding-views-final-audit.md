@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Accepted
+Status: Post-twenty-seventh-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -11,7 +11,7 @@ Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 - Audit target: `socu/scratch-persistent-binding-views-v1`
 - Structural audit: `node tests/audits/scratch-persistent-binding-views-final-parity.mjs`
 - Final acceptance: `SCRATCH_FINAL_AUDIT=1 node tests/audits/scratch-persistent-binding-views-final-parity.mjs`
-- Native authority: [WebGPU resource binding](https://gpuweb.github.io/gpuweb/#resource-binding), [texture views](https://gpuweb.github.io/gpuweb/#texture-view-creation), [canvas configuration](https://gpuweb.github.io/gpuweb/#canvas-configuration), [copies](https://gpuweb.github.io/gpuweb/#copies), [query sets](https://gpuweb.github.io/gpuweb/#query-sets), [timestamp-write validation](https://gpuweb.github.io/gpuweb/#abstract-opdef-validate-timestampwrites), and [Web IDL integer conversion](https://webidl.spec.whatwg.org/#es-integer-types)
+- Native authority: [WebGPU resource binding](https://gpuweb.github.io/gpuweb/#resource-binding), [texture creation](https://gpuweb.github.io/gpuweb/#texture-creation), [texture views](https://gpuweb.github.io/gpuweb/#texture-view-creation), [canvas configuration](https://gpuweb.github.io/gpuweb/#canvas-configuration), [copies](https://gpuweb.github.io/gpuweb/#copies), [query sets](https://gpuweb.github.io/gpuweb/#query-sets), [timestamp-write validation](https://gpuweb.github.io/gpuweb/#abstract-opdef-validate-timestampwrites), and [Web IDL integer conversion](https://webidl.spec.whatwg.org/#es-integer-types)
 
 The executable audit uses the TypeScript compiler AST to derive exports and every
 public exported-class constructor, property, method, getter, setter, parameter type,
@@ -742,9 +742,10 @@ Resolved twenty-second review findings:
    retains runtime disposal, device loss, BindSet/BindLayout disposal, and every distinct
    disposed bound-resource fact in the ADR-defined deterministic order before choosing
    the primary outcome.
-5. One-dimensional textures now accept every mip count within the ordinary native
-   maximum-mip calculation. The native 1D render-attachment prohibition remains enforced
-   independently, and persistent 1D mip views have direct positive coverage.
+5. This checkpoint treated one-dimensional textures as ordinary mip chains. The
+   twenty-seventh review later proved that premise incorrect: the native maximum-mip
+   calculation returns `1` for `1d`, so the current contract rejects every larger count
+   before native issue while preserving valid single-level persistent views.
 
 These findings bring the reproduced or source-verified reviewer total to 74.
 
@@ -805,6 +806,21 @@ Resolved twenty-fifth review finding:
    stale-output detection when generated output already exists.
 
 This finding brings the reproduced or source-verified reviewer total to 82.
+
+The twenty-sixth isolated review returned exactly `No findings.` for checkpoint
+`585d65739ecb03fe0d3c81c7e940545ca88faad0`. After the audit-only closure commit
+`dac721bb29ad6f5ca97dbaef950f6b990c51ba31` passed clean acceptance, the required
+twenty-seventh isolated review found the native 1D mip contract defect below.
+
+Resolved twenty-seventh review finding:
+
+1. `TextureResource` creation now rejects a `1d` descriptor unless `mipLevelCount` is
+   exactly `1`, before error scopes or `GPUDevice.createTexture()`. The executable audit
+   locks both the official GPUWeb prose prohibition and its maximum-mip algorithm's
+   `1d` return value. The regression, bilingual resource vision, and ADR-031 no longer
+   certify mipmapped one-dimensional textures.
+
+This finding brings the reproduced or source-verified reviewer total to 83.
 
 ## Verification Record
 
@@ -1213,12 +1229,13 @@ Post-twenty-first-review pre-commit verification:
 
 Post-twenty-second-review pre-commit verification:
 
-- the five new reviewer regressions first failed for their intended reasons: Canvas
+- the five new reviewer regressions first failed for their then-understood reasons: Canvas
   transient-attachment usage reached native configuration, mutable PassSpec attachment
   descriptors bypassed submission validation, live Program requirement replacement
   weakened an existing pipeline contract, BindSet preparation retained only one of
-  several concurrent lifecycle failures, and valid one-dimensional mip chains were
-  rejected before native texture creation
+  several concurrent lifecycle failures, and one-dimensional mip chains then assumed
+  valid were rejected before native texture creation; the twenty-seventh review
+  supersedes that incorrect mip premise
 - seven public type assertions also failed before implementation because normalized
   pass attachment, timestamp-write, and descriptor collections were still mutable
 - all five targeted regressions now pass 5/5; the complete affected Surface, PassSpec,
@@ -1318,10 +1335,28 @@ Post-twenty-fifth-review pre-commit verification:
 - the twenty-sixth isolated strict review of that accepted checkpoint returned exactly
   `No findings.`
 
-This audit accepts the implementation checkpoint above. The audit-only closure commit
-must repeat clean acceptance and receive a new exact no-findings review; the final
-handoff records that commit and the required feature-branch push without recursively
-editing this document after its own review.
+Post-twenty-seventh-review pre-commit verification:
+
+- the replacement regression first failed because the mipmapped `1d` descriptor returned
+  successfully without a Scratch diagnostic; after the fix it reports
+  `SCRATCH_RESOURCE_DESCRIPTOR_INVALID` with `expected.mipLevelCount: 1` and leaves both
+  texture-creation and error-scope call counts unchanged
+- the current official GPUWeb source contains both the normative statement that `1d`
+  textures cannot have mipmaps and the maximum-mip algorithm branch that returns `1`;
+  both exact source markers are now acceptance gates
+- the complete resource-view and final-contract collection passes 13 tests with only its
+  explicit final-acceptance identity pending; fixed-history structural parity passes the
+  corrected behavior, bilingual documentation, ADR, official-source, production-emit,
+  and baseline contracts while correctly reporting `incomplete` for the dirty tree
+- `npm run typecheck` passes both TypeScript consumers; `npm test` reports exactly 853
+  passing with only the two exact browser/final-acceptance identities pending; `npm run
+  build` emits the package and all 14 runnable examples
+- `git diff --check`, clean-commit acceptance, and a fresh isolated exact no-findings
+  review remain required before audit closure
+
+The twenty-seventh-review correction must now pass targeted and full verification,
+clean acceptance, and a fresh exact no-findings review before this audit can return to
+Accepted status. The required feature-branch push remains ordered after that closure.
 
 ## Explicit Non-Goals
 

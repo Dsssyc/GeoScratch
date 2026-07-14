@@ -110,8 +110,10 @@ describe('Scratch persistent binding final parity', () => {
             'applies native depth-stencil aspect footprints and direction limits',
             'rejects invalid copy ranges and every same-buffer copy',
             'creates complete immutable TextureViewSpecs and preflights usage capabilities without native views',
-            'accepts mipmapped one-dimensional textures and persistent mip views',
+            'rejects mipmapped one-dimensional textures before native issue',
             'rejects render-attachment one-dimensional textures',
+            'oneDimensionalTextureMipmapRestriction',
+            'oneDimensionalMaximumMipLevelCount',
             'settles scopes and preserves causal failures across lifecycle changes',
             'rejects noncanonical raw resource descriptor integers before native issue',
             'rejects color attachment metadata and surface view descriptor divergence',
@@ -299,7 +301,7 @@ describe('Scratch persistent binding final parity', () => {
         )).to.equal(true)
         expect(result.documentation.checks).to.deep.include({
             canonicalResourceDescriptors: true,
-            oneDimensionalMips: true,
+            oneDimensionalSingleMip: true,
             supportingObjectCausality: true,
             nativeRegionAlignment: true,
             attachmentViewContracts: true,
