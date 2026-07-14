@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-twenty-fifth-review fixes; clean acceptance and independent re-review pending
+Status: Accepted
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -322,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Twenty-five isolated review passes have examined the fixed-baseline diff and working tree.
+Twenty-six isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -348,7 +348,8 @@ timestamp/performance-contract defects and one P2 living-document defect. The
 twenty-fourth review confirmed one P1 pass-owned query lifecycle defect, two P2 current
 documentation defects, and the still-required feature-branch push gate. The twenty-fifth
 review confirmed one P2 clean-checkout acceptance reproducibility defect. No Critical
-issue was reported.
+issue was reported. The twenty-sixth review examined the accepted implementation
+checkpoint and returned exactly `No findings.`
 
 Resolved core finding:
 
@@ -1300,11 +1301,27 @@ Post-twenty-fifth-review pre-commit verification:
 - `npm run typecheck` passes both TypeScript consumers; `npm test` reports exactly 853
   passing with only the two exact browser/final-acceptance identities pending; `npm run
   build` emits the package and all 14 runnable examples
-- a new clean-checkout execution, clean acceptance, and fresh exact no-findings review
-  remain required
+- detached clean-checkout acceptance at exact commit
+  `585d65739ecb03fe0d3c81c7e940545ca88faad0` started without
+  `packages/geoscratch/dist`; the recorded bootstrap package build passed, followed by
+  455/455 focused tests, 853 passing plus the two exact pending gates, both 20,000-cycle
+  phases at observed 1.22 and 1.09 microseconds per cycle with zero binding-order sorts,
+  headed Chrome 150.0.7871.115 on Apple Metal 3, all 11 ordinary examples, the negative
+  target, managed-server cleanup, and final exact clean repository evidence
+- clean acceptance in the feature worktree at the same exact commit independently
+  passed its recorded bootstrap build, both TypeScript consumers, complete package and
+  all 14 runnable-example builds, diff check, 455/455 focused tests, 853 passing plus
+  the two exact pending gates, official source matrices, both 20,000-cycle phases at
+  observed 1.27 and 1.04 microseconds per cycle with zero binding-order sorts, headed
+  browser proof, 11/11 examples, negative target, managed-server cleanup, and final
+  exact clean repository evidence
+- the twenty-sixth isolated strict review of that accepted checkpoint returned exactly
+  `No findings.`
 
-The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree
-state are recorded only after those gates complete.
+This audit accepts the implementation checkpoint above. The audit-only closure commit
+must repeat clean acceptance and receive a new exact no-findings review; the final
+handoff records that commit and the required feature-branch push without recursively
+editing this document after its own review.
 
 ## Explicit Non-Goals
 
