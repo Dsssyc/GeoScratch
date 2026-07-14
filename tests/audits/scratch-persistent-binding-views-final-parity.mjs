@@ -1604,6 +1604,10 @@ async function fetchOfficialSpecificationEvidence(canonicalTypes) {
         textureToBuffer: 'copyTextureToBuffer(source, destination, copySize)',
         pipelineLayoutGroupIndex:
             'with the `N`th element corresponding with `@group(N)`.',
+        pipelineLayoutNullableSlots:
+            'required sequence<GPUBindGroupLayout?> bindGroupLayouts;',
+        pipelineLayoutNullInitialization:
+            'Let |bindGroupLayouts| be a [=list=] of `null` {{GPUBindGroupLayout}}s',
         pipelineLayoutAggregateBindingLimits:
             '|allEntries| must not [=exceeds the binding slot limits|exceed the binding slot limits=] of |limits|.',
         bufferCopyDistinctResources:

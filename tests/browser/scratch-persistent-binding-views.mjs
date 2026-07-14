@@ -123,6 +123,7 @@ async function verifyPersistentBindings(browser) {
 
         try {
             const main = await dynamicRegionAndReplacementProbe(runtime, layoutCodec)
+            const sparsePipelineLayout = await sparsePipelineLayoutProbe(runtime)
             const readOnlyStorage = await readOnlyStorageTextureProbe(runtime)
             const readWriteStorage = await readWriteStorageTextureProbe(runtime)
             const occlusion = await occlusionQueryProbe(runtime)
@@ -144,6 +145,7 @@ async function verifyPersistentBindings(browser) {
                 requestedFeatures: optionalFeatures,
                 deviceFeatures: [ ...runtime.deviceFeatures ].sort(),
                 main,
+                sparsePipelineLayout,
                 readOnlyStorage,
                 readWriteStorage,
                 occlusion,
@@ -503,6 +505,79 @@ async function verifyPersistentBindings(browser) {
                     outputValue: replacementOutput,
                     storagePixel: Array.from(storageBytes.slice(0, 4)),
                 },
+            }
+        }
+
+        async function sparsePipelineLayoutProbe(runtime) {
+            const output = await runtime.createBuffer({
+                label: 'browser sparse pipeline layout output',
+                size: 4,
+                usage: GPUBufferUsage.COPY_DST |
+                    GPUBufferUsage.COPY_SRC |
+                    GPUBufferUsage.STORAGE,
+            })
+            const groupZero = await runtime.createBindLayout({
+                label: 'browser sparse pipeline empty group zero',
+                group: 0,
+                entries: [],
+            })
+            const groupTwo = await runtime.createBindLayout({
+                label: 'browser sparse pipeline storage group two',
+                group: 2,
+                entries: [ {
+                    binding: 0,
+                    name: 'outputValue',
+                    type: 'storage',
+                    visibility: [ 'compute' ],
+                } ],
+            })
+            const bindSet = await runtime.createBindSet(groupTwo, {
+                outputValue: output.region(),
+            })
+            const program = runtime.createProgram({
+                label: 'browser sparse pipeline program',
+                modules: [ `
+                    @group(2) @binding(0)
+                    var<storage, read_write> outputValue: array<u32>;
+
+                    @compute @workgroup_size(1)
+                    fn main() {
+                        outputValue[0] = 73u;
+                    }
+                ` ],
+                entryPoints: { compute: 'main' },
+            })
+            const pipeline = await runtime.createComputePipeline({
+                label: 'browser sparse pipeline',
+                program,
+                bindLayouts: [ groupTwo, groupZero ],
+            })
+            const initialize = runtime.createUploadCommand({
+                label: 'browser sparse pipeline initialize output',
+                target: output.region(),
+                data: new Uint32Array([ 0 ]),
+            })
+            const dispatch = runtime.createDispatchCommand({
+                label: 'browser sparse pipeline dispatch',
+                pipeline,
+                bindSets: [ { set: bindSet } ],
+                count: { workgroups: [ 1 ] },
+                resources: {
+                    read: [ { resource: output, contentEpoch: 1 } ],
+                    write: [ output ],
+                },
+                whenMissing: 'throw',
+            })
+            const work = runtime.createSubmission({ validation: 'throw' })
+                .upload(initialize)
+                .compute(runtime.createComputePass(), [ dispatch ])
+                .submit()
+            await work.done
+            return {
+                status: 'passed',
+                value: await readUint32(runtime, output.region(), work),
+                callerLayoutGroups: pipeline.bindLayouts.map(layout => layout.group),
+                sparseGroup: groupTwo.group,
             }
         }
 
@@ -1008,6 +1083,15 @@ function validateResult(adapter, probe, probeError) {
     if (replacement.outputValue !== 17) failures.push('replacement Command GPU output drifted')
     if (!equalNumbers(replacement.storagePixel, [ 17, 0, 0, 255 ])) {
         failures.push('write-only storage texture pixel drifted')
+    }
+
+    if (
+        probe.sparsePipelineLayout.status !== 'passed' ||
+        probe.sparsePipelineLayout.value !== 73 ||
+        !equalNumbers(probe.sparsePipelineLayout.callerLayoutGroups, [ 2, 0 ]) ||
+        probe.sparsePipelineLayout.sparseGroup !== 2
+    ) {
+        failures.push('nullable sparse pipeline-layout slots failed exact GPU proof')
     }
 
     if (probe.readOnlyStorage.status !== 'passed' || probe.readOnlyStorage.value !== 41) {

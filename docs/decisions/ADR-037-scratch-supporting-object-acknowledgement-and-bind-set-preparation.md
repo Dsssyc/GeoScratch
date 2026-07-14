@@ -71,6 +71,11 @@ access/format/dimension, and sampler type. Names and binding indices are unique.
 It owns no resource, `LayoutArtifact`, Program, source, command policy, or scene
 semantics. Reflection remains an optional cross-check.
 
+Pipeline lowering uses `BindLayout.group` as the native sequence index rather than
+caller array order. Sparse groups retain WebGPU's nullable pipeline-layout slots:
+groups 0 and 2 lower to `[group0, null, group2]`. Scratch does not create or own an
+empty supporting object for the gap.
+
 ### Immutable BindSet contract
 
 `BindSet` accepts only:

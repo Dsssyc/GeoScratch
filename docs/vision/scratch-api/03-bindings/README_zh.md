@@ -72,7 +72,7 @@ BindLayout 与 BindSet preparation candidate 都使用同一规则。Runtime dis
 creation/preparation operation 的 `exact-operation` `supporting-object-failure`
 incident。抛出的 diagnostic 指向后者并通过 related 关联前者；两者不能互相替代。
 
-Pipeline lowering 把 `BindLayout.group` 视为 native pipeline-layout index，调用方数组顺序没有语义。Sparse group 会产生显式 `null` slot，因此 group `0` 与 `2` 会降低成 `[group0, null, group2]`。WebGPU 定义在完整 `GPUPipelineLayout` 上的 limit，会针对所有 group entry 的拼接结果再次校验。因此，即使两个 layout 各自没有超过 dynamic-buffer 或 per-stage slot limit，组合后仍可能在任何 native pipeline object issue 前被拒绝。
+Pipeline lowering 把 `BindLayout.group` 视为 native pipeline-layout index，调用方数组顺序没有语义。Sparse group 会产生显式 `null` slot，因此 group `0` 与 `2` 会降低成 `[group0, null, group2]`。当前 WebGPU 把 `bindGroupLayouts` 定义为 nullable sequence，并把缺失 index 初始化为原生 `null` slot；Scratch 不会为这些 gap 合成空 `GPUBindGroupLayout` 对象。WebGPU 定义在完整 `GPUPipelineLayout` 上的 limit，会针对所有 non-null group entry 的拼接结果再次校验。因此，即使两个 layout 各自没有超过 dynamic-buffer 或 per-stage slot limit，组合后仍可能在任何 native pipeline object issue 前被拒绝。
 
 持久 binding matrix 覆盖:
 

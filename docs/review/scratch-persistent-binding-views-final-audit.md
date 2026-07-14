@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-thirty-first-review fixes pending acceptance
+Status: Post-thirty-second-review evidence pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -322,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Thirty-one isolated review passes have examined the fixed-baseline diff and working tree.
+Thirty-two isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -357,7 +357,9 @@ verification confirmed the operation-specific device-loss incident defect, while
 current official GPUWeb bind-group validation disproved the claimed compatibility-mode
 array-layer-subset support. The thirty-first review found that BindSet's separate
 device-loss-primary failure path created both incident scopes but did not relate the
-operation-specific report back to the runtime-wide incident.
+operation-specific report back to the runtime-wide incident. The thirty-second review
+claimed that sparse pipeline-layout `null` slots were invalid; current GPUWeb IDL,
+creation steps, generated WebGPU types, and a headed real-device dispatch disproved it.
 
 Resolved core finding:
 
@@ -888,6 +890,24 @@ Resolved thirty-first review finding:
    complete outcomes, cancelled status, and both causal links.
 
 This finding brings the reproduced or source-verified reviewer total to 86.
+
+The thirty-first-review implementation passed clean acceptance at exact checkpoint
+`4c3631d5fd951b67f18e3012417dea5d5cc6e116`, but the required thirty-second
+fresh-context review made the native-capability claim below.
+
+Rejected thirty-second review claim:
+
+1. The review claimed that `GPUPipelineLayoutDescriptor.bindGroupLayouts` cannot contain
+   `null` and that Scratch must synthesize empty native layouts for sparse group indices.
+   Current GPUWeb main instead defines `required sequence<GPUBindGroupLayout?>` and its
+   creation algorithm initializes the native sequence with `null` layouts before copying
+   non-null descriptors into their group indices. Current generated GPUWeb types likewise
+   expose `Iterable<GPUBindGroupLayout | null | undefined>`. Scratch's existing
+   `[group0, null, group2]` lowering is therefore native behavior, not a fake-device
+   concession. A headed Chrome/Apple Metal proof now dispatches through a real group-2
+   storage binding and reads back the exact value `73` without uncaptured or page errors.
+
+The rejected claim does not change the reproduced or source-verified finding total of 86.
 
 ## Verification Record
 
@@ -1534,9 +1554,41 @@ Post-thirty-first-review targeted verification:
 - `npm run build` emits the package and all 14 runnable examples; structural parity,
   diff check, clean acceptance, and a new isolated exact no-findings review remain required
 
-The correction must pass targeted and full verification, clean acceptance, and a new
-exact no-findings review before this audit can return to Accepted status. The required
-feature-branch push remains ordered after that closure.
+Clean thirty-first-review checkpoint acceptance (`4c3631d`):
+
+- initial and final repository evidence named exact commit
+  `4c3631d5fd951b67f18e3012417dea5d5cc6e116` with an empty working tree
+- focused acceptance passed 455/455; the complete suite reported 853 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- live GPUWeb/WHATWG evidence passed; both 20,000-cycle steady-state phases passed with
+  zero binding-order sorts, snapshot serializations, or dynamic-offset name-map reads
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the browser proof; all 11 ordinary
+  examples passed, the unavailable target failed with `ERR_CONNECTION_REFUSED`, and the
+  managed Vite server stopped successfully with port 4173 closed
+- production bootstrap, both TypeScript consumers, complete package/example build, diff
+  check, and exact clean-repository recheck passed
+
+Post-thirty-second-review source and browser verification:
+
+- current GPUWeb main source hash
+  `39beba36023c6b9081c2a45f4e01db3fcb555517d350d5d30910dc91f0b3e408`
+  contains both the nullable `GPUBindGroupLayout?` IDL and native null-list
+  initialization steps; the executable official-source gate now requires both markers
+- current local generated WebGPU declarations independently type the sequence element as
+  `GPUBindGroupLayout | null | undefined`
+- a new headed-browser probe creates group 0 and group 2 layouts in caller order `[2, 0]`,
+  executes a group-2 storage-buffer dispatch through the native null gap, and reads back
+  `73`; Chrome 150.0.7871.115 on Apple Metal 3 reports zero uncaptured, console, page, or
+  request failures
+- `npm run typecheck`, `npm run build`, the async pipeline/final-contract tests, structural
+  parity, and `git diff --check` pass; the managed test server was stopped and port 4173
+  is closed
+- clean acceptance and a new isolated exact no-findings review remain required before
+  audit closure
+
+The source-verified evidence must pass clean acceptance and a new exact no-findings review
+before this audit can return to Accepted status. The required feature-branch push remains
+ordered after that closure.
 
 ## Explicit Non-Goals
 

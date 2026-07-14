@@ -75,7 +75,7 @@ different scopes of evidence: the runtime-wide `device-loss` incident and an
 creation/preparation operation. The thrown diagnostic points to the latter and
 relates the former; neither incident substitutes for the other.
 
-Pipeline lowering treats `BindLayout.group` as the native pipeline-layout index. Caller array order is not semantic: sparse groups produce explicit `null` slots, so groups `0` and `2` lower to `[group0, null, group2]`. Limits that WebGPU defines across a complete `GPUPipelineLayout` are checked again over the concatenated entries from every group. Two layouts that are individually within a dynamic-buffer or per-stage slot limit can therefore still be rejected together before any native pipeline object is issued.
+Pipeline lowering treats `BindLayout.group` as the native pipeline-layout index. Caller array order is not semantic: sparse groups produce explicit `null` slots, so groups `0` and `2` lower to `[group0, null, group2]`. Current WebGPU defines `bindGroupLayouts` as a nullable sequence and initializes omitted indices as native `null` slots; Scratch does not synthesize empty `GPUBindGroupLayout` objects for those gaps. Limits that WebGPU defines across a complete `GPUPipelineLayout` are checked again over the concatenated entries from every non-null group. Two layouts that are individually within a dynamic-buffer or per-stage slot limit can therefore still be rejected together before any native pipeline object is issued.
 
 The persistent matrix covers:
 
