@@ -618,7 +618,7 @@ const behaviorTestContracts = [
     behaviorTestContract('tests/scratch-supporting-object-acknowledgement.test.js', [
         'normalizes every native field and rejects deterministic sampler violations before native issue',
         'preflights group, binding, stage, feature, and slot limits without a native call',
-        'settles scopes and preserves causal failures across lifecycle changes',
+        'settles scopes and preserves all causal failures across simultaneous lifecycle changes',
     ]),
     behaviorTestContract('tests/scratch-compute-pipeline-async.test.js', [
         'rejects local validation through a Promise without native or operation effects',
@@ -878,7 +878,9 @@ const documentationAudit = Object.freeze({
     explicitPreparation: hasAll(finalDocs.bindings, [ 'prepare()', 'stale', 'Submission never prepares' ]),
     supportingObjectCausality: [ finalDocs.bindings, finalDocs.bindingsZh ].every(source =>
         hasAll(source, [ 'native issue', 'scope', 'lifecycle', 'secondary' ])
-    ) && hasAll(finalDocs.bindingDecision, [ 'cannot short-circuit', 'secondary evidence' ]),
+    ) && finalDocs.bindings.includes('not mutually exclusive') &&
+        finalDocs.bindingsZh.includes('不是互斥') &&
+        hasAll(finalDocs.bindingDecision, [ 'cannot short-circuit', 'secondary evidence' ]),
     nativeRegionAlignment: [
         finalDocs.commands,
         finalDocs.commandsZh,

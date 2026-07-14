@@ -114,7 +114,7 @@ describe('Scratch persistent binding final parity', () => {
             'rejects render-attachment one-dimensional textures',
             'oneDimensionalTextureMipmapRestriction',
             'oneDimensionalMaximumMipLevelCount',
-            'settles scopes and preserves causal failures across lifecycle changes',
+            'settles scopes and preserves all causal failures across simultaneous lifecycle changes',
             'rejects noncanonical raw resource descriptor integers before native issue',
             'rejects color attachment metadata and surface view descriptor divergence',
             'rejects invalid TextureResource attachment views and transient operations',

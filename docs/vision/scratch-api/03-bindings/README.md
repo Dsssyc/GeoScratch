@@ -65,7 +65,9 @@ native/scope failure, or become primary merely because it settled first. Scratch
 orders the complete evidence as synchronous native issue, structural scope
 failure, validation, internal, OOM, runtime disposal, then device loss; later
 lifecycle facts remain bounded secondary evidence. The same rule applies to
-sampler, QuerySet, BindLayout, and BindSet preparation candidates.
+sampler, QuerySet, BindLayout, and BindSet preparation candidates. Runtime
+disposal and device loss are not mutually exclusive: when both are observed,
+both remain in that fixed order.
 
 Pipeline lowering treats `BindLayout.group` as the native pipeline-layout index. Caller array order is not semantic: sparse groups produce explicit `null` slots, so groups `0` and `2` lower to `[group0, null, group2]`. Limits that WebGPU defines across a complete `GPUPipelineLayout` are checked again over the concatenated entries from every group. Two layouts that are individually within a dynamic-buffer or per-stage slot limit can therefore still be rejected together before any native pipeline object is issued.
 

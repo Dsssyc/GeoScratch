@@ -573,7 +573,7 @@ describe('Scratch acknowledged supporting objects', () => {
         })
     }
 
-    it('settles scopes and preserves causal failures across lifecycle changes', async() => {
+    it('settles scopes and preserves all causal failures across simultaneous lifecycle changes', async() => {
 
         const disposedFixture = await createFixture({ deferErrorScopePops: true })
         const disposedCreation = disposedFixture.runtime.createQuerySet({ type: 'occlusion', count: 2 })
@@ -581,6 +581,26 @@ describe('Scratch acknowledged supporting objects', () => {
         settleAllPops(disposedFixture)
         const disposedError = await rejectedDiagnostic(disposedCreation)
         expect(disposedError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
+        expect(disposedError.incident).to.deep.include({
+            kind: 'supporting-object-failure',
+            diagnosticCode: 'SCRATCH_RUNTIME_DISPOSED',
+            nativeErrorCategory: 'none',
+            failureStage: 'lifecycle-recheck',
+        })
+        expect(disposedError.incident.triggerOperation.status).to.equal('cancelled')
+        expect(disposedError.diagnostic.actual.failures).to.deep.equal(disposedError.incident.outcomes)
+        expect(causalOutcomeFacts(disposedError)).to.deep.equal([
+            {
+                stage: 'lifecycle-recheck',
+                diagnosticCode: 'SCRATCH_RUNTIME_DISPOSED',
+                nativeErrorCategory: 'none',
+            },
+            {
+                stage: 'lifecycle-recheck',
+                diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+                nativeErrorCategory: 'device-lost',
+            },
+        ])
         expect(disposedFixture.calls.querySets[0].destroyed).to.equal(true)
         expect(disposedFixture.runtime._resources.size).to.equal(0)
 
@@ -592,6 +612,27 @@ describe('Scratch acknowledged supporting objects', () => {
         expect(lostError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
         expect(lostFixture.runtime._resources.size).to.equal(0)
 
+        const recheckFixture = await createFixture({ deferErrorScopePops: true })
+        const recheckCreation = recheckFixture.runtime.createSampler()
+        recheckFixture.errors.loseDevice({ reason: 'unknown', message: 'loss preceded disposal' })
+        await settleMicrotasks()
+        settleAllPops(recheckFixture)
+        queueMicrotask(() => queueMicrotask(() => recheckFixture.runtime.dispose()))
+        const recheckError = await rejectedDiagnostic(recheckCreation)
+        expect(recheckError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
+        expect(causalOutcomeFacts(recheckError)).to.deep.equal([
+            {
+                stage: 'lifecycle-recheck',
+                diagnosticCode: 'SCRATCH_RUNTIME_DISPOSED',
+                nativeErrorCategory: 'none',
+            },
+            {
+                stage: 'lifecycle-recheck',
+                diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+                nativeErrorCategory: 'device-lost',
+            },
+        ])
+
         const nativeFixture = await createFixture({ deferErrorScopePops: true })
         const nativeCause = new TypeError('sampler issue preceded disposal')
         nativeFixture.errors.throwNext('createSampler', nativeCause)
@@ -602,19 +643,21 @@ describe('Scratch acknowledged supporting objects', () => {
         expect(nativeError.diagnostic.code).to.equal('SCRATCH_SAMPLER_ALLOCATION_NATIVE_FAILED')
         expect(nativeError.cause).to.equal(nativeCause)
         expect(nativeError.incident.failureStage).to.equal('native-issue')
-        expect(nativeError.incident.outcomes).to.deep.include.members([
+        expect(causalOutcomeFacts(nativeError)).to.deep.equal([
             {
                 stage: 'native-issue',
                 diagnosticCode: 'SCRATCH_SAMPLER_ALLOCATION_NATIVE_FAILED',
                 nativeErrorCategory: 'native-exception',
-                subject: nativeError.incident.outcomes[0].subject,
-                nativeError: nativeError.incident.outcomes[0].nativeError,
             },
             {
                 stage: 'lifecycle-recheck',
                 diagnosticCode: 'SCRATCH_RUNTIME_DISPOSED',
                 nativeErrorCategory: 'none',
-                subject: nativeError.incident.outcomes[0].subject,
+            },
+            {
+                stage: 'lifecycle-recheck',
+                diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+                nativeErrorCategory: 'device-lost',
             },
         ])
         expect(nativeFixture.runtime._resources.size).to.equal(0)
@@ -646,6 +689,15 @@ function settleAllPops(fixture) {
     for (let index = 0; index < fixture.errors.pendingPops.length; index++) {
         if (!fixture.errors.pendingPops[index].settled) fixture.errors.settlePop(index)
     }
+}
+
+function causalOutcomeFacts(error) {
+
+    return error.incident.outcomes.map(({ stage, diagnosticCode, nativeErrorCategory }) => ({
+        stage,
+        diagnosticCode,
+        nativeErrorCategory,
+    }))
 }
 
 function pendingResourceId(runtime) {

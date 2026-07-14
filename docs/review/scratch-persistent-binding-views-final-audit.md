@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Accepted
+Status: Post-twenty-ninth-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -822,6 +822,23 @@ Resolved twenty-seventh review finding:
 
 This finding brings the reproduced or source-verified reviewer total to 83.
 
+The twenty-eighth isolated review returned exactly `No findings.` for checkpoint
+`af99e37670960f08dab305bcc032f742120a0c0b`. Its audit-only closure commit
+`3f8250b5bbc19771d7380f713e7e9de0937a242a` also passed clean acceptance, but the
+required twenty-ninth fresh-context review found the supporting-object lifecycle
+evidence defect below.
+
+Resolved twenty-ninth review finding:
+
+1. Supporting-object acknowledgement now treats runtime disposal and device loss as
+   independent, ordered lifecycle observations instead of an `else if` choice in both
+   settlement and final recheck. A lifecycle-primary runtime-disposal cancellation now
+   records a `supporting-object-failure` incident with complete bounded outcomes, while a
+   native-primary failure retains native exception, runtime disposal, and device loss in
+   exact causal order. The regression uses exact equality rather than a permissive subset.
+
+This finding brings the reproduced or source-verified reviewer total to 84.
+
 ## Verification Record
 
 Prior v9 revalidation evidence before the tenth review is retained only as diagnostic
@@ -1372,10 +1389,32 @@ Clean twenty-seventh-review checkpoint acceptance (`af99e37`):
 - the twenty-eighth isolated strict review of that exact accepted checkpoint returned
   exactly `No findings.`
 
-This audit accepts the implementation checkpoint above. The audit-only closure commit
-must repeat clean acceptance and receive a new exact no-findings review; the final
-handoff records that commit and the required feature-branch push without recursively
-editing this document after its own review.
+The audit-only closure commit `3f8250b` passed clean acceptance, but the twenty-ninth
+fresh-context review did not approve it because of the lifecycle-evidence defect above.
+
+Post-twenty-ninth-review pre-commit verification:
+
+- the strengthened lifecycle-primary regression first failed because
+  `ScratchDiagnosticError.incident` was absent; the native-primary exact-outcome contract
+  would also have exposed the missing device-loss secondary fact
+- settlement-time simultaneous disposal/loss, device-loss-before-final-recheck, and
+  native-failure-before-disposal cases now retain their complete expected outcomes in
+  fixed order; the reverse chronology passed 20 consecutive focused executions
+- lifecycle-primary diagnostics retain `cancelled` trigger-operation status, expose a
+  bounded `supporting-object-failure` incident, and publish the same immutable outcomes
+  through `diagnostic.actual.failures`
+- the complete supporting-object, BindSet, GPU-provenance, and final-contract collection
+  passed 75 tests with only the explicit final-acceptance identity pending; fixed-history
+  structural parity passed the strengthened behavior and bilingual documentation checks
+- `npm run typecheck` passed both TypeScript consumers; `npm test` reported exactly 853
+  passing with only the two exact browser/final-acceptance identities pending; `npm run
+  build` emitted the package and all 14 runnable examples
+- `git diff --check`, clean-commit acceptance, and a new isolated exact no-findings review
+  remain required before audit closure
+
+The correction must pass targeted and full verification, clean acceptance, and a new
+exact no-findings review before this audit can return to Accepted status. The required
+feature-branch push remains ordered after that closure.
 
 ## Explicit Non-Goals
 

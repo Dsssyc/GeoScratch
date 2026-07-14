@@ -107,16 +107,7 @@ export function beginSupportingObjectCreation<T>(
         for (const scope of observations) {
             failures.push(...scopeFailures(scope))
         }
-        if (runtime.isDisposed) {
-            failures.push(observedFailure('runtime-disposed'))
-        } else if (runtime.isDeviceLost) {
-            failures.push(Object.freeze({
-                kind: 'device-lost' as const,
-                ...(runtime.deviceLostInfo !== undefined
-                    ? { deviceLostInfo: runtime.deviceLostInfo }
-                    : {}),
-            }))
-        }
+        failures.push(...supportingObjectLifecycleFailures(runtime))
 
         return Object.freeze({
             ...(candidate !== undefined ? { candidate } : {}),
@@ -135,24 +126,48 @@ export function recheckSupportingObjectLifecycle<T>(
     outcome: SupportingObjectCreationOutcome<T>
 ): SupportingObjectCreationOutcome<T> {
 
-    let failure: SupportingObjectObservedFailure | undefined
-    if (runtime.isDisposed) {
-        failure = observedFailure('runtime-disposed')
-    } else if (runtime.isDeviceLost) {
-        failure = Object.freeze({
+    const currentLifecycleFailures = supportingObjectLifecycleFailures(runtime)
+    const addedLifecycleFailures = currentLifecycleFailures.filter(failure =>
+        !outcome.failures.some(existing => existing.kind === failure.kind)
+    )
+    if (addedLifecycleFailures.length === 0) return outcome
+
+    const lifecycleFailures = new Map<SupportingObjectFailureKind, SupportingObjectObservedFailure>()
+    for (const failure of outcome.failures) {
+        if (failure.kind === 'runtime-disposed' || failure.kind === 'device-lost') {
+            lifecycleFailures.set(failure.kind, failure)
+        }
+    }
+    for (const failure of addedLifecycleFailures) lifecycleFailures.set(failure.kind, failure)
+
+    const nonLifecycleFailures = outcome.failures.filter(failure =>
+        failure.kind !== 'runtime-disposed' && failure.kind !== 'device-lost'
+    )
+    const orderedLifecycleFailures = [ 'runtime-disposed', 'device-lost' ]
+        .map(kind => lifecycleFailures.get(kind as SupportingObjectFailureKind))
+        .filter((failure): failure is SupportingObjectObservedFailure => failure !== undefined)
+
+    return Object.freeze({
+        ...(outcome.candidate !== undefined ? { candidate: outcome.candidate } : {}),
+        failures: Object.freeze([ ...nonLifecycleFailures, ...orderedLifecycleFailures ]),
+    })
+}
+
+function supportingObjectLifecycleFailures(
+    runtime: ScratchRuntime
+): SupportingObjectObservedFailure[] {
+
+    const failures: SupportingObjectObservedFailure[] = []
+    if (runtime.isDisposed) failures.push(observedFailure('runtime-disposed'))
+    if (runtime.isDeviceLost) {
+        failures.push(Object.freeze({
             kind: 'device-lost' as const,
             ...(runtime.deviceLostInfo !== undefined
                 ? { deviceLostInfo: runtime.deviceLostInfo }
                 : {}),
-        })
+        }))
     }
-    if (failure === undefined) return outcome
-    if (outcome.failures.some(existing => existing.kind === failure.kind)) return outcome
-
-    return Object.freeze({
-        ...(outcome.candidate !== undefined ? { candidate: outcome.candidate } : {}),
-        failures: Object.freeze([ ...outcome.failures, failure ]),
-    })
+    return failures
 }
 
 export function destroySupportingObjectCandidate(candidate: unknown): void {

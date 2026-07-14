@@ -45,6 +45,10 @@ export function throwSupportingObjectCreationFailure<T>(
         }) ])
     const primary = selectPrimaryFailure(failures)
     const controller = diagnosticsControllerFor(runtime)
+    const code = failureCode(primary.kind, codes)
+    const nativeErrorCategory = failureNativeCategory(primary.kind)
+    const incidentOutcomes = Object.freeze(failures
+        .map(failure => incidentOutcome(failure, codes, input.subject)))
 
     if (primary.kind === 'device-lost') {
         const info = primary.deviceLostInfo ?? runtime.deviceLostInfo ?? {
@@ -64,31 +68,13 @@ export function throwSupportingObjectCreationFailure<T>(
             subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
             related: [ runtime.subject, input.subject, ...(input.related ?? []) ],
             message: `GPU device was lost while ${input.operationName} was pending.`,
-            actual: { operationId: operation.id },
+            actual: { operationId: operation.id, failures: incidentOutcomes },
         }, { ...(incident !== undefined ? { incident } : {}) })
     }
 
-    if (primary.kind === 'runtime-disposed') {
-        controller.completeOperation(operation, { status: 'cancelled' })
-        throwScratchDiagnostic({
-            code: 'SCRATCH_RUNTIME_DISPOSED',
-            severity: 'error',
-            phase: 'runtime',
-            subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
-            related: [ runtime.subject, input.subject, ...(input.related ?? []) ],
-            message: `ScratchRuntime was disposed while ${input.operationName} was pending.`,
-            actual: { operationId: operation.id },
-        })
-    }
-
-    const code = failureCode(primary.kind, codes)
-    const nativeErrorCategory = failureNativeCategory(primary.kind)
-    const record = controller.completeOperation(operation, {
-        status: 'failed',
-        nativeErrorCategory,
-    })
-    const incidentOutcomes = Object.freeze(failures
-        .map(failure => incidentOutcome(failure, codes, input.subject)))
+    const record = controller.completeOperation(operation, primary.kind === 'runtime-disposed'
+        ? { status: 'cancelled' }
+        : { status: 'failed', nativeErrorCategory })
     const incident = controller.recordIncident({
         kind: 'supporting-object-failure',
         diagnosticCode: code,
@@ -104,6 +90,18 @@ export function throwSupportingObjectCreationFailure<T>(
         failureStage: failureStage(primary.kind),
         outcomes: incidentOutcomes,
     })
+
+    if (primary.kind === 'runtime-disposed') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_RUNTIME_DISPOSED',
+            severity: 'error',
+            phase: 'runtime',
+            subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+            related: [ runtime.subject, input.subject, ...(input.related ?? []), incident.subject ],
+            message: `ScratchRuntime was disposed while ${input.operationName} was pending.`,
+            actual: { operationId: operation.id, failures: incidentOutcomes },
+        }, { incident })
+    }
 
     throwScratchDiagnostic({
         code,
