@@ -819,7 +819,7 @@ describe('Scratch BindSet preparation', () => {
         ])
     })
 
-    it('retains every simultaneous lifecycle failure in deterministic order', async() => {
+    it('retains simultaneous lifecycle failures and links device-loss incidents', async() => {
 
         const fixture = await createUniformFixture({ deferErrorScopePops: true })
         fixture.errors.resetHistory()
@@ -851,6 +851,43 @@ describe('Scratch BindSet preparation', () => {
                 subjectKind: 'BufferRegion',
             },
         ])
+
+        const lostFixture = await createUniformFixture({ deferErrorScopePops: true })
+        lostFixture.errors.resetHistory()
+        lostFixture.calls.bindGroups.length = 0
+        const lostCreation = lostFixture.runtime.createBindSet(lostFixture.layout, {
+            uniforms: lostFixture.buffer.region({ size: 256 }),
+        })
+        const lostPendingOperation = lostFixture.runtime.diagnostics.snapshot().pendingOperations[0]
+        lostFixture.errors.loseDevice({ reason: 'unknown', message: 'bind device vanished' })
+        settleAllPops(lostFixture)
+
+        const lostError = await rejectedDiagnostic(lostCreation)
+        expect(lostError.diagnostic.code)
+            .to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
+        expect(lostError.incident).to.deep.include({
+            kind: 'supporting-object-failure',
+            diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
+            nativeErrorCategory: 'device-lost',
+            attribution: 'exact-operation',
+            operationId: lostPendingOperation.id,
+            failureStage: 'lifecycle-recheck',
+        })
+        expect(lostError.incident.triggerOperation).to.deep.include({
+            id: lostPendingOperation.id,
+            status: 'cancelled',
+            nativeErrorCategory: 'device-lost',
+        })
+        expect(lostError.diagnostic.actual.failures).to.deep.equal(lostError.incident.outcomes)
+        const lostIncidents = lostFixture.runtime.diagnostics.incidents()
+        const deviceLossIncident = lostIncidents.find(incident => incident.kind === 'device-loss')
+        expect(deviceLossIncident).not.to.equal(undefined)
+        expect(deviceLossIncident.id).not.to.equal(lostError.incident.id)
+        expect(lostError.incident.related).to.deep.include(deviceLossIncident.subject)
+        expect(lostError.diagnostic.related).to.deep.include(deviceLossIncident.subject)
+        expect(lostError.diagnostic.related).to.deep.include(lostError.incident.subject)
+        expect(lostFixture.runtime.diagnostics.operation(lostPendingOperation.id).incidentId)
+            .to.equal(lostError.incident.id)
     })
 
     it('cancels an initial candidate when a dependency is disposed during acknowledgement', async() => {

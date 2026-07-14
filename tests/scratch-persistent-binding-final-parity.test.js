@@ -131,7 +131,7 @@ describe('Scratch persistent binding final parity', () => {
             'rejects invalid and unaligned vertex buffer bindings with structured diagnostics',
             'defaults depth clear to one and accepts inclusive unit-range boundaries',
             'retains lifecycle recheck as secondary evidence beside a native preparation failure',
-            'retains every simultaneous lifecycle failure in deterministic order',
+            'retains simultaneous lifecycle failures and links device-loss incidents',
             'snapshots Program layout requirements into immutable pipeline command contracts',
             'revalidates buffer bounds, usage, and alignment before binding a replacement allocation',
             'revalidates every buffer copy source region against replacement bounds before encoder effects',

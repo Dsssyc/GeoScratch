@@ -1213,6 +1213,12 @@ function failBindSetPreparation(
     const state = bindSetStateFor(bindSet)
     state.committed = undefined
     state.cachedPreparedPromise = undefined
+    const deviceLossIncident = primary.kind === 'device-lost'
+        ? controller.recordDeviceLoss((bindSet.runtime.deviceLostInfo ?? {
+            reason: 'unknown',
+            message: 'GPU device was lost while BindSet preparation was settling.',
+        }) as GPUDeviceLostInfo)
+        : undefined
     const cancelled = primary.stage === 'lifecycle-recheck' || primary.stage === 'snapshot-recheck'
     const record = controller.completeOperation(inFlight.operation, {
         status: cancelled ? 'cancelled' : 'failed',
@@ -1233,7 +1239,12 @@ function failBindSetPreparation(
         target: record.target,
         operationId: record.id,
         triggerOperation: record,
-        related: [ bindSet.subject, bindSet.layout.subject, ...ordered.map(failure => failure.subject) ],
+        related: [
+            bindSet.subject,
+            bindSet.layout.subject,
+            ...ordered.map(failure => failure.subject),
+            ...(deviceLossIncident !== undefined ? [ deviceLossIncident.subject ] : []),
+        ],
         ...(primary.cause !== undefined
             ? { nativeError: serializeNativeGpuError(primary.cause) }
             : {}),
@@ -1255,7 +1266,13 @@ function failBindSetPreparation(
         severity: 'error',
         phase: primary.stage === 'lifecycle-recheck' ? 'runtime' : 'binding',
         subject: { kind: 'GpuOperation', id: record.id, operationKind: record.kind },
-        related: [ bindSet.subject, bindSet.layout.subject, primary.subject, incident.subject ],
+        related: [
+            bindSet.subject,
+            bindSet.layout.subject,
+            primary.subject,
+            ...(deviceLossIncident !== undefined ? [ deviceLossIncident.subject ] : []),
+            incident.subject,
+        ],
         message: bindSetPreparationFailureMessage(primary),
         actual: {
             operationId: record.id,

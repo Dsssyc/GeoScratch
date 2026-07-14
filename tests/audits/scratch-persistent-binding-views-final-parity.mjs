@@ -612,7 +612,7 @@ const behaviorTestContracts = [
         'rejects incompatible sampler, sampled texture, and storage texture shapes before native issue',
         'keeps unchanged preparation checks free of snapshot reconstruction',
         'retains lifecycle recheck as secondary evidence beside a native preparation failure',
-        'retains every simultaneous lifecycle failure in deterministic order',
+        'retains simultaneous lifecycle failures and links device-loss incidents',
         'revalidates buffer bounds, usage, and alignment before binding a replacement allocation',
     ]),
     behaviorTestContract('tests/scratch-supporting-object-acknowledgement.test.js', [

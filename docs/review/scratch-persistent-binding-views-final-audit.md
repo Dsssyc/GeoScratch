@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-thirtieth-review fixes pending acceptance
+Status: Post-thirty-first-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -322,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Thirty isolated review passes have examined the fixed-baseline diff and working tree.
+Thirty-one isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -355,7 +355,9 @@ native one-dimensional mip defect; the twenty-eighth review returned exactly
 evidence. The thirtieth review reported two P1 claims: source and executable
 verification confirmed the operation-specific device-loss incident defect, while the
 current official GPUWeb bind-group validation disproved the claimed compatibility-mode
-array-layer-subset support.
+array-layer-subset support. The thirty-first review found that BindSet's separate
+device-loss-primary failure path created both incident scopes but did not relate the
+operation-specific report back to the runtime-wide incident.
 
 Resolved core finding:
 
@@ -871,6 +873,21 @@ Rejected thirtieth review claim:
    or bind-group issue, and the executable audit locks the exact official source rule.
 
 The confirmed finding brings the reproduced or source-verified reviewer total to 85.
+
+The thirtieth-review implementation passed clean acceptance at exact checkpoint
+`87562f5fa63b9d80468d693507089b5d6da193ee`, but the required thirty-first
+fresh-context review found the BindSet incident-link defect below.
+
+Resolved thirty-first review finding:
+
+1. Device-loss-primary BindSet preparation now obtains the idempotent runtime-wide
+   `device-loss` incident before completing its cancelled operation. Both the
+   `exact-operation` `supporting-object-failure` incident and the thrown diagnostic
+   relate that global incident subject, while the retained operation remains linked to
+   the operation-specific incident. The regression asserts two distinct incidents,
+   complete outcomes, cancelled status, and both causal links.
+
+This finding brings the reproduced or source-verified reviewer total to 86.
 
 ## Verification Record
 
@@ -1485,6 +1502,37 @@ Post-thirtieth-review pre-commit verification:
   reporting `incomplete` for the dirty tree
 - `git diff --check`, clean-commit acceptance, and a new isolated exact no-findings review
   remain required before audit closure
+
+Clean thirtieth-review checkpoint acceptance (`87562f5`):
+
+- initial and final repository evidence named exact commit
+  `87562f5fa63b9d80468d693507089b5d6da193ee` with an empty working tree
+- focused acceptance passed 455/455; the complete suite reported 853 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- live GPUWeb/WHATWG evidence passed, including the official compatibility-mode
+  full-array-layer bind-group marker; both 20,000-cycle steady-state phases passed with
+  zero binding-order sorts
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the browser proof; all 11 ordinary
+  examples passed, the unavailable target failed with `ERR_CONNECTION_REFUSED`, and the
+  managed Vite server stopped successfully with port 4173 closed
+- production bootstrap, both TypeScript consumers, complete package/example build, and
+  diff check passed; the thirty-first review then found the BindSet incident-link defect,
+  so this checkpoint remains historical evidence rather than final approval
+
+Post-thirty-first-review targeted verification:
+
+- the new BindSet device-loss-primary assertion first failed because the exact-operation
+  incident's `related` array omitted the distinct runtime-wide incident subject
+- after implementation, the same regression passes while retaining the cancelled
+  operation, operation-specific incident linkage, complete outcomes, global incident,
+  and links from both the exact incident and thrown diagnostic
+- the complete affected supporting-object, BindSet, GPU-provenance, texture-binding, and
+  final-contract collection reports 90 passing with only its explicit final-acceptance
+  identity pending
+- `npm run typecheck` passes both TypeScript consumers; `npm test` reports exactly 853
+  passing with only the two exact browser/final-acceptance identities pending
+- `npm run build` emits the package and all 14 runnable examples; structural parity,
+  diff check, clean acceptance, and a new isolated exact no-findings review remain required
 
 The correction must pass targeted and full verification, clean acceptance, and a new
 exact no-findings review before this audit can return to Accepted status. The required
