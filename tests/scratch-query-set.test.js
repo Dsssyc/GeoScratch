@@ -270,6 +270,51 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         await submitted.done
     })
 
+    it('rejects identical compute timestamp write indices before encoder creation', async() => {
+
+        const fixture = await createQueryFixture()
+
+        const diagnostic = await expectScratchDiagnostic(() => fixture.runtime.createComputePass({
+            timestampWrites: {
+                querySet: fixture.querySet,
+                begin: 1,
+                end: 1,
+            },
+        }), {
+            code: 'SCRATCH_PASS_TIMESTAMP_WRITES_INVALID',
+            severity: 'error',
+            phase: 'submission',
+        })
+        expect(diagnostic.actual).to.include({ reason: 'duplicate-indices', begin: 1, end: 1 })
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.computePasses).to.have.length(0)
+    })
+
+    it('rejects identical render timestamp write indices before encoder creation', async() => {
+
+        const fixture = await createRenderTimestampFixture()
+
+        const diagnostic = await expectScratchDiagnostic(() => fixture.runtime.createRenderPass({
+            color: [ {
+                target: fixture.target.view(),
+                load: 'clear',
+                store: 'store',
+            } ],
+            timestampWrites: {
+                querySet: fixture.querySet,
+                begin: 0,
+                end: 0,
+            },
+        }), {
+            code: 'SCRATCH_PASS_TIMESTAMP_WRITES_INVALID',
+            severity: 'error',
+            phase: 'submission',
+        })
+        expect(diagnostic.actual).to.include({ reason: 'duplicate-indices', begin: 0, end: 0 })
+        expect(fixture.calls.commandEncoders).to.have.length(0)
+        expect(fixture.calls.renderPasses).to.have.length(0)
+    })
+
     it('resolves query sets through an explicit submission resolve step', async() => {
 
         const fixture = await createQueryFixture()

@@ -68,9 +68,9 @@ a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 | N20 | `packages/geoscratch/src/scratch/command.ts:2600` | `resolveQuerySet()` | Resolve step is one standalone command location. | Observed command; manual encode deferred |
 | N21 | `packages/geoscratch/src/scratch/command.ts:2930` | `GPUQueue.writeBuffer()` | Submission replay uses one `queue-action`; direct upload execution shares this call site without an owner. | Observed submission; direct execute deferred |
 | N22 | `packages/geoscratch/src/scratch/command.ts:2937` | `GPUQueue.writeTexture()` | Same shared queue-action boundary. | Observed submission; direct execute deferred |
-| N23 | `packages/geoscratch/src/scratch/command.ts:3369` | dynamic-offset `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
-| N24 | `packages/geoscratch/src/scratch/command.ts:3373` | static `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
-| N25 | `packages/geoscratch/src/scratch/command.ts:6162` | `copyExternalImageToTexture()` | Submission replay uses one `queue-action`; direct execution shares this call site without an owner. | Observed submission; direct execute deferred |
+| N23 | `packages/geoscratch/src/scratch/command.ts:3389` | dynamic-offset `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
+| N24 | `packages/geoscratch/src/scratch/command.ts:3397` | static `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
+| N25 | `packages/geoscratch/src/scratch/command.ts:6186` | `copyExternalImageToTexture()` | Submission replay uses one `queue-action`; direct execution shares this call site without an owner. | Observed submission; direct execute deferred |
 | N26 | `packages/geoscratch/src/scratch/readback.ts:481` | `createCommandEncoder()` | Direct-readback native observation, `encoder-create`. | Observed direct readback |
 | N27 | `packages/geoscratch/src/scratch/readback.ts:483` | `copyBufferToBuffer()` | Direct-readback native observation, `command-encode`. | Observed direct readback |
 | N28 | `packages/geoscratch/src/scratch/readback.ts:492` | `finish()` | Direct-readback native observation, `encoder-finish`. | Observed direct readback |

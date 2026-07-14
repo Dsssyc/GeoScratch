@@ -56,7 +56,13 @@ const simulationPass = runtime.createComputePass({
 })
 ```
 
-`timestampWrites` lower to WebGPU pass descriptor timestamp writes and require a `timestamp` query set. `occlusionQuerySet` is render-pass-only and requires an `occlusion` query set. Query result transfer is not implicit in pass specs; resolve and readback remain explicit commands or operations.
+`timestampWrites` lower to WebGPU pass descriptor timestamp writes and require a
+`timestamp` query set. At least one of `begin` or `end` is required; when both are
+provided, their in-range query indices must be distinct. Scratch rejects duplicate
+indices while creating the `PassSpec`, before encoder creation. `occlusionQuerySet`
+is render-pass-only and requires an `occlusion` query set. Query result transfer is
+not implicit in pass specs; resolve and readback remain explicit commands or
+operations.
 
 An attachment is validated against its actual logical view, not only its parent
 texture. A persistent `TextureViewSpec` must include `RENDER_ATTACHMENT` view

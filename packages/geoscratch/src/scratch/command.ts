@@ -3016,7 +3016,15 @@ type DynamicBufferBindLayoutEntry = Extract<
     hasDynamicOffset: true
 }
 
-const commandNativeDynamicOffsets = new WeakMap<DynamicOffsetCommand, ReadonlyMap<number, readonly number[]>>()
+type CommandDynamicOffsetContract = Readonly<{
+    entries: readonly DynamicBufferBindLayoutEntry[]
+    nativeOffsets: readonly number[]
+}>
+
+const commandDynamicOffsetContracts = new WeakMap<
+    DynamicOffsetCommand,
+    ReadonlyMap<number, CommandDynamicOffsetContract>
+>()
 
 function rejectRemovedCommandDynamicOffsets(command: DynamicOffsetCommand, descriptor: unknown): void {
 
@@ -3058,7 +3066,7 @@ function normalizeBindSetInvocations(
     }
 
     const groups = new Set<number>()
-    const nativeOffsets = new Map<number, readonly number[]>()
+    const dynamicOffsetContracts = new Map<number, CommandDynamicOffsetContract>()
     const normalized = bindSets.map((invocation): CommandBindSetInvocation => {
         if (!isRecord(invocation) || !('set' in invocation)) {
             throwScratchDiagnostic({
@@ -3124,7 +3132,12 @@ function normalizeBindSetInvocations(
         groups.add(group)
 
         const offsets = normalizeInvocationDynamicOffsets(command, bindSet, invocation.dynamicOffsets)
-        if (offsets.native.length > 0) nativeOffsets.set(group, offsets.native)
+        if (offsets.entries.length > 0) {
+            dynamicOffsetContracts.set(group, Object.freeze({
+                entries: offsets.entries,
+                nativeOffsets: offsets.native,
+            }))
+        }
 
         const result: {
             set: BindSet
@@ -3134,7 +3147,7 @@ function normalizeBindSetInvocations(
         return result
     })
 
-    commandNativeDynamicOffsets.set(command, readonlyMapSnapshot(nativeOffsets))
+    commandDynamicOffsetContracts.set(command, readonlyMapSnapshot(dynamicOffsetContracts))
     return normalized
 }
 
@@ -3144,6 +3157,7 @@ function normalizeInvocationDynamicOffsets(
     supplied: unknown
 ): Readonly<{
     public: Readonly<Record<string, number>> | undefined
+    entries: readonly DynamicBufferBindLayoutEntry[]
     native: readonly number[]
 }> {
 
@@ -3205,18 +3219,19 @@ function normalizeInvocationDynamicOffsets(
     Object.freeze(native)
     return Object.freeze({
         public: supplied === undefined ? undefined : Object.freeze(normalizedRecord),
+        entries,
         native,
     })
 }
 
-function dynamicBufferEntries(bindSet: BindSet): DynamicBufferBindLayoutEntry[] {
+function dynamicBufferEntries(bindSet: BindSet): readonly DynamicBufferBindLayoutEntry[] {
 
-    return bindSet.layout.entries
+    return Object.freeze(bindSet.layout.entries
         .filter((entry): entry is DynamicBufferBindLayoutEntry =>
             (entry.type === 'uniform' || entry.type === 'read-storage' || entry.type === 'storage') &&
             entry.hasDynamicOffset === true
         )
-        .sort((a, b) => a.binding - b.binding)
+        .sort((a, b) => a.binding - b.binding))
 }
 
 function validateDynamicOffsetValue(
@@ -3319,13 +3334,18 @@ function validateDynamicOffsetValue(
 
 function validateCurrentDynamicOffsets(command: DynamicOffsetCommand): void {
 
-    const offsetsByGroup = commandNativeDynamicOffsets.get(command)
+    const contractsByGroup = commandDynamicOffsetContracts.get(command)
     for (const invocation of command.bindSets) {
-        const entries = dynamicBufferEntries(invocation.set)
-        const nativeOffsets = offsetsByGroup?.get(invocation.set.layout.group) ?? []
-        entries.forEach((entry, index) => {
-            validateDynamicOffsetValue(command, invocation.set, entry, nativeOffsets[index])
-        })
+        const contract = contractsByGroup?.get(invocation.set.layout.group)
+        if (contract === undefined) continue
+        for (let index = 0; index < contract.entries.length; index++) {
+            validateDynamicOffsetValue(
+                command,
+                invocation.set,
+                contract.entries[index]!,
+                contract.nativeOffsets[index]
+            )
+        }
     }
 }
 
@@ -3364,9 +3384,13 @@ function setBindGroupWithDynamicOffsets(
 ): void {
 
     const bindSet = invocation.set
-    const dynamicOffsets = commandNativeDynamicOffsets.get(command)?.get(bindSet.layout.group)
-    if (dynamicOffsets !== undefined) {
-        passEncoder.setBindGroup(bindSet.layout.group, preparedBindGroupFor(bindSet), dynamicOffsets)
+    const contract = commandDynamicOffsetContracts.get(command)?.get(bindSet.layout.group)
+    if (contract !== undefined) {
+        passEncoder.setBindGroup(
+            bindSet.layout.group,
+            preparedBindGroupFor(bindSet),
+            contract.nativeOffsets
+        )
         return
     }
 

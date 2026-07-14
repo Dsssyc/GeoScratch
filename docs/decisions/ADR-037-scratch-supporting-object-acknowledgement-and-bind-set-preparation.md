@@ -183,9 +183,10 @@ ABI compatibility, exact schema compatibility, and current allocation snapshot.
 Dynamic offsets belong to one immutable Command BindSet invocation and are
 provided by binding name. Exact coverage, finite non-negative integer range,
 alignment, and effective bounds are validated at Command construction. Scratch
-prelowers one immutable native sequence in binding-index order. Submission does
-not sort names or rebuild the sequence. Dynamic offsets do not mutate a region,
-BindSet snapshot, or generation.
+prelowers one immutable native sequence and its matching immutable entry sequence
+in binding-index order. Submission revalidates current allocation bounds and alignment
+against those snapshots; it does not filter or sort entries, sort names, or rebuild the
+native sequence. Dynamic offsets do not mutate a region, BindSet snapshot, or generation.
 
 ### Pass attachments
 
@@ -195,6 +196,11 @@ attachment views under its native observation boundary, attributes failures to
 the submission, pass, slot, view, resource, and allocation snapshot, and never
 caches the view across submissions. Surface presentation remains a borrowed
 submission-scoped current texture and view.
+
+Pass timestamp writes require at least one in-range `begin` or `end` query index.
+When both are present they must be distinct, matching native WebGPU validation;
+Scratch rejects duplicates while creating the persistent PassSpec, before encoder
+creation.
 
 ## Alternatives Considered
 

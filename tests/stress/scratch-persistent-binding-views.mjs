@@ -349,7 +349,7 @@ function runSteadyState({ cycleCount, commands, pass, bindSet, expectedBindGroup
 
         if (
             this.length > 0 &&
-            this.every(value => Number.isInteger(value?.entry?.binding))
+            this.every(value => Number.isInteger(value?.binding))
         ) bindingOrderSorts++
         return originalSort.apply(this, parameters)
     }

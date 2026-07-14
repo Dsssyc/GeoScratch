@@ -147,21 +147,25 @@ the same contracts. It was not a second valid implementation line.
 
 ## Goal Contract Review / Goal 契约复核
 
-The merged tree retains every locked Goal result:
+The merged tree retained every locked result at the provenance-consolidation
+checkpoint. This list is historical evidence, not the current Scratch target contract:
 
 - synchronous, non-thenable `SubmissionBuilder.submit()` and unchanged physical
   queue order;
 - constant-size summary observation, explicit off mode, and finite detailed
   capture;
 - immutable resolving `SubmittedWork.nativeOutcome` and joined `done`;
-- schema-v4 submission targets, discriminated native locations, bounded current
-  facts/history/capture, and source-free evidence;
 - resource/query `indeterminate` content with epoch guards and later confirmed
   writer recovery;
 - direct and ordered readback native-outcome boundaries;
-- unchanged legacy DEM Layer, Flow Layer, and Hello GAW implementations;
-- explicit deferred sampler/query-set/bind-layout and independent lazy
-  bind-group acknowledgement rather than false completion claims.
+- unchanged legacy DEM Layer, Flow Layer, and Hello GAW implementations.
+
+Current replacement: schema v5 and acknowledged explicit BindSet preparation.
+The persistent-binding clean cut supersedes the checkpoint's schema-v4 target shapes
+and deferred/lazy supporting-object language. `SamplerResource`, `QuerySetResource`,
+`BindLayout`, and initial `BindSet` creation are Promise-only acknowledged factories;
+an existing stale `BindSet` is repaired only through explicit allocation-bound
+`BindSet.prepare()`, never through submission-time lazy native creation.
 
 ## Verdict / 结论
 

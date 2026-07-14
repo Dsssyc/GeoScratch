@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-twenty-second-review fixes; clean acceptance and independent re-review pending
+Status: Post-twenty-third-review fixes; clean acceptance and independent re-review pending
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -11,7 +11,7 @@ Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 - Audit target: `socu/scratch-persistent-binding-views-v1`
 - Structural audit: `node tests/audits/scratch-persistent-binding-views-final-parity.mjs`
 - Final acceptance: `SCRATCH_FINAL_AUDIT=1 node tests/audits/scratch-persistent-binding-views-final-parity.mjs`
-- Native authority: [WebGPU resource binding](https://gpuweb.github.io/gpuweb/#resource-binding), [texture views](https://gpuweb.github.io/gpuweb/#texture-view-creation), [canvas configuration](https://gpuweb.github.io/gpuweb/#canvas-configuration), [copies](https://gpuweb.github.io/gpuweb/#copies), [query sets](https://gpuweb.github.io/gpuweb/#query-sets), and [Web IDL integer conversion](https://webidl.spec.whatwg.org/#es-integer-types)
+- Native authority: [WebGPU resource binding](https://gpuweb.github.io/gpuweb/#resource-binding), [texture views](https://gpuweb.github.io/gpuweb/#texture-view-creation), [canvas configuration](https://gpuweb.github.io/gpuweb/#canvas-configuration), [copies](https://gpuweb.github.io/gpuweb/#copies), [query sets](https://gpuweb.github.io/gpuweb/#query-sets), [timestamp-write validation](https://gpuweb.github.io/gpuweb/#abstract-opdef-validate-timestampwrites), and [Web IDL integer conversion](https://webidl.spec.whatwg.org/#es-integer-types)
 
 The executable audit uses the TypeScript compiler AST to derive exports and every
 public exported-class constructor, property, method, getter, setter, parameter type,
@@ -24,8 +24,8 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 441
-referenced behavior tests; requires the complete suite to report exactly 848 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 443
+referenced behavior tests; requires the complete suite to report exactly 850 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -318,7 +318,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Twenty-two isolated review passes have examined the fixed-baseline diff and working tree.
+Twenty-three isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -339,7 +339,9 @@ acceptance execution, copy diagnostics, and attachment-dimension documentation.
 Reviews fifteen through twenty-one confirmed allocation-replacement, acceptance,
 current-use validation, Surface ownership/authority, and transaction defects. The
 twenty-second review confirmed three P1 immutable-contract/native-capability defects and
-two P2 lifecycle/texture-capability defects. No Critical issue was reported.
+two P2 lifecycle/texture-capability defects. The twenty-third review confirmed two P1
+timestamp/performance-contract defects and one P2 living-document defect. No Critical
+issue was reported.
 
 Resolved core finding:
 
@@ -737,6 +739,32 @@ Resolved twenty-second review findings:
    independently, and persistent 1D mip views have direct positive coverage.
 
 These findings bring the reproduced or source-verified reviewer total to 74.
+
+The twenty-second-review implementation received clean mechanical acceptance at exact
+commit `c8ae0ab018b70e47eff70b998de842699116bc95`: 441/441 focused tests,
+848 passing plus the two exact pending gates, both TypeScript consumers, all 14 builds,
+both 20,000-cycle stress phases at 1.71 and 1.41 microseconds per cycle, headed Chrome
+150.0.7871.115 on Apple Metal 3, and all 11 ordinary examples passed. The next isolated
+review did not approve that checkpoint and reported the three defects below, so
+`c8ae0ab` remains evidence history rather than final approval.
+
+Resolved twenty-third review findings:
+
+1. PassSpec normalization now rejects equal provided `begin` and `end` timestamp-write
+   indices with `SCRATCH_PASS_TIMESTAMP_WRITES_INVALID`. Separate render and compute
+   regressions prove rejection while creating the pass, before command-encoder or native
+   pass effects, matching the official `Validate timestampWrites` rule.
+2. Command construction now snapshots each dynamic BindLayout entry sequence together
+   with its immutable native offset sequence. Steady-state validation rechecks current
+   allocation alignment and bounds against those snapshots without `filter()`, `sort()`,
+   name-map reads, or native sequence reconstruction. The stress detector now observes
+   the real `binding` property instead of the nonexistent `entry.binding` path.
+3. The active provenance-integration review now labels its consolidation list as
+   historical and explicitly records the current schema-v5, Promise-only supporting
+   object, and explicit `BindSet.prepare()` replacement. It no longer teaches schema v4
+   or lazy bind-group creation as retained current behavior.
+
+These findings bring the reproduced or source-verified reviewer total to 77.
 
 ## Verification Record
 
@@ -1167,6 +1195,29 @@ Post-twenty-second-review pre-commit verification:
   structural parity passes the expanded capability, official-source, behavior-title,
   bilingual-documentation, ADR, production-emit, and historical-baseline contract while
   correctly reporting `incomplete` for the dirty pre-commit tree
+- clean-commit acceptance and a fresh isolated exact no-findings review remain required
+
+Post-twenty-third-review pre-commit verification:
+
+- separate compute and render duplicate-index regressions first failed 0/2 because
+  PassSpec creation accepted equal timestamp slots; both now pass before encoder or
+  native-pass effects with the structured timestamp-write diagnostic
+- correcting the stress detector from nonexistent `entry.binding` to the actual
+  `binding` property first failed the short steady-state gate with
+  `steady-state binding work sorted bindings into native order`; the Command-owned
+  entry/native-offset snapshot implementation then restored the gate without weakening
+  its zero-sort assertion
+- the living-review contract check first failed on the missing current-replacement
+  marker; it now passes and rejects both obsolete schema-v4/lazy-binding bullet forms
+- the affected QuerySet, dynamic-offset, performance, and final-contract collection
+  reports 42 passing with only its final-acceptance identity pending; fixed-history
+  structural parity locks the 443-test focused acceptance count, confirms every named
+  behavior contract, and includes the new official timestamp-write distinctness marker
+  while correctly reporting `incomplete` on the dirty tree
+- `npm run typecheck` passes both TypeScript consumers; `npm test` reports exactly
+  850 passing with only the two exact browser/final-acceptance identities pending
+- `npm run build` emits the package and all 14 runnable examples; the exact native
+  inventory passes all 43 call sites after reindexing the three shifted command sites
 - clean-commit acceptance and a fresh isolated exact no-findings review remain required
 
 The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree

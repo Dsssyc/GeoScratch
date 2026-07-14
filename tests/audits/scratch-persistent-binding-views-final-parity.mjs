@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 441
-const expectedFullSuitePasses = 848
+const expectedFocusedAcceptancePasses = 443
+const expectedFullSuitePasses = 850
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -340,7 +340,9 @@ const capabilityRows = [
             hasAll(current.command, [
                 'CommandBindSetInvocation',
                 'dynamicOffsets',
-                'commandNativeDynamicOffsets',
+                'commandDynamicOffsetContracts',
+                'entries: offsets.entries',
+                'nativeOffsets: offsets.native',
                 'programLayoutRequirementsForPipeline(command.pipeline)',
             ]) &&
             !exportedTypeNames(current.scratchIndex).includes('CommandDynamicOffsets'),
@@ -654,6 +656,8 @@ const behaviorTestContracts = [
         'revalidates readback source usage against replacement allocations before staging copy effects',
     ]),
     behaviorTestContract('tests/scratch-query-set.test.js', [
+        'rejects identical compute timestamp write indices before encoder creation',
+        'rejects identical render timestamp write indices before encoder creation',
         'revalidates query resolve usage against replacement allocations before encoder effects',
     ]),
     behaviorTestContract('tests/scratch-native-indirect-execution.test.js', [
@@ -894,6 +898,9 @@ const documentationAudit = Object.freeze({
     passSpecImmutability: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
         hasAll(source, [ 'PassSpec', 'timestamp', 'lifecycle', 'mutation' ])
     ),
+    timestampWriteIndices: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
+        hasAll(source, [ 'timestampWrites', 'begin', 'end', 'distinct' ])
+    ),
     programRequirementSnapshots: [ finalDocs.programs, finalDocs.programsZh ].every(source =>
         hasAll(source, [ 'Pipeline', 'layoutRequirements', 'snapshot', 'Command' ])
     ) && hasAll(finalDocs.bindingDecision, [ 'Pipeline requirement snapshot', 'mutable Program property' ]),
@@ -950,7 +957,16 @@ const documentationAudit = Object.freeze({
         !fs.existsSync('tests/audits/scratch-submission-native-final-parity.mjs'),
     activeReviewReferencesCurrentAudit:
         !activeReviewSource.includes('scratch-submission-native-final-parity') &&
-        activeReviewSource.includes('scratch-persistent-binding-views-final-audit.md'),
+        activeReviewSource.includes('scratch-persistent-binding-views-final-audit.md') &&
+        activeReviewSource.includes(
+            'Current replacement: schema v5 and acknowledged explicit BindSet preparation.'
+        ) &&
+        !activeReviewSource.includes(
+            '- schema-v4 submission targets, discriminated native locations, bounded current'
+        ) &&
+        !activeReviewSource.includes(
+            '- explicit deferred sampler/query-set/bind-layout and independent lazy'
+        ),
 })
 const documentationStatus = Object.values(documentationAudit).every(Boolean)
 const officialSpecificationEvidence = acceptanceMode
@@ -1545,6 +1561,8 @@ async function fetchOfficialSpecificationEvidence(canonicalTypes) {
             'Set |this|.{{GPUCanvasContext/[[configuration]]}} to `null`.',
         textureMaximumMipLevelCount:
             '|descriptor|.{{GPUTextureDescriptor/mipLevelCount}} must be &le; [$maximum mipLevel count$](|descriptor|.{{GPUTextureDescriptor/dimension}}, |descriptor|.{{GPUTextureDescriptor/size}}).',
+        timestampWriteIndicesDistinct:
+            '- No two may be equal. - Each must be &lt; |timestampWrites|.`querySet`.{{GPUQuerySet/count}}.',
         writeBufferContentsAlignment:
             '|contentsSize|, converted to bytes, is a multiple of 4 bytes.',
         writeBufferOffsetAlignment:

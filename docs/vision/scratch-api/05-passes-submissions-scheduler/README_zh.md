@@ -56,7 +56,12 @@ const simulationPass = runtime.createComputePass({
 })
 ```
 
-`timestampWrites` 降低为 WebGPU pass descriptor timestamp writes，并要求 `timestamp` query set。`occlusionQuerySet` 仅用于 render pass，并要求 `occlusion` query set。Query result transfer 不隐含在 pass spec 中; resolve 与 readback 仍然是显式 command 或 operation。
+`timestampWrites` 降低为 WebGPU pass descriptor timestamp writes，并要求
+`timestamp` query set。`begin` 与 `end` 至少提供一个；两者都提供时，其合法
+query index 必须 distinct。Scratch 在创建 `PassSpec` 时、encoder creation 之前
+拒绝重复 index。`occlusionQuerySet` 仅用于 render pass，并要求 `occlusion`
+query set。Query result transfer 不隐含在 pass spec 中；resolve 与 readback
+仍然是显式 command 或 operation。
 
 Attachment 按实际逻辑 view 校验，而不是只看 parent texture。持久
 `TextureViewSpec` 必须包含 `RENDER_ATTACHMENT` view usage，并满足完整的

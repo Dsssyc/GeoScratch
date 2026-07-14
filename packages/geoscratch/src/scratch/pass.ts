@@ -377,6 +377,9 @@ function normalizeTimestampWrites(
     if (begin === undefined && end === undefined) {
         throwTimestampWritesDiagnostic(pass, timestampWrites, 'empty')
     }
+    if (begin !== undefined && begin === end) {
+        throwTimestampWritesDiagnostic(pass, timestampWrites, 'duplicate-indices')
+    }
 
     const normalized: MutableTimestampWritesSpec = {
         querySet,
@@ -451,11 +454,12 @@ function throwTimestampWritesDiagnostic(pass: RenderPassSpec | ComputePassSpec, 
         related: [
             diagnosticSubjectOf(querySet),
         ].filter(isDefined),
-        message: 'PassSpec timestampWrites requires a timestamp QuerySetResource and at least one valid query slot index.',
+        message: 'PassSpec timestampWrites requires a timestamp QuerySetResource and distinct valid query slot indices.',
         expected: {
             querySet: 'timestamp QuerySetResource owned by this ScratchRuntime',
             begin: 'optional integer query index within querySet.count',
             end: 'optional integer query index within querySet.count',
+            distinct: 'provided begin and end indices differ',
         },
         actual: {
             reason,

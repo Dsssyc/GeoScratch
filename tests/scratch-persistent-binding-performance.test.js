@@ -22,6 +22,8 @@ describe('Scratch persistent binding performance gate', () => {
         expect(source).to.include('dynamicOffsetNameMapReads')
         expect(source).to.include('snapshotSerializations')
         expect(source).to.include('bindingOrderSorts')
+        expect(source).to.include('value?.binding')
+        expect(source).to.not.include('value?.entry?.binding')
         expect(source).to.include('sameBindSetPublicState')
         expect(source).to.include('SCRATCH_BIND_SET_STALE')
         expect(source).to.include('firstPrepare === sameSnapshotPrepare')

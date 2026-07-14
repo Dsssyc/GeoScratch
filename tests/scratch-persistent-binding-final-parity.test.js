@@ -56,8 +56,8 @@ describe('Scratch persistent binding final parity', () => {
             'officialWebIdlSource',
             'clampedUnsignedShort',
             'nearestEvenInteger',
-            'const expectedFocusedAcceptancePasses = 441',
-            'const expectedFullSuitePasses = 848',
+            'const expectedFocusedAcceptancePasses = 443',
+            'const expectedFullSuitePasses = 850',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -85,6 +85,8 @@ describe('Scratch persistent binding final parity', () => {
             'preserves native Surface usage, view format, color, and tone-mapping capabilities',
             'deep-locks normalized PassSpec attachments before reusable submission',
             'snapshots Surface attachment view descriptors when the PassSpec is created',
+            'rejects identical compute timestamp write indices before encoder creation',
+            'rejects identical render timestamp write indices before encoder creation',
             'SCRATCH_SURFACE_CONTEXT_IN_USE',
             'SCRATCH_SURFACE_CONTEXT_NOT_OWNED',
             'SCRATCH_SURFACE_CONFIGURATION_FAILED',
@@ -162,6 +164,7 @@ describe('Scratch persistent binding final parity', () => {
             'canvasConfigureCommitsConfiguration',
             'canvasUnconfigureClearsConfiguration',
             'textureMaximumMipLevelCount',
+            'timestampWriteIndicesDistinct',
             'depthStencilFullPhysicalSubresource',
             'compatibilityCompressedTextureRestriction',
             'wholeTexelBlockCopies',
@@ -294,6 +297,7 @@ describe('Scratch persistent binding final parity', () => {
             nativeRegionAlignment: true,
             attachmentViewContracts: true,
             passSpecImmutability: true,
+            timestampWriteIndices: true,
             programRequirementSnapshots: true,
             programExamplesUseBufferRegions: true,
             layoutCodecDiagnosticsCurrent: true,
@@ -339,6 +343,12 @@ describe('Scratch persistent binding final parity', () => {
             '09-diagnostics-validation',
             'README_zh.md'
         ), 'utf8')
+        const provenanceIntegrationReview = fs.readFileSync(path.join(
+            root,
+            'docs',
+            'review',
+            'scratch-dev-feature-provenance-integration-audit.md'
+        ), 'utf8')
 
         for (const source of [ vision08, vision08Zh ]) {
             const bufferDescriptors = source.match(/scratch\.buffer\(\{[\s\S]*?\n\}\)/g) ?? []
@@ -356,6 +366,15 @@ describe('Scratch persistent binding final parity', () => {
             expect(source).to.include('SCRATCH_CODEC_SCHEMA_MISMATCH')
             expect(source).to.include('SCRATCH_QUERY_SLOT_INDEX_INVALID')
         }
+        expect(provenanceIntegrationReview).to.include(
+            'Current replacement: schema v5 and acknowledged explicit BindSet preparation.'
+        )
+        expect(provenanceIntegrationReview).to.not.include(
+            '- schema-v4 submission targets, discriminated native locations, bounded current'
+        )
+        expect(provenanceIntegrationReview).to.not.include(
+            '- explicit deferred sampler/query-set/bind-layout and independent lazy'
+        )
         expectCurrentReplacementDecision(
             'ADR-008-scratch-buffer-layout-artifact-integration.md',
             'Superseded by ADR-036',
@@ -429,15 +448,15 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence.mocha).to.deep.include({
             status: 'passed',
-            tests: 441,
-            passes: 441,
+            tests: 443,
+            passes: 443,
             failures: 0,
             pending: 0,
         })
         expect(result.executionEvidence.fullSuite).to.deep.include({
             status: 'passed',
-            tests: 850,
-            passes: 848,
+            tests: 852,
+            passes: 850,
             failures: 0,
             pending: 2,
         })
