@@ -388,9 +388,9 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
         const overlappingSurfacePass = runtime.createRenderPass({
             color: [ { target: surface }, { target: surface } ],
         })
-        const aliasedSurface = runtime.createSurface(canvas.canvas, {
-            format: 'bgra8unorm',
-            size: { width: 8, height: 8 },
+        const aliasedSurface = Object.assign(Object.create(surface), {
+            id: 'forged-surface-alias',
+            label: 'forged Surface alias',
         })
         const overlappingContextPass = runtime.createRenderPass({
             color: [ { target: surface }, { target: aliasedSurface } ],

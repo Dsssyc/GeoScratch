@@ -83,7 +83,7 @@ a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 | N37 | `packages/geoscratch/src/scratch/submission.ts:876` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
 | N38 | `packages/geoscratch/src/scratch/submission.ts:1204` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
 | N39 | `packages/geoscratch/src/scratch/submission.ts:1209` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
-| N40 | `packages/geoscratch/src/scratch/surface.ts:113` | `GPUCanvasContext.getCurrentTexture()` | Submission attachment lowering reaches it inside `pass-begin`; a direct public method call has no owner. | Observed submission; direct call deferred |
+| N40 | `packages/geoscratch/src/scratch/surface.ts:121` | `GPUCanvasContext.getCurrentTexture()` | Submission attachment lowering reaches it inside `pass-begin`; a direct public method call has no owner. | Observed submission; direct call deferred |
 | N41 | `packages/geoscratch/src/scratch/texture.ts:488` | persistent attachment `GPUTexture.createView()` | Called only inside the owning submission `attachment-view` issue with pass, slot, view, resource, and allocation facts. | Observed submission attachment |
 
 Inventory totals:

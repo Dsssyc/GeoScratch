@@ -60,11 +60,27 @@ const surface = scratch.surface(canvas, {
   native device underneath diagnostics or allocation.
 - Runtime disposal and device-loss properties are read-only observations of
   runtime-owned lifecycle transitions.
-- A surface is configured by exactly one `ScratchRuntime` at a time.
+- A `GPUCanvasContext` is claimed by exactly one live `Surface`, and therefore
+  exactly one `ScratchRuntime`, at a time.
 - Resources from one runtime cannot be used by commands recorded on another runtime.
 - A surface current texture is presentation-submission-scoped and must not be stored as a persistent resource.
 - Disposing a surface does not dispose the runtime.
 - Disposing a runtime invalidates its resources, surfaces, pipelines, bind sets, and commands.
+
+## Exclusive Canvas-Context Ownership
+
+`Surface` creation claims its `GPUCanvasContext` before changing canvas size or
+calling `GPUCanvasContext.configure()`. A second live `Surface` for that context
+is rejected with `SCRATCH_SURFACE_CONTEXT_IN_USE`, whether it comes from the same
+runtime or another runtime. The diagnostic identifies both the attempted Surface
+and the current owner; rejection performs no canvas, configure, or runtime-registry
+effect.
+
+`Surface.dispose()` unconfigures the context and releases the claim. A replacement
+Surface may claim it only after that explicit lifecycle transition. Construction
+that fails after claiming also releases its uncommitted claim. Scratch does not
+maintain multiple wrappers with hidden shared configuration or attempt to infer the
+current configuration from a borrowed presentation texture at submission time.
 
 ## Surface Is Not A TextureResource
 

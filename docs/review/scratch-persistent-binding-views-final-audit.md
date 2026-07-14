@@ -1,8 +1,8 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-seventeenth-review fixes; clean acceptance and independent re-review pending
-Decisions: ADR-036, ADR-037, ADR-038
+Status: Post-eighteenth-review fixes; clean acceptance and independent re-review pending
+Decisions: ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
 
@@ -24,8 +24,8 @@ mode first requires a clean Git working tree and reports the exact HEAD commit, 
 porcelain inventory, and porcelain hash. It then downloads the GPUWeb Bikeshed main
 source, copy-rules source, and WHATWG Web IDL source; derives the native enum matrices;
 first verifies that its managed browser port is unoccupied, then explicitly executes
-`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 397
-referenced behavior tests; requires the complete suite to report exactly 820 passing
+`npm run typecheck`, `npm run build`, and `git diff --check`. It executes exactly 399
+referenced behavior tests; requires the complete suite to report exactly 822 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -38,13 +38,13 @@ execution sequence.
 The Goal-start commit is the behavioral and public-symbol baseline. The historical
 JavaScript commit is evidence for behavior that had already survived the TypeScript
 migration; it is not authority for restoring synchronous factories, old names, or
-legacy descriptor shapes. ADR-036 through ADR-038 define the clean target state.
+legacy descriptor shapes. ADR-036 through ADR-039 define the clean target state.
 
 ## Final Parity Table
 
 | Area | Goal-start TypeScript behavior and public symbols | Historical JavaScript feature inventory | Target clean-cut behavior | Final implementation location | Test evidence | Documentation evidence | Intentional breaking replacement | Final status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Runtime and surface | Async runtime plus independent `Surface` and `SubmissionBuilder` | Same runtime/surface separation | Preserve explicit async runtime and non-resource descriptions | `scratch/runtime.ts`, `surface.ts`, `submission.ts` | Runtime, surface, submission suites | Vision 01 and overview | Preserved and strengthened | Complete |
+| Runtime and surface | Async runtime plus independent `Surface` and `SubmissionBuilder` | Same runtime/surface separation | Preserve explicit async runtime, exclusive live canvas-context ownership, and non-resource descriptions | `scratch/runtime.ts`, `surface.ts`, `submission.ts` | Runtime, surface, submission suites | Vision 01, ADR-039, and overview | Preserved and strengthened | Complete |
 | Resource semantics | Universal allocation/content facts | Allocation and scalar content epochs existed | Allocation lifecycle on every resource; scalar content only on buffers/textures; indexed query facts | `resource.ts`, `buffer.ts`, `texture.ts`, `sampler.ts`, `query-set.ts` | Resource-semantics and supporting-object suites | Vision 02, ADR-036 | Universal `ResourceState` narrowed to truthful owners | Complete |
 | Layout codecs | `structuralHash`, CPU packing, WGSL accessors, readback views | LayoutCodec did not yet exist | Collision-safe canonical `abiHash` plus `schemaHash`, preserving codec helpers | `layout-codec.ts` | Layout-codec and resource-view suites | Vision 02, ADR-036 | `structuralHash` removed without alias | Complete |
 | Buffer ranges | Resource-global layout/stride/count | Raw `BufferResource` existed | Raw buffer plus frozen `BufferRegion`; every public range consumer uses regions | `buffer.ts`, `command.ts`, `readback.ts`, `binding.ts` | Resource-view, region-layout, copy, readback suites | Vision 02 and 07, ADR-036 | Resource-global layout and ad hoc ranges removed | Complete |
@@ -202,7 +202,7 @@ admits both. Every path is a direct encoder copy with no CPU round trip.
 ## Diagnostics Evidence
 
 - Goal-start diagnostic code inventory: 158
-- Final diagnostic code inventory: 196
+- Final diagnostic code inventory: 197
 - Unexpected missing codes: 0
 - `SCRATCH_CODEC_STRUCTURAL_HASH_MISMATCH` is intentionally replaced by
   `SCRATCH_LAYOUT_ABI_MISMATCH` and `SCRATCH_CODEC_SCHEMA_MISMATCH`.
@@ -295,7 +295,7 @@ canonicalized, serialized, and hashed a complete snapshot on every check.
 - DEM and Flow remain separate implementations.
 - No `scratch_` example naming flag remains.
 - Hello Map remains absent.
-- Vision 02/03/04/05/07/08/09, ADR-036/037/038, the supersession notices on
+- Vision 01/02/03/04/05/07/08/09, ADR-036/037/038/039, the supersession notices on
   ADR-008/009/010, package exports, tests, examples, and generated declarations agree
   on the final contract.
 
@@ -306,6 +306,7 @@ canonicalized, serialized, and hashed a complete snapshot on every check.
 - `structuralHash` -> `abiHash` plus `schemaHash`
 - Synchronous supporting-object factories -> Promise-only acknowledgement
 - Public/direct construction -> runtime factories with closed constructors
+- Aliased Surface wrappers for one canvas context -> one explicit live owner
 - Lazy submission-time BindSet repair -> explicit allocation-bound `prepare()`
 - Descriptor-level/raw dynamic offsets -> command-owned named offsets pre-lowered once
 - Whole-buffer/range overloads -> `BufferRegion`
@@ -317,7 +318,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Seventeen isolated review passes have examined the fixed-baseline diff and working tree.
+Eighteen isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -611,7 +612,21 @@ Resolved seventeenth review findings:
    renderable formats fail with a structured descriptor diagnostic before native view or
    command encoder creation instead of relying on asynchronous WebGPU validation.
 
-These three findings bring the reproduced or source-verified reviewer total to 57.
+The seventeenth-review fixes were accepted on the clean `9fe89ee` checkpoint. The
+next isolated review did not approve that checkpoint and reported the Surface
+ownership defect below.
+
+Resolved eighteenth review finding:
+
+1. One `GPUCanvasContext` can now have only one live Scratch `Surface` owner. The
+   module-private weak claim is acquired before canvas resize, native configure, or
+   runtime registration; duplicate claims from the same or another runtime produce
+   `SCRATCH_SURFACE_CONTEXT_IN_USE` without native effects. Failed construction rolls
+   back an uncommitted claim, and successful disposal unconfigures and releases it so
+   an explicit replacement can be created. Submission retains its context-identity
+   overlap check as defense against forged JavaScript aliases.
+
+These findings bring the reproduced or source-verified reviewer total to 58.
 
 ## Verification Record
 
@@ -839,7 +854,7 @@ Post-seventeenth-review pre-commit verification:
   behavior instead of a Scratch diagnostic
 - the same three focused tests passed after implementation, including a positive
   submission that binds two different 3D `depthSlice` values from one texture
-- the same-root pass audit also covers distinct Surface wrappers sharing one canvas
+- the same-root pass audit also covers forged Surface aliases sharing one canvas
   context and submit-time Surface format reconfiguration without increasing the reviewer
   finding count
 - the affected copy, pass, depth/stencil, documentation, fixed-history, and native-source
@@ -849,7 +864,49 @@ Post-seventeenth-review pre-commit verification:
   reporting `incomplete` on the dirty tree
 - `npm test`: 820 passing with only the two exact browser/final-acceptance gate
   identities pending; `npm run typecheck` and the complete package/example build passed
-- clean-commit acceptance and a new isolated no-findings review remain required
+- clean-commit acceptance and a new isolated review remained required
+
+Clean checkpoint acceptance at `9fe89eea0ce37e01b400603f2e6270e6119d033b`:
+
+- runner verification was `acceptance` / `passed`; initial and final repository
+  evidence named the same exact commit and an empty working tree
+- live GPUWeb main, copy-rules, and Web IDL sources retained the recorded byte lengths
+  and SHA-256 hashes; all six enum rows, all 101 texture formats, and 50 required native
+  markers passed
+- runner-owned typecheck, complete build, and diff checking passed in 5,808 ms,
+  5,175 ms, and 22 ms
+- focused acceptance passed 397/397; the complete suite reported 820 passing and only
+  the two exact browser/final-acceptance gate identities pending
+- both 20,000-cycle steady-state phases passed at observed 1.76 and 1.45 microseconds
+  per cycle
+- Chrome 150.0.7871.115 on Apple Metal 3 passed the headed persistent-binding proof;
+  all 11 ordinary examples passed with zero matrix failures
+- the managed Vite server started in 236 ms, completed its 19,468 ms lifecycle, stopped
+  cleanly, and left port 4173 closed; the unavailable target produced the required
+  non-zero `ERR_CONNECTION_REFUSED` result
+- the subsequent eighteenth isolated review found the Surface ownership issue recorded
+  above, so this checkpoint is evidence history rather than final approval
+
+Post-eighteenth-review pre-commit verification:
+
+- duplicate same-runtime/cross-runtime Surface construction first produced one focused
+  RED failure because both candidates reached native configure instead of a Scratch
+  diagnostic
+- the two ownership regressions and the retained pass overlap/format regressions passed
+  4/4 after implementation; the duplicate claim has zero configure/unconfigure side
+  effects, failed configure rolls back its claim, and explicit owner disposal permits
+  one replacement claim
+- fixed-history structural parity passed all capability, behavior-title, bilingual
+  documentation, ADR, production-emit, and baseline/historical contracts while correctly
+  reporting `incomplete` on the dirty tree
+- the exact submission-native inventory passed all 41 call sites after the Surface
+  current-texture source location was re-derived
+- `npm run typecheck` passed, including the canonical WebGPU declaration consumer;
+  the complete package and all 14 runnable examples built successfully
+- `npm test` reported 822 passing with only the two exact browser/final-acceptance gate
+  identities pending; `git diff --check` passed
+- the acceptance runner now locks 399 focused cases and the exact 822 + 2 full-suite
+  total; a clean checkpoint and new isolated no-findings review remain required
 
 The exact no-findings re-review, new clean-commit acceptance, final push, and clean-tree
 state are recorded only after those gates complete.

@@ -60,11 +60,26 @@ const surface = scratch.surface(canvas, {
   底层替换 native device。
 - runtime disposal 与 device-loss 属性是 runtime-owned lifecycle transition
   的只读观察值。
-- 一个 surface 同一时间只由一个 `ScratchRuntime` 配置。
+- 一个 `GPUCanvasContext` 同一时间只由一个 live `Surface` claim，因此也只由
+  一个 `ScratchRuntime` 配置。
 - 一个 runtime 的资源不能被另一个 runtime 记录的 command 使用。
 - surface current texture 是 presentation-submission-scoped，不允许作为持久 resource 保存。
 - dispose surface 不会 dispose runtime。
 - dispose runtime 会使其 resources、surfaces、pipelines、bind sets、commands 全部失效。
+
+## Canvas Context 独占 Ownership
+
+创建 `Surface` 时，会先 claim 对应 `GPUCanvasContext`，之后才允许改变 canvas
+尺寸或调用 `GPUCanvasContext.configure()`。无论来自同一个 runtime 还是另一个
+runtime，同一 context 上的第二个 live `Surface` 都会收到
+`SCRATCH_SURFACE_CONTEXT_IN_USE`。Diagnostic 同时标识 attempted Surface 与当前
+owner；拒绝过程不产生 canvas、configure 或 runtime registry 副作用。
+
+`Surface.dispose()` 会 unconfigure context 并释放 claim。只有完成这次显式
+lifecycle transition 后，replacement Surface 才能重新 claim。构造过程若在
+claim 后失败，也会释放尚未 commit 的 claim。Scratch 不维护带隐式共享配置的
+多个 wrapper，也不会在 submission 时尝试从 borrowed presentation texture
+反推出 current configuration。
 
 ## Surface 不是 TextureResource
 

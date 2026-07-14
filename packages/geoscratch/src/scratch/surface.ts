@@ -19,6 +19,8 @@ export type SurfaceOptions = {
 
 type ScratchCanvas = HTMLCanvasElement | OffscreenCanvas
 
+const surfaceContextOwners = new WeakMap<GPUCanvasContext, Surface>()
+
 export interface Surface {
     runtime: ScratchRuntime
     id: string
@@ -49,8 +51,14 @@ export class Surface {
         this.isConfigured = false
         this.isDisposed = false
 
-        this.configure()
-        runtime._registerSurface(this)
+        claimSurfaceContext(this)
+        try {
+            this.configure()
+            runtime._registerSurface(this)
+        } catch (error) {
+            releaseSurfaceContext(this)
+            throw error
+        }
     }
 
     get subject(): DiagnosticSubject {
@@ -124,6 +132,41 @@ export class Surface {
         this.isConfigured = false
         this.isDisposed = true
         this.runtime._unregisterSurface(this)
+        releaseSurfaceContext(this)
+    }
+}
+
+function claimSurfaceContext(surface: Surface): void {
+
+    const owner = surfaceContextOwners.get(surface.context)
+    if (owner === undefined || owner.isDisposed) {
+        surfaceContextOwners.set(surface.context, surface)
+        return
+    }
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_SURFACE_CONTEXT_IN_USE',
+        severity: 'error',
+        phase: 'runtime',
+        subject: surface.subject,
+        related: owner.runtime === surface.runtime
+            ? [ owner.subject, surface.runtime.subject ]
+            : [ owner.subject, owner.runtime.subject, surface.runtime.subject ],
+        message: 'GPUCanvasContext is already owned by another live Surface.',
+        expected: { canvasContextOwner: 'no live Surface' },
+        actual: {
+            ownerSurfaceId: owner.id,
+            ownerRuntimeId: owner.runtime.id,
+            requestedRuntimeId: surface.runtime.id,
+        },
+        hints: [ 'Dispose the owning Surface before creating a replacement for this canvas context.' ],
+    })
+}
+
+function releaseSurfaceContext(surface: Surface): void {
+
+    if (surfaceContextOwners.get(surface.context) === surface) {
+        surfaceContextOwners.delete(surface.context)
     }
 }
 

@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 397
-const expectedFullSuitePasses = 820
+const expectedFocusedAcceptancePasses = 399
+const expectedFullSuitePasses = 822
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -48,6 +48,7 @@ const currentPaths = Object.freeze({
     scratchIndex: 'packages/geoscratch/src/scratch/index.ts',
     scratchShim: 'packages/geoscratch/src/scratch.ts',
     runtime: 'packages/geoscratch/src/scratch/runtime.ts',
+    surface: 'packages/geoscratch/src/scratch/surface.ts',
     resource: 'packages/geoscratch/src/scratch/resource.ts',
     buffer: 'packages/geoscratch/src/scratch/buffer.ts',
     texture: 'packages/geoscratch/src/scratch/texture.ts',
@@ -156,6 +157,8 @@ const emittedProductionOutputs = emitCurrentProductionOutputs()
 const goalStartScratchDeclarations = scratchDeclarationTree(goalStartProductionDeclarations)
 const finalScratchDeclarations = scratchDeclarationTree(emittedProductionOutputs)
 const finalDocs = loadCurrentSources({
+    runtimeSurface: 'docs/vision/scratch-api/01-runtime-surface/README.md',
+    runtimeSurfaceZh: 'docs/vision/scratch-api/01-runtime-surface/README_zh.md',
     resources: 'docs/vision/scratch-api/02-resources/README.md',
     resourcesZh: 'docs/vision/scratch-api/02-resources/README_zh.md',
     bindings: 'docs/vision/scratch-api/03-bindings/README.md',
@@ -176,6 +179,7 @@ const finalDocs = loadCurrentSources({
     resourceDecision: 'docs/decisions/ADR-036-scratch-resource-views-and-layout-compatibility.md',
     bindingDecision: 'docs/decisions/ADR-037-scratch-supporting-object-acknowledgement-and-bind-set-preparation.md',
     diagnosticsDecision: 'docs/decisions/ADR-038-scratch-diagnostics-schema-v5.md',
+    surfaceDecision: 'docs/decisions/ADR-039-scratch-exclusive-surface-context-ownership.md',
 })
 const activeReviewSource = loadMarkdownDirectory('docs/review')
 
@@ -185,7 +189,13 @@ const capabilityRows = [
         goalStart: hasAll(baseline.runtime, [ 'static async create', 'createSurface(', 'createSubmission(' ]),
         historical: hasAll(historical.runtime, [ 'static async create', 'createSurface(', 'createSubmission(' ]),
         target: 'Explicit async runtime with independent synchronous Surface and SubmissionBuilder descriptions',
-        final: hasAll(current.runtime, [ 'static async create', 'createSurface(', 'createSubmission(' ]),
+        final: hasAll(current.runtime, [ 'static async create', 'createSurface(', 'createSubmission(' ]) &&
+            hasAll(current.surface, [
+                'surfaceContextOwners',
+                'claimSurfaceContext(',
+                'SCRATCH_SURFACE_CONTEXT_IN_USE',
+                'releaseSurfaceContext(',
+            ]),
         implementation: 'scratch/runtime.ts, scratch/surface.ts, scratch/submission.ts',
         tests: 'scratch-runtime.test.js, scratch-surface.test.js, scratch-submitted-work-epochs.test.js',
         docs: 'scratch-graphics-kernel.md and scratch-api/01-runtime-surfaces',
@@ -540,6 +550,10 @@ const referencedTestEvidence = referencedTestFiles.map(file => Object.freeze({
     status: fs.existsSync(`tests/${file}`) ? 'passed' : 'failed',
 }))
 const behaviorTestContracts = [
+    behaviorTestContract('tests/scratch-surface.test.js', [
+        'claims each canvas context exclusively until the owning Surface is disposed',
+        'releases an uncommitted canvas-context claim after configure fails',
+    ]),
     behaviorTestContract('tests/scratch-bind-dynamic-offsets.test.js', [
         'revalidates frozen dynamic offsets against the current replacement allocation',
     ]),
@@ -761,6 +775,22 @@ const resourceStateParity = auditResourceStateDocumentation()
 const currentLayoutDiagnosticCodes = scratchLayoutDiagnosticCodes(currentScratchSource)
 const visionDiagnosticParity = auditVisionDiagnosticDocumentation()
 const documentationAudit = Object.freeze({
+    exclusiveSurfaceOwnership: [ finalDocs.runtimeSurface, finalDocs.runtimeSurfaceZh ].every(source =>
+        hasAll(source, [
+            'GPUCanvasContext',
+            'SCRATCH_SURFACE_CONTEXT_IN_USE',
+            'dispose',
+        ])
+    ) && finalDocs.runtimeSurface.includes('exactly one live `Surface`') &&
+    finalDocs.runtimeSurface.includes('before') &&
+    finalDocs.runtimeSurfaceZh.includes('一个 live `Surface`') &&
+    finalDocs.runtimeSurfaceZh.includes('之后才') &&
+    hasAll(finalDocs.surfaceDecision, [
+        '## Status',
+        'Accepted',
+        'WeakMap<GPUCanvasContext, Surface>',
+        'exactly one live Scratch `Surface` owner',
+    ]),
     resourceViews: hasAll(finalDocs.resources, [ 'BufferRegion', 'TextureViewSpec', 'abiHash', 'schemaHash' ]),
     canonicalResourceDescriptors: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
         hasAll(source, [ 'GPUSize64', 'GPUIntegerCoordinate', 'GPUFlagsConstant', 'canonical' ])
@@ -811,7 +841,8 @@ const documentationAudit = Object.freeze({
     diagnosticsV5: hasAll(finalDocs.diagnostics, [ 'version 5', 'bind-set-preparation' ]),
     acceptedDecisions: hasAll(finalDocs.resourceDecision, [ '## Status', 'Accepted' ]) &&
         hasAll(finalDocs.bindingDecision, [ '## Status', 'Accepted' ]) &&
-        hasAll(finalDocs.diagnosticsDecision, [ '## Status', 'Accepted' ]),
+        hasAll(finalDocs.diagnosticsDecision, [ '## Status', 'Accepted' ]) &&
+        hasAll(finalDocs.surfaceDecision, [ '## Status', 'Accepted' ]),
     resourceStateParity: resourceStateParity.status === 'passed',
     programExamplesUseBufferRegions: [ finalDocs.programs, finalDocs.programsZh ]
         .every(programExampleUsesBufferRegion),

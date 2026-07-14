@@ -84,7 +84,9 @@ range. A render pass may be depth-only, but it may not omit both color and
 depth/stencil attachments. Submission preflight requires color attachment regions
 to be pairwise disjoint. Views of one texture overlap when they select the same
 mip and array layer, or the same 3D `depthSlice`; distinct layers and slices remain
-valid. Color slots also reject two Surface objects that share one canvas context.
+valid. Surface creation separately enforces one live owner per canvas context.
+Submission still compares Surface context identity defensively and rejects an alias
+before borrowing a current texture or creating an encoder.
 
 Pass specs do not store commands. This prevents stale command lists from surviving across submissions.
 

@@ -81,7 +81,9 @@ view，并要求单个 mip 与单个选定 array layer。`2d-array` view 通过
 省略 color 与 depth/stencil attachment。Submission preflight 要求 color
 attachment region pairwise disjoint。同一 texture 上选择相同 mip 与 array layer，
 或相同 3D `depthSlice` 的 view 会重叠；不同 layer 与 slice 仍然合法。同一个
-共享同一个 canvas context 的两个 Surface 对象不能在一个 pass 中占据两个 color slot。
+canvas context 在 Surface 创建阶段另有单一 live owner 门禁。Submission 仍会
+防御性比较 Surface context identity，并在借用 current texture 或创建 encoder
+之前拒绝 alias。
 
 Pass spec 不存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
 

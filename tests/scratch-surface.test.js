@@ -131,6 +131,86 @@ describe('Surface', () => {
         expect(context.unconfigureCalls).to.equal(1)
     })
 
+    it('claims each canvas context exclusively until the owning Surface is disposed', async() => {
+
+        for (const contenderKind of [ 'same-runtime', 'different-runtime' ]) {
+            const { gpu } = createFakeGpu()
+            const { canvas, context } = createFakeCanvas()
+            const ownerRuntime = await ScratchRuntime.create({ gpu })
+            const contenderRuntime = contenderKind === 'same-runtime'
+                ? ownerRuntime
+                : await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+            const owner = ownerRuntime.createSurface(canvas, {
+                label: 'owner',
+                format: 'rgba8unorm',
+                size: { width: 4, height: 4 },
+            })
+
+            try {
+                contenderRuntime.createSurface(canvas, {
+                    label: 'contender',
+                    format: 'bgra8unorm',
+                    size: { width: 8, height: 8 },
+                })
+                throw new Error('expected duplicate canvas-context ownership to fail')
+            } catch (error) {
+                expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                expect(error.diagnostic).to.include({
+                    code: 'SCRATCH_SURFACE_CONTEXT_IN_USE',
+                    severity: 'error',
+                    phase: 'runtime',
+                })
+                expect(error.diagnostic.subject).to.include({
+                    kind: 'Surface',
+                    label: 'contender',
+                })
+                expect(error.diagnostic.related).to.deep.include(owner.subject)
+            }
+
+            expect(context.configureCalls).to.have.length(1)
+            expect(context.unconfigureCalls).to.equal(0)
+            expect(canvas.width).to.equal(4)
+            expect(canvas.height).to.equal(4)
+
+            owner.dispose()
+            const replacement = contenderRuntime.createSurface(canvas, {
+                format: 'bgra8unorm',
+            })
+
+            expect(replacement.context).to.equal(context)
+            expect(context.configureCalls).to.have.length(2)
+            expect(context.unconfigureCalls).to.equal(1)
+        }
+    })
+
+    it('releases an uncommitted canvas-context claim after configure fails', async() => {
+
+        const { gpu } = createFakeGpu()
+        const { canvas, context } = createFakeCanvas()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const configure = context.configure.bind(context)
+        let shouldFail = true
+        context.configure = descriptor => {
+            if (shouldFail) {
+                shouldFail = false
+                throw new Error('synchronous configure failure')
+            }
+            configure(descriptor)
+        }
+
+        expect(() => runtime.createSurface(canvas, {
+            format: 'rgba8unorm',
+        })).to.throw('synchronous configure failure')
+
+        const surface = runtime.createSurface(canvas, {
+            format: 'bgra8unorm',
+        })
+
+        expect(surface.isConfigured).to.equal(true)
+        expect(context.configureCalls).to.have.length(1)
+        expect(context.configureCalls[0].format).to.equal('bgra8unorm')
+    })
+
     it('rejects surface use after disposal with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
