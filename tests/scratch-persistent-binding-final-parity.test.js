@@ -59,8 +59,8 @@ describe('Scratch persistent binding final parity', () => {
             'officialWebIdlSource',
             'clampedUnsignedShort',
             'nearestEvenInteger',
-            'const expectedFocusedAcceptancePasses = 455',
-            'const expectedFullSuitePasses = 853',
+            'const expectedFocusedAcceptancePasses = 460',
+            'const expectedFullSuitePasses = 858',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -124,6 +124,11 @@ describe('Scratch persistent binding final parity', () => {
             'rejects depth-stencil formats in color attachment slots before encoder creation',
             'rejects invalid depth attachment views, clear values, and transient operations',
             'rejects invalid, unaligned, and disposed uploads with structured diagnostics',
+            'rejects direct buffer uploads on a queue not owned by the command runtime',
+            'rejects direct texture uploads on a queue not owned by the command runtime',
+            'freezes one resolve slot snapshot for readiness and native encoding',
+            'keeps disposal irreversible for every mutable legacy command family',
+            'rejects unsafe layout multiplication, addition, and alignment rounding',
             'rejects invalid descriptors and unaligned regions with structured diagnostics',
             'revalidates readback source usage against replacement allocations before staging copy effects',
             'revalidates query resolve usage against replacement allocations before encoder effects',
@@ -163,6 +168,7 @@ describe('Scratch persistent binding final parity', () => {
             'bufferCopyOffsetAndSizeAlignment',
             'gpuSizeAndCoordinateEnforceRange',
             'gpuSize32EnforceRange',
+            'objectSameDeviceValidity',
             'gpuStencilValueEnforceRange',
             'completeFiniteGpuColorShape',
             'renderPipelineAttachmentPresence',
@@ -258,7 +264,7 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.historicalTypeInventory.every(entry => entry.status === 'passed')).to.equal(true)
         expect(result.publicSurface.publicMemberParity).to.deep.include({
             goalStartCount: 357,
-            finalCount: 378,
+            finalCount: 388,
             status: 'passed',
         })
         expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(21)

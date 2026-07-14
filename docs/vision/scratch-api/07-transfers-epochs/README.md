@@ -134,6 +134,12 @@ The buffer upload path lowers to `GPUQueue.writeBuffer()`. Its target
 Scratch validates that native requirement before a direct queue call or a
 submission timeline can acquire effects.
 
+All three immediate upload variants execute only on their owning
+`ScratchRuntime.queue`. A foreign queue is rejected with
+`SCRATCH_COMMAND_WRONG_RUNTIME` before `writeBuffer()`, `writeTexture()`, or any logical
+content-epoch effect. This preserves WebGPU's same-device object-validity rule even for
+direct command execution outside `SubmissionBuilder`.
+
 ### Queue-Side Upload Ordering
 
 Buffer and texture uploads are ordered submission actions, not preparation outside the submission. A queue write must physically appear at its declared `SubmissionBuilder` position relative to copy, ordered readback staging, resolve, compute, and render work.
@@ -522,6 +528,7 @@ const timingQueries = await runtime.createQuerySet({
 - `timestamp` requires the `timestamp-query` feature and can be used by render or compute pass `timestampWrites`.
 - `occlusion` belongs to render passes through `occlusionQuerySet` and begin/end occlusion query brackets.
 - A query write advances the query slot's content epoch. Resolving query results advances the destination buffer's `contentEpoch`.
+- A resolve command deep-freezes one normalized `source` and slot array at construction. Readiness, epoch validation, `firstQuery`, `queryCount`, and native encoding all consume that one snapshot.
 - Unsupported features fail with a structured diagnostic. Optional profiling policy belongs above Scratch core.
 
 Timestamp writes are pass-level instrumentation:

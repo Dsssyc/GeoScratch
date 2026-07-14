@@ -101,6 +101,12 @@ Each artifact exposes two separate facts:
 
 Short hashes are bounded identifiers, not collision-proof proof. Scratch also retains and compares immutable canonical ABI/schema signatures. Typed Program requirements default to exact schema compatibility; native binding separately validates ABI, usage, range, and alignment. ABI-compatible schema reinterpretation is never automatic.
 
+Layout lowering publishes an artifact only when every array count, byte-size product,
+field offset/end, and final alignment round-up remains a non-negative
+JavaScript safe integer. Overflow fails closed with
+`SCRATCH_LAYOUT_UNSUPPORTED_FORMAT` and structured arithmetic facts; Scratch never
+publishes an internally self-invalid `LayoutArtifact`.
+
 ## TextureResource And TextureViewSpec
 
 `TextureResource` is a stable logical texture whose current `GPUTexture` allocation may be replaced explicitly:

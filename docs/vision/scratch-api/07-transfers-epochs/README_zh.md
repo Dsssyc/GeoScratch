@@ -131,6 +131,11 @@ Buffer upload path 会降低到 `GPUQueue.writeBuffer()`。其 target
 `BufferRegion` offset 与所选 byte length 都必须满足 4-byte alignment。Scratch
 会在直接 queue call 或 submission timeline 获得任何 effect 前校验这条原生规则。
 
+三种 immediate upload variant 都只能在其所属的 `ScratchRuntime.queue` 上执行。
+foreign queue 会在 `writeBuffer()`、`writeTexture()` 或任何逻辑 content-epoch effect
+前以 `SCRATCH_COMMAND_WRONG_RUNTIME` 被拒绝。这样即使 command 脱离
+`SubmissionBuilder` 直接执行，也仍保留 WebGPU 的 same-device object-validity rule。
+
 ### Queue-Side Upload 顺序
 
 Buffer 与 texture upload 是有序 submission action，不是 submission 之外的 preparation。queue write 必须相对 copy、ordered readback staging、resolve、compute 与 render work 出现在其声明的 `SubmissionBuilder` 位置。
@@ -511,6 +516,7 @@ const timingQueries = await runtime.createQuerySet({
 - `timestamp` 需要 `timestamp-query` feature，可用于 render 或 compute pass 的 `timestampWrites`。
 - `occlusion` 通过 `occlusionQuerySet` 和 begin/end occlusion query brackets 属于 render pass。
 - query write 会推进 query slot 的 content epoch。resolve query results 会推进 destination buffer 的 `contentEpoch`。
+- resolve command 会在构造时深度冻结唯一一份归一化 `source` 与 slot array。Readiness、epoch validation、`firstQuery`、`queryCount` 与 native encoding 都消费这同一份 snapshot。
 - 不支持的 feature 通过结构化 diagnostic 失败。可选 profiling policy 属于 Scratch core 之上的层。
 
 Timestamp writes 是 pass-level instrumentation:

@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 455
-const expectedFullSuitePasses = 853
+const expectedFocusedAcceptancePasses = 460
+const expectedFullSuitePasses = 858
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -387,7 +387,7 @@ const capabilityRows = [
             ]) &&
             hasAll(current.command, [ 'region.offset % 4 !== 0', "reason: 'writeBufferAlignment'" ]),
         implementation: 'scratch/command.ts, scratch/pass.ts, scratch/submission.ts',
-        tests: 'scratch-submission-queue-order.test.js, scratch-submitted-work-epochs.test.js, scratch-pass-submission.test.js, scratch-depth-stencil-attachments.test.js, scratch-pipeline-command.test.js, scratch-native-indirect-execution.test.js',
+        tests: 'scratch-command-lifecycle.test.js, scratch-submission-queue-order.test.js, scratch-submitted-work-epochs.test.js, scratch-pass-submission.test.js, scratch-depth-stencil-attachments.test.js, scratch-pipeline-command.test.js, scratch-native-indirect-execution.test.js',
         docs: 'scratch-api/05-passes-submissions-scheduler',
         replacement: 'buffer ranges and pass targets migrated to BufferRegion/TextureViewSpec',
     }),
@@ -654,6 +654,7 @@ const behaviorTestContracts = [
     ]),
     behaviorTestContract('tests/scratch-binding-upload.test.js', [
         'rejects invalid, unaligned, and disposed uploads with structured diagnostics',
+        'rejects direct buffer uploads on a queue not owned by the command runtime',
         'requires COPY_DST and revalidates replacement usage before upload queue effects',
     ]),
     behaviorTestContract('tests/scratch-readback-command.test.js', [
@@ -661,6 +662,7 @@ const behaviorTestContracts = [
         'revalidates readback source usage against replacement allocations before staging copy effects',
     ]),
     behaviorTestContract('tests/scratch-query-set.test.js', [
+        'freezes one resolve slot snapshot for readiness and native encoding',
         'rejects a disposed compute timestamp query set before encoder creation',
         'rejects a disposed render timestamp query set before attachment or encoder creation',
         'rejects identical compute timestamp write indices before encoder creation',
@@ -703,6 +705,13 @@ const behaviorTestContracts = [
     behaviorTestContract('tests/scratch-texture-sampler.test.js', [
         'preserves full 2d-array bindings and rejects layer subsets on compatibility devices',
         'enforces GPUSize32 bounds for texture upload row layouts',
+        'rejects direct texture uploads on a queue not owned by the command runtime',
+    ]),
+    behaviorTestContract('tests/scratch-layout-codec.test.js', [
+        'rejects unsafe layout multiplication, addition, and alignment rounding',
+    ]),
+    behaviorTestContract('tests/scratch-command-lifecycle.test.js', [
+        'keeps disposal irreversible for every mutable legacy command family',
     ]),
     behaviorTestContract('tests/scratch-command-binding-access.test.js', [
         'requires read-write storage buffers in both read and write declarations',
@@ -917,6 +926,40 @@ const documentationAudit = Object.freeze({
         finalDocs.transfers,
         finalDocs.transfersZh,
     ].every(source => hasAll(source, [ 'BufferRegion', '4-byte' ])),
+    immutableCommandLifecycle: [ finalDocs.commands, finalDocs.commandsZh ].every(source =>
+        hasAll(source, [
+            '`isDisposed`',
+            '`dispose()`',
+            'property shadowing',
+            '`ResolveQuerySetCommand`',
+            'source snapshot',
+            '`firstQuery`',
+            '`queryCount`',
+        ])
+    ),
+    uploadQueueOwnership: [ finalDocs.transfers, finalDocs.transfersZh ].every(source =>
+        hasAll(source, [
+            '`ScratchRuntime.queue`',
+            'foreign queue',
+            '`writeBuffer()`',
+            '`writeTexture()`',
+            '`SCRATCH_COMMAND_WRONG_RUNTIME`',
+            'same-device object-validity',
+        ])
+    ) && [ finalDocs.diagnostics, finalDocs.diagnosticsZh ].every(source =>
+        hasAll(source, [ '`SCRATCH_COMMAND_WRONG_RUNTIME`', '`actual.queueOwnedByRuntime: false`' ])
+    ),
+    safeLayoutArithmetic: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
+        hasAll(source, [
+            'array count',
+            'alignment round-up',
+            'JavaScript safe integer',
+            '`SCRATCH_LAYOUT_UNSUPPORTED_FORMAT`',
+            '`LayoutArtifact`',
+        ])
+    ) && [ finalDocs.diagnostics, finalDocs.diagnosticsZh ].every(source =>
+        hasAll(source, [ '`actual.reason`', '`actual.operation`', '`LayoutArtifact`' ])
+    ),
     attachmentViewContracts: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
         hasAll(source, [
             'RENDER_ATTACHMENT',
@@ -1579,6 +1622,8 @@ async function fetchOfficialSpecificationEvidence(canonicalTypes) {
     )
     const requiredMarkers = Object.freeze({
         resourceBindingEnums: 'enum GPUBufferBindingType',
+        objectSameDeviceValidity:
+            '|object|.{{GPUObjectBase/[[device]]}} must equal |targetObject|.{{GPUObjectBase/[[device]]}}.',
         storageTextureDimensionRestriction:
             '{{GPUTextureViewDimension/"cube"}} or {{GPUTextureViewDimension/"cube-array"}}',
         physicalMipExtent: '<dfn dfn>physical miplevel-specific texture extent</dfn>',

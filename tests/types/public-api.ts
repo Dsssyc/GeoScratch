@@ -714,6 +714,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         layout: { bytesPerRow: 8, rowsPerImage: 2 },
         size: { width: 2, height: 2 },
     })
+    // @ts-expect-error buffer upload disposal state is read-only
+    upload.isDisposed = false
+    // @ts-expect-error texture upload disposal state is read-only
+    textureUpload.isDisposed = false
     const externalImageSources: GPUCopyExternalImageSource[] = [
         typedImageBitmap,
         typedImageData,
@@ -767,6 +771,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         target: storageInputRegion,
         whenMissing: 'throw',
     })
+    // @ts-expect-error copy disposal state is read-only
+    copy.isDisposed = false
     const texelCopyBufferLayout: scr.TexelCopyBufferLayout = {
         bytesPerRow: 256,
         rowsPerImage: 2,
@@ -857,6 +863,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             { index: 1, contentEpoch: 1 },
         ],
     }
+    // @ts-expect-error normalized query slot reads are immutable
+    querySlotRead.index = 1
+    // @ts-expect-error normalized resolve slot arrays are immutable
+    queryResolveSource.slots.push({ index: 1, contentEpoch: 1 })
     const querySetAlias: scr.QuerySetResource = await runtime.querySet({
         type: 'occlusion',
         count: 1,
@@ -874,12 +884,22 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         label: 'typed end occlusion',
     })
     const endOcclusionAlias: scr.EndOcclusionQueryCommand = runtime.endOcclusionQueryCommand()
+    // @ts-expect-error begin occlusion disposal state is read-only
+    beginOcclusion.isDisposed = false
+    // @ts-expect-error end occlusion disposal state is read-only
+    endOcclusion.isDisposed = false
     const resolveQueries: scr.ResolveQuerySetCommand = runtime.createResolveQuerySetCommand({
         label: 'typed query resolve',
         source: queryResolveSource,
         destination: queryDestination.region({ size: 16 }),
         whenMissing: 'throw',
     })
+    // @ts-expect-error resolve disposal state is read-only
+    resolveQueries.isDisposed = false
+    // @ts-expect-error normalized resolve source is immutable
+    resolveQueries.source = queryResolveSource
+    // @ts-expect-error native resolve range is derived from the immutable source
+    resolveQueries.firstQuery = 1
     const resolveAlias: scr.ResolveQuerySetCommand = runtime.resolveQuerySetCommand({
         source: {
             querySet,

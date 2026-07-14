@@ -869,4 +869,28 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             }
         }
     })
+
+    it('rejects direct texture uploads on a queue not owned by the command runtime', async() => {
+
+        const fixtureA = await createTextureFixture()
+        const fixtureB = await createTextureFixture()
+
+        try {
+            fixtureA.upload.execute(fixtureB.queue)
+            throw new Error('expected foreign queue texture upload to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+            })
+            expect(error.diagnostic.actual).to.deep.include({
+                queueOwnedByRuntime: false,
+            })
+        }
+
+        expect(fixtureA.texture.contentEpoch).to.equal(0)
+        expect(fixtureB.calls.queueTextureWrites).to.have.length(0)
+    })
 })

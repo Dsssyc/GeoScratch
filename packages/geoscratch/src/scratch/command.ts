@@ -218,15 +218,15 @@ export type CopyCommandSourceDescriptor =
     | BufferCopyCommandSourceDescriptor
     | TextureCopyCommandSourceDescriptor
 
-export type QuerySetSlotReadDescriptor = {
+export type QuerySetSlotReadDescriptor = Readonly<{
     index: number
     contentEpoch: number
-}
+}>
 
-export type ResolveQuerySetSourceDescriptor = {
+export type ResolveQuerySetSourceDescriptor = Readonly<{
     querySet: QuerySetResource
-    slots: QuerySetSlotReadDescriptor[]
-}
+    slots: readonly QuerySetSlotReadDescriptor[]
+}>
 
 export type CommandResourceAccessDescriptor = {
     readonly read: readonly CommandResourceReadDescriptor[]
@@ -800,10 +800,11 @@ export interface BeginOcclusionQueryCommand {
     commandKind: 'begin-occlusion-query'
     querySet: QuerySetResource
     index: number
-    isDisposed: boolean
 }
 
 export class BeginOcclusionQueryCommand {
+
+    #isDisposed = false
 
     constructor(runtime: ScratchRuntime, descriptor: BeginOcclusionQueryCommandDescriptor = {} as BeginOcclusionQueryCommandDescriptor) {
 
@@ -836,7 +837,7 @@ export class BeginOcclusionQueryCommand {
         this.commandKind = 'begin-occlusion-query'
         this.querySet = querySet
         this.index = normalizeOcclusionQueryIndex(runtime, querySet, descriptor.index)
-        this.isDisposed = false
+        Object.preventExtensions(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -849,6 +850,11 @@ export class BeginOcclusionQueryCommand {
         if (this.label !== undefined) subject.label = this.label
 
         return subject
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
     }
 
     assertRuntime(runtime: ScratchRuntime) {
@@ -874,7 +880,7 @@ export class BeginOcclusionQueryCommand {
 
     assertUsable() {
 
-        if (this.isDisposed) {
+        if (this.#isDisposed) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
@@ -931,7 +937,7 @@ export class BeginOcclusionQueryCommand {
 
     dispose(): void {
 
-        this.isDisposed = true
+        this.#isDisposed = true
     }
 }
 
@@ -940,10 +946,11 @@ export interface EndOcclusionQueryCommand {
     id: string
     label?: string
     commandKind: 'end-occlusion-query'
-    isDisposed: boolean
 }
 
 export class EndOcclusionQueryCommand {
+
+    #isDisposed = false
 
     constructor(runtime: ScratchRuntime, descriptor: EndOcclusionQueryCommandDescriptor = {}) {
 
@@ -953,7 +960,7 @@ export class EndOcclusionQueryCommand {
         this.id = `scratch-command-${UUID()}`
         if (descriptor.label !== undefined) this.label = descriptor.label
         this.commandKind = 'end-occlusion-query'
-        this.isDisposed = false
+        Object.preventExtensions(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -966,6 +973,11 @@ export class EndOcclusionQueryCommand {
         if (this.label !== undefined) subject.label = this.label
 
         return subject
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
     }
 
     assertRuntime(runtime: ScratchRuntime) {
@@ -991,7 +1003,7 @@ export class EndOcclusionQueryCommand {
 
     assertUsable() {
 
-        if (this.isDisposed) {
+        if (this.#isDisposed) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
@@ -1046,7 +1058,7 @@ export class EndOcclusionQueryCommand {
 
     dispose(): void {
 
-        this.isDisposed = true
+        this.#isDisposed = true
     }
 }
 
@@ -1356,10 +1368,11 @@ export interface UploadCommand {
     layout?: LayoutArtifact
     dataOffset: number
     byteLength: number
-    isDisposed: boolean
 }
 
 export class UploadCommand {
+
+    #isDisposed = false
 
     constructor(runtime: ScratchRuntime, descriptor: UploadCommandDescriptor = {} as UploadCommandDescriptor) {
 
@@ -1392,9 +1405,9 @@ export class UploadCommand {
         this.dataOffset = normalizeUploadOffset(runtime, descriptor.dataOffset ?? uploadSource.dataOffset)
         const sourceByteLength = descriptor.dataOffset === undefined ? uploadSource.byteLength : undefined
         this.byteLength = normalizeUploadByteLength(runtime, this.data, this.dataOffset, descriptor, sourceByteLength)
-        this.isDisposed = false
 
         validateUploadRange(this)
+        Object.preventExtensions(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -1408,6 +1421,11 @@ export class UploadCommand {
         if (this.label !== undefined) subject.label = this.label
 
         return subject
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
     }
 
     assertRuntime(runtime: ScratchRuntime) {
@@ -1433,7 +1451,7 @@ export class UploadCommand {
 
     assertUsable() {
 
-        if (this.isDisposed) {
+        if (this.#isDisposed) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
@@ -1456,7 +1474,7 @@ export class UploadCommand {
 
     dispose(): void {
 
-        this.isDisposed = true
+        this.#isDisposed = true
     }
 }
 
@@ -1478,10 +1496,11 @@ export interface CopyCommand {
     targetAspect?: GPUTextureAspect
     size?: { width: number, height: number, depthOrArrayLayers: number }
     whenMissing: 'throw'
-    isDisposed: boolean
 }
 
 export class CopyCommand {
+
+    #isDisposed = false
 
     constructor(runtime: ScratchRuntime, descriptor: CopyCommandDescriptor = {} as CopyCommandDescriptor) {
 
@@ -1498,7 +1517,6 @@ export class CopyCommand {
         this.source = source
         this.target = descriptor.target
         this.whenMissing = normalizeCopyReadinessPolicy(this, descriptor.whenMissing)
-        this.isDisposed = false
 
         if (isBufferRegionSource(source) && isBufferRegion(descriptor.target)) {
             const bufferDescriptor = descriptor as BufferToBufferCopyCommandDescriptor
@@ -1579,6 +1597,7 @@ export class CopyCommand {
                 reason: 'target',
             })
         }
+        Object.preventExtensions(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -1591,6 +1610,11 @@ export class CopyCommand {
         if (this.label !== undefined) subject.label = this.label
 
         return subject
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
     }
 
     assertRuntime(runtime: ScratchRuntime) {
@@ -1616,7 +1640,7 @@ export class CopyCommand {
 
     assertUsable() {
 
-        if (this.isDisposed) {
+        if (this.#isDisposed) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
@@ -1768,7 +1792,7 @@ export class CopyCommand {
 
     dispose(): void {
 
-        this.isDisposed = true
+        this.#isDisposed = true
     }
 }
 
@@ -2475,16 +2499,14 @@ export interface ResolveQuerySetCommand {
     id: string
     label?: string
     commandKind: 'resolve-query-set'
-    source: ResolveQuerySetSourceDescriptor
-    querySet: QuerySetResource
-    firstQuery: number
-    queryCount: number
     destination: BufferRegion
     whenMissing: 'throw'
-    isDisposed: boolean
 }
 
 export class ResolveQuerySetCommand {
+
+    readonly #source: ResolveQuerySetSourceDescriptor
+    #isDisposed = false
 
     constructor(runtime: ScratchRuntime, descriptor: ResolveQuerySetCommandDescriptor = {} as ResolveQuerySetCommandDescriptor) {
 
@@ -2517,15 +2539,32 @@ export class ResolveQuerySetCommand {
         this.id = `scratch-command-${UUID()}`
         if (normalizedDescriptor.label !== undefined) this.label = normalizedDescriptor.label
         this.commandKind = 'resolve-query-set'
-        this.source = source
-        this.querySet = source.querySet
-        this.firstQuery = source.slots[0]!.index
-        this.queryCount = source.slots.length
+        this.#source = source
         this.destination = destination
         this.whenMissing = normalizedDescriptor.whenMissing
-        this.isDisposed = false
 
         validateResolveQuerySetRange(this)
+        Object.preventExtensions(this)
+    }
+
+    get source(): ResolveQuerySetSourceDescriptor {
+
+        return this.#source
+    }
+
+    get querySet(): QuerySetResource {
+
+        return this.#source.querySet
+    }
+
+    get firstQuery(): number {
+
+        return this.#source.slots[0]!.index
+    }
+
+    get queryCount(): number {
+
+        return this.#source.slots.length
     }
 
     get subject(): DiagnosticSubject {
@@ -2538,6 +2577,11 @@ export class ResolveQuerySetCommand {
         if (this.label !== undefined) subject.label = this.label
 
         return subject
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
     }
 
     assertRuntime(runtime: ScratchRuntime) {
@@ -2563,7 +2607,7 @@ export class ResolveQuerySetCommand {
 
     assertUsable() {
 
-        if (this.isDisposed) {
+        if (this.#isDisposed) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
@@ -2609,7 +2653,7 @@ export class ResolveQuerySetCommand {
 
     dispose(): void {
 
-        this.isDisposed = true
+        this.#isDisposed = true
     }
 }
 
@@ -2625,10 +2669,11 @@ export interface TextureUploadCommand {
     origin: { x: number, y: number, z: number }
     size: { width: number, height: number, depthOrArrayLayers: number }
     mipLevel: number
-    isDisposed: boolean
 }
 
 export class TextureUploadCommand {
+
+    #isDisposed = false
 
     constructor(runtime: ScratchRuntime, descriptor: TextureUploadCommandDescriptor = {} as TextureUploadCommandDescriptor) {
 
@@ -2672,9 +2717,9 @@ export class TextureUploadCommand {
         this.mipLevel = normalizeTextureUploadMipLevel(runtime, target, descriptor.mipLevel ?? 0)
         this.size = normalizeTextureUploadSize(runtime, target, descriptor.size, this.origin)
         this.layout = normalizeTextureUploadLayout(runtime, target, descriptor.layout, this.size)
-        this.isDisposed = false
 
         validateTextureUploadRange(this)
+        Object.preventExtensions(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -2688,6 +2733,11 @@ export class TextureUploadCommand {
         if (this.label !== undefined) subject.label = this.label
 
         return subject
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
     }
 
     assertRuntime(runtime: ScratchRuntime) {
@@ -2713,7 +2763,7 @@ export class TextureUploadCommand {
 
     assertUsable() {
 
-        if (this.isDisposed) {
+        if (this.#isDisposed) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
@@ -2736,7 +2786,7 @@ export class TextureUploadCommand {
 
     dispose(): void {
 
-        this.isDisposed = true
+        this.#isDisposed = true
     }
 }
 
@@ -2895,6 +2945,7 @@ export function validateUploadCommandQueueAction(
                     actual: { writeBuffer: typeof queue?.writeBuffer },
                 })
             }
+            validateUploadCommandQueueOwner(command, queue)
             validateUploadRange(command)
             return
         case 'texture':
@@ -2910,6 +2961,7 @@ export function validateUploadCommandQueueAction(
                     actual: { writeTexture: typeof queue?.writeTexture },
                 })
             }
+            validateUploadCommandQueueOwner(command, queue)
             validateTextureUploadRange(command)
             return
         case 'external-image':
@@ -2918,6 +2970,30 @@ export function validateUploadCommandQueueAction(
         default:
             return assertNeverUploadCommand(command)
     }
+}
+
+function validateUploadCommandQueueOwner(
+    command: UploadCommand | TextureUploadCommand,
+    queue: GPUQueue
+): void {
+
+    if (queue === command.runtime.queue) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [ command.runtime.subject ],
+        message: 'Upload command queue is not owned by its ScratchRuntime.',
+        expected: {
+            queueOwnedByRuntime: true,
+            runtimeId: command.runtime.id,
+        },
+        actual: {
+            queueOwnedByRuntime: false,
+        },
+    })
 }
 
 export function writeUploadCommandQueueAction(
@@ -5353,10 +5429,10 @@ function normalizeResolveSource(runtime: ScratchRuntime, source: unknown): Resol
 
     const slots = normalizeResolveQuerySlots(runtime, querySet, source.slots, source)
 
-    return {
+    return Object.freeze({
         querySet,
         slots,
-    }
+    })
 }
 
 function normalizeResolveQuerySlots(
@@ -5364,7 +5440,7 @@ function normalizeResolveQuerySlots(
     querySet: QuerySetResource,
     slots: unknown,
     source: unknown
-): QuerySetSlotReadDescriptor[] {
+): readonly QuerySetSlotReadDescriptor[] {
 
     if (!Array.isArray(slots) || slots.length === 0) {
         throwResolveQuerySetDiagnostic({ runtime, source, querySet, slots, reason: 'slots' })
@@ -5391,13 +5467,13 @@ function normalizeResolveQuerySlots(
             throwResolveQuerySetDiagnostic({ runtime, source, querySet, slots, reason: 'slotRange' })
         }
 
-        normalized.push({
+        normalized.push(Object.freeze({
             index,
             contentEpoch,
-        })
+        }))
     }
 
-    return normalized
+    return Object.freeze(normalized)
 }
 
 function validateResolveReadinessPolicy(

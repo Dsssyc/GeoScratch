@@ -543,11 +543,11 @@ function normalizeFieldTypeDescriptor(path: string, type: unknown): LayoutFieldT
             })
         }
 
-        if (typeof count !== 'number' || !Number.isInteger(count) || count <= 0) {
+        if (typeof count !== 'number' || !Number.isSafeInteger(count) || count <= 0) {
             throwUnsupportedFormat(fieldSubject(path), {
-                expected: { count: 'positive integer' },
+                expected: { count: 'positive safe integer' },
                 actual: { count },
-                message: 'Layout array count must be a positive integer.',
+                message: 'Layout array count must be a positive safe integer.',
             })
         }
 
@@ -578,11 +578,21 @@ function lowerLayoutArtifact(spec: LayoutSpec, options: LayoutCodecOptions): Lay
 
     for (const field of lowered) {
         alignment = Math.max(alignment, field.type.alignment)
-        field.offset = roundUp(field.type.alignment, cursor)
-        cursor = field.offset + field.type.size
+        field.offset = checkedRoundUp(
+            fieldSubject(field.descriptor.name),
+            field.type.alignment,
+            cursor,
+            'field-offset'
+        )
+        cursor = checkedAddLayoutSize(
+            fieldSubject(field.descriptor.name),
+            field.offset,
+            field.type.size,
+            'field-end'
+        )
     }
 
-    const byteLength = roundUp(alignment, cursor)
+    const byteLength = checkedRoundUp(artifactSubject(spec), alignment, cursor, 'struct-size')
     const fields: LayoutFieldArtifact[] = lowered.map((field, index) => {
         const nextOffset = lowered[index + 1]?.offset ?? byteLength
         return {
@@ -681,13 +691,19 @@ function lowerFieldType(path: string, type: LayoutFieldType): LoweredFieldType {
     }
 
     const element = lowerPrimitiveFieldType(path, type.element)
-    const arrayStride = roundUp(element.alignment, element.size)
+    const arrayStride = checkedRoundUp(fieldSubject(path), element.alignment, element.size, 'array-stride')
+    const size = checkedMultiplyLayoutSize(
+        fieldSubject(path),
+        arrayStride,
+        type.count,
+        'array-size'
+    )
 
     return {
         type: `array<${element.type}, ${type.count}>`,
         wgslType: `array<${element.wgslType}, ${type.count}>`,
         alignment: element.alignment,
-        size: arrayStride * type.count,
+        size,
         arrayLength: type.count,
         arrayStride,
         element,
@@ -1031,9 +1047,71 @@ function fieldSubject(path: string): DiagnosticSubject {
     }
 }
 
-function roundUp(alignment: number, value: number): number {
+function checkedAddLayoutSize(
+    subject: DiagnosticSubject,
+    left: number,
+    right: number,
+    reason: string
+): number {
 
-    return Math.ceil(value / alignment) * alignment
+    return requireSafeLayoutSize(subject, left + right, {
+        reason,
+        operation: 'addition',
+        left,
+        right,
+    })
+}
+
+function checkedMultiplyLayoutSize(
+    subject: DiagnosticSubject,
+    left: number,
+    right: number,
+    reason: string
+): number {
+
+    return requireSafeLayoutSize(subject, left * right, {
+        reason,
+        operation: 'multiplication',
+        left,
+        right,
+    })
+}
+
+function checkedRoundUp(
+    subject: DiagnosticSubject,
+    alignment: number,
+    value: number,
+    reason: string
+): number {
+
+    return requireSafeLayoutSize(subject, Math.ceil(value / alignment) * alignment, {
+        reason,
+        operation: 'alignment-rounding',
+        alignment,
+        value,
+    })
+}
+
+function requireSafeLayoutSize(
+    subject: DiagnosticSubject,
+    result: number,
+    actual: Record<string, unknown>
+): number {
+
+    if (Number.isSafeInteger(result) && result >= 0) return result
+
+    throwUnsupportedFormat(subject, {
+        expected: {
+            result: 'non-negative safe integer layout byte size',
+            safeIntegerMax: Number.MAX_SAFE_INTEGER,
+        },
+        actual: {
+            ...actual,
+            result,
+            safeIntegerMax: Number.MAX_SAFE_INTEGER,
+        },
+        message: 'Layout byte-size arithmetic exceeds the JavaScript safe-integer domain.',
+    })
 }
 
 function constantSegment(name: string): string {

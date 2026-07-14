@@ -231,6 +231,58 @@ describe('scratch LayoutCodec', () => {
         expect(wgsl).to.include('fn ParticleLayout_readIds(value: Particle) -> array<u32, 3> {')
     })
 
+    it('rejects unsafe layout multiplication, addition, and alignment rounding', () => {
+
+        const largestAlignedArrayCount = Math.floor(Number.MAX_SAFE_INTEGER / 16)
+        const cases = [
+            {
+                spec: {
+                    name: 'UnsafeArrayProduct',
+                    fields: [ { name: 'values', type: { element: 'vec4f', count: Number.MAX_SAFE_INTEGER } } ],
+                },
+                reason: 'array-size',
+            },
+            {
+                spec: {
+                    name: 'UnsafeFieldEnd',
+                    fields: [
+                        { name: 'values', type: { element: 'vec4f', count: largestAlignedArrayCount } },
+                        { name: 'tail', type: 'vec4f' },
+                    ],
+                },
+                reason: 'field-end',
+            },
+            {
+                spec: {
+                    name: 'UnsafeStructAlignment',
+                    fields: [
+                        { name: 'values', type: { element: 'vec4f', count: largestAlignedArrayCount } },
+                        { name: 'tail', type: 'f32' },
+                    ],
+                },
+                reason: 'struct-size',
+            },
+        ]
+
+        for (const { spec, reason } of cases) {
+            try {
+                layoutCodec(spec)
+                throw new Error(`expected ${reason} overflow to fail`)
+            } catch (error) {
+                expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                expect(error.diagnostic).to.include({
+                    code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
+                    severity: 'error',
+                    phase: 'layout-codec',
+                })
+                expect(error.diagnostic.actual).to.deep.include({
+                    reason,
+                    safeIntegerMax: Number.MAX_SAFE_INTEGER,
+                })
+            }
+        }
+    })
+
     it('throws structured layout-codec diagnostics for invalid descriptors and bytes', () => {
 
         expect(() => layoutCodec({

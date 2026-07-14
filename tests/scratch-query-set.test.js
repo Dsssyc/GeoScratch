@@ -162,6 +162,36 @@ async function expectScratchDiagnostic(action, expected) {
 
 describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
 
+    it('freezes one resolve slot snapshot for readiness and native encoding', async() => {
+
+        const fixture = await createQueryFixture()
+        const source = fixture.resolve.source
+
+        expect(Object.isFrozen(source)).to.equal(true)
+        expect(Object.isFrozen(source.slots)).to.equal(true)
+        expect(source.slots.every(Object.isFrozen)).to.equal(true)
+        expect(source.querySet).to.equal(fixture.querySet)
+        expect(fixture.resolve.querySet).to.equal(source.querySet)
+        expect(fixture.resolve.firstQuery).to.equal(source.slots[0].index)
+        expect(fixture.resolve.queryCount).to.equal(source.slots.length)
+
+        for (const mutation of [
+            () => { source.slots[0].index = 3 },
+            () => { source.slots[0].contentEpoch = 0 },
+            () => { source.slots.push({ index: 3, contentEpoch: 1 }) },
+            () => { fixture.resolve.source = { querySet: fixture.querySet, slots: [ { index: 3, contentEpoch: 1 } ] } },
+            () => { fixture.resolve.querySet = fixture.querySet },
+            () => { fixture.resolve.firstQuery = 3 },
+            () => { fixture.resolve.queryCount = 1 },
+        ]) {
+            expect(mutation).to.throw(TypeError)
+        }
+
+        expect(fixture.resolve.firstQuery).to.equal(1)
+        expect(fixture.resolve.queryCount).to.equal(2)
+        expect(source.slots).to.deep.equal(querySlots([ 1, 2 ], 1))
+    })
+
     it('creates indexed query resources and exposes the public API', async() => {
 
         const fixture = await createQueryFixture()

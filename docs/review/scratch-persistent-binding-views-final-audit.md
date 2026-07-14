@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-thirty-third-review fixes pending acceptance
+Status: Post-thirty-fourth-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -322,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Thirty-three isolated review passes have examined the fixed-baseline diff and working tree.
+Thirty-four isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -362,6 +362,9 @@ claimed that sparse pipeline-layout `null` slots were invalid; current GPUWeb ID
 creation steps, generated WebGPU types, and a headed real-device dispatch disproved it.
 The thirty-third review found that the bilingual occlusion-query example selected a
 `depth-only` view even though renderable texture views must refer to all aspects.
+The thirty-fourth review found two P1 defects in direct-upload queue ownership and
+query-resolve snapshot consistency plus two P2 defects in command disposal and layout
+size arithmetic.
 
 Resolved core finding:
 
@@ -926,6 +929,28 @@ Resolved thirty-third review finding:
    renderable-view all-aspects rule.
 
 This finding brings the reproduced or source-verified reviewer total to 87.
+
+The thirty-third-review implementation passed clean acceptance at exact checkpoint
+`e9d92acdd27986554c0cc99c8f1ff8407b0b5864`, but the required thirty-fourth
+fresh-context review found four implementation-contract defects below.
+
+Resolved thirty-fourth review findings:
+
+1. Direct buffer and texture upload execution now rejects a queue other than the owning
+   runtime's queue with `SCRATCH_COMMAND_WRONG_RUNTIME` before any native call or logical
+   epoch effect. This preserves WebGPU same-device object validity rather than relying on
+   delayed native validation.
+2. `ResolveQuerySetCommand` now owns one deeply frozen source/slot snapshot. Public
+   `source`, `querySet`, `firstQuery`, and `queryCount` are read-only getters derived from
+   it, so submission readiness and native encoding cannot observe different query ranges.
+3. Upload, copy, begin/end occlusion, query-resolve, and texture-upload commands now keep
+   disposal in private state, expose only a getter, reject assignment and property
+   shadowing, and read the private state internally. Disposal is irreversible.
+4. Layout lowering now uses checked multiplication, addition, and alignment rounding.
+   Unsafe results fail closed with `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT`, exact arithmetic
+   facts, and no published internally invalid `LayoutArtifact`.
+
+These findings bring the reproduced or source-verified reviewer total to 91.
 
 ## Verification Record
 
@@ -1640,9 +1665,48 @@ Post-thirty-third-review targeted verification:
 - clean-commit acceptance and a new isolated exact no-findings review remain required
   before audit closure
 
-The corrected evidence must pass clean acceptance and a new exact no-findings review
-before this audit can return to Accepted status. The required feature-branch push remains
-ordered after that closure.
+Clean thirty-third-review checkpoint acceptance (`e9d92ac`):
+
+- initial and final repository evidence named exact commit
+  `e9d92acdd27986554c0cc99c8f1ff8407b0b5864` with an empty working tree
+- focused acceptance passed 455/455; the complete suite reported 853 passing and only
+  the two exact browser/final-acceptance identities pending
+- production bootstrap, both TypeScript consumers, package/example build, and diff check
+  passed; current official GPUWeb/WHATWG evidence included the renderable-view
+  all-aspects marker
+- both 20,000-cycle steady-state phases passed at observed 1.2855625 and 1.0413625
+  microseconds per cycle with zero binding-order sorts, snapshot serializations, or
+  dynamic-offset name-map reads
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the complete browser proof; all
+  11 ordinary examples passed with no reported failures, the unavailable target failed
+  with `ERR_CONNECTION_REFUSED`, and the managed server stopped with port 4173 closed
+- the thirty-fourth review then found the four defects above, so this checkpoint remains
+  historical evidence rather than final approval
+
+Post-thirty-fourth-review targeted verification:
+
+- the initial runtime collection reported 47 passing and five exact failures: foreign
+  buffer queue, foreign texture queue, mutable resolve snapshot, unsafe layout size, and
+  command resurrection; TypeScript separately reported ten unused `@ts-expect-error`
+  directives proving the affected public types were writable
+- after implementation, the same runtime collection passes 52/52; both declaration
+  consumers pass, including readonly resolve slots/source facts and disposal observations
+- current GPUWeb main source explicitly requires an object's device to equal the target
+  object's device; final acceptance now locks that same-device validity marker for direct
+  upload queue ownership
+- an additional property-shadowing assertion proves `Object.defineProperty()` cannot
+  mask a disposed command's public or internal lifecycle state
+- fixed-history structural parity passes with the new command-lifecycle test in focused
+  acceptance, a 460-test expected focused count, all behavior titles, bilingual docs,
+  public declaration inventory, and dirty-tree status correctly reported as `incomplete`
+- `npm test` reports exactly 858 passing with only the two exact browser/final-acceptance
+  identities pending; `npm run typecheck` passes both declaration consumers
+- `npm run build` emits the package and all 14 runnable examples
+- diff checking, clean-commit acceptance, and a new isolated exact no-findings review
+  remain required before audit closure
+
+The corrected evidence must pass those gates before this audit can return to Accepted
+status. The required feature-branch push remains ordered after that closure.
 
 ## Explicit Non-Goals
 

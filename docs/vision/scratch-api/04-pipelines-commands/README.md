@@ -59,6 +59,13 @@ Target command families:
 
 `CopyCommand` covers WebGPU-native GPU-side copy directions: buffer-to-buffer, texture-to-texture, buffer-to-texture, and texture-to-buffer. CPU upload and CPU readback remain explicit transfer/readback operations rather than substitutes for these command encoder copies.
 
+Every executable command exposes a one-way lifecycle.
+`isDisposed` is a read-only observation backed by private state; `dispose()` is
+irreversible, and neither assignment nor property shadowing can make a disposed command
+usable again. `ResolveQuerySetCommand` owns one deeply frozen source snapshot. Its
+`querySet`, `firstQuery`, and `queryCount` observations are derived from that snapshot, so
+submission readiness and native encoding cannot inspect different slot ranges.
+
 ### Texture Allocation Replacement
 
 `TextureResource.resize()` is a Promise-returning resource-lifecycle operation, not a `Command`, upload, copy, or submission step. It creates no encoder, queue action, resource-access entry, producer epoch, or content write. While native scopes settle, the old allocation remains current; acknowledged changed resize advances `allocationVersion`, preserves `contentEpoch`, and marks the replacement empty.
@@ -80,7 +87,7 @@ The other upload variants are explicitly discriminated as `uploadKind: 'buffer'`
 
 The complete current source union is accepted: `ImageBitmap`, `ImageData`, `HTMLImageElement`, `HTMLVideoElement`, `VideoFrame`, `HTMLCanvasElement`, and `OffscreenCanvas`. Cross-realm-safe platform getter brand checks reject arbitrary records without requiring realm-local `instanceof`. Construction locks command fields without requiring the source to be loaded. Execution revalidates the exact public dimension fields for image, video, frame, and data sources. Canvas dimensions may instead be the current WebGL drawing buffer or an `ImageBitmapRenderingContext` internal output bitmap; because the canvas does not expose a side-effect-free context-mode query, Scratch leaves that context-specific source-range check to the native content timeline and classifies its synchronous `OperationError` as invalid input.
 
-Lowering uses canonical `GPUCopyExternalImageSourceInfo` and `GPUCopyExternalImageDestInfo` and requires the command runtime's own queue. Pixels are captured when the native queue method is called. Scratch does not call `getContext()` to inspect a canvas, extract CPU pixels, use `writeTexture()`, close or dispose the source, or invent a source resource epoch.
+Lowering uses canonical `GPUCopyExternalImageSourceInfo` and `GPUCopyExternalImageDestInfo` and requires the command runtime's own queue. The same queue-ownership rule applies to direct buffer and texture uploads before any native or logical effect. Pixels are captured when the native queue method is called. Scratch does not call `getContext()` to inspect a canvas, extract CPU pixels, use `writeTexture()`, close or dispose the source, or invent a source resource epoch.
 
 Eligible targets are single-sampled 2D plain color textures with both `COPY_DST` and `RENDER_ATTACHMENT` usage and a device-enabled renderable `unorm`, `unorm-srgb`, `float`, or `ufloat` format. Direct execution and submission use the same validation, native-call, failure, and target-epoch path. See ADR-030.
 

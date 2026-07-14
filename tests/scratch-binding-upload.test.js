@@ -503,6 +503,30 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         }
     })
 
+    it('rejects direct buffer uploads on a queue not owned by the command runtime', async() => {
+
+        const fixtureA = await createUniformFixture()
+        const fixtureB = await createUniformFixture()
+
+        try {
+            fixtureA.upload.execute(fixtureB.queue)
+            throw new Error('expected foreign queue upload to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+            })
+            expect(error.diagnostic.actual).to.deep.include({
+                queueOwnedByRuntime: false,
+            })
+        }
+
+        expect(fixtureA.uniformBuffer.contentEpoch).to.equal(0)
+        expect(fixtureB.calls.queueWrites).to.have.length(0)
+    })
+
     it('requires COPY_DST and revalidates replacement usage before upload queue effects', async() => {
 
         const fake = createFakeGpu()
