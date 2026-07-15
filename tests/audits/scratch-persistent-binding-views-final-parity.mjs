@@ -11,9 +11,10 @@ const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const cleanThirtySixthReviewCheckpoint = '4926648e8258fcb6a58e6746704c708beab611e6'
 const cleanThirtySeventhReviewCheckpoint = '3d5f4d73c64eb5cc1108cd26fa31fec546badb3d'
 const cleanThirtyEighthReviewCheckpoint = 'c9cfad3decd3380c2d03509482b549d3275e1c1c'
+const cleanThirtyNinthReviewCheckpoint = '01f26da07ffb4fddd7c389cd388ea0c4307a09a6'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 479
-const expectedFullSuitePasses = 877
+const expectedFocusedAcceptancePasses = 481
+const expectedFullSuitePasses = 879
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -227,7 +228,16 @@ const closedBrandGuards = Object.freeze({
     ExternalImageUploadCommand: current.command.includes("commandBrands.set(this, 'external-image-upload')") &&
         current.submission.includes('if (!isUploadCommand(command))'),
     LayoutCodec: current.layoutCodec.includes('isLayoutCodec('),
-    Program: current.pipeline.split('if (!isProgram(program))').length === 3 &&
+    Program: current.program.includes('const programStates = new WeakMap<Program, ProgramState>()') &&
+        current.program.includes('readonly runtime: ScratchRuntime') &&
+        current.program.includes('readonly id: string') &&
+        current.program.includes('readonly isDisposed: boolean') &&
+        current.program.includes('Object.defineProperties(this, {') &&
+        current.program.includes('Object.getPrototypeOf(value) === Program.prototype') &&
+        current.program.includes('programStates.has(value as Program)') &&
+        current.program.includes('programStateFor(this).isDisposed = true') &&
+        !current.program.includes('this.isDisposed =') &&
+        current.pipeline.split('if (!isProgram(program))').length === 3 &&
         current.shaderInspection.includes('if (!isProgram(program))'),
     QuerySetResource: current.querySet.includes('isQuerySetResource('),
     ReadbackCommand: current.command.includes("commandBrands.set(this, 'readback')") &&
@@ -262,6 +272,11 @@ const goalStartProductionDeclarations = emitProductionDeclarationsAt(goalBaselin
 const emittedProductionOutputs = emitCurrentProductionOutputs()
 const goalStartScratchDeclarations = scratchDeclarationTree(goalStartProductionDeclarations)
 const finalScratchDeclarations = scratchDeclarationTree(emittedProductionOutputs)
+const goalStartProgramDeclaration = Object.entries(goalStartScratchDeclarations)
+    .find(([ sourcePath ]) => sourcePath.endsWith('scratch/program.d.ts'))?.[1] ?? ''
+const finalProgramDeclaration = Object.entries(finalScratchDeclarations)
+    .find(([ sourcePath ]) => sourcePath.endsWith('scratch/program.d.ts'))?.[1] ?? ''
+const publicApiTypeSource = fs.readFileSync('tests/types/public-api.ts', 'utf8')
 const finalDocs = loadCurrentSources({
     runtimeSurface: 'docs/vision/scratch-api/01-runtime-surface/README.md',
     runtimeSurfaceZh: 'docs/vision/scratch-api/01-runtime-surface/README_zh.md',
@@ -669,6 +684,51 @@ const publicMemberParity = Object.freeze({
         Object.keys(historicalPublicMethodReplacements)
     ) ? 'passed' : 'failed',
 })
+const programReadonlyPublicContracts = Object.freeze([
+    {
+        id: 'Program.runtime',
+        mutableDeclaration: 'runtime: ScratchRuntime;',
+        readonlyDeclaration: 'readonly runtime: ScratchRuntime;',
+        typeTestMarkers: [
+            '// @ts-expect-error Program runtime ownership is readonly',
+            'program.runtime = runtime',
+        ],
+        disposition: 'mutable runtime field -> readonly private-backed runtime ownership observation',
+    },
+    {
+        id: 'Program.id',
+        mutableDeclaration: 'id: string;',
+        readonlyDeclaration: 'readonly id: string;',
+        typeTestMarkers: [
+            '// @ts-expect-error Program identity is readonly',
+            "program.id = 'changed-program-id'",
+        ],
+        disposition: 'mutable identity field -> immutable Scratch-owned Program identity observation',
+    },
+    {
+        id: 'Program.isDisposed',
+        mutableDeclaration: 'isDisposed: boolean;',
+        readonlyDeclaration: 'readonly isDisposed: boolean;',
+        typeTestMarkers: [
+            '// @ts-expect-error Program disposal is a readonly lifecycle observation',
+            'program.isDisposed = false',
+        ],
+        disposition: 'mutable lifecycle flag -> readonly private-backed disposal observation',
+    },
+].map(contract => Object.freeze({
+    id: contract.id,
+    disposition: contract.disposition,
+    goalStartMutable: goalStartProgramDeclaration.includes(contract.mutableDeclaration) &&
+        !goalStartProgramDeclaration.includes(contract.readonlyDeclaration),
+    finalReadonly: finalProgramDeclaration.includes(contract.readonlyDeclaration),
+    typeTest: hasAll(publicApiTypeSource, contract.typeTestMarkers),
+    status: goalStartProgramDeclaration.includes(contract.mutableDeclaration) &&
+        !goalStartProgramDeclaration.includes(contract.readonlyDeclaration) &&
+        finalProgramDeclaration.includes(contract.readonlyDeclaration) &&
+        hasAll(publicApiTypeSource, contract.typeTestMarkers)
+        ? 'passed'
+        : 'failed',
+})))
 
 const baselineDiagnosticCodes = diagnosticCodes(baselineScratchSource)
 const currentDiagnosticCodes = diagnosticCodes(currentScratchSource)
@@ -699,6 +759,8 @@ const behaviorTestContracts = [
         'rejects a forged texture before native copy encoding after constructor replacement',
         'rejects prototype-derived BindLayout identities before native binding creation',
         'rejects prototype-derived Program identities before native pipeline creation',
+        'keeps Program identity and runtime ownership authoritative after public mutation attempts',
+        'keeps Program disposal authoritative after public mutation attempts',
         'rejects prototype-derived Pipeline and BindSet identities before command creation',
         'rejects prototype-derived pass and command identities before native submission effects',
         'does not use open instanceof checks as Scratch-owned internal brands',
@@ -1210,8 +1272,15 @@ const documentationAudit = Object.freeze({
         ])) &&
         [ finalDocs.programs, finalDocs.programsZh ].every(source => hasAll(source, [
             'module-private',
+            '`WeakMap`',
             '`WeakSet`',
             '`isProgram()`',
+            '`Program.runtime`',
+            '`Program.id`',
+            '`Program.isDisposed`',
+            'caller-owned shader contract',
+            'future Pipeline',
+            'immutable snapshot',
             'Pipeline',
             'Shader inspection',
             '`Object.create(',
@@ -1310,9 +1379,22 @@ const documentationAudit = Object.freeze({
         'focused acceptance passed 475/475',
         'complete suite reported 873 passing',
     ]),
+    thirtyNinthReviewAcceptanceRecorded: hasAll(finalDocs.finalAudit, [
+        'Clean thirty-ninth-review checkpoint acceptance (`01f26da`)',
+        cleanThirtyNinthReviewCheckpoint,
+        'focused acceptance passed 479/479',
+        'complete suite reported 877 passing',
+    ]),
+    boundedClosureProtocol: hasAll(finalDocs.finalAudit, [
+        'Review 40',
+        'reviewer total to 108',
+        'No unresolved in-scope correctness findings',
+        'maximum of two substantive review cycles',
+        'must not be written back into this repository',
+    ]),
     currentAcceptanceCounts: hasAll(finalDocs.finalAudit, [
-        'executes exactly 479',
-        'complete suite to report exactly 877 passing',
+        'executes exactly 481',
+        'complete suite to report exactly 879 passing',
     ]),
     resourceStateParity: resourceStateParity.status === 'passed',
     programExamplesUseBufferRegions: [ finalDocs.programs, finalDocs.programsZh ]
@@ -1426,6 +1508,10 @@ assertParity(
     `public member dispositions failed: ${JSON.stringify(publicMemberParity)}`
 )
 assertParity(
+    programReadonlyPublicContracts.every(contract => contract.status === 'passed'),
+    `Program readonly public contracts failed: ${JSON.stringify(programReadonlyPublicContracts)}`
+)
+assertParity(
     testEvidence.status === 'passed',
     `referenced behavioral test evidence failed: ${JSON.stringify(testEvidence)}`
 )
@@ -1490,6 +1576,7 @@ const result = {
         goalStartTypeReplacements: baselineTypeReplacements,
         historicalTypeInventory: classifiedHistoricalTypes,
         publicMemberParity,
+        programReadonlyPublicContracts,
         productionEmitParity,
         sourceFirst,
         closedBrandAuthority,

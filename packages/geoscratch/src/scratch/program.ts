@@ -31,17 +31,22 @@ export type ProgramDescriptor = {
     layoutRequirements?: readonly ProgramBufferLayoutRequirement[]
 }
 
-const programs = new WeakSet<Program>()
+type ProgramState = {
+    runtime: ScratchRuntime
+    isDisposed: boolean
+}
+
+const programStates = new WeakMap<Program, ProgramState>()
 
 export interface Program {
-    runtime: ScratchRuntime
-    id: string
+    readonly runtime: ScratchRuntime
+    readonly id: string
     label?: string
     modules: string[]
     entryPoints: ProgramEntryPoints
     requiredFeatures: GPUFeatureName[]
     layoutRequirements: readonly ProgramBufferLayoutRequirement[]
-    isDisposed: boolean
+    readonly isDisposed: boolean
 }
 
 export class Program {
@@ -50,17 +55,33 @@ export class Program {
 
         runtime.assertActive()
 
-        this.runtime = runtime
-        this.id = `scratch-program-${UUID()}`
+        programStates.set(this, { runtime, isDisposed: false })
+        Object.defineProperties(this, {
+            runtime: {
+                value: runtime,
+                enumerable: true,
+                configurable: false,
+                writable: false,
+            },
+            id: {
+                value: `scratch-program-${UUID()}`,
+                enumerable: true,
+                configurable: false,
+                writable: false,
+            },
+            isDisposed: {
+                get: () => programStateFor(this).isDisposed,
+                enumerable: true,
+                configurable: false,
+            },
+        })
         if (descriptor.label !== undefined) this.label = descriptor.label
         this.modules = normalizeModules(this, descriptor.modules)
         this.entryPoints = normalizeEntryPoints(this, descriptor.entryPoints)
         this.requiredFeatures = normalizeRequiredFeatures(descriptor.requiredFeatures)
         this.layoutRequirements = normalizeLayoutRequirements(this, descriptor.layoutRequirements)
-        this.isDisposed = false
 
         validateRequiredFeatures(this)
-        programs.add(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -76,20 +97,21 @@ export class Program {
 
     assertRuntime(runtime: ScratchRuntime): void {
 
+        const state = programStateFor(this)
         this.assertUsable()
 
-        if (runtime !== this.runtime) {
+        if (runtime !== state.runtime) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PROGRAM_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'program',
                 subject: this.subject,
                 related: [
-                    this.runtime.subject,
+                    state.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
                 message: 'Program belongs to a different ScratchRuntime.',
-                expected: { runtimeId: this.runtime.id },
+                expected: { runtimeId: state.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
         }
@@ -97,7 +119,8 @@ export class Program {
 
     assertUsable(): void {
 
-        if (this.isDisposed) {
+        const state = programStateFor(this)
+        if (state.isDisposed) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PROGRAM_DISPOSED',
                 severity: 'error',
@@ -107,12 +130,12 @@ export class Program {
             })
         }
 
-        this.runtime.assertActive()
+        state.runtime.assertActive()
     }
 
     dispose(): void {
 
-        this.isDisposed = true
+        programStateFor(this).isDisposed = true
     }
 }
 
@@ -120,7 +143,14 @@ export function isProgram(value: unknown): value is Program {
 
     return typeof value === 'object' && value !== null &&
         Object.getPrototypeOf(value) === Program.prototype &&
-        programs.has(value as Program)
+        programStates.has(value as Program)
+}
+
+function programStateFor(program: Program): ProgramState {
+
+    const state = programStates.get(program)
+    if (state === undefined) throw new TypeError('Program private state is unavailable.')
+    return state
 }
 
 export function programLayoutRequirementSubject(requirement: Pick<ProgramBufferLayoutRequirement, 'group' | 'binding'> & { name?: unknown }): DiagnosticSubject {

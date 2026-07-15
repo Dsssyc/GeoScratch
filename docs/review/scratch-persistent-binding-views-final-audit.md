@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
-Date: 2026-07-14
-Status: Post-thirty-ninth-review fixes pending acceptance
+Date: 2026-07-15
+Status: Bounded closure candidate pending clean acceptance and scoped review
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -28,8 +28,8 @@ source, and WHATWG Web IDL source and derives the native enum matrices. It later
 the managed port and explicitly executes `npm run typecheck`, the complete `npm run
 build`, and `git diff --check`. Structural mode preserves existing `dist` so stale
 output remains detectable, but performs the same recorded package bootstrap when `dist`
-is absent. It executes exactly 479 referenced behavior tests; requires the
-complete suite to report exactly 877 passing
+is absent. It executes exactly 481 referenced behavior tests; requires the
+complete suite to report exactly 879 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -102,7 +102,7 @@ contains 173 method/getter/setter entries. Every member record includes its kind
 modifiers, parameter names and types, optional/rest shape, and inferred or declared
 return/property type. The audit fails if a missing or changed Goal-start contract is
 absent from an explicit disposition map. It classifies all 21 missing Goal-start
-members, all 10 changed Goal-start signatures, and all 16 missing historical
+members, all 10 changed Goal-start class-member signatures, and all 16 missing historical
 method/getter/setter entries.
 
 | Missing Goal-start entry | Target disposition |
@@ -122,10 +122,15 @@ method/getter/setter entries.
 | `SamplerResource` constructor / `create()` | Promise-only `ScratchRuntime.createSampler()` |
 | `TextureResource.createView()` | Logical `TextureResource.view(): TextureViewSpec` |
 
-The 10 changed signatures are also explicit: `BindLayout.entrySubject()` accepts
+The 10 changed class-member signatures are also explicit: `BindLayout.entrySubject()` accepts
 `unknown` so malformed input still receives structured diagnostics;
 `ReadbackOperation.source` is a `BufferRegion`; and the sampler, query-set, bind-layout,
 and bind-set runtime factory/alias methods return ordinary `Promise` values.
+
+The merged `Program` interface adds three separate readonly dispositions that are not
+class members in the compiler inventory: `Program.runtime`, `Program.id`, and
+`Program.isDisposed`. The audit compares their Goal-start mutable declarations with the
+final emitted readonly declarations and requires all three public type-negative tests.
 
 Historical-only missing entries are also explicit: Buffer/Texture static factories
 move to Promise-only runtime factories; QuerySet lifecycle methods are inherited;
@@ -322,7 +327,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Thirty-nine isolated review passes have examined the fixed-baseline diff and working tree.
+Forty isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -381,6 +386,10 @@ inspection boundaries for BindLayout and Program still accepted caller-authored 
 that merely exposed expected methods, allowing prototype-derived lookalikes to reach
 native bind-group or pipeline work. Same-root inspection found equivalent open authority
 at Pipeline, BindSet, PassSpec, and Submission command boundaries.
+Review 40 found one P1 Program authority defect: the exact Program brand did not protect
+its public runtime ownership or disposal fields. Reassigning `Program.runtime`, or
+setting `Program.isDisposed` back to false, let the wrong-runtime or disposed Program
+reach native shader-module and pipeline work.
 
 Resolved core finding:
 
@@ -1077,6 +1086,49 @@ This finding brings the reproduced or source-verified reviewer total to 107. Ext
 the same rule from the reported BindLayout and Program paths through the remaining
 Pipeline, BindSet, PassSpec, and Command boundaries is same-root proactive coverage,
 not an additional reviewer finding.
+
+Clean thirty-ninth-review checkpoint acceptance (`01f26da`):
+
+- initial and final repository evidence named exact commit
+  `01f26da07ffb4fddd7c389cd388ea0c4307a09a6` with an empty working tree
+- focused acceptance passed 479/479; the complete suite reported 877 passing and only
+  the two exact browser/final-acceptance identities pending
+- production bootstrap, both TypeScript consumers, package/example build, diff check,
+  all 11 ordinary examples, the negative unavailable target, and managed-server cleanup
+  passed
+- both 20,000-cycle steady-state phases passed with zero binding-order sorts, snapshot
+  serializations, dynamic-offset name-map reads, identity changes, or extra steady-state
+  native objects
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the persistent replacement,
+  storage-access, sparse-layout, diagnostics-schema-v5, and controlled-failure proof
+  without uncaptured, console, page, or request failures
+- Review 40 then found the Program authority defect above, so this checkpoint remains
+  historical evidence rather than final approval
+
+Resolved fortieth review finding:
+
+1. Program runtime ownership and disposal now live in a module-private `WeakMap` state
+   record. `runtime` and `id` are immutable own observations; `isDisposed` is a readonly
+   private-backed observation. `assertRuntime()`, `assertUsable()`, and `dispose()` use
+   private state, while `isProgram()` requires both the exact prototype and that state
+   record. Public mutation attempts are rejected before shader-module, pipeline-layout,
+   or pipeline creation calls. Caller-owned shader facts remain mutable and continue to
+   be snapshotted by future Pipeline creation.
+
+This finding brings the reproduced or source-verified reviewer total to 108.
+
+## Bounded Closure Protocol
+
+This candidate replaces the former repository-wide zero-finding loop with a scoped
+closure. The acceptance condition is `No unresolved in-scope correctness findings` for
+the change from `01f26da` and its direct Program pipeline/inspection boundaries. The
+process permits a maximum of two substantive review cycles and one corrective commit.
+Pre-existing behavior, adjacent same-root hardening, speculative risks, and future API
+work are non-blocking follow-up material rather than scope for this branch.
+
+The final scoped review result belongs in the final handoff and must not be written back into this repository.
+This keeps the accepted and reviewed commit byte-identical and prevents an evidence-only
+commit from recursively invalidating acceptance and review.
 
 ## Verification Record
 
@@ -2024,8 +2076,25 @@ Post-thirty-ninth-review targeted verification:
 - `git diff --check` passes; clean-commit acceptance and a new isolated exact no-findings
   review remain required before audit closure
 
-The corrected evidence must pass those gates before this audit can return to Accepted
-status. The required feature-branch push remains ordered after that closure.
+Post-fortieth-review targeted verification:
+
+- before implementation, the expanded closed-brand collection reported 7 passing and
+  two exact failures: public runtime replacement and disposal resurrection each reached
+  one native shader-module creation call
+- after the private-state correction and a fresh package emit, the collection passes
+  9/9; wrong-runtime and disposed cases create zero shader modules, pipeline layouts, or
+  compute pipelines
+- `npm run typecheck` passes both declaration consumers with readonly `Program.runtime`,
+  `Program.id`, and `Program.isDisposed` assignments rejected by the public type surface
+- the executable audit now requires both new behavior titles, separate Program `WeakMap`
+  and LayoutCodec `WeakSet` documentation, 10 class-member dispositions plus three
+  readonly Program interface dispositions, 481 focused passes, 879 full-suite passes,
+  and the bounded closure protocol
+- complete candidate-suite, build, structural, clean acceptance, scoped review, and push
+  evidence remain pending and must not be inferred from these targeted results
+
+The bounded candidate must pass those gates before this audit can close. The required
+feature-branch push remains ordered after clean acceptance and the scoped review.
 
 ## Explicit Non-Goals
 

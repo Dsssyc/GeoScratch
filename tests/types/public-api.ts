@@ -583,6 +583,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         layoutRequirements: [ programBufferRequirement ],
     })
     const normalizedRequirement: scr.ProgramBufferLayoutRequirement = program.layoutRequirements[0]
+    // @ts-expect-error Program runtime ownership is readonly
+    program.runtime = runtime
+    // @ts-expect-error Program identity is readonly
+    program.id = 'changed-program-id'
+    // @ts-expect-error Program disposal is a readonly lifecycle observation
+    program.isDisposed = false
     const bindLayoutDescriptor: scr.BindLayoutDescriptor = {
         label: 'typed bind layout',
         group: 0,

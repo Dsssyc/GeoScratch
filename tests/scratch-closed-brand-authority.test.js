@@ -225,6 +225,65 @@ describe('scratch closed brand authority', () => {
         expect(fake.calls.computePipelines).to.have.length(0)
     })
 
+    it('keeps Program identity and runtime ownership authoritative after public mutation attempts', async() => {
+
+        const fakeA = createFakeGpu()
+        const fakeB = createFakeGpu()
+        const runtimeA = await ScratchRuntime.create({ gpu: fakeA.gpu })
+        const runtimeB = await ScratchRuntime.create({ gpu: fakeB.gpu })
+        const program = runtimeA.createProgram({
+            modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+            entryPoints: { compute: 'csMain' },
+        })
+        const originalId = program.id
+        const idMutationAccepted = Reflect.set(program, 'id', 'changed-program-id')
+        const mutationAccepted = Reflect.set(program, 'runtime', runtimeB)
+        let caught
+
+        try {
+            await runtimeB.createComputePipeline({ program })
+        } catch (error) {
+            caught = error
+        }
+
+        expect(fakeB.calls.shaderModules).to.have.length(0)
+        expect(fakeB.calls.pipelineLayouts).to.have.length(0)
+        expect(fakeB.calls.computePipelines).to.have.length(0)
+        expect(idMutationAccepted).to.equal(false)
+        expect(program.id).to.equal(originalId)
+        expect(mutationAccepted).to.equal(false)
+        expect(program.runtime).to.equal(runtimeA)
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_PROGRAM_WRONG_RUNTIME')
+    })
+
+    it('keeps Program disposal authoritative after public mutation attempts', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const program = runtime.createProgram({
+            modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+            entryPoints: { compute: 'csMain' },
+        })
+        program.dispose()
+        const mutationAccepted = Reflect.set(program, 'isDisposed', false)
+        let caught
+
+        try {
+            await runtime.createComputePipeline({ program })
+        } catch (error) {
+            caught = error
+        }
+
+        expect(fake.calls.shaderModules).to.have.length(0)
+        expect(fake.calls.pipelineLayouts).to.have.length(0)
+        expect(fake.calls.computePipelines).to.have.length(0)
+        expect(mutationAccepted).to.equal(false)
+        expect(program.isDisposed).to.equal(true)
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_PROGRAM_DISPOSED')
+    })
+
     it('rejects prototype-derived Pipeline and BindSet identities before command creation', async() => {
 
         const fake = createFakeGpu()

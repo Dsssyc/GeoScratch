@@ -40,14 +40,22 @@ user WGSL + generated accessor modules + bind-layout contract
 - Submission-time 执行只消费显式 artifact。它不应依赖临时 string generation 或隐藏 shader mutation。
 - 生成 artifact 必须可 inspect、可按 canonical ABI/schema signature 缓存，并通过 `09-diagnostics-validation` 中的共享 `ScratchDiagnostic` envelope 诊断。短 hash 本身不是 compatibility proof。
 
-`Program` 与 `LayoutCodec` discrimination 使用 module-private `WeakSet` brand 和
-exact built-in prototype 闭合。每条 Pipeline creation path、每个显式
-Shader inspection input 或 option，都会先调用 `isProgram()`，再读取 module、layout
-requirement 或 `assertRuntime()`。Render/compute Pipeline object 也只有在 exact
-prototype 与 module-private state-map record 同时匹配后，才能进入 Command
-construction。Public `instanceof`、同形方法、替换 `Symbol.hasInstance`、subclassing，
-以及 `Object.create(Program.prototype)` / `Object.create(LayoutCodec.prototype)` 都不能
-向这些路径注入调用方伪造 facts。
+`Program` discrimination 使用 exact built-in prototype 与 module-private `WeakMap`
+state record 闭合。该 record 是 runtime ownership 与 disposal 的权威事实；公开的
+`Program.runtime`、`Program.id` 与 `Program.isDisposed` 只是 immutable observation，
+不是可写 authority。`LayoutCodec` 则继续使用 exact prototype 加 module-private
+`WeakSet` brand。每条 Pipeline creation path、每个显式 Shader inspection input 或
+option，都会先调用 `isProgram()`，再读取 module、layout requirement 或
+`assertRuntime()`。Render/compute Pipeline object 也只有在 exact prototype 与
+module-private state-map record 同时匹配后，才能进入 Command construction。Public
+`instanceof`、同形方法、替换 `Symbol.hasInstance`、subclassing，以及
+`Object.create(Program.prototype)` / `Object.create(LayoutCodec.prototype)` 都不能向
+这些路径注入调用方伪造 facts。
+
+这个 ownership/lifecycle boundary 不会冻结 caller-owned shader contract。
+`Program.modules`、`entryPoints`、`requiredFeatures` 与 `layoutRequirements` 仍可为
+future Pipeline 修改。Pipeline creation 会在 native async work 前 snapshot 这些
+facts，existing Pipeline 保留自己的 immutable snapshot。
 
 ## LayoutCodec
 

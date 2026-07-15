@@ -40,15 +40,23 @@ This keeps code generation and runtime execution connected without hiding behavi
 - Submission-time execution consumes explicit artifacts. It must not depend on ad-hoc string generation or hidden shader mutation.
 - Generated artifacts must be inspectable, cacheable by canonical ABI/schema signatures, and diagnosable through the shared `ScratchDiagnostic` envelope in `09-diagnostics-validation`. Short hashes alone are not compatibility proof.
 
-`Program` and `LayoutCodec` discrimination is closed with module-private `WeakSet`
-brands and exact built-in prototypes. Every Pipeline creation path and every explicit
-Shader inspection input or option calls `isProgram()` before reading modules, layout
-requirements, or `assertRuntime()`. Render and compute Pipeline objects are likewise
-recognized only by their exact prototype and module-private state-map record before
-Command construction. Public `instanceof`, similarly shaped methods, replacement of
-`Symbol.hasInstance`, subclassing, and `Object.create(Program.prototype)` /
-`Object.create(LayoutCodec.prototype)` cannot inject caller-authored facts into those
-paths.
+`Program` discrimination is closed with its exact built-in prototype and a
+module-private `WeakMap` state record. That record is authoritative for runtime
+ownership and disposal. Public `Program.runtime`, `Program.id`, and
+`Program.isDisposed` are immutable observations rather than writable authority.
+`LayoutCodec` separately keeps its exact prototype plus module-private `WeakSet` brand.
+Every Pipeline creation path and every explicit Shader inspection input or option calls
+`isProgram()` before reading modules, layout requirements, or `assertRuntime()`. Render
+and compute Pipeline objects are likewise recognized only by their exact prototype and
+module-private state-map record before Command construction. Public `instanceof`,
+similarly shaped methods, replacement of `Symbol.hasInstance`, subclassing, and
+`Object.create(Program.prototype)` / `Object.create(LayoutCodec.prototype)` cannot
+inject caller-authored facts into those paths.
+
+The ownership and lifecycle boundary does not freeze the caller-owned shader contract.
+`Program.modules`, `entryPoints`, `requiredFeatures`, and `layoutRequirements` may still
+be changed for a future Pipeline. Pipeline creation snapshots those facts before native
+asynchronous work, and an existing Pipeline retains its immutable snapshot.
 
 ## LayoutCodec
 

@@ -35,6 +35,7 @@ describe('Scratch persistent binding final parity', () => {
             'externalTextureBoundary',
             'historicalTypeInventory',
             'publicClassMemberInventory',
+            'programReadonlyPublicContracts',
             'goalStartPublicMemberReplacements',
             'goalStartChangedPublicMemberReplacements',
             'RenderPassSpec.createRenderPassDescriptor:method',
@@ -62,8 +63,9 @@ describe('Scratch persistent binding final parity', () => {
             'const cleanThirtySixthReviewCheckpoint = \'4926648e8258fcb6a58e6746704c708beab611e6\'',
             'const cleanThirtySeventhReviewCheckpoint = \'3d5f4d73c64eb5cc1108cd26fa31fec546badb3d\'',
             'const cleanThirtyEighthReviewCheckpoint = \'c9cfad3decd3380c2d03509482b549d3275e1c1c\'',
-            'const expectedFocusedAcceptancePasses = 479',
-            'const expectedFullSuitePasses = 877',
+            'const cleanThirtyNinthReviewCheckpoint = \'01f26da07ffb4fddd7c389cd388ea0c4307a09a6\'',
+            'const expectedFocusedAcceptancePasses = 481',
+            'const expectedFullSuitePasses = 879',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -133,6 +135,8 @@ describe('Scratch persistent binding final parity', () => {
             'rejects a forged texture before native copy encoding after constructor replacement',
             'rejects prototype-derived BindLayout identities before native binding creation',
             'rejects prototype-derived Program identities before native pipeline creation',
+            'keeps Program identity and runtime ownership authoritative after public mutation attempts',
+            'keeps Program disposal authoritative after public mutation attempts',
             'rejects prototype-derived Pipeline and BindSet identities before command creation',
             'rejects prototype-derived pass and command identities before native submission effects',
             'does not use open instanceof checks as Scratch-owned internal brands',
@@ -289,6 +293,12 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(21)
         expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(10)
+        expect(result.publicSurface.programReadonlyPublicContracts.map(
+            contract => contract.id
+        )).to.deep.equal([ 'Program.runtime', 'Program.id', 'Program.isDisposed' ])
+        expect(result.publicSurface.programReadonlyPublicContracts.every(
+            contract => contract.status === 'passed'
+        )).to.equal(true)
         expect(result.publicSurface.productionEmitParity).to.deep.include({
             status: 'passed',
             emittedJavaScriptCount: 102,
@@ -354,6 +364,8 @@ describe('Scratch persistent binding final parity', () => {
             thirtySixthReviewAcceptanceRecorded: true,
             thirtySeventhReviewAcceptanceRecorded: true,
             thirtyEighthReviewAcceptanceRecorded: true,
+            thirtyNinthReviewAcceptanceRecorded: true,
+            boundedClosureProtocol: true,
             currentAcceptanceCounts: true,
             supersededLayoutDecisionsCurrent: true,
             obsoleteSubmissionAuditRemoved: true,
@@ -508,15 +520,15 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence.mocha).to.deep.include({
             status: 'passed',
-            tests: 479,
-            passes: 479,
+            tests: 481,
+            passes: 481,
             failures: 0,
             pending: 0,
         })
         expect(result.executionEvidence.fullSuite).to.deep.include({
             status: 'passed',
-            tests: 879,
-            passes: 877,
+            tests: 881,
+            passes: 879,
             failures: 0,
             pending: 2,
         })
