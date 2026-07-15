@@ -795,9 +795,14 @@ const behaviorTestContracts = [
         'snapshots Program layout requirements into immutable pipeline command contracts',
     ]),
 ]
+const focusedAcceptanceTestFiles = [ ...new Set([
+    ...referencedTestFiles,
+    ...behaviorTestContracts.map(contract => contract.file.replace(/^tests\//, '')),
+]) ].sort()
 const packageTestScript = JSON.parse(fs.readFileSync('package.json', 'utf8')).scripts?.test
 const testEvidence = Object.freeze({
     referencedFiles: referencedTestEvidence,
+    focusedAcceptanceFiles: focusedAcceptanceTestFiles,
     behaviorContracts: behaviorTestContracts,
     defaultMochaPattern: packageTestScript,
     status: referencedTestEvidence.every(entry => entry.status === 'passed') &&
@@ -1294,7 +1299,7 @@ const officialSpecificationEvidence = acceptanceMode
     })
 const executionEvidence = acceptanceMode
     ? await runAcceptanceEvidence(
-        referencedTestFiles,
+        focusedAcceptanceTestFiles,
         behaviorTestContracts,
         productionBootstrap
     )

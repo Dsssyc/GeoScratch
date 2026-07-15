@@ -67,6 +67,8 @@ describe('Scratch persistent binding final parity', () => {
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
             'behaviorTestContract',
+            'const focusedAcceptanceTestFiles = [ ...new Set([',
+            '...behaviorTestContracts.map(contract => contract.file.replace(/^tests\\//, \'\'))',
             'rejects transient Surface usage before native canvas configuration',
             'claims each canvas context exclusively until the owning Surface is disposed',
             'releases an uncommitted canvas-context claim after configure fails',
