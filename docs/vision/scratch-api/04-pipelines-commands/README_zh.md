@@ -75,6 +75,12 @@ property shadowing 都不能让已 disposed command 再次可用。`ResolveQuery
 `queryCount` observation 都从该 snapshot 派生，因此 submission readiness 与 native
 encoding 不可能读取不同的 slot range。
 
+Command-kind authority 同样在 module 内闭合。Draw/Dispatch 只会在构造成功时登记
+module-private `WeakSet` brand，fallback validation 使用这些 brand，而不是 public
+`instanceof`；resource 与 query operand 也通过各自的 closed brand 进入。替换
+`Symbol.hasInstance` 或执行 `Object.create(CommandClass.prototype)`，因此不能向
+fallback chain 注入伪造 command，也不能把 raw native handle 导入 encoding。
+
 ### Texture Allocation Replacement
 
 `TextureResource.resize()` 是返回 Promise 的 resource-lifecycle operation，不是 `Command`、upload、copy 或 submission step。它不创建 encoder、queue action、resource-access entry、producer epoch 或 content write。原生 scope settle 期间旧 allocation 保持 current；被确认成功的 size-changing resize 会推进 `allocationVersion`，保留 `contentEpoch`，并把 replacement 标为 empty。

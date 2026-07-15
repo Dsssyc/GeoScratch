@@ -21,6 +21,14 @@ Resource
 
 `BindLayout` 与 `BindSet` 是 acknowledged supporting object，不是 Resource 子类。Presentation current texture 是 submission-scoped borrowed target，不是持久 resource。
 
+Resource-kind authority 在 module 内闭合。`BufferResource`、`TextureResource`、
+`SamplerResource` 与 `QuerySetResource` 只会在成功构造时登记进 module-private
+`WeakSet` brand，所有内部 validation/lowering branch 都使用这些 brand。Public
+`instanceof` 只是便于观察的 JavaScript 结果，不是 authorization boundary：替换
+`Symbol.hasInstance`、包装 raw native object，或执行
+`Object.create(ResourceClass.prototype)`，都不能把调用方对象提升为 Scratch resource，
+也不能绕过 runtime ownership、allocation version、content epoch 与 lifecycle facts。
+
 原始 resource descriptor 是 canonical Scratch 输入，不是留给隐式 Web IDL
 coercion 的值。Buffer `size` 必须已经是精确、非负且位于 JavaScript
 safe-integer 范围内的 `GPUSize64`；texture extent、mip count 与 sample count

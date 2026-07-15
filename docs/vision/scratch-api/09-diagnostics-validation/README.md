@@ -77,6 +77,11 @@ Human-readable, not a stable parsing target:
 
 Diagnostics may be thrown, returned in a report, attached to `SubmittedWork`, attached to `ReadbackOperation`, or delivered to a runtime diagnostic sink. The shape stays the same.
 
+Internal `ScratchDiagnosticError` classification uses a module-private `WeakSet` closed
+brand, not public `instanceof`. Replacing `Symbol.hasInstance` or constructing an object
+with `Object.create(ScratchDiagnosticError.prototype)` cannot make an arbitrary error
+enter diagnostic-only recovery, attribution, or report-preservation paths.
+
 ## Subjects And Related Objects
 
 A diagnostic must identify the smallest useful subject. Use `related` for context instead of hiding references inside prose.

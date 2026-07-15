@@ -1,6 +1,6 @@
 import { BindLayout } from './binding.js'
 import { createScratchDiagnostic, createScratchDiagnosticReport } from './diagnostics.js'
-import { Program } from './program.js'
+import { Program, isProgram } from './program.js'
 import type { BindLayoutEntry } from './binding.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 
@@ -130,7 +130,7 @@ class ShaderInspectionResult implements ShaderInspection {
 
 function normalizeModules(input: ShaderInspectionInput): string[] {
 
-    if (input instanceof Program) return [ ...input.modules ]
+    if (isProgram(input)) return [ ...input.modules ]
     if (typeof input === 'string') return [ input ]
 
     return [ ...input ]
@@ -139,7 +139,7 @@ function normalizeModules(input: ShaderInspectionInput): string[] {
 function resolveProgram(input: ShaderInspectionInput, program: Program | undefined): Program | undefined {
 
     if (program !== undefined) return program
-    if (input instanceof Program) return input
+    if (isProgram(input)) return input
 
     return undefined
 }

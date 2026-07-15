@@ -56,6 +56,7 @@ type BufferAllocationInstaller = (
 
 const bufferResourceToken = Symbol('BufferResource')
 const bufferRegionToken = Symbol('BufferRegion')
+const bufferResources = new WeakSet<BufferResource>()
 const bufferRegions = new WeakSet<BufferRegion>()
 const bufferAllocationInstallers = new WeakMap<BufferResource, BufferAllocationInstaller>()
 const GPU_FLAGS_MAX = 0xffff_ffff
@@ -126,6 +127,7 @@ export class BufferResource extends Resource {
             destroyNativeCandidate(previousGpuBuffer)
         })
         registerResource(this)
+        bufferResources.add(this)
         Object.preventExtensions(this)
     }
 
@@ -300,6 +302,11 @@ export class BufferRegion {
 
 Object.freeze(BufferRegion.prototype)
 
+export function isBufferResource(value: unknown): value is BufferResource {
+
+    return typeof value === 'object' && value !== null && bufferResources.has(value as BufferResource)
+}
+
 export function isBufferRegion(value: unknown): value is BufferRegion {
 
     return typeof value === 'object' && value !== null && bufferRegions.has(value as BufferRegion)
@@ -311,7 +318,7 @@ export function commitBufferResourceAllocation(
     gpuBuffer: GPUBuffer
 ): void {
 
-    if (!(resource instanceof BufferResource)) {
+    if (!isBufferResource(resource)) {
         destroyNativeCandidate(gpuBuffer)
         throw new TypeError('Buffer allocation commit requires a BufferResource.')
     }

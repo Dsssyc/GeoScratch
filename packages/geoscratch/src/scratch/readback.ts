@@ -1,6 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferRegion, isBufferRegion } from './buffer.js'
-import { ScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
+import { isScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createLayoutReadbackView } from './layout-codec.js'
 import {
@@ -605,7 +605,7 @@ export class ReadbackOperation {
                 cancelReadbackMapping(mappingTransaction)
                 mappingTransaction = undefined
             }
-            if (error instanceof ScratchDiagnosticError) {
+            if (isScratchDiagnosticError(error)) {
                 this._releaseStagingBuffer(true)
                 if (this.state !== 'cancelled' && this.state !== 'disposed') {
                     readbackStateFor(this).failureCode = error.diagnostic.code

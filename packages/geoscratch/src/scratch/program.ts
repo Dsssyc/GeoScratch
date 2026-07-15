@@ -31,6 +31,8 @@ export type ProgramDescriptor = {
     layoutRequirements?: readonly ProgramBufferLayoutRequirement[]
 }
 
+const programs = new WeakSet<Program>()
+
 export interface Program {
     runtime: ScratchRuntime
     id: string
@@ -58,6 +60,7 @@ export class Program {
         this.isDisposed = false
 
         validateRequiredFeatures(this)
+        programs.add(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -111,6 +114,11 @@ export class Program {
 
         this.isDisposed = true
     }
+}
+
+export function isProgram(value: unknown): value is Program {
+
+    return typeof value === 'object' && value !== null && programs.has(value as Program)
 }
 
 export function programLayoutRequirementSubject(requirement: Pick<ProgramBufferLayoutRequirement, 'group' | 'binding'> & { name?: unknown }): DiagnosticSubject {

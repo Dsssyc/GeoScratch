@@ -1,4 +1,4 @@
-import { ScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
+import { isScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import {
     createScratchNativeLabel,
@@ -349,7 +349,7 @@ function throwReadbackStagingBudgetFailure(
             gpuOperationSubject(operation),
         ],
     })
-    const actual = cause instanceof ScratchDiagnosticError
+    const actual = isScratchDiagnosticError(cause)
         ? cause.diagnostic.actual
         : undefined
     throwScratchDiagnostic({

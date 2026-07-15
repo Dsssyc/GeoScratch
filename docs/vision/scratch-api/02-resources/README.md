@@ -21,6 +21,16 @@ Resource
 
 `BindLayout` and `BindSet` are acknowledged supporting objects, not Resource subclasses. Presentation current textures are submission-scoped borrowed targets, not persistent resources.
 
+Resource-kind authority is closed inside the module. `BufferResource`,
+`TextureResource`, `SamplerResource`, and `QuerySetResource` are registered in
+module-private `WeakSet` brands at successful construction, and every internal
+validation/lowering branch uses those brands. Public `instanceof` remains an ergonomic
+JavaScript observation, not an authorization boundary: replacing
+`Symbol.hasInstance`, wrapping a raw native object, or using
+`Object.create(ResourceClass.prototype)` cannot promote a caller object into a Scratch
+resource or bypass runtime ownership, allocation version, content epoch, and lifecycle
+facts.
+
 Raw resource descriptors are canonical Scratch inputs, not values left for
 implicit Web IDL coercion. Buffer `size` must already be an exact non-negative
 safe-integer `GPUSize64`; texture extents, mip counts, and sample counts must

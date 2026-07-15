@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-thirty-seventh-review fixes pending acceptance
+Status: Post-thirty-eighth-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -28,8 +28,8 @@ source, and WHATWG Web IDL source and derives the native enum matrices. It later
 the managed port and explicitly executes `npm run typecheck`, the complete `npm run
 build`, and `git diff --check`. Structural mode preserves existing `dist` so stale
 output remains detectable, but performs the same recorded package bootstrap when `dist`
-is absent. It executes exactly 472 referenced behavior tests; requires the
-complete suite to report exactly 870 passing
+is absent. It executes exactly 475 referenced behavior tests; requires the
+complete suite to report exactly 873 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -322,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Thirty-seven isolated review passes have examined the fixed-baseline diff and working tree.
+Thirty-eight isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -373,6 +373,9 @@ supporting-object prototype identity, and BindSet snapshot prototype integrity, 
 P2 defect in inherited mutation of absent normalized command facts.
 The thirty-seventh review found two P1 prototype-authority defects in BufferResource and
 BindSet, plus two P2 defects in Draw/Dispatch label locking and stale final-audit evidence.
+The thirty-eighth review found one P1 constructor-brand defect: caller-controlled
+`Symbol.hasInstance` could make forged resource wrappers pass Scratch-owned `instanceof`
+authority checks and reach native binding or copy paths.
 
 Resolved core finding:
 
@@ -1030,6 +1033,24 @@ Resolved thirty-seventh review findings:
 These findings bring the reproduced or source-verified reviewer total to 105. The
 BindLayout extension is same-root proactive coverage rather than an additional reviewer
 finding.
+
+The thirty-seventh-review implementation passed clean acceptance at exact checkpoint
+`3d5f4d73c64eb5cc1108cd26fa31fec546badb3d`, but the required thirty-eighth
+fresh-context review found one implementation defect below.
+
+Resolved thirty-eighth review finding:
+
+1. Scratch-owned runtime brands no longer trust public `instanceof`. Successful
+   construction registers BufferResource, TextureResource, SamplerResource,
+   QuerySetResource, DrawCommand, DispatchCommand, Program, LayoutCodec, and
+   ScratchDiagnosticError in module-private WeakSet brands. All 35 internal authority
+   sites now use closed guards, so caller-controlled `Symbol.hasInstance`, raw-native
+   wrappers, and `Object.create(Class.prototype)` forgeries cannot enter binding, copy,
+   query, fallback, shader-inspection, layout-diagnostic, or diagnostic-recovery paths.
+
+This finding brings the reproduced or source-verified reviewer total to 106. Extending
+the same closed-brand rule across every remaining Scratch-owned `instanceof` authority
+is same-root coverage, not an additional reviewer finding.
 
 ## Verification Record
 
@@ -1879,6 +1900,50 @@ Post-thirty-seventh-review targeted verification:
   identities pending; `npm run typecheck` passes both declaration consumers
 - `npm run build` emits the package and all 14 runnable examples; structural parity passes
   and truthfully reports the dirty tree as `incomplete`; `git diff --check` passes
+- clean-commit acceptance and a new isolated exact no-findings review remain required
+  before audit closure
+
+Clean thirty-seventh-review checkpoint acceptance (`3d5f4d7`):
+
+- initial and final repository evidence named exact commit
+  `3d5f4d73c64eb5cc1108cd26fa31fec546badb3d` with an empty working tree
+- focused acceptance passed 472/472; the complete suite reported 870 passing and only
+  the two exact browser/final-acceptance identities pending
+- production bootstrap, both TypeScript consumers, package/example build, diff check,
+  all 11 ordinary examples, the negative unavailable target, and managed-server cleanup
+  passed
+- both 20,000-cycle steady-state phases passed at observed 1.43585 and 1.04698335
+  microseconds per cycle with zero binding-order sorts, snapshot serializations,
+  dynamic-offset name-map reads, identity changes, or extra steady-state native objects
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed persistent replacement with exact
+  values 17/33, storage values 41/6, sparse group 2 value 73, query paths, and controlled
+  multi-failure diagnostics schema v5 round-trip evidence with no uncaptured, console,
+  page, or request failures
+- the official GPUWeb main/copies and WHATWG Web IDL sources matched the recorded enum,
+  format, copy, range, and conversion matrices
+- the thirty-eighth review then found the constructor-brand defect above, so this
+  checkpoint remains historical evidence rather than final approval
+
+Post-thirty-eighth-review targeted verification:
+
+- before implementation, the new closed-brand collection reported zero passing and
+  three exact failures: a forged sampler reached native bind-group creation, a forged
+  texture reached texture-to-buffer encoding, and the source inventory found 35
+  Scratch-owned `instanceof` authority sites
+- after resource-brand implementation and a fresh package emit, both native-path attack
+  cases pass; after complete same-root brand replacement, the collection passes 3/3 and
+  the source inventory reports zero open Scratch-owned authority sites
+- 16 affected binding, texture, copy, command, fallback, query, shader, layout,
+  diagnostics, readback, and submission collections pass 233/233
+- the executable audit now requires all three new behavior titles, bilingual closed-brand
+  contracts, the clean `3d5f4d7` checkpoint record, 475 focused passes, and 873
+  full-suite passes
+- `npm test` reports exactly 873 passing plus the two exact pending WebGPU environment
+  gates; `npm run typecheck` passes both declaration consumers, and `npm run build`
+  emits the package and all 14 runnable examples
+- fixed-history structural parity passes every capability, behavior-title, closed-brand,
+  bilingual-documentation, official-source, and example inventory check while truthfully
+  reporting the dirty tree as `incomplete`; `git diff --check` passes
 - clean-commit acceptance and a new isolated exact no-findings review remain required
   before audit closure
 

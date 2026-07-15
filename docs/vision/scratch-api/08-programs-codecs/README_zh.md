@@ -40,6 +40,11 @@ user WGSL + generated accessor modules + bind-layout contract
 - Submission-time 执行只消费显式 artifact。它不应依赖临时 string generation 或隐藏 shader mutation。
 - 生成 artifact 必须可 inspect、可按 canonical ABI/schema signature 缓存，并通过 `09-diagnostics-validation` 中的共享 `ScratchDiagnostic` envelope 诊断。短 hash 本身不是 compatibility proof。
 
+`Program` 与 `LayoutCodec` discrimination 使用 module-private `WeakSet` brand 闭合。
+Shader inspection 与 layout diagnostic routing 不把 public `instanceof` 当作 authority，
+所以替换 `Symbol.hasInstance`，或执行 `Object.create(Program.prototype)` /
+`Object.create(LayoutCodec.prototype)`，都不能向这些路径注入调用方伪造 facts。
+
 ## LayoutCodec
 
 `LayoutCodec` 不是 resource，也不是 scheduler 特性。它是 typed layout 与 CPU、WGSL、readback 所需字节事实之间的桥。

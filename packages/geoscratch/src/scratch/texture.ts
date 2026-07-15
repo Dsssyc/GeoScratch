@@ -137,6 +137,7 @@ const DEPTH_STENCIL_TEXEL_COPY_CAPABILITIES = new Map<
 ])
 const textureResourceToken = Symbol('TextureResource')
 const textureViewSpecToken = Symbol('TextureViewSpec')
+const textureResources = new WeakSet<TextureResource>()
 const textureViewSpecs = new WeakSet<TextureViewSpec>()
 const TEXTURE_ALLOCATION_CODES = Object.freeze({
     validation: 'SCRATCH_TEXTURE_ALLOCATION_VALIDATION_FAILED',
@@ -233,6 +234,7 @@ export class TextureResource extends Resource {
         this.#physicalDescriptor = descriptor
         this.#gpuTexture = gpuTexture
         registerResource(this)
+        textureResources.add(this)
         Object.preventExtensions(this)
     }
 
@@ -402,6 +404,11 @@ export class TextureResource extends Resource {
 }
 
 Object.freeze(TextureResource.prototype)
+
+export function isTextureResource(value: unknown): value is TextureResource {
+
+    return typeof value === 'object' && value !== null && textureResources.has(value as TextureResource)
+}
 
 export class TextureViewSpec {
 

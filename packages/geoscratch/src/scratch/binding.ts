@@ -6,11 +6,11 @@ import {
     unregisterBindSetOwnership,
 } from './binding-ownership.js'
 import { BufferRegion, isBufferRegion } from './buffer.js'
-import { ScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
+import { ScratchDiagnosticError, isScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createScratchNativeLabel } from './native-allocation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
-import { SamplerResource } from './sampler.js'
+import { SamplerResource, isSamplerResource } from './sampler.js'
 import { throwSupportingObjectCreationFailure } from './supporting-object-failure.js'
 import {
     beginSupportingObjectCreation,
@@ -1184,7 +1184,7 @@ function failBindSetPreflight(
     cause: unknown
 ): never {
 
-    const diagnosticError = cause instanceof ScratchDiagnosticError ? cause : undefined
+    const diagnosticError = isScratchDiagnosticError(cause) ? cause : undefined
     const code = diagnosticError?.diagnostic.code ?? BIND_SET_PREPARATION_CODES.nativeException
     const failure = Object.freeze({
         stage: 'descriptor-validation' as const,
@@ -1351,7 +1351,7 @@ function captureBindSetSnapshot(bindSet: BindSet): BindSetPreparationSnapshot {
                 descriptor: canonicalizeSnapshotValue(resource.descriptor),
             })
         }
-        if (resource instanceof SamplerResource) {
+        if (isSamplerResource(resource)) {
             return Object.freeze({
                 ...base,
                 resourceKind: 'sampler',
@@ -1415,7 +1415,7 @@ function nativeBindingResource(
         })
     }
     if (isTextureViewSpec(resource)) return views.get(textureViewCandidateKey(resource))
-    if (resource instanceof SamplerResource) return resource.gpuSampler
+    if (isSamplerResource(resource)) return resource.gpuSampler
     return undefined
 }
 
@@ -1528,14 +1528,14 @@ function bindingResourceAllocationVersion(
 
     if (isBufferRegion(resource)) return resource.buffer.allocationVersion
     if (isTextureViewSpec(resource)) return resource.texture.allocationVersion
-    return resource instanceof SamplerResource ? resource.allocationVersion : undefined
+    return isSamplerResource(resource) ? resource.allocationVersion : undefined
 }
 
 function bindingResourceDisposed(resource: BufferRegion | TextureViewSpec | SamplerResource): boolean {
 
     if (isBufferRegion(resource)) return resource.buffer.isDisposed
     if (isTextureViewSpec(resource)) return resource.texture.isDisposed
-    return resource instanceof SamplerResource ? resource.isDisposed : true
+    return isSamplerResource(resource) ? resource.isDisposed : true
 }
 
 function bindingResourceSubject(
@@ -2212,7 +2212,7 @@ function validateSamplerResource(
     resource: unknown
 ) {
 
-    if (!(resource instanceof SamplerResource)) {
+    if (!isSamplerResource(resource)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
             severity: 'error',

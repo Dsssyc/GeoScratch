@@ -29,6 +29,7 @@ const COMPARE_FUNCTIONS = new Set<GPUCompareFunction>([
     'always',
 ])
 const samplerResourceToken = Symbol('SamplerResource')
+const samplerResources = new WeakSet<SamplerResource>()
 const SAMPLER_ALLOCATION_CODES = Object.freeze({
     validation: 'SCRATCH_SAMPLER_ALLOCATION_VALIDATION_FAILED',
     internal: 'SCRATCH_SAMPLER_ALLOCATION_INTERNAL_FAILED',
@@ -77,6 +78,7 @@ export class SamplerResource extends Resource {
 
         this.#gpuSampler = gpuSampler
         registerResource(this)
+        samplerResources.add(this)
         Object.preventExtensions(this)
     }
 
@@ -87,6 +89,11 @@ export class SamplerResource extends Resource {
 }
 
 Object.freeze(SamplerResource.prototype)
+
+export function isSamplerResource(value: unknown): value is SamplerResource {
+
+    return typeof value === 'object' && value !== null && samplerResources.has(value as SamplerResource)
+}
 
 export async function createSamplerResource(
     runtime: ScratchRuntime,

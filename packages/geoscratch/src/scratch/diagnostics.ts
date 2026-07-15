@@ -120,6 +120,8 @@ export function createScratchDiagnosticReport(diagnostics: ScratchDiagnostic[] =
     }
 }
 
+const scratchDiagnosticErrors = new WeakSet<ScratchDiagnosticError>()
+
 export class ScratchDiagnosticError extends Error {
 
     diagnostic: ScratchDiagnostic
@@ -138,7 +140,13 @@ export class ScratchDiagnosticError extends Error {
         this.diagnostic = diagnostic
         this.report = report
         if (options?.incident !== undefined) this.incident = options.incident
+        scratchDiagnosticErrors.add(this)
     }
+}
+
+export function isScratchDiagnosticError(value: unknown): value is ScratchDiagnosticError {
+
+    return typeof value === 'object' && value !== null && scratchDiagnosticErrors.has(value as ScratchDiagnosticError)
 }
 
 export function throwScratchDiagnostic(

@@ -76,6 +76,13 @@ usable again. `ResolveQuerySetCommand` owns one deeply frozen source snapshot. I
 `querySet`, `firstQuery`, and `queryCount` observations are derived from that snapshot, so
 submission readiness and native encoding cannot inspect different slot ranges.
 
+Command-kind authority is also closed inside the module. Draw/Dispatch construction
+registers module-private `WeakSet` brands, and fallback validation uses those brands
+rather than public `instanceof`. Resource and query operands are admitted through their
+own closed brands. Replacing `Symbol.hasInstance` or using
+`Object.create(CommandClass.prototype)` therefore cannot inject a forged command into a
+fallback chain or route a raw native handle into encoding.
+
 ### Texture Allocation Replacement
 
 `TextureResource.resize()` is a Promise-returning resource-lifecycle operation, not a `Command`, upload, copy, or submission step. It creates no encoder, queue action, resource-access entry, producer epoch, or content write. While native scopes settle, the old allocation remains current; acknowledged changed resize advances `allocationVersion`, preserves `contentEpoch`, and marks the replacement empty.

@@ -77,6 +77,11 @@ type ScratchDiagnostic = {
 
 Diagnostics 可以被 throw、作为 report 返回、挂在 `SubmittedWork` 上、挂在 `ReadbackOperation` 上，或送进 runtime diagnostic sink。形状保持一致。
 
+内部 `ScratchDiagnosticError` classification 使用 module-private `WeakSet` closed
+brand，而不是 public `instanceof`。替换 `Symbol.hasInstance`，或通过
+`Object.create(ScratchDiagnosticError.prototype)` 构造对象，都不能让任意 error 进入
+diagnostic-only recovery、attribution 或 report-preservation path。
+
 ## Subjects 与 Related Objects
 
 diagnostic 必须定位到最小有用 subject。上下文放进 `related`，不要藏在 prose 里。

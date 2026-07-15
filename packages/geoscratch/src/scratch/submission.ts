@@ -18,6 +18,7 @@ import {
     ScratchDiagnosticError,
     createScratchDiagnostic,
     createScratchDiagnosticReport,
+    isScratchDiagnosticError,
     throwScratchDiagnostic,
 } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
@@ -40,7 +41,7 @@ import {
     prepareSurfaceAttachment,
     preparedSurfaceAttachmentFacts,
 } from './surface.js'
-import { TextureResource, createNativeTextureView, isTextureViewSpec } from './texture.js'
+import { TextureResource, createNativeTextureView, isTextureResource, isTextureViewSpec } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
@@ -683,7 +684,7 @@ export class SubmissionBuilder {
                     const source = 'region' in step.command.source
                         ? step.command.source.region.buffer
                         : step.command.source.resource
-                    const target = step.command.target instanceof TextureResource
+                    const target = isTextureResource(step.command.target)
                         ? step.command.target
                         : step.command.target.buffer
                     trackSegmentResourceWrite(target)
@@ -1423,7 +1424,7 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
             validateCopyReadiness(builder, step, stepIndex, readiness, diagnostics)
             markSimulatedReady(
                 readiness,
-                step.command.target instanceof TextureResource ? step.command.target : step.command.target.buffer
+                isTextureResource(step.command.target) ? step.command.target : step.command.target.buffer
             )
             steps.push(step)
             continue
@@ -2274,7 +2275,7 @@ function validateFallbackCommandForPass(
     try {
         fallback.assertRuntime(builder.runtime)
     } catch (error) {
-        if (error instanceof ScratchDiagnosticError) {
+        if (isScratchDiagnosticError(error)) {
             throwFallbackResolutionDiagnostic(
                 builder,
                 stepIndex,
@@ -2313,7 +2314,7 @@ function validateFallbackCommandForPass(
             'pass-kind'
         )
     } catch (error) {
-        if (error instanceof ScratchDiagnosticError && error.diagnostic.code === 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE') {
+        if (isScratchDiagnosticError(error) && error.diagnostic.code === 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE') {
             throw error
         }
 
@@ -2325,7 +2326,7 @@ function validateFallbackCommandForPass(
             attemptedCommands,
             attempts,
             fallback,
-            error instanceof ScratchDiagnosticError ? error.diagnostic.code : 'pass-validation'
+            isScratchDiagnosticError(error) ? error.diagnostic.code : 'pass-validation'
         )
     }
 }
@@ -3473,7 +3474,7 @@ function collectRenderCommandResourceConflictDiagnostics(
         : command.resources.write
 
     for (const resource of resources) {
-        if (!(resource instanceof TextureResource)) continue
+        if (!isTextureResource(resource)) continue
 
         const attachmentKind = attachmentTargets.get(resource)
         if (attachmentKind === undefined) continue

@@ -40,6 +40,12 @@ This keeps code generation and runtime execution connected without hiding behavi
 - Submission-time execution consumes explicit artifacts. It must not depend on ad-hoc string generation or hidden shader mutation.
 - Generated artifacts must be inspectable, cacheable by canonical ABI/schema signatures, and diagnosable through the shared `ScratchDiagnostic` envelope in `09-diagnostics-validation`. Short hashes alone are not compatibility proof.
 
+`Program` and `LayoutCodec` discrimination is closed with module-private `WeakSet`
+brands. Shader inspection and layout diagnostic routing never treat public `instanceof`
+as authority, so replacing `Symbol.hasInstance` or using
+`Object.create(Program.prototype)` / `Object.create(LayoutCodec.prototype)` cannot inject
+caller-authored facts into those paths.
+
 ## LayoutCodec
 
 `LayoutCodec` is not a resource and not a scheduler feature. It is a bridge between a typed layout and the byte-level facts needed by CPU, WGSL, and readback.

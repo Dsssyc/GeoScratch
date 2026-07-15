@@ -12,7 +12,7 @@ import {
 } from './layout-codec.js'
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import { programLayoutRequirementsForPipeline } from './pipeline.js'
-import { QuerySetResource } from './query-set.js'
+import { QuerySetResource, isQuerySetResource } from './query-set.js'
 import {
     registerRuntimeReadbackCommand,
     releaseReservedRuntimeReadbackOperationFact,
@@ -32,6 +32,7 @@ import { readonlyMapSnapshot } from './readonly-map.js'
 import { advanceResourceContentEpoch, isContentResource } from './resource.js'
 import {
     TextureResource,
+    isTextureResource,
     textureFormatBlockSize,
     textureFormatCopyFootprint,
     textureFormatIsCompressed,
@@ -564,6 +565,9 @@ type NormalizedUploadSource = {
     layout?: LayoutArtifact
 }
 
+const drawCommands = new WeakSet<DrawCommand>()
+const dispatchCommands = new WeakSet<DispatchCommand>()
+
 export interface DrawCommand {
     readonly runtime: ScratchRuntime
     readonly id: string
@@ -626,6 +630,7 @@ export class DrawCommand {
         mutable.whenMissing = readiness.whenMissing
         if (readiness.fallback !== undefined) mutable.fallback = readiness.fallback
         validateProgramLayoutRequirementsForCommand(this)
+        drawCommands.add(this)
         lockDrawCommandContract(this)
     }
 
@@ -811,7 +816,7 @@ export class BeginOcclusionQueryCommand {
         runtime.assertActive()
 
         const querySet = descriptor.querySet
-        if (!(querySet instanceof QuerySetResource)) {
+        if (!isQuerySetResource(querySet)) {
             throwOcclusionQueryCommandDiagnostic({
                 runtime,
                 querySet,
@@ -1120,6 +1125,7 @@ export class DispatchCommand {
         mutable.whenMissing = readiness.whenMissing
         if (readiness.fallback !== undefined) mutable.fallback = readiness.fallback
         validateProgramLayoutRequirementsForCommand(this)
+        dispatchCommands.add(this)
         lockDispatchCommandContract(this)
     }
 
@@ -1266,6 +1272,16 @@ function dispatchCountProducesDeclaredWrites(count: DispatchCommand['count']): b
 
     if ('indirect' in count) return true
     return count.workgroups.every(value => value > 0)
+}
+
+export function isDrawCommand(value: unknown): value is DrawCommand {
+
+    return typeof value === 'object' && value !== null && drawCommands.has(value as DrawCommand)
+}
+
+export function isDispatchCommand(value: unknown): value is DispatchCommand {
+
+    return typeof value === 'object' && value !== null && dispatchCommands.has(value as DispatchCommand)
 }
 
 function lockDrawCommandContract(command: DrawCommand): void {
@@ -1538,7 +1554,7 @@ export class CopyCommand {
             validateBufferCopyUsage(runtime, source.region.buffer, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
             validateBufferCopyUsage(runtime, target.buffer, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
             validateBufferCopyRange(this)
-        } else if (isTextureCopySource(source) && descriptor.target instanceof TextureResource) {
+        } else if (isTextureCopySource(source) && isTextureResource(descriptor.target)) {
             const textureDescriptor = descriptor as TextureToTextureCopyCommandDescriptor
             const target = normalizeTextureCopyTarget(runtime, textureDescriptor, source.resource)
 
@@ -1554,7 +1570,7 @@ export class CopyCommand {
             validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
             validateTextureCopyUsage(runtime, target, GPU_TEXTURE_USAGE_COPY_DST, 'target', 'GPUTextureUsage.COPY_DST')
             validateTextureCopyRange(this)
-        } else if (isBufferRegionSource(source) && descriptor.target instanceof TextureResource) {
+        } else if (isBufferRegionSource(source) && isTextureResource(descriptor.target)) {
             const bufferToTextureDescriptor = descriptor as BufferToTextureCopyCommandDescriptor
             const target = normalizeBufferToTextureCopyTarget(runtime, bufferToTextureDescriptor, source.region.buffer)
 
@@ -1813,7 +1829,7 @@ export class CopyCommand {
             )
         }
 
-        advanceResourceContentEpoch(this.target instanceof TextureResource ? this.target : this.target.buffer)
+        advanceResourceContentEpoch(isTextureResource(this.target) ? this.target : this.target.buffer)
     }
 
     dispose(): void {
@@ -2710,7 +2726,7 @@ export class TextureUploadCommand {
         runtime.assertActive()
 
         const target = descriptor.target
-        if (!(target instanceof TextureResource)) {
+        if (!isTextureResource(target)) {
             throwTextureUploadDiagnostic({
                 runtime,
                 target,
@@ -2861,7 +2877,7 @@ export class ExternalImageUploadCommand {
         }
 
         const target = descriptor.target
-        if (!(target instanceof TextureResource)) {
+        if (!isTextureResource(target)) {
             throwExternalImageUploadInvalid({
                 runtime,
                 source: descriptor.source,
@@ -3115,7 +3131,7 @@ function throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason
         actual: {
             reason,
             querySet: describeValue(querySet),
-            querySetType: querySet instanceof QuerySetResource ? querySet.type : undefined,
+            querySetType: isQuerySetResource(querySet) ? querySet.type : undefined,
             index,
         },
     })
@@ -4738,7 +4754,7 @@ function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDes
     const contentEpoch = source.contentEpoch
     const region = 'region' in source ? source.region : undefined
     const resource = 'resource' in source ? source.resource : undefined
-    if (!isBufferRegion(region) && !(resource instanceof TextureResource)) {
+    if (!isBufferRegion(region) && !isTextureResource(resource)) {
         throwCopySourceDiagnostic({
             runtime,
             source,
@@ -4818,7 +4834,7 @@ function normalizeBufferCopyTarget(runtime: ScratchRuntime, descriptor: BufferTo
 function normalizeTextureCopyTarget(runtime: ScratchRuntime, descriptor: TextureToTextureCopyCommandDescriptor, source: TextureResource): TextureResource {
 
     const target = descriptor.target
-    if (!(target instanceof TextureResource)) {
+    if (!isTextureResource(target)) {
         throwCopyDiagnostic({
             runtime,
             source,
@@ -4837,7 +4853,7 @@ function normalizeTextureCopyTarget(runtime: ScratchRuntime, descriptor: Texture
 function normalizeBufferToTextureCopyTarget(runtime: ScratchRuntime, descriptor: BufferToTextureCopyCommandDescriptor, source: BufferResource): TextureResource {
 
     const target = descriptor.target
-    if (!(target instanceof TextureResource)) {
+    if (!isTextureResource(target)) {
         throwCopyDiagnostic({
             runtime,
             source,
@@ -5453,7 +5469,7 @@ function normalizeResolveSource(runtime: ScratchRuntime, source: unknown): Resol
     }
 
     const querySet = source.querySet
-    if (!(querySet instanceof QuerySetResource)) {
+    if (!isQuerySetResource(querySet)) {
         throwResolveQuerySetDiagnostic({
             runtime,
             source,
@@ -6308,7 +6324,7 @@ function writeExternalImageUploadQueueAction(
 
 function throwExternalImageUploadInvalid(input: ExternalImageUploadDiagnosticInput, cause?: unknown): never {
 
-    const target = input.target instanceof TextureResource ? input.target : input.command?.target
+    const target = isTextureResource(input.target) ? input.target : input.command?.target
     throwScratchDiagnostic({
         code: 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
         severity: 'error',
@@ -6475,8 +6491,8 @@ function validateFallbackChain(
 
     for (const fallbackCommand of chain) {
         const isExpectedCommand = command.commandKind === 'draw'
-            ? fallbackCommand instanceof DrawCommand
-            : fallbackCommand instanceof DispatchCommand
+            ? isDrawCommand(fallbackCommand)
+            : isDispatchCommand(fallbackCommand)
         if (!isExpectedCommand) {
             throwFallbackDiagnostic(command, fallbackCommand, 'command')
         }

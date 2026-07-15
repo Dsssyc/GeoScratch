@@ -1,6 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { advanceQuerySlotContentEpoch, QuerySetResource } from './query-set.js'
+import { advanceQuerySlotContentEpoch, isQuerySetResource, QuerySetResource } from './query-set.js'
 import { isSurfaceReceiver, surfaceFactsFor } from './surface.js'
 import { TextureResource, TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
 import { textureFormatIsColorRenderable } from './texture-format-capabilities.js'
@@ -364,7 +364,7 @@ function normalizeTimestampWrites(
     if (timestampWrites === undefined) return undefined
 
     const querySet = timestampWrites?.querySet
-    if (!(querySet instanceof QuerySetResource)) {
+    if (!isQuerySetResource(querySet)) {
         throwTimestampWritesDiagnostic(pass, timestampWrites, 'querySet')
     }
 
@@ -397,7 +397,7 @@ function normalizeOcclusionQuerySet(pass: RenderPassSpec, querySet?: QuerySetRes
 
     if (querySet === undefined) return undefined
 
-    if (!(querySet instanceof QuerySetResource)) {
+    if (!isQuerySetResource(querySet)) {
         throwOcclusionQuerySetDiagnostic(pass, querySet, 'querySet')
     }
 
@@ -488,7 +488,7 @@ function throwOcclusionQuerySetDiagnostic(pass: RenderPassSpec, querySet: unknow
         actual: {
             reason,
             occlusionQuerySet: describeValue(querySet),
-            querySetType: querySet instanceof QuerySetResource ? querySet.type : undefined,
+            querySetType: isQuerySetResource(querySet) ? querySet.type : undefined,
         },
     })
 }

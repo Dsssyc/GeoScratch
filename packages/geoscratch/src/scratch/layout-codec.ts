@@ -158,6 +158,7 @@ const layoutCanonicalSignatures = new WeakMap<LayoutArtifact, Readonly<{
     abi: string
     schema: string
 }>>()
+const layoutCodecs = new WeakSet<LayoutCodec>()
 
 export interface LayoutCodec {
     spec: LayoutSpec
@@ -172,6 +173,7 @@ export class LayoutCodec {
         this.spec = normalizeSpec(spec)
         this.artifact = lowerLayoutArtifact(this.spec, options)
         this.report = createScratchDiagnosticReport()
+        layoutCodecs.add(this)
     }
 
     get subject(): DiagnosticSubject {
@@ -258,6 +260,11 @@ export class LayoutCodec {
 
         return lines.join('\n')
     }
+}
+
+export function isLayoutCodec(value: unknown): value is LayoutCodec {
+
+    return typeof value === 'object' && value !== null && layoutCodecs.has(value as LayoutCodec)
 }
 
 export function layoutCodec(spec: LayoutSpec, options?: LayoutCodecOptions): LayoutCodec {
@@ -1002,7 +1009,7 @@ function throwByteLengthDiagnostic(
 
 function layoutDiagnosticSubject(context: LayoutCodec | LayoutArtifact | DiagnosticSubject): DiagnosticSubject {
 
-    if (context instanceof LayoutCodec) return context.subject
+    if (isLayoutCodec(context)) return context.subject
     if (isLayoutArtifact(context)) return layoutArtifactSubject(context)
 
     return context

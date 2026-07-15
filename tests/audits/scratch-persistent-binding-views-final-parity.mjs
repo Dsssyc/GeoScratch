@@ -9,9 +9,10 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const cleanThirtySixthReviewCheckpoint = '4926648e8258fcb6a58e6746704c708beab611e6'
+const cleanThirtySeventhReviewCheckpoint = '3d5f4d73c64eb5cc1108cd26fa31fec546badb3d'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 472
-const expectedFullSuitePasses = 870
+const expectedFocusedAcceptancePasses = 475
+const expectedFullSuitePasses = 873
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -158,6 +159,51 @@ const historicalScratchTree = loadGitScratchTree(historicalJavaScript)
 const currentScratchSource = Object.values(currentScratchTree).join('\n')
 const baselineScratchSource = Object.values(baselineScratchTree).join('\n')
 const historicalScratchSource = Object.values(historicalScratchTree).join('\n')
+const scratchOwnedInstanceofAuthorities = Object.freeze([
+    'BufferResource',
+    'DispatchCommand',
+    'DrawCommand',
+    'LayoutCodec',
+    'Program',
+    'QuerySetResource',
+    'SamplerResource',
+    'ScratchDiagnosticError',
+    'TextureResource',
+])
+const openScratchOwnedInstanceofSites = Object.freeze(Object.entries(currentScratchTree)
+    .flatMap(([ sourcePath, source ]) => [ ...source.matchAll(/\binstanceof\s+([A-Za-z_$][A-Za-z0-9_$]*)/g) ]
+        .filter(match => scratchOwnedInstanceofAuthorities.includes(match[1]))
+        .map(match => Object.freeze({
+            path: sourcePath,
+            line: source.slice(0, match.index).split('\n').length,
+            authority: match[1],
+        }))))
+const closedBrandAuthority = Object.freeze({
+    authorities: scratchOwnedInstanceofAuthorities,
+    openInstanceofSites: openScratchOwnedInstanceofSites,
+    guards: Object.freeze({
+        BufferResource: current.buffer.includes('isBufferResource('),
+        DispatchCommand: current.command.includes('isDispatchCommand('),
+        DrawCommand: current.command.includes('isDrawCommand('),
+        LayoutCodec: current.layoutCodec.includes('isLayoutCodec('),
+        Program: current.program.includes('isProgram('),
+        QuerySetResource: current.querySet.includes('isQuerySetResource('),
+        SamplerResource: current.sampler.includes('isSamplerResource('),
+        ScratchDiagnosticError: currentScratchSource.includes('isScratchDiagnosticError('),
+        TextureResource: current.texture.includes('isTextureResource('),
+    }),
+    status: openScratchOwnedInstanceofSites.length === 0 && [
+        current.buffer.includes('isBufferResource('),
+        current.command.includes('isDispatchCommand('),
+        current.command.includes('isDrawCommand('),
+        current.layoutCodec.includes('isLayoutCodec('),
+        current.program.includes('isProgram('),
+        current.querySet.includes('isQuerySetResource('),
+        current.sampler.includes('isSamplerResource('),
+        currentScratchSource.includes('isScratchDiagnosticError('),
+        current.texture.includes('isTextureResource('),
+    ].every(Boolean) ? 'passed' : 'failed',
+})
 const goalStartProductionDeclarations = emitProductionDeclarationsAt(goalBaseline)
 const emittedProductionOutputs = emitCurrentProductionOutputs()
 const goalStartScratchDeclarations = scratchDeclarationTree(goalStartProductionDeclarations)
@@ -594,6 +640,11 @@ const referencedTestEvidence = referencedTestFiles.map(file => Object.freeze({
     status: fs.existsSync(`tests/${file}`) ? 'passed' : 'failed',
 }))
 const behaviorTestContracts = [
+    behaviorTestContract('tests/scratch-closed-brand-authority.test.js', [
+        'rejects a forged sampler after constructor Symbol.hasInstance replacement',
+        'rejects a forged texture before native copy encoding after constructor replacement',
+        'does not use open instanceof checks as Scratch-owned internal brands',
+    ]),
     behaviorTestContract('tests/scratch-surface.test.js', [
         'rejects transient Surface usage before native canvas configuration',
         'claims each canvas context exclusively until the owning Surface is disposed',
@@ -1061,6 +1112,22 @@ const documentationAudit = Object.freeze({
             'encoding',
             'module',
         ])),
+    closedBrandAuthority: [
+        finalDocs.resources,
+        finalDocs.resourcesZh,
+        finalDocs.commands,
+        finalDocs.commandsZh,
+        finalDocs.programs,
+        finalDocs.programsZh,
+        finalDocs.diagnostics,
+        finalDocs.diagnosticsZh,
+    ].every(source => hasAll(source, [
+        'module-private',
+        '`WeakSet`',
+        '`instanceof`',
+        '`Symbol.hasInstance`',
+        '`Object.create(',
+    ])) && closedBrandAuthority.status === 'passed',
     attachmentViewContracts: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
         hasAll(source, [
             'RENDER_ATTACHMENT',
@@ -1136,9 +1203,15 @@ const documentationAudit = Object.freeze({
         'focused acceptance passed 467/467',
         'complete suite reported 865 passing',
     ]),
+    thirtySeventhReviewAcceptanceRecorded: hasAll(finalDocs.finalAudit, [
+        'Clean thirty-seventh-review checkpoint acceptance (`3d5f4d7`)',
+        cleanThirtySeventhReviewCheckpoint,
+        'focused acceptance passed 472/472',
+        'complete suite reported 870 passing',
+    ]),
     currentAcceptanceCounts: hasAll(finalDocs.finalAudit, [
-        'executes exactly 472',
-        'complete suite to report exactly 870 passing',
+        'executes exactly 475',
+        'complete suite to report exactly 873 passing',
     ]),
     resourceStateParity: resourceStateParity.status === 'passed',
     programExamplesUseBufferRegions: [ finalDocs.programs, finalDocs.programsZh ]
@@ -1279,6 +1352,10 @@ assertParity(
     productionEmitParity.status === 'passed',
     `production emit parity failed: ${JSON.stringify(productionEmitParity.failures)}`
 )
+assertParity(
+    closedBrandAuthority.status === 'passed',
+    `closed brand authority failed: ${JSON.stringify(closedBrandAuthority)}`
+)
 assertParity(sourceFirst.status === 'passed', 'Scratch source-first boundary failed')
 assertParity(exampleAudit.status === 'passed', `example audit failed: ${exampleAudit.failures.join(', ')}`)
 assertParity(documentationStatus, `documentation audit failed: ${JSON.stringify(documentationAudit)}`)
@@ -1314,6 +1391,7 @@ const result = {
         publicMemberParity,
         productionEmitParity,
         sourceFirst,
+        closedBrandAuthority,
     },
     diagnostics: {
         goalStartCodeCount: baselineDiagnosticCodes.length,

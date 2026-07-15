@@ -32,6 +32,7 @@ type MutableQuerySetSlotFacts = {
 }
 
 const querySetSlotFacts = new WeakMap<QuerySetResource, MutableQuerySetSlotFacts>()
+const querySetResources = new WeakSet<QuerySetResource>()
 
 function slotFactsFor(querySet: QuerySetResource): MutableQuerySetSlotFacts {
 
@@ -124,6 +125,7 @@ export class QuerySetResource extends Resource {
         })
         this.#gpuQuerySet = gpuQuerySet
         registerResource(this)
+        querySetResources.add(this)
         Object.preventExtensions(this)
     }
 
@@ -184,6 +186,11 @@ export class QuerySetResource extends Resource {
 }
 
 Object.freeze(QuerySetResource.prototype)
+
+export function isQuerySetResource(value: unknown): value is QuerySetResource {
+
+    return typeof value === 'object' && value !== null && querySetResources.has(value as QuerySetResource)
+}
 
 export async function createQuerySetResource(
     runtime: ScratchRuntime,
