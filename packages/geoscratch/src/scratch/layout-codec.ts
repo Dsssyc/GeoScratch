@@ -153,6 +153,7 @@ const PRIMITIVE_DEFINITIONS: Record<LayoutPrimitiveType, PrimitiveDefinition> = 
 }
 
 const DEFAULT_USAGES: LayoutCodecUsage[] = [ 'storage', 'readback' ]
+const WGSL_U32_MAX = 0xffff_ffff
 const layoutCanonicalSignatures = new WeakMap<LayoutArtifact, Readonly<{
     abi: string
     schema: string
@@ -1098,19 +1099,21 @@ function requireSafeLayoutSize(
     actual: Record<string, unknown>
 ): number {
 
-    if (Number.isSafeInteger(result) && result >= 0) return result
+    if (Number.isSafeInteger(result) && result >= 0 && result <= WGSL_U32_MAX) return result
 
     throwUnsupportedFormat(subject, {
         expected: {
-            result: 'non-negative safe integer layout byte size',
+            result: 'non-negative safe integer layout byte size representable by WGSL u32',
             safeIntegerMax: Number.MAX_SAFE_INTEGER,
+            wgslU32Max: WGSL_U32_MAX,
         },
         actual: {
             ...actual,
             result,
             safeIntegerMax: Number.MAX_SAFE_INTEGER,
+            wgslU32Max: WGSL_U32_MAX,
         },
-        message: 'Layout byte-size arithmetic exceeds the JavaScript safe-integer domain.',
+        message: 'Layout byte-size arithmetic exceeds the JavaScript safe-integer or WGSL u32 domain.',
     })
 }
 

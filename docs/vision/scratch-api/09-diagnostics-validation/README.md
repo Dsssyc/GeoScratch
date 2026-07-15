@@ -249,7 +249,8 @@ Layout codec diagnostics cover layout lowering, CPU writer, upload byte ranges, 
 
 Unsafe array-size multiplication, field-end addition, or alignment rounding uses
 `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT`; `actual.reason` and `actual.operation` identify the
-failed arithmetic step, and no `LayoutArtifact` is published.
+failed arithmetic step. `actual.safeIntegerMax` and `actual.wgslU32Max` distinguish the
+JavaScript and generated-WGSL numeric bounds; no `LayoutArtifact` is published.
 
 Candidate codes:
 
@@ -408,9 +409,9 @@ Expected Draw/Dispatch `skip-command`, `skip-pass`, and successful `use-fallback
 
 Fallback readiness or dependency failures use the selected fallback as `subject`. `related` includes the requested command, attempted chain, pass, resources, and submission. Structured `actual` facts include step/pass IDs, requested command ID, attempted command IDs, a complete `attempts` array with every available missing-resource state/epoch fact, current command/resource state and epochs, plus validation mode. A selected fallback dependency that becomes unusable after construction uses `SCRATCH_COMMAND_FALLBACK_INVALID` and retains the underlying lifecycle diagnostic in `actual.cause`. Render attachment resource-conflict diagnostics generated for a selected fallback retain the same requested/attempted provenance.
 
-`ExternalImageUploadCommand` diagnostics use `commandKind: 'upload'` and `uploadKind: 'external-image'` in their structured command facts. `SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` covers deterministic descriptor, platform brand, live source-range, target, queue ownership, lifecycle, and queue-capability failures. Context-specific canvas dimensions are not exposed through a side-effect-free JavaScript query, so a synchronous native `OperationError` from that authoritative range check uses the same invalid code. Its `expected` and `actual` fields contain machine-readable validation facts rather than requiring message parsing.
+`ExternalImageUploadCommand` diagnostics use `commandKind: 'upload'` and `uploadKind: 'external-image'` in their structured command facts. `SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` covers deterministic descriptor, platform brand, live source-range, target, lifecycle, and queue-capability failures. Context-specific canvas dimensions are not exposed through a side-effect-free JavaScript query, so a synchronous native `OperationError` from that authoritative range check uses the same invalid code. Its `expected` and `actual` fields contain machine-readable validation facts rather than requiring message parsing.
 
-Direct buffer and texture uploads reject a foreign `GPUQueue` with
+All three immediate upload variants reject a foreign `GPUQueue` with
 `SCRATCH_COMMAND_WRONG_RUNTIME` and `actual.queueOwnedByRuntime: false` before any native
 queue call or content-epoch effect.
 

@@ -249,7 +249,8 @@ Layout codec diagnostics 覆盖 layout lowering、CPU writer、upload byte range
 
 不安全的 array-size multiplication、field-end addition 或 alignment rounding 使用
 `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT`；`actual.reason` 与 `actual.operation` 标识失败的
-arithmetic step，且不会发布 `LayoutArtifact`。
+arithmetic step。`actual.safeIntegerMax` 与 `actual.wgslU32Max` 区分 JavaScript 和
+generated-WGSL numeric bound；不会发布 `LayoutArtifact`。
 
 候选 codes:
 
@@ -408,9 +409,9 @@ type PassDiagnosticCode =
 
 Fallback readiness 或 dependency failure 以最终选中的 fallback 作为 `subject`。`related` 包含 requested command、attempted chain、pass、resources 与 submission。结构化 `actual` facts 包含 step/pass IDs、requested command ID、attempted command IDs、携带每个可用 missing-resource state/epoch fact 的完整 `attempts` 数组、当前 command/resource state 与 epochs，以及 validation mode。构造后变为不可用的 selected fallback dependency 使用 `SCRATCH_COMMAND_FALLBACK_INVALID`，并在 `actual.cause` 中保留底层 lifecycle diagnostic。针对 selected fallback 生成的 render attachment resource-conflict diagnostic 也保留相同的 requested/attempted provenance。
 
-`ExternalImageUploadCommand` diagnostic 在结构化 command facts 中使用 `commandKind: 'upload'` 与 `uploadKind: 'external-image'`。`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` 覆盖确定性的 descriptor、platform brand、live source-range、target、queue ownership、lifecycle 与 queue-capability failure。context-specific canvas dimensions 没有无副作用的 JavaScript query，因此原生权威 range check 同步抛出的 `OperationError` 也使用这个 invalid code。它的 `expected` 和 `actual` 字段携带 machine-readable validation facts，不要求解析 message。
+`ExternalImageUploadCommand` diagnostic 在结构化 command facts 中使用 `commandKind: 'upload'` 与 `uploadKind: 'external-image'`。`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` 覆盖确定性的 descriptor、platform brand、live source-range、target、lifecycle 与 queue-capability failure。context-specific canvas dimensions 没有无副作用的 JavaScript query，因此原生权威 range check 同步抛出的 `OperationError` 也使用这个 invalid code。它的 `expected` 和 `actual` 字段携带 machine-readable validation facts，不要求解析 message。
 
-Direct buffer 与 texture upload 会在任何原生 queue call 或 content-epoch effect 前，
+三种 immediate upload variant 都会在任何原生 queue call 或 content-epoch effect 前，
 以 `SCRATCH_COMMAND_WRONG_RUNTIME` 和 `actual.queueOwnedByRuntime: false` 拒绝 foreign
 `GPUQueue`。
 

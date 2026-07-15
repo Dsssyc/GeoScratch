@@ -586,11 +586,11 @@ describe('scratch external image upload', () => {
         const fixtureB = await createFixture()
         const command = createCommand(fixtureA)
 
-        expectDiagnostic(
+        const error = expectDiagnostic(
             () => command.execute(fixtureB.queue),
-            'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
-            'queue-owner'
+            'SCRATCH_COMMAND_WRONG_RUNTIME'
         )
+        expect(error.diagnostic.actual).to.deep.include({ queueOwnedByRuntime: false })
         expect(fixtureA.target.contentEpoch).to.equal(0)
         expect(fixtureB.calls.queueExternalImageCopies).to.have.length(0)
     })

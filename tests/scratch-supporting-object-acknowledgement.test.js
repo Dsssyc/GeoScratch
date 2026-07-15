@@ -167,6 +167,19 @@ describe('Scratch acknowledged supporting objects', () => {
                 expect(fixture.calls.samplers).to.have.length(before)
             }
         })
+
+        it('keeps the acknowledged native sampler identity immutable', async() => {
+
+            const fixture = await createFixture()
+            const sampler = await fixture.runtime.createSampler()
+            const other = await fixture.runtime.createSampler({ magFilter: 'linear' })
+            const acknowledgedNativeSampler = sampler.gpuSampler
+
+            expect(() => {
+                sampler.gpuSampler = other.gpuSampler
+            }).to.throw(TypeError)
+            expect(sampler.gpuSampler).to.equal(acknowledgedNativeSampler)
+        })
     })
 
     describe('QuerySetResource', () => {
@@ -248,6 +261,29 @@ describe('Scratch acknowledged supporting objects', () => {
             expect(fixture.runtime._resources.size).to.equal(0)
             expect(fixture.runtime.diagnostics.operations({ kind: 'query-set-allocation' })[0].status)
                 .to.equal('failed')
+        })
+
+        it('keeps acknowledged query facts and native allocation identity immutable', async() => {
+
+            const fixture = await createFixture()
+            const querySet = await fixture.runtime.createQuerySet({ type: 'occlusion', count: 1 })
+            const other = await fixture.runtime.createQuerySet({ type: 'occlusion', count: 2 })
+            const acknowledgedNativeQuerySet = querySet.gpuQuerySet
+
+            expect(() => { querySet.type = 'timestamp' }).to.throw(TypeError)
+            expect(() => { querySet.count = 4096 }).to.throw(TypeError)
+            expect(() => { querySet.gpuQuerySet = other.gpuQuerySet }).to.throw(TypeError)
+            expect(querySet.type).to.equal('occlusion')
+            expect(querySet.count).to.equal(1)
+            expect(querySet.slots()).to.deep.equal([ { index: 0, state: 'empty', contentEpoch: 0 } ])
+            expect(querySet.gpuQuerySet).to.equal(acknowledgedNativeQuerySet)
+
+            querySet.dispose()
+            expect(acknowledgedNativeQuerySet.destroyed).to.equal(true)
+            expect(other.gpuQuerySet.destroyed).to.equal(false)
+            expect(fixture.calls.querySetDestroys).to.deep.equal([
+                { querySet: acknowledgedNativeQuerySet },
+            ])
         })
     })
 

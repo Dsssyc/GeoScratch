@@ -136,7 +136,8 @@ submission timeline can acquire effects.
 
 All three immediate upload variants execute only on their owning
 `ScratchRuntime.queue`. A foreign queue is rejected with
-`SCRATCH_COMMAND_WRONG_RUNTIME` before `writeBuffer()`, `writeTexture()`, or any logical
+`SCRATCH_COMMAND_WRONG_RUNTIME` and `actual.queueOwnedByRuntime: false` before
+`writeBuffer()`, `writeTexture()`, `copyExternalImageToTexture()`, or any logical
 content-epoch effect. This preserves WebGPU's same-device object-validity rule even for
 direct command execution outside `SubmissionBuilder`.
 

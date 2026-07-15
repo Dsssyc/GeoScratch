@@ -103,7 +103,8 @@ Short hashes are bounded identifiers, not collision-proof proof. Scratch also re
 
 Layout lowering publishes an artifact only when every array count, byte-size product,
 field offset/end, and final alignment round-up remains a non-negative
-JavaScript safe integer. Overflow fails closed with
+JavaScript safe integer representable by the generated WGSL `u32` constants, whose
+maximum is `0xffffffff`. Overflow in either domain fails closed with
 `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT` and structured arithmetic facts; Scratch never
 publishes an internally self-invalid `LayoutArtifact`.
 
@@ -151,7 +152,7 @@ const sampler = await runtime.createSampler({
 })
 ```
 
-Scratch validates the complete native descriptor, issues one `createSampler()` candidate under validation/internal/OOM scopes, and registers it only after acknowledgement and lifecycle rechecks. SamplerResource has allocation lifecycle and disposal, but no scalar content state, content epoch, readiness, or footprint.
+Scratch validates the complete native descriptor, issues one `createSampler()` candidate under validation/internal/OOM scopes, and registers it only after acknowledgement and lifecycle rechecks. The acknowledged `gpuSampler` identity is private-backed and immutable: callers can observe it but cannot replace the native handle used by binding. SamplerResource has allocation lifecycle and disposal, but no scalar content state, content epoch, readiness, or footprint.
 
 ## QuerySetResource
 
@@ -164,7 +165,7 @@ const queries = await runtime.createQuerySet({
 })
 ```
 
-Core query types are `timestamp` and `occlusion`. Timestamp requires the native feature; occlusion does not fabricate one. `queries.slot(index)` and `queries.slots()` return frozen indexed snapshots containing `state` and `contentEpoch`. QuerySetResource has no scalar content epoch or ambiguous whole-object readiness. Pipeline statistics remain outside core WebGPU and outside Scratch core.
+Core query types are `timestamp` and `occlusion`. Timestamp requires the native feature; occlusion does not fabricate one. The acknowledged `type`, `count`, and `gpuQuerySet` identity are private-backed immutable facts, so slot publication, native resolve, and disposal always refer to the same allocation. `queries.slot(index)` and `queries.slots()` return frozen indexed snapshots containing `state` and `contentEpoch`. QuerySetResource has no scalar content epoch or ambiguous whole-object readiness. Pipeline statistics remain outside core WebGPU and outside Scratch core.
 
 ## Readiness
 

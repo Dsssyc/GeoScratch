@@ -12,7 +12,7 @@ const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 
 describe('scratch executable command lifecycle', () => {
 
-    it('keeps disposal irreversible for every mutable legacy command family', async() => {
+    it('keeps construction facts and disposal immutable for every legacy command family', async() => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
@@ -37,6 +37,12 @@ describe('scratch executable command lifecycle', () => {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_DST,
         })
+        const textureUpload = runtime.createTextureUploadCommand({
+            target: texture,
+            data: new Uint8Array(4),
+            layout: { bytesPerRow: 4, rowsPerImage: 1 },
+            size: { width: 1, height: 1 },
+        })
         const commands = [
             runtime.createUploadCommand({
                 target: source.region(),
@@ -54,15 +60,16 @@ describe('scratch executable command lifecycle', () => {
                 destination: resolveTarget.region(),
                 whenMissing: 'throw',
             }),
-            runtime.createTextureUploadCommand({
-                target: texture,
-                data: new Uint8Array(4),
-                layout: { bytesPerRow: 4, rowsPerImage: 1 },
-                size: { width: 1, height: 1 },
-            }),
+            textureUpload,
         ]
 
         for (const command of commands) {
+            for (const key of Object.keys(command)) {
+                expect(() => {
+                    command[key] = command[key]
+                }, `${command.commandKind}.${key}`).to.throw(TypeError)
+            }
+
             command.dispose()
             expect(command.isDisposed).to.equal(true)
             expect(() => { command.isDisposed = false }).to.throw(TypeError)
@@ -81,5 +88,9 @@ describe('scratch executable command lifecycle', () => {
                 })
             }
         }
+
+        expect(Object.isFrozen(textureUpload.layout)).to.equal(true)
+        expect(Object.isFrozen(textureUpload.origin)).to.equal(true)
+        expect(Object.isFrozen(textureUpload.size)).to.equal(true)
     })
 })

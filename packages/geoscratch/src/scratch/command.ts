@@ -794,12 +794,12 @@ export class DrawCommand {
 }
 
 export interface BeginOcclusionQueryCommand {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    commandKind: 'begin-occlusion-query'
-    querySet: QuerySetResource
-    index: number
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'begin-occlusion-query'
+    readonly querySet: QuerySetResource
+    readonly index: number
 }
 
 export class BeginOcclusionQueryCommand {
@@ -831,12 +831,14 @@ export class BeginOcclusionQueryCommand {
             })
         }
 
-        this.runtime = runtime
-        this.id = `scratch-command-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.commandKind = 'begin-occlusion-query'
-        this.querySet = querySet
-        this.index = normalizeOcclusionQueryIndex(runtime, querySet, descriptor.index)
+        const mutable = this as Mutable<BeginOcclusionQueryCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) mutable.label = descriptor.label
+        mutable.commandKind = 'begin-occlusion-query'
+        mutable.querySet = querySet
+        mutable.index = normalizeOcclusionQueryIndex(runtime, querySet, descriptor.index)
+        lockCommandProperties(this, [ 'runtime', 'id', 'label', 'commandKind', 'querySet', 'index' ])
         Object.preventExtensions(this)
     }
 
@@ -942,10 +944,10 @@ export class BeginOcclusionQueryCommand {
 }
 
 export interface EndOcclusionQueryCommand {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    commandKind: 'end-occlusion-query'
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'end-occlusion-query'
 }
 
 export class EndOcclusionQueryCommand {
@@ -956,10 +958,12 @@ export class EndOcclusionQueryCommand {
 
         runtime.assertActive()
 
-        this.runtime = runtime
-        this.id = `scratch-command-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.commandKind = 'end-occlusion-query'
+        const mutable = this as Mutable<EndOcclusionQueryCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) mutable.label = descriptor.label
+        mutable.commandKind = 'end-occlusion-query'
+        lockCommandProperties(this, [ 'runtime', 'id', 'label', 'commandKind' ])
         Object.preventExtensions(this)
     }
 
@@ -1358,16 +1362,16 @@ function lockExternalImageUploadCommandContract(command: ExternalImageUploadComm
 }
 
 export interface UploadCommand {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    commandKind: 'upload'
-    uploadKind: 'buffer'
-    target: BufferRegion
-    data: ArrayBuffer | ArrayBufferView
-    layout?: LayoutArtifact
-    dataOffset: number
-    byteLength: number
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'upload'
+    readonly uploadKind: 'buffer'
+    readonly target: BufferRegion
+    readonly data: ArrayBuffer | ArrayBufferView
+    readonly layout?: LayoutArtifact
+    readonly dataOffset: number
+    readonly byteLength: number
 }
 
 export class UploadCommand {
@@ -1393,20 +1397,25 @@ export class UploadCommand {
         validateBufferUploadUsage(runtime, target)
         const uploadSource = normalizeUploadSource(runtime, descriptor)
 
-        this.runtime = runtime
-        this.id = `scratch-command-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.commandKind = 'upload'
-        this.uploadKind = 'buffer'
-        this.target = target
-        this.data = uploadSource.data
+        const mutable = this as Mutable<UploadCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) mutable.label = descriptor.label
+        mutable.commandKind = 'upload'
+        mutable.uploadKind = 'buffer'
+        mutable.target = target
+        mutable.data = uploadSource.data
         const layout = normalizeUploadLayout(runtime, uploadSource.layout, descriptor)
-        if (layout !== undefined) this.layout = layout
-        this.dataOffset = normalizeUploadOffset(runtime, descriptor.dataOffset ?? uploadSource.dataOffset)
+        if (layout !== undefined) mutable.layout = layout
+        mutable.dataOffset = normalizeUploadOffset(runtime, descriptor.dataOffset ?? uploadSource.dataOffset)
         const sourceByteLength = descriptor.dataOffset === undefined ? uploadSource.byteLength : undefined
-        this.byteLength = normalizeUploadByteLength(runtime, this.data, this.dataOffset, descriptor, sourceByteLength)
+        mutable.byteLength = normalizeUploadByteLength(runtime, this.data, this.dataOffset, descriptor, sourceByteLength)
 
         validateUploadRange(this)
+        lockCommandProperties(this, [
+            'runtime', 'id', 'label', 'commandKind', 'uploadKind', 'target', 'data',
+            'layout', 'dataOffset', 'byteLength',
+        ])
         Object.preventExtensions(this)
     }
 
@@ -1479,23 +1488,23 @@ export class UploadCommand {
 }
 
 export interface CopyCommand {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    commandKind: 'copy'
-    copyKind: 'buffer-to-buffer' | 'texture-to-texture' | 'buffer-to-texture' | 'texture-to-buffer'
-    source: CopyCommandSourceDescriptor
-    sourceLayout?: Required<TexelCopyBufferLayout>
-    target: BufferRegion | TextureResource
-    targetLayout?: Required<TexelCopyBufferLayout>
-    sourceOrigin?: { x: number, y: number, z: number }
-    targetOrigin?: { x: number, y: number, z: number }
-    sourceMipLevel?: number
-    targetMipLevel?: number
-    sourceAspect?: GPUTextureAspect
-    targetAspect?: GPUTextureAspect
-    size?: { width: number, height: number, depthOrArrayLayers: number }
-    whenMissing: 'throw'
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'copy'
+    readonly copyKind: 'buffer-to-buffer' | 'texture-to-texture' | 'buffer-to-texture' | 'texture-to-buffer'
+    readonly source: CopyCommandSourceDescriptor
+    readonly sourceLayout?: Readonly<Required<TexelCopyBufferLayout>>
+    readonly target: BufferRegion | TextureResource
+    readonly targetLayout?: Readonly<Required<TexelCopyBufferLayout>>
+    readonly sourceOrigin?: Readonly<{ x: number, y: number, z: number }>
+    readonly targetOrigin?: Readonly<{ x: number, y: number, z: number }>
+    readonly sourceMipLevel?: number
+    readonly targetMipLevel?: number
+    readonly sourceAspect?: GPUTextureAspect
+    readonly targetAspect?: GPUTextureAspect
+    readonly size?: Readonly<{ width: number, height: number, depthOrArrayLayers: number }>
+    readonly whenMissing: 'throw'
 }
 
 export class CopyCommand {
@@ -1510,20 +1519,21 @@ export class CopyCommand {
         const sourceResource = copySourceResource(source)
         sourceResource.assertRuntime(runtime)
 
-        this.runtime = runtime
-        this.id = `scratch-command-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.commandKind = 'copy'
-        this.source = source
-        this.target = descriptor.target
-        this.whenMissing = normalizeCopyReadinessPolicy(this, descriptor.whenMissing)
+        const mutable = this as Mutable<CopyCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) mutable.label = descriptor.label
+        mutable.commandKind = 'copy'
+        mutable.source = source
+        mutable.target = descriptor.target
+        mutable.whenMissing = normalizeCopyReadinessPolicy(this, descriptor.whenMissing)
 
         if (isBufferRegionSource(source) && isBufferRegion(descriptor.target)) {
             const bufferDescriptor = descriptor as BufferToBufferCopyCommandDescriptor
             const target = normalizeBufferCopyTarget(runtime, bufferDescriptor, source.region)
 
-            this.copyKind = 'buffer-to-buffer'
-            this.target = target
+            mutable.copyKind = 'buffer-to-buffer'
+            mutable.target = target
             validateBufferCopyUsage(runtime, source.region.buffer, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
             validateBufferCopyUsage(runtime, target.buffer, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
             validateBufferCopyRange(this)
@@ -1531,15 +1541,15 @@ export class CopyCommand {
             const textureDescriptor = descriptor as TextureToTextureCopyCommandDescriptor
             const target = normalizeTextureCopyTarget(runtime, textureDescriptor, source.resource)
 
-            this.copyKind = 'texture-to-texture'
-            this.target = target
-            this.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.sourceOrigin, 'sourceOrigin')
-            this.targetOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.targetOrigin, 'targetOrigin')
-            this.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, source.resource, textureDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
-            this.targetMipLevel = normalizeTextureCopyMipLevel(runtime, target, textureDescriptor.targetMipLevel ?? 0, 'targetMipLevel')
-            this.sourceAspect = normalizeTextureCopyAspect(runtime, textureDescriptor.sourceAspect ?? 'all', 'sourceAspect')
-            this.targetAspect = normalizeTextureCopyAspect(runtime, textureDescriptor.targetAspect ?? 'all', 'targetAspect')
-            this.size = normalizeTextureCopySize(runtime, source.resource, target, textureDescriptor.size, this.sourceOrigin, this.targetOrigin)
+            mutable.copyKind = 'texture-to-texture'
+            mutable.target = target
+            mutable.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.sourceOrigin, 'sourceOrigin')
+            mutable.targetOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.targetOrigin, 'targetOrigin')
+            mutable.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, source.resource, textureDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
+            mutable.targetMipLevel = normalizeTextureCopyMipLevel(runtime, target, textureDescriptor.targetMipLevel ?? 0, 'targetMipLevel')
+            mutable.sourceAspect = normalizeTextureCopyAspect(runtime, textureDescriptor.sourceAspect ?? 'all', 'sourceAspect')
+            mutable.targetAspect = normalizeTextureCopyAspect(runtime, textureDescriptor.targetAspect ?? 'all', 'targetAspect')
+            mutable.size = normalizeTextureCopySize(runtime, source.resource, target, textureDescriptor.size, this.sourceOrigin, this.targetOrigin)
             validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
             validateTextureCopyUsage(runtime, target, GPU_TEXTURE_USAGE_COPY_DST, 'target', 'GPUTextureUsage.COPY_DST')
             validateTextureCopyRange(this)
@@ -1547,20 +1557,22 @@ export class CopyCommand {
             const bufferToTextureDescriptor = descriptor as BufferToTextureCopyCommandDescriptor
             const target = normalizeBufferToTextureCopyTarget(runtime, bufferToTextureDescriptor, source.region.buffer)
 
-            this.copyKind = 'buffer-to-texture'
-            this.target = target
-            this.targetOrigin = normalizeTextureCopyOrigin(runtime, bufferToTextureDescriptor.targetOrigin, 'targetOrigin')
-            this.targetMipLevel = normalizeTextureCopyMipLevel(runtime, target, bufferToTextureDescriptor.targetMipLevel ?? 0, 'targetMipLevel')
-            this.targetAspect = normalizeTextureCopyAspect(runtime, bufferToTextureDescriptor.targetAspect ?? 'all', 'targetAspect')
-            this.size = normalizeTextureCopySize(runtime, source.region.buffer, target, bufferToTextureDescriptor.size, undefined, this.targetOrigin)
-            this.sourceLayout = normalizeTexelCopyBufferLayout(
+            mutable.copyKind = 'buffer-to-texture'
+            mutable.target = target
+            mutable.targetOrigin = normalizeTextureCopyOrigin(runtime, bufferToTextureDescriptor.targetOrigin, 'targetOrigin')
+            mutable.targetMipLevel = normalizeTextureCopyMipLevel(runtime, target, bufferToTextureDescriptor.targetMipLevel ?? 0, 'targetMipLevel')
+            const targetAspect = normalizeTextureCopyAspect(runtime, bufferToTextureDescriptor.targetAspect ?? 'all', 'targetAspect')
+            mutable.targetAspect = targetAspect
+            const size = normalizeTextureCopySize(runtime, source.region.buffer, target, bufferToTextureDescriptor.size, undefined, this.targetOrigin)
+            mutable.size = size
+            mutable.sourceLayout = normalizeTexelCopyBufferLayout(
                 runtime,
                 source.region,
                 target,
-                this.targetAspect,
+                targetAspect,
                 'destination',
                 bufferToTextureDescriptor.sourceLayout,
-                this.size,
+                size,
                 'sourceLayout'
             )
             validateBufferCopyUsage(runtime, source.region.buffer, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
@@ -1570,20 +1582,22 @@ export class CopyCommand {
             const textureToBufferDescriptor = descriptor as TextureToBufferCopyCommandDescriptor
             const target = normalizeTextureToBufferCopyTarget(runtime, textureToBufferDescriptor, source.resource)
 
-            this.copyKind = 'texture-to-buffer'
-            this.target = target
-            this.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureToBufferDescriptor.sourceOrigin, 'sourceOrigin')
-            this.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, source.resource, textureToBufferDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
-            this.sourceAspect = normalizeTextureCopyAspect(runtime, textureToBufferDescriptor.sourceAspect ?? 'all', 'sourceAspect')
-            this.size = normalizeTextureCopySize(runtime, source.resource, target.buffer, textureToBufferDescriptor.size, this.sourceOrigin, undefined)
-            this.targetLayout = normalizeTexelCopyBufferLayout(
+            mutable.copyKind = 'texture-to-buffer'
+            mutable.target = target
+            mutable.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureToBufferDescriptor.sourceOrigin, 'sourceOrigin')
+            mutable.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, source.resource, textureToBufferDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
+            const sourceAspect = normalizeTextureCopyAspect(runtime, textureToBufferDescriptor.sourceAspect ?? 'all', 'sourceAspect')
+            mutable.sourceAspect = sourceAspect
+            const size = normalizeTextureCopySize(runtime, source.resource, target.buffer, textureToBufferDescriptor.size, this.sourceOrigin, undefined)
+            mutable.size = size
+            mutable.targetLayout = normalizeTexelCopyBufferLayout(
                 runtime,
                 target,
                 source.resource,
-                this.sourceAspect,
+                sourceAspect,
                 'source',
                 textureToBufferDescriptor.targetLayout,
-                this.size,
+                size,
                 'targetLayout'
             )
             validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
@@ -1597,6 +1611,17 @@ export class CopyCommand {
                 reason: 'target',
             })
         }
+        for (const value of [
+            this.source, this.sourceLayout, this.targetLayout, this.sourceOrigin,
+            this.targetOrigin, this.size,
+        ]) {
+            if (value !== undefined) Object.freeze(value)
+        }
+        lockCommandProperties(this, [
+            'runtime', 'id', 'label', 'commandKind', 'copyKind', 'source', 'sourceLayout',
+            'target', 'targetLayout', 'sourceOrigin', 'targetOrigin', 'sourceMipLevel',
+            'targetMipLevel', 'sourceAspect', 'targetAspect', 'size', 'whenMissing',
+        ])
         Object.preventExtensions(this)
     }
 
@@ -2495,12 +2520,12 @@ function readbackCommandSubject(
 }
 
 export interface ResolveQuerySetCommand {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    commandKind: 'resolve-query-set'
-    destination: BufferRegion
-    whenMissing: 'throw'
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'resolve-query-set'
+    readonly destination: BufferRegion
+    readonly whenMissing: 'throw'
 }
 
 export class ResolveQuerySetCommand {
@@ -2535,15 +2560,19 @@ export class ResolveQuerySetCommand {
         validateResolveDestinationUsage(runtime, destination.buffer)
         validateResolveReadinessPolicy(runtime, normalizedDescriptor.whenMissing, source, destination)
 
-        this.runtime = runtime
-        this.id = `scratch-command-${UUID()}`
-        if (normalizedDescriptor.label !== undefined) this.label = normalizedDescriptor.label
-        this.commandKind = 'resolve-query-set'
+        const mutable = this as Mutable<ResolveQuerySetCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (normalizedDescriptor.label !== undefined) mutable.label = normalizedDescriptor.label
+        mutable.commandKind = 'resolve-query-set'
         this.#source = source
-        this.destination = destination
-        this.whenMissing = normalizedDescriptor.whenMissing
+        mutable.destination = destination
+        mutable.whenMissing = normalizedDescriptor.whenMissing
 
         validateResolveQuerySetRange(this)
+        lockCommandProperties(this, [
+            'runtime', 'id', 'label', 'commandKind', 'destination', 'whenMissing',
+        ])
         Object.preventExtensions(this)
     }
 
@@ -2658,17 +2687,17 @@ export class ResolveQuerySetCommand {
 }
 
 export interface TextureUploadCommand {
-    runtime: ScratchRuntime
-    id: string
-    label?: string
-    commandKind: 'upload'
-    uploadKind: 'texture'
-    target: TextureResource
-    data: ArrayBuffer | ArrayBufferView
-    layout: Required<TextureUploadLayout>
-    origin: { x: number, y: number, z: number }
-    size: { width: number, height: number, depthOrArrayLayers: number }
-    mipLevel: number
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'upload'
+    readonly uploadKind: 'texture'
+    readonly target: TextureResource
+    readonly data: ArrayBuffer | ArrayBufferView
+    readonly layout: Readonly<Required<TextureUploadLayout>>
+    readonly origin: Readonly<{ x: number, y: number, z: number }>
+    readonly size: Readonly<{ width: number, height: number, depthOrArrayLayers: number }>
+    readonly mipLevel: number
 }
 
 export class TextureUploadCommand {
@@ -2706,19 +2735,27 @@ export class TextureUploadCommand {
             })
         }
 
-        this.runtime = runtime
-        this.id = `scratch-command-${UUID()}`
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.commandKind = 'upload'
-        this.uploadKind = 'texture'
-        this.target = target
-        this.data = descriptor.data
-        this.origin = normalizeTextureUploadOrigin(runtime, descriptor.origin)
-        this.mipLevel = normalizeTextureUploadMipLevel(runtime, target, descriptor.mipLevel ?? 0)
-        this.size = normalizeTextureUploadSize(runtime, target, descriptor.size, this.origin)
-        this.layout = normalizeTextureUploadLayout(runtime, target, descriptor.layout, this.size)
+        const mutable = this as Mutable<TextureUploadCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) mutable.label = descriptor.label
+        mutable.commandKind = 'upload'
+        mutable.uploadKind = 'texture'
+        mutable.target = target
+        mutable.data = descriptor.data
+        mutable.origin = normalizeTextureUploadOrigin(runtime, descriptor.origin)
+        mutable.mipLevel = normalizeTextureUploadMipLevel(runtime, target, descriptor.mipLevel ?? 0)
+        mutable.size = normalizeTextureUploadSize(runtime, target, descriptor.size, this.origin)
+        mutable.layout = normalizeTextureUploadLayout(runtime, target, descriptor.layout, this.size)
 
         validateTextureUploadRange(this)
+        Object.freeze(this.layout)
+        Object.freeze(this.origin)
+        Object.freeze(this.size)
+        lockCommandProperties(this, [
+            'runtime', 'id', 'label', 'commandKind', 'uploadKind', 'target', 'data',
+            'layout', 'origin', 'size', 'mipLevel',
+        ])
         Object.preventExtensions(this)
     }
 
@@ -2973,7 +3010,7 @@ export function validateUploadCommandQueueAction(
 }
 
 function validateUploadCommandQueueOwner(
-    command: UploadCommand | TextureUploadCommand,
+    command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand,
     queue: GPUQueue
 ): void {
 
@@ -6042,15 +6079,7 @@ function validateExternalImageUploadQueueAction(
     queue: GPUQueue
 ): void {
 
-    if (queue !== command.runtime.queue) {
-        throwExternalImageUploadInvalid({
-            command,
-            runtime: command.runtime,
-            target: command.target,
-            source: command.source,
-            reason: 'queue-owner',
-        })
-    }
+    validateUploadCommandQueueOwner(command, queue)
 
     if (typeof queue.copyExternalImageToTexture !== 'function') {
         throwExternalImageUploadInvalid({

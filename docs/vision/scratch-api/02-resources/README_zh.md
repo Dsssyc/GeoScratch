@@ -101,8 +101,9 @@ const particleLayout = codec.artifact
 短 hash 是有界 identifier，不是无碰撞证明。Scratch 还会保留并比较不可变 canonical ABI/schema signature。Typed Program requirement 默认要求 exact schema compatibility；native binding 另行校验 ABI、usage、range 与 alignment。ABI-compatible schema reinterpretation 绝不会自动发生。
 
 只有当每个 array count、byte-size product、field offset/end 与最终 alignment round-up
-都保持为非负 JavaScript safe integer 时，layout lowering 才会发布 artifact。overflow
-会以 `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT` 和结构化 arithmetic facts fail closed；
+都保持为非负 JavaScript safe integer，并可由生成的 WGSL `u32` constant 表达时，
+layout lowering 才会发布 artifact；该域的最大值为 `0xffffffff`。任一 domain 的
+overflow 都会以 `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT` 和结构化 arithmetic facts fail closed；
 Scratch 绝不会发布内部自相矛盾的 `LayoutArtifact`。
 
 ## TextureResource 与 TextureViewSpec
@@ -149,7 +150,7 @@ const sampler = await runtime.createSampler({
 })
 ```
 
-Scratch 校验完整 native descriptor，在 validation/internal/OOM scope 内 issue 一次 `createSampler()` candidate，并只在 acknowledgement 与 lifecycle 复核后注册。SamplerResource 有 allocation lifecycle 与 disposal，但没有 scalar content state、content epoch、readiness 或 footprint。
+Scratch 校验完整 native descriptor，在 validation/internal/OOM scope 内 issue 一次 `createSampler()` candidate，并只在 acknowledgement 与 lifecycle 复核后注册。已确认的 `gpuSampler` identity 由 private state 支撑且 immutable：调用方可以观察，但不能替换 binding 实际使用的 native handle。SamplerResource 有 allocation lifecycle 与 disposal，但没有 scalar content state、content epoch、readiness 或 footprint。
 
 ## QuerySetResource
 
@@ -162,7 +163,7 @@ const queries = await runtime.createQuerySet({
 })
 ```
 
-核心 query type 是 `timestamp` 与 `occlusion`。Timestamp 要求 native feature；occlusion 不虚构 feature。`queries.slot(index)` 与 `queries.slots()` 返回包含 `state` 和 `contentEpoch` 的 frozen indexed snapshot。QuerySetResource 没有 scalar content epoch 或含糊的 whole-object readiness。Pipeline statistics 不属于 core WebGPU，也不属于 Scratch core。
+核心 query type 是 `timestamp` 与 `occlusion`。Timestamp 要求 native feature；occlusion 不虚构 feature。已确认的 `type`、`count` 与 `gpuQuerySet` identity 是由 private state 支撑的 immutable facts，因此 slot publication、native resolve 与 disposal 始终指向同一个 allocation。`queries.slot(index)` 与 `queries.slots()` 返回包含 `state` 和 `contentEpoch` 的 frozen indexed snapshot。QuerySetResource 没有 scalar content epoch 或含糊的 whole-object readiness。Pipeline statistics 不属于 core WebGPU，也不属于 Scratch core。
 
 ## Readiness
 

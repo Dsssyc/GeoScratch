@@ -132,8 +132,9 @@ Buffer upload path 会降低到 `GPUQueue.writeBuffer()`。其 target
 会在直接 queue call 或 submission timeline 获得任何 effect 前校验这条原生规则。
 
 三种 immediate upload variant 都只能在其所属的 `ScratchRuntime.queue` 上执行。
-foreign queue 会在 `writeBuffer()`、`writeTexture()` 或任何逻辑 content-epoch effect
-前以 `SCRATCH_COMMAND_WRONG_RUNTIME` 被拒绝。这样即使 command 脱离
+foreign queue 会在 `writeBuffer()`、`writeTexture()`、`copyExternalImageToTexture()`
+或任何逻辑 content-epoch effect 前以 `SCRATCH_COMMAND_WRONG_RUNTIME` 和
+`actual.queueOwnedByRuntime: false` 被拒绝。这样即使 command 脱离
 `SubmissionBuilder` 直接执行，也仍保留 WebGPU 的 same-device object-validity rule。
 
 ### Queue-Side Upload 顺序

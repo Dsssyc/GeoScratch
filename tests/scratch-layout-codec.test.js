@@ -231,10 +231,26 @@ describe('scratch LayoutCodec', () => {
         expect(wgsl).to.include('fn ParticleLayout_readIds(value: Particle) -> array<u32, 3> {')
     })
 
-    it('rejects unsafe layout multiplication, addition, and alignment rounding', () => {
+    it('accepts the WGSL u32 boundary and rejects unsafe layout-size arithmetic', () => {
 
-        const largestAlignedArrayCount = Math.floor(Number.MAX_SAFE_INTEGER / 16)
+        const largestAlignedArrayCount = Math.floor(0xffff_ffff / 16)
+        const largestU32Array = layoutCodec({
+            name: 'LargestU32Layout',
+            fields: [ { name: 'values', type: { element: 'u32', count: 0x3fff_ffff } } ],
+        })
+        expect(largestU32Array.artifact.byteLength).to.equal(0xffff_fffc)
+        expect(largestU32Array.wgslAccessors())
+            .to.include('const LargestU32Layout_BYTE_LENGTH: u32 = 4294967292u;')
+
         const cases = [
+            {
+                spec: {
+                    name: 'BeyondWgslU32',
+                    fields: [ { name: 'values', type: { element: 'u32', count: 0x4000_0000 } } ],
+                },
+                reason: 'array-size',
+                wgslU32Overflow: true,
+            },
             {
                 spec: {
                     name: 'UnsafeArrayProduct',
@@ -264,7 +280,7 @@ describe('scratch LayoutCodec', () => {
             },
         ]
 
-        for (const { spec, reason } of cases) {
+        for (const { spec, reason, wgslU32Overflow = false } of cases) {
             try {
                 layoutCodec(spec)
                 throw new Error(`expected ${reason} overflow to fail`)
@@ -279,6 +295,12 @@ describe('scratch LayoutCodec', () => {
                     reason,
                     safeIntegerMax: Number.MAX_SAFE_INTEGER,
                 })
+                if (wgslU32Overflow) {
+                    expect(error.diagnostic.actual).to.deep.include({
+                        result: 0x1_0000_0000,
+                        wgslU32Max: 0xffff_ffff,
+                    })
+                }
             }
         }
     })

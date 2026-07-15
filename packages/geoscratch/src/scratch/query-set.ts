@@ -93,9 +93,9 @@ export type QuerySetResourceDescriptor = {
 
 export class QuerySetResource extends Resource {
 
-    readonly type: QuerySetType
-    readonly count: number
-    readonly gpuQuerySet: GPUQuerySet
+    readonly #type: QuerySetType
+    readonly #count: number
+    readonly #gpuQuerySet: GPUQuerySet
 
     private constructor(
         token: symbol,
@@ -116,15 +116,30 @@ export class QuerySetResource extends Resource {
             ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
         })
 
-        this.type = descriptor.type
-        this.count = descriptor.count
+        this.#type = descriptor.type
+        this.#count = descriptor.count
         querySetSlotFacts.set(this, {
-            states: Array.from({ length: this.count }, () => 'empty'),
-            contentEpochs: Array.from({ length: this.count }, () => 0),
+            states: Array.from({ length: this.#count }, () => 'empty'),
+            contentEpochs: Array.from({ length: this.#count }, () => 0),
         })
-        this.gpuQuerySet = gpuQuerySet
+        this.#gpuQuerySet = gpuQuerySet
         registerResource(this)
         Object.preventExtensions(this)
+    }
+
+    get type(): QuerySetType {
+
+        return this.#type
+    }
+
+    get count(): number {
+
+        return this.#count
+    }
+
+    get gpuQuerySet(): GPUQuerySet {
+
+        return this.#gpuQuerySet
     }
 
     get subject(): DiagnosticSubject {
@@ -159,8 +174,8 @@ export class QuerySetResource extends Resource {
 
         if (this.isDisposed) return
 
-        if (this.gpuQuerySet && typeof this.gpuQuerySet.destroy === 'function') {
-            this.gpuQuerySet.destroy()
+        if (this.#gpuQuerySet && typeof this.#gpuQuerySet.destroy === 'function') {
+            this.#gpuQuerySet.destroy()
         }
 
         super.dispose()

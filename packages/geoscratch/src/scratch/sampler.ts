@@ -54,7 +54,7 @@ type NormalizedSamplerResourceDescriptor = Readonly<{
 
 export class SamplerResource extends Resource {
 
-    readonly gpuSampler: GPUSampler
+    readonly #gpuSampler: GPUSampler
 
     private constructor(
         token: symbol,
@@ -75,9 +75,14 @@ export class SamplerResource extends Resource {
             ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
         })
 
-        this.gpuSampler = gpuSampler
+        this.#gpuSampler = gpuSampler
         registerResource(this)
         Object.preventExtensions(this)
+    }
+
+    get gpuSampler(): GPUSampler {
+
+        return this.#gpuSampler
     }
 }
 

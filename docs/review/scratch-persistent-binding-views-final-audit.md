@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-thirty-fourth-review fixes pending acceptance
+Status: Post-thirty-fifth-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -11,7 +11,7 @@ Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 - Audit target: `socu/scratch-persistent-binding-views-v1`
 - Structural audit: `node tests/audits/scratch-persistent-binding-views-final-parity.mjs`
 - Final acceptance: `SCRATCH_FINAL_AUDIT=1 node tests/audits/scratch-persistent-binding-views-final-parity.mjs`
-- Native authority: [WebGPU resource binding](https://gpuweb.github.io/gpuweb/#resource-binding), [texture creation](https://gpuweb.github.io/gpuweb/#texture-creation), [texture views](https://gpuweb.github.io/gpuweb/#texture-view-creation), [canvas configuration](https://gpuweb.github.io/gpuweb/#canvas-configuration), [copies](https://gpuweb.github.io/gpuweb/#copies), [query sets](https://gpuweb.github.io/gpuweb/#query-sets), [timestamp-write validation](https://gpuweb.github.io/gpuweb/#abstract-opdef-validate-timestampwrites), and [Web IDL integer conversion](https://webidl.spec.whatwg.org/#es-integer-types)
+- Native authority: [WebGPU resource binding](https://gpuweb.github.io/gpuweb/#resource-binding), [texture creation](https://gpuweb.github.io/gpuweb/#texture-creation), [texture views](https://gpuweb.github.io/gpuweb/#texture-view-creation), [canvas configuration](https://gpuweb.github.io/gpuweb/#canvas-configuration), [copies](https://gpuweb.github.io/gpuweb/#copies), [query sets](https://gpuweb.github.io/gpuweb/#query-sets), [timestamp-write validation](https://gpuweb.github.io/gpuweb/#abstract-opdef-validate-timestampwrites), [WGSL integer literals](https://www.w3.org/TR/WGSL/#integer-literal), and [Web IDL integer conversion](https://webidl.spec.whatwg.org/#es-integer-types)
 
 The executable audit uses the TypeScript compiler AST to derive exports and every
 public exported-class constructor, property, method, getter, setter, parameter type,
@@ -28,8 +28,8 @@ source, and WHATWG Web IDL source and derives the native enum matrices. It later
 the managed port and explicitly executes `npm run typecheck`, the complete `npm run
 build`, and `git diff --check`. Structural mode preserves existing `dist` so stale
 output remains detectable, but performs the same recorded package bootstrap when `dist`
-is absent. It executes exactly 455
-referenced behavior tests; requires the complete suite to report exactly 853 passing
+is absent. It executes exactly 462
+referenced behavior tests; requires the complete suite to report exactly 860 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -365,6 +365,9 @@ The thirty-third review found that the bilingual occlusion-query example selecte
 The thirty-fourth review found two P1 defects in direct-upload queue ownership and
 query-resolve snapshot consistency plus two P2 defects in command disposal and layout
 size arithmetic.
+The thirty-fifth review found two P1 defects in mutable command/query construction facts,
+three P2 defects in sampler identity, WGSL `u32` representability, and contradictory
+external-upload queue diagnostics, plus one P3 stale audit-headline defect.
 
 Resolved core finding:
 
@@ -951,6 +954,31 @@ Resolved thirty-fourth review findings:
    facts, and no published internally invalid `LayoutArtifact`.
 
 These findings bring the reproduced or source-verified reviewer total to 91.
+
+The thirty-fourth-review implementation passed clean acceptance at exact checkpoint
+`89298a804a0f5533ce2dd920b24c4b0f4f78defe`, but the required thirty-fifth
+fresh-context review found six implementation/evidence defects below.
+
+Resolved thirty-fifth review findings:
+
+1. Upload, Copy, begin/end occlusion, query-resolve, and texture-upload commands now lock
+   every normalized construction fact and payload/resource reference. Nested normalized
+   copy/upload shapes are frozen while caller-owned byte and external-image contents
+   remain mutable by identity.
+2. `QuerySetResource` now keeps `type`, `count`, and `gpuQuerySet` in private fields with
+   read-only getters. Slot publication, resolve, and disposal cannot be redirected to a
+   different native allocation.
+3. `SamplerResource.gpuSampler` is now a private-backed read-only getter, so BindSet
+   lowering cannot reread a caller-replaced native handle.
+4. Layout lowering rejects byte facts above `0xffffffff`, the largest value emitted by
+   its WGSL `u32` constants, while retaining separate JavaScript safe-integer evidence.
+5. Buffer, texture, and external-image immediate uploads now share
+   `SCRATCH_COMMAND_WRONG_RUNTIME` with `actual.queueOwnedByRuntime: false`; the external
+   invalid-input code no longer claims queue ownership.
+6. The executable audit headline, behavior contracts, and exact counts now cover these
+   regressions directly instead of retaining the pre-review totals.
+
+These findings bring the reproduced or source-verified reviewer total to 97.
 
 ## Verification Record
 
@@ -1704,6 +1732,28 @@ Post-thirty-fourth-review targeted verification:
 - `npm run build` emits the package and all 14 runnable examples
 - diff checking, clean-commit acceptance, and a new isolated exact no-findings review
   remain required before audit closure
+
+Post-thirty-fifth-review targeted verification:
+
+- before implementation, the four affected runtime files reported 39 passing and five
+  exact failures for writable command facts, Sampler identity, QuerySet facts/allocation,
+  WGSL `u32` overflow, and the external-image foreign-queue code; TypeScript reported
+  seven unused `@ts-expect-error` directives for writable command fields
+- after implementation, the same runtime collection passes 44/44 and both TypeScript
+  declaration consumers pass with the new readonly command contracts
+- the executable audit now inspects the external-image foreign-queue test body, requires
+  all three immediate upload paths to use `SCRATCH_COMMAND_WRONG_RUNTIME`, and rejects
+  the stale external-invalid queue-ownership claim
+- fixed-history structural parity passes all 11 capability rows, six official binding
+  rows, four GPU copy quadrants, behavior-title contracts, bilingual documentation,
+  source-first checks, and production emit parity; the dirty tree is truthfully
+  `incomplete`, with 462 focused and 860 full-suite passes locked for acceptance
+- `npm test` reports exactly 860 passing with only the two exact browser/final-acceptance
+  identities pending; `npm run typecheck` passes both declaration consumers
+- `npm run build` emits the package and all 14 runnable examples; `git diff --check`
+  passes
+- clean-commit acceptance and a new isolated exact no-findings review remain required
+  before audit closure
 
 The corrected evidence must pass those gates before this audit can return to Accepted
 status. The required feature-branch push remains ordered after that closure.

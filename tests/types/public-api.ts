@@ -716,8 +716,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     // @ts-expect-error buffer upload disposal state is read-only
     upload.isDisposed = false
+    // @ts-expect-error buffer upload runtime is immutable
+    upload.runtime = runtime
+    // @ts-expect-error buffer upload target is immutable
+    upload.target = uniformRegion
     // @ts-expect-error texture upload disposal state is read-only
     textureUpload.isDisposed = false
+    // @ts-expect-error normalized texture upload layout is immutable
+    textureUpload.layout.bytesPerRow = 256
     const externalImageSources: GPUCopyExternalImageSource[] = [
         typedImageBitmap,
         typedImageData,
@@ -773,6 +779,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     // @ts-expect-error copy disposal state is read-only
     copy.isDisposed = false
+    // @ts-expect-error copy target is immutable
+    copy.target = uniformRegion
     const texelCopyBufferLayout: scr.TexelCopyBufferLayout = {
         bytesPerRow: 256,
         rowsPerImage: 2,
@@ -886,8 +894,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const endOcclusionAlias: scr.EndOcclusionQueryCommand = runtime.endOcclusionQueryCommand()
     // @ts-expect-error begin occlusion disposal state is read-only
     beginOcclusion.isDisposed = false
+    // @ts-expect-error begin occlusion slot is immutable
+    beginOcclusion.index = 1
     // @ts-expect-error end occlusion disposal state is read-only
     endOcclusion.isDisposed = false
+    // @ts-expect-error end occlusion runtime is immutable
+    endOcclusion.runtime = runtime
     const resolveQueries: scr.ResolveQuerySetCommand = runtime.createResolveQuerySetCommand({
         label: 'typed query resolve',
         source: queryResolveSource,
@@ -896,6 +908,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     // @ts-expect-error resolve disposal state is read-only
     resolveQueries.isDisposed = false
+    // @ts-expect-error resolve destination is immutable
+    resolveQueries.destination = queryDestination.region({ size: 16 })
     // @ts-expect-error normalized resolve source is immutable
     resolveQueries.source = queryResolveSource
     // @ts-expect-error native resolve range is derived from the immutable source

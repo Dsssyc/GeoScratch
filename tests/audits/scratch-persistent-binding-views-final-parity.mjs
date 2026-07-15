@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 460
-const expectedFullSuitePasses = 858
+const expectedFocusedAcceptancePasses = 462
+const expectedFullSuitePasses = 860
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -187,6 +187,15 @@ const finalDocs = loadCurrentSources({
     surfaceDecision: 'docs/decisions/ADR-039-scratch-exclusive-surface-context-ownership.md',
 })
 const activeReviewSource = loadMarkdownDirectory('docs/review')
+const externalImageUploadTestSource = fs.readFileSync(
+    'tests/scratch-external-image-upload.test.js',
+    'utf8'
+)
+const externalImageQueueOwnershipTest = testCaseSource(
+    externalImageUploadTestSource,
+    'tests/scratch-external-image-upload.test.js',
+    'rejects direct execution on a queue that is not owned by the command runtime'
+)
 
 const capabilityRows = [
     capability({
@@ -617,6 +626,8 @@ const behaviorTestContracts = [
     ]),
     behaviorTestContract('tests/scratch-supporting-object-acknowledgement.test.js', [
         'normalizes every native field and rejects deterministic sampler violations before native issue',
+        'keeps the acknowledged native sampler identity immutable',
+        'keeps acknowledged query facts and native allocation identity immutable',
         'preflights group, binding, stage, feature, and slot limits without a native call',
         'settles scopes and preserves all causal failures across simultaneous lifecycle changes',
     ]),
@@ -708,10 +719,10 @@ const behaviorTestContracts = [
         'rejects direct texture uploads on a queue not owned by the command runtime',
     ]),
     behaviorTestContract('tests/scratch-layout-codec.test.js', [
-        'rejects unsafe layout multiplication, addition, and alignment rounding',
+        'accepts the WGSL u32 boundary and rejects unsafe layout-size arithmetic',
     ]),
     behaviorTestContract('tests/scratch-command-lifecycle.test.js', [
-        'keeps disposal irreversible for every mutable legacy command family',
+        'keeps construction facts and disposal immutable for every legacy command family',
     ]),
     behaviorTestContract('tests/scratch-command-binding-access.test.js', [
         'requires read-write storage buffers in both read and write declarations',
@@ -928,6 +939,9 @@ const documentationAudit = Object.freeze({
     ].every(source => hasAll(source, [ 'BufferRegion', '4-byte' ])),
     immutableCommandLifecycle: [ finalDocs.commands, finalDocs.commandsZh ].every(source =>
         hasAll(source, [
+            'command construction facts',
+            'public property',
+            'payload',
             '`isDisposed`',
             '`dispose()`',
             'property shadowing',
@@ -943,22 +957,51 @@ const documentationAudit = Object.freeze({
             'foreign queue',
             '`writeBuffer()`',
             '`writeTexture()`',
+            '`copyExternalImageToTexture()`',
             '`SCRATCH_COMMAND_WRONG_RUNTIME`',
+            '`actual.queueOwnedByRuntime: false`',
             'same-device object-validity',
         ])
     ) && [ finalDocs.diagnostics, finalDocs.diagnosticsZh ].every(source =>
-        hasAll(source, [ '`SCRATCH_COMMAND_WRONG_RUNTIME`', '`actual.queueOwnedByRuntime: false`' ])
-    ),
+        hasAll(source, [
+            'immediate upload variant',
+            '`SCRATCH_COMMAND_WRONG_RUNTIME`',
+            '`actual.queueOwnedByRuntime: false`',
+        ]) && !source.includes('target, queue ownership, lifecycle')
+    ) && hasAll(current.command, [ 'validateUploadCommandQueueOwner(command, queue)' ]) &&
+        hasAll(externalImageQueueOwnershipTest, [
+            'command.execute(fixtureB.queue)',
+            'SCRATCH_COMMAND_WRONG_RUNTIME',
+            'queueOwnedByRuntime: false',
+        ]) &&
+        !externalImageQueueOwnershipTest.includes('SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID'),
     safeLayoutArithmetic: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
         hasAll(source, [
             'array count',
             'alignment round-up',
             'JavaScript safe integer',
+            'WGSL `u32`',
+            '`0xffffffff`',
             '`SCRATCH_LAYOUT_UNSUPPORTED_FORMAT`',
             '`LayoutArtifact`',
         ])
     ) && [ finalDocs.diagnostics, finalDocs.diagnosticsZh ].every(source =>
-        hasAll(source, [ '`actual.reason`', '`actual.operation`', '`LayoutArtifact`' ])
+        hasAll(source, [
+            '`actual.reason`',
+            '`actual.operation`',
+            '`actual.safeIntegerMax`',
+            '`actual.wgslU32Max`',
+            '`LayoutArtifact`',
+        ])
+    ),
+    supportingObjectNativeIdentity: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
+        hasAll(source, [
+            '`gpuSampler`',
+            '`gpuQuerySet`',
+            'private',
+            'immutable',
+            'native handle',
+        ])
     ),
     attachmentViewContracts: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
         hasAll(source, [
@@ -2699,6 +2742,24 @@ function testCaseNames(source, fileName) {
         names.push(node.arguments[0].text)
     })
     return names.sort()
+}
+
+function testCaseSource(source, fileName, title) {
+
+    const file = parseSource(source, fileName)
+    let result = ''
+    walk(file, node => {
+        if (
+            result !== '' ||
+            !ts.isCallExpression(node) ||
+            !ts.isIdentifier(node.expression) ||
+            node.expression.text !== 'it' ||
+            !ts.isStringLiteralLike(node.arguments[0]) ||
+            node.arguments[0].text !== title
+        ) return
+        result = node.getText(file)
+    })
+    return result
 }
 
 function parseSource(source, fileName) {

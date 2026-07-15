@@ -60,6 +60,11 @@ Target command families:
 `CopyCommand` covers WebGPU-native GPU-side copy directions: buffer-to-buffer, texture-to-texture, buffer-to-texture, and texture-to-buffer. CPU upload and CPU readback remain explicit transfer/readback operations rather than substitutes for these command encoder copies.
 
 Every executable command exposes a one-way lifecycle.
+All normalized command construction facts and payload/resource references are locked:
+each public property is non-writable, and normalized nested layout/origin/extent
+shapes are frozen. Upload bytes and external-image source contents remain
+application-owned mutable payloads by identity; locking a command never freezes those
+contents or a referenced Resource's own lifecycle.
 `isDisposed` is a read-only observation backed by private state; `dispose()` is
 irreversible, and neither assignment nor property shadowing can make a disposed command
 usable again. `ResolveQuerySetCommand` owns one deeply frozen source snapshot. Its
