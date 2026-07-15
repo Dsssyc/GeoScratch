@@ -55,10 +55,17 @@ inject caller-authored facts into those paths.
 
 The ownership and lifecycle boundary does not freeze the caller-owned shader contract.
 `Program.modules`, `entryPoints`, `requiredFeatures`, and `layoutRequirements` may still
-be changed for a future Pipeline. Pipeline creation snapshots those facts before native
-asynchronous work, and an existing Pipeline retains its immutable snapshot. Each future
-Pipeline creation revalidates the current `requiredFeatures` against the owning runtime
-before native work.
+be changed for a future Pipeline. Each render or compute Pipeline creation first proves
+exact Program identity and runtime ownership without reading those facts, then
+materializes all four groups into one candidate-local immutable snapshot. Caller getters
+and iterators may run while that internal snapshot is sampled, so Program lifecycle and
+runtime activity are authoritatively revalidated immediately after materialization and
+again after feature validation. Disposal during sampling reports
+`SCRATCH_PROGRAM_DISPOSED` before `requiredFeatures` availability and before any native work,
+including shader-module, pipeline-layout, or Pipeline creation. Both planners consume only the stable
+snapshot and do not reread the mutable Program properties; an existing Pipeline retains
+its immutable snapshot. This is an internal preparation transaction, not a public
+`prepare()` method, mandatory state machine, or caller-visible preparation state.
 
 ## LayoutCodec
 

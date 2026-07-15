@@ -36,6 +36,7 @@ describe('Scratch persistent binding final parity', () => {
             'historicalTypeInventory',
             'publicClassMemberInventory',
             'programReadonlyPublicContracts',
+            'programPipelineFactSnapshot',
             'goalStartPublicMemberReplacements',
             'goalStartChangedPublicMemberReplacements',
             'RenderPassSpec.createRenderPassDescriptor:method',
@@ -64,8 +65,9 @@ describe('Scratch persistent binding final parity', () => {
             'const cleanThirtySeventhReviewCheckpoint = \'3d5f4d73c64eb5cc1108cd26fa31fec546badb3d\'',
             'const cleanThirtyEighthReviewCheckpoint = \'c9cfad3decd3380c2d03509482b549d3275e1c1c\'',
             'const cleanThirtyNinthReviewCheckpoint = \'01f26da07ffb4fddd7c389cd388ea0c4307a09a6\'',
-            'const expectedFocusedAcceptancePasses = 482',
-            'const expectedFullSuitePasses = 880',
+            'const cleanProgramFactSnapshotPredecessor = \'ae9986d4cc1d7edacccd7ba0b4e15cd58a38dfdf\'',
+            'const expectedFocusedAcceptancePasses = 484',
+            'const expectedFullSuitePasses = 882',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -138,6 +140,8 @@ describe('Scratch persistent binding final parity', () => {
             'keeps Program identity and runtime ownership authoritative after public mutation attempts',
             'keeps Program disposal authoritative after public mutation attempts',
             'revalidates caller-owned Program required features before future native pipeline work',
+            'rejects render Program disposal during caller-owned fact snapshot before native work',
+            'rejects compute Program disposal during caller-owned fact snapshot before native work',
             'rejects prototype-derived Pipeline and BindSet identities before command creation',
             'rejects prototype-derived pass and command identities before native submission effects',
             'does not use open instanceof checks as Scratch-owned internal brands',
@@ -300,11 +304,16 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.programReadonlyPublicContracts.every(
             contract => contract.status === 'passed'
         )).to.equal(true)
+        expect(result.publicSurface.programPipelineFactSnapshot).to.deep.include({
+            status: 'passed',
+            packageExported: false,
+        })
+        expect(result.publicSurface.programPipelineFactSnapshot.mutablePlannerReads).to.deep.equal([])
         expect(result.publicSurface.productionEmitParity).to.deep.include({
             status: 'passed',
             emittedJavaScriptCount: 102,
             emittedDeclarationCount: 102,
-            declarationSignatureCount: 4792,
+            declarationSignatureCount: 4798,
         })
         expect(result.publicSurface.productionEmitParity.files).to.have.length(204)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
@@ -368,6 +377,8 @@ describe('Scratch persistent binding final parity', () => {
             thirtyNinthReviewAcceptanceRecorded: true,
             boundedClosureProtocol: true,
             firstBoundedReviewCorrection: true,
+            programFactSnapshotPredecessorAcceptanceRecorded: true,
+            programFactSnapshotTerminalAdjudication: true,
             currentAcceptanceCounts: true,
             supersededLayoutDecisionsCurrent: true,
             obsoleteSubmissionAuditRemoved: true,
@@ -522,15 +533,15 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence.mocha).to.deep.include({
             status: 'passed',
-            tests: 482,
-            passes: 482,
+            tests: 484,
+            passes: 484,
             failures: 0,
             pending: 0,
         })
         expect(result.executionEvidence.fullSuite).to.deep.include({
             status: 'passed',
-            tests: 882,
-            passes: 880,
+            tests: 884,
+            passes: 882,
             failures: 0,
             pending: 2,
         })

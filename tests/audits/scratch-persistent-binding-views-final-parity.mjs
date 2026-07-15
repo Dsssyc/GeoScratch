@@ -12,9 +12,10 @@ const cleanThirtySixthReviewCheckpoint = '4926648e8258fcb6a58e6746704c708beab611
 const cleanThirtySeventhReviewCheckpoint = '3d5f4d73c64eb5cc1108cd26fa31fec546badb3d'
 const cleanThirtyEighthReviewCheckpoint = 'c9cfad3decd3380c2d03509482b549d3275e1c1c'
 const cleanThirtyNinthReviewCheckpoint = '01f26da07ffb4fddd7c389cd388ea0c4307a09a6'
+const cleanProgramFactSnapshotPredecessor = 'ae9986d4cc1d7edacccd7ba0b4e15cd58a38dfdf'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 482
-const expectedFullSuitePasses = 880
+const expectedFocusedAcceptancePasses = 484
+const expectedFullSuitePasses = 882
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -236,7 +237,9 @@ const closedBrandGuards = Object.freeze({
         current.program.includes('Object.getPrototypeOf(value) === Program.prototype') &&
         current.program.includes('programStates.has(value as Program)') &&
         current.program.includes('programStateFor(this).isDisposed = true') &&
-        current.program.split('validateRequiredFeatures(this)').length === 3 &&
+        current.program.includes('export function snapshotProgramPipelineFacts(') &&
+        current.program.includes('const sampled = runProgramFactPhase(') &&
+        current.program.includes('validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)') &&
         !current.program.includes('this.isDisposed =') &&
         current.pipeline.split('if (!isProgram(program))').length === 3 &&
         current.shaderInspection.includes('if (!isProgram(program))'),
@@ -278,6 +281,43 @@ const goalStartProgramDeclaration = Object.entries(goalStartScratchDeclarations)
 const finalProgramDeclaration = Object.entries(finalScratchDeclarations)
     .find(([ sourcePath ]) => sourcePath.endsWith('scratch/program.d.ts'))?.[1] ?? ''
 const publicApiTypeSource = fs.readFileSync('tests/types/public-api.ts', 'utf8')
+const pipelineMutableProgramFactReads = Object.freeze([
+    ...current.pipeline.matchAll(/\bprogram\.(modules|entryPoints|requiredFeatures|layoutRequirements)\b/g),
+].map(match => match[0]))
+const programPipelineFactSnapshot = Object.freeze({
+    internalTransaction: hasAll(current.program, [
+        'export function snapshotProgramPipelineFacts(',
+        'materializeProgramPipelineFacts(program)',
+        'runProgramFactPhase(program',
+        'validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)',
+    ]),
+    sharedPlanners:
+        current.pipeline.split('snapshotProgramPipelineFacts(program, runtime)').length === 3,
+    mutablePlannerReads: pipelineMutableProgramFactReads,
+    packageExported:
+        current.packageIndex.includes('snapshotProgramPipelineFacts') ||
+        current.scratchIndex.includes('snapshotProgramPipelineFacts'),
+    typeNegativeEvidence: hasAll(publicApiTypeSource, [
+        'Program Pipeline-fact snapshots are package-internal preparation artifacts',
+        'Compatibility entrypoints do not expose internal Program snapshot transactions',
+    ]),
+    status: hasAll(current.program, [
+        'export function snapshotProgramPipelineFacts(',
+        'materializeProgramPipelineFacts(program)',
+        'runProgramFactPhase(program',
+        'validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)',
+    ]) &&
+        current.pipeline.split('snapshotProgramPipelineFacts(program, runtime)').length === 3 &&
+        pipelineMutableProgramFactReads.length === 0 &&
+        !current.packageIndex.includes('snapshotProgramPipelineFacts') &&
+        !current.scratchIndex.includes('snapshotProgramPipelineFacts') &&
+        hasAll(publicApiTypeSource, [
+            'Program Pipeline-fact snapshots are package-internal preparation artifacts',
+            'Compatibility entrypoints do not expose internal Program snapshot transactions',
+        ])
+        ? 'passed'
+        : 'failed',
+})
 const finalDocs = loadCurrentSources({
     runtimeSurface: 'docs/vision/scratch-api/01-runtime-surface/README.md',
     runtimeSurfaceZh: 'docs/vision/scratch-api/01-runtime-surface/README_zh.md',
@@ -763,6 +803,8 @@ const behaviorTestContracts = [
         'keeps Program identity and runtime ownership authoritative after public mutation attempts',
         'keeps Program disposal authoritative after public mutation attempts',
         'revalidates caller-owned Program required features before future native pipeline work',
+        'rejects render Program disposal during caller-owned fact snapshot before native work',
+        'rejects compute Program disposal during caller-owned fact snapshot before native work',
         'rejects prototype-derived Pipeline and BindSet identities before command creation',
         'rejects prototype-derived pass and command identities before native submission effects',
         'does not use open instanceof checks as Scratch-owned internal brands',
@@ -1285,6 +1327,11 @@ const documentationAudit = Object.freeze({
             'immutable snapshot',
             '`requiredFeatures`',
             'native work',
+            'candidate-local immutable snapshot',
+            'materialization',
+            '`SCRATCH_PROGRAM_DISPOSED`',
+            '`prepare()`',
+            'state machine',
             'Pipeline',
             'Shader inspection',
             '`Object.create(',
@@ -1402,9 +1449,23 @@ const documentationAudit = Object.freeze({
         'reviewer total to 109',
         'single corrective commit',
     ]),
+    programFactSnapshotPredecessorAcceptanceRecorded: hasAll(finalDocs.finalAudit, [
+        'Clean Program snapshot predecessor acceptance (`ae9986d`)',
+        cleanProgramFactSnapshotPredecessor,
+        'focused acceptance passed 482/482',
+        'complete suite reported 880 passing',
+    ]),
+    programFactSnapshotTerminalAdjudication: hasAll(finalDocs.finalAudit, [
+        'Second bounded scoped review finding and terminal adjudication',
+        'reviewer total to 110',
+        'ACCEPTED',
+        'COMPLETED_WITH_FINDINGS',
+        'both mark the Goal complete',
+        'must not be written back into this repository',
+    ]),
     currentAcceptanceCounts: hasAll(finalDocs.finalAudit, [
-        'executes exactly 482',
-        'complete suite to report exactly 880 passing',
+        'executes exactly 484',
+        'complete suite to report exactly 882 passing',
     ]),
     resourceStateParity: resourceStateParity.status === 'passed',
     programExamplesUseBufferRegions: [ finalDocs.programs, finalDocs.programsZh ]
@@ -1553,6 +1614,10 @@ assertParity(
     closedBrandAuthority.status === 'passed',
     `closed brand authority failed: ${JSON.stringify(closedBrandAuthority)}`
 )
+assertParity(
+    programPipelineFactSnapshot.status === 'passed',
+    `Program Pipeline-fact snapshot transaction failed: ${JSON.stringify(programPipelineFactSnapshot)}`
+)
 assertParity(sourceFirst.status === 'passed', 'Scratch source-first boundary failed')
 assertParity(exampleAudit.status === 'passed', `example audit failed: ${exampleAudit.failures.join(', ')}`)
 assertParity(documentationStatus, `documentation audit failed: ${JSON.stringify(documentationAudit)}`)
@@ -1590,6 +1655,7 @@ const result = {
         productionEmitParity,
         sourceFirst,
         closedBrandAuthority,
+        programPipelineFactSnapshot,
     },
     diagnostics: {
         goalStartCodeCount: baselineDiagnosticCodes.length,

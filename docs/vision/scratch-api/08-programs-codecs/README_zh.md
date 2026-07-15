@@ -54,9 +54,16 @@ module-private state-map record 同时匹配后，才能进入 Command construct
 
 这个 ownership/lifecycle boundary 不会冻结 caller-owned shader contract。
 `Program.modules`、`entryPoints`、`requiredFeatures` 与 `layoutRequirements` 仍可为
-future Pipeline 修改。Pipeline creation 会在 native async work 前 snapshot 这些
-facts，existing Pipeline 保留自己的 immutable snapshot。每次 future Pipeline
-creation 都会在 native work 前按 owning runtime 重新校验当前 `requiredFeatures`。
+future Pipeline 修改。每次 render/compute Pipeline creation 都会先在不读取这些
+facts 的情况下确认 exact Program identity 与 runtime ownership，再把四组 facts
+materialize 成一个 candidate-local immutable snapshot。内部采样期间允许 caller
+getter 与 iterator 执行，因此 materialization 后、feature validation 后都会按私有
+authority 重新校验 Program lifecycle 与 runtime activity。若采样导致 disposal，
+必须先报告 `SCRATCH_PROGRAM_DISPOSED`，不能先报告 `requiredFeatures` unavailable，
+也不能执行任何 native work，包括创建 shader module、pipeline layout 或 Pipeline。两种 planner 后续只
+消费 stable snapshot，不再读取 mutable Program property；existing Pipeline 继续保留
+自己的 immutable snapshot。这只是 internal preparation transaction，不增加 public
+`prepare()` method、mandatory state machine 或 caller-visible preparation state。
 
 ## LayoutCodec
 

@@ -36,6 +36,20 @@ type ProgramState = {
     isDisposed: boolean
 }
 
+type ProgramPipelineFacts = Readonly<{
+    modules: readonly string[]
+    entryPoints: Readonly<ProgramEntryPoints>
+    requiredFeatures: readonly GPUFeatureName[]
+    layoutRequirements: readonly ProgramBufferLayoutRequirement[]
+}>
+
+type SampledProgramPipelineFacts = Readonly<{
+    modules: unknown
+    entryPoints: unknown
+    requiredFeatures: unknown
+    layoutRequirements: unknown
+}>
+
 const programStates = new WeakMap<Program, ProgramState>()
 
 export interface Program {
@@ -81,7 +95,7 @@ export class Program {
         this.requiredFeatures = normalizeRequiredFeatures(descriptor.requiredFeatures)
         this.layoutRequirements = normalizeLayoutRequirements(this, descriptor.layoutRequirements)
 
-        validateRequiredFeatures(this)
+        validateRequiredFeatures(this, runtime, this.requiredFeatures)
     }
 
     get subject(): DiagnosticSubject {
@@ -116,7 +130,6 @@ export class Program {
             })
         }
 
-        validateRequiredFeatures(this)
     }
 
     assertUsable(): void {
@@ -148,11 +161,110 @@ export function isProgram(value: unknown): value is Program {
         programStates.has(value as Program)
 }
 
+export function snapshotProgramPipelineFacts(
+    program: Program,
+    runtime: ScratchRuntime
+): ProgramPipelineFacts {
+
+    program.assertRuntime(runtime)
+    const state = programStateFor(program)
+    const sampled = runProgramFactPhase(program, () => materializeProgramPipelineFacts(program))
+    const normalized = runProgramFactPhase(program, () => Object.freeze({
+        modules: Object.freeze(normalizeModules(program, sampled.modules)),
+        entryPoints: Object.freeze(normalizeEntryPoints(program, sampled.entryPoints)),
+        requiredFeatures: Object.freeze(normalizeRequiredFeatures(
+            sampled.requiredFeatures as Iterable<GPUFeatureName> | undefined
+        )),
+        layoutRequirements: normalizeLayoutRequirements(program, sampled.layoutRequirements),
+    }))
+
+    runProgramFactPhase(program, () => {
+        validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)
+    })
+
+    return normalized
+}
+
 function programStateFor(program: Program): ProgramState {
 
     const state = programStates.get(program)
     if (state === undefined) throw new TypeError('Program private state is unavailable.')
     return state
+}
+
+function runProgramFactPhase<T>(program: Program, phase: () => T): T {
+
+    let value: T | undefined
+    let failure: unknown
+    let failed = false
+
+    try {
+        value = phase()
+    } catch (error) {
+        failed = true
+        failure = error
+    }
+
+    program.assertUsable()
+    if (failed) throw failure
+    return value as T
+}
+
+function materializeProgramPipelineFacts(program: Program): SampledProgramPipelineFacts {
+
+    const modules = program.modules as unknown
+    const entryPoints = program.entryPoints as unknown
+    const requiredFeatures = program.requiredFeatures as unknown
+    const layoutRequirements = program.layoutRequirements as unknown
+
+    return Object.freeze({
+        modules: materializeProgramModules(modules),
+        entryPoints: materializeProgramEntryPoints(entryPoints),
+        requiredFeatures: materializeProgramRequiredFeatures(requiredFeatures),
+        layoutRequirements: materializeProgramLayoutRequirements(layoutRequirements),
+    })
+}
+
+function materializeProgramModules(modules: unknown): unknown {
+
+    return Array.isArray(modules) ? [ ...modules ] : modules
+}
+
+function materializeProgramEntryPoints(entryPoints: unknown): unknown {
+
+    if (!isRecord(entryPoints)) return entryPoints
+    return {
+        vertex: entryPoints.vertex,
+        fragment: entryPoints.fragment,
+        compute: entryPoints.compute,
+    }
+}
+
+function materializeProgramRequiredFeatures(requiredFeatures: unknown): unknown {
+
+    if (requiredFeatures === undefined) return undefined
+    return [ ...(requiredFeatures as Iterable<unknown>) ]
+}
+
+function materializeProgramLayoutRequirements(layoutRequirements: unknown): unknown {
+
+    if (!Array.isArray(layoutRequirements)) return layoutRequirements
+    return layoutRequirements.map(requirement => materializeProgramLayoutRequirement(requirement))
+}
+
+function materializeProgramLayoutRequirement(requirement: unknown): unknown {
+
+    if (!isRecord(requirement)) return requirement
+    const visibility = requirement.visibility
+    return {
+        group: requirement.group,
+        binding: requirement.binding,
+        name: requirement.name,
+        type: requirement.type,
+        visibility: Array.isArray(visibility) ? [ ...visibility ] : visibility,
+        hasDynamicOffset: requirement.hasDynamicOffset,
+        layout: requirement.layout,
+    }
 }
 
 export function programLayoutRequirementSubject(requirement: Pick<ProgramBufferLayoutRequirement, 'group' | 'binding'> & { name?: unknown }): DiagnosticSubject {
@@ -396,10 +508,14 @@ function isBindVisibility(stage: unknown): stage is BindVisibility {
     return stage === 'vertex' || stage === 'fragment' || stage === 'compute'
 }
 
-function validateRequiredFeatures(program: Program): void {
+function validateRequiredFeatures(
+    program: Program,
+    runtime: ScratchRuntime,
+    requiredFeatures: readonly GPUFeatureName[]
+): void {
 
-    for (const feature of program.requiredFeatures) {
-        if (!program.runtime.deviceFeatures?.has?.(feature)) {
+    for (const feature of requiredFeatures) {
+        if (!runtime.deviceFeatures?.has?.(feature)) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PROGRAM_FEATURE_UNAVAILABLE',
                 severity: 'error',
@@ -407,7 +523,7 @@ function validateRequiredFeatures(program: Program): void {
                 subject: program.subject,
                 message: 'Program requires a WebGPU feature that is not available on this runtime.',
                 expected: { feature },
-                actual: { features: [ ...(program.runtime.deviceFeatures ?? []) ] },
+                actual: { features: [ ...(runtime.deviceFeatures ?? []) ] },
             })
         }
     }

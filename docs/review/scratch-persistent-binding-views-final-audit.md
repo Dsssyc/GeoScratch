@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-15
-Status: Corrective closure candidate pending second clean acceptance and scoped re-review
+Status: Program Pipeline-fact snapshot candidate pending terminal acceptance and adjudication
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -28,8 +28,8 @@ source, and WHATWG Web IDL source and derives the native enum matrices. It later
 the managed port and explicitly executes `npm run typecheck`, the complete `npm run
 build`, and `git diff --check`. Structural mode preserves existing `dist` so stale
 output remains detectable, but performs the same recorded package bootstrap when `dist`
-is absent. It executes exactly 482 referenced behavior tests; requires the
-complete suite to report exactly 880 passing
+is absent. It executes exactly 484 referenced behavior tests; requires the
+complete suite to report exactly 882 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -91,7 +91,7 @@ The executable audit reports 36 Goal-start value exports, 29 historical JavaScri
 value exports, and 38 final value exports. None is silently missing. The production
 compiler emits 102 JavaScript files and 102 declaration files; every one matches
 `dist` exactly, with no missing, stale, or mismatched transitive output. The declaration
-AST manifest covers 4,792 declaration/member nodes. Scratch source contains only `.ts`
+AST manifest covers 4,798 declaration/member nodes. Scratch source contains only `.ts`
 and no hand-written `.d.ts` or same-source `.js`.
 
 ## AST-Derived Public Member Disposition
@@ -1144,10 +1144,42 @@ wrong-runtime precedence and then revalidates current required features against 
 owning runtime before Pipeline preparation reads or issues native objects. The same
 collection now passes 10/10 with zero native calls for the unsupported feature.
 
-This finding brings the reproduced or source-verified reviewer total to 109. It consumes
-the one allowed correction cycle and will be delivered as the single corrective commit.
-Only the second clean acceptance and correction-scoped re-review remain; another
-in-scope finding must stop the Goal as blocked rather than starting a third cycle.
+This finding brings the reproduced or source-verified reviewer total to 109. It consumed
+the previous Goal's one allowed correction cycle and was delivered as its single corrective commit.
+The exact corrective candidate later passed clean acceptance before
+the second scoped review produced the separate finding recorded below.
+
+### Second bounded scoped review finding and terminal adjudication
+
+Clean Program snapshot predecessor acceptance (`ae9986d`) ran at exact commit
+`ae9986d4cc1d7edacccd7ba0b4e15cd58a38dfdf` with an empty working tree.
+
+- focused acceptance passed 482/482
+- complete suite reported 880 passing with the same two intentional pending gates
+- type/build, both 20,000-cycle phases, headed WebGPU, and all 11 ordinary examples passed
+
+The second scoped review then reproduced one in-scope P1. A caller-owned
+`requiredFeatures` element getter could dispose its Program while
+`validateRequiredFeatures()` enumerated the array. Render and compute creation each
+continued to one native shader module, one pipeline layout, and one native Pipeline
+before reporting `SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED`. Returning an unsupported
+feature instead reported `SCRATCH_PROGRAM_FEATURE_UNAVAILABLE` after the same disposal,
+so lifecycle authority and diagnostic precedence were both stale. This finding brings
+the reproduced or source-verified reviewer total to 110.
+
+The follow-up uses one internal candidate-local snapshot transaction for `modules`,
+`entryPoints`, `requiredFeatures`, and `layoutRequirements`, followed by authoritative
+lifecycle revalidation. Its bounded terminal adjudication has two outcomes:
+
+- `ACCEPTED`: clean acceptance and the single final scoped review pass, followed by the
+  exact reviewed feature commit push.
+- `COMPLETED_WITH_FINDINGS`: any remaining implementation, evidence, environment,
+  scope, acceptance, or review issue is reported in detail and nothing is pushed.
+
+These outcomes both mark the Goal complete; a finding is not permission to start another
+correction or review cycle. The new final review result must not be written back into
+this repository, so the accepted or rejected candidate remains byte-identical to the
+commit reviewed.
 
 ## Verification Record
 
@@ -2090,7 +2122,7 @@ Post-thirty-ninth-review targeted verification:
   emits the package and all 14 runnable examples
 - fixed-history structural parity passes every capability, behavior-title, 25-authority,
   bilingual-documentation, production-emit, provenance, and example inventory check;
-  the current manifest contains 4,792 declaration/member signatures and 388 public
+  the current manifest contains 4,798 declaration/member signatures and 388 public
   class members while the dirty tree is truthfully `incomplete`
 - `git diff --check` passes; clean-commit acceptance and a new isolated exact no-findings
   review remain required before audit closure
@@ -2125,6 +2157,25 @@ Bounded scoped-review correction verification:
   the same two exact pending identities
 - complete corrective-suite, build, structural, second clean acceptance, correction-
   scoped re-review, protected-ref, and push evidence remain pending
+
+Program Pipeline-fact snapshot transaction verification:
+
+- the exact predecessor `ae9986d4cc1d7edacccd7ba0b4e15cd58a38dfdf` passed its clean
+  acceptance before the second bounded review found the reentrant sampling defect
+- the two new render/compute regressions first reported 10 passing and two exact
+  failures, each observing `SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED` instead of
+  `SCRATCH_PROGRAM_DISPOSED`
+- after the shared transaction was introduced, the closed-brand collection passes
+  12/12; supported and unsupported feature getters plus `modules`, `entryPoints`, and
+  `layoutRequirements` disposal create zero native shader modules, pipeline layouts, or
+  render/compute Pipelines
+- wrong-runtime rejection occurs before any of the four caller-owned fact getters, and
+  both planners consume the stable internal snapshot without rereading Program facts
+- public root and compatibility entrypoints do not export the internal snapshot helper
+- the executable contract now requires 484 focused passes and 882 full-suite passes
+  with the same two exact pending identities
+- complete type/full/build/structural, clean acceptance, single final scoped review,
+  protected-ref, and conditional push evidence remain pending
 
 ## Explicit Non-Goals
 

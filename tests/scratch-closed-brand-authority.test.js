@@ -13,7 +13,7 @@ import {
     TextureResource,
     inspectShader,
 } from 'geoscratch'
-import { createFakeGpu } from './scratch-test-utils.js'
+import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_TEXTURE_USAGE_COPY_SRC = 0x1
@@ -308,6 +308,16 @@ describe('scratch closed brand authority', () => {
         expect(caught.diagnostic.code).to.equal('SCRATCH_PROGRAM_FEATURE_UNAVAILABLE')
     })
 
+    it('rejects render Program disposal during caller-owned fact snapshot before native work', async() => {
+
+        await expectProgramFactSnapshotDisposal('render')
+    })
+
+    it('rejects compute Program disposal during caller-owned fact snapshot before native work', async() => {
+
+        await expectProgramFactSnapshotDisposal('compute')
+    })
+
     it('rejects prototype-derived Pipeline and BindSet identities before command creation', async() => {
 
         const fake = createFakeGpu()
@@ -489,4 +499,169 @@ function restoreHasInstance(Constructor, descriptor) {
 
     if (descriptor === undefined) delete Constructor[Symbol.hasInstance]
     else Object.defineProperty(Constructor, Symbol.hasInstance, descriptor)
+}
+
+async function expectProgramFactSnapshotDisposal(pipelineKind) {
+
+    const scenarios = [
+        {
+            name: 'supported required feature element getter',
+            install(program) {
+                const requiredFeatures = []
+                Object.defineProperty(requiredFeatures, 0, {
+                    configurable: true,
+                    enumerable: true,
+                    get() {
+                        program.dispose()
+                        return 'timestamp-query'
+                    },
+                })
+                requiredFeatures.length = 1
+                program.requiredFeatures = requiredFeatures
+            },
+        },
+        {
+            name: 'unsupported required feature element getter',
+            install(program) {
+                const requiredFeatures = []
+                Object.defineProperty(requiredFeatures, 0, {
+                    configurable: true,
+                    enumerable: true,
+                    get() {
+                        program.dispose()
+                        return 'texture-compression-astc'
+                    },
+                })
+                requiredFeatures.length = 1
+                program.requiredFeatures = requiredFeatures
+            },
+        },
+        {
+            name: 'modules getter',
+            install(program) {
+                Object.defineProperty(program, 'modules', {
+                    configurable: true,
+                    enumerable: true,
+                    get() {
+                        program.dispose()
+                        return [ triangleWgsl ]
+                    },
+                })
+            },
+        },
+        {
+            name: 'entryPoints getter',
+            install(program) {
+                Object.defineProperty(program, 'entryPoints', {
+                    configurable: true,
+                    enumerable: true,
+                    get() {
+                        program.dispose()
+                        return programEntryPoints()
+                    },
+                })
+            },
+        },
+        {
+            name: 'layoutRequirements getter',
+            install(program) {
+                Object.defineProperty(program, 'layoutRequirements', {
+                    configurable: true,
+                    enumerable: true,
+                    get() {
+                        program.dispose()
+                        return []
+                    },
+                })
+            },
+        },
+    ]
+
+    for (const scenario of scenarios) {
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const program = createPipelineProgram(runtime)
+        scenario.install(program)
+        let caught
+
+        try {
+            await createPipeline(pipelineKind, runtime, program)
+        } catch (error) {
+            caught = error
+        }
+
+        expect(caught, scenario.name).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code, scenario.name).to.equal('SCRATCH_PROGRAM_DISPOSED')
+        expect(fake.calls.shaderModules, scenario.name).to.have.length(0)
+        expect(fake.calls.pipelineLayouts, scenario.name).to.have.length(0)
+        expect(fake.calls.renderPipelines, scenario.name).to.have.length(0)
+        expect(fake.calls.computePipelines, scenario.name).to.have.length(0)
+    }
+
+    const fakeA = createFakeGpu()
+    const fakeB = createFakeGpu()
+    const runtimeA = await ScratchRuntime.create({ gpu: fakeA.gpu })
+    const runtimeB = await ScratchRuntime.create({ gpu: fakeB.gpu })
+    const program = createPipelineProgram(runtimeA)
+    const reads = []
+    const facts = {
+        modules: program.modules,
+        entryPoints: program.entryPoints,
+        requiredFeatures: program.requiredFeatures,
+        layoutRequirements: program.layoutRequirements,
+    }
+    for (const [ name, value ] of Object.entries(facts)) {
+        Object.defineProperty(program, name, {
+            configurable: true,
+            enumerable: true,
+            get() {
+                reads.push(name)
+                return value
+            },
+        })
+    }
+    let wrongRuntimeError
+
+    try {
+        await createPipeline(pipelineKind, runtimeB, program)
+    } catch (error) {
+        wrongRuntimeError = error
+    }
+
+    expect(wrongRuntimeError).to.be.instanceOf(ScratchDiagnosticError)
+    expect(wrongRuntimeError.diagnostic.code).to.equal('SCRATCH_PROGRAM_WRONG_RUNTIME')
+    expect(reads).to.deep.equal([])
+    expect(fakeA.calls.shaderModules).to.have.length(0)
+    expect(fakeB.calls.shaderModules).to.have.length(0)
+    expect(fakeB.calls.pipelineLayouts).to.have.length(0)
+    expect(fakeB.calls.renderPipelines).to.have.length(0)
+    expect(fakeB.calls.computePipelines).to.have.length(0)
+}
+
+function createPipelineProgram(runtime) {
+
+    return runtime.createProgram({
+        modules: [ triangleWgsl ],
+        entryPoints: programEntryPoints(),
+    })
+}
+
+function programEntryPoints() {
+
+    return {
+        vertex: 'vsMain',
+        fragment: 'fsMain',
+        compute: 'csMain',
+    }
+}
+
+async function createPipeline(pipelineKind, runtime, program) {
+
+    if (pipelineKind === 'render') {
+        return await runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+    }
+    return await runtime.createComputePipeline({ program })
 }

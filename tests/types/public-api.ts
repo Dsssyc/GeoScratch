@@ -38,6 +38,10 @@ const compatTextureUploadSize: scratchCompat.TextureUploadSize = typedTextureUpl
 const typedPendingOperationKind: scr.ScratchPendingGpuOperationFact['kind'] = 'buffer-allocation'
 // @ts-expect-error Disposal records are instantaneous and cannot be pending
 const invalidPendingOperationKind: scr.ScratchPendingGpuOperationFact['kind'] = 'resource-disposal'
+// @ts-expect-error Program Pipeline-fact snapshots are package-internal preparation artifacts
+scr.snapshotProgramPipelineFacts
+// @ts-expect-error Compatibility entrypoints do not expose internal Program snapshot transactions
+scratchCompat.snapshotProgramPipelineFacts
 
 const startResult: Promise<GPUDevice | undefined> = scr.StartDash()
 const device: GPUDevice = scr.getDevice()

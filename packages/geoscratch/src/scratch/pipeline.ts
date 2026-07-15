@@ -8,7 +8,12 @@ import { snapshotPipelineSource } from './pipeline-compilation.js'
 import { createPipelineNativeErrorSerializer } from './pipeline-native-error.js'
 import { registerRuntimePipeline, unregisterRuntimePipeline } from './pipeline-ownership.js'
 import { describeValue } from './type-utils.js'
-import { isProgram, programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
+import {
+    isProgram,
+    programLayoutRequirementExpected,
+    programLayoutRequirementSubject,
+    snapshotProgramPipelineFacts,
+} from './program.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type { BindLayout } from './binding.js'
@@ -329,8 +334,8 @@ function prepareRenderPipeline(
             actual: { program: program === undefined || program === null ? String(program) : typeof program },
         })
     }
-    program.assertRuntime(runtime)
-    const layoutRequirements = Object.freeze([ ...program.layoutRequirements ])
+    const programFacts = snapshotProgramPipelineFacts(program, runtime)
+    const layoutRequirements = programFacts.layoutRequirements
 
     const id = `scratch-pipeline-${UUID()}`
     const subject = Object.freeze({
@@ -373,8 +378,8 @@ function prepareRenderPipeline(
         ...context,
         bindLayouts,
         bindLayoutsByGroup,
-        vertexEntryPoint: (input.vertex ?? program.entryPoints.vertex) as string,
-        fragmentEntryPoint: (input.fragment ?? program.entryPoints.fragment) as string,
+        vertexEntryPoint: (input.vertex ?? programFacts.entryPoints.vertex) as string,
+        fragmentEntryPoint: (input.fragment ?? programFacts.entryPoints.fragment) as string,
         vertexBuffers,
         targets,
         targetFormats: Object.freeze(targets.map(target => target.format)),
@@ -390,17 +395,18 @@ function prepareRenderPipeline(
 
     return Object.freeze({
         ...draft,
-        sourceSnapshot: snapshotProgramSource(program, subject),
+        sourceSnapshot: snapshotProgramSource(program, programFacts.modules, subject),
     })
 }
 
 function snapshotProgramSource(
     program: Program,
+    modules: readonly string[],
     pipelineSubject: DiagnosticSubject
 ): PipelineSourceSnapshot {
 
     try {
-        return snapshotPipelineSource(program)
+        return snapshotPipelineSource({ id: program.id, modules })
     } catch {
         throwScratchDiagnostic({
             code: 'SCRATCH_PROGRAM_MODULES_INVALID',
@@ -411,9 +417,7 @@ function snapshotProgramSource(
             message: 'Program modules are invalid at the pipeline snapshot boundary.',
             expected: { modules: 'non-empty string[]' },
             actual: {
-                modules: Array.isArray(program.modules)
-                    ? program.modules.map(module => typeof module)
-                    : typeof program.modules,
+                modules: modules.map(module => typeof module),
             },
         })
     }
@@ -998,8 +1002,8 @@ function prepareComputePipeline(
             actual: { program: program === undefined || program === null ? String(program) : typeof program },
         })
     }
-    program.assertRuntime(runtime)
-    const layoutRequirements = Object.freeze([ ...program.layoutRequirements ])
+    const programFacts = snapshotProgramPipelineFacts(program, runtime)
+    const layoutRequirements = programFacts.layoutRequirements
 
     const id = `scratch-pipeline-${UUID()}`
     const subject = Object.freeze({
@@ -1032,7 +1036,7 @@ function prepareComputePipeline(
         ...context,
         bindLayouts,
         bindLayoutsByGroup,
-        computeEntryPoint: (input.compute ?? program.entryPoints.compute) as string,
+        computeEntryPoint: (input.compute ?? programFacts.entryPoints.compute) as string,
         ...(constants !== undefined ? { constants } : {}),
     }
     if (!draft.computeEntryPoint) throwMissingEntryPoint(draft, 'compute')
@@ -1040,7 +1044,7 @@ function prepareComputePipeline(
 
     return Object.freeze({
         ...draft,
-        sourceSnapshot: snapshotProgramSource(program, subject),
+        sourceSnapshot: snapshotProgramSource(program, programFacts.modules, subject),
     })
 }
 
