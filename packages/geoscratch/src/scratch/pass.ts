@@ -356,6 +356,20 @@ export class ComputePassSpec {
     }
 }
 
+export function isRenderPassSpec(value: unknown): value is RenderPassSpec {
+
+    return typeof value === 'object' && value !== null &&
+        Object.getPrototypeOf(value) === RenderPassSpec.prototype &&
+        renderPassStates.has(value as RenderPassSpec)
+}
+
+export function isComputePassSpec(value: unknown): value is ComputePassSpec {
+
+    return typeof value === 'object' && value !== null &&
+        Object.getPrototypeOf(value) === ComputePassSpec.prototype &&
+        computePassStates.has(value as ComputePassSpec)
+}
+
 function normalizeTimestampWrites(
     pass: RenderPassSpec | ComputePassSpec,
     timestampWrites?: TimestampWritesSpec
@@ -1429,3 +1443,6 @@ function validateTextureColorAttachmentUsage(pass: RenderPassSpec, texture: Text
         actual: { usage: texture.usage },
     })
 }
+
+Object.freeze(RenderPassSpec.prototype)
+Object.freeze(ComputePassSpec.prototype)

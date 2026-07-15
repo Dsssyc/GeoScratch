@@ -10,9 +10,10 @@ const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const cleanThirtySixthReviewCheckpoint = '4926648e8258fcb6a58e6746704c708beab611e6'
 const cleanThirtySeventhReviewCheckpoint = '3d5f4d73c64eb5cc1108cd26fa31fec546badb3d'
+const cleanThirtyEighthReviewCheckpoint = 'c9cfad3decd3380c2d03509482b549d3275e1c1c'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 475
-const expectedFullSuitePasses = 873
+const expectedFocusedAcceptancePasses = 479
+const expectedFullSuitePasses = 877
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -63,6 +64,7 @@ const currentPaths = Object.freeze({
     pipeline: 'packages/geoscratch/src/scratch/pipeline.ts',
     command: 'packages/geoscratch/src/scratch/command.ts',
     pass: 'packages/geoscratch/src/scratch/pass.ts',
+    shaderInspection: 'packages/geoscratch/src/scratch/shader-inspection.ts',
     readback: 'packages/geoscratch/src/scratch/readback.ts',
     supportingObjectCreation: 'packages/geoscratch/src/scratch/supporting-object-creation.ts',
     supportingObjectFailure: 'packages/geoscratch/src/scratch/supporting-object-failure.ts',
@@ -160,15 +162,31 @@ const currentScratchSource = Object.values(currentScratchTree).join('\n')
 const baselineScratchSource = Object.values(baselineScratchTree).join('\n')
 const historicalScratchSource = Object.values(historicalScratchTree).join('\n')
 const scratchOwnedInstanceofAuthorities = Object.freeze([
+    'BeginOcclusionQueryCommand',
+    'BindLayout',
+    'BindSet',
+    'BufferRegion',
     'BufferResource',
+    'ComputePassSpec',
+    'ComputePipeline',
+    'CopyCommand',
     'DispatchCommand',
     'DrawCommand',
+    'EndOcclusionQueryCommand',
+    'ExternalImageUploadCommand',
     'LayoutCodec',
     'Program',
     'QuerySetResource',
+    'ReadbackCommand',
+    'RenderPassSpec',
+    'RenderPipeline',
+    'ResolveQuerySetCommand',
     'SamplerResource',
     'ScratchDiagnosticError',
+    'TextureUploadCommand',
     'TextureResource',
+    'TextureViewSpec',
+    'UploadCommand',
 ])
 const openScratchOwnedInstanceofSites = Object.freeze(Object.entries(currentScratchTree)
     .flatMap(([ sourcePath, source ]) => [ ...source.matchAll(/\binstanceof\s+([A-Za-z_$][A-Za-z0-9_$]*)/g) ]
@@ -178,31 +196,67 @@ const openScratchOwnedInstanceofSites = Object.freeze(Object.entries(currentScra
             line: source.slice(0, match.index).split('\n').length,
             authority: match[1],
         }))))
+const openScratchOwnedDuckAuthoritySites = Object.freeze(Object.entries(currentScratchTree)
+    .flatMap(([ sourcePath, source ]) => [
+        ...source.matchAll(/typeof\s+[A-Za-z_$][A-Za-z0-9_$.]*\.assertRuntime\s*!==?\s*['"]function['"]/g),
+    ].map(match => Object.freeze({
+        path: sourcePath,
+        line: source.slice(0, match.index).split('\n').length,
+    }))))
+const closedBrandGuards = Object.freeze({
+    BeginOcclusionQueryCommand: current.command.includes("commandBrands.set(this, 'begin-occlusion-query')") &&
+        current.submission.includes('isRenderCommand(command)'),
+    BindLayout: current.binding.includes('if (!isBindLayout(layout))') &&
+        current.pipeline.includes('if (!isBindLayout(layout))') &&
+        current.shaderInspection.includes('if (!isBindLayout(layout))'),
+    BindSet: current.command.includes('if (!isBindSet(bindSet))'),
+    BufferRegion: current.buffer.includes('isBufferRegion('),
+    BufferResource: current.buffer.includes('isBufferResource('),
+    ComputePassSpec: current.pass.includes('isComputePassSpec(') &&
+        current.submission.includes('!isRenderPassSpec(passSpec) && !isComputePassSpec(passSpec)'),
+    ComputePipeline: current.pipeline.includes('isComputePipeline(') &&
+        current.command.includes('if (!isComputePipeline(pipeline))'),
+    CopyCommand: current.command.includes("commandBrands.set(this, 'copy')") &&
+        current.submission.includes('if (!isCopyCommand(command))'),
+    DispatchCommand: current.command.includes("commandBrands.set(this, 'dispatch')") &&
+        current.submission.includes('if (!isDispatchCommand(command))'),
+    DrawCommand: current.command.includes("commandBrands.set(this, 'draw')") &&
+        current.submission.includes('isRenderCommand(command)'),
+    EndOcclusionQueryCommand: current.command.includes("commandBrands.set(this, 'end-occlusion-query')") &&
+        current.submission.includes('isRenderCommand(command)'),
+    ExternalImageUploadCommand: current.command.includes("commandBrands.set(this, 'external-image-upload')") &&
+        current.submission.includes('if (!isUploadCommand(command))'),
+    LayoutCodec: current.layoutCodec.includes('isLayoutCodec('),
+    Program: current.pipeline.split('if (!isProgram(program))').length === 3 &&
+        current.shaderInspection.includes('if (!isProgram(program))'),
+    QuerySetResource: current.querySet.includes('isQuerySetResource('),
+    ReadbackCommand: current.command.includes("commandBrands.set(this, 'readback')") &&
+        current.submission.includes('if (!isReadbackCommand(command))'),
+    RenderPassSpec: current.pass.includes('isRenderPassSpec(') &&
+        current.submission.includes('!isRenderPassSpec(passSpec) && !isComputePassSpec(passSpec)'),
+    RenderPipeline: current.pipeline.includes('isRenderPipeline(') &&
+        current.command.includes('if (!isRenderPipeline(pipeline))'),
+    ResolveQuerySetCommand: current.command.includes("commandBrands.set(this, 'resolve-query-set')") &&
+        current.submission.includes('if (!isResolveQuerySetCommand(command))'),
+    SamplerResource: current.sampler.includes('isSamplerResource('),
+    ScratchDiagnosticError: currentScratchSource.includes('isScratchDiagnosticError('),
+    TextureUploadCommand: current.command.includes("commandBrands.set(this, 'texture-upload')") &&
+        current.submission.includes('if (!isUploadCommand(command))'),
+    TextureResource: current.texture.includes('isTextureResource('),
+    TextureViewSpec: current.texture.includes('isTextureViewSpec('),
+    UploadCommand: current.command.includes("commandBrands.set(this, 'buffer-upload')") &&
+        current.submission.includes('if (!isUploadCommand(command))'),
+})
 const closedBrandAuthority = Object.freeze({
     authorities: scratchOwnedInstanceofAuthorities,
     openInstanceofSites: openScratchOwnedInstanceofSites,
-    guards: Object.freeze({
-        BufferResource: current.buffer.includes('isBufferResource('),
-        DispatchCommand: current.command.includes('isDispatchCommand('),
-        DrawCommand: current.command.includes('isDrawCommand('),
-        LayoutCodec: current.layoutCodec.includes('isLayoutCodec('),
-        Program: current.program.includes('isProgram('),
-        QuerySetResource: current.querySet.includes('isQuerySetResource('),
-        SamplerResource: current.sampler.includes('isSamplerResource('),
-        ScratchDiagnosticError: currentScratchSource.includes('isScratchDiagnosticError('),
-        TextureResource: current.texture.includes('isTextureResource('),
-    }),
-    status: openScratchOwnedInstanceofSites.length === 0 && [
-        current.buffer.includes('isBufferResource('),
-        current.command.includes('isDispatchCommand('),
-        current.command.includes('isDrawCommand('),
-        current.layoutCodec.includes('isLayoutCodec('),
-        current.program.includes('isProgram('),
-        current.querySet.includes('isQuerySetResource('),
-        current.sampler.includes('isSamplerResource('),
-        currentScratchSource.includes('isScratchDiagnosticError('),
-        current.texture.includes('isTextureResource('),
-    ].every(Boolean) ? 'passed' : 'failed',
+    openDuckTypedAuthoritySites: openScratchOwnedDuckAuthoritySites,
+    guards: closedBrandGuards,
+    status: openScratchOwnedInstanceofSites.length === 0 &&
+        openScratchOwnedDuckAuthoritySites.length === 0 &&
+        Object.values(closedBrandGuards).every(Boolean)
+        ? 'passed'
+        : 'failed',
 })
 const goalStartProductionDeclarations = emitProductionDeclarationsAt(goalBaseline)
 const emittedProductionOutputs = emitCurrentProductionOutputs()
@@ -643,6 +697,10 @@ const behaviorTestContracts = [
     behaviorTestContract('tests/scratch-closed-brand-authority.test.js', [
         'rejects a forged sampler after constructor Symbol.hasInstance replacement',
         'rejects a forged texture before native copy encoding after constructor replacement',
+        'rejects prototype-derived BindLayout identities before native binding creation',
+        'rejects prototype-derived Program identities before native pipeline creation',
+        'rejects prototype-derived Pipeline and BindSet identities before command creation',
+        'rejects prototype-derived pass and command identities before native submission effects',
         'does not use open instanceof checks as Scratch-owned internal brands',
     ]),
     behaviorTestContract('tests/scratch-surface.test.js', [
@@ -1117,22 +1175,54 @@ const documentationAudit = Object.freeze({
             'encoding',
             'module',
         ])),
-    closedBrandAuthority: [
-        finalDocs.resources,
-        finalDocs.resourcesZh,
-        finalDocs.commands,
-        finalDocs.commandsZh,
-        finalDocs.programs,
-        finalDocs.programsZh,
-        finalDocs.diagnostics,
-        finalDocs.diagnosticsZh,
-    ].every(source => hasAll(source, [
-        'module-private',
-        '`WeakSet`',
-        '`instanceof`',
-        '`Symbol.hasInstance`',
-        '`Object.create(',
-    ])) && closedBrandAuthority.status === 'passed',
+    closedBrandAuthority:
+        [ finalDocs.resources, finalDocs.resourcesZh ].every(source => hasAll(source, [
+            'module-private',
+            '`WeakSet`',
+            '`instanceof`',
+            '`Symbol.hasInstance`',
+            '`Object.create(',
+        ])) &&
+        [ finalDocs.bindings, finalDocs.bindingsZh ].every(source => hasAll(source, [
+            'module-private',
+            '`WeakMap`',
+            '`isBindLayout()`',
+            '`isBindSet()`',
+            '`assertRuntime()`',
+            '`Object.create(',
+        ])) &&
+        [ finalDocs.commands, finalDocs.commandsZh ].every(source => hasAll(source, [
+            'module-private',
+            '`WeakMap`',
+            '`isRenderPipeline()`',
+            '`isComputePipeline()`',
+            '`isBindSet()`',
+            '`instanceof`',
+            '`Object.create(',
+        ])) &&
+        [ finalDocs.passes, finalDocs.passesZh ].every(source => hasAll(source, [
+            'module-private',
+            '`WeakMap`',
+            '`isRenderPassSpec()`',
+            '`isComputePassSpec()`',
+            '`assertRuntime()`',
+            '`Object.create(',
+        ])) &&
+        [ finalDocs.programs, finalDocs.programsZh ].every(source => hasAll(source, [
+            'module-private',
+            '`WeakSet`',
+            '`isProgram()`',
+            'Pipeline',
+            'Shader inspection',
+            '`Object.create(',
+        ])) &&
+        [ finalDocs.diagnostics, finalDocs.diagnosticsZh ].every(source => hasAll(source, [
+            'module-private',
+            '`WeakSet`',
+            '`instanceof`',
+            '`Symbol.hasInstance`',
+            '`Object.create(',
+        ])) && closedBrandAuthority.status === 'passed',
     attachmentViewContracts: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
         hasAll(source, [
             'RENDER_ATTACHMENT',
@@ -1214,9 +1304,15 @@ const documentationAudit = Object.freeze({
         'focused acceptance passed 472/472',
         'complete suite reported 870 passing',
     ]),
+    thirtyEighthReviewAcceptanceRecorded: hasAll(finalDocs.finalAudit, [
+        'Clean thirty-eighth-review checkpoint acceptance (`c9cfad3`)',
+        cleanThirtyEighthReviewCheckpoint,
+        'focused acceptance passed 475/475',
+        'complete suite reported 873 passing',
+    ]),
     currentAcceptanceCounts: hasAll(finalDocs.finalAudit, [
-        'executes exactly 475',
-        'complete suite to report exactly 873 passing',
+        'executes exactly 479',
+        'complete suite to report exactly 877 passing',
     ]),
     resourceStateParity: resourceStateParity.status === 'passed',
     programExamplesUseBufferRegions: [ finalDocs.programs, finalDocs.programsZh ]

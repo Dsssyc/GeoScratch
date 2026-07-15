@@ -107,6 +107,15 @@ region overlap 时仍会防御性比较 Surface context identity。
 mutation 因此不能绕过已验证的 load/store、query slot 或 view facts。Pass spec 不
 存储 command。这能避免上一轮 submission 残留 command list 存活到下一轮。
 
+Pass identity 是另一条 closed authority。成功构造的 `RenderPassSpec` 与
+`ComputePassSpec` 会登记 module-private `WeakMap` state record；
+`isRenderPassSpec()` / `isComputePassSpec()` 必须同时确认该 record 与 exact
+built-in prototype。Submission 会在 `assertRuntime()`、attachment preparation、
+queue work 或 command encoder creation 前，先要求 pass guard 和对应的 closed
+command guard 都成立。Public `instanceof`、具有 `assertRuntime()` 形状的 record、
+subclassing，以及 `Object.create(PassSpecClass.prototype)` 都不能进入 submission
+plan。
+
 ## Submission
 
 `SubmissionBuilder` 记录一条显式 pass-command 序列。它不是 display frame，也不暗示 presentation:

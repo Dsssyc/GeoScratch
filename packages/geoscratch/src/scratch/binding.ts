@@ -580,7 +580,7 @@ export class BindSet {
 
         runtime.assertActive()
 
-        if (!layout || typeof layout.assertRuntime !== 'function') {
+        if (!isBindLayout(layout)) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',
                 severity: 'error',
@@ -809,6 +809,20 @@ export class BindSet {
             diagnosticsControllerFor(this.runtime).unregisterBindSet(this)
         }
     }
+}
+
+export function isBindLayout(value: unknown): value is BindLayout {
+
+    return typeof value === 'object' && value !== null &&
+        Object.getPrototypeOf(value) === BindLayout.prototype &&
+        bindLayoutStates.has(value as BindLayout)
+}
+
+export function isBindSet(value: unknown): value is BindSet {
+
+    return typeof value === 'object' && value !== null &&
+        Object.getPrototypeOf(value) === BindSet.prototype &&
+        bindSetStates.has(value as BindSet)
 }
 
 export async function createBindSet(

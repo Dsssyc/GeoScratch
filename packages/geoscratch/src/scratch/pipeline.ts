@@ -1,5 +1,5 @@
 import { UUID } from '../core/utils/uuid.js'
-import { firstBindingLimitViolation } from './binding.js'
+import { firstBindingLimitViolation, isBindLayout } from './binding.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
     issuePipelineCreation,
@@ -8,7 +8,7 @@ import { snapshotPipelineSource } from './pipeline-compilation.js'
 import { createPipelineNativeErrorSerializer } from './pipeline-native-error.js'
 import { registerRuntimePipeline, unregisterRuntimePipeline } from './pipeline-ownership.js'
 import { describeValue } from './type-utils.js'
-import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
+import { isProgram, programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type { BindLayout } from './binding.js'
@@ -167,6 +167,13 @@ export class RenderPipeline {
     }
 }
 
+export function isRenderPipeline(value: unknown): value is RenderPipeline {
+
+    return typeof value === 'object' && value !== null &&
+        Object.getPrototypeOf(value) === RenderPipeline.prototype &&
+        renderPipelineStates.has(value as RenderPipeline)
+}
+
 type PipelineValidationContext = {
     runtime: ScratchRuntime
     id: string
@@ -311,7 +318,7 @@ function prepareRenderPipeline(
     runtime.assertActive()
     const input = descriptor ?? {} as RenderPipelineDescriptor
     const program = input.program
-    if (!program || typeof program.assertRuntime !== 'function') {
+    if (!isProgram(program)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_PIPELINE_PROGRAM_INVALID',
             severity: 'error',
@@ -861,6 +868,13 @@ export class ComputePipeline {
     }
 }
 
+export function isComputePipeline(value: unknown): value is ComputePipeline {
+
+    return typeof value === 'object' && value !== null &&
+        Object.getPrototypeOf(value) === ComputePipeline.prototype &&
+        computePipelineStates.has(value as ComputePipeline)
+}
+
 type ComputePipelinePlan = PipelineCreationPlan & Readonly<{
     pipelineKind: 'compute'
     computeEntryPoint: string
@@ -973,7 +987,7 @@ function prepareComputePipeline(
     runtime.assertActive()
     const input = descriptor ?? {} as ComputePipelineDescriptor
     const program = input.program
-    if (!program || typeof program.assertRuntime !== 'function') {
+    if (!isProgram(program)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_PIPELINE_PROGRAM_INVALID',
             severity: 'error',
@@ -1220,7 +1234,7 @@ function normalizeBindLayouts(
 
     const groups = new Set<number>()
     const normalized = bindLayouts.map((layout: BindLayout) => {
-        if (!layout || typeof layout.assertRuntime !== 'function') {
+        if (!isBindLayout(layout)) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
                 severity: 'error',
@@ -1526,3 +1540,6 @@ function isLowSurrogate(value: number): boolean {
 
     return value >= 0xDC00 && value <= 0xDFFF
 }
+
+Object.freeze(RenderPipeline.prototype)
+Object.freeze(ComputePipeline.prototype)

@@ -61,8 +61,9 @@ describe('Scratch persistent binding final parity', () => {
             'nearestEvenInteger',
             'const cleanThirtySixthReviewCheckpoint = \'4926648e8258fcb6a58e6746704c708beab611e6\'',
             'const cleanThirtySeventhReviewCheckpoint = \'3d5f4d73c64eb5cc1108cd26fa31fec546badb3d\'',
-            'const expectedFocusedAcceptancePasses = 475',
-            'const expectedFullSuitePasses = 873',
+            'const cleanThirtyEighthReviewCheckpoint = \'c9cfad3decd3380c2d03509482b549d3275e1c1c\'',
+            'const expectedFocusedAcceptancePasses = 479',
+            'const expectedFullSuitePasses = 877',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -130,6 +131,10 @@ describe('Scratch persistent binding final parity', () => {
             'freezes every executable command prototype authority',
             'rejects a forged sampler after constructor Symbol.hasInstance replacement',
             'rejects a forged texture before native copy encoding after constructor replacement',
+            'rejects prototype-derived BindLayout identities before native binding creation',
+            'rejects prototype-derived Program identities before native pipeline creation',
+            'rejects prototype-derived Pipeline and BindSet identities before command creation',
+            'rejects prototype-derived pass and command identities before native submission effects',
             'does not use open instanceof checks as Scratch-owned internal brands',
             'rejects noncanonical raw resource descriptor integers before native issue',
             'rejects color attachment metadata and surface view descriptor divergence',
@@ -288,6 +293,7 @@ describe('Scratch persistent binding final parity', () => {
             status: 'passed',
             emittedJavaScriptCount: 102,
             emittedDeclarationCount: 102,
+            declarationSignatureCount: 4792,
         })
         expect(result.publicSurface.productionEmitParity.files).to.have.length(204)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
@@ -299,6 +305,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.nativeCopyQuadrants.every(entry => (
             entry.status === 'passed' && entry.gpuSide && entry.astResolvedCallCount === 1
         ))).to.equal(true)
+        expect(result.publicSurface.closedBrandAuthority).to.deep.include({ status: 'passed' })
+        expect(result.publicSurface.closedBrandAuthority.authorities).to.have.length(25)
+        expect(result.publicSurface.closedBrandAuthority.openInstanceofSites).to.deep.equal([])
+        expect(result.publicSurface.closedBrandAuthority.openDuckTypedAuthoritySites).to.deep.equal([])
+        expect(Object.values(result.publicSurface.closedBrandAuthority.guards).every(Boolean)).to.equal(true)
         expect(result.testEvidence.status).to.equal('passed')
         expect(result.executionEvidence.status).to.equal('not-run')
         expect(result.officialSpecificationEvidence.status).to.equal('not-run')
@@ -342,6 +353,7 @@ describe('Scratch persistent binding final parity', () => {
             closedBrandAuthority: true,
             thirtySixthReviewAcceptanceRecorded: true,
             thirtySeventhReviewAcceptanceRecorded: true,
+            thirtyEighthReviewAcceptanceRecorded: true,
             currentAcceptanceCounts: true,
             supersededLayoutDecisionsCurrent: true,
             obsoleteSubmissionAuditRemoved: true,
@@ -496,15 +508,15 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence.mocha).to.deep.include({
             status: 'passed',
-            tests: 455,
-            passes: 455,
+            tests: 479,
+            passes: 479,
             failures: 0,
             pending: 0,
         })
         expect(result.executionEvidence.fullSuite).to.deep.include({
             status: 'passed',
-            tests: 855,
-            passes: 853,
+            tests: 879,
+            passes: 877,
             failures: 0,
             pending: 2,
         })

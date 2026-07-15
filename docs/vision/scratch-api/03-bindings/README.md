@@ -138,6 +138,16 @@ The BindSet instance is non-extensible and `BindSet.prototype` is frozen. In par
 `preparationState`, lifecycle observations, `assertPrepared()`, and `prepare()` cannot be
 replaced to disguise a stale allocation snapshot or recover an old native bind group.
 
+Binding identity authority is closed independently of those public observations.
+Successful `BindLayout` and `BindSet` construction installs one corresponding
+module-private `WeakMap` state record. `isBindLayout()` and `isBindSet()` require both
+the exact built-in prototype and that private record before any `assertRuntime()`,
+lifecycle, preparation, pipeline-layout, shader-inspection, or native binding work.
+A record that merely supplies similarly named methods is not a binding object; public
+`instanceof`, replacement of `Symbol.hasInstance`, subclass prototypes, and
+`Object.create(BindLayout.prototype)` / `Object.create(BindSet.prototype)` do not grant
+authority.
+
 `await runtime.createBindSet(...)` returns only an initially prepared object. Preparation privately creates allocation-scoped texture views and one bind group, then commits them atomically after native scope acknowledgement and lifecycle/snapshot rechecks. Identical texture views may be deduplicated only inside that one candidate. There is no runtime-wide or cross-BindSet native-view cache.
 
 ## Preparation Lifecycle

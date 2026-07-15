@@ -132,6 +132,15 @@ BindSet instance 不可扩展，且 `BindSet.prototype` 会被冻结。特别是
 `preparationState`、lifecycle observation、`assertPrepared()` 与 `prepare()` 不能被
 替换来掩盖 stale allocation snapshot，也不能恢复旧 native bind group。
 
+Binding identity authority 独立于这些 public observation 闭合。成功构造的
+`BindLayout` 与 `BindSet` 会各自登记一条对应的 module-private `WeakMap` state
+record。`isBindLayout()` 与 `isBindSet()` 必须同时确认 exact built-in prototype 和
+该 private record，之后才允许执行 `assertRuntime()`、lifecycle、preparation、
+pipeline-layout、Shader inspection 或 native binding 工作。仅提供同名方法的 record
+不是 binding object；public `instanceof`、替换 `Symbol.hasInstance`、subclass
+prototype，以及 `Object.create(BindLayout.prototype)` /
+`Object.create(BindSet.prototype)` 都不能获得 authority。
+
 `await runtime.createBindSet(...)` 只返回 initially prepared 对象。Preparation 私有创建 allocation-scoped texture view 和一个 bind group，并在 native scope acknowledgement 与 lifecycle/snapshot 复核后原子提交。同一 candidate 内可以去重完全相同的 texture view；不存在 runtime-wide 或 cross-BindSet native-view cache。
 
 ## Preparation 生命周期

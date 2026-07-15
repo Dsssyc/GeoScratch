@@ -1,6 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferRegion, BufferResource, isBufferRegion } from './buffer.js'
-import { preparedBindGroupFor } from './binding.js'
+import { isBindSet, preparedBindGroupFor } from './binding.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
     describeLayoutCompatibilityDifference,
@@ -11,7 +11,7 @@ import {
     layoutArtifactsSchemaCompatible,
 } from './layout-codec.js'
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
-import { programLayoutRequirementsForPipeline } from './pipeline.js'
+import { isComputePipeline, isRenderPipeline, programLayoutRequirementsForPipeline } from './pipeline.js'
 import { QuerySetResource, isQuerySetResource } from './query-set.js'
 import {
     registerRuntimeReadbackCommand,
@@ -565,8 +565,19 @@ type NormalizedUploadSource = {
     layout?: LayoutArtifact
 }
 
-const drawCommands = new WeakSet<DrawCommand>()
-const dispatchCommands = new WeakSet<DispatchCommand>()
+type CommandBrand =
+    | 'draw'
+    | 'begin-occlusion-query'
+    | 'end-occlusion-query'
+    | 'dispatch'
+    | 'buffer-upload'
+    | 'copy'
+    | 'readback'
+    | 'resolve-query-set'
+    | 'texture-upload'
+    | 'external-image-upload'
+
+const commandBrands = new WeakMap<object, CommandBrand>()
 
 export interface DrawCommand {
     readonly runtime: ScratchRuntime
@@ -592,8 +603,8 @@ export class DrawCommand {
 
         runtime.assertActive()
 
-        const pipeline = descriptor.pipeline
-        if (!pipeline || typeof pipeline.assertRuntime !== 'function' || pipeline.pipelineKind !== 'render') {
+        const pipeline: unknown = descriptor.pipeline
+        if (!isRenderPipeline(pipeline)) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
                 severity: 'error',
@@ -603,7 +614,7 @@ export class DrawCommand {
                 expected: { pipeline: 'RenderPipeline' },
                 actual: {
                     pipeline: pipeline === undefined || pipeline === null ? String(pipeline) : typeof pipeline,
-                    pipelineKind: pipeline?.pipelineKind,
+                    pipelineKind: isRecord(pipeline) ? pipeline.pipelineKind : undefined,
                 },
             })
         }
@@ -630,7 +641,7 @@ export class DrawCommand {
         mutable.whenMissing = readiness.whenMissing
         if (readiness.fallback !== undefined) mutable.fallback = readiness.fallback
         validateProgramLayoutRequirementsForCommand(this)
-        drawCommands.add(this)
+        commandBrands.set(this, 'draw')
         lockDrawCommandContract(this)
     }
 
@@ -843,6 +854,7 @@ export class BeginOcclusionQueryCommand {
         mutable.commandKind = 'begin-occlusion-query'
         mutable.querySet = querySet
         mutable.index = normalizeOcclusionQueryIndex(runtime, querySet, descriptor.index)
+        commandBrands.set(this, 'begin-occlusion-query')
         lockCommandProperties(this, [ 'runtime', 'id', 'label', 'commandKind', 'querySet', 'index' ])
         Object.preventExtensions(this)
     }
@@ -968,6 +980,7 @@ export class EndOcclusionQueryCommand {
         mutable.id = `scratch-command-${UUID()}`
         if (descriptor.label !== undefined) mutable.label = descriptor.label
         mutable.commandKind = 'end-occlusion-query'
+        commandBrands.set(this, 'end-occlusion-query')
         lockCommandProperties(this, [ 'runtime', 'id', 'label', 'commandKind' ])
         Object.preventExtensions(this)
     }
@@ -1093,8 +1106,8 @@ export class DispatchCommand {
 
         runtime.assertActive()
 
-        const pipeline = descriptor.pipeline
-        if (!pipeline || typeof pipeline.assertRuntime !== 'function' || pipeline.pipelineKind !== 'compute') {
+        const pipeline: unknown = descriptor.pipeline
+        if (!isComputePipeline(pipeline)) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
                 severity: 'error',
@@ -1125,7 +1138,7 @@ export class DispatchCommand {
         mutable.whenMissing = readiness.whenMissing
         if (readiness.fallback !== undefined) mutable.fallback = readiness.fallback
         validateProgramLayoutRequirementsForCommand(this)
-        dispatchCommands.add(this)
+        commandBrands.set(this, 'dispatch')
         lockDispatchCommandContract(this)
     }
 
@@ -1276,12 +1289,62 @@ function dispatchCountProducesDeclaredWrites(count: DispatchCommand['count']): b
 
 export function isDrawCommand(value: unknown): value is DrawCommand {
 
-    return typeof value === 'object' && value !== null && drawCommands.has(value as DrawCommand)
+    return hasCommandBrand(value, 'draw', DrawCommand.prototype)
 }
 
 export function isDispatchCommand(value: unknown): value is DispatchCommand {
 
-    return typeof value === 'object' && value !== null && dispatchCommands.has(value as DispatchCommand)
+    return hasCommandBrand(value, 'dispatch', DispatchCommand.prototype)
+}
+
+export function isBeginOcclusionQueryCommand(value: unknown): value is BeginOcclusionQueryCommand {
+
+    return hasCommandBrand(value, 'begin-occlusion-query', BeginOcclusionQueryCommand.prototype)
+}
+
+export function isEndOcclusionQueryCommand(value: unknown): value is EndOcclusionQueryCommand {
+
+    return hasCommandBrand(value, 'end-occlusion-query', EndOcclusionQueryCommand.prototype)
+}
+
+export function isRenderCommand(
+    value: unknown
+): value is DrawCommand | BeginOcclusionQueryCommand | EndOcclusionQueryCommand {
+
+    return isDrawCommand(value) ||
+        isBeginOcclusionQueryCommand(value) ||
+        isEndOcclusionQueryCommand(value)
+}
+
+export function isUploadCommand(
+    value: unknown
+): value is UploadCommand | TextureUploadCommand | ExternalImageUploadCommand {
+
+    return hasCommandBrand(value, 'buffer-upload', UploadCommand.prototype) ||
+        hasCommandBrand(value, 'texture-upload', TextureUploadCommand.prototype) ||
+        hasCommandBrand(value, 'external-image-upload', ExternalImageUploadCommand.prototype)
+}
+
+export function isCopyCommand(value: unknown): value is CopyCommand {
+
+    return hasCommandBrand(value, 'copy', CopyCommand.prototype)
+}
+
+export function isReadbackCommand(value: unknown): value is ReadbackCommand {
+
+    return hasCommandBrand(value, 'readback', ReadbackCommand.prototype)
+}
+
+export function isResolveQuerySetCommand(value: unknown): value is ResolveQuerySetCommand {
+
+    return hasCommandBrand(value, 'resolve-query-set', ResolveQuerySetCommand.prototype)
+}
+
+function hasCommandBrand(value: unknown, brand: CommandBrand, prototype: object): boolean {
+
+    return typeof value === 'object' && value !== null &&
+        Object.getPrototypeOf(value) === prototype &&
+        commandBrands.get(value) === brand
 }
 
 function lockDrawCommandContract(command: DrawCommand): void {
@@ -1429,6 +1492,7 @@ export class UploadCommand {
         mutable.byteLength = normalizeUploadByteLength(runtime, this.data, this.dataOffset, descriptor, sourceByteLength)
 
         validateUploadRange(this)
+        commandBrands.set(this, 'buffer-upload')
         lockCommandProperties(this, [
             'runtime', 'id', 'label', 'commandKind', 'uploadKind', 'target', 'data',
             'layout', 'dataOffset', 'byteLength',
@@ -1634,6 +1698,7 @@ export class CopyCommand {
         ]) {
             if (value !== undefined) Object.freeze(value)
         }
+        commandBrands.set(this, 'copy')
         lockCommandProperties(this, [
             'runtime', 'id', 'label', 'commandKind', 'copyKind', 'source', 'sourceLayout',
             'target', 'targetLayout', 'sourceOrigin', 'targetOrigin', 'sourceMipLevel',
@@ -1916,6 +1981,7 @@ export class ReadbackCommand {
             activeClaim: undefined,
         })
         readbackCommandResults.set(this, new WeakMap())
+        commandBrands.set(this, 'readback')
         Object.preventExtensions(this)
     }
 
@@ -2587,6 +2653,7 @@ export class ResolveQuerySetCommand {
         mutable.whenMissing = normalizedDescriptor.whenMissing
 
         validateResolveQuerySetRange(this)
+        commandBrands.set(this, 'resolve-query-set')
         lockCommandProperties(this, [
             'runtime', 'id', 'label', 'commandKind', 'destination', 'whenMissing',
         ])
@@ -2769,6 +2836,7 @@ export class TextureUploadCommand {
         Object.freeze(this.layout)
         Object.freeze(this.origin)
         Object.freeze(this.size)
+        commandBrands.set(this, 'texture-upload')
         lockCommandProperties(this, [
             'runtime', 'id', 'label', 'commandKind', 'uploadKind', 'target', 'data',
             'layout', 'origin', 'size', 'mipLevel',
@@ -2909,6 +2977,7 @@ export class ExternalImageUploadCommand {
         mutable.size = normalizeExternalImageUploadSize(runtime, descriptor.size)
 
         validateExternalImageUploadTarget(this)
+        commandBrands.set(this, 'external-image-upload')
         lockExternalImageUploadCommandContract(this)
     }
 
@@ -3214,7 +3283,7 @@ function normalizeBindSetInvocations(
         }
 
         const bindSet = invocation.set
-        if (!bindSet || typeof bindSet.assertRuntime !== 'function') {
+        if (!isBindSet(bindSet)) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
                 severity: 'error',

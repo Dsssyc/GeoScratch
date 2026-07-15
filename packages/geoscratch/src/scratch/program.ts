@@ -118,7 +118,9 @@ export class Program {
 
 export function isProgram(value: unknown): value is Program {
 
-    return typeof value === 'object' && value !== null && programs.has(value as Program)
+    return typeof value === 'object' && value !== null &&
+        Object.getPrototypeOf(value) === Program.prototype &&
+        programs.has(value as Program)
 }
 
 export function programLayoutRequirementSubject(requirement: Pick<ProgramBufferLayoutRequirement, 'group' | 'binding'> & { name?: unknown }): DiagnosticSubject {
@@ -421,3 +423,5 @@ function throwLayoutRequirementDiagnostic(
         actual: details.actual,
     })
 }
+
+Object.freeze(Program.prototype)

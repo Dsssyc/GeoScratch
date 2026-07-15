@@ -75,11 +75,17 @@ property shadowing 都不能让已 disposed command 再次可用。`ResolveQuery
 `queryCount` observation 都从该 snapshot 派生，因此 submission readiness 与 native
 encoding 不可能读取不同的 slot range。
 
-Command-kind authority 同样在 module 内闭合。Draw/Dispatch 只会在构造成功时登记
-module-private `WeakSet` brand，fallback validation 使用这些 brand，而不是 public
-`instanceof`；resource 与 query operand 也通过各自的 closed brand 进入。替换
-`Symbol.hasInstance` 或执行 `Object.create(CommandClass.prototype)`，因此不能向
-fallback chain 注入伪造 command，也不能把 raw native handle 导入 encoding。
+Command-kind authority 同样在 module 内闭合。每个成功构造的 executable command
+都会在一个 module-private `WeakMap` 中登记其 exact command-family discriminator；
+command guard 必须同时确认 exact built-in prototype 与该 private brand。Submission
+和 fallback validation 使用这些 guard，而不是 public `instanceof`。Command
+construction 也只通过 `isRenderPipeline()` / `isComputePipeline()` 接纳 render 或
+compute pipeline，并只通过 `isBindSet()` 接纳 bind set；这些 guard 都由所属 module
+的 private state map 支持。Resource 与 query operand 通过各自的 closed brand 进入。
+替换 `Symbol.hasInstance`、提供具有 `assertRuntime()` 形状的 record、subclassing，
+或执行 `Object.create(CommandClass.prototype)`，都不能向 construction、fallback
+resolution、submission 或 native encoding 注入伪造 Pipeline、BindSet 或 Command
+facts。
 
 ### Texture Allocation Replacement
 

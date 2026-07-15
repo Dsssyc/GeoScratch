@@ -1,7 +1,8 @@
-import { BindLayout } from './binding.js'
-import { createScratchDiagnostic, createScratchDiagnosticReport } from './diagnostics.js'
+import { isBindLayout } from './binding.js'
+import { createScratchDiagnostic, createScratchDiagnosticReport, throwScratchDiagnostic } from './diagnostics.js'
 import { Program, isProgram } from './program.js'
-import type { BindLayoutEntry } from './binding.js'
+import { describeValue } from './type-utils.js'
+import type { BindLayout, BindLayoutEntry } from './binding.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 
 export type ShaderBindingResourceType =
@@ -93,7 +94,9 @@ class ShaderInspectionResult implements ShaderInspection {
 
     compareBindLayouts(bindLayouts: ReadonlyArray<BindLayout>, options: ShaderBindLayoutComparisonOptions = {}): ScratchDiagnosticReport {
 
-        const program = options.program ?? this.#program
+        const program = options.program === undefined
+            ? this.#program
+            : resolveProgram('', options.program)
         const diagnostics = [ ...this.diagnostics ]
         const entries = collectBindLayoutEntries(bindLayouts)
         const entriesByKey = new Map(entries.map(record => [ bindingKey(record.layout.group, record.entry.binding), record ]))
@@ -132,13 +135,19 @@ function normalizeModules(input: ShaderInspectionInput): string[] {
 
     if (isProgram(input)) return [ ...input.modules ]
     if (typeof input === 'string') return [ input ]
+    if (!Array.isArray(input) || input.some(moduleSource => typeof moduleSource !== 'string')) {
+        return throwShaderInspectionProgramInvalid(input)
+    }
 
     return [ ...input ]
 }
 
 function resolveProgram(input: ShaderInspectionInput, program: Program | undefined): Program | undefined {
 
-    if (program !== undefined) return program
+    if (program !== undefined) {
+        if (!isProgram(program)) return throwShaderInspectionProgramInvalid(program)
+        return program
+    }
     if (isProgram(input)) return input
 
     return undefined
@@ -315,9 +324,11 @@ function createInconclusiveDiagnostic(input: {
 
 function collectBindLayoutEntries(bindLayouts: ReadonlyArray<BindLayout>): BindLayoutEntryRecord[] {
 
+    if (!Array.isArray(bindLayouts)) return throwShaderInspectionBindLayoutInvalid(bindLayouts)
     const records: BindLayoutEntryRecord[] = []
 
     for (const layout of bindLayouts) {
+        if (!isBindLayout(layout)) return throwShaderInspectionBindLayoutInvalid(layout)
         for (const entry of layout.entries) {
             records.push({ layout, entry })
         }
@@ -331,6 +342,32 @@ function collectBindLayoutEntries(bindLayouts: ReadonlyArray<BindLayout>): BindL
         if (bindingDelta !== 0) return bindingDelta
 
         return left.entry.name.localeCompare(right.entry.name)
+    })
+}
+
+function throwShaderInspectionProgramInvalid(program: unknown): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PROGRAM_MODULES_INVALID',
+        severity: 'error',
+        phase: 'program',
+        subject: { kind: 'Program' },
+        message: 'Shader inspection requires a constructed Program or explicit WGSL modules.',
+        expected: { input: 'Program, string, or string[]' },
+        actual: { input: describeValue(program) },
+    })
+}
+
+function throwShaderInspectionBindLayoutInvalid(layout: unknown): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_BIND_LAYOUT_DESCRIPTOR_INVALID',
+        severity: 'error',
+        phase: 'binding',
+        subject: { kind: 'BindLayout' },
+        message: 'Shader inspection comparison requires constructed BindLayout objects.',
+        expected: { bindLayouts: 'BindLayout[]' },
+        actual: { bindLayout: describeValue(layout) },
     })
 }
 

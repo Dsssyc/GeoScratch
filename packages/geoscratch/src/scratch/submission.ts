@@ -9,6 +9,13 @@ import {
     readbackCommandClaimBuffer,
     registerReadbackCommandResult,
     releaseReadbackCommandClaim,
+    isCopyCommand,
+    isDispatchCommand,
+    isDrawCommand,
+    isReadbackCommand,
+    isRenderCommand,
+    isResolveQuerySetCommand,
+    isUploadCommand,
     updateReadbackCommandClaimProvenance,
     uploadCommandHasContentEffect,
     validateUploadCommandQueueAction,
@@ -22,7 +29,12 @@ import {
     throwScratchDiagnostic,
 } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
-import { createRenderPassDescriptor, validateRenderPassAttachments } from './pass.js'
+import {
+    createRenderPassDescriptor,
+    isComputePassSpec,
+    isRenderPassSpec,
+    validateRenderPassAttachments,
+} from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
@@ -1539,7 +1551,7 @@ function validateUploadStep(builder: SubmissionBuilder, step: UploadStep) {
 
     const command = step.command
 
-    if (!command || typeof command.assertRuntime !== 'function' || command.commandKind !== 'upload') {
+    if (!isUploadCommand(command)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
@@ -1558,7 +1570,7 @@ function validateCopyStep(builder: SubmissionBuilder, step: CopyStep) {
 
     const command = step.command
 
-    if (!command || typeof command.assertRuntime !== 'function' || command.commandKind !== 'copy') {
+    if (!isCopyCommand(command)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
@@ -1593,7 +1605,7 @@ function validateReadbackStep(builder: SubmissionBuilder, step: ReadbackStep) {
 
     const command = step.command
 
-    if (!command || typeof command.assertRuntime !== 'function' || command.commandKind !== 'readback') {
+    if (!isReadbackCommand(command)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
@@ -1656,7 +1668,7 @@ function validateResolveStep(builder: SubmissionBuilder, step: ResolveStep) {
 
     const command = step.command
 
-    if (!command || typeof command.assertRuntime !== 'function' || command.commandKind !== 'resolve-query-set') {
+    if (!isResolveQuerySetCommand(command)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
@@ -2241,12 +2253,7 @@ function validateFallbackCommandForPass(
     fallback: ExecutableCommand
 ): void {
 
-    if (
-        !isRecord(fallback) ||
-        typeof fallback.assertRuntime !== 'function' ||
-        typeof fallback.validateForPass !== 'function' ||
-        typeof fallback.encode !== 'function'
-    ) {
+    if (!isDrawCommand(fallback) && !isDispatchCommand(fallback)) {
         throwFallbackPassIncompatibleDiagnostic(
             builder,
             stepIndex,
@@ -3311,9 +3318,9 @@ function freezeDiagnosticSubject(subject: DiagnosticSubject): DiagnosticSubject 
 
 function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
 
-    const passSpec = step.passSpec
+    const passSpec: unknown = step.passSpec
 
-    if (!passSpec || typeof passSpec.assertRuntime !== 'function') {
+    if (!isRenderPassSpec(passSpec) && !isComputePassSpec(passSpec)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
@@ -3327,7 +3334,7 @@ function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
 
     passSpec.assertRuntime(builder.runtime)
 
-    if (passSpec.passKind !== 'render') {
+    if (!isRenderPassSpec(passSpec)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
             severity: 'error',
@@ -3367,9 +3374,9 @@ function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
 
 function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
 
-    const passSpec = step.passSpec
+    const passSpec: unknown = step.passSpec
 
-    if (!passSpec || typeof passSpec.assertRuntime !== 'function') {
+    if (!isRenderPassSpec(passSpec) && !isComputePassSpec(passSpec)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
@@ -3383,7 +3390,7 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
 
     passSpec.assertRuntime(builder.runtime)
 
-    if (passSpec.passKind !== 'compute') {
+    if (!isComputePassSpec(passSpec)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
             severity: 'error',
@@ -3396,7 +3403,24 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
         })
     }
 
-    for (const command of step.commands) {
+    for (const commandValue of step.commands) {
+        const command: unknown = commandValue
+        if (!isDispatchCommand(command)) {
+            if (isRenderCommand(command)) {
+                command.assertRuntime(builder.runtime)
+                // JavaScript can supply a genuine render command despite the typed compute-step contract.
+                command.validateForPass(passSpec as unknown as RenderPassSpec)
+            }
+            throwScratchDiagnostic({
+                code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+                severity: 'error',
+                phase: 'submission',
+                subject: builder.subject,
+                message: 'Submission compute step requires dispatch commands.',
+                expected: { command: 'DispatchCommand' },
+                actual: { command: command === undefined || command === null ? String(command) : typeof command },
+            })
+        }
         command.assertRuntime(builder.runtime)
         command.validateForPass(passSpec)
     }
@@ -3676,17 +3700,6 @@ function validateRenderOcclusionQueryOrder(builder: SubmissionBuilder, step: Ren
     if (activeCommand !== undefined) {
         throwOcclusionQueryStateDiagnostic(builder, step, activeCommand, 'unclosedBegin', activeCommand)
     }
-}
-
-function isRenderCommand(command: unknown): command is RenderCommand {
-
-    if (!isRecord(command)) return false
-
-    return Boolean(
-        typeof command.assertRuntime === 'function' &&
-        typeof command.validateForPass === 'function' &&
-        new Set([ 'draw', 'begin-occlusion-query', 'end-occlusion-query' ]).has(String(command.commandKind))
-    )
 }
 
 function throwOcclusionQueryStateDiagnostic(

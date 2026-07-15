@@ -76,12 +76,18 @@ usable again. `ResolveQuerySetCommand` owns one deeply frozen source snapshot. I
 `querySet`, `firstQuery`, and `queryCount` observations are derived from that snapshot, so
 submission readiness and native encoding cannot inspect different slot ranges.
 
-Command-kind authority is also closed inside the module. Draw/Dispatch construction
-registers module-private `WeakSet` brands, and fallback validation uses those brands
-rather than public `instanceof`. Resource and query operands are admitted through their
-own closed brands. Replacing `Symbol.hasInstance` or using
-`Object.create(CommandClass.prototype)` therefore cannot inject a forged command into a
-fallback chain or route a raw native handle into encoding.
+Command-kind authority is also closed inside the module. Every successfully constructed
+executable command registers its exact command-family discriminator in one
+module-private `WeakMap`; command guards require both the exact built-in prototype and
+that private brand. Submission and fallback validation use those guards rather than
+public `instanceof`. Command construction likewise admits render and compute pipelines
+only through `isRenderPipeline()` / `isComputePipeline()` and bind sets only through
+`isBindSet()`, each backed by its owning module's private state map. Resource and query
+operands use their own closed brands. Replacing `Symbol.hasInstance`, supplying an
+`assertRuntime()`-shaped record, subclassing, or using
+`Object.create(CommandClass.prototype)` therefore cannot inject forged Pipeline,
+BindSet, or Command facts into construction, fallback resolution, submission, or native
+encoding.
 
 ### Texture Allocation Replacement
 

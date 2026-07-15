@@ -1643,17 +1643,11 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('rejects wrong pass kinds with structured diagnostics', async() => {
 
         const fixture = await createTriangleScene()
-        const fakeComputePass = {
-            runtime: fixture.runtime,
-            passKind: 'compute',
-            subject: { kind: 'PassSpec', id: 'compute-pass', passKind: 'compute' },
-            assertUsable() {},
-            assertRuntime() {},
-        }
+        const computePass = fixture.runtime.createComputePass()
 
         try {
             fixture.runtime.createSubmission({ validation: 'throw' })
-                .render(fakeComputePass, [ fixture.draw ])
+                .render(computePass, [ fixture.draw ])
                 .submit()
             throw new Error('expected wrong pass kind to fail')
         } catch (error) {

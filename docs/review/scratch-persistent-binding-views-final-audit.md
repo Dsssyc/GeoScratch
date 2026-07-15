@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-thirty-eighth-review fixes pending acceptance
+Status: Post-thirty-ninth-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -28,8 +28,8 @@ source, and WHATWG Web IDL source and derives the native enum matrices. It later
 the managed port and explicitly executes `npm run typecheck`, the complete `npm run
 build`, and `git diff --check`. Structural mode preserves existing `dist` so stale
 output remains detectable, but performs the same recorded package bootstrap when `dist`
-is absent. It executes exactly 475 referenced behavior tests; requires the
-complete suite to report exactly 873 passing
+is absent. It executes exactly 479 referenced behavior tests; requires the
+complete suite to report exactly 877 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -91,13 +91,13 @@ The executable audit reports 36 Goal-start value exports, 29 historical JavaScri
 value exports, and 38 final value exports. None is silently missing. The production
 compiler emits 102 JavaScript files and 102 declaration files; every one matches
 `dist` exactly, with no missing, stale, or mismatched transitive output. The declaration
-AST manifest covers 4,718 declaration/member nodes. Scratch source contains only `.ts`
+AST manifest covers 4,792 declaration/member nodes. Scratch source contains only `.ts`
 and no hand-written `.d.ts` or same-source `.js`.
 
 ## AST-Derived Public Member Disposition
 
 The compiler-emitted declaration inventory contains 357 Goal-start public class
-members and 378 final public class members; the historical source/declaration inventory
+members and 388 final public class members; the historical source/declaration inventory
 contains 173 method/getter/setter entries. Every member record includes its kind,
 modifiers, parameter names and types, optional/rest shape, and inferred or declared
 return/property type. The audit fails if a missing or changed Goal-start contract is
@@ -322,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Thirty-eight isolated review passes have examined the fixed-baseline diff and working tree.
+Thirty-nine isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -376,6 +376,11 @@ BindSet, plus two P2 defects in Draw/Dispatch label locking and stale final-audi
 The thirty-eighth review found one P1 constructor-brand defect: caller-controlled
 `Symbol.hasInstance` could make forged resource wrappers pass Scratch-owned `instanceof`
 authority checks and reach native binding or copy paths.
+The thirty-ninth review found one P1 cross-module identity defect: creation and
+inspection boundaries for BindLayout and Program still accepted caller-authored records
+that merely exposed expected methods, allowing prototype-derived lookalikes to reach
+native bind-group or pipeline work. Same-root inspection found equivalent open authority
+at Pipeline, BindSet, PassSpec, and Submission command boundaries.
 
 Resolved core finding:
 
@@ -1051,6 +1056,27 @@ Resolved thirty-eighth review finding:
 This finding brings the reproduced or source-verified reviewer total to 106. Extending
 the same closed-brand rule across every remaining Scratch-owned `instanceof` authority
 is same-root coverage, not an additional reviewer finding.
+
+The thirty-eighth-review implementation passed clean acceptance at exact checkpoint
+`c9cfad3decd3380c2d03509482b549d3275e1c1c`, but the required thirty-ninth
+fresh-context review found one implementation defect below.
+
+Resolved thirty-ninth review finding:
+
+1. Cross-module Scratch identity no longer treats an `assertRuntime()`-shaped record as
+   authority. BindLayout, BindSet, RenderPipeline, ComputePipeline, RenderPassSpec, and
+   ComputePassSpec require exact prototypes plus their owning module-private WeakMap
+   state records; Program requires its exact prototype plus its private WeakSet brand.
+   Every executable command family registers one discriminator in a shared private
+   WeakMap. Pipeline creation, Shader inspection, Command construction, fallback
+   resolution, and Submission now apply these guards before lifecycle reads, resource
+   preparation, encoder creation, or native issue. All 14 duck-typed authority gates are
+   removed.
+
+This finding brings the reproduced or source-verified reviewer total to 107. Extending
+the same rule from the reported BindLayout and Program paths through the remaining
+Pipeline, BindSet, PassSpec, and Command boundaries is same-root proactive coverage,
+not an additional reviewer finding.
 
 ## Verification Record
 
@@ -1944,8 +1970,59 @@ Post-thirty-eighth-review targeted verification:
 - fixed-history structural parity passes every capability, behavior-title, closed-brand,
   bilingual-documentation, official-source, and example inventory check while truthfully
   reporting the dirty tree as `incomplete`; `git diff --check` passes
-- clean-commit acceptance and a new isolated exact no-findings review remain required
-  before audit closure
+
+Clean thirty-eighth-review checkpoint acceptance (`c9cfad3`):
+
+- initial and final repository evidence named exact commit
+  `c9cfad3decd3380c2d03509482b549d3275e1c1c` with an empty working tree
+- focused acceptance passed 475/475; the complete suite reported 873 passing and only
+  the two exact browser/final-acceptance identities pending
+- production bootstrap, both TypeScript consumers, package/example build, diff check,
+  all 11 ordinary examples, the negative unavailable target, and managed-server cleanup
+  passed
+- both 20,000-cycle steady-state phases passed at observed 1.3709646 and 1.074225
+  microseconds per cycle with zero binding-order sorts, snapshot serializations,
+  dynamic-offset name-map reads, identity changes, or extra steady-state native objects
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed persistent replacement with exact
+  values 17/33, storage values 41/6, sparse group 2 value 73, query paths, and controlled
+  multi-failure diagnostics schema v5 round-trip evidence with no uncaptured, console,
+  page, or request failures
+- the official GPUWeb main/copies and WHATWG Web IDL sources matched every recorded enum,
+  format, copy, range, and conversion matrix
+- the thirty-ninth review then found the cross-module identity defect above, so this
+  checkpoint remains historical evidence rather than final approval
+
+Post-thirty-ninth-review targeted verification:
+
+- before implementation, the expanded closed-brand collection reported 2 passing and 5
+  exact failures: prototype-derived BindLayout and Program values reached their old
+  authority boundaries, Pipeline and BindSet lookalikes passed Command construction,
+  a PassSpec lookalike reached Submission, and the source inventory found 14 duck-typed
+  `assertRuntime()` authority sites
+- after implementation and a fresh package emit, that collection passes 7/7, including
+  both PassSpec and Command lookalikes rejected before encoder creation; the inventory
+  reports zero open `instanceof` and zero open duck-typed authority sites across all 25
+  Scratch-owned identity families
+- nine directly affected binding, command, pipeline, shader-inspection, pass, and
+  submission collections pass 152/152
+- full-suite integration first exposed a pass-kind diagnostic regression and shifted
+  native-provenance line inventory; the closed command guard now preserves the exact
+  `SCRATCH_COMMAND_PASS_KIND_MISMATCH` path for genuine render commands in compute
+  streams, and all 43 physical call sites are again source-derived and documented
+- the executable audit now requires all four new behavior titles, exact call-site guards,
+  all 25 closed authorities, bilingual cross-module identity contracts, the clean
+  `c9cfad3` checkpoint record, 479 focused passes, and 877 full-suite passes
+- the exact focused acceptance collection passes 479/479 with zero pending or failed
+  cases
+- `npm test` reports exactly 877 passing plus the two exact pending WebGPU environment
+  gates; `npm run typecheck` passes both declaration consumers, and `npm run build`
+  emits the package and all 14 runnable examples
+- fixed-history structural parity passes every capability, behavior-title, 25-authority,
+  bilingual-documentation, production-emit, provenance, and example inventory check;
+  the current manifest contains 4,792 declaration/member signatures and 388 public
+  class members while the dirty tree is truthfully `incomplete`
+- `git diff --check` passes; clean-commit acceptance and a new isolated exact no-findings
+  review remain required before audit closure
 
 The corrected evidence must pass those gates before this audit can return to Accepted
 status. The required feature-branch push remains ordered after that closure.

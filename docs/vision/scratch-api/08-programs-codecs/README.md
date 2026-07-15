@@ -41,10 +41,14 @@ This keeps code generation and runtime execution connected without hiding behavi
 - Generated artifacts must be inspectable, cacheable by canonical ABI/schema signatures, and diagnosable through the shared `ScratchDiagnostic` envelope in `09-diagnostics-validation`. Short hashes alone are not compatibility proof.
 
 `Program` and `LayoutCodec` discrimination is closed with module-private `WeakSet`
-brands. Shader inspection and layout diagnostic routing never treat public `instanceof`
-as authority, so replacing `Symbol.hasInstance` or using
-`Object.create(Program.prototype)` / `Object.create(LayoutCodec.prototype)` cannot inject
-caller-authored facts into those paths.
+brands and exact built-in prototypes. Every Pipeline creation path and every explicit
+Shader inspection input or option calls `isProgram()` before reading modules, layout
+requirements, or `assertRuntime()`. Render and compute Pipeline objects are likewise
+recognized only by their exact prototype and module-private state-map record before
+Command construction. Public `instanceof`, similarly shaped methods, replacement of
+`Symbol.hasInstance`, subclassing, and `Object.create(Program.prototype)` /
+`Object.create(LayoutCodec.prototype)` cannot inject caller-authored facts into those
+paths.
 
 ## LayoutCodec
 

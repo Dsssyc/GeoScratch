@@ -113,6 +113,14 @@ state. Reusing a pass therefore cannot bypass validated load/store, query-slot, 
 facts through later JavaScript mutation. Pass specs do not store commands. This prevents
 stale command lists from surviving across submissions.
 
+Pass identity is a separate closed authority. Successful `RenderPassSpec` and
+`ComputePassSpec` construction installs a module-private `WeakMap` state record, and
+`isRenderPassSpec()` / `isComputePassSpec()` require that record plus the exact built-in
+prototype. Submission requires the matching pass guard and the corresponding closed
+command guard before `assertRuntime()`, attachment preparation, queue work, or command
+encoder creation. Public `instanceof`, an `assertRuntime()`-shaped record, subclassing,
+and `Object.create(PassSpecClass.prototype)` cannot enter the submission plan.
+
 ## Submission
 
 `SubmissionBuilder` records one explicit pass-command sequence. It is not a display frame and does not imply presentation:
