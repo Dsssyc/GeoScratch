@@ -56,7 +56,9 @@ inject caller-authored facts into those paths.
 The ownership and lifecycle boundary does not freeze the caller-owned shader contract.
 `Program.modules`, `entryPoints`, `requiredFeatures`, and `layoutRequirements` may still
 be changed for a future Pipeline. Pipeline creation snapshots those facts before native
-asynchronous work, and an existing Pipeline retains its immutable snapshot.
+asynchronous work, and an existing Pipeline retains its immutable snapshot. Each future
+Pipeline creation revalidates the current `requiredFeatures` against the owning runtime
+before native work.
 
 ## LayoutCodec
 

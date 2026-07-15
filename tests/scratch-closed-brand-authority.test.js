@@ -284,6 +284,30 @@ describe('scratch closed brand authority', () => {
         expect(caught.diagnostic.code).to.equal('SCRATCH_PROGRAM_DISPOSED')
     })
 
+    it('revalidates caller-owned Program required features before future native pipeline work', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const program = runtime.createProgram({
+            modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+            entryPoints: { compute: 'csMain' },
+        })
+        program.requiredFeatures.push('texture-compression-astc')
+        let caught
+
+        try {
+            await runtime.createComputePipeline({ program })
+        } catch (error) {
+            caught = error
+        }
+
+        expect(fake.calls.shaderModules).to.have.length(0)
+        expect(fake.calls.pipelineLayouts).to.have.length(0)
+        expect(fake.calls.computePipelines).to.have.length(0)
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_PROGRAM_FEATURE_UNAVAILABLE')
+    })
+
     it('rejects prototype-derived Pipeline and BindSet identities before command creation', async() => {
 
         const fake = createFakeGpu()

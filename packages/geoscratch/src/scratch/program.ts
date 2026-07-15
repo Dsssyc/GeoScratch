@@ -115,6 +115,8 @@ export class Program {
                 actual: { runtimeId: runtime?.id },
             })
         }
+
+        validateRequiredFeatures(this)
     }
 
     assertUsable(): void {

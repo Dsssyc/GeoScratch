@@ -55,7 +55,8 @@ module-private state-map record 同时匹配后，才能进入 Command construct
 这个 ownership/lifecycle boundary 不会冻结 caller-owned shader contract。
 `Program.modules`、`entryPoints`、`requiredFeatures` 与 `layoutRequirements` 仍可为
 future Pipeline 修改。Pipeline creation 会在 native async work 前 snapshot 这些
-facts，existing Pipeline 保留自己的 immutable snapshot。
+facts，existing Pipeline 保留自己的 immutable snapshot。每次 future Pipeline
+creation 都会在 native work 前按 owning runtime 重新校验当前 `requiredFeatures`。
 
 ## LayoutCodec
 

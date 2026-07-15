@@ -13,8 +13,8 @@ const cleanThirtySeventhReviewCheckpoint = '3d5f4d73c64eb5cc1108cd26fa31fec546ba
 const cleanThirtyEighthReviewCheckpoint = 'c9cfad3decd3380c2d03509482b549d3275e1c1c'
 const cleanThirtyNinthReviewCheckpoint = '01f26da07ffb4fddd7c389cd388ea0c4307a09a6'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 481
-const expectedFullSuitePasses = 879
+const expectedFocusedAcceptancePasses = 482
+const expectedFullSuitePasses = 880
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -236,6 +236,7 @@ const closedBrandGuards = Object.freeze({
         current.program.includes('Object.getPrototypeOf(value) === Program.prototype') &&
         current.program.includes('programStates.has(value as Program)') &&
         current.program.includes('programStateFor(this).isDisposed = true') &&
+        current.program.split('validateRequiredFeatures(this)').length === 3 &&
         !current.program.includes('this.isDisposed =') &&
         current.pipeline.split('if (!isProgram(program))').length === 3 &&
         current.shaderInspection.includes('if (!isProgram(program))'),
@@ -761,6 +762,7 @@ const behaviorTestContracts = [
         'rejects prototype-derived Program identities before native pipeline creation',
         'keeps Program identity and runtime ownership authoritative after public mutation attempts',
         'keeps Program disposal authoritative after public mutation attempts',
+        'revalidates caller-owned Program required features before future native pipeline work',
         'rejects prototype-derived Pipeline and BindSet identities before command creation',
         'rejects prototype-derived pass and command identities before native submission effects',
         'does not use open instanceof checks as Scratch-owned internal brands',
@@ -1281,6 +1283,8 @@ const documentationAudit = Object.freeze({
             'caller-owned shader contract',
             'future Pipeline',
             'immutable snapshot',
+            '`requiredFeatures`',
+            'native work',
             'Pipeline',
             'Shader inspection',
             '`Object.create(',
@@ -1392,9 +1396,15 @@ const documentationAudit = Object.freeze({
         'maximum of two substantive review cycles',
         'must not be written back into this repository',
     ]),
+    firstBoundedReviewCorrection: hasAll(finalDocs.finalAudit, [
+        'First bounded scoped review correction',
+        'revalidates caller-owned Program required features before future native pipeline work',
+        'reviewer total to 109',
+        'single corrective commit',
+    ]),
     currentAcceptanceCounts: hasAll(finalDocs.finalAudit, [
-        'executes exactly 481',
-        'complete suite to report exactly 879 passing',
+        'executes exactly 482',
+        'complete suite to report exactly 880 passing',
     ]),
     resourceStateParity: resourceStateParity.status === 'passed',
     programExamplesUseBufferRegions: [ finalDocs.programs, finalDocs.programsZh ]

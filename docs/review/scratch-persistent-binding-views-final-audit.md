@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-15
-Status: Bounded closure candidate pending clean acceptance and scoped review
+Status: Corrective closure candidate pending second clean acceptance and scoped re-review
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -28,8 +28,8 @@ source, and WHATWG Web IDL source and derives the native enum matrices. It later
 the managed port and explicitly executes `npm run typecheck`, the complete `npm run
 build`, and `git diff --check`. Structural mode preserves existing `dist` so stale
 output remains detectable, but performs the same recorded package bootstrap when `dist`
-is absent. It executes exactly 481 referenced behavior tests; requires the
-complete suite to report exactly 879 passing
+is absent. It executes exactly 482 referenced behavior tests; requires the
+complete suite to report exactly 880 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -327,7 +327,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Forty isolated review passes have examined the fixed-baseline diff and working tree.
+Forty historical isolated review passes examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -1129,6 +1129,25 @@ work are non-blocking follow-up material rather than scope for this branch.
 The final scoped review result belongs in the final handoff and must not be written back into this repository.
 This keeps the accepted and reviewed commit byte-identical and prevents an evidence-only
 commit from recursively invalidating acceptance and review.
+
+### First bounded scoped review correction
+
+The first bounded review of accepted candidate `4b1464d` found one in-scope P1 false
+contract. `Program.requiredFeatures` remained caller-owned, but Pipeline creation did not
+revalidate a feature added after Program construction. An unsupported mutation therefore
+created one shader module, pipeline layout, and compute pipeline instead of reporting
+`SCRATCH_PROGRAM_FEATURE_UNAVAILABLE` before native work.
+
+The regression `revalidates caller-owned Program required features before future native pipeline work`
+first reported 9 passing and one exact failure. `Program.assertRuntime()` now preserves
+wrong-runtime precedence and then revalidates current required features against the
+owning runtime before Pipeline preparation reads or issues native objects. The same
+collection now passes 10/10 with zero native calls for the unsupported feature.
+
+This finding brings the reproduced or source-verified reviewer total to 109. It consumes
+the one allowed correction cycle and will be delivered as the single corrective commit.
+Only the second clean acceptance and correction-scoped re-review remain; another
+in-scope finding must stop the Goal as blocked rather than starting a third cycle.
 
 ## Verification Record
 
@@ -2095,6 +2114,17 @@ Post-fortieth-review targeted verification:
 
 The bounded candidate must pass those gates before this audit can close. The required
 feature-branch push remains ordered after clean acceptance and the scoped review.
+
+Bounded scoped-review correction verification:
+
+- the reviewer reproduction first reported 9 passing and one failing case because one
+  shader module had already been issued
+- after feature revalidation, the closed-brand collection passes 10/10 and preserves
+  zero shader-module, pipeline-layout, and compute-pipeline calls
+- the executable contract now requires 482 focused passes and 880 full-suite passes with
+  the same two exact pending identities
+- complete corrective-suite, build, structural, second clean acceptance, correction-
+  scoped re-review, protected-ref, and push evidence remain pending
 
 ## Explicit Non-Goals
 

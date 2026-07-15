@@ -64,8 +64,8 @@ describe('Scratch persistent binding final parity', () => {
             'const cleanThirtySeventhReviewCheckpoint = \'3d5f4d73c64eb5cc1108cd26fa31fec546badb3d\'',
             'const cleanThirtyEighthReviewCheckpoint = \'c9cfad3decd3380c2d03509482b549d3275e1c1c\'',
             'const cleanThirtyNinthReviewCheckpoint = \'01f26da07ffb4fddd7c389cd388ea0c4307a09a6\'',
-            'const expectedFocusedAcceptancePasses = 481',
-            'const expectedFullSuitePasses = 879',
+            'const expectedFocusedAcceptancePasses = 482',
+            'const expectedFullSuitePasses = 880',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -137,6 +137,7 @@ describe('Scratch persistent binding final parity', () => {
             'rejects prototype-derived Program identities before native pipeline creation',
             'keeps Program identity and runtime ownership authoritative after public mutation attempts',
             'keeps Program disposal authoritative after public mutation attempts',
+            'revalidates caller-owned Program required features before future native pipeline work',
             'rejects prototype-derived Pipeline and BindSet identities before command creation',
             'rejects prototype-derived pass and command identities before native submission effects',
             'does not use open instanceof checks as Scratch-owned internal brands',
@@ -366,6 +367,7 @@ describe('Scratch persistent binding final parity', () => {
             thirtyEighthReviewAcceptanceRecorded: true,
             thirtyNinthReviewAcceptanceRecorded: true,
             boundedClosureProtocol: true,
+            firstBoundedReviewCorrection: true,
             currentAcceptanceCounts: true,
             supersededLayoutDecisionsCurrent: true,
             obsoleteSubmissionAuditRemoved: true,
@@ -520,15 +522,15 @@ describe('Scratch persistent binding final parity', () => {
         })
         expect(result.executionEvidence.mocha).to.deep.include({
             status: 'passed',
-            tests: 481,
-            passes: 481,
+            tests: 482,
+            passes: 482,
             failures: 0,
             pending: 0,
         })
         expect(result.executionEvidence.fullSuite).to.deep.include({
             status: 'passed',
-            tests: 881,
-            passes: 879,
+            tests: 882,
+            passes: 880,
             failures: 0,
             pending: 2,
         })
