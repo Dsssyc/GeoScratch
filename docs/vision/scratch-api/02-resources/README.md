@@ -46,7 +46,7 @@ Scratch reports only logical footprint it can derive. It does not claim physical
 
 ## BufferResource And BufferRegion
 
-`BufferResource` is a raw physical byte container. It does not own a global layout, element count, or typed byte length.
+`BufferResource` is a raw physical byte container. It does not own a global layout, element count, or typed byte length. Its current `gpuBuffer` is private-backed authority: the resource instance is non-extensible and the public prototype is frozen, so binding, copy, disposal, and observation cannot be redirected to different native allocations through prototype replacement.
 
 ```ts
 const storage = await runtime.createBuffer({

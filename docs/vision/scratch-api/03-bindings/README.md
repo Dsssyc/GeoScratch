@@ -58,6 +58,8 @@ const terrainLayout = await runtime.createBindLayout({
 
 Scratch preflights names, binding indices, visibility, device features, limits, buffer type, dynamic-offset contract, `minBindingSize`, sampled-texture shape, storage-texture access/format/dimension, and sampler type. The acknowledged transaction issues exactly one native layout creation call and registers the object only after validation, internal, and OOM scopes settle and lifecycle facts are rechecked.
 
+The acknowledged layout instance is non-extensible and `BindLayout.prototype` is frozen. Its native layout, identity, lifecycle observation, and validation methods therefore remain one authority after publication rather than caller-replaceable prototype behavior.
+
 Supporting-object acknowledgement joins every scope issued around the same
 native issue before selecting a result. A concurrent runtime-disposal or
 device-loss lifecycle fact cannot race that join, hide an already observed
@@ -131,6 +133,10 @@ or iteration redirected after construction. Validation, preparation, and encodin
 observe the same slot table. A different logical resource mapping requires a different
 BindSet. Content writes do not change native binding shape and never invalidate
 preparation.
+
+The BindSet instance is non-extensible and `BindSet.prototype` is frozen. In particular,
+`preparationState`, lifecycle observations, `assertPrepared()`, and `prepare()` cannot be
+replaced to disguise a stale allocation snapshot or recover an old native bind group.
 
 `await runtime.createBindSet(...)` returns only an initially prepared object. Preparation privately creates allocation-scoped texture views and one bind group, then commits them atomically after native scope acknowledgement and lifecycle/snapshot rechecks. Identical texture views may be deduplicated only inside that one candidate. There is no runtime-wide or cross-BindSet native-view cache.
 

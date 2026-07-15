@@ -1280,6 +1280,7 @@ function lockDrawCommandContract(command: DrawCommand): void {
     lockCommandProperties(command, [
         'runtime',
         'id',
+        'label',
         'commandKind',
         'pipeline',
         'bindSets',
@@ -1303,6 +1304,7 @@ function lockDispatchCommandContract(command: DispatchCommand): void {
     lockCommandProperties(command, [
         'runtime',
         'id',
+        'label',
         'commandKind',
         'pipeline',
         'bindSets',
@@ -6685,3 +6687,17 @@ function isGpuSignedOffset32(value: unknown): value is number {
         (value as number) >= GPU_SIGNED_OFFSET_32_MIN &&
         (value as number) <= GPU_SIGNED_OFFSET_32_MAX
 }
+
+for (const commandPrototype of [
+    DrawCommand.prototype,
+    DispatchCommand.prototype,
+    UploadCommand.prototype,
+    CopyCommand.prototype,
+    BeginOcclusionQueryCommand.prototype,
+    EndOcclusionQueryCommand.prototype,
+    ResolveQuerySetCommand.prototype,
+    TextureUploadCommand.prototype,
+    ExternalImageUploadCommand.prototype,
+    ReadbackCommand.prototype,
+    ReadbackCommandClaim.prototype,
+]) Object.freeze(commandPrototype)

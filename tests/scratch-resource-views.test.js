@@ -1,6 +1,7 @@
 import { expect } from 'chai'
 import {
     BufferRegion,
+    BufferResource,
     ScratchDiagnosticError,
     ScratchRuntime,
     TextureViewSpec,
@@ -111,6 +112,40 @@ describe('scratch logical resource views', () => {
         expect(records).to.not.have.property('contentEpoch')
         expect(records).to.not.have.property('state')
         expect(() => new BufferRegion()).to.throw(TypeError)
+    })
+
+    it('keeps BufferResource native allocation identity authoritative through its prototype', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const first = await runtime.createBuffer({ size: 16, usage: 0x8 })
+        const second = await runtime.createBuffer({ size: 16, usage: 0x8 })
+        const firstNative = first.gpuBuffer
+        const secondNative = second.gpuBuffer
+        const prototype = Object.getPrototypeOf(first)
+        const original = Object.getOwnPropertyDescriptor(prototype, 'gpuBuffer')
+        let replaced = false
+
+        try {
+            try {
+                Object.defineProperty(prototype, 'gpuBuffer', {
+                    configurable: true,
+                    get: () => secondNative,
+                })
+                replaced = true
+            } catch (error) {
+                expect(error).to.be.instanceOf(TypeError)
+            }
+            expect(replaced).to.equal(false)
+            expect(first.gpuBuffer).to.equal(firstNative)
+        } finally {
+            if (replaced) Object.defineProperty(prototype, 'gpuBuffer', original)
+        }
+
+        expect(first).to.be.instanceOf(BufferResource)
+        expect(Object.isFrozen(prototype)).to.equal(true)
+        first.dispose()
+        expect(firstNative.destroyed).to.equal(true)
+        expect(secondNative.destroyed).to.equal(false)
     })
 
     it('rejects unsafe ranges and permits only ABI-compatible reinterpretation', async() => {

@@ -8,9 +8,10 @@ import ts from 'typescript'
 
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
+const cleanThirtySixthReviewCheckpoint = '4926648e8258fcb6a58e6746704c708beab611e6'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 467
-const expectedFullSuitePasses = 865
+const expectedFocusedAcceptancePasses = 472
+const expectedFullSuitePasses = 870
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -185,6 +186,7 @@ const finalDocs = loadCurrentSources({
     bindingDecision: 'docs/decisions/ADR-037-scratch-supporting-object-acknowledgement-and-bind-set-preparation.md',
     diagnosticsDecision: 'docs/decisions/ADR-038-scratch-diagnostics-schema-v5.md',
     surfaceDecision: 'docs/decisions/ADR-039-scratch-exclusive-surface-context-ownership.md',
+    finalAudit: 'docs/review/scratch-persistent-binding-views-final-audit.md',
 })
 const activeReviewSource = loadMarkdownDirectory('docs/review')
 const externalImageUploadTestSource = fs.readFileSync(
@@ -616,6 +618,8 @@ const behaviorTestContracts = [
     ]),
     behaviorTestContract('tests/scratch-bind-set-preparation.test.js', [
         'keeps the binding snapshot implementation immutable through its prototype',
+        'keeps BindSet preparation state authoritative through its prototype',
+        'keeps BindLayout lifecycle authority immutable through its prototype',
         'prepares the complete core buffer, sampler, sampled-texture, and storage-texture families',
         'supports storage textures across every native-valid view dimension',
         'supports every sampled view dimension and the native multisample contract',
@@ -639,6 +643,7 @@ const behaviorTestContracts = [
         'creates one ready immutable wrapper through the native async compute path',
     ]),
     behaviorTestContract('tests/scratch-resource-views.test.js', [
+        'keeps BufferResource native allocation identity authoritative through its prototype',
         'creates complete immutable TextureViewSpecs and preflights usage capabilities without native views',
         'rejects mipmapped one-dimensional textures before native issue',
         'rejects render-attachment one-dimensional textures',
@@ -728,6 +733,8 @@ const behaviorTestContracts = [
     behaviorTestContract('tests/scratch-command-lifecycle.test.js', [
         'keeps construction facts and disposal immutable for every legacy command family',
         'shadows absent normalized facts against inherited command mutation',
+        'locks Draw and Dispatch label facts as immutable own properties',
+        'freezes every executable command prototype authority',
     ]),
     behaviorTestContract('tests/scratch-command-binding-access.test.js', [
         'requires read-write storage buffers in both read and write declarations',
@@ -896,6 +903,9 @@ const documentationAudit = Object.freeze({
         'finally',
     ]),
     resourceViews: hasAll(finalDocs.resources, [ 'BufferRegion', 'TextureViewSpec', 'abiHash', 'schemaHash' ]),
+    bufferResourcePrototypeAuthority:
+        hasAll(finalDocs.resources, [ '`gpuBuffer`', 'private-backed', 'prototype is frozen' ]) &&
+        hasAll(finalDocs.resourcesZh, [ '`gpuBuffer`', 'private state', 'prototype', '被冻结' ]),
     oneDimensionalSingleMip:
         hasAll(finalDocs.resources, [ '`1d`', 'cannot have mipmaps', '`mipLevelCount` must be `1`' ]) &&
         hasAll(finalDocs.resourcesZh, [ '`1d`', '不能拥有 mipmap', '`mipLevelCount` 必须为 `1`' ]),
@@ -1035,6 +1045,22 @@ const documentationAudit = Object.freeze({
             'frozen',
         ])
     ),
+    persistentBindingPrototypeAuthority:
+        [ finalDocs.bindings, finalDocs.bindingsZh ].every(source => hasAll(source, [
+            '`BindLayout.prototype`',
+            '`BindSet.prototype`',
+            '`preparationState`',
+            '`assertPrepared()`',
+            'stale allocation snapshot',
+        ])),
+    commandPrototypeAuthority:
+        [ finalDocs.commands, finalDocs.commandsZh ].every(source => hasAll(source, [
+            '`label`',
+            'command prototype',
+            'lifecycle',
+            'encoding',
+            'module',
+        ])),
     attachmentViewContracts: [ finalDocs.passes, finalDocs.passesZh ].every(source =>
         hasAll(source, [
             'RENDER_ATTACHMENT',
@@ -1104,6 +1130,16 @@ const documentationAudit = Object.freeze({
         hasAll(finalDocs.bindingDecision, [ '## Status', 'Accepted' ]) &&
         hasAll(finalDocs.diagnosticsDecision, [ '## Status', 'Accepted' ]) &&
         hasAll(finalDocs.surfaceDecision, [ '## Status', 'Accepted' ]),
+    thirtySixthReviewAcceptanceRecorded: hasAll(finalDocs.finalAudit, [
+        'Clean thirty-sixth-review checkpoint acceptance (`4926648`)',
+        cleanThirtySixthReviewCheckpoint,
+        'focused acceptance passed 467/467',
+        'complete suite reported 865 passing',
+    ]),
+    currentAcceptanceCounts: hasAll(finalDocs.finalAudit, [
+        'executes exactly 472',
+        'complete suite to report exactly 870 passing',
+    ]),
     resourceStateParity: resourceStateParity.status === 'passed',
     programExamplesUseBufferRegions: [ finalDocs.programs, finalDocs.programsZh ]
         .every(programExampleUsesBufferRegion),

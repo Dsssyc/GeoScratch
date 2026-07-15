@@ -2746,3 +2746,6 @@ function isBufferBindingType(type: unknown): type is BufferBindingType {
 
     return typeof type === 'string' && BUFFER_BINDING_TYPES.has(type as BufferBindingType)
 }
+
+Object.freeze(BindLayout.prototype)
+Object.freeze(BindSet.prototype)

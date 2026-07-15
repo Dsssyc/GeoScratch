@@ -724,3 +724,5 @@ function createGpuBufferDescriptor(
 
     return gpuDescriptor
 }
+
+Object.freeze(BufferResource.prototype)

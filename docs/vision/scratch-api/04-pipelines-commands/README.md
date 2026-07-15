@@ -64,9 +64,12 @@ All normalized command construction facts and payload/resource references are lo
 each public property is non-writable, and normalized nested layout/origin/extent
 shapes are frozen. An absent optional fact is materialized as a non-enumerable own
 `undefined` property before the command becomes non-extensible, so inherited prototype
-writes cannot inject a new normalized value. Upload bytes and external-image source contents remain
-application-owned mutable payloads by identity; locking a command never freezes those
-contents or a referenced Resource's own lifecycle.
+writes cannot inject a new normalized value. `label` participates in the same lock for
+Draw and Dispatch whether present or absent. Every executable command prototype is
+frozen, so lifecycle, validation, and encoding behavior cannot be replaced after module
+publication. Upload bytes and external-image source contents remain application-owned
+mutable payloads by identity; locking a command never freezes those contents or a
+referenced Resource's own lifecycle.
 `isDisposed` is a read-only observation backed by private state; `dispose()` is
 irreversible, and neither assignment nor property shadowing can make a disposed command
 usable again. `ResolveQuerySetCommand` owns one deeply frozen source snapshot. Its

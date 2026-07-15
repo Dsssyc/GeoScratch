@@ -58,6 +58,8 @@ const terrainLayout = await runtime.createBindLayout({
 
 Scratch 会预检 name、binding index、visibility、device feature、limit、buffer type、dynamic-offset contract、`minBindingSize`、sampled-texture shape、storage-texture access/format/dimension 与 sampler type。Acknowledged transaction 只 issue 一次 native layout creation；validation、internal 与 OOM scope settle 且 lifecycle 事实复核通过后才注册对象。
 
+已确认的 layout instance 不可扩展，且 `BindLayout.prototype` 会被冻结。因此 native layout、identity、lifecycle observation 与 validation method 在发布后保持同一权威来源，而不是可由调用方替换的 prototype behavior。
+
 Supporting-object acknowledgement 会先 join 同一次 native issue 周围已经 issue
 的全部 scope，再选择结果。并发的 runtime disposal 或 device loss lifecycle fact
 不能与该 join 竞速、遮蔽已经观察到的 native/scope failure，也不能仅因更早
@@ -125,6 +127,10 @@ instance 与 prototype，因此构造后不能重定向 `get()`、`values()` 或
 Validation、preparation 与 encoding 始终观察同一份 slot table。若要绑定另一组逻辑
 资源，必须创建另一个 BindSet。内容写入不改变 native binding shape，也绝不会使
 preparation 失效。
+
+BindSet instance 不可扩展，且 `BindSet.prototype` 会被冻结。特别是
+`preparationState`、lifecycle observation、`assertPrepared()` 与 `prepare()` 不能被
+替换来掩盖 stale allocation snapshot，也不能恢复旧 native bind group。
 
 `await runtime.createBindSet(...)` 只返回 initially prepared 对象。Preparation 私有创建 allocation-scoped texture view 和一个 bind group，并在 native scope acknowledgement 与 lifecycle/snapshot 复核后原子提交。同一 candidate 内可以去重完全相同的 texture view；不存在 runtime-wide 或 cross-BindSet native-view cache。
 

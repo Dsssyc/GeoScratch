@@ -1,5 +1,6 @@
 import { expect } from 'chai'
 import {
+    BindLayout,
     BindSet,
     ScratchDiagnosticError,
     ScratchRuntime,
@@ -114,6 +115,74 @@ describe('Scratch BindSet preparation', () => {
         expect(Object.isFrozen(prototype)).to.equal(true)
         expect(bindSet.bindings.get('uniforms').resource.buffer).to.equal(fixture.buffer)
         expect([ ...bindSet.bindings.values() ]).to.have.length(1)
+    })
+
+    it('keeps BindSet preparation state authoritative through its prototype', async() => {
+
+        const fixture = await createUniformFixture()
+        const bindSet = await fixture.runtime.createBindSet(fixture.layout, {
+            uniforms: fixture.buffer.region({ size: 256 }),
+        })
+        replaceResourceAllocationForTest(fixture.buffer)
+        const prototype = Object.getPrototypeOf(bindSet)
+        const original = Object.getOwnPropertyDescriptor(prototype, 'preparationState')
+        let replaced = false
+
+        try {
+            try {
+                Object.defineProperty(prototype, 'preparationState', {
+                    configurable: true,
+                    get: () => 'prepared',
+                })
+                replaced = true
+            } catch (error) {
+                expect(error).to.be.instanceOf(TypeError)
+            }
+            expect(replaced).to.equal(false)
+            expect(bindSet.preparationState).to.equal('stale')
+        } finally {
+            if (replaced) Object.defineProperty(prototype, 'preparationState', original)
+        }
+
+        expect(Object.isFrozen(prototype)).to.equal(true)
+        let caught
+        try {
+            bindSet.assertUsable()
+        } catch (error) {
+            caught = error
+        }
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_BIND_SET_STALE')
+    })
+
+    it('keeps BindLayout lifecycle authority immutable through its prototype', async() => {
+
+        const fixture = await createUniformFixture()
+        const layout = fixture.layout
+        layout.dispose()
+        const prototype = Object.getPrototypeOf(layout)
+        const original = Object.getOwnPropertyDescriptor(prototype, 'isDisposed')
+        let replaced = false
+
+        try {
+            try {
+                Object.defineProperty(prototype, 'isDisposed', {
+                    configurable: true,
+                    get: () => false,
+                })
+                replaced = true
+            } catch (error) {
+                expect(error).to.be.instanceOf(TypeError)
+            }
+            expect(replaced).to.equal(false)
+            expect(layout.isDisposed).to.equal(true)
+        } finally {
+            if (replaced) Object.defineProperty(prototype, 'isDisposed', original)
+        }
+
+        expect(layout).to.be.instanceOf(BindLayout)
+        expect(Object.isFrozen(prototype)).to.equal(true)
+        expect(layout.isDisposed).to.equal(true)
     })
 
     it('returns one exact cached Promise for unchanged and same-snapshot preparation', async() => {

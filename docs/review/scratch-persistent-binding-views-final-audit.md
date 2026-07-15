@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-thirty-sixth-review fixes pending acceptance
+Status: Post-thirty-seventh-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -28,8 +28,8 @@ source, and WHATWG Web IDL source and derives the native enum matrices. It later
 the managed port and explicitly executes `npm run typecheck`, the complete `npm run
 build`, and `git diff --check`. Structural mode preserves existing `dist` so stale
 output remains detectable, but performs the same recorded package bootstrap when `dist`
-is absent. It executes exactly 462
-referenced behavior tests; requires the complete suite to report exactly 860 passing
+is absent. It executes exactly 472 referenced behavior tests; requires the
+complete suite to report exactly 870 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -322,7 +322,7 @@ graph, CPU copy substitute, or hidden submission preparation was retained.
 
 ## Fresh-Context Strict Review
 
-Thirty-four isolated review passes have examined the fixed-baseline diff and working tree.
+Thirty-seven isolated review passes have examined the fixed-baseline diff and working tree.
 The first core review confirmed one Important performance defect. The first parity
 review confirmed three P1 and three P2 evidence defects. The second parity review
 confirmed two P1 and two P2 defects in copy semantics, audit execution, transitive
@@ -371,6 +371,8 @@ external-upload queue diagnostics, plus one P3 stale audit-headline defect.
 The thirty-sixth review found three P1 defects in portable uniform-layout compatibility,
 supporting-object prototype identity, and BindSet snapshot prototype integrity, plus one
 P2 defect in inherited mutation of absent normalized command facts.
+The thirty-seventh review found two P1 prototype-authority defects in BufferResource and
+BindSet, plus two P2 defects in Draw/Dispatch label locking and stale final-audit evidence.
 
 Resolved core finding:
 
@@ -1005,6 +1007,29 @@ Resolved thirty-sixth review findings:
    origin, aspect, mip, or extent after construction.
 
 These findings bring the reproduced or source-verified reviewer total to 101.
+
+The thirty-sixth-review implementation passed clean acceptance at exact checkpoint
+`4926648e8258fcb6a58e6746704c708beab611e6`, but the required thirty-seventh
+fresh-context review found four implementation/evidence defects below.
+
+Resolved thirty-seventh review findings:
+
+1. `BufferResource.prototype` is now frozen. The private-backed current `gpuBuffer`
+   cannot be redirected after publication, so binding, copy, disposal, and public
+   observation stay on one native allocation identity.
+2. `BindSet.prototype` is now frozen, so a caller cannot replace `preparationState` or
+   lifecycle/preparation methods to disguise a stale allocation snapshot and reuse an old
+   bind group. `BindLayout.prototype` is frozen under the same supporting-object authority
+   rule as proactive same-root coverage.
+3. Draw and Dispatch now lock `label` as an own immutable fact whether it is present or
+   absent. Every executable command prototype is frozen, closing the equivalent
+   lifecycle, validation, and encoding replacement path across all command families.
+4. The audit now records the clean `4926648` acceptance checkpoint, the subsequent review,
+   every new behavior title, and the current 472-focused/870-full acceptance contract.
+
+These findings bring the reproduced or source-verified reviewer total to 105. The
+BindLayout extension is same-root proactive coverage rather than an additional reviewer
+finding.
 
 ## Verification Record
 
@@ -1816,6 +1841,41 @@ Post-thirty-sixth-review targeted verification:
   documentation, prototype integrity for supporting objects and binding snapshots,
   absent command fact shadowing, 467 focused passes, and 865 full-suite passes
 - `npm test` reports exactly 865 passing with only the two exact browser/final-acceptance
+  identities pending; `npm run typecheck` passes both declaration consumers
+- `npm run build` emits the package and all 14 runnable examples; structural parity passes
+  and truthfully reports the dirty tree as `incomplete`; `git diff --check` passes
+- clean-commit acceptance and a new isolated exact no-findings review remain required
+  before audit closure
+
+Clean thirty-sixth-review checkpoint acceptance (`4926648`):
+
+- initial and final repository evidence named exact commit
+  `4926648e8258fcb6a58e6746704c708beab611e6` with an empty working tree
+- focused acceptance passed 467/467; the complete suite reported 865 passing and only
+  the two exact browser/final-acceptance identities pending
+- production bootstrap, both TypeScript consumers, package/example build, diff check,
+  all 11 ordinary examples, the negative unavailable target, and managed-server cleanup
+  passed
+- both 20,000-cycle steady-state phases passed at observed 1.28710415 and 1.07843125
+  microseconds per cycle with zero binding-order sorts, snapshot serializations,
+  dynamic-offset name-map reads, identity changes, or extra steady-state native objects
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the complete binding, replacement,
+  storage-access, query, sparse-layout, and controlled-failure proof with diagnostics
+  schema v5 round-trip evidence and no uncaptured, console, page, or request failures
+- the thirty-seventh review then found the four defects above, so this checkpoint remains
+  historical evidence rather than final approval
+
+Post-thirty-seventh-review targeted verification:
+
+- before implementation, the three affected runtime collections reported 32 passing and
+  six exact failures for BufferResource native identity, BindSet preparation state,
+  BindLayout lifecycle authority, inherited command mutation, Draw/Dispatch labels, and
+  executable command prototypes
+- after implementation and a fresh package emit, the same collections pass 38/38
+- the executable audit now requires all five new behavior titles, bilingual prototype
+  authority contracts, the clean `4926648` checkpoint record, 472 focused passes, and
+  870 full-suite passes
+- `npm test` reports exactly 870 passing with only the two exact browser/final-acceptance
   identities pending; `npm run typecheck` passes both declaration consumers
 - `npm run build` emits the package and all 14 runnable examples; structural parity passes
   and truthfully reports the dirty tree as `incomplete`; `git diff --check` passes
