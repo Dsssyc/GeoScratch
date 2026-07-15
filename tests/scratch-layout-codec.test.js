@@ -175,6 +175,49 @@ describe('scratch LayoutCodec', () => {
         expect(bytesOf(new Uint8Array(target, 0, 8))).to.deep.equal(new Array(8).fill(0))
     })
 
+    it('reports portable uniform compatibility from WGSL address-space constraints', () => {
+
+        const scalarArray = layoutCodec({
+            name: 'ScalarArray',
+            fields: [
+                { name: 'values', type: { element: 'u32', count: 2 } },
+            ],
+        }, {
+            usage: [ 'uniform', 'storage', 'readback' ],
+        })
+        const vectorArray = layoutCodec({
+            name: 'VectorArray',
+            fields: [
+                { name: 'values', type: { element: 'vec2f', count: 2 } },
+            ],
+        }, {
+            usage: [ 'uniform', 'storage', 'readback' ],
+        })
+        const alignedArray = layoutCodec({
+            name: 'AlignedArray',
+            fields: [
+                { name: 'prefix', type: 'u32' },
+                { name: 'values', type: { element: 'vec4f', count: 2 } },
+            ],
+        }, {
+            usage: [ 'uniform', 'storage', 'readback' ],
+        })
+
+        expect(scalarArray.artifact.fields[0].arrayStride).to.equal(4)
+        expect(vectorArray.artifact.fields[0].arrayStride).to.equal(8)
+        expect(scalarArray.artifact.usageCompatibility).to.include({
+            uniform: false,
+            storage: true,
+            readback: true,
+        })
+        expect(vectorArray.artifact.usageCompatibility.uniform).to.equal(false)
+        expect(alignedArray.artifact.fields[1]).to.include({
+            offset: 16,
+            arrayStride: 16,
+        })
+        expect(alignedArray.artifact.usageCompatibility.uniform).to.equal(true)
+    })
+
     it('packs arrays with struct stride and creates readback views', () => {
 
         const codec = layoutCodec({

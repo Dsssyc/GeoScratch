@@ -51,6 +51,8 @@ class ReadonlyMapSnapshot<Key, Value> implements ReadonlyMap<Key, Value> {
     }
 }
 
+Object.freeze(ReadonlyMapSnapshot.prototype)
+
 export function readonlyMapSnapshot<Key, Value>(entries: ReadonlyMap<Key, Value>): ReadonlyMap<Key, Value> {
 
     return Object.freeze(new ReadonlyMapSnapshot(entries))

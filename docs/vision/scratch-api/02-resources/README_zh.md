@@ -106,6 +106,15 @@ layout lowering 才会发布 artifact；该域的最大值为 `0xffffffff`。任
 overflow 都会以 `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT` 和结构化 arithmetic facts fail closed；
 Scratch 绝不会发布内部自相矛盾的 `LayoutArtifact`。
 
+`usageCompatibility.uniform` 表示不依赖可选
+`uniform_buffer_standard_layout` language extension 的可移植 WGSL uniform address
+space 结果。Scratch 保留通用 host-shareable/storage ABI，而不会静默 repack：每个
+array field 的 field offset 必须 16-byte aligned，且 `arrayStride` 必须能被 16
+整除。因此自然 stride 为 4-byte 或 8-byte 的 scalar 与 `vec2` array 会报告
+`uniform: false`，对齐的 `vec3`、`vec4` 与 `mat4x4` array 仍兼容。任何
+extension-specific compatibility 都必须成为显式 capability-aware contract，不能
+静默扩大这一可移植事实。
+
 ## TextureResource 与 TextureViewSpec
 
 `TextureResource` 是身份稳定的逻辑 texture，其 current `GPUTexture` allocation 可以显式替换:
@@ -150,7 +159,7 @@ const sampler = await runtime.createSampler({
 })
 ```
 
-Scratch 校验完整 native descriptor，在 validation/internal/OOM scope 内 issue 一次 `createSampler()` candidate，并只在 acknowledgement 与 lifecycle 复核后注册。已确认的 `gpuSampler` identity 由 private state 支撑且 immutable：调用方可以观察，但不能替换 binding 实际使用的 native handle。SamplerResource 有 allocation lifecycle 与 disposal，但没有 scalar content state、content epoch、readiness 或 footprint。
+Scratch 校验完整 native descriptor，在 validation/internal/OOM scope 内 issue 一次 `createSampler()` candidate，并只在 acknowledgement 与 lifecycle 复核后注册。已确认的 `gpuSampler` identity 由 private state 支撑且 immutable：调用方可以观察，但不能替换 binding 实际使用的 native handle，也不能通过 prototype replacement 重定向。Resource instance 不可扩展，其 public getter prototype 会被冻结。SamplerResource 有 allocation lifecycle 与 disposal，但没有 scalar content state、content epoch、readiness 或 footprint。
 
 ## QuerySetResource
 
@@ -163,7 +172,7 @@ const queries = await runtime.createQuerySet({
 })
 ```
 
-核心 query type 是 `timestamp` 与 `occlusion`。Timestamp 要求 native feature；occlusion 不虚构 feature。已确认的 `type`、`count` 与 `gpuQuerySet` identity 是由 private state 支撑的 immutable facts，因此 slot publication、native resolve 与 disposal 始终指向同一个 allocation。`queries.slot(index)` 与 `queries.slots()` 返回包含 `state` 和 `contentEpoch` 的 frozen indexed snapshot。QuerySetResource 没有 scalar content epoch 或含糊的 whole-object readiness。Pipeline statistics 不属于 core WebGPU，也不属于 Scratch core。
+核心 query type 是 `timestamp` 与 `occlusion`。Timestamp 要求 native feature；occlusion 不虚构 feature。已确认的 `type`、`count` 与 `gpuQuerySet` identity 是由 private state 支撑的 immutable facts，因此 slot publication、native resolve 与 disposal 始终指向同一个 allocation。Prototype replacement 不能重定向这些 getter：Resource instance 不可扩展，getter prototype 会被冻结。`queries.slot(index)` 与 `queries.slots()` 返回包含 `state` 和 `contentEpoch` 的 frozen indexed snapshot。QuerySetResource 没有 scalar content epoch 或含糊的 whole-object readiness。Pipeline statistics 不属于 core WebGPU，也不属于 Scratch core。
 
 ## Readiness
 

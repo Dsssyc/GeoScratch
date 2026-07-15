@@ -93,4 +93,58 @@ describe('scratch executable command lifecycle', () => {
         expect(Object.isFrozen(textureUpload.origin)).to.equal(true)
         expect(Object.isFrozen(textureUpload.size)).to.equal(true)
     })
+
+    it('shadows absent normalized facts against inherited command mutation', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const source = await runtime.createBuffer({
+            size: 8,
+            usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const target = await runtime.createBuffer({
+            size: 8,
+            usage: GPU_BUFFER_USAGE_COPY_DST,
+        })
+        const upload = runtime.createUploadCommand({
+            target: source.region(),
+            data: new Uint8Array(8),
+        })
+        const copy = runtime.createCopyCommand({
+            source: { region: source.region(), contentEpoch: 0 },
+            target: target.region(),
+            whenMissing: 'throw',
+        })
+
+        for (const [ command, properties ] of [
+            [ upload, [ 'label', 'layout' ] ],
+            [ copy, [
+                'label', 'sourceLayout', 'targetLayout', 'sourceOrigin', 'targetOrigin',
+                'sourceMipLevel', 'targetMipLevel', 'sourceAspect', 'targetAspect', 'size',
+            ] ],
+        ]) {
+            const prototype = Object.getPrototypeOf(command)
+            for (const property of properties) {
+                expect(Object.hasOwn(command, property), `${command.commandKind}.${property}`).to.equal(true)
+                const ownDescriptor = Object.getOwnPropertyDescriptor(command, property)
+                expect(ownDescriptor, `${command.commandKind}.${property}`).to.include({
+                    configurable: false,
+                    writable: false,
+                    value: undefined,
+                })
+
+                const inheritedDescriptor = Object.getOwnPropertyDescriptor(prototype, property)
+                try {
+                    Object.defineProperty(prototype, property, {
+                        configurable: true,
+                        value: { injected: property },
+                    })
+                    expect(command[property], `${command.commandKind}.${property}`).to.equal(undefined)
+                } finally {
+                    if (inheritedDescriptor === undefined) delete prototype[property]
+                    else Object.defineProperty(prototype, property, inheritedDescriptor)
+                }
+            }
+        }
+    })
 })

@@ -9,8 +9,8 @@ import ts from 'typescript'
 const goalBaseline = '26c6d8875caea7612e573dfb4e33e1340a016d46'
 const historicalJavaScript = '20bb393df570ff1914a6789e9bd422d59ddfecc8'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 462
-const expectedFullSuitePasses = 860
+const expectedFocusedAcceptancePasses = 467
+const expectedFullSuitePasses = 865
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -615,6 +615,7 @@ const behaviorTestContracts = [
         'revalidates frozen dynamic offsets against the current replacement allocation',
     ]),
     behaviorTestContract('tests/scratch-bind-set-preparation.test.js', [
+        'keeps the binding snapshot implementation immutable through its prototype',
         'prepares the complete core buffer, sampler, sampled-texture, and storage-texture families',
         'supports storage textures across every native-valid view dimension',
         'supports every sampled view dimension and the native multisample contract',
@@ -627,7 +628,9 @@ const behaviorTestContracts = [
     behaviorTestContract('tests/scratch-supporting-object-acknowledgement.test.js', [
         'normalizes every native field and rejects deterministic sampler violations before native issue',
         'keeps the acknowledged native sampler identity immutable',
+        'rejects prototype replacement of the acknowledged native sampler identity',
         'keeps acknowledged query facts and native allocation identity immutable',
+        'rejects prototype replacement of acknowledged query facts and native identity',
         'preflights group, binding, stage, feature, and slot limits without a native call',
         'settles scopes and preserves all causal failures across simultaneous lifecycle changes',
     ]),
@@ -719,10 +722,12 @@ const behaviorTestContracts = [
         'rejects direct texture uploads on a queue not owned by the command runtime',
     ]),
     behaviorTestContract('tests/scratch-layout-codec.test.js', [
+        'reports portable uniform compatibility from WGSL address-space constraints',
         'accepts the WGSL u32 boundary and rejects unsafe layout-size arithmetic',
     ]),
     behaviorTestContract('tests/scratch-command-lifecycle.test.js', [
         'keeps construction facts and disposal immutable for every legacy command family',
+        'shadows absent normalized facts against inherited command mutation',
     ]),
     behaviorTestContract('tests/scratch-command-binding-access.test.js', [
         'requires read-write storage buffers in both read and write declarations',
@@ -949,6 +954,19 @@ const documentationAudit = Object.freeze({
             'source snapshot',
             '`firstQuery`',
             '`queryCount`',
+            'prototype',
+            'own',
+            '`undefined`',
+        ])
+    ),
+    immutableBindingSnapshot: [ finalDocs.bindings, finalDocs.bindingsZh ].every(source =>
+        hasAll(source, [
+            'read-only snapshot',
+            'private map',
+            'prototype',
+            '`get()`',
+            '`values()`',
+            'slot table',
         ])
     ),
     uploadQueueOwnership: [ finalDocs.transfers, finalDocs.transfersZh ].every(source =>
@@ -994,6 +1012,18 @@ const documentationAudit = Object.freeze({
             '`LayoutArtifact`',
         ])
     ),
+    portableUniformCompatibility: [
+        finalDocs.resources,
+        finalDocs.resourcesZh,
+        finalDocs.programs,
+        finalDocs.programsZh,
+    ].every(source => hasAll(source, [
+        '`usageCompatibility.uniform`',
+        '`uniform_buffer_standard_layout`',
+        '`arrayStride`',
+        '16',
+        'host-shareable/storage ABI',
+    ])),
     supportingObjectNativeIdentity: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
         hasAll(source, [
             '`gpuSampler`',
@@ -1001,6 +1031,8 @@ const documentationAudit = Object.freeze({
             'private',
             'immutable',
             'native handle',
+            'prototype',
+            'frozen',
         ])
     ),
     attachmentViewContracts: [ finalDocs.passes, finalDocs.passesZh ].every(source =>

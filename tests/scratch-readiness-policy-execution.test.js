@@ -244,15 +244,11 @@ describe('scratch readiness policy execution', () => {
         }), 'SCRATCH_COMMAND_FALLBACK_INVALID')
         expect(mismatch.actual).to.deep.include({ reason: 'writes' })
 
-        const leaf = createDraw(fixture)
-        let cycle
-        cycle = new Proxy(leaf, {
-            get(target, property) {
-                if (property === 'fallback') return cycle
-                const value = Reflect.get(target, property, target)
-                return typeof value === 'function' ? value.bind(target) : value
-            },
-        })
+        const cycle = {
+            commandKind: 'draw',
+            id: 'self-referencing-fallback',
+        }
+        cycle.fallback = cycle
 
         const repeated = await expectDiagnostic(() => createDraw(fixture, {
             whenMissing: 'use-fallback',

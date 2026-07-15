@@ -1,7 +1,7 @@
 # Scratch Persistent Binding Views Final Audit
 
 Date: 2026-07-14
-Status: Post-thirty-fifth-review fixes pending acceptance
+Status: Post-thirty-sixth-review fixes pending acceptance
 Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
 
 ## Fixed Evidence
@@ -368,6 +368,9 @@ size arithmetic.
 The thirty-fifth review found two P1 defects in mutable command/query construction facts,
 three P2 defects in sampler identity, WGSL `u32` representability, and contradictory
 external-upload queue diagnostics, plus one P3 stale audit-headline defect.
+The thirty-sixth review found three P1 defects in portable uniform-layout compatibility,
+supporting-object prototype identity, and BindSet snapshot prototype integrity, plus one
+P2 defect in inherited mutation of absent normalized command facts.
 
 Resolved core finding:
 
@@ -979,6 +982,29 @@ Resolved thirty-fifth review findings:
    regressions directly instead of retaining the pre-review totals.
 
 These findings bring the reproduced or source-verified reviewer total to 97.
+
+The thirty-fifth-review implementation passed clean acceptance at exact checkpoint
+`da2ab1a3ca993b8f6d8fe80c7d737e229d366769`, but the required thirty-sixth
+fresh-context review found four implementation-contract defects below.
+
+Resolved thirty-sixth review findings:
+
+1. `LayoutArtifact.usageCompatibility.uniform` now evaluates the portable WGSL uniform
+   address-space constraints without `uniform_buffer_standard_layout`. Naturally packed
+   scalar/`vec2` arrays no longer claim uniform compatibility; array field offsets and
+   strides must both satisfy the 16-byte rule, while the common storage/readback ABI is
+   retained.
+2. `SamplerResource` and `QuerySetResource` now freeze their getter prototypes as well
+   as preventing instance extension. A caller cannot replace `gpuSampler`, `type`,
+   `count`, or `gpuQuerySet` through a prototype and redirect native lowering.
+3. The private-map `ReadonlyMapSnapshot` freezes its prototype, so BindSet validation,
+   preparation, and encoding cannot be redirected through replaced `get()` or `values()`
+   methods.
+4. Command locking now materializes every absent normalized fact as a non-enumerable,
+   non-writable own `undefined` property. Prototype writes cannot inject a label, layout,
+   origin, aspect, mip, or extent after construction.
+
+These findings bring the reproduced or source-verified reviewer total to 101.
 
 ## Verification Record
 
@@ -1752,6 +1778,47 @@ Post-thirty-fifth-review targeted verification:
   identities pending; `npm run typecheck` passes both declaration consumers
 - `npm run build` emits the package and all 14 runnable examples; `git diff --check`
   passes
+- clean-commit acceptance and a new isolated exact no-findings review remain required
+  before audit closure
+
+Clean thirty-fifth-review checkpoint acceptance (`da2ab1a`):
+
+- initial and final repository evidence named exact commit
+  `da2ab1a3ca993b8f6d8fe80c7d737e229d366769` with an empty working tree
+- focused acceptance passed 462/462; the complete suite reported 860 passing and only
+  the two exact browser/final-acceptance identities pending
+- production bootstrap, both TypeScript consumers, package/example build, diff check,
+  all 11 ordinary examples, the negative unavailable target, and managed-server cleanup
+  passed
+- both 20,000-cycle steady-state phases passed at observed 1.2860583 and 1.06608955
+  microseconds per cycle with zero binding-order sorts, snapshot serializations,
+  dynamic-offset name-map reads, identity changes, or extra steady-state native objects
+- headed Chrome 150.0.7871.115 on Apple Metal 3 passed the complete binding, replacement,
+  storage-access, query, sparse-layout, and controlled-failure proof with diagnostics
+  schema v5 round-trip evidence and no uncaptured, console, page, or request failures
+- the thirty-sixth review then found the four defects above, so this checkpoint remains
+  historical evidence rather than final approval
+
+Post-thirty-sixth-review targeted verification:
+
+- before implementation, the four affected runtime collections reported 43 passing and
+  five exact failures: portable uniform compatibility, sampler prototype identity,
+  query prototype facts/identity, BindSet snapshot prototype integrity, and inherited
+  command mutation; after correcting one missing test readiness policy, the command test
+  failed on the intended absent-own-property invariant
+- after implementation and a fresh package emit, the same collections pass 48/48
+- the complete suite first exposed three integration drifts: Draw's old absent-property
+  reflection expectation, a Proxy fixture that violated the new non-configurable
+  `fallback` property, and native-provenance line numbers shifted by the command lock
+  change; the stronger own-property contract, an ordinary self-referencing cycle fixture,
+  and the exact current inventory replaced those stale assumptions
+- the executable audit now requires all five behavior titles, portable uniform-layout
+  documentation, prototype integrity for supporting objects and binding snapshots,
+  absent command fact shadowing, 467 focused passes, and 865 full-suite passes
+- `npm test` reports exactly 865 passing with only the two exact browser/final-acceptance
+  identities pending; `npm run typecheck` passes both declaration consumers
+- `npm run build` emits the package and all 14 runnable examples; structural parity passes
+  and truthfully reports the dirty tree as `incomplete`; `git diff --check` passes
 - clean-commit acceptance and a new isolated exact no-findings review remain required
   before audit closure
 

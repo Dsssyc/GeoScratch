@@ -629,7 +629,13 @@ describe('scratch native indexed and indirect execution', () => {
             whenMissing: 'throw',
         })
 
-        expect('indexBuffer' in draw).to.equal(false)
+        expect('indexBuffer' in draw).to.equal(true)
+        expect(Object.getOwnPropertyDescriptor(draw, 'indexBuffer')).to.include({
+            configurable: false,
+            enumerable: false,
+            value: undefined,
+            writable: false,
+        })
         expect(Object.isExtensible(draw)).to.equal(false)
         expect(() => { draw.indexBuffer = { region: indexBuffer.region(), format: 'uint16' } }).to.throw(TypeError)
         expect(() => { draw.count = { indirect: indirect.region() } }).to.throw(TypeError)

@@ -86,6 +86,36 @@ describe('Scratch BindSet preparation', () => {
         }
     })
 
+    it('keeps the binding snapshot implementation immutable through its prototype', async() => {
+
+        const fixture = await createUniformFixture()
+        const bindSet = await fixture.runtime.createBindSet(fixture.layout, {
+            uniforms: fixture.buffer.region(),
+        })
+        const prototype = Object.getPrototypeOf(bindSet.bindings)
+
+        for (const property of [ 'get', 'values' ]) {
+            const original = Object.getOwnPropertyDescriptor(prototype, property)
+            let replaced = false
+            try {
+                Object.defineProperty(prototype, property, {
+                    configurable: true,
+                    value: () => property === 'get' ? undefined : [][Symbol.iterator](),
+                })
+                replaced = true
+            } catch (error) {
+                expect(error).to.be.instanceOf(TypeError)
+            } finally {
+                if (replaced) Object.defineProperty(prototype, property, original)
+            }
+            expect(replaced, property).to.equal(false)
+        }
+
+        expect(Object.isFrozen(prototype)).to.equal(true)
+        expect(bindSet.bindings.get('uniforms').resource.buffer).to.equal(fixture.buffer)
+        expect([ ...bindSet.bindings.values() ]).to.have.length(1)
+    })
+
     it('returns one exact cached Promise for unchanged and same-snapshot preparation', async() => {
 
         const fixture = await createUniformFixture({ deferErrorScopePops: true })

@@ -180,6 +180,32 @@ describe('Scratch acknowledged supporting objects', () => {
             }).to.throw(TypeError)
             expect(sampler.gpuSampler).to.equal(acknowledgedNativeSampler)
         })
+
+        it('rejects prototype replacement of the acknowledged native sampler identity', async() => {
+
+            const fixture = await createFixture()
+            const sampler = await fixture.runtime.createSampler()
+            const other = await fixture.runtime.createSampler({ magFilter: 'linear' })
+            const prototype = Object.getPrototypeOf(sampler)
+            const original = Object.getOwnPropertyDescriptor(prototype, 'gpuSampler')
+            let replaced = false
+
+            try {
+                Object.defineProperty(prototype, 'gpuSampler', {
+                    configurable: true,
+                    get: () => other.gpuSampler,
+                })
+                replaced = true
+            } catch (error) {
+                expect(error).to.be.instanceOf(TypeError)
+            } finally {
+                if (replaced) Object.defineProperty(prototype, 'gpuSampler', original)
+            }
+
+            expect(replaced).to.equal(false)
+            expect(Object.isFrozen(prototype)).to.equal(true)
+            expect(sampler.gpuSampler).to.equal(fixture.calls.samplers[0])
+        })
     })
 
     describe('QuerySetResource', () => {
@@ -284,6 +310,41 @@ describe('Scratch acknowledged supporting objects', () => {
             expect(fixture.calls.querySetDestroys).to.deep.equal([
                 { querySet: acknowledgedNativeQuerySet },
             ])
+        })
+
+        it('rejects prototype replacement of acknowledged query facts and native identity', async() => {
+
+            const fixture = await createFixture()
+            const querySet = await fixture.runtime.createQuerySet({ type: 'occlusion', count: 1 })
+            const other = await fixture.runtime.createQuerySet({ type: 'occlusion', count: 2 })
+            const prototype = Object.getPrototypeOf(querySet)
+            const replacements = new Map([
+                [ 'type', () => 'timestamp' ],
+                [ 'count', () => 4096 ],
+                [ 'gpuQuerySet', () => other.gpuQuerySet ],
+            ])
+
+            for (const [ property, replacement ] of replacements) {
+                const original = Object.getOwnPropertyDescriptor(prototype, property)
+                let replaced = false
+                try {
+                    Object.defineProperty(prototype, property, {
+                        configurable: true,
+                        get: replacement,
+                    })
+                    replaced = true
+                } catch (error) {
+                    expect(error).to.be.instanceOf(TypeError)
+                } finally {
+                    if (replaced) Object.defineProperty(prototype, property, original)
+                }
+                expect(replaced, property).to.equal(false)
+            }
+
+            expect(Object.isFrozen(prototype)).to.equal(true)
+            expect(querySet.type).to.equal('occlusion')
+            expect(querySet.count).to.equal(1)
+            expect(querySet.gpuQuerySet).to.equal(fixture.calls.querySets[0])
         })
     })
 

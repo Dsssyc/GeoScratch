@@ -65,6 +65,13 @@ source AoS/SoA data
 
 Raw packed bytes 仍然是 escape hatch，但不是默认 authoring model。要求作者在 shader 中手动复刻 WGSL padding 是正确性风险，尤其在 AI 辅助写代码时更容易出错。
 
+当前 artifact 保持一套通用 host-shareable/storage ABI。其
+`usageCompatibility.uniform` flag 表示不启用 `uniform_buffer_standard_layout` 时的
+可移植 WGSL 结果：array member 只有在 field offset 与 `arrayStride` 都是 16 的倍数
+时才兼容。Codec 会把自然紧密排列的 scalar 与 `vec2` array 报告为不兼容，而不会
+声称 4-byte 或 8-byte stride 可作为 core uniform layout 绑定；它也不会静默选择第二
+套 ABI。未来 extension-aware layout 必须显式命名该 capability。
+
 ## Program
 
 `Program` 是 shader contract。它拥有代码和紧邻代码的 metadata，但不拥有具体资源或场景含义。

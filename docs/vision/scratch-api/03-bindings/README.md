@@ -125,7 +125,12 @@ const terrainSet = await runtime.createBindSet(terrainLayout, {
 })
 ```
 
-The binding table is immutable. A different logical resource mapping requires a different BindSet. Content writes do not change native binding shape and never invalidate preparation.
+The binding table is immutable. Its read-only snapshot owns a private map, freezes both
+the snapshot instance and its prototype, and therefore cannot have `get()`, `values()`,
+or iteration redirected after construction. Validation, preparation, and encoding all
+observe the same slot table. A different logical resource mapping requires a different
+BindSet. Content writes do not change native binding shape and never invalidate
+preparation.
 
 `await runtime.createBindSet(...)` returns only an initially prepared object. Preparation privately creates allocation-scoped texture views and one bind group, then commits them atomically after native scope acknowledgement and lifecycle/snapshot rechecks. Identical texture views may be deduplicated only inside that one candidate. There is no runtime-wide or cross-BindSet native-view cache.
 

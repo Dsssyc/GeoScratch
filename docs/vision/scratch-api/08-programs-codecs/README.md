@@ -65,6 +65,14 @@ This avoids one CPU-to-GPU operation per structure and also avoids a GPU-side re
 
 Raw packed bytes remain an escape hatch, but they are not the default authoring model. Forcing authors to manually mirror WGSL padding in shader code is a correctness hazard, especially when code is AI-assisted.
 
+The current artifact keeps one common host-shareable/storage ABI. Its
+`usageCompatibility.uniform` flag is the portable WGSL result without
+`uniform_buffer_standard_layout`: an array member is compatible only when both its field
+offset and `arrayStride` are multiples of 16. The codec reports incompatible naturally
+packed scalar and `vec2` arrays instead of claiming that 4-byte or 8-byte strides can be
+bound as core uniform layout. It does not silently select a second ABI. A future
+extension-aware layout must name that capability explicitly.
+
 ## Program
 
 `Program` is a shader contract. It owns code and code-adjacent metadata, but it does not own concrete resources or scene meaning.

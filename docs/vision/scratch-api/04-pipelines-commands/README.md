@@ -62,7 +62,9 @@ Target command families:
 Every executable command exposes a one-way lifecycle.
 All normalized command construction facts and payload/resource references are locked:
 each public property is non-writable, and normalized nested layout/origin/extent
-shapes are frozen. Upload bytes and external-image source contents remain
+shapes are frozen. An absent optional fact is materialized as a non-enumerable own
+`undefined` property before the command becomes non-extensible, so inherited prototype
+writes cannot inject a new normalized value. Upload bytes and external-image source contents remain
 application-owned mutable payloads by identity; locking a command never freezes those
 contents or a referenced Resource's own lifecycle.
 `isDisposed` is a read-only observation backed by private state; `dispose()` is

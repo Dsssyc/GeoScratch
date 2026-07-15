@@ -1327,10 +1327,9 @@ function lockCommandProperties(command: object, properties: string[]): void {
     const record = command as Record<string, unknown>
     for (const property of properties) {
         const descriptor = Object.getOwnPropertyDescriptor(command, property)
-        if (descriptor === undefined) continue
         Object.defineProperty(command, property, {
-            value: record[property],
-            enumerable: descriptor.enumerable ?? false,
+            value: descriptor === undefined ? undefined : record[property],
+            enumerable: descriptor?.enumerable ?? false,
             configurable: false,
             writable: false,
         })

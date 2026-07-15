@@ -768,7 +768,13 @@ function normalizeUsages(spec: LayoutSpec, usage: unknown): LayoutCodecUsage[] {
 function computeUsageCompatibility(fields: LayoutFieldArtifact[]): LayoutUsageCompatibility {
 
     return {
-        uniform: true,
+        uniform: fields.every(field =>
+            field.arrayLength === undefined || (
+                field.offset % 16 === 0 &&
+                field.arrayStride !== undefined &&
+                field.arrayStride % 16 === 0
+            )
+        ),
         storage: true,
         readback: true,
         vertex: fields.every(field => field.arrayLength === undefined && field.type !== 'mat4x4f'),

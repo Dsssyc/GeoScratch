@@ -86,6 +86,8 @@ export class SamplerResource extends Resource {
     }
 }
 
+Object.freeze(SamplerResource.prototype)
+
 export async function createSamplerResource(
     runtime: ScratchRuntime,
     descriptor: SamplerResourceDescriptor = {}

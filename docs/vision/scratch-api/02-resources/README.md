@@ -108,6 +108,15 @@ maximum is `0xffffffff`. Overflow in either domain fails closed with
 `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT` and structured arithmetic facts; Scratch never
 publishes an internally self-invalid `LayoutArtifact`.
 
+`usageCompatibility.uniform` is the portable WGSL uniform-address-space result without
+the optional `uniform_buffer_standard_layout` language extension. The common
+host-shareable/storage ABI is retained rather than silently repacked: every array field
+must have both a 16-byte-aligned field offset and an `arrayStride` divisible by 16.
+Scalar and `vec2` arrays with natural 4-byte or 8-byte stride therefore report
+`uniform: false`, while aligned `vec3`, `vec4`, and `mat4x4` arrays remain compatible.
+Extension-specific compatibility must become an explicit capability-aware contract; it
+must not silently widen this portable fact.
+
 ## TextureResource And TextureViewSpec
 
 `TextureResource` is a stable logical texture whose current `GPUTexture` allocation may be replaced explicitly:
@@ -152,7 +161,7 @@ const sampler = await runtime.createSampler({
 })
 ```
 
-Scratch validates the complete native descriptor, issues one `createSampler()` candidate under validation/internal/OOM scopes, and registers it only after acknowledgement and lifecycle rechecks. The acknowledged `gpuSampler` identity is private-backed and immutable: callers can observe it but cannot replace the native handle used by binding. SamplerResource has allocation lifecycle and disposal, but no scalar content state, content epoch, readiness, or footprint.
+Scratch validates the complete native descriptor, issues one `createSampler()` candidate under validation/internal/OOM scopes, and registers it only after acknowledgement and lifecycle rechecks. The acknowledged `gpuSampler` identity is private-backed and immutable: callers can observe it but cannot replace the native handle used by binding, including through prototype replacement. The resource instance is non-extensible and its public getter prototype is frozen. SamplerResource has allocation lifecycle and disposal, but no scalar content state, content epoch, readiness, or footprint.
 
 ## QuerySetResource
 
@@ -165,7 +174,7 @@ const queries = await runtime.createQuerySet({
 })
 ```
 
-Core query types are `timestamp` and `occlusion`. Timestamp requires the native feature; occlusion does not fabricate one. The acknowledged `type`, `count`, and `gpuQuerySet` identity are private-backed immutable facts, so slot publication, native resolve, and disposal always refer to the same allocation. `queries.slot(index)` and `queries.slots()` return frozen indexed snapshots containing `state` and `contentEpoch`. QuerySetResource has no scalar content epoch or ambiguous whole-object readiness. Pipeline statistics remain outside core WebGPU and outside Scratch core.
+Core query types are `timestamp` and `occlusion`. Timestamp requires the native feature; occlusion does not fabricate one. The acknowledged `type`, `count`, and `gpuQuerySet` identity are private-backed immutable facts, so slot publication, native resolve, and disposal always refer to the same allocation. Prototype replacement cannot redirect those getters: the resource instance is non-extensible and the getter prototype is frozen. `queries.slot(index)` and `queries.slots()` return frozen indexed snapshots containing `state` and `contentEpoch`. QuerySetResource has no scalar content epoch or ambiguous whole-object readiness. Pipeline statistics remain outside core WebGPU and outside Scratch core.
 
 ## Readiness
 

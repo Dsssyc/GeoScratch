@@ -183,6 +183,8 @@ export class QuerySetResource extends Resource {
 
 }
 
+Object.freeze(QuerySetResource.prototype)
+
 export async function createQuerySetResource(
     runtime: ScratchRuntime,
     descriptor: QuerySetResourceDescriptor
