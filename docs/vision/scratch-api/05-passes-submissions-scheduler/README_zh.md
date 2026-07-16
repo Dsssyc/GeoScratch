@@ -344,7 +344,7 @@ Draw/Dispatch resolution 在精确 command position 发生:
 - missing `skip-pass` request 会移除整个 pass;
 - missing `use-fallback` request 会解析同 kind fallback chain，只有最终选中的 command 才参与 dependency validation 与 encoding。
 
-对每个最终选中的 Draw/Dispatch command，numeric required epoch 继续精确比较。`'current-at-step'` read 则解析为该位置的 simulated numeric epoch：包含全部已提交前序 step effects，但位于该 command 自身 writes 之前。它绝不查看后序 producer。该解析在 `throw`、`warn` 与 `off` 中都执行；validation disposition 不会关闭 readiness、ownership、lifecycle、binding/allocation、pass-conflict 或 indeterminate-content gate。
+对每个最终选中的 Draw/Dispatch command，numeric required epoch 继续精确比较。`'current-at-step'` read 则解析为该位置的 simulated numeric epoch：包含全部已提交前序 step effects，但位于该 command 自身 writes 之前。它绝不查看后序 producer。该解析在 `throw`、`warn` 与 `off` 中都执行。sentinel 不会绕过所选 mode 已启用的 finding：numeric epoch 与 render pass-conflict finding 保持现有 validation disposition；readiness、ownership、lifecycle、binding/allocation 与 indeterminate-content gate 保持现有 mandatory behavior。
 
 每个 pass 都基于克隆的 readiness state、query-slot state 和 pass-local dependency findings 解析。被跳过的 pass 会丢弃所有 clone，包括较早 command writes、render attachment load/clear/store、color/depth epochs、timestamp writes、occlusion query writes 与 optional findings。即使 draw 被逐个跳过，只要 attachment operation 仍存在，render pass 就继续执行。没有 selected command 且无 side effect 的 compute pass 记为 `skipped-empty`，不会开始 native pass。
 

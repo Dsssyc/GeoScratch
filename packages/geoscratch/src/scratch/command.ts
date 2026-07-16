@@ -4006,7 +4006,7 @@ function assertDeclaredCommandRead(
             read: {
                 role,
                 resourceId: resource.id,
-                contentEpoch: 'non-negative integer',
+                contentEpoch: 'non-negative integer | "current-at-step"',
             },
         },
         actual: {

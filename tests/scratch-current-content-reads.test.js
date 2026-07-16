@@ -4,7 +4,10 @@ import {
     ScratchRuntime,
 } from 'geoscratch'
 import { setResourceContentState } from '../packages/geoscratch/dist/scratch/resource.js'
-import { createFakeGpu } from './scratch-test-utils.js'
+import {
+    advanceResourceContentEpochForTest,
+    createFakeGpu,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x8
 const GPU_BUFFER_USAGE_INDEX = 0x10
@@ -41,6 +44,23 @@ struct VertexInput {
 @vertex
 fn vsMain(input: VertexInput) -> @builtin(position) vec4f {
     return vec4f(input.position, 0.0, 1.0);
+}
+
+@fragment
+fn fsMain() -> @location(0) vec4f {
+    return vec4f(0.9, 0.3, 0.1, 1.0);
+}
+`
+
+const passConflictWgsl = `
+@vertex
+fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+    var positions = array<vec2f, 3>(
+        vec2f(0.0, 0.5),
+        vec2f(-0.5, -0.5),
+        vec2f(0.5, -0.5)
+    );
+    return vec4f(positions[vertexIndex], 0.0, 1.0);
 }
 
 @fragment
@@ -437,6 +457,77 @@ describe('scratch current-at-step resource reads', () => {
             contentEpoch: 3,
         })
         expect(fixture.calls.commandEncoders).to.have.length(encoderCount)
+    })
+
+    it('preserves render pass-conflict disposition in throw, warn, and off modes', async() => {
+
+        const fixture = await createRuntime()
+        const target = await fixture.runtime.createTexture({
+            label: 'current content conflict target',
+            size: [ 4, 4 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        advanceResourceContentEpochForTest(target)
+        const program = fixture.runtime.createProgram({
+            modules: [ passConflictWgsl ],
+            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        })
+        const pipeline = await fixture.runtime.createRenderPipeline({
+            program,
+            targets: [ { format: target.format } ],
+        })
+        const pass = fixture.runtime.createRenderPass({
+            color: [ {
+                target: target.view(),
+                load: 'clear',
+                store: 'store',
+                clear: [ 0, 0, 0, 1 ],
+            } ],
+        })
+        const draw = fixture.runtime.createDrawCommand({
+            pipeline,
+            count: { vertexCount: 3 },
+            resources: {
+                read: [ { resource: target, contentEpoch: 'current-at-step' } ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+
+        await expectScratchDiagnostic(() => fixture.runtime.createSubmission({ validation: 'throw' })
+            .render(pass, [ draw ])
+            .submit(), {
+            code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
+            phase: 'submission',
+        })
+        expect(target.contentEpoch).to.equal(1)
+
+        const warned = fixture.runtime.createSubmission({ validation: 'warn' })
+            .render(pass, [ draw ])
+            .submit()
+        expect(warned.diagnostics).to.have.length(1)
+        expect(warned.diagnostics[0]).to.include({
+            code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
+            phase: 'submission',
+        })
+        expect(commandReads(warned, draw)[0]).to.include({
+            declaredContentEpoch: 'current-at-step',
+            contentEpochBefore: 1,
+        })
+        expect(target.contentEpoch).to.equal(2)
+        await warned.done
+
+        const off = fixture.runtime.createSubmission({ validation: 'off' })
+            .render(pass, [ draw ])
+            .submit()
+        expect(off.diagnostics).to.deep.equal([])
+        expect(commandReads(off, draw)[0]).to.include({
+            declaredContentEpoch: 'current-at-step',
+            contentEpochBefore: 2,
+        })
+        expect(target.contentEpoch).to.equal(3)
+        await off.done
     })
 
     it('uses current-at-step for vertex, index, and indirect fixed-function reads', async() => {

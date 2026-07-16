@@ -1079,6 +1079,10 @@ describe('scratch native indexed and indirect execution', () => {
                 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE'
             )
             expect(diagnostic.phase).to.equal('command')
+            expect(diagnostic.expected.read).to.deep.include({
+                role: testCase.role,
+                contentEpoch: 'non-negative integer | "current-at-step"',
+            })
             expect(diagnostic.actual).to.deep.include({ role: testCase.role })
         }
 
@@ -1090,6 +1094,10 @@ describe('scratch native indexed and indirect execution', () => {
             resources: { read: [], write: [] },
             whenMissing: 'throw',
         }), 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE')
+        expect(diagnostic.expected.read).to.deep.include({
+            role: 'indirect-buffer',
+            contentEpoch: 'non-negative integer | "current-at-step"',
+        })
         expect(diagnostic.actual).to.deep.include({ role: 'indirect-buffer' })
     })
 

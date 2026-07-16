@@ -46,13 +46,23 @@ try {
 } catch (error) {
     fatalError = serializeError(error)
 } finally {
+    const cleanupFailures = []
     try {
-        await browser?.close()
+        if (browser !== undefined) await withTimeout(browser.close(), 5_000, 'Chrome shutdown')
+    } catch (error) {
+        cleanupFailures.push(serializeError(error))
+    }
+    try {
         await stopVite(vite)
+    } catch (error) {
+        cleanupFailures.push(serializeError(error))
+    }
+    try {
         serverClosed = await waitForPortClosed(port)
     } catch (error) {
-        cleanupError = serializeError(error)
+        cleanupFailures.push(serializeError(error))
     }
+    if (cleanupFailures.length > 0) cleanupError = cleanupFailures.join('\n')
 }
 
 const failures = validateResult({
@@ -96,6 +106,7 @@ async function verifyCurrentContentReads(activeBrowser) {
     const consoleFailures = []
     const pageErrors = []
     const requestFailures = []
+    const httpFailures = []
     page.on('console', (message) => {
         if (message.type() === 'error') pushBounded(consoleFailures, message.text())
     })
@@ -104,6 +115,10 @@ async function verifyCurrentContentReads(activeBrowser) {
         requestFailures,
         `${request.method()} ${request.url()}: ${request.failure()?.errorText ?? 'unknown failure'}`
     ))
+    page.on('response', (response) => {
+        if (response.status() < 400) return
+        pushBounded(httpFailures, `${response.status()} ${response.request().method()} ${response.url()}`)
+    })
 
     try {
         await page.goto(`${baseUrl}/uniformTriangle/index.html`, {
@@ -171,6 +186,7 @@ async function verifyCurrentContentReads(activeBrowser) {
                 consoleFailures,
                 pageErrors,
                 requestFailures,
+                httpFailures,
             },
         }
     } finally {
@@ -283,6 +299,7 @@ function validateResult(result) {
     if (result.proof.consoleFailures.length > 0) failures.push('browser emitted console errors')
     if (result.proof.pageErrors.length > 0) failures.push('browser emitted page errors')
     if (result.proof.requestFailures.length > 0) failures.push('browser emitted request failures')
+    if (result.proof.httpFailures.length > 0) failures.push('browser received failing HTTP responses')
     return failures
 }
 
@@ -318,8 +335,13 @@ async function waitForVite(vite, url) {
             throw new Error(`Vite exited before readiness with code ${vite.child.exitCode}.`)
         }
         try {
-            const response = await fetch(url)
-            if (response.ok) return
+            const remainingMs = Math.max(1, deadline - Date.now())
+            const response = await fetch(url, {
+                signal: AbortSignal.timeout(Math.min(1_000, remainingMs)),
+            })
+            const ready = response.ok
+            await response.body?.cancel()
+            if (ready) return
         } catch {
             // The listener is not ready yet.
         }
@@ -426,6 +448,24 @@ function pushBounded(target, value) {
 function serializeError(error) {
 
     return error instanceof Error ? error.stack ?? error.message : String(error)
+}
+
+async function withTimeout(promise, milliseconds, label) {
+
+    let timer
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((resolvePromise, rejectPromise) => {
+                timer = setTimeout(
+                    () => rejectPromise(new Error(`${label} exceeded ${milliseconds} ms.`)),
+                    milliseconds
+                )
+            }),
+        ])
+    } finally {
+        clearTimeout(timer)
+    }
 }
 
 function delay(milliseconds) {

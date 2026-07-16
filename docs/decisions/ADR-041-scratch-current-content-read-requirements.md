@@ -36,7 +36,7 @@ A numeric epoch keeps ADR-019 exact-match semantics. A command that declares `'c
 
 There is no lookahead to later producers, automatic sorting, retry, command mutation, or fallback from a stale numeric epoch to current content. The sentinel is a frozen declarative value, not a callback, closure, tracked value, setter, or mutable relationship to the Resource.
 
-Resolution occurs in `throw`, `warn`, and `off` validation modes. Validation mode controls optional numeric epoch findings; it does not disable ownership, lifecycle, readiness, indeterminate-content, binding, allocation, usage, layout, pass-conflict, or readiness-policy checks. Empty content still follows the command's explicit `whenMissing` policy. Indeterminate content remains a hard failure. A selected fallback resolves its own declarations only; skipped primary and skipped pass facts do not enter the execution ledger.
+Resolution occurs in `throw`, `warn`, and `off` validation modes. Validation mode controls optional numeric epoch and render pass-conflict findings; the sentinel does not bypass any finding enabled by that mode. Ownership, lifecycle, readiness, indeterminate-content, binding, allocation, usage, layout, and readiness-policy checks retain their existing mandatory behavior. Empty content still follows the command's explicit `whenMissing` policy. Indeterminate content remains a hard failure. A selected fallback resolves its own declarations only; skipped primary and skipped pass facts do not enter the execution ledger.
 
 The same mode is valid for shader resources and fixed-function vertex, index, and indirect reads. Copy, Readback, and query-slot source descriptors keep their existing exact numeric epoch APIs.
 
