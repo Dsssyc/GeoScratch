@@ -39,6 +39,16 @@ import {
     retainDeviceLostInfo,
     ScratchRuntimeDiagnosticsController,
 } from './runtime-diagnostics.js'
+import {
+    assertScratchRuntimeActive,
+    disposeScratchRuntimeAuthority,
+    initializeScratchRuntimeAuthority,
+    loseScratchRuntimeAuthority,
+    scratchRuntimeAuthoritySubject,
+    scratchRuntimeDeviceLostInfo,
+    scratchRuntimeIsDeviceLost,
+    scratchRuntimeIsDisposed,
+} from './runtime-authority.js'
 import { createSamplerResource, SamplerResource } from './sampler.js'
 import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
@@ -111,9 +121,6 @@ export interface ScratchRuntime {
 export class ScratchRuntime {
 
     #diagnosticsController: ScratchRuntimeDiagnosticsController
-    #isDisposed = false
-    #isDeviceLost = false
-    #deviceLostInfo: ScratchDeviceLostInfo | undefined
 
     private constructor(token: symbol, options: ScratchRuntimeConstructorOptions) {
 
@@ -128,6 +135,7 @@ export class ScratchRuntime {
             })
         }
 
+        initializeScratchRuntimeAuthority(this)
         Object.defineProperties(this, {
             id: immutableRuntimeProperty(`scratch-runtime-${UUID()}`),
             label: immutableRuntimeProperty(options.label),
@@ -140,9 +148,9 @@ export class ScratchRuntime {
             deviceFeatures: immutableRuntimeProperty(options.device.features),
             deviceLimits: immutableRuntimeProperty(options.device.limits),
             readbackPolicy: immutableRuntimeProperty(options.readbackPolicy),
-            isDisposed: immutableRuntimeGetter(() => this.#isDisposed),
-            isDeviceLost: immutableRuntimeGetter(() => this.#isDeviceLost),
-            deviceLostInfo: immutableRuntimeGetter(() => this.#deviceLostInfo),
+            isDisposed: immutableRuntimeGetter(() => scratchRuntimeIsDisposed(this)),
+            isDeviceLost: immutableRuntimeGetter(() => scratchRuntimeIsDeviceLost(this)),
+            deviceLostInfo: immutableRuntimeGetter(() => scratchRuntimeDeviceLostInfo(this)),
         })
         this._resources = new Set()
         this._surfaces = new Set()
@@ -162,8 +170,7 @@ export class ScratchRuntime {
 
         if (options.device.lost && typeof options.device.lost.then === 'function') {
             options.device.lost.then((info) => {
-                this.#isDeviceLost = true
-                this.#deviceLostInfo = retainDeviceLostInfo(info)
+                loseScratchRuntimeAuthority(this, retainDeviceLostInfo(info))
                 this.#diagnosticsController.recordDeviceLoss(info)
                 for (const readback of runtimeReadbackOperationSnapshot(this)) {
                     readback.cancel('device-lost')
@@ -177,17 +184,17 @@ export class ScratchRuntime {
 
     get isDisposed(): boolean {
 
-        return this.#isDisposed
+        return scratchRuntimeIsDisposed(this)
     }
 
     get isDeviceLost(): boolean {
 
-        return this.#isDeviceLost
+        return scratchRuntimeIsDeviceLost(this)
     }
 
     get deviceLostInfo(): ScratchDeviceLostInfo | undefined {
 
-        return this.#deviceLostInfo
+        return scratchRuntimeDeviceLostInfo(this)
     }
 
     static async create(options: ScratchRuntimeCreateOptions = {}) {
@@ -255,44 +262,17 @@ export class ScratchRuntime {
 
     get subject(): DiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
-            kind: 'ScratchRuntime',
-            id: this.id,
-        }
-        if (this.label !== undefined) subject.label = this.label
-
-        return subject
+        return scratchRuntimeAuthoritySubject(this)
     }
 
     assertActive() {
 
-        if (this.isDisposed) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_RUNTIME_DISPOSED',
-                severity: 'error',
-                phase: 'runtime',
-                subject: this.subject,
-                message: 'ScratchRuntime has been disposed.',
-                hints: [ 'Create a new ScratchRuntime before creating resources or surfaces.' ],
-            })
-        }
-
-        if (this.isDeviceLost) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_RUNTIME_DEVICE_LOST',
-                severity: 'error',
-                phase: 'runtime',
-                subject: this.subject,
-                message: 'ScratchRuntime device has been lost.',
-                actual: this.deviceLostInfo,
-                hints: [ 'Create a replacement runtime or wait for a future rehydration API.' ],
-            })
-        }
+        assertScratchRuntimeActive(this)
     }
 
     createSurface(canvas: HTMLCanvasElement | OffscreenCanvas, options: SurfaceOptions = {}) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new Surface(this, canvas, options)
     }
 
@@ -303,7 +283,7 @@ export class ScratchRuntime {
 
     async createBuffer(descriptor: BufferResourceDescriptor): Promise<BufferResource> {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createBufferResource(this, descriptor)
     }
 
@@ -314,7 +294,7 @@ export class ScratchRuntime {
 
     async createTexture(descriptor: TextureResourceDescriptor): Promise<TextureResource> {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createTextureResource(this, descriptor)
     }
 
@@ -325,7 +305,7 @@ export class ScratchRuntime {
 
     async createSampler(descriptor?: SamplerResourceDescriptor): Promise<SamplerResource> {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createSamplerResource(this, descriptor)
     }
 
@@ -336,7 +316,7 @@ export class ScratchRuntime {
 
     async createQuerySet(descriptor: QuerySetResourceDescriptor): Promise<QuerySetResource> {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createQuerySetResource(this, descriptor)
     }
 
@@ -347,7 +327,7 @@ export class ScratchRuntime {
 
     async createBindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout> {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createScratchBindLayout(this, descriptor)
     }
 
@@ -362,7 +342,7 @@ export class ScratchRuntime {
         options?: BindSetOptions
     ): Promise<import('./binding.js').BindSet> {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createScratchBindSet(this, layout, bindings, options)
     }
 
@@ -377,7 +357,7 @@ export class ScratchRuntime {
 
     createProgram(descriptor: ProgramDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new Program(this, descriptor)
     }
 
@@ -388,7 +368,7 @@ export class ScratchRuntime {
 
     async createRenderPipeline(descriptor: RenderPipelineDescriptor): Promise<RenderPipeline> {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createScratchRenderPipeline(this, descriptor)
     }
 
@@ -399,7 +379,7 @@ export class ScratchRuntime {
 
     async createComputePipeline(descriptor: ComputePipelineDescriptor): Promise<ComputePipeline> {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createScratchComputePipeline(this, descriptor)
     }
 
@@ -410,7 +390,7 @@ export class ScratchRuntime {
 
     createDrawCommand(descriptor: DrawCommandDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new DrawCommand(this, descriptor)
     }
 
@@ -421,7 +401,7 @@ export class ScratchRuntime {
 
     createBeginOcclusionQueryCommand(descriptor: BeginOcclusionQueryCommandDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new BeginOcclusionQueryCommand(this, descriptor)
     }
 
@@ -432,7 +412,7 @@ export class ScratchRuntime {
 
     createEndOcclusionQueryCommand(descriptor?: EndOcclusionQueryCommandDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new EndOcclusionQueryCommand(this, descriptor)
     }
 
@@ -443,7 +423,7 @@ export class ScratchRuntime {
 
     createDispatchCommand(descriptor: DispatchCommandDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new DispatchCommand(this, descriptor)
     }
 
@@ -454,7 +434,7 @@ export class ScratchRuntime {
 
     createUploadCommand(descriptor: UploadCommandDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new UploadCommand(this, descriptor)
     }
 
@@ -465,7 +445,7 @@ export class ScratchRuntime {
 
     createCopyCommand(descriptor: CopyCommandDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new CopyCommand(this, descriptor)
     }
 
@@ -476,7 +456,7 @@ export class ScratchRuntime {
 
     async createReadbackCommand(descriptor: ReadbackCommandDescriptor): Promise<ReadbackCommand> {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createScratchReadbackCommand(this, descriptor)
     }
 
@@ -487,7 +467,7 @@ export class ScratchRuntime {
 
     createResolveQuerySetCommand(descriptor: ResolveQuerySetCommandDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new ResolveQuerySetCommand(this, descriptor)
     }
 
@@ -498,7 +478,7 @@ export class ScratchRuntime {
 
     createTextureUploadCommand(descriptor: TextureUploadCommandDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new TextureUploadCommand(this, descriptor)
     }
 
@@ -509,7 +489,7 @@ export class ScratchRuntime {
 
     createExternalImageUploadCommand(descriptor: ExternalImageUploadCommandDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new ExternalImageUploadCommand(this, descriptor)
     }
 
@@ -520,7 +500,7 @@ export class ScratchRuntime {
 
     createRenderPass(descriptor: RenderPassSpecDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new RenderPassSpec(this, descriptor)
     }
 
@@ -531,7 +511,7 @@ export class ScratchRuntime {
 
     createComputePass(descriptor?: ComputePassSpecDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new ComputePassSpec(this, descriptor)
     }
 
@@ -542,7 +522,7 @@ export class ScratchRuntime {
 
     createReadback(descriptor: ReadbackOperationDescriptor) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return createReadbackOperation(this, descriptor)
     }
 
@@ -553,7 +533,7 @@ export class ScratchRuntime {
 
     createSubmission(options: SubmissionBuilderOptions = {}) {
 
-        this.assertActive()
+        assertScratchRuntimeActive(this)
         return new SubmissionBuilder(this, options)
     }
 
@@ -564,8 +544,7 @@ export class ScratchRuntime {
 
     dispose() {
 
-        if (this.isDisposed) return
-        this.#isDisposed = true
+        if (!disposeScratchRuntimeAuthority(this)) return
 
         const failures: unknown[] = []
         const dispose = (action: () => void) => {

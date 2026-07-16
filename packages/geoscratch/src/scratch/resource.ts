@@ -1,5 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { updateRuntimeResourceFact } from './runtime-diagnostics.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -161,7 +162,7 @@ export abstract class Resource {
             })
         }
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         this.#runtime = runtime
         this.#id = options.identity?.token === resourceIdentityToken
@@ -273,7 +274,7 @@ export abstract class Resource {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
     }
 
     dispose(): void {

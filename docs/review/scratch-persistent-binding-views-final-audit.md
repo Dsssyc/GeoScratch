@@ -1,8 +1,8 @@
 # Scratch Persistent Binding Views Final Audit
 
-Date: 2026-07-15
-Status: Program Pipeline-fact snapshot candidate pending terminal acceptance and adjudication
-Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039
+Date: 2026-07-16
+Status: Runtime/Program lifecycle-authority correction pending clean acceptance
+Decisions: ADR-031, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039, ADR-040
 
 ## Fixed Evidence
 
@@ -28,8 +28,8 @@ source, and WHATWG Web IDL source and derives the native enum matrices. It later
 the managed port and explicitly executes `npm run typecheck`, the complete `npm run
 build`, and `git diff --check`. Structural mode preserves existing `dist` so stale
 output remains detectable, but performs the same recorded package bootstrap when `dist`
-is absent. It executes exactly 484 referenced behavior tests; requires the
-complete suite to report exactly 882 passing
+is absent. It executes exactly 491 referenced behavior tests; requires the
+complete suite to report exactly 889 passing
 and 2 intentionally pending gates; runs both 20,000-cycle steady-state phases; starts
 and stops its own Vite development server; and launches both the non-headless binding
 proof and the 11-page ordinary-example matrix. During that same managed-server
@@ -42,20 +42,20 @@ execution sequence.
 The Goal-start commit is the behavioral and public-symbol baseline. The historical
 JavaScript commit is evidence for behavior that had already survived the TypeScript
 migration; it is not authority for restoring synchronous factories, old names, or
-legacy descriptor shapes. ADR-036 through ADR-039 define the clean target state.
+legacy descriptor shapes. ADR-036 through ADR-040 define the clean target state.
 
 ## Final Parity Table
 
 | Area | Goal-start TypeScript behavior and public symbols | Historical JavaScript feature inventory | Target clean-cut behavior | Final implementation location | Test evidence | Documentation evidence | Intentional breaking replacement | Final status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Runtime and surface | Async runtime plus independent `Surface` and `SubmissionBuilder` | Same runtime/surface separation | Preserve explicit async runtime, exclusive live canvas-context ownership, and non-resource descriptions | `scratch/runtime.ts`, `surface.ts`, `submission.ts` | Runtime, surface, submission suites | Vision 01, ADR-039, and overview | Preserved and strengthened | Complete |
+| Runtime and surface | Async runtime plus independent `Surface` and `SubmissionBuilder` | Same runtime/surface separation | Preserve explicit async runtime, private lifecycle authority, exclusive live canvas-context ownership, and non-resource descriptions | `scratch/runtime.ts`, `runtime-authority.ts`, `surface.ts`, `submission.ts` | Runtime authority, surface, submission suites | Vision 01, ADR-039/040, and overview | Preserved and strengthened | Complete |
 | Resource semantics | Universal allocation/content facts | Allocation and scalar content epochs existed | Allocation lifecycle on every resource; scalar content only on buffers/textures; indexed query facts | `resource.ts`, `buffer.ts`, `texture.ts`, `sampler.ts`, `query-set.ts` | Resource-semantics and supporting-object suites | Vision 02, ADR-036 | Universal `ResourceState` narrowed to truthful owners | Complete |
 | Layout codecs | `structuralHash`, CPU packing, WGSL accessors, readback views | LayoutCodec did not yet exist | Collision-safe canonical `abiHash` plus `schemaHash`, preserving codec helpers | `layout-codec.ts` | Layout-codec and resource-view suites | Vision 02, ADR-036 | `structuralHash` removed without alias | Complete |
 | Buffer ranges | Resource-global layout/stride/count | Raw `BufferResource` existed | Raw buffer plus frozen `BufferRegion`; every public range consumer uses regions | `buffer.ts`, `command.ts`, `readback.ts`, `binding.ts` | Resource-view, region-layout, copy, readback suites | Vision 02 and 07, ADR-036 | Resource-global layout and ad hoc ranges removed | Complete |
 | Texture views | Public allocation-scoped `GPUTextureView` cache | Public `createView()` existed | Frozen logical `TextureViewSpec`; native usage/format capability preflight; candidate/submission-local native views stay private | `texture.ts`, `texture-format-capabilities.ts`, `binding.ts`, `pass.ts`, `submission.ts` | Resource-view, BindSet preparation, pass tests | Vision 02, 03, 05; ADR-036/037 | Public managed native view and global cache removed | Complete |
 | Supporting objects | Sampler, QuerySet, and BindLayout factories returned synchronously | Synchronous native constructors existed | Promise-only candidate transactions with scoped native acknowledgement | `runtime.ts`, `sampler.ts`, `query-set.ts`, `binding.ts` | Supporting-object acknowledgement suite | Vision 03, ADR-037 | Sync factories and constructor bypasses removed | Complete |
 | Persistent BindSet | Lazy `getBindGroup()` rebuilding and allocation checks | Same lazy binding path | Initially acknowledged prepared set; explicit single-flight `prepare()` only after allocation staleness; submission never repairs | `binding.ts`, `command.ts` | BindSet preparation, lifecycle, performance suites | Vision 03/04, ADR-037 | Lazy submission-time creation removed | Complete |
-| Program and command binding | `ProgramBufferLayoutRequirement`, one structural hash, descriptor-level offsets | Program modules/entry points/features existed; typed requirements did not | ABI/schema-aware command validation and immutable command-owned named offsets pre-lowered to native order | `program.ts`, `command.ts`, `binding.ts` | Dynamic-offset and binding-access suites | Vision 03/04, ADR-036/037 | `CommandDynamicOffsets` replaced by `CommandBindSetInvocation` | Complete |
+| Program and command binding | `ProgramBufferLayoutRequirement`, one structural hash, descriptor-level offsets | Program modules/entry points/features existed; typed requirements did not | ABI/schema-aware command validation, private lifecycle stamps, and immutable command-owned named offsets pre-lowered to native order | `program.ts`, `pipeline.ts`, `command.ts`, `binding.ts` | Lifecycle-authority, dynamic-offset, and binding-access suites | Vision 03/04/08, ADR-036/037/040 | `CommandDynamicOffsets` replaced by `CommandBindSetInvocation`; public assertions are not internal authority | Complete |
 | Commands, passes, submission | Stable command/pass objects, queue order, readiness, epochs | Draw/dispatch/copy/submission path existed | Region/view specs flow through stable commands; pass attachments remain submission-observed; no hidden binding preparation | `command.ts`, `pass.ts`, `submission.ts` | Queue-order, epoch, native-provenance suites | Vision 04/05/07 | Whole-resource range/attachment shapes removed | Complete |
 | Readback, query, copy | Layout-aware readback and all four native copy directions | Raw/typed readback and buffer-to-buffer copy existed | `BufferRegion` readback/query resolve and all four direct GPU copy quadrants | `readback.ts`, `command.ts`, `submission.ts` | Copy, readback, query, browser suites | Vision 04/07 | `ReadbackRange` and whole-buffer overloads removed | Complete |
 | Diagnostics | GPU operation schema v4 and broad resource-shaped facts | Structured `SCRATCH_*` diagnostics existed | Bounded schema v5 with discriminated resources, supporting objects, views, and indexed query slots | `gpu-operation.ts`, `runtime-diagnostics.ts` | Schema-v5, bounded evidence, browser failure probes | Vision 09, ADR-038 | Schema v4 writers and fabricated content/footprint facts removed | Complete |
@@ -89,9 +89,9 @@ three implementation-normalization helpers remain internal.
 
 The executable audit reports 36 Goal-start value exports, 29 historical JavaScript
 value exports, and 38 final value exports. None is silently missing. The production
-compiler emits 102 JavaScript files and 102 declaration files; every one matches
+compiler emits 103 JavaScript files and 103 declaration files; every one matches
 `dist` exactly, with no missing, stale, or mismatched transitive output. The declaration
-AST manifest covers 4,798 declaration/member nodes. Scratch source contains only `.ts`
+AST manifest covers 4,834 declaration/member nodes. Scratch source contains only `.ts`
 and no hand-written `.d.ts` or same-source `.js`.
 
 ## AST-Derived Public Member Disposition
@@ -211,7 +211,7 @@ admits both. Every path is a direct encoder copy with no CPU round trip.
 ## Diagnostics Evidence
 
 - Goal-start diagnostic code inventory: 158
-- Final diagnostic code inventory: 201
+- Final diagnostic code inventory: 205
 - Unexpected missing codes: 0
 - `SCRATCH_CODEC_STRUCTURAL_HASH_MISMATCH` is intentionally replaced by
   `SCRATCH_LAYOUT_ABI_MISMATCH` and `SCRATCH_CODEC_SCHEMA_MISMATCH`.
@@ -2176,6 +2176,38 @@ Program Pipeline-fact snapshot transaction verification:
   with the same two exact pending identities
 - complete type/full/build/structural, clean acceptance, single final scoped review,
   protected-ref, and conditional push evidence remain pending
+
+Runtime/Program lifecycle-authority correction verification:
+
+- the focused RED run reported 14 passing and six exact failures: two Runtime factory
+  calls bypassed lifecycle authority after own-property `assertActive` shadowing, while
+  render and compute Program invalidation reached late pipeline-creation diagnostics
+  after avoidable native creation
+- Runtime now owns one package-internal lifecycle cell with disposed, device-lost, and
+  monotonic epoch facts; all Scratch-internal Runtime lifecycle checks call that
+  authority directly rather than dynamically dispatching through the public method
+- Program pipeline preparation captures one Program/Runtime authority stamp, validates
+  it after caller-owned Program phases and complete descriptor normalization, fences
+  native issue, and observes the same stamp before async result commit
+- the focused GREEN run passes 23/23 with zero shader-module, pipeline-layout, render-
+  pipeline, compute-pipeline, or buffer-allocation effects in every pre-issue rejection;
+  the existing async render/compute and pipeline-lifecycle collections pass 50/50; the
+  complete Scratch source contains no internal call to public `assertActive()`
+- public root and compatibility entrypoints reject both Runtime and Program internal
+  authority helpers in the type contract; Vision 01/08 and ADR-040 record the no-lock,
+  no-public-`prepare()`, no-automatic-retry, and post-issue non-cancellation boundaries
+- production emit parity covers 103 JavaScript and 103 declaration files plus 4,834
+  declaration/member signatures with exact generated-byte matches
+- the executable contract now requires 491 focused passes and 889 full-suite passes
+  with the same two exact pending identities
+- the complete `npm test` gate reports exactly 889 passing and the same two expected
+  pending identities; `npm run typecheck`, fixed-history structural parity, and all
+  three exact native-source inventory audits pass
+- the complete root build emits the package and all 14 runnable examples successfully
+- clean acceptance, final review, protected-ref, and conditional push evidence remain
+  pending and must not be inferred from the pre-commit verification
+- clean acceptance, final review, protected-ref, and conditional push evidence remain
+  pending and must not be inferred from the pre-commit verification
 
 ## Explicit Non-Goals
 

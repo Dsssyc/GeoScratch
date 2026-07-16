@@ -9,6 +9,7 @@ import { BufferRegion, isBufferRegion } from './buffer.js'
 import { ScratchDiagnosticError, isScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createScratchNativeLabel } from './native-allocation.js'
+import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { SamplerResource, isSamplerResource } from './sampler.js'
 import { throwSupportingObjectCreationFailure } from './supporting-object-failure.js'
@@ -446,7 +447,7 @@ export class BindLayout {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
     }
 
     entrySubject(entry: unknown) {
@@ -468,7 +469,7 @@ export async function createBindLayout(
     descriptor: BindLayoutDescriptor
 ): Promise<BindLayout> {
 
-    runtime.assertActive()
+    assertScratchRuntimeActive(runtime)
     const id = `scratch-bind-layout-${UUID()}`
     const normalizedDescriptor = normalizeBindLayoutDescriptor(runtime, id, descriptor)
     const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, id)
@@ -578,7 +579,7 @@ export class BindSet {
             throw new TypeError('BindSet must be created by ScratchRuntime.createBindSet().')
         }
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         if (!isBindLayout(layout)) {
             throwScratchDiagnostic({
@@ -719,7 +720,7 @@ export class BindSet {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.layout.assertUsable()
         this.assertPrepared()
     }
@@ -832,7 +833,7 @@ export async function createBindSet(
     options: BindSetOptions = {}
 ): Promise<BindSet> {
 
-    runtime.assertActive()
+    assertScratchRuntimeActive(runtime)
     const bindSet = constructBindSet(
         runtime,
         `scratch-bind-set-${UUID()}`,
@@ -957,7 +958,7 @@ async function executeBindSetPreparation(
 ): Promise<void> {
 
     try {
-        bindSet.runtime.assertActive()
+        assertScratchRuntimeActive(bindSet.runtime)
         bindSet.layout.assertUsable()
         for (const binding of bindingsInNativeOrder(bindSet)) {
             validateBindingResource(bindSet, binding.entry, binding.resource)

@@ -9,12 +9,20 @@ import { createPipelineNativeErrorSerializer } from './pipeline-native-error.js'
 import { registerRuntimePipeline, unregisterRuntimePipeline } from './pipeline-ownership.js'
 import { describeValue } from './type-utils.js'
 import {
+    assertProgramPipelineAuthority,
+    assertProgramUsableAuthority,
     isProgram,
+    observeProgramPipelineAuthority,
+    programAuthoritySubject,
     programLayoutRequirementExpected,
     programLayoutRequirementSubject,
     snapshotProgramPipelineFacts,
 } from './program.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
+import {
+    assertScratchRuntimeActive,
+    scratchRuntimeAuthoritySubject,
+} from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type { BindLayout } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -30,7 +38,11 @@ import type {
     PipelineNativeLabels,
 } from './pipeline-creation.js'
 import type { PipelineCompilationReport, PipelineSourceSnapshot } from './pipeline-compilation.js'
-import type { Program, ProgramBufferLayoutRequirement } from './program.js'
+import type {
+    Program,
+    ProgramBufferLayoutRequirement,
+    ProgramPipelineAuthorityStamp,
+} from './program.js'
 import type { ScratchGpuOperationCompletion, ScratchPendingGpuOperation } from './runtime-diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
@@ -156,8 +168,8 @@ export class RenderPipeline {
             })
         }
 
-        this.runtime.assertActive()
-        this.program.assertUsable()
+        assertScratchRuntimeActive(this.runtime)
+        assertProgramUsableAuthority(this.program)
         for (const layout of this.bindLayouts) {
             layout.assertUsable()
         }
@@ -185,6 +197,7 @@ type PipelineValidationContext = {
     label?: string
     pipelineKind: 'render' | 'compute'
     program: Program
+    programAuthority: ProgramPipelineAuthorityStamp
     subject: DiagnosticSubject
     bindLayouts: readonly BindLayout[]
     bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
@@ -222,6 +235,7 @@ export async function createRenderPipeline(
 ): Promise<RenderPipeline> {
 
     const plan = prepareRenderPipeline(runtime, descriptor)
+    assertProgramPipelineAuthority(plan.programAuthority)
     const nativeLabels = pipelineNativeLabels(plan.label, plan.id)
     const controller = diagnosticsControllerFor(runtime)
     const target = {
@@ -320,7 +334,7 @@ function prepareRenderPipeline(
     descriptor: RenderPipelineDescriptor
 ): RenderPipelinePlan {
 
-    runtime.assertActive()
+    assertScratchRuntimeActive(runtime)
     const input = descriptor ?? {} as RenderPipelineDescriptor
     const program = input.program
     if (!isProgram(program)) {
@@ -334,7 +348,8 @@ function prepareRenderPipeline(
             actual: { program: program === undefined || program === null ? String(program) : typeof program },
         })
     }
-    const programFacts = snapshotProgramPipelineFacts(program, runtime)
+    const programSnapshot = snapshotProgramPipelineFacts(program, runtime)
+    const programFacts = programSnapshot.facts
     const layoutRequirements = programFacts.layoutRequirements
 
     const id = `scratch-pipeline-${UUID()}`
@@ -352,6 +367,7 @@ function prepareRenderPipeline(
         ...(input.label !== undefined ? { label: input.label } : {}),
         pipelineKind: 'render',
         program,
+        programAuthority: programSnapshot.authority,
         subject,
         bindLayouts: Object.freeze([]),
         bindLayoutsByGroup: readonlyMapSnapshot(new Map()),
@@ -393,10 +409,12 @@ function prepareRenderPipeline(
     validateEntryPoints(draft)
     validateProgramLayoutRequirements(draft)
 
-    return Object.freeze({
+    const plan = Object.freeze({
         ...draft,
         sourceSnapshot: snapshotProgramSource(program, programFacts.modules, subject),
     })
+    assertProgramPipelineAuthority(plan.programAuthority)
+    return plan
 }
 
 function snapshotProgramSource(
@@ -412,7 +430,7 @@ function snapshotProgramSource(
             code: 'SCRATCH_PROGRAM_MODULES_INVALID',
             severity: 'error',
             phase: 'program',
-            subject: program.subject,
+            subject: programAuthoritySubject(program),
             related: [ pipelineSubject ],
             message: 'Program modules are invalid at the pipeline snapshot boundary.',
             expected: { modules: 'non-empty string[]' },
@@ -494,27 +512,41 @@ function pipelineLifecycleFailures(
 
     const failures: PipelineCreationObservedFailure[] = []
     const serializeNativeError = createPipelineNativeErrorSerializer(plan.sourceSnapshot)
-    if (plan.runtime.isDisposed) {
+    const authority = observeProgramPipelineAuthority(plan.programAuthority)
+    if (authority.runtime.isDisposed) {
         failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
             'none',
-            plan.runtime.subject
+            scratchRuntimeAuthoritySubject(plan.runtime)
         ))
     }
 
-    if (plan.runtime.isDeviceLost) {
+    if (authority.runtime.isDeviceLost) {
         failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
             'device-lost',
-            plan.runtime.subject,
-            observedDeviceLostInfo ?? plan.runtime.deviceLostInfo
+            scratchRuntimeAuthoritySubject(plan.runtime),
+            observedDeviceLostInfo ?? authority.runtime.deviceLostInfo
         ))
     }
-    if (plan.program.isDisposed) {
+    if (!authority.runtime.isCurrent && !authority.runtime.isDisposed && !authority.runtime.isDeviceLost) {
+        failures.push(lifecycleFailure(serializeNativeError,
+            'SCRATCH_PIPELINE_CREATION_RUNTIME_LIFECYCLE_CHANGED',
+            'none',
+            scratchRuntimeAuthoritySubject(plan.runtime)
+        ))
+    }
+    if (authority.isProgramDisposed) {
         failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED',
             'none',
-            plan.program.subject
+            programAuthoritySubject(plan.program)
+        ))
+    } else if (!authority.isProgramCurrent) {
+        failures.push(lifecycleFailure(serializeNativeError,
+            'SCRATCH_PIPELINE_CREATION_PROGRAM_LIFECYCLE_CHANGED',
+            'none',
+            programAuthoritySubject(plan.program)
         ))
     }
     for (const layout of plan.bindLayouts) {
@@ -609,8 +641,8 @@ function throwPipelineCreationFailure(
     const controller = diagnosticsControllerFor(plan.runtime)
     const record = controller.completeOperation(operation, completion)
     const related = [
-        plan.runtime.subject,
-        plan.program.subject,
+        scratchRuntimeAuthoritySubject(plan.runtime),
+        programAuthoritySubject(plan.program),
         { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
         ...plan.bindLayouts.map(layout => layout.subject),
     ]
@@ -856,8 +888,8 @@ export class ComputePipeline {
             })
         }
 
-        this.runtime.assertActive()
-        this.program.assertUsable()
+        assertScratchRuntimeActive(this.runtime)
+        assertProgramUsableAuthority(this.program)
         for (const layout of this.bindLayouts) {
             layout.assertUsable()
         }
@@ -898,6 +930,7 @@ export async function createComputePipeline(
 ): Promise<ComputePipeline> {
 
     const plan = prepareComputePipeline(runtime, descriptor)
+    assertProgramPipelineAuthority(plan.programAuthority)
     const nativeLabels = pipelineNativeLabels(plan.label, plan.id)
     const controller = diagnosticsControllerFor(runtime)
     const target = {
@@ -988,7 +1021,7 @@ function prepareComputePipeline(
     descriptor: ComputePipelineDescriptor
 ): ComputePipelinePlan {
 
-    runtime.assertActive()
+    assertScratchRuntimeActive(runtime)
     const input = descriptor ?? {} as ComputePipelineDescriptor
     const program = input.program
     if (!isProgram(program)) {
@@ -1002,7 +1035,8 @@ function prepareComputePipeline(
             actual: { program: program === undefined || program === null ? String(program) : typeof program },
         })
     }
-    const programFacts = snapshotProgramPipelineFacts(program, runtime)
+    const programSnapshot = snapshotProgramPipelineFacts(program, runtime)
+    const programFacts = programSnapshot.facts
     const layoutRequirements = programFacts.layoutRequirements
 
     const id = `scratch-pipeline-${UUID()}`
@@ -1020,6 +1054,7 @@ function prepareComputePipeline(
         ...(input.label !== undefined ? { label: input.label } : {}),
         pipelineKind: 'compute',
         program,
+        programAuthority: programSnapshot.authority,
         subject,
         bindLayouts: Object.freeze([]),
         bindLayoutsByGroup: readonlyMapSnapshot(new Map()),
@@ -1042,10 +1077,12 @@ function prepareComputePipeline(
     if (!draft.computeEntryPoint) throwMissingEntryPoint(draft, 'compute')
     validateProgramLayoutRequirements(draft)
 
-    return Object.freeze({
+    const plan = Object.freeze({
         ...draft,
         sourceSnapshot: snapshotProgramSource(program, programFacts.modules, subject),
     })
+    assertProgramPipelineAuthority(plan.programAuthority)
+    return plan
 }
 
 function computePipelineDescriptorEvidence(plan: ComputePipelinePlan): {

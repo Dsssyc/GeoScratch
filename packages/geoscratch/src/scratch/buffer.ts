@@ -21,6 +21,7 @@ import {
     resourceContentEpoch,
     resourceContentState,
 } from './resource.js'
+import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -512,7 +513,7 @@ export async function createBufferResource(
     descriptor: BufferResourceDescriptor
 ): Promise<BufferResource> {
 
-    runtime.assertActive()
+    assertScratchRuntimeActive(runtime)
     const normalizedDescriptor = normalizeBufferDescriptor(runtime, descriptor)
     const identity = createScratchResourceIdentity()
     const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, identity.id)

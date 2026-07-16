@@ -37,6 +37,7 @@ import {
 } from './pass.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
+import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import {
     advanceQuerySlotContentEpoch,
@@ -454,7 +455,7 @@ export class SubmissionBuilder {
 
     constructor(runtime: ScratchRuntime, options: SubmissionBuilderOptions = {}) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         this.runtime = runtime
         this.id = `scratch-submission-builder-${UUID()}`
@@ -527,7 +528,7 @@ export class SubmissionBuilder {
 
     submit() {
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
 
         if (this.isSubmitted) {
             throwScratchDiagnostic({

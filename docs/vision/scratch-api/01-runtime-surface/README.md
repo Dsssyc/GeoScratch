@@ -58,8 +58,11 @@ const surface = scratch.surface(canvas, {
 - A runtime's `GPU`, adapter, device, queue, and feature/limit snapshots are
   immutable ownership facts after creation; application code cannot swap the
   native device underneath diagnostics or allocation.
-- Runtime disposal and device-loss properties are read-only observations of
-  runtime-owned lifecycle transitions.
+- Runtime disposal, device loss, and a monotonically increasing lifecycle epoch live
+  in one module-private authority cell. Public lifecycle properties and
+  `assertActive()` are observations of that cell; Scratch-internal lifecycle checks
+  invoke the private authority directly, so an own property that shadows a public
+  method cannot suppress lifecycle validation.
 - A `GPUCanvasContext` is claimed by exactly one live `Surface`, and therefore
   exactly one `ScratchRuntime`, at a time.
 - Resources from one runtime cannot be used by commands recorded on another runtime.
@@ -163,14 +166,22 @@ const renderPipeline = await runtime.createRenderPipeline(renderDescriptor)
 const computePipeline = await runtime.createComputePipeline(computeDescriptor)
 ```
 
-The runtime does not publish a pending pipeline wrapper. It retains only one
-bounded pending fact while shader-module and pipeline-layout scopes,
-compilation information, and the native async pipeline Promise settle. Before
-commit it rechecks the runtime, device, Program, and every BindLayout. Disposal
-or device loss cancels the transaction and installs no current pipeline fact.
-Current pipeline facts scale with live pipelines; historical operations remain
-in the bounded recorder. Pipeline creation does not add work or waits to
-`SubmissionBuilder.submit()`.
+The runtime does not publish a pending pipeline wrapper. Pipeline preparation captures
+an internal Program/Runtime lifecycle stamp, materializes caller-owned Program and
+descriptor facts, and rechecks the stamp before any shader-module, pipeline-layout, or
+native pipeline creation. The same stamp is checked after the native async transaction
+settles and before a successful result is committed as a public Pipeline. A lifecycle
+change before native issue reports the direct Runtime or Program diagnostic with zero
+native creation work. A change after issue rejects publication and records the bounded
+pipeline-creation lifecycle diagnostic; Scratch does not claim that an already-issued
+WebGPU promise can be cancelled.
+
+Only one bounded pending fact is retained while shader-module and pipeline-layout
+scopes, compilation information, and the native async pipeline Promise settle. Before
+commit Scratch also rechecks every BindLayout. Current pipeline facts scale with live
+pipelines; historical operations remain in the bounded recorder. Pipeline creation
+does not add work or waits to `SubmissionBuilder.submit()`, does not expose a public
+`prepare()` state, and does not replay caller getters through automatic retry.
 
 ## Async Supporting-Object Ownership
 

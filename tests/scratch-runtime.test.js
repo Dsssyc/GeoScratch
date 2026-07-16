@@ -12,13 +12,17 @@ function createFakeGpu() {
         queue: { label: 'queue' },
         lost: new Promise(() => {}),
         destroyCalled: false,
-        createBuffer: (descriptor) => ({
-            descriptor,
-            destroyed: false,
-            destroy() {
-                this.destroyed = true
-            },
-        }),
+        createBufferCalls: [],
+        createBuffer(descriptor) {
+            this.createBufferCalls.push(descriptor)
+            return {
+                descriptor,
+                destroyed: false,
+                destroy() {
+                    this.destroyed = true
+                },
+            }
+        },
         destroy() {
             this.destroyCalled = true
         },
@@ -143,5 +147,77 @@ describe('ScratchRuntime', () => {
             message: '[native device-loss message omitted]',
             nativeMessageOmitted: true,
         })
+    })
+
+    it('keeps disposed lifecycle authority after public assertActive shadowing', async() => {
+
+        const { gpu, device } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        Object.defineProperty(runtime, 'assertActive', {
+            configurable: true,
+            value() {},
+        })
+        runtime.dispose()
+        let caught
+
+        try {
+            await runtime.createBuffer({ size: 4, usage: 1 })
+        } catch (error) {
+            caught = error
+        }
+
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
+        expect(device.createBufferCalls).to.have.length(0)
+    })
+
+    it('keeps device-loss lifecycle authority after public assertActive shadowing', async() => {
+
+        let loseDevice
+        const { gpu, device } = createFakeGpu()
+        device.lost = new Promise((resolve) => {
+            loseDevice = resolve
+        })
+        const runtime = await ScratchRuntime.create({ gpu })
+        Object.defineProperty(runtime, 'assertActive', {
+            configurable: true,
+            value() {},
+        })
+
+        loseDevice({ reason: 'unknown', message: 'test loss' })
+        await Promise.resolve()
+        let caught
+
+        try {
+            await runtime.createBuffer({ size: 4, usage: 1 })
+        } catch (error) {
+            caught = error
+        }
+
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST')
+        expect(device.createBufferCalls).to.have.length(0)
+    })
+
+    it('keeps downstream runtime authority after public assertActive shadowing', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const submission = runtime.createSubmission()
+        Object.defineProperty(runtime, 'assertActive', {
+            configurable: true,
+            value() {},
+        })
+        runtime.dispose()
+        let caught
+
+        try {
+            submission.submit()
+        } catch (error) {
+            caught = error
+        }
+
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
     })
 })

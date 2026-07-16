@@ -30,6 +30,7 @@ import {
 } from './readback-staging.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import { advanceResourceContentEpoch, isContentResource } from './resource.js'
+import { assertScratchRuntimeActive } from './runtime-authority.js'
 import {
     TextureResource,
     isTextureResource,
@@ -601,7 +602,7 @@ export class DrawCommand {
 
     constructor(runtime: ScratchRuntime, descriptor: DrawCommandDescriptor = {} as DrawCommandDescriptor) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const pipeline: unknown = descriptor.pipeline
         if (!isRenderPipeline(pipeline)) {
@@ -700,7 +701,7 @@ export class DrawCommand {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.pipeline.assertUsable()
         for (const invocation of this.bindSets) {
             invocation.set.assertUsable()
@@ -824,7 +825,7 @@ export class BeginOcclusionQueryCommand {
 
     constructor(runtime: ScratchRuntime, descriptor: BeginOcclusionQueryCommandDescriptor = {} as BeginOcclusionQueryCommandDescriptor) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const querySet = descriptor.querySet
         if (!isQuerySetResource(querySet)) {
@@ -909,7 +910,7 @@ export class BeginOcclusionQueryCommand {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.querySet.assertUsable()
     }
 
@@ -973,7 +974,7 @@ export class EndOcclusionQueryCommand {
 
     constructor(runtime: ScratchRuntime, descriptor: EndOcclusionQueryCommandDescriptor = {}) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const mutable = this as Mutable<EndOcclusionQueryCommand>
         mutable.runtime = runtime
@@ -1035,7 +1036,7 @@ export class EndOcclusionQueryCommand {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
     }
 
     validateForPass(passSpec: RenderPassSpec) {
@@ -1104,7 +1105,7 @@ export class DispatchCommand {
 
     constructor(runtime: ScratchRuntime, descriptor: DispatchCommandDescriptor = {} as DispatchCommandDescriptor) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const pipeline: unknown = descriptor.pipeline
         if (!isComputePipeline(pipeline)) {
@@ -1197,7 +1198,7 @@ export class DispatchCommand {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.pipeline.assertUsable()
         for (const invocation of this.bindSets) {
             invocation.set.assertUsable()
@@ -1460,7 +1461,7 @@ export class UploadCommand {
 
     constructor(runtime: ScratchRuntime, descriptor: UploadCommandDescriptor = {} as UploadCommandDescriptor) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const target = descriptor.target
         if (!isBufferRegion(target)) {
@@ -1551,7 +1552,7 @@ export class UploadCommand {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.target.assertUsable()
     }
 
@@ -1594,7 +1595,7 @@ export class CopyCommand {
 
     constructor(runtime: ScratchRuntime, descriptor: CopyCommandDescriptor = {} as CopyCommandDescriptor) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const source = normalizeCopySource(runtime, descriptor)
         const sourceResource = copySourceResource(source)
@@ -1757,7 +1758,7 @@ export class CopyCommand {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         if (isBufferRegionSource(this.source)) {
             this.source.region.assertUsable()
         } else {
@@ -2020,13 +2021,13 @@ export class ReadbackCommand {
     assertUsable(): void {
 
         this._assertNotDisposed()
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         validateCurrentReadbackCommandSource(this.runtime, this.subject, this.source)
     }
 
     result(options: ReadbackCommandResultOptions): ReadbackOperation {
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         const after = options?.after
         if (!after || after.runtime !== this.runtime || typeof after.done?.then !== 'function') {
             throwScratchDiagnostic({
@@ -2115,7 +2116,7 @@ export async function createReadbackCommand(
     descriptor: ReadbackCommandDescriptor
 ): Promise<ReadbackCommand> {
 
-    runtime.assertActive()
+    assertScratchRuntimeActive(runtime)
     const id = `scratch-command-${UUID()}`
     const normalized = normalizeReadbackCommandDescriptor(runtime, id, descriptor)
     const stagingLabel = normalized.label === undefined ? undefined : `${normalized.label} staging`
@@ -2127,7 +2128,7 @@ export async function createReadbackCommand(
         ...(stagingLabel !== undefined ? { label: stagingLabel } : {}),
     })
     try {
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
         normalized.source.region.assertUsable()
         const command = constructReadbackCommand(runtime, id, normalized, slot)
         registerRuntimeReadbackCommand(runtime, command, readbackCommandFact(command))
@@ -2618,7 +2619,7 @@ export class ResolveQuerySetCommand {
 
     constructor(runtime: ScratchRuntime, descriptor: ResolveQuerySetCommandDescriptor = {} as ResolveQuerySetCommandDescriptor) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const normalizedDescriptor = normalizeResolveDescriptor(runtime, descriptor)
         const source = normalizeResolveSource(runtime, normalizedDescriptor.source)
@@ -2730,7 +2731,7 @@ export class ResolveQuerySetCommand {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.querySet.assertUsable()
         this.destination.assertUsable()
         validateResolveDestinationUsage(this.runtime, this.destination.buffer)
@@ -2790,7 +2791,7 @@ export class TextureUploadCommand {
 
     constructor(runtime: ScratchRuntime, descriptor: TextureUploadCommandDescriptor = {} as TextureUploadCommandDescriptor) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const target = descriptor.target
         if (!isTextureResource(target)) {
@@ -2895,7 +2896,7 @@ export class TextureUploadCommand {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.target.assertUsable()
     }
 
@@ -2938,7 +2939,7 @@ export class ExternalImageUploadCommand {
         descriptor: ExternalImageUploadCommandDescriptor
     ) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         if (!isRecord(descriptor)) {
             throwExternalImageUploadInvalid({ runtime, reason: 'descriptor' })
@@ -3029,7 +3030,7 @@ export class ExternalImageUploadCommand {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.target.assertRuntime(this.runtime)
     }
 

@@ -37,6 +37,8 @@ describe('Scratch persistent binding final parity', () => {
             'publicClassMemberInventory',
             'programReadonlyPublicContracts',
             'programPipelineFactSnapshot',
+            'runtimeProgramLifecycleAuthority',
+            'runtimeAuthority',
             'goalStartPublicMemberReplacements',
             'goalStartChangedPublicMemberReplacements',
             'RenderPassSpec.createRenderPassDescriptor:method',
@@ -66,8 +68,8 @@ describe('Scratch persistent binding final parity', () => {
             'const cleanThirtyEighthReviewCheckpoint = \'c9cfad3decd3380c2d03509482b549d3275e1c1c\'',
             'const cleanThirtyNinthReviewCheckpoint = \'01f26da07ffb4fddd7c389cd388ea0c4307a09a6\'',
             'const cleanProgramFactSnapshotPredecessor = \'ae9986d4cc1d7edacccd7ba0b4e15cd58a38dfdf\'',
-            'const expectedFocusedAcceptancePasses = 484',
-            'const expectedFullSuitePasses = 882',
+            'const expectedFocusedAcceptancePasses = 491',
+            'const expectedFullSuitePasses = 889',
             'const expectedFullSuitePending = 2',
             'const expectedFullSuitePendingIdentities',
             'propertyCallsInClass',
@@ -110,6 +112,7 @@ describe('Scratch persistent binding final parity', () => {
             'SCRATCH_SURFACE_UNCONFIGURE_FAILED',
             'surfaceContextOwners',
             'ADR-039-scratch-exclusive-surface-context-ownership.md',
+            'ADR-040-scratch-lifecycle-authority-stamps.md',
             'requires read-write storage buffers in both read and write declarations',
             'rejects empty read-write storage buffers during submission readiness validation',
             'allows equal multisample texture copies only on core devices',
@@ -142,6 +145,15 @@ describe('Scratch persistent binding final parity', () => {
             'revalidates caller-owned Program required features before future native pipeline work',
             'rejects render Program disposal during caller-owned fact snapshot before native work',
             'rejects compute Program disposal during caller-owned fact snapshot before native work',
+            'rejects render Program disposal during pipeline descriptor snapshot before native work',
+            'rejects compute Program disposal during pipeline descriptor snapshot before native work',
+            'keeps disposed lifecycle authority after public assertActive shadowing',
+            'keeps device-loss lifecycle authority after public assertActive shadowing',
+            'keeps downstream runtime authority after public assertActive shadowing',
+            'keeps render Pipeline Program lifecycle authoritative after public assertion shadowing',
+            'keeps compute Pipeline Program lifecycle authoritative after public assertion shadowing',
+            'Runtime lifecycle authority is package-internal',
+            'Program lifecycle authority stamps are package-internal',
             'rejects prototype-derived Pipeline and BindSet identities before command creation',
             'rejects prototype-derived pass and command identities before native submission effects',
             'does not use open instanceof checks as Scratch-owned internal brands',
@@ -311,11 +323,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.programPipelineFactSnapshot.mutablePlannerReads).to.deep.equal([])
         expect(result.publicSurface.productionEmitParity).to.deep.include({
             status: 'passed',
-            emittedJavaScriptCount: 102,
-            emittedDeclarationCount: 102,
-            declarationSignatureCount: 4798,
+            emittedJavaScriptCount: 103,
+            emittedDeclarationCount: 103,
+            declarationSignatureCount: 4834,
         })
-        expect(result.publicSurface.productionEmitParity.files).to.have.length(204)
+        expect(result.publicSurface.productionEmitParity.files).to.have.length(206)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
         expect(result.diagnostics).to.deep.include({ schemaVersion: 5 })
         expect(result.diagnostics.unexpectedMissing).to.deep.equal([])

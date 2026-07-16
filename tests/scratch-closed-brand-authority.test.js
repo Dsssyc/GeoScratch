@@ -318,6 +318,26 @@ describe('scratch closed brand authority', () => {
         await expectProgramFactSnapshotDisposal('compute')
     })
 
+    it('rejects render Program disposal during pipeline descriptor snapshot before native work', async() => {
+
+        await expectProgramDescriptorSnapshotDisposal('render')
+    })
+
+    it('rejects compute Program disposal during pipeline descriptor snapshot before native work', async() => {
+
+        await expectProgramDescriptorSnapshotDisposal('compute')
+    })
+
+    it('keeps render Pipeline Program lifecycle authoritative after public assertion shadowing', async() => {
+
+        await expectExistingPipelineProgramAuthority('render')
+    })
+
+    it('keeps compute Pipeline Program lifecycle authoritative after public assertion shadowing', async() => {
+
+        await expectExistingPipelineProgramAuthority('compute')
+    })
+
     it('rejects prototype-derived Pipeline and BindSet identities before command creation', async() => {
 
         const fake = createFakeGpu()
@@ -582,6 +602,10 @@ async function expectProgramFactSnapshotDisposal(pipelineKind) {
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
         const program = createPipelineProgram(runtime)
         scenario.install(program)
+        Object.defineProperty(program, 'assertUsable', {
+            configurable: true,
+            value() {},
+        })
         let caught
 
         try {
@@ -603,6 +627,10 @@ async function expectProgramFactSnapshotDisposal(pipelineKind) {
     const runtimeA = await ScratchRuntime.create({ gpu: fakeA.gpu })
     const runtimeB = await ScratchRuntime.create({ gpu: fakeB.gpu })
     const program = createPipelineProgram(runtimeA)
+    Object.defineProperty(program, 'assertRuntime', {
+        configurable: true,
+        value() {},
+    })
     const reads = []
     const facts = {
         modules: program.modules,
@@ -636,6 +664,72 @@ async function expectProgramFactSnapshotDisposal(pipelineKind) {
     expect(fakeB.calls.pipelineLayouts).to.have.length(0)
     expect(fakeB.calls.renderPipelines).to.have.length(0)
     expect(fakeB.calls.computePipelines).to.have.length(0)
+}
+
+async function expectProgramDescriptorSnapshotDisposal(pipelineKind) {
+
+    const fake = createFakeGpu()
+    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const program = createPipelineProgram(runtime)
+    Object.defineProperty(program, 'assertUsable', {
+        configurable: true,
+        value() {},
+    })
+    const descriptor = { program }
+    const fact = pipelineKind === 'render' ? 'targets' : 'constants'
+    Object.defineProperty(descriptor, fact, {
+        configurable: true,
+        enumerable: true,
+        get() {
+            program.dispose()
+            return pipelineKind === 'render'
+                ? [ { format: 'bgra8unorm' } ]
+                : { workgroupScale: 1 }
+        },
+    })
+    let caught
+
+    try {
+        if (pipelineKind === 'render') {
+            await runtime.createRenderPipeline(descriptor)
+        } else {
+            await runtime.createComputePipeline(descriptor)
+        }
+    } catch (error) {
+        caught = error
+    }
+
+    expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+    expect(caught.diagnostic.code).to.equal('SCRATCH_PROGRAM_DISPOSED')
+    expect(fake.calls.shaderModules).to.have.length(0)
+    expect(fake.calls.pipelineLayouts).to.have.length(0)
+    expect(fake.calls.renderPipelines).to.have.length(0)
+    expect(fake.calls.computePipelines).to.have.length(0)
+}
+
+async function expectExistingPipelineProgramAuthority(pipelineKind) {
+
+    const fake = createFakeGpu()
+    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const program = createPipelineProgram(runtime)
+    const pipeline = await createPipeline(pipelineKind, runtime, program)
+    Object.defineProperty(program, 'assertUsable', {
+        configurable: true,
+        value() {},
+    })
+    program.dispose()
+    let caught
+
+    try {
+        pipeline.assertUsable()
+    } catch (error) {
+        caught = error
+    }
+
+    expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+    expect(caught.diagnostic.code).to.equal('SCRATCH_PROGRAM_DISPOSED')
+    expect(fake.calls.renderPipelines).to.have.length(pipelineKind === 'render' ? 1 : 0)
+    expect(fake.calls.computePipelines).to.have.length(pipelineKind === 'compute' ? 1 : 0)
 }
 
 function createPipelineProgram(runtime) {

@@ -6,6 +6,7 @@ import {
     issueScopedNativeAllocation,
     recheckScopedNativeAllocationLifecycle,
 } from './native-allocation.js'
+import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type { BufferResource } from './buffer.js'
 import type {
@@ -110,7 +111,7 @@ export async function allocateReadbackStaging(
 ): Promise<ReadbackStagingSlot> {
 
     const { runtime, target, source, byteLength } = input
-    runtime.assertActive()
+    assertScratchRuntimeActive(runtime)
     source.assertRuntime(runtime)
     source.assertUsable()
     const controller = diagnosticsControllerFor(runtime)

@@ -1,5 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { getGlobalConstant } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -122,7 +123,7 @@ export class Surface {
 
     constructor(runtime: ScratchRuntime, canvas: ScratchCanvas, options: SurfaceOptions = {}) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const id = `scratch-surface-${UUID()}`
         const subject = surfaceSubjectFromValues(id, options.label)
@@ -178,7 +179,7 @@ export class Surface {
     configure(options: SurfaceOptions = {}): void {
 
         const state = assertSurfaceAliveOwner(this)
-        state.runtime.assertActive()
+        assertScratchRuntimeActive(state.runtime)
 
         const previousConfiguration = state.configuration
         const previousConfigurationVersion = state.configurationVersion
@@ -424,7 +425,7 @@ function assertSurfaceAliveOwner(surface: Surface): SurfaceState {
 function assertSurfaceUsable(surface: Surface): SurfaceState {
 
     const state = assertSurfaceAliveOwner(surface)
-    state.runtime.assertActive()
+    assertScratchRuntimeActive(state.runtime)
     assertSurfaceConfigurationCurrent(surface, state)
     return state
 }
@@ -436,7 +437,7 @@ function assertSurfaceConfigurationCandidateCurrent(
 ): void {
 
     const currentState = assertSurfaceAliveOwner(surface)
-    currentState.runtime.assertActive()
+    assertScratchRuntimeActive(currentState.runtime)
     if (currentState === state && currentState.configurationVersion === configurationVersion) return
 
     throwScratchDiagnostic({

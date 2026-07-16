@@ -42,6 +42,14 @@ const invalidPendingOperationKind: scr.ScratchPendingGpuOperationFact['kind'] = 
 scr.snapshotProgramPipelineFacts
 // @ts-expect-error Compatibility entrypoints do not expose internal Program snapshot transactions
 scratchCompat.snapshotProgramPipelineFacts
+// @ts-expect-error Runtime lifecycle authority is package-internal
+scr.captureScratchRuntimeAuthority
+// @ts-expect-error Compatibility entrypoints do not expose Runtime lifecycle authority
+scratchCompat.captureScratchRuntimeAuthority
+// @ts-expect-error Program lifecycle authority stamps are package-internal
+scr.assertProgramPipelineAuthority
+// @ts-expect-error Compatibility entrypoints do not expose Program lifecycle authority stamps
+scratchCompat.assertProgramPipelineAuthority
 
 const startResult: Promise<GPUDevice | undefined> = scr.StartDash()
 const device: GPUDevice = scr.getDevice()

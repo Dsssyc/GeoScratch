@@ -14,8 +14,8 @@ const cleanThirtyEighthReviewCheckpoint = 'c9cfad3decd3380c2d03509482b549d3275e1
 const cleanThirtyNinthReviewCheckpoint = '01f26da07ffb4fddd7c389cd388ea0c4307a09a6'
 const cleanProgramFactSnapshotPredecessor = 'ae9986d4cc1d7edacccd7ba0b4e15cd58a38dfdf'
 const acceptanceMode = process.env.SCRATCH_FINAL_AUDIT === '1'
-const expectedFocusedAcceptancePasses = 484
-const expectedFullSuitePasses = 882
+const expectedFocusedAcceptancePasses = 491
+const expectedFullSuitePasses = 889
 const expectedFullSuitePending = 2
 const expectedFullSuiteTests = expectedFullSuitePasses + expectedFullSuitePending
 const expectedFullSuitePendingIdentities = Object.freeze([
@@ -53,6 +53,7 @@ const currentPaths = Object.freeze({
     scratchIndex: 'packages/geoscratch/src/scratch/index.ts',
     scratchShim: 'packages/geoscratch/src/scratch.ts',
     runtime: 'packages/geoscratch/src/scratch/runtime.ts',
+    runtimeAuthority: 'packages/geoscratch/src/scratch/runtime-authority.ts',
     surface: 'packages/geoscratch/src/scratch/surface.ts',
     resource: 'packages/geoscratch/src/scratch/resource.ts',
     buffer: 'packages/geoscratch/src/scratch/buffer.ts',
@@ -77,6 +78,7 @@ const currentPaths = Object.freeze({
 const baselinePaths = Object.freeze(Object.fromEntries(
     Object.entries(currentPaths).filter(([ name ]) =>
         name !== 'scratchShim' &&
+        name !== 'runtimeAuthority' &&
         name !== 'textureFormatCapabilities' &&
         name !== 'supportingObjectCreation' &&
         name !== 'supportingObjectFailure'
@@ -236,7 +238,8 @@ const closedBrandGuards = Object.freeze({
         current.program.includes('Object.defineProperties(this, {') &&
         current.program.includes('Object.getPrototypeOf(value) === Program.prototype') &&
         current.program.includes('programStates.has(value as Program)') &&
-        current.program.includes('programStateFor(this).isDisposed = true') &&
+        current.program.includes('state.lifecycleEpoch += 1') &&
+        current.program.includes('assertProgramPipelineAuthority(authority)') &&
         current.program.includes('export function snapshotProgramPipelineFacts(') &&
         current.program.includes('const sampled = runProgramFactPhase(') &&
         current.program.includes('validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)') &&
@@ -288,7 +291,7 @@ const programPipelineFactSnapshot = Object.freeze({
     internalTransaction: hasAll(current.program, [
         'export function snapshotProgramPipelineFacts(',
         'materializeProgramPipelineFacts(program)',
-        'runProgramFactPhase(program',
+        'runProgramFactPhase(authority',
         'validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)',
     ]),
     sharedPlanners:
@@ -304,7 +307,7 @@ const programPipelineFactSnapshot = Object.freeze({
     status: hasAll(current.program, [
         'export function snapshotProgramPipelineFacts(',
         'materializeProgramPipelineFacts(program)',
-        'runProgramFactPhase(program',
+        'runProgramFactPhase(authority',
         'validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)',
     ]) &&
         current.pipeline.split('snapshotProgramPipelineFacts(program, runtime)').length === 3 &&
@@ -342,7 +345,84 @@ const finalDocs = loadCurrentSources({
     bindingDecision: 'docs/decisions/ADR-037-scratch-supporting-object-acknowledgement-and-bind-set-preparation.md',
     diagnosticsDecision: 'docs/decisions/ADR-038-scratch-diagnostics-schema-v5.md',
     surfaceDecision: 'docs/decisions/ADR-039-scratch-exclusive-surface-context-ownership.md',
+    lifecycleAuthorityDecision: 'docs/decisions/ADR-040-scratch-lifecycle-authority-stamps.md',
     finalAudit: 'docs/review/scratch-persistent-binding-views-final-audit.md',
+})
+const lifecycleAuthorityInternalNames = Object.freeze([
+    'captureScratchRuntimeAuthority',
+    'assertScratchRuntimeAuthority',
+    'assertProgramPipelineAuthority',
+    'observeProgramPipelineAuthority',
+])
+const runtimeProgramLifecycleAuthorityFacts = {
+    runtimePrivateCell: hasAll(current.runtimeAuthority, [
+        'const runtimeAuthorityStates = new WeakMap<ScratchRuntime, ScratchRuntimeAuthorityState>()',
+        'lifecycleEpoch: number',
+        'export function assertScratchRuntimeActive(',
+        'export function captureScratchRuntimeAuthority(',
+        'export function assertScratchRuntimeAuthority(',
+        'export function observeScratchRuntimeAuthority(',
+    ]),
+    runtimeInternalDispatchClosed:
+        !current.runtime.includes('this.assertActive()') &&
+        current.runtime.split('assertScratchRuntimeActive(this)').length >= 20,
+    runtimeInternalCallSitesClosed: !currentScratchSource.includes('.assertActive()'),
+    programPrivateEpoch: hasAll(current.program, [
+        'lifecycleEpoch: number',
+        'state.lifecycleEpoch += 1',
+        'assertProgramUsableAuthority(this)',
+        'assertProgramRuntimeAuthority(this, runtime)',
+        'runtimeAuthority: captureScratchRuntimeAuthority(state.runtime)',
+        'assertProgramPipelineAuthority(authority)',
+    ]) &&
+        !current.program.includes('program.assertUsable()') &&
+        !current.program.includes('program.assertRuntime('),
+    pipelineIssueAndCommitFences:
+        current.pipeline.split('assertProgramPipelineAuthority(plan.programAuthority)').length === 5 &&
+        current.pipeline.includes('observeProgramPipelineAuthority(plan.programAuthority)') &&
+        !current.pipeline.includes('this.program.assertUsable()') &&
+        !current.pipeline.includes('this.runtime.assertActive()'),
+    packageExported: lifecycleAuthorityInternalNames.some(name =>
+        current.packageIndex.includes(name) || current.scratchIndex.includes(name)
+    ),
+    typeNegativeEvidence: hasAll(publicApiTypeSource, [
+        'Runtime lifecycle authority is package-internal',
+        'Compatibility entrypoints do not expose Runtime lifecycle authority',
+        'Program lifecycle authority stamps are package-internal',
+        'Compatibility entrypoints do not expose Program lifecycle authority stamps',
+    ]),
+    bilingualVision: [
+        finalDocs.runtimeSurface,
+        finalDocs.runtimeSurfaceZh,
+        finalDocs.programs,
+        finalDocs.programsZh,
+    ].every(source => hasAll(source, [
+        'lifecycle epoch',
+        'lifecycle stamp',
+        'prepare()',
+        'retry',
+    ])),
+    acceptedDecision: hasAll(finalDocs.lifecycleAuthorityDecision, [
+        '## Status',
+        'Accepted',
+        'module-private state',
+        'lifecycle epoch',
+        'Automatic retry',
+    ]),
+}
+const runtimeProgramLifecycleAuthority = Object.freeze({
+    ...runtimeProgramLifecycleAuthorityFacts,
+    status: runtimeProgramLifecycleAuthorityFacts.runtimePrivateCell &&
+        runtimeProgramLifecycleAuthorityFacts.runtimeInternalDispatchClosed &&
+        runtimeProgramLifecycleAuthorityFacts.runtimeInternalCallSitesClosed &&
+        runtimeProgramLifecycleAuthorityFacts.programPrivateEpoch &&
+        runtimeProgramLifecycleAuthorityFacts.pipelineIssueAndCommitFences &&
+        !runtimeProgramLifecycleAuthorityFacts.packageExported &&
+        runtimeProgramLifecycleAuthorityFacts.typeNegativeEvidence &&
+        runtimeProgramLifecycleAuthorityFacts.bilingualVision &&
+        runtimeProgramLifecycleAuthorityFacts.acceptedDecision
+            ? 'passed'
+            : 'failed',
 })
 const activeReviewSource = loadMarkdownDirectory('docs/review')
 const externalImageUploadTestSource = fs.readFileSync(
@@ -795,6 +875,11 @@ const referencedTestEvidence = referencedTestFiles.map(file => Object.freeze({
     status: fs.existsSync(`tests/${file}`) ? 'passed' : 'failed',
 }))
 const behaviorTestContracts = [
+    behaviorTestContract('tests/scratch-runtime.test.js', [
+        'keeps disposed lifecycle authority after public assertActive shadowing',
+        'keeps device-loss lifecycle authority after public assertActive shadowing',
+        'keeps downstream runtime authority after public assertActive shadowing',
+    ]),
     behaviorTestContract('tests/scratch-closed-brand-authority.test.js', [
         'rejects a forged sampler after constructor Symbol.hasInstance replacement',
         'rejects a forged texture before native copy encoding after constructor replacement',
@@ -805,6 +890,10 @@ const behaviorTestContracts = [
         'revalidates caller-owned Program required features before future native pipeline work',
         'rejects render Program disposal during caller-owned fact snapshot before native work',
         'rejects compute Program disposal during caller-owned fact snapshot before native work',
+        'rejects render Program disposal during pipeline descriptor snapshot before native work',
+        'rejects compute Program disposal during pipeline descriptor snapshot before native work',
+        'keeps render Pipeline Program lifecycle authoritative after public assertion shadowing',
+        'keeps compute Pipeline Program lifecycle authoritative after public assertion shadowing',
         'rejects prototype-derived Pipeline and BindSet identities before command creation',
         'rejects prototype-derived pass and command identities before native submission effects',
         'does not use open instanceof checks as Scratch-owned internal brands',
@@ -1328,7 +1417,7 @@ const documentationAudit = Object.freeze({
             '`requiredFeatures`',
             'native work',
             'candidate-local immutable snapshot',
-            'materialization',
+            'lifecycle stamp',
             '`SCRATCH_PROGRAM_DISPOSED`',
             '`prepare()`',
             'state machine',
@@ -1411,7 +1500,9 @@ const documentationAudit = Object.freeze({
     acceptedDecisions: hasAll(finalDocs.resourceDecision, [ '## Status', 'Accepted' ]) &&
         hasAll(finalDocs.bindingDecision, [ '## Status', 'Accepted' ]) &&
         hasAll(finalDocs.diagnosticsDecision, [ '## Status', 'Accepted' ]) &&
-        hasAll(finalDocs.surfaceDecision, [ '## Status', 'Accepted' ]),
+        hasAll(finalDocs.surfaceDecision, [ '## Status', 'Accepted' ]) &&
+        hasAll(finalDocs.lifecycleAuthorityDecision, [ '## Status', 'Accepted' ]),
+    runtimeProgramLifecycleAuthority: runtimeProgramLifecycleAuthority.status === 'passed',
     thirtySixthReviewAcceptanceRecorded: hasAll(finalDocs.finalAudit, [
         'Clean thirty-sixth-review checkpoint acceptance (`4926648`)',
         cleanThirtySixthReviewCheckpoint,
@@ -1464,8 +1555,8 @@ const documentationAudit = Object.freeze({
         'must not be written back into this repository',
     ]),
     currentAcceptanceCounts: hasAll(finalDocs.finalAudit, [
-        'executes exactly 484',
-        'complete suite to report exactly 882 passing',
+        'executes exactly 491',
+        'complete suite to report exactly 889 passing',
     ]),
     resourceStateParity: resourceStateParity.status === 'passed',
     programExamplesUseBufferRegions: [ finalDocs.programs, finalDocs.programsZh ]
@@ -1618,6 +1709,10 @@ assertParity(
     programPipelineFactSnapshot.status === 'passed',
     `Program Pipeline-fact snapshot transaction failed: ${JSON.stringify(programPipelineFactSnapshot)}`
 )
+assertParity(
+    runtimeProgramLifecycleAuthority.status === 'passed',
+    `Runtime/Program lifecycle authority failed: ${JSON.stringify(runtimeProgramLifecycleAuthority)}`
+)
 assertParity(sourceFirst.status === 'passed', 'Scratch source-first boundary failed')
 assertParity(exampleAudit.status === 'passed', `example audit failed: ${exampleAudit.failures.join(', ')}`)
 assertParity(documentationStatus, `documentation audit failed: ${JSON.stringify(documentationAudit)}`)
@@ -1656,6 +1751,7 @@ const result = {
         sourceFirst,
         closedBrandAuthority,
         programPipelineFactSnapshot,
+        runtimeProgramLifecycleAuthority,
     },
     diagnostics: {
         goalStartCodeCount: baselineDiagnosticCodes.length,

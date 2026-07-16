@@ -43,10 +43,13 @@ user WGSL + generated accessor modules + bind-layout contract
 `Program` discrimination 使用 exact built-in prototype 与 module-private `WeakMap`
 state record 闭合。该 record 是 runtime ownership 与 disposal 的权威事实；公开的
 `Program.runtime`、`Program.id` 与 `Program.isDisposed` 只是 immutable observation，
-不是可写 authority。`LayoutCodec` 则继续使用 exact prototype 加 module-private
+不是可写 authority。公开 `assertRuntime()` 与 `assertUsable()` 只是 convenience
+validation method，并非内部 authority dispatch point；pipeline internal 直接读取
+私有 state 与 lifecycle epoch，因此实例同名属性遮蔽公开方法也不能跳过 ownership
+或 disposal check。`LayoutCodec` 则继续使用 exact prototype 加 module-private
 `WeakSet` brand。每条 Pipeline creation path、每个显式 Shader inspection input 或
-option，都会先调用 `isProgram()`，再读取 module、layout requirement 或
-`assertRuntime()`。Render/compute Pipeline object 也只有在 exact prototype 与
+option，都会先调用 `isProgram()`，再执行内部 ownership validation 或读取 module、
+layout requirement。Render/compute Pipeline object 也只有在 exact prototype 与
 module-private state-map record 同时匹配后，才能进入 Command construction。Public
 `instanceof`、同形方法、替换 `Symbol.hasInstance`、subclassing，以及
 `Object.create(Program.prototype)` / `Object.create(LayoutCodec.prototype)` 都不能向
@@ -55,15 +58,20 @@ module-private state-map record 同时匹配后，才能进入 Command construct
 这个 ownership/lifecycle boundary 不会冻结 caller-owned shader contract。
 `Program.modules`、`entryPoints`、`requiredFeatures` 与 `layoutRequirements` 仍可为
 future Pipeline 修改。每次 render/compute Pipeline creation 都会先在不读取这些
-facts 的情况下确认 exact Program identity 与 runtime ownership，再把四组 facts
-materialize 成一个 candidate-local immutable snapshot。内部采样期间允许 caller
-getter 与 iterator 执行，因此 materialization 后、feature validation 后都会按私有
-authority 重新校验 Program lifecycle 与 runtime activity。若采样导致 disposal，
+facts 的情况下确认 exact Program identity 与 runtime ownership，并捕获一份内部
+Program/Runtime lifecycle stamp，再把四组 facts materialize 成一个
+candidate-local immutable snapshot。Program fact 与 pipeline descriptor 的内部采样期间允许 caller
+getter 与 iterator 执行，因此每个 Program-fact phase 后、完整 descriptor normalization
+后、native issue 前以及 async result commit 前，都会按私有 authority 重新校验同一
+stamp。若 native issue 前发生 disposal，
 必须先报告 `SCRATCH_PROGRAM_DISPOSED`，不能先报告 `requiredFeatures` unavailable，
 也不能执行任何 native work，包括创建 shader module、pipeline layout 或 Pipeline。两种 planner 后续只
 消费 stable snapshot，不再读取 mutable Program property；existing Pipeline 继续保留
-自己的 immutable snapshot。这只是 internal preparation transaction，不增加 public
-`prepare()` method、mandatory state machine 或 caller-visible preparation state。
+自己的 immutable snapshot。fact mutation 不推进 lifecycle epoch，只影响后续
+candidate。stale candidate 不会自动 retry，因为重放 caller getter 或 iterator 并不
+具备安全语义。这只是 internal preparation transaction，不增加 public `prepare()`
+method、mandatory state machine、跨 caller code 持有的 lock 或 caller-visible
+preparation state。
 
 ## LayoutCodec
 

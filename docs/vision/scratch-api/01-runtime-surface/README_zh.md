@@ -58,8 +58,10 @@ const surface = scratch.surface(canvas, {
 - runtime 的 `GPU`、adapter、device、queue 与 feature/limit snapshot 在创建后
   都是不可变 ownership fact；应用代码不能在 diagnostics 或 allocation
   底层替换 native device。
-- runtime disposal 与 device-loss 属性是 runtime-owned lifecycle transition
-  的只读观察值。
+- runtime disposal、device loss 与单调递增的 lifecycle epoch 存放在同一个
+  module-private authority cell 中。公开 lifecycle property 与 `assertActive()` 只是
+  该 cell 的 observation；Scratch internal lifecycle check 直接调用私有 authority，
+  因此实例同名属性遮蔽公开方法也不能跳过 lifecycle validation。
 - 一个 `GPUCanvasContext` 同一时间只由一个 live `Surface` claim，因此也只由
   一个 `ScratchRuntime` 配置。
 - 一个 runtime 的资源不能被另一个 runtime 记录的 command 使用。
@@ -159,13 +161,21 @@ const renderPipeline = await runtime.createRenderPipeline(renderDescriptor)
 const computePipeline = await runtime.createComputePipeline(computeDescriptor)
 ```
 
-runtime 不发布 pending pipeline wrapper。shader-module 与 pipeline-layout
-scope、compilation information 以及原生 async pipeline Promise settle 期间，
-它只保留一个有界 pending fact。commit 前会重新检查 runtime、device、
-Program 与每个 BindLayout。dispose 或 device loss 会取消 transaction，且不
-安装 current pipeline fact。current pipeline facts 的规模随 live pipelines
-变化；历史 operation 留在有界 recorder 中。Pipeline 创建不会给
-`SubmissionBuilder.submit()` 增加工作或等待。
+runtime 不发布 pending pipeline wrapper。Pipeline preparation 会捕获内部
+Program/Runtime lifecycle stamp，materialize caller-owned Program 与 descriptor
+facts，并在任何 shader-module、pipeline-layout 或 native pipeline creation 前
+重新校验该 stamp。原生 async transaction settle 后、成功结果 commit 为公开
+Pipeline 前，还会再次校验同一 stamp。若 lifecycle 在 native issue 前变化，Scratch
+会直接报告 Runtime 或 Program diagnostic，且 native creation work 为零；若在 issue
+后变化，则拒绝发布 Pipeline，并记录 bounded pipeline-creation lifecycle
+diagnostic。Scratch 不会虚构已经发出的 WebGPU Promise 可以被取消。
+
+shader-module 与 pipeline-layout scope、compilation information 以及原生 async
+pipeline Promise settle 期间，runtime 只保留一条 bounded pending fact；commit 前
+还会重新校验每个 BindLayout。current pipeline facts 的规模随 live pipelines
+增长，历史 operation 仍留在 bounded recorder 中。Pipeline creation 不会向
+`SubmissionBuilder.submit()` 增加工作或等待，不暴露 public `prepare()` state，也
+不会通过 automatic retry 重放 caller getter。
 
 ## 异步 Supporting-Object Ownership
 

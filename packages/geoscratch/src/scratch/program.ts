@@ -1,11 +1,22 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { isLayoutArtifact } from './layout-codec.js'
+import {
+    assertScratchRuntimeActive,
+    assertScratchRuntimeAuthority,
+    captureScratchRuntimeAuthority,
+    observeScratchRuntimeAuthority,
+    scratchRuntimeAuthoritySubject,
+} from './runtime-authority.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { BindVisibility } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { LayoutArtifact } from './layout-codec.js'
 import type { ScratchRuntime } from './runtime.js'
+import type {
+    ScratchRuntimeAuthorityObservation,
+    ScratchRuntimeAuthorityStamp,
+} from './runtime-authority.js'
 
 export type ProgramEntryPoints = {
     vertex?: string
@@ -34,6 +45,7 @@ export type ProgramDescriptor = {
 type ProgramState = {
     runtime: ScratchRuntime
     isDisposed: boolean
+    lifecycleEpoch: number
 }
 
 type ProgramPipelineFacts = Readonly<{
@@ -41,6 +53,24 @@ type ProgramPipelineFacts = Readonly<{
     entryPoints: Readonly<ProgramEntryPoints>
     requiredFeatures: readonly GPUFeatureName[]
     layoutRequirements: readonly ProgramBufferLayoutRequirement[]
+}>
+
+type ProgramPipelineFactsSnapshot = Readonly<{
+    facts: ProgramPipelineFacts
+    authority: ProgramPipelineAuthorityStamp
+}>
+
+export type ProgramPipelineAuthorityStamp = Readonly<{
+    program: Program
+    lifecycleEpoch: number
+    runtimeAuthority: ScratchRuntimeAuthorityStamp
+}>
+
+export type ProgramPipelineAuthorityObservation = Readonly<{
+    isProgramCurrent: boolean
+    isProgramDisposed: boolean
+    programLifecycleEpoch: number
+    runtime: ScratchRuntimeAuthorityObservation
 }>
 
 type SampledProgramPipelineFacts = Readonly<{
@@ -67,9 +97,9 @@ export class Program {
 
     constructor(runtime: ScratchRuntime, descriptor: ProgramDescriptor) {
 
-        runtime.assertActive()
+        const runtimeAuthority = captureScratchRuntimeAuthority(runtime)
 
-        programStates.set(this, { runtime, isDisposed: false })
+        programStates.set(this, { runtime, isDisposed: false, lifecycleEpoch: 0 })
         Object.defineProperties(this, {
             runtime: {
                 value: runtime,
@@ -96,61 +126,30 @@ export class Program {
         this.layoutRequirements = normalizeLayoutRequirements(this, descriptor.layoutRequirements)
 
         validateRequiredFeatures(this, runtime, this.requiredFeatures)
+        assertScratchRuntimeAuthority(runtimeAuthority)
     }
 
     get subject(): DiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
-            kind: 'Program',
-            id: this.id,
-        }
-        if (this.label !== undefined) subject.label = this.label
-
-        return subject
+        return programAuthoritySubject(this)
     }
 
     assertRuntime(runtime: ScratchRuntime): void {
 
-        const state = programStateFor(this)
-        this.assertUsable()
-
-        if (runtime !== state.runtime) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_PROGRAM_WRONG_RUNTIME',
-                severity: 'error',
-                phase: 'program',
-                subject: this.subject,
-                related: [
-                    state.runtime.subject,
-                    runtime?.subject,
-                ].filter(Boolean),
-                message: 'Program belongs to a different ScratchRuntime.',
-                expected: { runtimeId: state.runtime.id },
-                actual: { runtimeId: runtime?.id },
-            })
-        }
-
+        assertProgramRuntimeAuthority(this, runtime)
     }
 
     assertUsable(): void {
 
-        const state = programStateFor(this)
-        if (state.isDisposed) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_PROGRAM_DISPOSED',
-                severity: 'error',
-                phase: 'program',
-                subject: this.subject,
-                message: 'Program has been disposed.',
-            })
-        }
-
-        state.runtime.assertActive()
+        assertProgramUsableAuthority(this)
     }
 
     dispose(): void {
 
-        programStateFor(this).isDisposed = true
+        const state = programStateFor(this)
+        if (state.isDisposed) return
+        state.isDisposed = true
+        state.lifecycleEpoch += 1
     }
 }
 
@@ -164,12 +163,12 @@ export function isProgram(value: unknown): value is Program {
 export function snapshotProgramPipelineFacts(
     program: Program,
     runtime: ScratchRuntime
-): ProgramPipelineFacts {
+): ProgramPipelineFactsSnapshot {
 
-    program.assertRuntime(runtime)
+    const authority = captureProgramPipelineAuthority(program, runtime)
     const state = programStateFor(program)
-    const sampled = runProgramFactPhase(program, () => materializeProgramPipelineFacts(program))
-    const normalized = runProgramFactPhase(program, () => Object.freeze({
+    const sampled = runProgramFactPhase(authority, () => materializeProgramPipelineFacts(program))
+    const normalized = runProgramFactPhase(authority, () => Object.freeze({
         modules: Object.freeze(normalizeModules(program, sampled.modules)),
         entryPoints: Object.freeze(normalizeEntryPoints(program, sampled.entryPoints)),
         requiredFeatures: Object.freeze(normalizeRequiredFeatures(
@@ -178,11 +177,66 @@ export function snapshotProgramPipelineFacts(
         layoutRequirements: normalizeLayoutRequirements(program, sampled.layoutRequirements),
     }))
 
-    runProgramFactPhase(program, () => {
+    runProgramFactPhase(authority, () => {
         validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)
     })
 
-    return normalized
+    return Object.freeze({ facts: normalized, authority })
+}
+
+export function assertProgramUsableAuthority(program: Program): void {
+
+    const state = programStateFor(program)
+    assertProgramNotDisposed(program, state)
+    assertScratchRuntimeActive(state.runtime)
+}
+
+export function assertProgramPipelineAuthority(stamp: ProgramPipelineAuthorityStamp): void {
+
+    const state = programStateFor(stamp.program)
+    assertProgramNotDisposed(stamp.program, state)
+    if (state.lifecycleEpoch !== stamp.lifecycleEpoch) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PROGRAM_LIFECYCLE_CHANGED',
+            severity: 'error',
+            phase: 'program',
+            subject: programAuthoritySubject(stamp.program),
+            message: 'Program lifecycle changed after pipeline preparation.',
+            expected: { lifecycleEpoch: stamp.lifecycleEpoch },
+            actual: { lifecycleEpoch: state.lifecycleEpoch },
+            hints: [ 'Prepare a new pipeline candidate from the current Program lifecycle.' ],
+        })
+    }
+    assertScratchRuntimeAuthority(stamp.runtimeAuthority)
+}
+
+export function observeProgramPipelineAuthority(
+    stamp: ProgramPipelineAuthorityStamp
+): ProgramPipelineAuthorityObservation {
+
+    const state = programStateFor(stamp.program)
+    return Object.freeze({
+        isProgramCurrent: state.lifecycleEpoch === stamp.lifecycleEpoch,
+        isProgramDisposed: state.isDisposed,
+        programLifecycleEpoch: state.lifecycleEpoch,
+        runtime: observeScratchRuntimeAuthority(stamp.runtimeAuthority),
+    })
+}
+
+export function programAuthoritySubject(program: Program): DiagnosticSubject {
+
+    const subject: DiagnosticSubject = {
+        kind: 'Program',
+        id: program.id,
+    }
+    let label: unknown
+    try {
+        label = program.label
+    } catch {
+        label = undefined
+    }
+    if (typeof label === 'string') subject.label = label
+    return subject
 }
 
 function programStateFor(program: Program): ProgramState {
@@ -192,7 +246,7 @@ function programStateFor(program: Program): ProgramState {
     return state
 }
 
-function runProgramFactPhase<T>(program: Program, phase: () => T): T {
+function runProgramFactPhase<T>(authority: ProgramPipelineAuthorityStamp, phase: () => T): T {
 
     let value: T | undefined
     let failure: unknown
@@ -205,9 +259,66 @@ function runProgramFactPhase<T>(program: Program, phase: () => T): T {
         failure = error
     }
 
-    program.assertUsable()
+    assertProgramPipelineAuthority(authority)
     if (failed) throw failure
     return value as T
+}
+
+function captureProgramPipelineAuthority(
+    program: Program,
+    runtime: ScratchRuntime
+): ProgramPipelineAuthorityStamp {
+
+    assertProgramRuntimeAuthority(program, runtime)
+    const state = programStateFor(program)
+    return Object.freeze({
+        program,
+        lifecycleEpoch: state.lifecycleEpoch,
+        runtimeAuthority: captureScratchRuntimeAuthority(state.runtime),
+    })
+}
+
+function assertProgramRuntimeAuthority(program: Program, runtime: ScratchRuntime): void {
+
+    const state = programStateFor(program)
+    assertProgramUsableAuthority(program)
+    if (runtime === state.runtime) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PROGRAM_WRONG_RUNTIME',
+        severity: 'error',
+        phase: 'program',
+        subject: programAuthoritySubject(program),
+        related: [
+            scratchRuntimeAuthoritySubject(state.runtime),
+            relatedRuntimeSubject(runtime),
+        ].filter((subject): subject is DiagnosticSubject => subject !== undefined),
+        message: 'Program belongs to a different ScratchRuntime.',
+        expected: { runtimeId: state.runtime.id },
+        actual: { runtimeId: runtime?.id },
+    })
+}
+
+function assertProgramNotDisposed(program: Program, state: ProgramState): void {
+
+    if (!state.isDisposed) return
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PROGRAM_DISPOSED',
+        severity: 'error',
+        phase: 'program',
+        subject: programAuthoritySubject(program),
+        message: 'Program has been disposed.',
+    })
+}
+
+function relatedRuntimeSubject(runtime: ScratchRuntime | undefined): DiagnosticSubject | undefined {
+
+    if (runtime === undefined || runtime === null) return undefined
+    try {
+        return scratchRuntimeAuthoritySubject(runtime)
+    } catch {
+        return undefined
+    }
 }
 
 function materializeProgramPipelineFacts(program: Program): SampledProgramPipelineFacts {

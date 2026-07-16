@@ -1,6 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { advanceQuerySlotContentEpoch, isQuerySetResource, QuerySetResource } from './query-set.js'
+import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { isSurfaceReceiver, surfaceFactsFor } from './surface.js'
 import { TextureResource, TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
 import { textureFormatIsColorRenderable } from './texture-format-capabilities.js'
@@ -123,7 +124,7 @@ export class RenderPassSpec {
 
     constructor(runtime: ScratchRuntime, descriptor: RenderPassSpecDescriptor) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const state = { isDisposed: false }
         renderPassStates.set(this, state)
@@ -192,7 +193,7 @@ export class RenderPassSpec {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.timestampWrites?.querySet.assertUsable()
         this.occlusionQuerySet?.assertUsable()
     }
@@ -263,7 +264,7 @@ export class ComputePassSpec {
 
     constructor(runtime: ScratchRuntime, descriptor: ComputePassSpecDescriptor = {}) {
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const state = { isDisposed: false }
         computePassStates.set(this, state)
@@ -325,7 +326,7 @@ export class ComputePassSpec {
             })
         }
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
         this.timestampWrites?.querySet.assertUsable()
     }
 

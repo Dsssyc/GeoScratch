@@ -32,7 +32,7 @@ message, timing adjacency, or logical byte count into a stronger claim.
 
 | Call | Current site | Ownership | Result |
 | --- | --- | --- | --- |
-| Readback staging `GPUDevice.createBuffer()` | `packages/geoscratch/src/scratch/readback-staging.ts:142` | Shared direct and ordered allocation transaction | Covered; no staging allocation remains in submission encoding |
+| Readback staging `GPUDevice.createBuffer()` | `packages/geoscratch/src/scratch/readback-staging.ts:143` | Shared direct and ordered allocation transaction | Covered; no staging allocation remains in submission encoding |
 | Readback `GPUBuffer.mapAsync()` | `packages/geoscratch/src/scratch/readback-mapping.ts:255` | Shared direct and ordered mapping transaction | Covered; no second mapping path remains |
 
 `readback.ts`, `command.ts`, and `submission.ts` contain no additional readback

@@ -21,6 +21,7 @@ import {
     readbackStagingBuffer,
     releaseReadbackStaging,
 } from './readback-staging.js'
+import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { beginReadbackNativeObservation } from './submission-native-observation.js'
 import { describeValue } from './type-utils.js'
@@ -156,7 +157,7 @@ export class ReadbackOperation {
             })
         }
 
-        runtime.assertActive()
+        assertScratchRuntimeActive(runtime)
 
         const state: ReadbackOperationPrivateState = {
             runtime,
@@ -664,7 +665,7 @@ export class ReadbackOperation {
 
     _assertReadableLifecycle() {
 
-        this.runtime.assertActive()
+        assertScratchRuntimeActive(this.runtime)
 
         if (this.isDisposed || this.state === 'disposed') {
             throwScratchDiagnostic({

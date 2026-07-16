@@ -44,9 +44,14 @@ This keeps code generation and runtime execution connected without hiding behavi
 module-private `WeakMap` state record. That record is authoritative for runtime
 ownership and disposal. Public `Program.runtime`, `Program.id`, and
 `Program.isDisposed` are immutable observations rather than writable authority.
+Public `assertRuntime()` and `assertUsable()` are convenience validation methods, not
+internal authority dispatch points; pipeline internals read the private state and
+lifecycle epoch directly, so own-property method shadowing cannot suppress ownership
+or disposal checks.
 `LayoutCodec` separately keeps its exact prototype plus module-private `WeakSet` brand.
 Every Pipeline creation path and every explicit Shader inspection input or option calls
-`isProgram()` before reading modules, layout requirements, or `assertRuntime()`. Render
+`isProgram()` before invoking internal ownership validation or reading modules and
+layout requirements. Render
 and compute Pipeline objects are likewise recognized only by their exact prototype and
 module-private state-map record before Command construction. Public `instanceof`,
 similarly shaped methods, replacement of `Symbol.hasInstance`, subclassing, and
@@ -56,16 +61,21 @@ inject caller-authored facts into those paths.
 The ownership and lifecycle boundary does not freeze the caller-owned shader contract.
 `Program.modules`, `entryPoints`, `requiredFeatures`, and `layoutRequirements` may still
 be changed for a future Pipeline. Each render or compute Pipeline creation first proves
-exact Program identity and runtime ownership without reading those facts, then
-materializes all four groups into one candidate-local immutable snapshot. Caller getters
-and iterators may run while that internal snapshot is sampled, so Program lifecycle and
-runtime activity are authoritatively revalidated immediately after materialization and
-again after feature validation. Disposal during sampling reports
+exact Program identity and runtime ownership without reading those facts and captures
+one internal Program/Runtime lifecycle stamp, then materializes all four groups into one
+candidate-local immutable snapshot. Caller getters and iterators may run while that
+internal snapshot and the pipeline descriptor are sampled, so the same stamp is
+authoritatively revalidated after each Program-fact phase, after complete descriptor
+normalization, immediately before native issue, and before asynchronous result commit.
+Disposal before native issue reports
 `SCRATCH_PROGRAM_DISPOSED` before `requiredFeatures` availability and before any native work,
 including shader-module, pipeline-layout, or Pipeline creation. Both planners consume only the stable
 snapshot and do not reread the mutable Program properties; an existing Pipeline retains
-its immutable snapshot. This is an internal preparation transaction, not a public
-`prepare()` method, mandatory state machine, or caller-visible preparation state.
+its immutable snapshot. Fact mutation does not advance the lifecycle epoch and affects
+only later candidates. Automatic retry is not performed because replaying caller getters
+or iterators is not semantically safe. This is an internal preparation transaction, not
+a public `prepare()` method, mandatory state machine, lock held across caller code, or
+caller-visible preparation state.
 
 ## LayoutCodec
 
