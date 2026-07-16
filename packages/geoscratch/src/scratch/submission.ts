@@ -56,7 +56,7 @@ import {
 } from './surface.js'
 import { TextureResource, createNativeTextureView, isTextureResource, isTextureViewSpec } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
-import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
+import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CommandResourceReadEpoch, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassNativeAttachments, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
@@ -102,6 +102,7 @@ export type SubmissionResourceAccess = SubmissionAccessOrigin & {
     label?: string
     subject: DiagnosticSubject
     access: SubmissionResourceAccessKind
+    declaredContentEpoch?: CommandResourceReadEpoch
     contentEpochBefore: number
     contentEpochAfter: number
     allocationVersion: number
@@ -154,7 +155,7 @@ export type SubmissionMissingResource = {
     label?: string
     subject: DiagnosticSubject
     role?: string
-    requiredContentEpoch: number
+    requiredContentEpoch: CommandResourceReadEpoch
     simulatedState: ResourceState
     simulatedContentEpoch: number
     allocationVersion: number
@@ -214,6 +215,7 @@ type PendingSubmissionResourceAccess = {
     origin: SubmissionAccessOrigin
     resource: ContentResource
     access: SubmissionResourceAccessKind
+    declaredContentEpoch?: CommandResourceReadEpoch
     contentEpochBefore: number
 }
 
@@ -703,7 +705,7 @@ export class SubmissionBuilder {
                     trackSegmentResourceWrite(target)
                     const origin = commandAccessOrigin(stepIndex, 'copy', step.command)
                     const accesses = [
-                        captureResourceAccess(source, 'read', origin),
+                        captureResourceAccess(source, 'read', origin, step.command.source.contentEpoch),
                         captureResourceAccess(target, 'write', origin),
                     ]
                     issueStandaloneCommandEncoding(
@@ -721,7 +723,12 @@ export class SubmissionBuilder {
                 if (step.kind === 'readback') {
                     const encoder = getEncoder()
                     const origin = commandAccessOrigin(stepIndex, 'readback', step.command)
-                    const readAccess = captureResourceAccess(step.command.source.region.buffer, 'read', origin)
+                    const readAccess = captureResourceAccess(
+                        step.command.source.region.buffer,
+                        'read',
+                        origin,
+                        step.command.source.contentEpoch
+                    )
                     const claim = readbackClaims.get(stepIndex)
                     if (claim === undefined) throw new TypeError(`Readback step ${stepIndex} has no staging claim.`)
                     updateReadbackCommandClaimProvenance(claim, {
@@ -787,7 +794,12 @@ export class SubmissionBuilder {
                         const declaredWrites = command._producesDeclaredWrites ? command.resources.write : []
                         for (const resource of declaredWrites) trackSegmentResourceWrite(resource)
                         const accesses = [
-                            ...command.resources.read.map(read => captureResourceAccess(read.resource, 'read', origin)),
+                            ...command.resources.read.map(read => captureResourceAccess(
+                                read.resource,
+                                'read',
+                                origin,
+                                read.contentEpoch
+                            )),
                             ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
                         ]
                         issuePassCommandEncoding(
@@ -841,7 +853,12 @@ export class SubmissionBuilder {
                     for (const resource of declaredWrites) trackSegmentResourceWrite(resource)
                     const accesses = command.commandKind === 'draw'
                         ? [
-                            ...command.resources.read.map(read => captureResourceAccess(read.resource, 'read', origin)),
+                            ...command.resources.read.map(read => captureResourceAccess(
+                                read.resource,
+                                'read',
+                                origin,
+                                read.contentEpoch
+                            )),
                             ...declaredWrites.map(resource => captureResourceAccess(resource, 'write', origin)),
                         ]
                         : []
@@ -2518,6 +2535,7 @@ function validateCommandReadEpochs(
         const resource = readRequirement.resource
         const simulated = simulatedResourceState(readiness, resource)
 
+        if (readRequirement.contentEpoch === 'current-at-step') continue
         if (builder.validation === 'off' || simulated.state !== 'ready') continue
 
         if (readRequirement.contentEpoch > simulated.contentEpoch) {
@@ -3055,15 +3073,19 @@ function passAccessOrigin(stepIndex: number, stepKind: SubmissionStepKind, passS
 function captureResourceAccess(
     resource: ContentResource,
     access: SubmissionResourceAccessKind,
-    origin: SubmissionAccessOrigin
+    origin: SubmissionAccessOrigin,
+    declaredContentEpoch?: CommandResourceReadEpoch
 ): PendingSubmissionResourceAccess {
 
-    return {
+    const pendingAccess: PendingSubmissionResourceAccess = {
         origin,
         resource,
         access,
         contentEpochBefore: resource.contentEpoch,
     }
+    if (declaredContentEpoch !== undefined) pendingAccess.declaredContentEpoch = declaredContentEpoch
+
+    return pendingAccess
 }
 
 function completeResourceAccesses(
@@ -3090,6 +3112,9 @@ function createResourceAccess(pendingAccess: PendingSubmissionResourceAccess): S
         allocationVersion: resource.allocationVersion,
     }
     if (resource.label !== undefined) access.label = resource.label
+    if (pendingAccess.declaredContentEpoch !== undefined) {
+        access.declaredContentEpoch = pendingAccess.declaredContentEpoch
+    }
 
     return access
 }

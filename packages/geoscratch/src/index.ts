@@ -56,6 +56,7 @@ export type {
     CommandReadinessDescriptor,
     CommandResourceAccessDescriptor,
     CommandResourceReadDescriptor,
+    CommandResourceReadEpoch,
     CopyCommandDescriptor,
     CopyCommandSourceDescriptor,
     DispatchCount,

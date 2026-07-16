@@ -192,6 +192,7 @@ export type {
     CommandReadinessDescriptor,
     CommandResourceAccessDescriptor,
     CommandResourceReadDescriptor,
+    CommandResourceReadEpoch,
     BufferCopyCommandSourceDescriptor,
     BufferToBufferCopyCommandDescriptor,
     BufferToTextureCopyCommandDescriptor,

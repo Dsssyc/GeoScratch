@@ -1,7 +1,7 @@
 # Diagnostics 与 Validation
 
 状态: Vision draft
-日期: 2026-07-12
+日期: 2026-07-16
 
 ## 决策
 
@@ -416,7 +416,11 @@ type PassDiagnosticCode =
 
 预期的 Draw/Dispatch `skip-command`、`skip-pass` 与成功 `use-fallback` 决策不是 diagnostics，而是不可变的 `SubmittedWork.executionOutcomes`。`SCRATCH_COMMAND_FALLBACK_INVALID` 只用于 missing/forbidden fallback shape、伪造的非 command 节点、kind/runtime/lifecycle/write-set 不兼容，以及重复 object 或 command ID。最终选中的 fallback 无法进入当前 pass 时使用 `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`。
 
+对 Draw/Dispatch `contentEpoch`，`SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE` 只接受非负整数或精确 sentinel `'current-at-step'`。结构化 `expected` 与 `actual` 会区分非法 alias/callback/object 和被接受的封闭 union。不存在 prose-only fallback 或 coercion。
+
 Fallback readiness 或 dependency failure 以最终选中的 fallback 作为 `subject`。`related` 包含 requested command、attempted chain、pass、resources 与 submission。结构化 `actual` facts 包含 step/pass IDs、requested command ID、attempted command IDs、携带每个可用 missing-resource state/epoch fact 的完整 `attempts` 数组、当前 command/resource state 与 epochs，以及 validation mode。构造后变为不可用的 selected fallback dependency 使用 `SCRATCH_COMMAND_FALLBACK_INVALID`，并在 `actual.cause` 中保留底层 lifecycle diagnostic。针对 selected fallback 生成的 render attachment resource-conflict diagnostic 也保留相同的 requested/attempted provenance。
+
+当 readiness 或 indeterminate-content diagnostic 涉及 `'current-at-step'` declaration 时，`requiredContentEpoch` 保留 authored sentinel，simulated/current numeric epoch 仍是独立字段。成功的 `SubmittedWork.resourceAccesses` 同样把 `declaredContentEpoch` 与 numeric `contentEpochBefore`/`contentEpochAfter` 分开保存。这样 authored intent 与 resolved history 都保持 machine-readable，而无需改写 command state。
 
 `ExternalImageUploadCommand` diagnostic 在结构化 command facts 中使用 `commandKind: 'upload'` 与 `uploadKind: 'external-image'`。`SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` 覆盖确定性的 descriptor、platform brand、live source-range、target、lifecycle 与 queue-capability failure。context-specific canvas dimensions 没有无副作用的 JavaScript query，因此原生权威 range check 同步抛出的 `OperationError` 也使用这个 invalid code。它的 `expected` 和 `actual` 字段携带 machine-readable validation facts，不要求解析 message。
 

@@ -318,10 +318,19 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const indirectRegion = indirectBuffer.region()
     const storageInputRegion = storageInput.region()
     const storageOutputRegion = storageOutput.region()
+    const currentReadEpoch: scr.CommandResourceReadEpoch = 'current-at-step'
+    const compatCurrentReadEpoch: scratchCompat.CommandResourceReadEpoch = currentReadEpoch
+    // @ts-expect-error The current-content mode has one explicit sentinel and no aliases
+    const invalidCurrentReadEpoch: scr.CommandResourceReadEpoch = 'latest'
     const uniformRead: scr.CommandResourceReadDescriptor = {
         resource: uniformBuffer,
         contentEpoch: uniformBuffer.contentEpoch,
     }
+    const currentUniformRead: scr.CommandResourceReadDescriptor = {
+        resource: uniformBuffer,
+        contentEpoch: currentReadEpoch,
+    }
+    const compatCurrentUniformRead: scratchCompat.CommandResourceReadDescriptor = currentUniformRead
     const vertexRead: scr.CommandResourceReadDescriptor = {
         resource: vertexBuffer,
         contentEpoch: vertexBuffer.contentEpoch,
@@ -1096,14 +1105,15 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     draw.isDisposed = false
     const drawResources: scr.CommandResourceAccessDescriptor = draw.resources
     const drawReadResource: scr.Resource = drawResources.read[0].resource
-    const drawReadContentEpoch: number = drawResources.read[0].contentEpoch
+    const drawReadContentEpoch: scr.CommandResourceReadEpoch = drawResources.read[0].contentEpoch
     const compatDraw: scratchCompat.DrawCommand = draw
     const compatIndexedDraw: scratchCompat.DrawCommand = indexedDraw
     const compatIndirectDraw: scratchCompat.DrawCommand = indirectDraw
     const compatIndexedIndirectDraw: scratchCompat.DrawCommand = indexedIndirectDraw
     const compatDrawResources: scratchCompat.CommandResourceAccessDescriptor = compatDraw.resources
     const compatDrawReadResource: scratchCompat.Resource = compatDrawResources.read[0].resource
-    const compatDrawReadContentEpoch: number = compatDrawResources.read[0].contentEpoch
+    const compatDrawReadContentEpoch: scratchCompat.CommandResourceReadEpoch =
+        compatDrawResources.read[0].contentEpoch
     const compatQuerySlotState: scratchCompat.QuerySetSlotState = querySet.slot(0).state
     const compatQueryResolveSource: scratchCompat.ResolveQuerySetSourceDescriptor = resolveQueries.source
     const passSpec: scr.RenderPassSpec = runtime.createRenderPass({
@@ -1427,6 +1437,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     submitted.executionOutcomes = []
     const accessKind: scr.SubmissionResourceAccessKind | undefined = resourceAccesses[0]?.access
     const stepKind: scr.SubmissionStepKind | undefined = resourceAccesses[0]?.stepKind
+    const declaredReadEpoch: scr.CommandResourceReadEpoch | undefined =
+        resourceAccesses[0]?.declaredContentEpoch
     const producedStepKind: scr.SubmissionStepKind | undefined = producerEpochs[0]?.producedBy.stepKind
     const compatResourceAccesses: readonly scratchCompat.SubmissionResourceAccess[] = submitted.resourceAccesses
     const compatProducerEpochs: readonly scratchCompat.SubmittedResourceEpoch[] = submitted.producerEpochs
@@ -1565,6 +1577,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void error
     void submitted
     void resourceAccesses
+    void compatCurrentReadEpoch
+    void invalidCurrentReadEpoch
+    void compatCurrentUniformRead
+    void declaredReadEpoch
     void producerEpochs
     void missingResource
     void readinessAttempt

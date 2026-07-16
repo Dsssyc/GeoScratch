@@ -9,6 +9,18 @@ Accepted vision still lives under `docs/vision/scratch-api/`. This review file i
 
 ## Recently Resolved
 
+### Stable Commands And Submission-Step Current Content
+
+Resolved in ADR-041 and the bilingual resource, command, submission, transfer, and diagnostic vision modules. DrawCommand and DispatchCommand now accept one closed read-epoch union: an exact non-negative number or `'current-at-step'`. The sentinel resolves only for the final selected command at its explicit submission position, after prior step effects and before its own writes. It does not add callbacks, aliases, command mutation, automatic ordering, retries, or transfer/query API drift.
+
+Coverage check for this pass:
+
+- Numeric exact stale/read-before-write behavior remains unchanged: covered by `tests/scratch-current-content-reads.test.js` and existing dependency suites.
+- Throw/skip-command/skip-pass/fallback readiness, no-lookahead behavior, read-before-own-write ordering, validation modes, and indeterminate hard failure: covered by the focused current-content suite.
+- Shader, vertex, index, and indirect reads use the same mode: covered by focused compute and fixed-function tests.
+- Authored-vs-resolved immutable ledger facts and stable command/upload identities: covered by focused tests, the 20,000-submission fake-GPU stress proof, and the 120-frame headed Chrome proof.
+- Public root and compatibility type surfaces reject aliases and callbacks: covered by `tests/types/public-api.ts`.
+
 ### GPU Operation Provenance And Fallible Allocation
 
 Resolved direction:

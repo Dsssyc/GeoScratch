@@ -1,7 +1,7 @@
 # Resources
 
 Status: Vision draft
-Date: 2026-07-13
+Date: 2026-07-16
 
 ## Decision
 
@@ -53,6 +53,8 @@ remain available subject to the native extent, sample, format, and usage constra
 - allocation replacement makes each affected BindSet stale until explicit `prepare()` succeeds.
 
 Scratch reports only logical footprint it can derive. It does not claim physical residency or attribute aggregate OOM to one resource.
+
+A Resource does not own a mutable "current reader" relationship. A DrawCommand or DispatchCommand may freeze `'current-at-step'` in one read descriptor, but the submission resolves that policy against its ordered simulation only when that selected command is reached. Numeric exact declarations remain tied to one epoch. Neither form changes the container, installs a callback, or couples a BufferRegion/TextureViewSpec interpretation to one command.
 
 ## BufferResource And BufferRegion
 

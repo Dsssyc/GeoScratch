@@ -1,7 +1,7 @@
 # 传输与 Epoch
 
 状态: Vision draft
-日期: 2026-07-12
+日期: 2026-07-16
 
 ## 决策
 
@@ -74,6 +74,14 @@ Resource identity、lifecycle、readiness、`allocationVersion` 与 `contentEpoc
 - 如果未来进入 API，显式 clear、resolve、mipmap generation command 也属于内容写入
 
 `contentEpoch` 属于 parent BufferResource 或 TextureResource。BufferRegion 与 TextureViewSpec 不拥有独立 epoch。Readback 与 dependency validation 讨论 parent content epoch；binding invalidation 讨论 allocation version。
+
+### Exact 与 Current-At-Step Command Read
+
+DrawCommand 与 DispatchCommand read descriptor 在两种语义中选择一种。非负整数指定一个精确 parent-resource epoch。`'current-at-step'` 指定最终选中 command 在显式 submission 位置可读的 parent-resource 内容。解析会观察有序前序 producer，发生在同一 command 的 declared writes 之前，并且绝不向后查看。
+
+这是 command dependency policy，不是新的 Resource state。它不改变 Resource epoch、不创建 subresource epoch、不检查 bytes、不调度 producer，也不修复 empty/indeterminate resource。empty state 仍遵循 `whenMissing`；indeterminate state 在所有 validation mode 下都硬失败。Copy、Readback 与 query-slot source epoch 继续要求 exact，避免 transfer/query provenance 漂移。
+
+最终 read ledger 在 `declaredContentEpoch` 中保存 authored policy，并在 `contentEpochBefore`/`contentEpochAfter` 中保存 resolved numeric fact。后续 submission 或 resource change 不能改写任何历史事实。
 
 ### 迟到 Failure 后的 Indeterminate Content
 

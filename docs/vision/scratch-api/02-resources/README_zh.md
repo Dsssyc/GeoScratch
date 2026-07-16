@@ -1,7 +1,7 @@
 # Resources
 
 状态: Vision draft
-日期: 2026-07-13
+日期: 2026-07-16
 
 ## 决策
 
@@ -50,6 +50,8 @@ native issue 前被 Scratch 拒绝。合法的单 mip `1d` texture 及其 persis
 - allocation replacement 会使每个受影响 BindSet 变成 stale，直到显式 `prepare()` 成功。
 
 Scratch 只报告可推导的 logical footprint，不声称 physical residency，也不把 aggregate OOM 归因于单一 resource。
+
+Resource 不拥有可变的“current reader”关系。DrawCommand 或 DispatchCommand 可以在 read descriptor 中冻结 `'current-at-step'`，但 submission 只会在最终选中 command 到达时，依据有序 simulation 解析该策略。numeric exact 声明仍绑定一个 epoch。两种形式都不修改 container、不安装 callback，也不把 BufferRegion/TextureViewSpec interpretation 静态耦合到某个 command。
 
 ## BufferResource 与 BufferRegion
 

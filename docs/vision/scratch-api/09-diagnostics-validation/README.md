@@ -1,7 +1,7 @@
 # Diagnostics And Validation
 
 Status: Vision draft
-Date: 2026-07-12
+Date: 2026-07-16
 
 ## Decision
 
@@ -416,7 +416,11 @@ type PassDiagnosticCode =
 
 Expected Draw/Dispatch `skip-command`, `skip-pass`, and successful `use-fallback` decisions are not diagnostics. They are immutable `SubmittedWork.executionOutcomes`. `SCRATCH_COMMAND_FALLBACK_INVALID` is reserved for missing/forbidden fallback shapes, forged non-command nodes, kind/runtime/lifecycle/write-set incompatibility, and repeated objects or command IDs. A selected fallback that cannot enter the current pass uses `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`.
 
+`SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE` accepts only a non-negative integer or the exact `'current-at-step'` sentinel for Draw/Dispatch `contentEpoch`. Structured `expected` and `actual` distinguish an invalid alias/callback/object from the accepted closed union. There is no prose-only fallback or coercion.
+
 Fallback readiness or dependency failures use the selected fallback as `subject`. `related` includes the requested command, attempted chain, pass, resources, and submission. Structured `actual` facts include step/pass IDs, requested command ID, attempted command IDs, a complete `attempts` array with every available missing-resource state/epoch fact, current command/resource state and epochs, plus validation mode. A selected fallback dependency that becomes unusable after construction uses `SCRATCH_COMMAND_FALLBACK_INVALID` and retains the underlying lifecycle diagnostic in `actual.cause`. Render attachment resource-conflict diagnostics generated for a selected fallback retain the same requested/attempted provenance.
+
+When a readiness or indeterminate-content diagnostic concerns a `'current-at-step'` declaration, `requiredContentEpoch` retains that authored sentinel and the simulated/current numeric epoch remains a separate field. Successful `SubmittedWork.resourceAccesses` likewise retain `declaredContentEpoch` separately from numeric `contentEpochBefore` and `contentEpochAfter`. This keeps authored intent and resolved history machine-readable without rewriting command state.
 
 `ExternalImageUploadCommand` diagnostics use `commandKind: 'upload'` and `uploadKind: 'external-image'` in their structured command facts. `SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID` covers deterministic descriptor, platform brand, live source-range, target, lifecycle, and queue-capability failures. Context-specific canvas dimensions are not exposed through a side-effect-free JavaScript query, so a synchronous native `OperationError` from that authoritative range check uses the same invalid code. Its `expected` and `actual` fields contain machine-readable validation facts rather than requiring message parsing.
 

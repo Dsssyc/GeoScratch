@@ -818,6 +818,7 @@ describe('scratch native indexed and indirect execution', () => {
             resourceKind: 'BufferResource',
             subject: argumentsBuffer.subject,
             access: 'read',
+            declaredContentEpoch: 1,
             contentEpochBefore: 1,
             contentEpochAfter: 1,
             allocationVersion: 1,

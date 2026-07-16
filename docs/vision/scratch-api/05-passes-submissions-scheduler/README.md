@@ -1,7 +1,7 @@
 # Passes, Submissions, And Scheduler
 
 Status: Vision draft
-Date: 2026-07-12
+Date: 2026-07-16
 
 ## Decision
 
@@ -295,6 +295,8 @@ Resize itself records no resource access, producer epoch, command buffer, queue 
 
 After submission, `SubmittedWork.resourceAccesses` and `producerEpochs` remain an immutable historical record of the allocation and content facts used by that submission. A later texture resize cannot rewrite those arrays or alter the existing `done` promise.
 
+Each resource read access retains `declaredContentEpoch`, containing the authored number or `'current-at-step'`, while `contentEpochBefore` and `contentEpochAfter` remain resolved numbers. A skipped command contributes no access. A fallback contributes only the selected fallback's declaration and resolved facts. The ledger never mutates the reusable command with its resolved epoch.
+
 ## Physical Queue Timeline
 
 `SubmissionBuilder.steps` defines one total order across encoder-backed work and queue-side uploads. Recording commands into an encoder is not the same as enqueuing them: `GPUQueue.writeBuffer(...)` and `GPUQueue.writeTexture(...)` enter the queue when called, while copy, readback staging, resolve, compute, and render work enter the queue only when a finished command buffer is submitted.
@@ -353,6 +355,8 @@ Draw/Dispatch resolution occurs at the exact command position:
 - a missing `skip-pass` request removes the complete pass;
 - a missing `use-fallback` request resolves a same-kind fallback chain, and only the final selected command participates in dependency validation and encoding.
 
+For each selected Draw/Dispatch command, a numeric required epoch is compared exactly. A `'current-at-step'` read instead resolves to the simulated numeric epoch at that point, after all committed prior-step effects and before that command's own writes. Later producers are never consulted. This resolution runs in `throw`, `warn`, and `off`; validation disposition never disables readiness, ownership, lifecycle, binding/allocation, pass-conflict, or indeterminate-content gates.
+
 Each pass resolves against cloned readiness state, query-slot state, and pass-local dependency findings. A skipped pass discards all clones, including earlier command writes, render attachment load/clear/store, color/depth epochs, timestamp writes, occlusion query writes, and optional findings. A render pass whose draws are individually skipped still executes when attachment operations remain. An effect-free compute pass with no selected commands is `skipped-empty` and does not begin a native pass.
 
 `SubmittedWork.executionOutcomes` is the immutable control-flow ledger. For each render/compute step, a pass summary is followed by Draw/Dispatch command outcomes in original request order. Pass `requestedCommandIds` retain the original pass command sequence; `encodedCommandIds` retain the actual sequence, including a selected fallback. Each command attempt records its policy and complete missing-resource state/epoch facts. All outcomes, attempts, missing facts, subjects, nested arrays, and the top-level array are frozen.
@@ -386,7 +390,7 @@ Examples of checks:
 - dispatch workgroup count exceeds `maxComputeWorkgroupsPerDimension`
 - bound storage buffer range exceeds device storage-binding limits
 
-Native indexed and indirect commands use the same declared-read validation path as shader resources. Vertex, index, and indirect buffers must have explicit required content epochs. A prior upload or GPU command in the same submission may produce that epoch; the later fixed-function read is recorded in `SubmittedWork.resourceAccesses` without advancing the resource epoch. Indirect argument contents remain GPU data and are not copied to the CPU for scheduler validation.
+Native indexed and indirect commands use the same declared-read validation path as shader resources. Vertex, index, and indirect buffers must declare either an exact numeric epoch or `'current-at-step'`. A prior upload or GPU command in the same submission may produce that content; the later fixed-function read is recorded in `SubmittedWork.resourceAccesses` without advancing the resource epoch. Indirect argument contents remain GPU data and are not copied to the CPU for scheduler validation.
 
 Submission simulation and encoding share the command's potential-write decision. A direct draw or dispatch whose static count is known to execute no invocations does not mark declared outputs ready and does not create write or producer ledger entries. Indirect counts remain opaque, so their declared writes are conservatively treated as potential producers without host inspection.
 

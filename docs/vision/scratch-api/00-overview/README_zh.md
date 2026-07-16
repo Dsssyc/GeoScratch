@@ -1,7 +1,7 @@
 # 总览
 
 状态: Vision draft
-日期: 2026-07-06
+日期: 2026-07-16
 
 ## 目的
 
@@ -101,6 +101,7 @@ Descriptor 不适合承担时间变化行为:
 - `Program` 描述 shader source、生成模块、entry points 与所需 layouts，但不拥有具体资源。
 - `Pipeline` 描述某个 `Program` entry point 的稳定 WebGPU 可执行状态。公开 render 与 compute factory 只返回 Promise；只有原生异步创建、compilation evidence、supporting-object scopes 与 lifecycle checks 全部成功 settle 后才暴露 wrapper。
 - `Command` 描述一个可执行 GPU 动作。
+- Draw/Dispatch resource read 必须声明一个精确 numeric content epoch 或 `'current-at-step'`。后者只在最终选中 command 的位置，基于显式前序 submission steps、且在该 command 自身 write 前解析一次；它不重排工作，也不改写 command。
 - `ScratchDiagnostic` 是统一 machine-readable validation contract; prose message 不是稳定 API。
 - `runtime.diagnostics` 将始终当前的事实、有界近期 operation、不可变 incident 与显式临时 deep capture 分开。
 - GPU operation evidence 使用 schema v5 discriminated Resource、Pipeline、BindLayout、BindSet、Command、Readback 与 Submission target。任何 fact 都不借用不属于其 object kind 的字段。

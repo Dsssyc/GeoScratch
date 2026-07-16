@@ -201,9 +201,11 @@ export type NormalizedDrawVertexBufferBinding = DrawVertexBufferBinding
 
 export type NormalizedDrawIndexBufferBinding = DrawIndexBufferBinding
 
+export type CommandResourceReadEpoch = number | 'current-at-step'
+
 export type CommandResourceReadDescriptor = {
     readonly resource: BufferResource | TextureResource
-    readonly contentEpoch: number
+    readonly contentEpoch: CommandResourceReadEpoch
 }
 
 export type BufferCopyCommandSourceDescriptor = {
@@ -4036,7 +4038,7 @@ function normalizeResourceReadList(
         }
 
         const contentEpoch = descriptor.contentEpoch
-        if (!Number.isInteger(contentEpoch) || contentEpoch < 0) {
+        if (contentEpoch !== 'current-at-step' && (!Number.isInteger(contentEpoch) || contentEpoch < 0)) {
             throwResourceReadDescriptorDiagnostic(command, descriptor, 'contentEpoch')
         }
 
@@ -4114,7 +4116,7 @@ function throwResourceReadDescriptorDiagnostic(
         expected: {
             read: {
                 resource: 'BufferResource | TextureResource',
-                contentEpoch: 'non-negative integer',
+                contentEpoch: 'non-negative integer | "current-at-step"',
             },
         },
         actual,

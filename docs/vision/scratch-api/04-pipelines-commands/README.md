@@ -1,7 +1,7 @@
 # Pipelines And Commands
 
 Status: Vision draft
-Date: 2026-07-12
+Date: 2026-07-16
 
 ## Decision
 
@@ -128,6 +128,19 @@ Every command should declare:
 - content epoch effects for written resources
 - readiness policy
 - static, dynamic, or indirect count where relevant
+
+DrawCommand and DispatchCommand use one closed read-epoch contract:
+
+```ts
+type CommandResourceReadEpoch = number | 'current-at-step'
+
+type CommandResourceReadDescriptor = {
+    readonly resource: BufferResource | TextureResource
+    readonly contentEpoch: CommandResourceReadEpoch
+}
+```
+
+A number requires the exact simulated epoch and keeps stale/read-before-write diagnostics. `'current-at-step'` resolves the content immediately before the final selected command at its explicit submission position, after prior step effects and before its own writes. The declaration is immutable and reusable; resolution does not rewrite it. Bare resources, aliases such as `latest`, callbacks, closures, setters, and compatibility overloads are rejected. Vertex, index, and indirect buffers use the same declaration mode. Copy, Readback, and query-slot sources remain exact numeric contracts.
 
 Commands that write resource contents advance `contentEpoch`. Commands that replace physical GPU objects advance `allocationVersion`. The two effects are separate so a compute write does not accidentally imply bind group invalidation.
 

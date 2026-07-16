@@ -1,7 +1,7 @@
 # Transfers And Epochs
 
 Status: Vision draft
-Date: 2026-07-12
+Date: 2026-07-16
 
 ## Decision
 
@@ -74,6 +74,14 @@ Resource identity, lifecycle, readiness, `allocationVersion`, and `contentEpoch`
 - explicit clear, resolve, or mipmap generation commands if they become part of the API
 
 `contentEpoch` belongs to the parent BufferResource or TextureResource. A BufferRegion or TextureViewSpec does not own an independent epoch. Readback and dependency validation talk about parent content epochs, while binding invalidation talks about allocation versions.
+
+### Exact And Current-At-Step Command Reads
+
+DrawCommand and DispatchCommand read descriptors choose one of two meanings. A non-negative integer names one exact parent-resource epoch. `'current-at-step'` names the readable parent-resource content at the final selected command's explicit submission position. Resolution observes prior ordered producers, occurs before the same command's declared writes, and never looks ahead.
+
+This is a command dependency policy, not a new Resource state. It does not change the Resource epoch, create a subresource epoch, inspect bytes, schedule producers, or repair an empty/indeterminate resource. Empty state still follows `whenMissing`; indeterminate state hard-fails in every validation mode. Copy, Readback, and query-slot source epochs remain exact so their transfer/query provenance cannot drift.
+
+The resulting read ledger stores the authored policy in `declaredContentEpoch` and the resolved numeric fact in `contentEpochBefore`/`contentEpochAfter`. Later submissions or resource changes cannot alter either historical fact.
 
 ### Indeterminate Content After Delayed Failure
 

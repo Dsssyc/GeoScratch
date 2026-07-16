@@ -1,7 +1,7 @@
 # Overview
 
 Status: Vision draft
-Date: 2026-07-06
+Date: 2026-07-16
 
 ## Purpose
 
@@ -101,6 +101,7 @@ The new API should make these boundaries hard to miss:
 - `Program` describes shader source, generated modules, entry points, and required layouts without owning concrete resources.
 - `Pipeline` describes stable WebGPU executable state for a `Program` entry point. Public render and compute factories are Promise-only transactions and expose a wrapper only after native async creation, compilation evidence, supporting-object scopes, and lifecycle checks settle successfully.
 - `Command` describes one executable GPU action.
+- A Draw/Dispatch resource read declares either one exact numeric content epoch or `'current-at-step'`. The latter resolves once against explicit prior submission steps at the final selected command position, before that command's own writes; it does not reorder work or mutate the command.
 - `ScratchDiagnostic` is the unified machine-readable validation contract; prose messages are not the stable API.
 - `runtime.diagnostics` separates always-current facts, bounded recent operations, immutable incidents, and explicit temporary deep capture.
 - GPU operation evidence uses schema v5 discriminated Resource, Pipeline, BindLayout, BindSet, Command, Readback, and Submission targets. Facts never borrow fields that do not belong to their object kind.

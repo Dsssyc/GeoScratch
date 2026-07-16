@@ -382,7 +382,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             expect(error.diagnostic.expected).to.deep.equal({
                 read: {
                     resource: 'BufferResource | TextureResource',
-                    contentEpoch: 'non-negative integer',
+                    contentEpoch: 'non-negative integer | "current-at-step"',
                 },
             })
             expect(error.diagnostic.actual).to.deep.include({
@@ -451,7 +451,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
                 expect(error.diagnostic.expected).to.deep.equal({
                     read: {
                     resource: 'BufferResource | TextureResource',
-                        contentEpoch: 'non-negative integer',
+                        contentEpoch: 'non-negative integer | "current-at-step"',
                     },
                 })
                 expect(error.diagnostic.actual).to.deep.include(testCase.actual)

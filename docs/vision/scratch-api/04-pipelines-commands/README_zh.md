@@ -1,7 +1,7 @@
 # Pipelines 与 Commands
 
 状态: Vision draft
-日期: 2026-07-12
+日期: 2026-07-16
 
 ## 决策
 
@@ -126,6 +126,19 @@ Buffer `ReadbackCommand` 路径已通过 Promise-only `createReadbackCommand()` 
 - written resources 的 content epoch effects
 - readiness policy
 - 适用时的 static、dynamic 或 indirect count
+
+DrawCommand 与 DispatchCommand 使用一个封闭的 read-epoch contract:
+
+```ts
+type CommandResourceReadEpoch = number | 'current-at-step'
+
+type CommandResourceReadDescriptor = {
+    readonly resource: BufferResource | TextureResource
+    readonly contentEpoch: CommandResourceReadEpoch
+}
+```
+
+number 要求精确 simulated epoch，并保留 stale/read-before-write diagnostics。`'current-at-step'` 在显式 submission 位置解析最终选中 command 之前的内容：已包含前序 step effects，但不包含该 command 自身 writes。声明不可变且可复用，解析不会改写它。Bare resource、`latest` 等 alias、callback、closure、setter 与 compatibility overload 都会被拒绝。Vertex、index 与 indirect buffer 使用同一种声明模式。Copy、Readback 与 query-slot source 继续要求精确 numeric epoch。
 
 写入资源内容的 command 推进 `contentEpoch`。替换物理 GPU 对象的 command 推进 `allocationVersion`。两者分离，这样 compute 写入不会被误解为 bind group invalidation。
 
