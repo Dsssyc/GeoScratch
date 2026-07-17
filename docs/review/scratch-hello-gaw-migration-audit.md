@@ -219,6 +219,31 @@ The catalog now contains one neutral `Hello GAW` route and two entries marked
 `(legacy)`. `x_helloGAW` and its eight unused image assets are absent. Package build
 output contains `helloGAW/index.html` and no old route.
 
+## Initialization Ownership Successor
+
+The clean-cut candidate's final review found one application-lifetime defect outside
+the workload parity matrices above: teardown became reachable only after complete
+graph initialization. A failure after runtime creation, image decoding, pipeline
+creation, graph creation, or initial submission could therefore strand page-owned
+state even though Scratch correctly owned its internal resource graph.
+
+ADR-043 closes that boundary with one example-local lifetime authority created before
+the first initialization `await`. Runtime and bitmap ownership now transfer at their
+respective acquisition points, initial `SubmittedWork` is registered before awaiting,
+and teardown runs stop, settle, then release. The five-scenario headed-Chrome matrix
+proves exact acquisition/cleanup counts and public runtime/Surface disposal facts.
+
+The invalid Bloom-combine WGSL scenario also demonstrates the diagnostic model in the
+real migrated workload. Chrome reports supporting-object, shader-compilation, and
+pipeline-validation outcomes together; the retained outcomes include
+`SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`, and the one-operation deep capture links
+the failed compute pipeline, Program, module, and compilation location without WGSL
+source. See `scratch-hello-gaw-failure-evidence-audit.md` for the bounded evidence and
+claim boundary.
+
+This successor does not alter any resource, binding, pipeline, command, stage, resize,
+asset, or visible-effect parity row in this audit.
+
 ## Acceptance Gate Evidence
 
 | Command | Result |

@@ -225,6 +225,43 @@ schema-v2 compatibility path. Texture readback, mapped leases, and broader
 native-operation provenance remain explicit future slices rather than hidden
 partial implementations.
 
+### Hello GAW Application Lifetime And Source-Blind Failure Localization
+
+Resolved at the example boundary by ADR-043 and the Hello GAW failure-evidence audit.
+The migrated workload exposed an application responsibility that the Scratch kernel
+must not hide: runtime-owned GPU objects, page-owned decoded image sources, browser
+listeners, scheduled frame work, and issued observation Promises do not share one
+native owner. Hello GAW now creates one local authority before initialization and
+orders stop, observation settlement, external release, and runtime disposal explicitly.
+
+This real rendering workload confirms where the intelligent-friendly design helped:
+
+- `ScratchRuntime` provides one transitive disposal boundary, so the page does not
+  need to reconstruct or duplicate the GPU resource graph.
+- Promise-returning factories make every acquisition boundary explicit enough to
+  register ownership immediately after settlement.
+- `SubmittedWork.nativeOutcome` and `done` give the page a concrete terminal barrier;
+  the after-submit proof records pending `1 -> 0` before runtime disposal.
+- Public `isDisposed` facts let the verifier observe runtime and Surface lifecycle
+  independently from application counters.
+- The unified diagnostic envelope, incident outcomes, bounded recorder, source-free
+  compilation report, and finite capture identify a failed Bloom-combine pipeline,
+  Program, module, and shader-compilation outcome without parsing console prose.
+- Immutable JSON evidence gives browser automation and an Agent the same inspectable
+  facts, while the verifier emits only a compact summary rather than feeding the full
+  runtime ledger into ordinary context.
+
+The exercise also sharpens two limits. Scratch cannot infer ownership of
+`ImageBitmap`, listeners, or frame scheduling, so application lifecycle authority is
+still required. Also, a real invalid WGSL operation may produce several independent
+native outcomes; an Agent must inspect structured `incident.outcomes` rather than
+treating the top-level multiple-failure code or first outcome as a selected root cause.
+This is evidence preservation, not ambiguity introduced by Scratch.
+
+The bounded five-scenario proof closes the specific Hello GAW initialization leak. It
+does not justify a generic disposable stack in Scratch core, automatic lifecycle
+repair, OOM attribution, device-loss recovery, or an unbounded always-on trace.
+
 ## Resolved Review Items
 
 ### Submission Native Outcome And Content Truth

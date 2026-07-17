@@ -186,4 +186,42 @@ describe('Hello GAW Scratch clean cut', () => {
         expect(browser).to.include('diagnosticEvidenceBytes')
         expect(browser).to.include('six distinct resources')
     })
+
+    it('locks initialization ownership and source-free failure proof', () => {
+
+        const source = read('examples', 'helloGAW', 'main.js')
+        const lifetime = read('examples', 'helloGAW', 'page-lifetime.js')
+        const browser = read('tests', 'browser', 'scratch-hello-gaw-init-failures.mjs')
+        const adr = read('docs', 'decisions', 'ADR-043-hello-gaw-initialization-ownership.md')
+        const audit = read('docs', 'review', 'scratch-hello-gaw-failure-evidence-audit.md')
+
+        expect(source).to.include("import { createPageLifetime } from './page-lifetime.js'")
+        expect(source.indexOf('const pageLifetime = createPageLifetime()'))
+            .to.be.lessThan(source.indexOf('void main(pageLifetime, failureProof)'))
+        for (const scenario of [
+            'after-runtime-created',
+            'after-first-image-decoded',
+            'invalid-bloom-pipeline-wgsl',
+            'after-graph-created',
+            'after-initial-submit-issued',
+        ]) {
+            expect(source, scenario).to.include(`'${scenario}'`)
+            expect(browser, scenario).to.include(`'${scenario}'`)
+        }
+        expect(source.indexOf('proof.ownBitmap(name, bitmap, lifetime)'))
+            .to.be.lessThan(source.indexOf('label: `Hello GAW image ${name}`'))
+        expect(source).to.include("'initial-submission'")
+        expect(source).to.include('runtime.diagnostics.exportEvidence()')
+        expect(lifetime).to.include("await runPhase('stop')")
+        expect(lifetime).to.include('pendingAtDisposal.map')
+        expect(lifetime).to.include("await runPhase('release')")
+        expect(browser).to.include("page.on('requestfailed'")
+        expect(browser).to.include('response.status() >= 400')
+        expect(browser).to.include('isDeepFrozen')
+        expect(browser).to.include('SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED')
+        expect(browser).to.include('waitForPortClosed')
+        expect(adr).to.include('## Status\n\nAccepted')
+        expect(audit).to.include('Source-Blind Failure Localization')
+        expect(audit).to.include('pending `1 -> 0`')
+    })
 })

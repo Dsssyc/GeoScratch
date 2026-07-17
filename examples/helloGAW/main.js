@@ -19,6 +19,7 @@ import linkShader from './shaders/link.wgsl?raw'
 import particleComputeShader from './shaders/particle.compute.wgsl?raw'
 import pointShader from './shaders/point.wgsl?raw'
 import waterShader from './shaders/water.wgsl?raw'
+import { createPageLifetime } from './page-lifetime.js'
 
 const canvas = document.getElementById('GPUFrame')
 const EARTH_RADIUS = 400
@@ -30,6 +31,7 @@ const MAX_CONNECTIONS = PARTICLE_COUNT / 2
 const BLOOM_BLUR_LEVELS = 5
 const POST_WORKGROUP_SIZE = 16
 const PROJECTION_FOV = 45
+const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
 const STAGE_ORDER = Object.freeze([
     'simulation-indexing',
     'scene',
@@ -39,6 +41,19 @@ const STAGE_ORDER = Object.freeze([
 ])
 const proofParameters = new URLSearchParams(window.location.search)
 const proofMode = proofParameters.get('proof') === '1'
+const FAILURE_SCENARIOS = Object.freeze([
+    'after-runtime-created',
+    'after-first-image-decoded',
+    'invalid-bloom-pipeline-wgsl',
+    'after-graph-created',
+    'after-initial-submit-issued',
+])
+const requestedFailureScenario = proofParameters.get('fault')
+const failureConfiguration = Object.freeze({
+    scenario: proofMode && requestedFailureScenario !== null
+        ? requestedFailureScenario
+        : undefined,
+})
 
 const imageSources = Object.freeze({
     earthDay: new URL('./assets/images/earth.jpg', import.meta.url).href,
@@ -51,11 +66,18 @@ const imageSources = Object.freeze({
     cloudMask: new URL('./assets/images/cloud-alpha.jpg', import.meta.url).href,
 })
 
+const pageLifetime = createPageLifetime()
+const failureProof = createFailureProofController(failureConfiguration)
+let pageFailureSettlement
+
 setStatus('loading')
-void main().catch(reportFatalError)
+void main(pageLifetime, failureProof).catch(error => {
+    void failPage(error)
+})
 
-async function main() {
+async function main(lifetime, proof) {
 
+    proof.assertConfiguration()
     assertPresentationShaderContract()
 
     const runtime = await ScratchRuntime.create({
@@ -69,6 +91,8 @@ async function main() {
             maxPendingNativeObservations: 64,
         },
     })
+    proof.ownRuntime(runtime, lifetime)
+    proof.reach('after-runtime-created')
     const initialSize = canvasPixelSize(canvas)
     const surface = runtime.createSurface(canvas, {
         label: 'Hello GAW surface',
@@ -76,7 +100,9 @@ async function main() {
         alphaMode: 'opaque',
         size: initialSize,
     })
-    const graph = await createRenderGraph(runtime, surface, initialSize, proofMode)
+    proof.observeSurface(surface)
+    const graph = await createRenderGraph(runtime, surface, initialSize, proofMode, lifetime, proof)
+    proof.reach('after-graph-created')
     const {
         simulationPass,
         scenePass,
@@ -87,10 +113,9 @@ async function main() {
         sceneCommands,
         outputCommand,
     } = graph
-    const pendingObservations = new Set()
     let active = true
-    let animationFrame = 0
-    let animationTimer = 0
+    let animationFrame
+    let animationTimer
     let disposal
     let submittedFrames = 0
     let observedFrames = 0
@@ -105,39 +130,80 @@ async function main() {
         throw new Error(`Scene graph must contain 5 commands, received ${sceneCommands.length}.`)
     }
 
-    await initializeGraph(runtime, graph)
-    graph.imageBitmaps.forEach(bitmap => bitmap.close())
+    await initializeGraph(runtime, graph, lifetime, proof)
+    await Promise.all(graph.imageBitmapOwnerships.map(ownership => ownership.run()))
 
     const stableIdentityBaseline = stableIdentitySnapshot(graph)
     publishGraphFacts(graph, stableIdentityBaseline, bloomCommands, fxaaCommand, resizeGeneration)
 
     const handleUncapturedError = event => fail(event.error)
     runtime.device.addEventListener('uncapturederror', handleUncapturedError)
+    proof.listenerRegistered()
+    lifetime.defer({
+        phase: 'stop',
+        label: 'uncaptured-error-listener',
+        run: () => {
+            runtime.device.removeEventListener('uncapturederror', handleUncapturedError)
+            proof.listenerRemoved()
+        },
+    })
     void runtime.device.lost.then((info) => {
         if (active) fail(new Error(`WebGPU device lost: ${info.message || info.reason}.`))
     })
 
-    window.addEventListener('pagehide', () => {
+    const handlePageHide = () => {
         void disposePage()
-    }, { once: true })
+    }
+    window.addEventListener('pagehide', handlePageHide, { once: true })
+    proof.listenerRegistered()
+    lifetime.defer({
+        phase: 'stop',
+        label: 'pagehide-listener',
+        run: () => {
+            window.removeEventListener('pagehide', handlePageHide)
+            proof.listenerRemoved()
+        },
+    })
+
+    lifetime.defer({
+        phase: 'stop',
+        label: 'frame-scheduler',
+        run: () => {
+            active = false
+            if (animationTimer !== undefined) {
+                clearTimeout(animationTimer)
+                animationTimer = undefined
+                proof.frameWorkCancelled()
+            }
+            if (animationFrame !== undefined) {
+                cancelAnimationFrame(animationFrame)
+                animationFrame = undefined
+                proof.frameWorkCancelled()
+            }
+        },
+    })
 
     function scheduleFrame() {
 
         animationTimer = window.setTimeout(() => {
+            animationTimer = undefined
+            proof.frameWorkCompleted()
+            if (!active) return
             animationFrame = requestAnimationFrame(render)
+            proof.frameWorkScheduled()
         }, 1000 / 45)
+        proof.frameWorkScheduled()
     }
 
     function disposePage() {
 
         if (disposal !== undefined) return disposal
-        active = false
-        clearTimeout(animationTimer)
-        cancelAnimationFrame(animationFrame)
-        runtime.device.removeEventListener('uncapturederror', handleUncapturedError)
-        disposal = Promise.allSettled([ ...pendingObservations ])
-            .then(() => runtime.dispose())
-            .catch(reportFatalError)
+        disposal = lifetime.dispose()
+        void disposal.then(report => {
+            if (report.cleanupFailures.length > 0) {
+                reportFatalError(report.cleanupFailures[0].error)
+            }
+        })
         return disposal
     }
 
@@ -145,14 +211,15 @@ async function main() {
 
         if (!active) return
         active = false
-        clearTimeout(animationTimer)
-        cancelAnimationFrame(animationFrame)
-        reportFatalError(error)
-        void disposePage()
+        void failPage(error)
     }
 
     async function render() {
 
+        if (animationFrame !== undefined) {
+            animationFrame = undefined
+            proof.frameWorkCompleted()
+        }
         if (!active) return
 
         try {
@@ -206,9 +273,8 @@ async function main() {
                     provenance
                 )
                 if (active) setStatus('ready')
-            }).catch(fail)
-            pendingObservations.add(observation)
-            void observation.finally(() => pendingObservations.delete(observation))
+            })
+            void lifetime.track(observation, `frame-submission-${frameNumber}`).catch(fail)
         } catch (error) {
             fail(error)
             return
@@ -218,9 +284,10 @@ async function main() {
     }
 
     animationFrame = requestAnimationFrame(render)
+    proof.frameWorkScheduled()
 }
 
-async function createRenderGraph(runtime, surface, size, deterministic) {
+async function createRenderGraph(runtime, surface, size, deterministic, lifetime, proof) {
 
     const matrices = createSceneMatrices(size)
     const codecs = createCodecs()
@@ -229,7 +296,7 @@ async function createRenderGraph(runtime, surface, size, deterministic) {
     const particleData = createParticleData(deterministic)
     const particles = await createParticleResources(runtime, particleData)
     const post = await createRenderTextures(runtime, size)
-    const images = await createImageResources(runtime)
+    const images = await createImageResources(runtime, lifetime, proof)
     const samplers = await createSamplers(runtime)
     const layouts = await createBindLayouts(runtime, codecs)
     const bindSets = await createBindSets({
@@ -242,8 +309,8 @@ async function createRenderGraph(runtime, surface, size, deterministic) {
         images: images.textures,
         samplers,
     })
-    const programs = createPrograms(runtime, codecs)
-    const pipelines = await createPipelines(runtime, surface, post, layouts, programs)
+    const programs = createPrograms(runtime, codecs, proof)
+    const pipelines = await createPipelines(runtime, surface, post, layouts, programs, proof)
     const passes = createPasses(runtime, surface, post)
     const commands = createPersistentCommands({
         runtime,
@@ -338,6 +405,7 @@ async function createRenderGraph(runtime, surface, size, deterministic) {
         initUploads,
         frameUploads,
         imageBitmaps: images.bitmaps,
+        imageBitmapOwnerships: images.ownerships,
         resizableBindSets,
         simulationPass: passes.simulation,
         scenePass: passes.scene,
@@ -767,17 +835,22 @@ async function createRenderTextures(runtime, size) {
     }
 }
 
-async function createImageResources(runtime) {
+async function createImageResources(runtime, lifetime, proof) {
 
     const definitions = Object.entries(imageSources)
     const textures = {}
     const bitmaps = []
+    const ownerships = []
     const uploads = []
 
     for (const [ name, source ] of definitions) {
         const response = await fetch(source)
         if (!response.ok) throw new Error(`Image request failed for ${name}: HTTP ${response.status}.`)
         const bitmap = await createImageBitmap(await response.blob())
+        const ownership = proof.ownBitmap(name, bitmap, lifetime)
+        bitmaps.push(bitmap)
+        ownerships.push(ownership)
+        proof.reach('after-first-image-decoded')
         const texture = await runtime.createTexture({
             label: `Hello GAW image ${name}`,
             size: { width: bitmap.width, height: bitmap.height },
@@ -796,11 +869,10 @@ async function createImageResources(runtime) {
             size: { width: bitmap.width, height: bitmap.height },
         })
         textures[name] = texture
-        bitmaps.push(bitmap)
         uploads.push(upload)
     }
 
-    return { textures, bitmaps, uploads }
+    return { textures, bitmaps, ownerships, uploads }
 }
 
 async function createSamplers(runtime) {
@@ -1112,7 +1184,7 @@ async function createBindSets({ runtime, layouts, uniforms, geometry, particles,
     }
 }
 
-function createPrograms(runtime, codecs) {
+function createPrograms(runtime, codecs, proof) {
 
     const requirement = (group, binding, type, codec) => ({
         group,
@@ -1202,7 +1274,7 @@ function createPrograms(runtime, codecs) {
         }),
         bloomCombine: runtime.createProgram({
             label: 'Hello GAW Bloom combine program',
-            modules: [ bloomCombineShader ],
+            modules: [ proof.bloomCombineShader(bloomCombineShader) ],
             entryPoints: { compute: 'cMain' },
             layoutRequirements: [ requirement(0, 0, 'uniform', codecs.bloomStrength) ],
         }),
@@ -1221,7 +1293,7 @@ function createPrograms(runtime, codecs) {
     }
 }
 
-async function createPipelines(runtime, surface, post, layouts, programs) {
+async function createPipelines(runtime, surface, post, layouts, programs, proof) {
 
     const normalBlend = {
         color: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
@@ -1250,14 +1322,19 @@ async function createPipelines(runtime, surface, post, layouts, programs) {
             attributes: [ { shaderLocation: 1, offset: 0, format: 'float32x4' } ],
         },
     ]
-    const compute = async (label, program, bindLayouts) => await runtime.createComputePipeline({
-        label,
-        program,
-        bindLayouts,
-        constants: { blockSize: label.includes('simulation') || label.includes('indexing')
-            ? PARTICLE_WORKGROUP_SIZE
-            : POST_WORKGROUP_SIZE },
-    })
+    const compute = async (label, program, bindLayouts) => {
+        if (label === 'Hello GAW Bloom combine pipeline') {
+            proof.beforeBloomCombinePipeline(runtime)
+        }
+        return await runtime.createComputePipeline({
+            label,
+            program,
+            bindLayouts,
+            constants: { blockSize: label.includes('simulation') || label.includes('indexing')
+                ? PARTICLE_WORKGROUP_SIZE
+                : POST_WORKGROUP_SIZE },
+        })
+    }
 
     return {
         land: await runtime.createRenderPipeline({
@@ -1726,12 +1803,17 @@ function createSizeDependentCommands(graph) {
     return { bloomCommands, fxaaCommand }
 }
 
-async function initializeGraph(runtime, graph) {
+async function initializeGraph(runtime, graph, lifetime, proof) {
 
     const builder = runtime.createSubmission({ validation: 'throw' })
     for (const upload of graph.initUploads) builder.upload(upload)
     const submitted = builder.submit()
-    await observeSubmittedWork(submitted)
+    const observation = lifetime.track(
+        observeSubmittedWork(submitted),
+        'initial-submission'
+    )
+    proof.reach('after-initial-submit-issued')
+    await observation
 }
 
 function updateFrameData(graph, delta) {
@@ -2047,6 +2129,284 @@ function assertPresentationShaderContract() {
             throw new Error(`Presentation shader is missing ${functionName}.`)
         }
     }
+}
+
+function createFailureProofController(configuration) {
+
+    let runtime
+    let surface
+    let capture
+    let captureReport
+    let runtimeEvidence
+    let runtimeEvidenceByteLength
+    let evidenceFailure
+    let reachedCount = 0
+    let runtimeDisposeAttempts = 0
+    let runtimeDisposed = false
+    let bitmapCreatedCount = 0
+    let bitmapCloseAttemptCount = 0
+    let bitmapClosedCount = 0
+    let bitmapDuplicateCloseCount = 0
+    let listenerRegisteredCount = 0
+    let listenerRemovedCount = 0
+    let frameWorkScheduledCount = 0
+    let frameWorkCompletedCount = 0
+    let frameWorkCancelledCount = 0
+    let listenersBeforeCleanup = 0
+    let frameWorkBeforeCleanup = 0
+
+    function assertConfiguration() {
+
+        if (
+            configuration.scenario !== undefined &&
+            !FAILURE_SCENARIOS.includes(configuration.scenario)
+        ) {
+            throw new Error(`Unsupported Hello GAW failure scenario: ${configuration.scenario}.`)
+        }
+    }
+
+    function ownRuntime(value, lifetime) {
+
+        runtime = value
+        lifetime.defer({
+            phase: 'release',
+            label: 'runtime',
+            run: () => {
+                runtimeDisposeAttempts += 1
+                try {
+                    value.dispose()
+                } finally {
+                    runtimeDisposed = value.isDisposed === true
+                }
+            },
+        })
+    }
+
+    function observeSurface(value) {
+
+        surface = value
+    }
+
+    function ownBitmap(name, bitmap, lifetime) {
+
+        bitmapCreatedCount += 1
+        let closed = false
+        return lifetime.defer({
+            phase: 'release',
+            label: `image-bitmap:${name}`,
+            run: () => {
+                bitmapCloseAttemptCount += 1
+                if (closed) {
+                    bitmapDuplicateCloseCount += 1
+                    return
+                }
+                closed = true
+                bitmap.close()
+                bitmapClosedCount += 1
+            },
+        })
+    }
+
+    function reach(scenario) {
+
+        if (configuration.scenario !== scenario) return
+        reachedCount += 1
+        const error = new Error(`Injected Hello GAW initialization failure: ${scenario}.`)
+        error.name = 'HelloGawInjectedFailure'
+        error.code = 'HELLO_GAW_INJECTED_FAILURE'
+        error.scenario = scenario
+        throw error
+    }
+
+    function bloomCombineShader(source) {
+
+        if (configuration.scenario !== 'invalid-bloom-pipeline-wgsl') return source
+        return `${source}\n@compute fn helloGawInjectedFailure( {`
+    }
+
+    function beforeBloomCombinePipeline(value) {
+
+        if (configuration.scenario !== 'invalid-bloom-pipeline-wgsl') return
+        reachedCount += 1
+        capture = value.diagnostics.capture({
+            maxOperations: 1,
+            maxDurationMs: 2_000,
+            maxEvidenceBytes: 64 * 1024,
+            includeStacks: true,
+            includeDescriptors: true,
+        })
+    }
+
+    function captureBeforeDisposal() {
+
+        listenersBeforeCleanup = listenerRegisteredCount - listenerRemovedCount
+        frameWorkBeforeCleanup = frameWorkScheduledCount -
+            frameWorkCompletedCount - frameWorkCancelledCount
+        try {
+            if (capture !== undefined) captureReport = capture.stop()
+            if (runtime !== undefined) {
+                runtimeEvidence = runtime.diagnostics.exportEvidence()
+                runtimeEvidenceByteLength = new TextEncoder()
+                    .encode(JSON.stringify(runtimeEvidence)).byteLength
+                if (runtimeEvidenceByteLength > FAILURE_RUNTIME_EVIDENCE_MAX_BYTES) {
+                    throw new Error(
+                        `Hello GAW runtime evidence exceeded ${FAILURE_RUNTIME_EVIDENCE_MAX_BYTES} bytes.`
+                    )
+                }
+            }
+        } catch (error) {
+            evidenceFailure = error
+        }
+    }
+
+    function finalize(primaryFailure, cleanupReport) {
+
+        const scenario = configuration.scenario
+        const runtimeWasCreated = runtime !== undefined
+        const surfaceWasCreated = surface !== undefined
+        runtimeDisposed = runtimeDisposed || runtime?.isDisposed === true
+        const surfaceDisposed = surface?.isDisposed === true
+        const diagnostic = primaryFailure && typeof primaryFailure === 'object'
+            ? primaryFailure.diagnostic
+            : undefined
+        const incident = primaryFailure && typeof primaryFailure === 'object'
+            ? primaryFailure.incident
+            : undefined
+        const cleanup = {
+            runtime: {
+                created: runtimeWasCreated,
+                disposeAttempts: runtimeDisposeAttempts,
+                disposed: runtimeDisposed,
+            },
+            surface: {
+                created: surfaceWasCreated,
+                disposed: surfaceDisposed,
+            },
+            bitmaps: {
+                created: bitmapCreatedCount,
+                closeAttempts: bitmapCloseAttemptCount,
+                closed: bitmapClosedCount,
+                duplicateCloseAttempts: bitmapDuplicateCloseCount,
+            },
+            pendingObservations: {
+                before: cleanupReport.pendingObservationsBefore,
+                after: cleanupReport.pendingObservationsAfter,
+            },
+            listeners: {
+                registered: listenerRegisteredCount,
+                removed: listenerRemovedCount,
+                activeBefore: listenersBeforeCleanup,
+                activeAfter: listenerRegisteredCount - listenerRemovedCount,
+            },
+            frameWork: {
+                scheduled: frameWorkScheduledCount,
+                completed: frameWorkCompletedCount,
+                cancelled: frameWorkCancelledCount,
+                activeBefore: frameWorkBeforeCleanup,
+                activeAfter: frameWorkScheduledCount -
+                    frameWorkCompletedCount - frameWorkCancelledCount,
+            },
+            invocationCount: cleanupReport.cleanupInvocationCount,
+            actionCount: cleanupReport.cleanupActions.length,
+            retainedActionCount: cleanupReport.retainedActionCount,
+            failures: cleanupReport.cleanupFailures.map(({ phase, label, error }) => ({
+                phase,
+                label,
+                error: serializeFailure(error),
+            })),
+        }
+
+        runtime = undefined
+        surface = undefined
+        capture = undefined
+
+        if (scenario === undefined) return undefined
+
+        return frozenJson({
+            schemaVersion: 1,
+            scenario,
+            reachedCount,
+            primaryFailure: serializeFailure(primaryFailure),
+            ...(diagnostic !== undefined ? { diagnostic } : {}),
+            ...(incident !== undefined ? { incident } : {}),
+            runtimeEvidence,
+            runtimeEvidenceByteLength,
+            runtimeEvidenceMaxBytes: FAILURE_RUNTIME_EVIDENCE_MAX_BYTES,
+            ...(captureReport !== undefined ? { captureReport } : {}),
+            ...(evidenceFailure !== undefined
+                ? { evidenceFailure: serializeFailure(evidenceFailure) }
+                : {}),
+            cleanup,
+        })
+    }
+
+    return Object.freeze({
+        assertConfiguration,
+        ownRuntime,
+        observeSurface,
+        ownBitmap,
+        reach,
+        bloomCombineShader,
+        beforeBloomCombinePipeline,
+        captureBeforeDisposal,
+        finalize,
+        listenerRegistered: () => { listenerRegisteredCount += 1 },
+        listenerRemoved: () => { listenerRemovedCount += 1 },
+        frameWorkScheduled: () => { frameWorkScheduledCount += 1 },
+        frameWorkCompleted: () => { frameWorkCompletedCount += 1 },
+        frameWorkCancelled: () => { frameWorkCancelledCount += 1 },
+    })
+}
+
+function serializeFailure(error) {
+
+    if (!(error instanceof Error)) {
+        return { name: 'NonErrorFailure', message: String(error) }
+    }
+
+    return {
+        name: error.name,
+        message: error.message,
+        ...(typeof error.code === 'string' ? { code: error.code } : {}),
+        ...(typeof error.scenario === 'string' ? { scenario: error.scenario } : {}),
+        ...(error.diagnostic?.code !== undefined
+            ? { diagnosticCode: error.diagnostic.code }
+            : {}),
+        ...(typeof error.stack === 'string' ? { stack: error.stack.slice(0, 8 * 1024) } : {}),
+    }
+}
+
+function frozenJson(value) {
+
+    return deepFreeze(JSON.parse(JSON.stringify(value)))
+}
+
+function deepFreeze(value) {
+
+    if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
+    for (const child of Object.values(value)) deepFreeze(child)
+    return Object.freeze(value)
+}
+
+function failPage(error) {
+
+    if (pageFailureSettlement !== undefined) return pageFailureSettlement
+    reportFatalError(error)
+    failureProof.captureBeforeDisposal()
+    pageFailureSettlement = pageLifetime.dispose(error).then(cleanupReport => {
+        const proof = failureProof.finalize(error, cleanupReport)
+        if (proof !== undefined) {
+            window.__HELLO_GAW_INIT_FAILURE_PROOF__ = proof
+            canvas.dataset.initFailureProof = JSON.stringify(proof)
+            canvas.dataset.failureScenario = proof.scenario
+        }
+        if (proof === undefined && cleanupReport.cleanupFailures.length > 0) {
+            console.error(cleanupReport.cleanupFailures[0].error)
+        }
+    }).catch(cleanupFailure => {
+        console.error(cleanupFailure)
+    })
+    return pageFailureSettlement
 }
 
 function setStatus(status) {
