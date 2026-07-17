@@ -90,7 +90,7 @@ describe('workspace layout', () => {
             'examples/m_demLayer/terrainLayer.js',
             'examples/m_flowLayer/steadyFlowLayer.js',
             'examples/m_flowLayer/flowJson.worker.js',
-            'examples/x_helloGAW/main.js',
+            'examples/helloGAW/main.js',
         ]
 
         for (const file of exampleFiles) {

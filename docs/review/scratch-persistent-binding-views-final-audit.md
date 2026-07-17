@@ -297,10 +297,9 @@ canonicalized, serialized, and hashed a complete snapshot on every check.
 
 ## Examples And Documentation
 
-- 11 ordinary examples import `geoscratch`, use only the target API, and do not reach
+- 12 ordinary examples import `geoscratch`, use only the target API, and do not reach
   into package source.
-- 3 legacy examples remain: `m_demLayer (legacy)`, `m_flowLayer (legacy)`, and
-  `x_helloGAW (legacy)`.
+- 2 legacy examples remain: `m_demLayer (legacy)` and `m_flowLayer (legacy)`.
 - DEM and Flow remain separate implementations.
 - No `scratch_` example naming flag remains.
 - Hello Map remains absent.

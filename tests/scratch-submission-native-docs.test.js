@@ -286,6 +286,7 @@ describe('scratch submission native outcome documentation', () => {
             'submissionOrder',
             'externalImageUpload',
             'textureResize',
+            'helloGAW',
         ]) {
             const source = read('examples', example, 'main.js')
 
@@ -295,12 +296,11 @@ describe('scratch submission native outcome documentation', () => {
         }
     })
 
-    it('leaves all three legacy example implementations byte-for-byte unchanged', () => {
+    it('leaves both remaining legacy example implementations byte-for-byte unchanged', () => {
 
         const expected = new Map([
             [ 'm_demLayer', 'ef22fcc37b806a62873ad1324db120ef6baf23acc5a0eb944cda7a0b8904a576' ],
             [ 'm_flowLayer', '60988379cbe94f8c0b295e84552603196275697c6ed1469cbcda760d838c62ee' ],
-            [ 'x_helloGAW', '079750fca1070e31a2bf41ff781db08db4aa7085873dd32a7048c781360a8ed3' ],
         ])
 
         for (const [ example, digest ] of expected) {

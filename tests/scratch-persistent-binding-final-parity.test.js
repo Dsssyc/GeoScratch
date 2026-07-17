@@ -252,8 +252,8 @@ describe('Scratch persistent binding final parity', () => {
             '20,000 + 20,000',
             'Chrome 150.0.7871.115',
             'Apple Metal 3',
-            '11 ordinary examples',
-            '3 legacy examples',
+            '12 ordinary examples',
+            '2 legacy examples',
             '`externalTexture`',
             'Fresh-Context Strict Review',
             'production bootstrap build',
@@ -296,8 +296,8 @@ describe('Scratch persistent binding final parity', () => {
             capabilityRowCount: 11,
             officialBindingRowCount: 6,
             nativeCopyQuadrantCount: 4,
-            ordinaryExampleCount: 11,
-            legacyExampleCount: 3,
+            ordinaryExampleCount: 12,
+            legacyExampleCount: 2,
         })
         expect(result.publicSurface.missingBaselineValues).to.deep.equal([])
         expect(result.publicSurface.missingHistoricalValues).to.deep.equal([])

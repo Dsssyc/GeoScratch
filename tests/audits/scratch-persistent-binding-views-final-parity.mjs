@@ -106,6 +106,7 @@ const historicalPaths = Object.freeze({
 const ordinaryExamples = Object.freeze([
     'computeReadback',
     'externalImageUpload',
+    'helloGAW',
     'helloTriangle',
     'helloVertexBuffer',
     'indirectExecution',
@@ -116,7 +117,7 @@ const ordinaryExamples = Object.freeze([
     'textureSampling',
     'uniformTriangle',
 ])
-const legacyExamples = Object.freeze([ 'm_demLayer', 'm_flowLayer', 'x_helloGAW' ])
+const legacyExamples = Object.freeze([ 'm_demLayer', 'm_flowLayer' ])
 const historicalTypeInventory = Object.freeze([
     { name: 'BufferResourceDescriptor', classification: 'restored', current: 'BufferResourceDescriptor' },
     { name: 'NormalizedDrawVertexBufferBinding', classification: 'internal', current: null },

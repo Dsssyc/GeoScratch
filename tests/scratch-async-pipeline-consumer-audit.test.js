@@ -22,7 +22,6 @@ const pipelineFamilies = [
         ]),
         legacyFiles: new Set([
             'examples/m_flowLayer/steadyFlowLayer.js',
-            'examples/x_helloGAW/main.js',
             'tests/types/public-api.ts',
         ]),
     },
@@ -40,7 +39,6 @@ const pipelineFamilies = [
         ]),
         legacyFiles: new Set([
             'examples/m_flowLayer/steadyFlowLayer.js',
-            'examples/x_helloGAW/main.js',
             'tests/types/public-api.ts',
         ]),
     },

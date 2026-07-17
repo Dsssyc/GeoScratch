@@ -21,7 +21,7 @@ const examplePages = {
   readinessPolicies: path.resolve(examplesRoot, 'readinessPolicies/index.html'),
   demLayer: path.resolve(examplesRoot, 'm_demLayer/index.html'),
   flowLayer: path.resolve(examplesRoot, 'm_flowLayer/index.html'),
-  helloGAW: path.resolve(examplesRoot, 'x_helloGAW/index.html'),
+  helloGAW: path.resolve(examplesRoot, 'helloGAW/index.html'),
 }
 
 // https://vitejs.dev/config/

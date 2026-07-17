@@ -21,7 +21,7 @@ describe('examples structure', () => {
         'readinessPolicies',
         'm_demLayer',
         'm_flowLayer',
-        'x_helloGAW',
+        'helloGAW',
     ]
     const standaloneExamples = [
         'helloTriangle',
@@ -37,7 +37,7 @@ describe('examples structure', () => {
         'readinessPolicies',
         'm_demLayer',
         'm_flowLayer',
-        'x_helloGAW',
+        'helloGAW',
     ]
 
     it('keeps the repository root free of demo html entrypoints', () => {
@@ -112,6 +112,7 @@ describe('examples structure', () => {
             [ 'renderToTexture', 'Render To Texture' ],
             [ 'indirectExecution', 'Indirect Execution' ],
             [ 'readinessPolicies', 'Readiness Policies' ],
+            [ 'helloGAW', 'Hello GAW' ],
         ]
 
         for (const [ name, title ] of scratchBackedExamples) {
@@ -131,7 +132,6 @@ describe('examples structure', () => {
         const legacyExamples = [
             'm_demLayer',
             'm_flowLayer',
-            'x_helloGAW',
         ]
 
         for (const name of legacyExamples) {

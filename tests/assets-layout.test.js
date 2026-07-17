@@ -18,11 +18,11 @@ describe('asset layout', () => {
 
     it('keeps ordinary example assets colocated with their examples', () => {
 
-        expect(exists('examples', 'x_helloGAW', 'assets', 'images', 'earth.jpg')).to.equal(true)
-        expect(exists('examples', 'x_helloGAW', 'shaders', 'land.wgsl')).to.equal(true)
+        expect(exists('examples', 'helloGAW', 'assets', 'images', 'earth.jpg')).to.equal(true)
+        expect(exists('examples', 'helloGAW', 'shaders', 'land.wgsl')).to.equal(true)
         expect(exists('examples', 'm_flowLayer', 'shaders', 'flow', 'particles.wgsl')).to.equal(true)
 
-        const helloGAW = read('examples', 'x_helloGAW', 'main.js')
+        const helloGAW = read('examples', 'helloGAW', 'main.js')
         const steadyFlowLayer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
 
         expect(helloGAW).to.not.include('/images/Earth/')
