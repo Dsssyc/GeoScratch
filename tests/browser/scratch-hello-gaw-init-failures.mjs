@@ -9,6 +9,21 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const timeout = positiveInteger(process.env.HELLO_GAW_FAILURE_BROWSER_TIMEOUT_MS, 90_000)
+const postProofQuietMs = 250
+const expectedRuntimeEvidenceMaxBytes = 512 * 1024
+const expectedRecorderBounds = Object.freeze({
+    operationCapacity: 256,
+    incidentCapacity: 32,
+    evidenceByteCapacity: 256 * 1024,
+})
+const expectedCaptureBounds = Object.freeze({
+    maxOperations: 1,
+    maxDurationMs: 2_000,
+    maxEvidenceBytes: 64 * 1024,
+    includeStacks: true,
+    includeDescriptors: true,
+})
+const expectedCompilationEvidenceMaxBytes = 64 * 1024
 const port = process.env.HELLO_GAW_FAILURE_BROWSER_PORT === undefined
     ? await findAvailablePort()
     : positiveInteger(process.env.HELLO_GAW_FAILURE_BROWSER_PORT)
@@ -156,6 +171,7 @@ async function verifyScenario(activeBrowser, scenario) {
             return canvas?.dataset.status === 'error' &&
                 window.__HELLO_GAW_INIT_FAILURE_PROOF__ !== undefined
         }, undefined, { timeout })
+        await page.waitForTimeout(postProofQuietMs)
 
         const observed = await page.evaluate(() => {
             const proof = window.__HELLO_GAW_INIT_FAILURE_PROOF__
@@ -299,9 +315,9 @@ function validateScenario(result, failures) {
     if (proof.runtimeEvidenceByteLength !== runtimeEvidenceByteLength) {
         fail('published runtime evidence byte length did not match the JSON payload')
     }
-    if (!Number.isSafeInteger(proof.runtimeEvidenceMaxBytes) || proof.runtimeEvidenceMaxBytes <= 0) {
-        fail('runtime evidence maximum byte bound was invalid')
-    } else if (runtimeEvidenceByteLength > proof.runtimeEvidenceMaxBytes) {
+    if (proof.runtimeEvidenceMaxBytes !== expectedRuntimeEvidenceMaxBytes) {
+        fail(`runtime evidence maximum was ${proof.runtimeEvidenceMaxBytes}`)
+    } else if (runtimeEvidenceByteLength > expectedRuntimeEvidenceMaxBytes) {
         fail('runtime evidence JSON exceeded its published maximum byte bound')
     }
     validateCleanup(proof.cleanup, label, fail)
@@ -332,6 +348,11 @@ function validateRuntimeEvidence(evidence, fail) {
         recorder.retainedEvidenceBytes > recorder.evidenceByteCapacity
     )) {
         fail('runtime evidence exceeded a configured retention bound')
+    }
+    for (const [ name, expected ] of Object.entries(expectedRecorderBounds)) {
+        if (recorder?.[name] !== expected) {
+            fail(`runtime evidence recorder ${name} was ${recorder?.[name]}`)
+        }
     }
     if (evidence.snapshot?.capture?.activeCount !== 0) {
         fail('diagnostic capture remained active at export')
@@ -405,6 +426,9 @@ function validateInvalidPipelineProof(proof, fail) {
     }
 
     const capture = proof.captureReport
+    if (JSON.stringify(proof.captureBounds) !== JSON.stringify(expectedCaptureBounds)) {
+        fail('capture bounds differed from the fixed verifier contract')
+    }
     if (capture?.version !== 5) fail(`capture version was ${capture?.version}`)
     if (capture?.stopReason !== 'operation-limit') {
         fail(`capture stop reason was ${capture?.stopReason}`)
@@ -412,6 +436,18 @@ function validateInvalidPipelineProof(proof, fail) {
     if (capture?.operations?.length !== 1) {
         fail(`capture retained ${capture?.operations?.length} operations`)
         return
+    }
+    if (capture.omittedOperations !== 0) {
+        fail(`capture omitted ${capture.omittedOperations} operations`)
+    }
+    if (!Number.isSafeInteger(capture.retainedEvidenceBytes) ||
+        capture.retainedEvidenceBytes > expectedCaptureBounds.maxEvidenceBytes) {
+        fail(`capture retained ${capture.retainedEvidenceBytes} evidence bytes`)
+    }
+    const captureDurationMs = capture.stoppedAtMs - capture.startedAtMs
+    if (!Number.isFinite(captureDurationMs) || captureDurationMs < 0 ||
+        captureDurationMs > expectedCaptureBounds.maxDurationMs) {
+        fail(`capture duration was ${captureDurationMs} ms`)
     }
 
     const operation = capture.operations[0]
@@ -430,6 +466,13 @@ function validateInvalidPipelineProof(proof, fail) {
         fail('compilation report program identity did not match')
     }
     if (!(compilation?.errorCount > 0)) fail('compilation report had no error')
+    if (!Number.isSafeInteger(compilation?.retainedEvidenceBytes) ||
+        compilation.retainedEvidenceBytes > expectedCompilationEvidenceMaxBytes) {
+        fail(`compilation retained ${compilation?.retainedEvidenceBytes} evidence bytes`)
+    }
+    if (compilation?.omittedModuleCount !== 0 || compilation?.omittedMessageCount !== 0) {
+        fail('compilation evidence omitted module or message facts')
+    }
     if (compilation?.moduleCount !== 1 || compilation?.modules?.length !== 1) {
         fail('compilation report did not identify the failing module')
     }
@@ -484,8 +527,10 @@ function summarizeScenarioResult(result) {
             recorder,
         },
         capture: proof?.captureReport === undefined ? undefined : {
+            bounds: proof.captureBounds,
             version: proof.captureReport.version,
             stopReason: proof.captureReport.stopReason,
+            durationMs: proof.captureReport.stoppedAtMs - proof.captureReport.startedAtMs,
             operationCount: proof.captureReport.operations.length,
             retainedEvidenceBytes: proof.captureReport.retainedEvidenceBytes,
             omittedOperations: proof.captureReport.omittedOperations,

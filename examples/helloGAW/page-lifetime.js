@@ -134,6 +134,10 @@ export function createPageLifetime() {
         const phaseActions = actions[phase]
         for (let index = phaseActions.length - 1; index >= 0; index -= 1) {
             const action = phaseActions[index]
+            if (action.settlement) {
+                await action.settlement.catch(() => {})
+                continue
+            }
             if (!action.active) {
                 continue
             }

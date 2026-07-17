@@ -118,6 +118,48 @@ describe('Hello GAW page lifetime authority', () => {
         expect(releases).to.equal(1)
     })
 
+    it('waits for an already-started async release before later ownership cleanup', async () => {
+        const lifetime = createLifetime()
+        const order = []
+        let settleBitmap
+        let disposalSettled = false
+        const bitmapSettlement = new Promise(resolve => {
+            settleBitmap = resolve
+        })
+
+        lifetime.defer({
+            phase: 'release',
+            label: 'runtime',
+            run: () => order.push('runtime'),
+        })
+        const bitmap = lifetime.defer({
+            phase: 'release',
+            label: 'bitmap',
+            run: async() => {
+                order.push('bitmap:start')
+                await bitmapSettlement
+                order.push('bitmap:end')
+            },
+        })
+
+        const startedRelease = bitmap.run()
+        await Promise.resolve()
+        const disposal = lifetime.dispose()
+        void disposal.then(() => { disposalSettled = true })
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(order).to.deep.equal([ 'bitmap:start' ])
+        expect(disposalSettled).to.equal(false)
+
+        settleBitmap()
+        await startedRelease
+        const report = await disposal
+
+        expect(order).to.deep.equal([ 'bitmap:start', 'bitmap:end', 'runtime' ])
+        expect(report.cleanupActions.map(({ label }) => label))
+            .to.deep.equal([ 'bitmap', 'runtime' ])
+    })
+
     it('runs every cleanup action while retaining cleanup failures as secondary facts', async () => {
         const lifetime = createLifetime()
         const primaryFailure = new Error('initialization failed')

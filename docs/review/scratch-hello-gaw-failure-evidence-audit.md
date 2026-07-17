@@ -60,7 +60,8 @@ claims that a nonexistent listener or frame was removed.
 The verifier rejects missing/vacuous acquisition counts, a live runtime or Surface,
 bitmap count mismatch, duplicate closure, pending observations, retained actions,
 cleanup failures, page errors, request failures, HTTP failures, missing expected
-console reporting, and a still-open Vite port.
+console reporting, and a still-open Vite port. After proof publication, each page stays
+open for a fixed 250 ms quiet interval before the final unhandled-rejection snapshot.
 
 ## Source-Blind Failure Localization
 
@@ -111,7 +112,10 @@ frozen after a JSON round trip and contains no mutable GPU handles.
 
 Default runtime evidence remains the bounded ledger defined by Scratch. Deep stacks
 and descriptors are enabled only for the one-operation invalid-pipeline capture; the
-other four scenarios contain no capture report.
+other four scenarios contain no capture report. The browser verifier owns independent
+fixed constants for the runtime recorder, outer JSON, capture operation/duration/byte,
+and compilation-byte ceilings; it rejects a producer that weakens or self-certifies
+those limits.
 
 ## Success-Path Preservation
 

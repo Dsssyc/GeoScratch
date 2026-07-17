@@ -32,6 +32,13 @@ const BLOOM_BLUR_LEVELS = 5
 const POST_WORKGROUP_SIZE = 16
 const PROJECTION_FOV = 45
 const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
+const FAILURE_CAPTURE_BOUNDS = Object.freeze({
+    maxOperations: 1,
+    maxDurationMs: 2_000,
+    maxEvidenceBytes: 64 * 1024,
+    includeStacks: true,
+    includeDescriptors: true,
+})
 const STAGE_ORDER = Object.freeze([
     'simulation-indexing',
     'scene',
@@ -2228,13 +2235,7 @@ function createFailureProofController(configuration) {
 
         if (configuration.scenario !== 'invalid-bloom-pipeline-wgsl') return
         reachedCount += 1
-        capture = value.diagnostics.capture({
-            maxOperations: 1,
-            maxDurationMs: 2_000,
-            maxEvidenceBytes: 64 * 1024,
-            includeStacks: true,
-            includeDescriptors: true,
-        })
+        capture = value.diagnostics.capture(FAILURE_CAPTURE_BOUNDS)
     }
 
     function captureBeforeDisposal() {
@@ -2332,7 +2333,10 @@ function createFailureProofController(configuration) {
             runtimeEvidence,
             runtimeEvidenceByteLength,
             runtimeEvidenceMaxBytes: FAILURE_RUNTIME_EVIDENCE_MAX_BYTES,
-            ...(captureReport !== undefined ? { captureReport } : {}),
+            ...(captureReport !== undefined ? {
+                captureBounds: FAILURE_CAPTURE_BOUNDS,
+                captureReport,
+            } : {}),
             ...(evidenceFailure !== undefined
                 ? { evidenceFailure: serializeFailure(evidenceFailure) }
                 : {}),
