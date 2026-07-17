@@ -114,6 +114,12 @@ describe('Hello GAW Scratch clean cut', () => {
 
         expect(source).to.not.match(/mapAsync|getMappedRange|createReadback|toBytes|toArray/)
         expect(source).to.not.match(/linkIndirect[^\n]*(?:map|readback|decode)/i)
+        expect(source).to.match(/label: 'Hello GAW scene color'[\s\S]{0,160}format: 'rgba8unorm'/)
+        expect(source.match(/runtime\.createSampler\(/g) ?? []).to.have.length(1)
+        expect(source).to.include('return { earth: linear, output: linear }')
+        expect(source).to.include('1000 / 45')
+        expect(source).to.include("removeEventListener('uncapturederror'")
+        expect(source).to.include('void disposePage()')
     })
 
     it('keeps every workload shader and used image beside the neutral example', () => {
@@ -128,6 +134,10 @@ describe('Hello GAW Scratch clean cut', () => {
             'point.wgsl',
             'water.wgsl',
             'bloom.wgsl',
+            'bloom-downsample.wgsl',
+            'bloom-blur-x.wgsl',
+            'bloom-blur-y.wgsl',
+            'bloom-combine.wgsl',
             'fxaa.wgsl',
         ]) {
             expect(exists('examples', 'helloGAW', 'shaders', shader), shader).to.equal(true)
@@ -171,5 +181,9 @@ describe('Hello GAW Scratch clean cut', () => {
         expect(browser).to.include('response.status() >= 400')
         expect(browser).to.include('waitForPortClosed')
         expect(browser).to.include('resize')
+        expect(browser).to.include('requiredProvenanceNames')
+        expect(browser).to.include('stable identity set was empty or invalid')
+        expect(browser).to.include('diagnosticEvidenceBytes')
+        expect(browser).to.include('six distinct resources')
     })
 })

@@ -62,7 +62,7 @@ resource epochs, stable identities, resize behavior, and at least 240 observed f
 | Bloom threshold/strength/steps and FXAA/output constants | Postprocess parameters | Layout-derived uniform buffers and persistent uploads | Upload once unless a value changes | Verified |
 | Gaussian kernel storage | Bloom blur weights | Read-only storage buffer and region | Generated and uploaded once | Verified |
 | Linear repeating sampler | Image and final-output sampling | One acknowledged `SamplerResource` | Persistent; no legacy sampler wrapper | Verified |
-| Scene color | HDR scene render target and Bloom source | Stable `rgba16float` `TextureResource` plus view spec | Explicit resize transaction; scene pass writes each frame | Verified |
+| Scene color | Legacy `rgba8unorm` scene target and Bloom source | Stable `rgba8unorm` `TextureResource` plus view spec | Explicit resize transaction; scene pass writes each frame | Verified |
 | Scene depth | Depth test/write for globe and overlays | Stable `depth24plus` `TextureResource` plus view spec | Explicit resize transaction | Verified |
 | Bloom highlight | Full-resolution threshold output | Stable `rgba16float` sampled/storage texture | Explicit resize and BindSet re-prepare | Verified |
 | Five downsample levels | Half through 1/32-resolution highlight chain | Five stable sampled/storage textures | Sizes derive explicitly from surface extent at resize | Verified |
@@ -172,7 +172,7 @@ shader code becomes example-owned WGSL instead of importing package legacy effec
 
 | Visible behavior | Preserving mechanism | Final proof |
 | --- | --- | --- |
-| Rotating textured earth | Fixed-step or realtime dynamic transform upload | Changing nonblank pixels across observed frames |
+| Rotating textured earth | Legacy 45 Hz pacing with fixed per-tick transform upload | Changing nonblank pixels across observed frames |
 | Day/night land lighting, mask, specular, emission | Same shader inputs and blend/depth contract | Screenshot and stage completion |
 | Water separated by inverse land mask | Same shader and draw order | Screenshot |
 | Additive moving cloud shell | Same shader, texture set, blend and depth contract | Screenshot and changing pixels |
@@ -203,14 +203,14 @@ The neutral page was run after the clean replacement with
 - After resize: 242 submitted / 241 observed frames at `800 x 600`
 - Stage order: simulation/indexing, scene, Bloom, FXAA, presentation
 - Scene/Bloom command counts: 5 / 17
-- Stable identity hash: `205dab3d` before and after resize
-- Size-dependent command hash: `0d34a459` before, `584db5b6` after resize
-- Exact producer/read chains: 6 / 6 with authored `'current-at-step'` and equal
-  resolved epochs
-- Diagnostics: 256 / 256 retained operations, 0 incidents, bounded evidence,
-  0 uncaptured errors, 0 device losses
-- Motion proof: 148,542 changed pixels, mean RGB delta 16.1157, maximum delta 499
-- Non-dark pixels: 182,773 motion start; 184,346 before resize; 130,341 after resize
+- Stable identity set: non-empty with the same count and hash before and after resize
+- Size-dependent command set: valid identity hashes that differ across resize
+- Exact producer/read chains: all six fixed names, six distinct resources, authored
+  `'current-at-step'`, and positive equal resolved epochs
+- Diagnostics: independently checked operation, incident, and evidence-byte bounds;
+  0 incidents, 0 uncaptured errors, 0 device losses
+- Pixel proof: all three screenshots exceed nonblank/range/luma thresholds, and the
+  pre-resize pair exceeds changed-pixel and mean-RGB-delta thresholds
 - Console warnings/errors, page errors, request failures, HTTP 4xx/5xx: all zero
 - Managed Vite port after shutdown: closed
 - Evidence: `/tmp/geoscratch-hello-gaw-browser/` JSON stdout and three PNGs

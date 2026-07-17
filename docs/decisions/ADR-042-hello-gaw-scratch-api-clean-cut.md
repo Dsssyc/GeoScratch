@@ -11,7 +11,7 @@ Accepted
 ## Context
 
 The Hello GAW example exercised an animated earth, GPU particle simulation, GPU link
-indexing, indirect drawing, HDR scene rendering, Bloom, FXAA, and final presentation,
+indexing, indirect drawing, scene-color rendering, Bloom, FXAA, and final presentation,
 but it still expressed those behaviors through the old orchestration API. Keeping both
 an old example and a separately flagged Scratch variant would make the catalog imply
 that two supported paths exist and would prevent the current API from becoming the

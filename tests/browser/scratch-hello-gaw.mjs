@@ -18,6 +18,14 @@ const port = process.env.HELLO_GAW_BROWSER_PORT === undefined
     ? await findAvailablePort()
     : positiveInteger(process.env.HELLO_GAW_BROWSER_PORT)
 const baseUrl = `http://127.0.0.1:${port}`
+const requiredProvenanceNames = Object.freeze([
+    'dynamic-upload-to-land',
+    'simulation-to-particle-draw',
+    'indexing-to-indirect-draw',
+    'scene-to-bloom',
+    'bloom-to-fxaa',
+    'fxaa-to-presentation',
+])
 
 if (proofFrames < 240) throw new TypeError('HELLO_GAW_PROOF_FRAMES must be at least 240.')
 
@@ -372,6 +380,9 @@ function validateResult(result) {
     if (before.stableIdentityHash !== after.stableIdentityHash) {
         failures.push('persistent graph identities changed across resize')
     }
+    if (before.stableIdentityCount !== after.stableIdentityCount) {
+        failures.push('persistent graph identity count changed across resize')
+    }
     if (before.sizeDependentIdentityHash === after.sizeDependentIdentityHash) {
         failures.push('size-dependent dispatch commands were not rebuilt on resize')
     }
@@ -388,6 +399,7 @@ function validateResult(result) {
         failures.push('earth animation did not produce enough changing pixels')
     }
     if (result.proof.consoleFailures.length > 0) failures.push('browser emitted console errors')
+    if (result.proof.consoleWarnings.length > 0) failures.push('browser emitted console warnings')
     if (result.proof.pageErrors.length > 0) failures.push('browser emitted page errors')
     if (result.proof.requestFailures.length > 0) failures.push('browser emitted request failures')
     if (result.proof.httpFailures.length > 0) failures.push('browser received HTTP 4xx/5xx responses')
@@ -414,6 +426,41 @@ function validateFacts(label, facts, failures) {
     if (facts.uncapturedErrors !== '0') failures.push(`${label} reported an uncaptured GPU error`)
     if (facts.deviceLosses !== '0') failures.push(`${label} reported device loss`)
 
+    const stableIdentityCount = Number(facts.stableIdentityCount)
+    if (!Number.isSafeInteger(stableIdentityCount) || stableIdentityCount <= 0) {
+        failures.push(`${label} stable identity set was empty or invalid`)
+    }
+    if (!/^[a-f0-9]{8}$/.test(facts.stableIdentityHash ?? '')) {
+        failures.push(`${label} stable identity hash was missing or invalid`)
+    }
+    if (!/^[a-f0-9]{8}$/.test(facts.sizeDependentIdentityHash ?? '')) {
+        failures.push(`${label} size-dependent identity hash was missing or invalid`)
+    }
+
+    const diagnosticFacts = {
+        operations: Number(facts.diagnosticOperations),
+        operationCapacity: Number(facts.diagnosticOperationCapacity),
+        incidents: Number(facts.diagnosticIncidents),
+        incidentCapacity: Number(facts.diagnosticIncidentCapacity),
+        evidenceBytes: Number(facts.diagnosticEvidenceBytes),
+        evidenceByteCapacity: Number(facts.diagnosticEvidenceByteCapacity),
+    }
+    for (const [ name, value ] of Object.entries(diagnosticFacts)) {
+        if (!Number.isSafeInteger(value) || value < 0) {
+            failures.push(`${label} diagnostic ${name} was missing or invalid`)
+        }
+    }
+    if (diagnosticFacts.operationCapacity <= 0 ||
+        diagnosticFacts.incidentCapacity <= 0 ||
+        diagnosticFacts.evidenceByteCapacity <= 0) {
+        failures.push(`${label} diagnostic capacity was not positive`)
+    }
+    if (diagnosticFacts.operations > diagnosticFacts.operationCapacity ||
+        diagnosticFacts.incidents > diagnosticFacts.incidentCapacity ||
+        diagnosticFacts.evidenceBytes > diagnosticFacts.evidenceByteCapacity) {
+        failures.push(`${label} diagnostic retention exceeded a configured bound`)
+    }
+
     let provenance
     try {
         provenance = JSON.parse(facts.provenance)
@@ -421,17 +468,33 @@ function validateFacts(label, facts, failures) {
         failures.push(`${label} provenance was not valid JSON`)
         return
     }
-    if (!Array.isArray(provenance) || provenance.length !== 6) {
+    if (!Array.isArray(provenance) || provenance.length !== requiredProvenanceNames.length) {
         failures.push(`${label} provenance did not contain six required chains`)
         return
     }
-    for (const chain of provenance) {
+    const resourceIds = new Set()
+    for (const [ index, chain ] of provenance.entries()) {
+        if (chain.name !== requiredProvenanceNames[index]) {
+            failures.push(`${label} provenance chain ${index} was not ${requiredProvenanceNames[index]}`)
+        }
+        if (typeof chain.resourceId !== 'string' || chain.resourceId.length === 0) {
+            failures.push(`${label} ${chain.name} resource identity was missing`)
+        } else {
+            resourceIds.add(chain.resourceId)
+        }
         if (chain.declaredContentEpoch !== 'current-at-step') {
             failures.push(`${label} ${chain.name} lost current-at-step`)
+        }
+        if (!Number.isSafeInteger(chain.producerContentEpoch) || chain.producerContentEpoch <= 0 ||
+            !Number.isSafeInteger(chain.readContentEpoch) || chain.readContentEpoch <= 0) {
+            failures.push(`${label} ${chain.name} resolved epoch was missing or invalid`)
         }
         if (chain.producerContentEpoch !== chain.readContentEpoch) {
             failures.push(`${label} ${chain.name} producer/read epochs differed`)
         }
+    }
+    if (resourceIds.size !== requiredProvenanceNames.length) {
+        failures.push(`${label} provenance chains did not identify six distinct resources`)
     }
 }
 

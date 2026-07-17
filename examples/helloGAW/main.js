@@ -90,6 +90,8 @@ async function main() {
     const pendingObservations = new Set()
     let active = true
     let animationFrame = 0
+    let animationTimer = 0
+    let disposal
     let submittedFrames = 0
     let observedFrames = 0
     let resizeGeneration = 0
@@ -109,25 +111,44 @@ async function main() {
     const stableIdentityBaseline = stableIdentitySnapshot(graph)
     publishGraphFacts(graph, stableIdentityBaseline, bloomCommands, fxaaCommand, resizeGeneration)
 
-    runtime.device.addEventListener('uncapturederror', (event) => {
-        fail(event.error)
-    })
+    const handleUncapturedError = event => fail(event.error)
+    runtime.device.addEventListener('uncapturederror', handleUncapturedError)
     void runtime.device.lost.then((info) => {
         if (active) fail(new Error(`WebGPU device lost: ${info.message || info.reason}.`))
     })
 
     window.addEventListener('pagehide', () => {
-        active = false
-        cancelAnimationFrame(animationFrame)
-        void Promise.allSettled([ ...pendingObservations ]).then(() => runtime.dispose())
+        void disposePage()
     }, { once: true })
+
+    function scheduleFrame() {
+
+        animationTimer = window.setTimeout(() => {
+            animationFrame = requestAnimationFrame(render)
+        }, 1000 / 45)
+    }
+
+    function disposePage() {
+
+        if (disposal !== undefined) return disposal
+        active = false
+        clearTimeout(animationTimer)
+        cancelAnimationFrame(animationFrame)
+        runtime.device.removeEventListener('uncapturederror', handleUncapturedError)
+        disposal = Promise.allSettled([ ...pendingObservations ])
+            .then(() => runtime.dispose())
+            .catch(reportFatalError)
+        return disposal
+    }
 
     function fail(error) {
 
         if (!active) return
         active = false
+        clearTimeout(animationTimer)
         cancelAnimationFrame(animationFrame)
         reportFatalError(error)
+        void disposePage()
     }
 
     async function render() {
@@ -138,6 +159,7 @@ async function main() {
             const nextSize = canvasPixelSize(canvas)
             if (!sameSize(surface.size, nextSize)) {
                 await resizeRenderGraph(graph, nextSize)
+                if (!active) return
                 ;({ bloomCommands, fxaaCommand } = createSizeDependentCommands(graph))
                 resizeGeneration++
                 publishGraphFacts(
@@ -192,7 +214,7 @@ async function main() {
             return
         }
 
-        animationFrame = requestAnimationFrame(render)
+        if (active) scheduleFrame()
     }
 
     animationFrame = requestAnimationFrame(render)
@@ -671,7 +693,7 @@ async function createRenderTextures(runtime, size) {
     const scene = await runtime.createTexture({
         label: 'Hello GAW scene color',
         size,
-        format: 'rgba16float',
+        format: 'rgba8unorm',
         usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
     const depth = await runtime.createTexture({
@@ -783,22 +805,16 @@ async function createImageResources(runtime) {
 
 async function createSamplers(runtime) {
 
-    return {
-        earth: await runtime.createSampler({
-            label: 'Hello GAW earth sampler',
-            magFilter: 'linear',
-            minFilter: 'linear',
-            addressModeU: 'repeat',
-            addressModeV: 'repeat',
-        }),
-        output: await runtime.createSampler({
-            label: 'Hello GAW output sampler',
-            magFilter: 'linear',
-            minFilter: 'linear',
-            addressModeU: 'clamp-to-edge',
-            addressModeV: 'clamp-to-edge',
-        }),
-    }
+    const linear = await runtime.createSampler({
+        label: 'Hello GAW linear repeating sampler',
+        magFilter: 'linear',
+        minFilter: 'linear',
+        addressModeU: 'repeat',
+        addressModeV: 'repeat',
+        addressModeW: 'repeat',
+    })
+
+    return { earth: linear, output: linear }
 }
 
 async function createBindLayouts(runtime, codecs) {
@@ -1869,7 +1885,7 @@ function stableIdentitySnapshot(graph) {
         ...graph.frameUploads,
     ]
 
-    return objects.map(object => object.id).sort()
+    return [ ...new Set(objects.map(object => object.id)) ].sort()
 }
 
 function assertStableIdentities(graph, baseline) {
@@ -1917,6 +1933,7 @@ function publishFrameFacts(runtime, submittedFrames, observedFrames, resizeGener
     canvas.dataset.diagnosticEvidenceByteCapacity = String(diagnostics.recorder.evidenceByteCapacity)
     canvas.dataset.diagnosticOperations = String(diagnostics.recorder.retainedOperationCount)
     canvas.dataset.diagnosticIncidents = String(diagnostics.recorder.retainedIncidentCount)
+    canvas.dataset.diagnosticEvidenceBytes = String(diagnostics.recorder.retainedEvidenceBytes)
     canvas.dataset.uncapturedErrors = String(diagnostics.aggregates.uncapturedErrors)
     canvas.dataset.deviceLosses = String(diagnostics.aggregates.deviceLosses)
 }
