@@ -36,12 +36,16 @@ export async function createDemLayer({
     size,
     shaders,
     failureProof = defaultFailureProof,
+    provenanceVerifier = verifyFrameProvenance,
 }) {
 
     if (!(runtime instanceof ScratchRuntime)) throw new TypeError('DEM Layer requires ScratchRuntime')
     assertSize(size)
     assertDemImage(demImage)
     assertShaders(shaders)
+    if (typeof provenanceVerifier !== 'function') {
+        throw new TypeError('DEM provenance verifier must be a function')
+    }
 
     const codecs = createCodecs()
     const geometry = createTerrainGeometry()
@@ -86,7 +90,8 @@ export async function createDemLayer({
     }
     const state = createState(size)
     const stableIdentities = Object.freeze(stableIdentitySnapshot(graph))
-    const stableIdentityHash = hashStrings(stableIdentities)
+    const stableIdentityFacts = identityFactSnapshot(graph)
+    const stableIdentityHash = stableIdentityFacts.hash
     const persistentBaseline = persistentFactSnapshot(runtime)
     let initialization
 
@@ -116,6 +121,8 @@ export async function createDemLayer({
 
         if (!state.initialized) throw new Error('DEM graph must be initialized before rendering')
         assertCamera(camera)
+        assertSameIdentities(stableIdentities, stableIdentitySnapshot(graph), 'frame')
+        assertPersistentCounts(persistentBaseline, persistentFactSnapshot(runtime), 'frame')
         const selection = selectTerrainNodes({
             cameraPos: camera.cameraPos,
             zoomLevel: camera.zoom,
@@ -134,7 +141,17 @@ export async function createDemLayer({
             .render(passes.lodMap, [ commands.drawLodMap ])
             .render(passes.terrain, [ commands.drawTerrain ])
             .submit()
-        const provenance = verifyFrameProvenance(submitted, graph)
+        const nativeObservation = observeSubmittedWork(submitted)
+        let provenance = Object.freeze([])
+        let provenanceFailure
+        try {
+            provenance = provenanceVerifier(submitted, graph)
+        } catch (error) {
+            provenanceFailure = error
+        }
+        const observation = provenanceFailure === undefined
+            ? nativeObservation
+            : nativeObservation.then(() => { throw provenanceFailure })
 
         state.frame++
         state.selection = selection
@@ -143,7 +160,7 @@ export async function createDemLayer({
 
         return Object.freeze({
             submitted,
-            observation: observeSubmittedWork(submitted),
+            observation,
             provenance,
             selection,
         })
@@ -185,6 +202,8 @@ export async function createDemLayer({
         resize,
         stableIdentities,
         stableIdentityHash,
+        stableIdentityFacts,
+        currentIdentityFacts: () => identityFactSnapshot(graph),
         persistentFacts: () => persistentFactSnapshot(runtime),
         contractFacts: () => graphContractSnapshot(graph),
         state: () => stateSnapshot(state),
@@ -727,21 +746,50 @@ function verifyFrameProvenance(submitted, graph) {
 
 function stableIdentitySnapshot(graph) {
 
-    const objects = [
-        ...Object.values(graph.uniforms).flatMap(value => [ value.buffer, value.upload ]),
-        ...Object.values(graph.buffers).flatMap(value => [ value.buffer, value.upload ]),
-        graph.textures.dem,
-        graph.textures.lodMap,
-        graph.textures.depth,
-        graph.textures.demUpload,
-        ...Object.values(graph.layouts),
-        ...Object.values(graph.bindSets),
-        ...Object.values(graph.programs),
-        ...Object.values(graph.pipelines),
-        ...Object.values(graph.passes),
-        ...Object.values(graph.commands),
-    ]
+    const objects = Object.values(identityObjectsByKind(graph)).flat()
     return [ ...new Set(objects.map(object => object.id)) ].sort()
+}
+
+function identityFactSnapshot(graph) {
+
+    const objects = identityObjectsByKind(graph)
+    const identities = stableIdentitySnapshot(graph)
+    return Object.freeze({
+        hash: hashStrings(identities),
+        count: identities.length,
+        resources: objects.resources.length,
+        uploads: objects.uploads.length,
+        bindLayouts: objects.bindLayouts.length,
+        bindSets: objects.bindSets.length,
+        programs: objects.programs.length,
+        pipelines: objects.pipelines.length,
+        passes: objects.passes.length,
+        commands: objects.commands.length,
+    })
+}
+
+function identityObjectsByKind(graph) {
+
+    return {
+        resources: [
+            ...Object.values(graph.uniforms).map(value => value.buffer),
+            ...Object.values(graph.buffers).map(value => value.buffer),
+            graph.textures.dem,
+            graph.textures.lodMap,
+            graph.textures.depth,
+        ],
+        uploads: [
+            ...Object.values(graph.uniforms).map(value => value.upload),
+            ...Object.values(graph.buffers).map(value => value.upload),
+            graph.textures.demUpload,
+        ],
+        bindLayouts: Object.values(graph.layouts),
+        bindSets: Object.values(graph.bindSets),
+        programs: Object.values(graph.programs),
+        pipelines: Object.values(graph.pipelines),
+        passes: Object.values(graph.passes),
+        commands: Object.values(graph.commands),
+    }
 }
 
 function persistentFactSnapshot(runtime) {

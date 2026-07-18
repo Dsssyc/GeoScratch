@@ -49,11 +49,11 @@ current-contract change is enumerated.
 | Fixed LoD map 512 by 256 | Yes | Legacy Texture | DEM TextureResource | Preserved | `LOD_MAP_SIZE` and `rgba8unorm` target | Graph contract and render proof | Fixed legacy resolution retained |
 | DEM texture | Yes | Worker-backed image loader | Page-owned ImageBitmap then graph texture/upload | Preserved | PNG payload SHA-256 `aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1` | Initialization upload observed before close | No mip chain added |
 | `lodMapShader` | Yes | Library terrain shader module | `shaders/lod-map.wgsl` | Preserved with correction | Reversing two `var<storage, read>` additions yields legacy SHA-256 `ba2a35...40bdc` | Pipeline and pass execute | Read-only access spelling is the only diff |
-| `terrainMeshShader` | Yes | Library terrain shader module | `shaders/terrain-mesh.wgsl` | Preserved with correction | Reversing four `var<storage, read>` additions yields legacy SHA-256 `7373bc...29352` | Terrain pixels nonblank/change | Read-only access spelling is the only diff |
+| `terrainMeshShader` active path | Yes | Library terrain shader module | `shaders/terrain-mesh.wgsl` | Preserved with enumerated correction | Reversing four `var<storage, read>` additions after removing the unreachable palette/color-map/comment paths yields canonical active SHA-256 `248ae79a...34b46` | Terrain pixels nonblank/change | Active vertex elevation, LoD stitching, depth, and grayscale fragment behavior are unchanged |
 | `lastShader` | No | Export-only dead accumulation | None | Removed | No terrain import or pass referenced it | Not applicable | Hello GAW owns a different example-local shader with the same generic name |
 | `terrainMeshLineShader` and line pipeline | No | `LocalTerrain`, gated by constant `asLine = 0` | None | Removed | No setter/control changed `asLine`; reachable getter selected mesh pipeline | Proof exercises only reachable mesh path | Line visualization is not preserved |
 | Border image | No | Image loader only | None | Removed | Loaded but absent from every BindSet | Not applicable | None |
-| Palette image and sampler path | No | Bound texture/sampler | None | Removed | All palette sampling expressions were comments; active fragment uses inline grayscale | Active terrain output matches reachable shader | Palette styling would require a future application feature |
+| Palette image, sampler/texture declarations, uncalled `colorMap`, and commented palette/debug path | No | Bound image/sampler plus dead WGSL accumulation | None | Removed | Active fragment returns inline grayscale; current shader contains no `lSampler`, `palette`, or `colorMap` token | Active terrain output matches the reachable shader | Palette styling would require a future application feature |
 | `LocalTerrain.d.ts` and public export | No independent consumer | Package compatibility surface | None | Removed | Repository-wide consumer scan found only old DEM and export | Package/type gates | This is a 0.x clean cut without alias |
 | `shared/scratchMap.js` after DEM migration | No remaining consumer | Shared legacy example helper | None | Removed | Flow and DEM each own current map hosts | Both headed map proofs | Map helpers are intentionally example-local |
 
@@ -90,7 +90,9 @@ The graph contains:
 - two persistent PassSpecs;
 - eleven persistent UploadCommands;
 - two persistent indirect DrawCommands;
-- 42 stable Scratch object identities in the graph snapshot.
+- 42 stable Scratch object identities, recomputed as 13 resources, 11 uploads, five
+  BindLayouts, five BindSets, two Programs, two pipelines, two PassSpecs, and two
+  commands whenever proof facts are published.
 
 Camera changes mutate only codec byte arrays, fixed-capacity node arrays, and the two
 indirect records. Resize replaces Surface/depth allocation state while all 42 graph
@@ -131,8 +133,10 @@ Terminal order is:
 5. dispose ScratchRuntime.
 
 Unit tests prove shared disposal Promise identity, one cleanup invocation, late runtime
-release, exact normal ordering, and primary failure preservation when map cleanup
-also fails.
+and image release, tracked graph-creation/resize settlement before owner release, exact
+normal ordering, primary failure de-duplication, and primary failure preservation when
+map cleanup also fails. A forced provenance mismatch proves that already-issued native
+work is observed before the application error is surfaced.
 
 Exactly two proof faults exist:
 
@@ -155,7 +159,7 @@ The managed normal proof recorded:
 | Selected nodes | 24 | 56 | 56 |
 | Level range | 9..9 | 9..10 | 9..10 |
 | Observed frame | 1 | 2 | 14 |
-| Stable Scratch identities | 42 | same 42 | same 42 |
+| Recomputed Scratch identities | 42 | same 42 and category counts | same 42 and category counts |
 | Pixel SHA-256 | `9fcb78476a1dddfa69fe38777a68e38379f6e3b283612b6f8107ead7b1585184` | `49fa9ffe10c5807a51f5b7ae99a6d80016628abf5c8d8d9acfaf6161c98ecc70` | `fde008dfadeb2a9b7ffac7d332313339a57b9a7c9d560b72459b724f68e29abc` |
 | Foreground pixels outside attribution | 110,767 | 152,186 | 115,821 |
 
@@ -178,8 +182,10 @@ no runtime, and no image; it retained `DEM_LAYER_INJECTED_FAILURE` and released 
 pagehide listener then map. `invalid-terrain-pipeline-wgsl` acquired one map, runtime,
 and image; it retained `SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES`, localized one
 render pipeline and Program, and recorded support-object, shader-compilation, and
-pipeline-validation outcomes. Its one-operation capture retained 4,548 bytes in 7.8
-ms under the 65,536-byte/2,000-ms bound; exported runtime evidence was 60,656 bytes
+pipeline-validation outcomes. Each failure drained one tracked initialization task to
+zero before releasing owners. The shader failure's one-operation capture retained
+4,532 bytes in 8.9 ms under the 65,536-byte/2,000-ms bound; exported runtime evidence
+was 60,355 bytes
 under 524,288 bytes and retained no WGSL source. Image, map, and runtime cleanup was
 ordered and complete.
 

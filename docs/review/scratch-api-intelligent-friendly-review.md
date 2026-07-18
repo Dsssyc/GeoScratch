@@ -268,7 +268,9 @@ The DEM Layer clean cut is a closer rendering-business test than a synthetic API
 probe: MapLibre camera state drives CPU terrain traversal, six changing GPU inputs,
 two dependent render passes, and native indirect draws. The implementation keeps 42
 Scratch identities stable across camera changes and Surface resize; a frame creates
-only a `SubmissionBuilder` and bounded observation bookkeeping.
+only a `SubmissionBuilder` and bounded observation bookkeeping. Browser facts recompute
+the complete 13-resource/11-upload/layout/BindSet/Program/pipeline/pass/command identity
+inventory instead of comparing a construction-time hash to itself.
 
 The following current contracts materially reduced ambiguity for the implementation
 and for an Agent reviewing it:
@@ -298,14 +300,18 @@ The exercise also identifies responsibilities that correctly remain above Scratc
 The CPU LoD selector owns terrain bounds, subdivision policy, the 5,000-node cap, and
 serializable selection facts. The map host owns camera interpretation and the normal
 basemap. The page lifecycle owns decoded-image transfer, coalesced render scheduling,
-listener removal, late async settlement, and cleanup order. Visual parity still
-requires a headed browser and pixel evidence; Scratch's logical provenance cannot
-decide whether an application chose the right terrain policy or camera matrix.
+listener removal, late async settlement, and cleanup order. It tracks the finite page
+initialization and each full render/resize task, and registers issued native work before
+provenance validation may fail. Visual parity still requires a headed browser and pixel
+evidence; Scratch's logical provenance cannot decide whether an application chose the
+right terrain policy or camera matrix.
 
 The remaining friction is explicit rather than hidden. The application still needs
 substantial proof wiring to publish compact graph, selection, lifecycle, and pixel
 facts. WGSL storage bindings required six mechanical read-only access corrections
-before native validation accepted the preserved shaders. Neither fact warrants a
+before native validation accepted the preserved shaders; the migration also had to
+delete unreachable palette declarations, an uncalled color map, and commented styling
+paths rather than carrying them forward as false parity. Neither fact warrants a
 DEM-specific core abstraction, an automatic render graph, a generic lifecycle stack,
 or CPU-dynamic command closures. The useful result is that Scratch exposes enough
 stable facts for the application to prove its own policy and ownership decisions.

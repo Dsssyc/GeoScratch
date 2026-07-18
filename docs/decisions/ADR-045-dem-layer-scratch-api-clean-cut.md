@@ -89,22 +89,28 @@ the `depthTest` line commented out.
 
 The existing DEM PNG is decoded from its data URL without payload change and becomes
 `examples/demLayer/assets/dem.png`. The active LoD-map and terrain shaders become
-example-local WGSL. Their only source change is adding explicit `read` access to six
-storage declarations so the shader contract matches read-only BindLayouts.
+example-local WGSL. Six storage declarations gain explicit `read` access so the shader
+contract matches read-only BindLayouts. The unreachable palette sampler/texture
+declarations, uncalled color-map function, and commented palette/debug fragment paths
+are removed from the terrain shader; they never contributed to reachable output.
 
 The following accumulated paths are unreachable and removed:
 
 - `lastShader`, which had no terrain consumer;
 - line rendering, because `asLine` was always zero and the example exposed no switch;
 - the border image, which was loaded but never bound;
-- the palette image and sampler path, whose only shader expressions were comments.
+- the palette image, sampler/texture declarations, uncalled color-map helper, and
+  commented palette/debug fragment paths.
 
 The page creates its lifecycle authority and registers pagehide cleanup before the
-first acquisition. Cleanup stops scheduling and detaches listeners, settles already
-issued nativeOutcome/done observations, closes any still-owned decoded image, removes
-MapLibre, and disposes ScratchRuntime. Concurrent dispose calls share one Promise,
-late runtime or image acquisition is released before it rejects, all actions run at
-most once, and cleanup failures do not replace the primary failure.
+first acquisition. The finite initialization Promise and every complete asynchronous
+render/resize task are tracked; an issued submission observation is registered before
+application provenance validation can fail. Cleanup stops scheduling and detaches
+listeners, settles those tasks and nativeOutcome/done observations, closes any
+still-owned decoded image, removes MapLibre, and disposes ScratchRuntime. Concurrent
+dispose calls share one Promise, late runtime or image acquisition is released before
+it rejects, all actions run at most once, and cleanup failures do not replace or
+duplicate the primary failure.
 
 Normal diagnostics retain finite summaries. Deterministic proof mode uses a local
 MapLibre background rather than CARTO tiles. Exactly two initialization faults are

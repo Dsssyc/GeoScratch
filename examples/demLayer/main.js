@@ -45,7 +45,11 @@ pageLifetime.deferStop({
 })
 
 setStatus('loading')
-void main(pageLifetime, failureProof).catch(error => {
+const pageInitialization = pageLifetime.track(
+    Promise.resolve().then(() => main(pageLifetime, failureProof)),
+    'dem-page-initialization'
+)
+void pageInitialization.catch(error => {
     if (pageLifetime.isStopError(error)) return
     void failPage(error)
 })
@@ -192,12 +196,22 @@ async function main(lifetime, proof) {
     publishGraphFacts(runtime, graph)
     publish()
 
-    async function render() {
+    function render() {
 
         animationFrame = undefined
         frameWorkCompleted++
         if (!active || rendering) return
         rendering = true
+        const renderTask = Promise.resolve().then(renderOnce)
+        void lifetime.track(renderTask, `dem-render-task-${frameWorkCompleted}`).catch(error => {
+            if (lifetime.isStopError(error)) return
+            active = false
+            void failPage(error)
+        })
+    }
+
+    async function renderOnce() {
+
         renderRequested = false
 
         try {
@@ -217,10 +231,6 @@ async function main(lifetime, proof) {
             observedFrames = Math.max(observedFrames, frameNumber)
             publish()
             if (active) setStatus('ready')
-        } catch (error) {
-            active = false
-            await failPage(error)
-            return
         } finally {
             rendering = false
         }
@@ -275,7 +285,10 @@ function publishFrameFacts({
     canvas.dataset.stageActivity = JSON.stringify(state.stageActivity)
     canvas.dataset.provenance = JSON.stringify(latestProvenance)
     canvas.dataset.persistentFacts = JSON.stringify(graph.persistentFacts())
-    canvas.dataset.currentStableIdentityHash = graph.stableIdentityHash
+    const identityFacts = graph.currentIdentityFacts()
+    canvas.dataset.currentStableIdentityHash = identityFacts.hash
+    canvas.dataset.currentStableIdentityCount = String(identityFacts.count)
+    canvas.dataset.currentIdentityFacts = JSON.stringify(identityFacts)
     canvas.dataset.staleBindSetPreparationCount = String(state.staleBindSetPreparationCount)
     canvas.dataset.lastResizeFacts = JSON.stringify(state.lastResizeFacts ?? null)
     canvas.dataset.pendingObservationCount = String(lifecycle.pendingObservationCount)

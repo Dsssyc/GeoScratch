@@ -501,7 +501,8 @@ function validateNormalProof(proof, failures) {
 
     for (const facts of [ initial, moved, resized, drained ]) {
         if (facts.currentStableIdentityHash !== initial.currentStableIdentityHash ||
-            facts.stableIdentityCount !== initial.stableIdentityCount) {
+            facts.currentStableIdentityCount !== initial.currentStableIdentityCount ||
+            facts.currentIdentityFacts !== initial.currentIdentityFacts) {
             failures.push('persistent DEM graph identity changed')
             break
         }
@@ -589,6 +590,28 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
     if (facts.diagnosticIncidents !== '0') failures.push(`${label} retained a diagnostic incident`)
     if (facts.uncapturedErrors !== '0') failures.push(`${label} reported an uncaptured GPU error`)
     if (facts.deviceLosses !== '0') failures.push(`${label} reported device loss`)
+
+    const identity = parseJson(facts.currentIdentityFacts, `${label} identity facts`, failures)
+    const expectedIdentityCounts = {
+        count: 42,
+        resources: 13,
+        uploads: 11,
+        bindLayouts: 5,
+        bindSets: 5,
+        programs: 2,
+        pipelines: 2,
+        passes: 2,
+        commands: 2,
+    }
+    for (const [ name, expected ] of Object.entries(expectedIdentityCounts)) {
+        if (identity?.[name] !== expected) {
+            failures.push(`${label} current identity ${name} was not ${expected}`)
+        }
+    }
+    if (identity?.hash !== facts.currentStableIdentityHash ||
+        String(identity?.count) !== facts.currentStableIdentityCount) {
+        failures.push(`${label} current identity hash/count publication was inconsistent`)
+    }
 
     const stageActivity = parseJson(facts.stageActivity, `${label} stage activity`, failures)
     for (const name of expectedStageOrder) {
@@ -787,8 +810,9 @@ function summarizeFacts(facts, selection) {
         observedFrames: Number(facts.observedFrames),
         visibleNodeCount: Number(facts.visibleNodeCount),
         levelRange: selection?.levelRange,
-        stableIdentityCount: Number(facts.stableIdentityCount),
+        stableIdentityCount: Number(facts.currentStableIdentityCount),
         stableIdentityHash: facts.currentStableIdentityHash,
+        identityFacts: parseJsonOrUndefined(facts.currentIdentityFacts),
         provenance: parseJsonOrUndefined(facts.provenance),
         persistentFacts: parseJsonOrUndefined(facts.persistentFacts),
         diagnosticIncidents: Number(facts.diagnosticIncidents),

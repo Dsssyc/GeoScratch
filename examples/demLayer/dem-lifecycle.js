@@ -179,7 +179,11 @@ export function createDemLifecycle() {
         const settlements = await Promise.all(entries.map(entry => entry.settlement))
         for (let index = 0; index < settlements.length; index++) {
             const settlement = settlements[index]
-            if (settlement.status !== 'rejected' || isStopError(settlement.error)) continue
+            if (
+                settlement.status !== 'rejected' ||
+                isStopError(settlement.error) ||
+                settlement.error === primaryFailure
+            ) continue
             cleanupFailures.push(Object.freeze({
                 phase: 'settle',
                 label: entries[index].label,

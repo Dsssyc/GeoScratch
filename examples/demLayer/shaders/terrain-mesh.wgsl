@@ -46,10 +46,8 @@ struct TileUniformBlock {
 @group(1) @binding(3) var<storage, read> box: array<f32>;
 
 // Texture Bindings
-@group(2) @binding(0) var lSampler: sampler;
 @group(2) @binding(1) var demTexture: texture_2d<f32>;
 @group(2) @binding(2) var lodMap: texture_2d<f32>;
-@group(2) @binding(3) var palette: texture_2d<f32>;
 
 const PI = 3.141592653;
 
@@ -143,25 +141,6 @@ fn altitude2Mercator(lat: f32, alt: f32) -> f32 {
     const earthRadius = 6371008.8;
     const earthCircumference = 2.0 * PI * earthRadius;
     return alt / earthCircumference * cos(lat * PI / 180.0);
-}
-
-fn colorMap(index: u32) -> vec3f {
-
-    let palette = array<vec3f, 11> (
-        vec3f(158.0, 1.0, 66.0),
-        vec3f(213.0, 62.0, 79.0),
-        vec3f(244.0, 109.0, 67.0),
-        vec3f(253.0, 174.0, 97.0),
-        vec3f(254.0, 224.0, 139.0),
-        vec3f(255.0, 255.0, 191.0),
-        vec3f(230.0, 245.0, 152.0),
-        vec3f(171.0, 221.0, 164.0),
-        vec3f(102.0, 194.0, 165.0),
-        vec3f(50.0, 136.0, 189.0),
-        vec3f(94.0, 79.0, 162.0),
-    );
-
-    return palette[index] / 255.0;
 }
 
 fn positionCS(coord: vec2f, z: f32) -> vec4f {
@@ -261,15 +240,5 @@ fn vMain(vsInput: VertexInput) -> VertexOutput {
 @fragment
 fn fMain(fsInput: VertexOutput) -> @location(0) vec4f {
     
-    // let level = clamp(14 - u32(fsInput.level), 0, 10);
-    // let dim = vec2f(textureDimensions(lodMap, 0).xy);
-    // let texcoords = fsInput.uv * dim;
-    // let levelColor = textureLoad(lodMap, vec2i(texcoords.xy), 0).rgb;
-
-    // let paletteLength = f32(textureDimensions(palette).x);
-    // let elevationLevel = fract(paletteLength * fsInput.depth) / paletteLength;
-    // let paletteColor = textureSample(palette, lSampler, vec2f(elevationLevel + 0.2, 0.5));
-    
     return vec4f(1.0 - fsInput.depth) * 0.5;
-    // return vec4f(vec3f(0.0, 0.5, 0.5) * fsInput.depth, 1.0);
 }

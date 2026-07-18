@@ -165,7 +165,9 @@ describe('DEM Layer clean cut', () => {
         const mainSource = read('examples', 'demLayer', 'main.js')
         const lifecycleCreation = mainSource.indexOf('const pageLifetime = createDemLifecycle()')
         const pageHideRegistration = mainSource.indexOf("window.addEventListener('pagehide'")
-        const initializationStart = mainSource.indexOf('void main(pageLifetime, failureProof)')
+        const initializationStart = mainSource.indexOf(
+            'Promise.resolve().then(() => main(pageLifetime, failureProof))'
+        )
         const faultNames = [ ...mainSource.matchAll(/'((?:after-map-acquisition|invalid-terrain-pipeline-wgsl))'/g) ]
             .map(match => match[1])
 
@@ -178,6 +180,8 @@ describe('DEM Layer clean cut', () => {
         expect(initializationStart).to.be.greaterThan(pageHideRegistration)
         expect(mainSource).to.include('FAILURE_CAPTURE_BOUNDS')
         expect(mainSource).to.include('retainsWgslSource')
+        expect(mainSource).to.include("'dem-page-initialization'")
+        expect(mainSource).to.include('`dem-render-task-${frameWorkCompleted}`')
 
         for (const documentation of [
             'docs/decisions/ADR-045-dem-layer-scratch-api-clean-cut.md',
@@ -310,6 +314,68 @@ describe('DEM Layer clean cut', () => {
         })
     })
 
+    it('settles tracked initialization and resize work before releasing page owners', async() => {
+
+        const actions = []
+        const lifecycle = createDemLifecycle()
+        let resolveInitialization
+        let resolveResize
+        const initialization = new Promise(resolve => { resolveInitialization = resolve })
+        const resize = new Promise(resolve => { resolveResize = resolve })
+        lifecycle.track(
+            initialization.then(() => { actions.push('initialization') }),
+            'dem-page-initialization'
+        )
+        lifecycle.track(
+            resize.then(() => { actions.push('resize') }),
+            'dem-render-task-1'
+        )
+        lifecycle.ownBitmap('DEM', { close: () => { actions.push('bitmap') } })
+        lifecycle.ownMap({ remove: () => { actions.push('map') } })
+        lifecycle.ownRuntime({ dispose: () => { actions.push('runtime') } })
+
+        const disposal = lifecycle.dispose()
+        await Promise.resolve()
+        expect(actions).to.deep.equal([])
+        resolveInitialization()
+        await Promise.resolve()
+        expect(actions).to.deep.equal([ 'initialization' ])
+        resolveResize()
+        const report = await disposal
+
+        expect(actions).to.deep.equal([
+            'initialization',
+            'resize',
+            'bitmap',
+            'map',
+            'runtime',
+        ])
+        expect(report).to.include({
+            pendingObservationsBefore: 2,
+            pendingObservationsAfter: 0,
+            cleanupInvocationCount: 1,
+        })
+        expect(report.cleanupFailures).to.deep.equal([])
+    })
+
+    it('does not duplicate a tracked primary failure as a cleanup failure', async() => {
+
+        const lifecycle = createDemLifecycle()
+        const primaryFailure = new Error('tracked initialization failed')
+        let rejectInitialization
+        const initialization = new Promise((resolve, reject) => {
+            rejectInitialization = reject
+        })
+        lifecycle.track(initialization, 'dem-page-initialization')
+
+        const disposal = lifecycle.dispose(primaryFailure)
+        rejectInitialization(primaryFailure)
+        const report = await disposal
+
+        expect(report.primaryFailure).to.equal(primaryFailure)
+        expect(report.cleanupFailures).to.deep.equal([])
+    })
+
     it('reports cleanup failures without replacing the primary failure', async() => {
 
         const lifecycle = createDemLifecycle()
@@ -328,7 +394,7 @@ describe('DEM Layer clean cut', () => {
         })
     })
 
-    it('preserves the DEM payload and only applies explicit read-only WGSL corrections', () => {
+    it('preserves the DEM payload and enumerates every reachable WGSL correction', () => {
 
         const demBytes = fs.readFileSync(path.join(root, 'examples', 'demLayer', 'assets', 'dem.png'))
         const lodShader = read('examples', 'demLayer', 'shaders', 'lod-map.wgsl')
@@ -338,9 +404,56 @@ describe('DEM Layer clean cut', () => {
         expect(sha256(lodShader.replaceAll('var<storage, read>', 'var<storage>')))
             .to.equal('ba2a35ab1aac1d9cc08f30be3eaaf88fba856629859cc4ce316c626619540bdc')
         expect(sha256(terrainShader.replaceAll('var<storage, read>', 'var<storage>')))
-            .to.equal('7373bc13df2ed25f62db0fb104c3cd1f4d620409071bbfc971e41c2aa1d29352')
+            .to.equal('248ae79a861bba63981176927b598f8a9b37516b8732b6311168625c6ae34b46')
         expect(lodShader.match(/var<storage, read>/g)).to.have.length(2)
         expect(terrainShader.match(/var<storage, read>/g)).to.have.length(4)
+        expect(terrainShader).not.to.match(/\b(lSampler|palette|colorMap)\b/)
+    })
+
+    it('observes issued native work before surfacing a provenance failure', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const fakeCanvas = createFakeCanvas()
+        const surface = runtime.createSurface(fakeCanvas.canvas, {
+            label: 'DEM provenance-failure surface',
+            format: 'rgba8unorm',
+            alphaMode: 'premultiplied',
+            size: { width: 320, height: 180 },
+        })
+        const provenanceFailure = new Error('injected DEM provenance mismatch')
+        const graph = await createDemLayer({
+            runtime,
+            surface,
+            demImage: createFakeExternalImageSource('ImageBitmap', {
+                width: 1024,
+                height: 558,
+                close() {},
+            }),
+            size: { width: 320, height: 180 },
+            shaders: {
+                lodMap: read('examples', 'demLayer', 'shaders', 'lod-map.wgsl'),
+                terrain: read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl'),
+            },
+            provenanceVerifier() {
+                throw provenanceFailure
+            },
+        })
+        await graph.initialize().observation
+
+        const frame = graph.renderFrame(cameraState(9, [ 120.980697, 31.684162 ], [ 320, 180 ]))
+        expect(frame.provenance).to.deep.equal([])
+        let observedFailure
+        try {
+            await frame.observation
+        } catch (error) {
+            observedFailure = error
+        }
+
+        expect(observedFailure).to.equal(provenanceFailure)
+        expect(fake.calls.queueSubmissions).to.have.length(1)
+        expect(fake.calls.submittedWorkDoneRegistrations).to.have.length(2)
+        await runtime.dispose()
     })
 
     it('keeps one persistent DEM graph across camera changes and resize', async() => {
@@ -371,6 +484,7 @@ describe('DEM Layer clean cut', () => {
         })
         const initialIdentityHash = graph.stableIdentityHash
         const initialIdentities = graph.stableIdentities
+        const initialIdentityFacts = graph.stableIdentityFacts
         const initialPersistentFacts = graph.persistentFacts()
         const initialized = graph.initialize()
         await initialized.observation
@@ -395,6 +509,20 @@ describe('DEM Layer clean cut', () => {
         ))).to.equal(true)
         expect(graph.stableIdentities).to.equal(initialIdentities)
         expect(graph.stableIdentityHash).to.equal(initialIdentityHash)
+        expect(graph.currentIdentityFacts()).to.deep.equal(initialIdentityFacts)
+        expect(graph.currentIdentityFacts()).not.to.equal(graph.currentIdentityFacts())
+        expect(initialIdentityFacts).to.deep.equal({
+            hash: initialIdentityHash,
+            count: 42,
+            resources: 13,
+            uploads: 11,
+            bindLayouts: 5,
+            bindSets: 5,
+            programs: 2,
+            pipelines: 2,
+            passes: 2,
+            commands: 2,
+        })
         expect(graph.persistentFacts()).to.deep.equal(initialPersistentFacts)
 
         const resizeFacts = await graph.resize({ width: 640, height: 360 })
@@ -405,6 +533,7 @@ describe('DEM Layer clean cut', () => {
         })
         expect(graph.stableIdentities).to.equal(initialIdentities)
         expect(graph.stableIdentityHash).to.equal(initialIdentityHash)
+        expect(graph.currentIdentityFacts()).to.deep.equal(initialIdentityFacts)
         const resizedPersistentFacts = graph.persistentFacts()
         expect(resizedPersistentFacts).to.deep.include({
             resources: initialPersistentFacts.resources,
