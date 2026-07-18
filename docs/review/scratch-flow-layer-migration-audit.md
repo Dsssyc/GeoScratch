@@ -123,15 +123,19 @@ drawing, and the selected history target to presentation.
 
 ## Streaming And Lifecycle Audit
 
-The lifecycle authority is created before `main()` and before the first initialization
-`await`. The Worker is acquired and owned first. Worker listeners, MapLibre listeners,
-pagehide handling, and frame scheduling register explicit stop actions. Each issued
+The lifecycle authority and its pagehide listener are created before `main()` and
+before the first initialization `await`. The Worker and MapLibre map transfer ownership
+synchronously. Runtime acquisition is a tracked observation: if disposal starts first,
+the late runtime is disposed before acquisition settles. The authority abort signal
+interrupts map readiness and station fetches, while new field requests fail before a
+Worker message or pending entry can be created. Worker listeners, MapLibre listeners,
+pagehide handling, and frame scheduling all register explicit stop actions. Each issued
 SubmittedWork observation registers before it is awaited.
 
 Terminal order is:
 
-1. detach pagehide, stop frame scheduling, detach camera listeners, and detach Worker
-   listeners in reverse registration order;
+1. stop frame scheduling, detach camera listeners, detach Worker listeners, and detach
+   pagehide in reverse registration order;
 2. settle observations already issued;
 3. terminate the Worker;
 4. remove the page-owned MapLibre map;
@@ -152,7 +156,7 @@ Exactly two fault scenarios exist:
 
 | Scenario | Boundary and evidence | Cleanup proof |
 | --- | --- | --- |
-| `after-worker-acquisition` | One `FLOW_LAYER_INJECTED_FAILURE` immediately after Worker/listener ownership; no runtime evidence is fabricated. | Listener removal then Worker termination; zero pending observations and no retained action. |
+| `after-worker-acquisition` | One `FLOW_LAYER_INJECTED_FAILURE` immediately after Worker/listener ownership; no runtime evidence is fabricated. | Worker and pagehide listener removal, then Worker termination; zero pending observations and no retained action. |
 | `invalid-simulation-pipeline-wgsl` | In-memory module mutation immediately before simulation pipeline creation. One deep capture stops at the one-operation limit. Structured evidence identifies compute pipeline ID, Program ID, one module hash/range, compilation messages, and `SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`. | Listener, Worker, map, then runtime; original `SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES` remains primary. |
 
 The invalid-WGSL evidence contains hashes, ranges, redacted messages, and native labels,
@@ -165,7 +169,10 @@ The first complete run of `node tests/browser/scratch-flow-layer.mjs` on 2026-07
 reported `passed` in headed Chrome `150.0.7871.125` with an Apple Metal 3 adapter.
 
 - 660 submitted and 660 observed frames;
-- 2 completed Worker-fed field transitions;
+- 2 completed Worker-fed field transitions at the 300- and 600-frame boundaries, with
+  progress and field indices matching the 27-field cycle;
+- live graph facts reported the Voronoi MRT targets as `rg32float` velocity and
+  `r8unorm` mask attachments;
 - camera move, settle, and 20 reprojection frames;
 - one explicit resize generation;
 - stable 77-object identity set across movement, field changes, and resize;

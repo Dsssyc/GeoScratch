@@ -61,12 +61,16 @@ prepares only BindSets whose allocation-sensitive view facts became stale. Conte
 changes alone do not prepare or rebuild bindings.
 
 Flow creates one example-local lifecycle authority before its first initialization
-`await`. Ownership transfers immediately for the Worker, MapLibre map, and Scratch
-runtime. Disposal stops scheduling and listeners, settles issued SubmittedWork
-observations, terminates the Worker, removes the page-owned map, and finally disposes
-the runtime. Every disposer receives the same Promise, each action runs at most once,
-secondary cleanup failures do not stop later cleanup, and the original failure stays
-primary.
+`await`. The pagehide listener is registered under that authority before initialization
+starts. Ownership transfers immediately for the Worker and MapLibre map; asynchronous
+runtime acquisition is tracked until ownership transfers. Disposal synchronously
+signals cancellation, so map readiness and station loading abort, new field requests
+fail before posting to the Worker, and a runtime that arrives after shutdown starts is
+disposed before the acquisition settles. Cleanup then stops scheduling and listeners,
+settles issued work, terminates the Worker, removes the page-owned map, and finally
+disposes the runtime. Every disposer receives the same Promise, each action runs at
+most once, secondary cleanup failures do not stop later cleanup, and the original
+failure stays primary.
 
 MapLibre continues to own a separate WebGL canvas and its normal remote CARTO raster
 style. Scratch owns the transparent WebGPU overlay canvas. No device, resource, queue,

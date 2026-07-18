@@ -139,6 +139,23 @@ describe('Flow Layer Scratch clean cut', () => {
         expect(source).to.not.match(/OOM causality|physical VRAM|device-loss recovery/i)
     })
 
+    it('covers asynchronous initialization with the Flow lifecycle authority', () => {
+
+        const main = read('examples', 'flowLayer', 'main.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const pagehideRegistration = main.indexOf("window.addEventListener('pagehide'")
+        const firstInitializationAwait = main.indexOf('ScratchRuntime.create({')
+
+        expect(pagehideRegistration).to.be.greaterThan(-1)
+        expect(pagehideRegistration).to.be.lessThan(firstInitializationAwait)
+        expect(main).to.include('lifetime.acquireRuntime(ScratchRuntime.create({')
+        expect(main).to.include('waitForFlowMap(map, lifetime.signal)')
+        expect(main).to.include("lifetime.assertActive('request Flow field')")
+        expect(layer).to.include('createStationGeometry(settings.flowDomainMaxEdge, lifetime.signal)')
+        expect(layer).to.include('fetch(url, { signal })')
+        expect(layer).to.include("lifetime.assertActive('continue Flow graph initialization')")
+    })
+
     it('keeps six Flow shaders byte-identical and fixes the documented arrow stride defect', () => {
 
         for (const [ name, expected ] of Object.entries(shaderHashes)) {
@@ -173,5 +190,11 @@ describe('Flow Layer Scratch clean cut', () => {
         expect(browser).to.include('stableIdentityHash')
         expect(browser).to.include('pendingObservationCount')
         expect(browser).to.include('serverClosed')
+        expect(browser).to.include('const expectedFramesPerField = 300')
+        expect(browser).to.include('const expectedFieldCount = 27')
+        expect(browser).to.include('validateTemporalFieldFacts')
+        expect(browser).to.include('validateMrtFacts')
+        expect(browser).to.include("velocityFormat !== 'rg32float'")
+        expect(browser).to.include("maskFormat !== 'r8unorm'")
     })
 })

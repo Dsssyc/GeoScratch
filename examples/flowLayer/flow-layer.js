@@ -53,20 +53,27 @@ export async function createFlowLayer({
     if (!(runtime instanceof ScratchRuntime)) throw new TypeError('Flow Layer requires ScratchRuntime')
     const settings = normalizeOptions(options)
     const codecs = createCodecs()
-    const stationGeometry = await createStationGeometry(settings.flowDomainMaxEdge)
+    const stationGeometry = await createStationGeometry(settings.flowDomainMaxEdge, lifetime.signal)
+    lifetime.assertActive('continue Flow graph initialization')
     const [ firstField, secondField ] = await Promise.all([ loadField(0), loadField(1) ])
+    lifetime.assertActive('continue Flow graph initialization')
     const fieldData = createFieldData(stationGeometry, firstField, secondField)
     const particleData = createParticleData(random)
     const uniforms = await createUniformResources(runtime, codecs, settings, size)
+    lifetime.assertActive('continue Flow graph initialization')
     const buffers = await createBufferResources(
         runtime,
         stationGeometry,
         fieldData,
         particleData
     )
+    lifetime.assertActive('continue Flow graph initialization')
     const textures = await createTextures(runtime, size)
+    lifetime.assertActive('continue Flow graph initialization')
     const layouts = await createBindLayouts(runtime, codecs)
+    lifetime.assertActive('continue Flow graph initialization')
     const bindSets = await createBindSets(runtime, layouts, uniforms, buffers, textures)
+    lifetime.assertActive('continue Flow graph initialization')
     const programs = createPrograms(runtime, codecs, failureProof)
     const pipelines = await createPipelines(
         runtime,
@@ -76,6 +83,7 @@ export async function createFlowLayer({
         programs,
         failureProof
     )
+    lifetime.assertActive('continue Flow graph initialization')
     const passes = createPasses(runtime, surface, textures)
     const commands = createCommands(
         runtime,
@@ -108,6 +116,7 @@ export async function createFlowLayer({
     const stableIdentities = stableIdentitySnapshot(graph)
 
     await lifetime.track(initializeGraph(graph), 'flow-initial-submission')
+    lifetime.assertActive('continue Flow graph initialization')
     state.persistentFacts = persistentFactSnapshot(runtime)
     queueNextField(state, stationGeometry, loadField)
 
@@ -119,6 +128,7 @@ export async function createFlowLayer({
         stableIdentities: Object.freeze([ ...stableIdentities ]),
         stableIdentityHash: hashStrings(stableIdentities),
         persistentFacts: () => persistentFactSnapshot(runtime),
+        contractFacts: () => graphContractSnapshot(graph),
         state: () => flowStateSnapshot(state),
         settings,
     })
@@ -264,9 +274,9 @@ async function createUniform(runtime, label, codec, values) {
     }
 }
 
-async function createStationGeometry(maxEdge) {
+async function createStationGeometry(maxEdge, signal) {
 
-    const stationCoords = new Float32Array(await fetchArrayBuffer('/json/examples/flow/station.bin'))
+    const stationCoords = new Float32Array(await fetchArrayBuffer('/json/examples/flow/station.bin', signal))
     const meshes = new Delaunay(stationCoords)
     const vertices = []
     const domainSupport = []
@@ -1271,6 +1281,19 @@ function persistentFactSnapshot(runtime) {
     })
 }
 
+function graphContractSnapshot(graph) {
+
+    return Object.freeze({
+        framesPerField: FRAMES_PER_FIELD,
+        fieldCount: FIELD_COUNT,
+        velocityFormat: graph.textures.flow.format,
+        maskFormat: graph.textures.mask.format,
+        voronoiTargetFormats: Object.freeze(graph.passes.voronoi.color.map(
+            attachment => attachment.target.texture.format
+        )),
+    })
+}
+
 function flowStateSnapshot(state) {
 
     return Object.freeze({
@@ -1337,9 +1360,9 @@ function calculateStationEdgeLength(points, a, b) {
     )
 }
 
-async function fetchArrayBuffer(url) {
+async function fetchArrayBuffer(url, signal) {
 
-    const response = await fetch(url)
+    const response = await fetch(url, { signal })
     if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`)
     return response.arrayBuffer()
 }

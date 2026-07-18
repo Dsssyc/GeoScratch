@@ -80,4 +80,37 @@ describe('Flow Layer lifecycle authority', () => {
             status: 'fulfilled',
         })
     })
+
+    it('aborts immediately and releases a runtime acquired after disposal starts', async() => {
+
+        const { createFlowLifecycle } = await import(moduleUrl)
+        let resolveRuntime
+        let releaseCount = 0
+        const runtimeAcquisition = new Promise(resolve => { resolveRuntime = resolve })
+        const lifecycle = createFlowLifecycle()
+        const ownedRuntime = lifecycle.acquireRuntime(runtimeAcquisition)
+
+        const disposal = lifecycle.dispose()
+        expect(lifecycle.signal.aborted).to.equal(true)
+        resolveRuntime({ dispose: () => { releaseCount++ } })
+
+        let acquisitionFailure
+        try {
+            await ownedRuntime
+        } catch (error) {
+            acquisitionFailure = error
+        }
+        const report = await disposal
+
+        expect(lifecycle.isStopError(acquisitionFailure)).to.equal(true)
+        expect(releaseCount).to.equal(1)
+        expect(report.pendingObservationsBefore).to.equal(1)
+        expect(report.pendingObservationsAfter).to.equal(0)
+        expect(report.cleanupActions).to.deep.include({
+            phase: 'release',
+            label: 'late-scratch-runtime',
+            status: 'fulfilled',
+        })
+        expect(report.cleanupFailures).to.deep.equal([])
+    })
 })

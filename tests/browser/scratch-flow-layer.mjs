@@ -10,6 +10,8 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const proofFrames = positiveInteger(process.env.FLOW_LAYER_PROOF_FRAMES, 660)
+const expectedFramesPerField = 300
+const expectedFieldCount = 27
 const timeout = positiveInteger(process.env.FLOW_LAYER_BROWSER_TIMEOUT_MS, 120_000)
 const outputDirectory = resolve(
     process.env.FLOW_LAYER_BROWSER_OUTPUT ?? '/tmp/geoscratch-flow-layer-browser'
@@ -530,12 +532,18 @@ function validateNormalProof(proof, failures) {
         [ 'before interaction', before ],
         [ 'after motion', motion ],
         [ 'after resize', after ],
-    ]) validateFlowFacts(label, facts, failures)
+    ]) {
+        validateFlowFacts(label, facts, failures)
+        validateTemporalFieldFacts(label, facts, failures)
+        validateMrtFacts(label, facts, failures)
+    }
 
     if (Number(after.frames) < proofFrames || Number(after.observedFrames) < proofFrames) {
         failures.push(`normal proof did not observe at least ${proofFrames} frames`)
     }
-    if (Number(after.workerTransitions) < 1) failures.push('worker-fed field never transitioned')
+    if (Number(after.workerTransitions) < 2) {
+        failures.push('660-frame proof did not complete two worker-fed field transitions')
+    }
     if (after.workerFailures !== '0') failures.push('worker reported a field-load failure')
     if (Number(motion.cameraMoveCount) <= Number(before.cameraMoveCount)) {
         failures.push('camera movement was not observed')
@@ -580,10 +588,10 @@ function validateNormalProof(proof, failures) {
             failures.push('concurrent cleanup callers observed different reports')
         }
         validateCleanup(first, [
-            'pagehide-listener',
             'flow-frame-scheduler',
             'flow-camera-listeners',
             'flow-worker-listeners',
+            'pagehide-listener',
             'flow-worker',
             'maplibre-map',
             'scratch-runtime',
@@ -675,6 +683,49 @@ function validateFlowFacts(label, facts, failures) {
     }
 }
 
+function validateTemporalFieldFacts(label, facts, failures) {
+
+    const frames = Number(facts.frames)
+    if (!Number.isSafeInteger(frames) || frames < 1) {
+        failures.push(`${label} frame count was invalid for field scheduling`)
+        return
+    }
+    const expectedTransitions = Math.floor((frames - 1) / expectedFramesPerField)
+    const expectedProgress = (frames - 1) % expectedFramesPerField
+    const expectedFrom = expectedTransitions % expectedFieldCount
+    const expectedTo = (expectedFrom + 1) % expectedFieldCount
+    if (Number(facts.workerTransitions) !== expectedTransitions) {
+        failures.push(`${label} field transitions did not follow the 300-frame phase boundary`)
+    }
+    if (Number(facts.fieldProgress) !== expectedProgress) {
+        failures.push(`${label} field progress did not follow the 300-frame phase boundary`)
+    }
+    if (Number(facts.fromFieldIndex) !== expectedFrom || Number(facts.toFieldIndex) !== expectedTo) {
+        failures.push(`${label} field indices did not follow the 27-field cycle`)
+    }
+}
+
+function validateMrtFacts(label, facts, failures) {
+
+    const contract = parseJson(facts.graphContract, `${label} graph contract`, failures)
+    if (contract?.framesPerField !== expectedFramesPerField ||
+        contract?.fieldCount !== expectedFieldCount) {
+        failures.push(`${label} temporal field contract drifted`)
+    }
+    if (contract?.velocityFormat !== 'rg32float') {
+        failures.push(`${label} velocity target was not rg32float`)
+    }
+    if (contract?.maskFormat !== 'r8unorm') {
+        failures.push(`${label} mask target was not r8unorm`)
+    }
+    if (JSON.stringify(contract?.voronoiTargetFormats) !== JSON.stringify([
+        'rg32float',
+        'r8unorm',
+    ])) {
+        failures.push(`${label} Voronoi pass did not retain the velocity/mask MRT attachments`)
+    }
+}
+
 function validatePersistentCounts(before, after, failures) {
 
     const first = parseJson(before.persistentFacts, 'before persistent facts', failures)
@@ -717,7 +768,11 @@ function validateFailureProof(result, failures) {
         if (result.proof?.runtimeEvidence !== undefined || result.proof?.captureReport !== undefined) {
             failures.push(`${prefix} fabricated runtime evidence before runtime acquisition`)
         }
-        validateCleanup(result.proof, [ 'flow-worker-listeners', 'flow-worker' ], failures)
+        validateCleanup(result.proof, [
+            'flow-worker-listeners',
+            'pagehide-listener',
+            'flow-worker',
+        ], failures)
         return
     }
 
@@ -763,6 +818,7 @@ function validateFailureProof(result, failures) {
     }
     validateCleanup(proof, [
         'flow-worker-listeners',
+        'pagehide-listener',
         'flow-worker',
         'maplibre-map',
         'scratch-runtime',

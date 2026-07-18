@@ -1,5 +1,6 @@
 export function createFlowLifecycle() {
 
+    const abortController = new AbortController()
     const stopActions = []
     const pendingObservations = new Map()
     const cleanupActions = []
@@ -12,11 +13,26 @@ export function createFlowLifecycle() {
     let state = 'active'
     let disposal
     let primaryFailure
+    let stopError
     let cleanupInvocationCount = 0
+
+    function lifecycleStopError() {
+
+        if (stopError !== undefined) return stopError
+        stopError = new Error('Flow lifecycle disposal has started')
+        stopError.name = 'FlowLifecycleStoppedError'
+        stopError.code = 'FLOW_LIFECYCLE_STOPPED'
+        return stopError
+    }
+
+    function isStopError(error) {
+
+        return error?.code === 'FLOW_LIFECYCLE_STOPPED'
+    }
 
     function assertActive(action) {
 
-        if (state !== 'active') throw new Error(`Cannot ${action} after Flow disposal has started`)
+        if (state !== 'active') throw lifecycleStopError()
     }
 
     function own(kind, value) {
@@ -85,6 +101,19 @@ export function createFlowLifecycle() {
         return promise
     }
 
+    function acquireRuntime(acquisition) {
+
+        assertActive('acquire Scratch runtime')
+        const guarded = Promise.resolve(acquisition).then(async value => {
+            if (state !== 'active') {
+                await recordAction('release', 'late-scratch-runtime', () => value.dispose())
+                throw lifecycleStopError()
+            }
+            return own('runtime', value)
+        })
+        return track(guarded, 'scratch-runtime-acquisition')
+    }
+
     async function recordAction(phase, label, run) {
 
         try {
@@ -113,7 +142,7 @@ export function createFlowLifecycle() {
         const settlements = await Promise.all(entries.map(entry => entry.settlement))
         for (let index = 0; index < settlements.length; index++) {
             const settlement = settlements[index]
-            if (settlement.status !== 'rejected') continue
+            if (settlement.status !== 'rejected' || isStopError(settlement.error)) continue
             cleanupFailures.push(Object.freeze({
                 phase: 'settle',
                 label: entries[index].label,
@@ -169,6 +198,7 @@ export function createFlowLifecycle() {
         state = 'disposing'
         primaryFailure = failure
         cleanupInvocationCount = 1
+        abortController.abort(lifecycleStopError())
         disposal = disposeOnce([ ...pendingObservations.values() ])
         return disposal
     }
@@ -189,10 +219,14 @@ export function createFlowLifecycle() {
         ownWorker: value => own('worker', value),
         ownMap: value => own('map', value),
         ownRuntime: value => own('runtime', value),
+        acquireRuntime,
         deferStop,
         track,
         drain,
         dispose,
         snapshot,
+        assertActive,
+        isStopError,
+        signal: abortController.signal,
     })
 }

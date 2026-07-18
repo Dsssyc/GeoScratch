@@ -67,10 +67,22 @@ export function createFlowMap(canvas, options = {}) {
     })
 }
 
-export function waitForFlowMap(map) {
+export function waitForFlowMap(map, signal) {
 
+    if (signal?.aborted) return Promise.reject(signal.reason)
     if (map.loaded()) return Promise.resolve(map)
-    return new Promise(resolve => map.once('load', () => resolve(map)))
+    return new Promise((resolve, reject) => {
+        const onLoad = () => {
+            signal?.removeEventListener('abort', onAbort)
+            resolve(map)
+        }
+        const onAbort = () => {
+            map.off('load', onLoad)
+            reject(signal.reason)
+        }
+        map.once('load', onLoad)
+        signal?.addEventListener('abort', onAbort, { once: true })
+    })
 }
 
 export function readFlowCameraState(map, viewport) {

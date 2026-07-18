@@ -38,9 +38,20 @@ const flowOptions = Object.freeze({
 const pageLifetime = createFlowLifecycle()
 const failureProof = createFailureProofController(failureConfiguration)
 let pageSettlement
+let pageCleanupContext
+const handlePageHide = () => {
+    void disposePage()
+}
+
+window.addEventListener('pagehide', handlePageHide, { once: true })
+pageLifetime.deferStop({
+    label: 'pagehide-listener',
+    run: () => window.removeEventListener('pagehide', handlePageHide),
+})
 
 setStatus('loading')
 void main(pageLifetime, failureProof).catch(error => {
+    if (pageLifetime.isStopError(error)) return
     void failPage(error)
 })
 
@@ -56,8 +67,8 @@ async function main(lifetime, proof) {
     proof.reach(FAILURE_SCENARIOS[0])
 
     const map = lifetime.ownMap(createFlowMap(canvas, { proof: proofMode }))
-    const mapReady = waitForFlowMap(map)
-    const runtime = await ScratchRuntime.create({
+    const mapReady = waitForFlowMap(map, lifetime.signal)
+    const runtimeReady = lifetime.acquireRuntime(ScratchRuntime.create({
         label: 'Flow Layer runtime',
         powerPreference: 'high-performance',
         diagnostics: {
@@ -67,10 +78,10 @@ async function main(lifetime, proof) {
             submissionScopes: 'summary',
             maxPendingNativeObservations: 8,
         },
-    })
-    lifetime.ownRuntime(runtime)
+    }))
+    const [ runtime ] = await Promise.all([ runtimeReady, mapReady ])
     proof.observeRuntime(runtime)
-    await mapReady
+    lifetime.assertActive('continue Flow initialization')
 
     const initialSize = canvasPixelSize(canvas)
     const surface = runtime.createSurface(canvas, {
@@ -91,6 +102,7 @@ async function main(lifetime, proof) {
         options: flowOptions,
         failureProof: proof,
     })
+    lifetime.assertActive('continue Flow initialization')
     let active = true
     let animationFrame
     let animationTimer
@@ -119,15 +131,7 @@ async function main(lifetime, proof) {
     }
 
     lifetime.deferStop({ label: 'flow-frame-scheduler', run: stopScheduling })
-
-    const handlePageHide = () => {
-        void disposePage()
-    }
-    window.addEventListener('pagehide', handlePageHide, { once: true })
-    lifetime.deferStop({
-        label: 'pagehide-listener',
-        run: () => window.removeEventListener('pagehide', handlePageHide),
-    })
+    pageCleanupContext = { fieldStream }
 
     function publish() {
 
@@ -155,23 +159,6 @@ async function main(lifetime, proof) {
         publish()
         setStatus('stopped')
         return readPublishedFacts()
-    }
-
-    async function disposePage() {
-
-        if (pageSettlement !== undefined) return pageSettlement
-        pageSettlement = lifetime.dispose().then(report => {
-            const cleanupProof = frozenJson({
-                report: serializeCleanupReport(report),
-                stream: fieldStream.snapshot(),
-                lifecycle: lifetime.snapshot(),
-            })
-            window.__FLOW_LAYER_CLEANUP_PROOF__ = cleanupProof
-            canvas.dataset.cleanupProof = JSON.stringify(cleanupProof)
-            setStatus(report.cleanupFailures.length === 0 ? 'disposed' : 'error')
-            return cleanupProof
-        })
-        return pageSettlement
     }
 
     window.__FLOW_LAYER_PROOF__ = Object.freeze({
@@ -285,6 +272,7 @@ function createFieldStream(worker, lifetime) {
 
     function request(index) {
 
+        lifetime.assertActive('request Flow field')
         if (!Number.isInteger(index) || index < 0 || index >= FIELD_COUNT) {
             return Promise.reject(new RangeError(`Invalid Flow field index: ${index}`))
         }
@@ -345,6 +333,7 @@ function publishGraphFacts(graph) {
     canvas.dataset.seed = proofMode ? '0x6d2b79f5' : 'random'
     canvas.dataset.fixedTimestep = String(proofMode)
     canvas.dataset.historyMode = graph.settings.historyMode
+    canvas.dataset.graphContract = JSON.stringify(graph.contractFacts())
 }
 
 function publishFrameFacts({
@@ -531,6 +520,25 @@ async function failPage(error) {
         return proof
     }).catch(cleanupFailure => {
         console.error(cleanupFailure)
+    })
+    return pageSettlement
+}
+
+async function disposePage() {
+
+    if (pageSettlement !== undefined) return pageSettlement
+    pageSettlement = pageLifetime.dispose().then(report => {
+        const cleanupProof = frozenJson({
+            report: serializeCleanupReport(report),
+            ...(pageCleanupContext === undefined
+                ? {}
+                : { stream: pageCleanupContext.fieldStream.snapshot() }),
+            lifecycle: pageLifetime.snapshot(),
+        })
+        window.__FLOW_LAYER_CLEANUP_PROOF__ = cleanupProof
+        canvas.dataset.cleanupProof = JSON.stringify(cleanupProof)
+        setStatus(report.cleanupFailures.length === 0 ? 'disposed' : 'error')
+        return cleanupProof
     })
     return pageSettlement
 }
