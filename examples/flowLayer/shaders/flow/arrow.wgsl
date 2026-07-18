@@ -104,8 +104,8 @@ fn vMain(input: VertexInput) -> VertexOutput {
     );
 
     let position = vec2f(
-        particles[input.instanceIndex * 4 + 0],
-        particles[input.instanceIndex * 4 + 1],
+        particles[input.instanceIndex * 6 + 0],
+        particles[input.instanceIndex * 6 + 1],
     );
 
     let cExtent = currentExtent();
@@ -126,7 +126,7 @@ fn vMain(input: VertexInput) -> VertexOutput {
     output.uv = vec2f(uv.x, 1.0 - uv.y);
     output.hide = select(0.0, 1.0, cExtent.z <= cExtent.x || cExtent.w <= cExtent.y);
     output.coords = offset;
-    output.velocity = vec2f(particles[input.instanceIndex * 4 + 2], particles[input.instanceIndex * 4 + 3]);
+    output.velocity = vec2f(particles[input.instanceIndex * 6 + 4], particles[input.instanceIndex * 6 + 5]);
     return output;
 }
 

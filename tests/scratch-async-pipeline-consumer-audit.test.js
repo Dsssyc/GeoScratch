@@ -21,7 +21,6 @@ const pipelineFamilies = [
             'tests/types/public-api.ts',
         ]),
         legacyFiles: new Set([
-            'examples/m_flowLayer/steadyFlowLayer.js',
             'tests/types/public-api.ts',
         ]),
     },
@@ -38,7 +37,6 @@ const pipelineFamilies = [
             'tests/types/public-api.ts',
         ]),
         legacyFiles: new Set([
-            'examples/m_flowLayer/steadyFlowLayer.js',
             'tests/types/public-api.ts',
         ]),
     },
@@ -84,7 +82,7 @@ describe('scratch async pipeline consumer audit', () => {
                 })
             }
 
-            expect(legacyCalls).not.to.be.empty
+            expect(legacyCalls.filter(reference => reference.startsWith('examples/'))).to.deep.equal([])
             expect(violations).to.deep.equal([])
         })
     }

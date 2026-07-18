@@ -18,6 +18,11 @@ const ordinaryExamples = [
     'indirectExecution',
     'readinessPolicies',
 ]
+const additionalOrdinaryFiles = [
+    'examples/flowLayer/main.js',
+    'examples/flowLayer/flow-layer.js',
+    'examples/flowLayer/flow-map.js',
+]
 const supportingFactories = new Set([
     'createSampler',
     'sampler',
@@ -33,14 +38,16 @@ describe('ordinary Scratch example target API audit', () => {
 
     it('uses only persistent binding views and Promise-only supporting factories', () => {
 
-        const violations = ordinaryExamples.flatMap((name) => auditExample(name))
+        const violations = [
+            ...ordinaryExamples.map(name => `examples/${name}/main.js`),
+            ...additionalOrdinaryFiles,
+        ].flatMap(relativePath => auditExample(relativePath))
         expect(violations).to.deep.equal([])
     })
 })
 
-function auditExample(name) {
+function auditExample(relativePath) {
 
-    const relativePath = `examples/${name}/main.js`
     const source = fs.readFileSync(path.join(root, relativePath), 'utf8')
     const sourceFile = ts.createSourceFile(
         relativePath,

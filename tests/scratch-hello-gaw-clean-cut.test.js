@@ -25,7 +25,7 @@ describe('Hello GAW Scratch clean cut', () => {
         expect(neutralLink).to.include('<span class="example-title">Hello GAW</span>')
         expect(neutralLink).to.not.include('(legacy)')
         expect(neutralLink).to.not.match(/scratch/i)
-        expect(catalog.match(/\(legacy\)/g) ?? []).to.have.length(2)
+        expect(catalog.match(/\(legacy\)/g) ?? []).to.have.length(1)
         expect(catalog).to.not.include('x_helloGAW')
         expect(vite).to.include("helloGAW: path.resolve(examplesRoot, 'helloGAW/index.html')")
         expect(vite).to.not.include('x_helloGAW')

@@ -7,7 +7,9 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
 const exists = (...parts) => fs.existsSync(path.join(root, ...parts))
 const methodBody = (source, name) => {
 
-    const start = source.indexOf(`${name}() {`)
+    const functionStart = source.indexOf(`function ${name}(`)
+    const methodStart = source.indexOf(`${name}() {`)
+    const start = functionStart === -1 ? methodStart : functionStart
     if (start === -1) return ''
 
     const bodyStart = source.indexOf('{', start)
@@ -48,55 +50,54 @@ describe('DEM flow history reprojection', () => {
 
     it('adds history mode options and camera state for reprojection', () => {
 
-        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
 
-        expect(layer).to.include("this.historyMode = options.historyMode ?? (options.clearOnMove === false ? 'off' : 'reproject')")
-        expect(layer).to.include("this.historyModeValue = scr.f32(historyModeToValue(this.historyMode))")
-        expect(layer).to.include('this.historyValid = scr.f32(0)')
-        expect(layer).to.include('this.historyReprojecting = scr.f32(0)')
-        expect(layer).to.include('this.previousHistoryMatrix = scr.mat4f()')
-        expect(layer).to.include('this.currentHistoryInverseMatrix = scr.mat4f()')
-        expect(layer).to.include('this.previousHistoryCenterHigh = scr.vec3f()')
-        expect(layer).to.include('this.currentHistoryCenterLow = scr.vec3f()')
-        expect(layer).to.include('this.previousHistoryViewport = scr.vec2f()')
-        expect(layer).to.include('this.currentHistoryViewport = scr.vec2f()')
-        expect(layer).to.include('updateHistoryCameraState()')
-        expect(layer).to.include('historyModeToValue(mode)')
+        expect(layer).to.include("const historyMode = options.historyMode ?? (options.clearOnMove === false ? 'off' : 'reproject')")
+        expect(layer).to.include('historyMode: historyModeValue(settings.historyMode)')
+        expect(layer).to.include('historyValid: 0')
+        expect(layer).to.include('historyReprojecting: 0')
+        expect(layer).to.include('previousMatrix: identity')
+        expect(layer).to.include('currentInverseMatrix: identity')
+        expect(layer).to.include('previousCenterHigh: [ 0, 0, 0 ]')
+        expect(layer).to.include('currentCenterLow: [ 0, 0, 0 ]')
+        expect(layer).to.include('previousViewport: [ size.width, size.height ]')
+        expect(layer).to.include('currentViewport: [ size.width, size.height ]')
+        expect(layer).to.include('updateCameraHistory(graph, state, camera)')
+        expect(layer).to.include('function historyModeValue(mode)')
     })
 
     it('keeps reproject movement from clearing history or resetting particles', () => {
 
-        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
-        const idle = methodBody(layer, 'idle')
-        const restart = methodBody(layer, 'restart')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const moving = methodBody(layer, 'setCameraMoving')
+        const settled = methodBody(layer, 'setCameraSettled')
 
-        expect(idle).to.include("if (this.historyMode !== 'clear')")
-        expect(idle).to.include("if (this.historyMode === 'reproject') this.historyReprojecting.n = 1")
-        expect(idle).to.match(/if \(this\.historyMode !== 'clear'\)[\s\S]*return[\s\S]*this\.swapPasses\[0\]\.executable = true/)
-
-        expect(restart).to.include("if (this.historyMode !== 'clear')")
-        expect(restart).to.include('this.historyReprojecting.n = 0')
-        expect(restart).to.match(/if \(this\.historyMode !== 'clear'\)[\s\S]*return[\s\S]*this\.particleRef\.value = this\.randomFillData/)
+        expect(moving).to.include("if (settings.historyMode === 'clear') state.historyClearPending = true")
+        expect(settled).to.include("if (settings.historyMode === 'clear') state.particleResetPending = true")
+        expect(moving).to.not.include("settings.historyMode === 'reproject'")
+        expect(settled).to.not.include("settings.historyMode === 'reproject'")
+        expect(moving).to.not.include('particleResetPending')
+        expect(settled).to.not.include('historyClearPending')
     })
 
     it('exposes history reprojection uniforms to the swap pass', () => {
 
-        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
 
-        expect(layer).to.include('historyMode: this.historyModeValue')
-        expect(layer).to.include('historyValid: this.historyValid')
-        expect(layer).to.include('historyReprojecting: this.historyReprojecting')
-        expect(layer).to.include('previousMatrix: this.previousHistoryMatrix')
-        expect(layer).to.include('currentInverseMatrix: this.currentHistoryInverseMatrix')
-        expect(layer).to.include('previousCenterHigh: this.previousHistoryCenterHigh')
-        expect(layer).to.include('currentCenterLow: this.currentHistoryCenterLow')
-        expect(layer).to.include('previousViewport: this.previousHistoryViewport')
-        expect(layer).to.include('currentViewport: this.currentHistoryViewport')
+        expect(layer).to.include('historyMode: historyModeValue(graph.settings.historyMode)')
+        expect(layer).to.include('historyValid: state.historyValid')
+        expect(layer).to.include("historyReprojecting: state.cameraMoving && graph.settings.historyMode === 'reproject' ? 1 : 0")
+        expect(layer).to.include('previousMatrix: state.historyUniformValues.previousMatrix')
+        expect(layer).to.include('currentInverseMatrix: state.currentInverseMatrix')
+        expect(layer).to.include('previousCenterHigh: state.historyUniformValues.previousCenterHigh')
+        expect(layer).to.include('currentCenterLow: state.currentCenterLow')
+        expect(layer).to.include('previousViewport: state.historyUniformValues.previousViewport')
+        expect(layer).to.include('currentViewport: state.currentViewport')
     })
 
     it('reprojects retained trail history by reverse gathering in the swap shader', () => {
 
-        const swap = read('examples', 'm_flowLayer', 'shaders', 'flow', 'swap.wgsl')
+        const swap = read('examples', 'flowLayer', 'shaders', 'flow', 'swap.wgsl')
 
         expect(swap).to.include('historyMode: f32')
         expect(swap).to.include('historyValid: f32')
@@ -121,7 +122,7 @@ describe('DEM flow history reprojection', () => {
 
     it('keeps static trail feedback pixel-exact and filters only during reprojection', () => {
 
-        const swap = read('examples', 'm_flowLayer', 'shaders', 'flow', 'swap.wgsl')
+        const swap = read('examples', 'flowLayer', 'shaders', 'flow', 'swap.wgsl')
 
         expect(swap).to.include('var color = textureLoad(bgTexture, pixel, 0)')
         expect(swap).to.match(/if \(cleanupUniform\.historyMode > 1\.5 && cleanupUniform\.historyReprojecting > 0\.5\)[\s\S]*color = linearSampling\(bgTexture, historyPixel, dim\)/)

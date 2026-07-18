@@ -296,11 +296,10 @@ describe('scratch submission native outcome documentation', () => {
         }
     })
 
-    it('leaves both remaining legacy example implementations byte-for-byte unchanged', () => {
+    it('leaves the remaining DEM legacy example implementation byte-for-byte unchanged', () => {
 
         const expected = new Map([
             [ 'm_demLayer', 'ef22fcc37b806a62873ad1324db120ef6baf23acc5a0eb944cda7a0b8904a576' ],
-            [ 'm_flowLayer', '60988379cbe94f8c0b295e84552603196275697c6ed1469cbcda760d838c62ee' ],
         ])
 
         for (const [ example, digest ] of expected) {

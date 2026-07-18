@@ -296,8 +296,8 @@ async function main() {
 | Indirect Execution | `examples/indirectExecution/` |
 | Readiness Policies | `examples/readinessPolicies/` |
 | DEM Layer (legacy) | `examples/m_demLayer/` |
-| Flow Layer (legacy) | `examples/m_flowLayer/` |
-| Hello GAW (legacy) | `examples/x_helloGAW/` |
+| Flow Layer | `examples/flowLayer/` |
+| Hello GAW | `examples/helloGAW/` |
 
 ## 开发说明
 

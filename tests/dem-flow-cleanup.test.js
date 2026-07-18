@@ -7,7 +7,9 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
 const stripLineComments = (source) => source.replace(/\/\/.*$/gm, '')
 const methodBody = (source, name) => {
 
-    const start = source.indexOf(`${name}() {`)
+    const functionStart = source.indexOf(`function ${name}(`)
+    const methodStart = source.indexOf(`${name}() {`)
+    const start = functionStart === -1 ? methodStart : functionStart
     if (start === -1) return ''
 
     const bodyStart = source.indexOf('{', start)
@@ -26,7 +28,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('makes trail history decay and cutoff configurable in the swap shader', () => {
 
-        const shader = read('examples', 'm_flowLayer', 'shaders', 'flow', 'swap.wgsl')
+        const shader = read('examples', 'flowLayer', 'shaders', 'flow', 'swap.wgsl')
 
         expect(shader).to.include('struct CleanupUniformBlock')
         expect(shader).to.include('trailDecay: f32')
@@ -39,34 +41,36 @@ describe('DEM flow layer cleanup', () => {
 
     it('wires cleanup controls and camera invalidation from the flow layer', () => {
 
-        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const main = read('examples', 'flowLayer', 'main.js')
 
-        expect(layer).to.include('constructor(options = {})')
-        expect(layer).to.include('this.trailDecay = scr.f32(')
-        expect(layer).to.include('this.trailCutoff = scr.f32(')
-        expect(layer).to.include('this.flowMaskCutoff = scr.f32(options.flowMaskCutoff ?? 0.0)')
-        expect(layer).to.not.include('this.flowMaskCutoff = scr.f32(options.flowMaskCutoff ?? 0.02)')
-        expect(layer).to.include('name: \'cleanupUniform\'')
-        expect(layer).to.include('trailDecay: this.trailDecay')
-        expect(layer).to.include('trailCutoff: this.trailCutoff')
-        expect(layer).to.include('registerCameraInvalidation()')
+        expect(layer).to.include('function normalizeOptions(options)')
+        expect(layer).to.include('trailDecay: options.trailDecay ?? 0.996')
+        expect(layer).to.include('trailCutoff: options.trailCutoff ?? 1 / 255')
+        expect(layer).to.include('flowMaskCutoff: options.flowMaskCutoff ?? 0')
+        expect(layer).to.not.include('flowMaskCutoff: options.flowMaskCutoff ?? 0.02')
+        expect(layer).to.include("cleanup: uniform('FlowCleanupUniform'")
+        expect(layer).to.include('trailDecay: settings.trailDecay')
+        expect(layer).to.include('trailCutoff: settings.trailCutoff')
+        expect(main).to.include('registerCameraListeners(map, graph, lifetime)')
         expect(layer).to.include('clearOnMove')
-        expect(layer).to.include('this.showVoronoi = options.showVoronoi ?? true')
+        expect(layer).to.include('showVoronoi: options.showVoronoi ?? true')
     })
 
     it('wires a flow-domain mask through velocity, simulation, and history cleanup', () => {
 
-        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
-        const voronoi = read('examples', 'm_flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
-        const simulation = read('examples', 'm_flowLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
-        const swap = read('examples', 'm_flowLayer', 'shaders', 'flow', 'swap.wgsl')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const voronoi = read('examples', 'flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+        const simulation = read('examples', 'flowLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
+        const swap = read('examples', 'flowLayer', 'shaders', 'flow', 'swap.wgsl')
 
-        expect(layer).to.include('this.useFlowMask = options.useFlowMask ?? true')
-        expect(layer).to.include('this.flowMaskCutoff = scr.f32(')
-        expect(layer).to.include("this.flowMaskTexture = this.map.screen.createScreenDependentTexture('Texture (Flow Mask)'")
-        expect(layer).to.include('colorAttachments: [ { colorResource: this.flowTexture }, { colorResource: this.flowMaskTexture } ]')
-        expect(layer).to.include('textures: [ { texture: this.flowTexture, sampleType: \'unfilterable-float\' }, { texture: this.flowMaskTexture } ]')
-        expect(layer).to.include('textures: [ { texture: this.layerTexture2 }, { texture: this.flowMaskTexture } ]')
+        expect(layer).to.include('useFlowMask: options.useFlowMask ?? true')
+        expect(layer).to.include('flowMaskCutoff: options.flowMaskCutoff ?? 0')
+        expect(layer).to.include("label: 'Flow domain mask'")
+        expect(layer).to.include('targets: [ { format: textures.flow.format }, { format: textures.mask.format } ]')
+        expect(layer).to.include('fromTexture: textures.views.flow')
+        expect(layer).to.include('maskTexture: textures.views.mask')
+        expect(layer).to.include('bgTexture: textures.views.historyB')
 
         expect(voronoi).to.include('flowMaskCutoff: f32')
         expect(voronoi).to.include('@location(1) mask: f32')
@@ -84,10 +88,10 @@ describe('DEM flow layer cleanup', () => {
 
     it('stores the flow-domain mask as a single-channel render target', () => {
 
-        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
-        const voronoi = read('examples', 'm_flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const voronoi = read('examples', 'flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
 
-        expect(layer).to.include("this.flowMaskTexture = this.map.screen.createScreenDependentTexture('Texture (Flow Mask)', 'r8unorm')")
+        expect(layer).to.match(/label: 'Flow domain mask',[\s\S]*?format: 'r8unorm'/)
         expect(voronoi).to.include('@location(1) mask: f32')
         expect(voronoi).to.include('output.mask = maskValue')
         expect(voronoi).to.not.include('@location(1) mask: vec4f')
@@ -96,7 +100,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('guards simulation drop-rate scaling against a zero max speed', () => {
 
-        const simulation = read('examples', 'm_flowLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
+        const simulation = read('examples', 'flowLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
 
         expect(simulation).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
         expect(simulation).to.not.include('length(velocity) / frameUniform.maxSpeed')
@@ -114,14 +118,14 @@ describe('DEM flow layer cleanup', () => {
 
         for (const shaderName of shaderNames) {
 
-            const shader = stripLineComments(read('examples', 'm_flowLayer', 'shaders', 'flow', shaderName))
+            const shader = stripLineComments(read('examples', 'flowLayer', 'shaders', 'flow', shaderName))
 
             expect(shader, shaderName).to.not.match(/\/\s*frameUniform\.maxSpeed/)
         }
 
-        expect(read('examples', 'm_flowLayer', 'shaders', 'flow', 'particles.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
-        expect(read('examples', 'm_flowLayer', 'shaders', 'flow', 'flowShow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
-        expect(read('examples', 'm_flowLayer', 'shaders', 'flow', 'arrow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
+        expect(read('examples', 'flowLayer', 'shaders', 'flow', 'particles.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
+        expect(read('examples', 'flowLayer', 'shaders', 'flow', 'flowShow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
+        expect(read('examples', 'flowLayer', 'shaders', 'flow', 'arrow.wgsl')).to.include('length(velocity) / max(frameUniform.maxSpeed, 0.000001)')
     })
 
     it('clamps flow velocity palette indices to the ramp bounds', () => {
@@ -134,7 +138,7 @@ describe('DEM flow layer cleanup', () => {
 
         for (const shaderName of shaderNames) {
 
-            const shader = stripLineComments(read('examples', 'm_flowLayer', 'shaders', 'flow', shaderName))
+            const shader = stripLineComments(read('examples', 'flowLayer', 'shaders', 'flow', shaderName))
 
             expect(shader, shaderName).to.include('let palettePosition = clamp(speed * 8.0, 0.0, 7.0)')
             expect(shader, shaderName).to.include('let bottomIndex = u32(floor(palettePosition))')
@@ -147,17 +151,17 @@ describe('DEM flow layer cleanup', () => {
 
     it('derives the flow-domain mask from supported Voronoi geometry, not speed alone', () => {
 
-        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
-        const voronoi = read('examples', 'm_flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const voronoi = read('examples', 'flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
 
-        expect(layer).to.include('this.flowDomainMaxEdge = options.flowDomainMaxEdge ??')
-        expect(layer).to.include('this.triangleVertexIndices = undefined')
-        expect(layer).to.include('this.voronoiVertexCount = 0')
+        expect(layer).to.include('flowDomainMaxEdge: options.flowDomainMaxEdge ??')
+        expect(layer).to.include('stationIndices.push(id)')
+        expect(layer).to.include('vertexCount: stationIndices.length')
         expect(layer).to.include('calculateTriangleDomainSupport(')
-        expect(layer).to.include('expandStationVelocities(uvs)')
-        expect(layer).to.include('range: () => [ this.voronoiVertexCount ]')
-        expect(layer).to.not.include('index: { buffer: this.indexBuffer_voronoi }')
-        expect(layer).to.include('structure: [ { components: 1 } ]')
+        expect(layer).to.include('expandStationVelocities(geometry, first.uvs)')
+        expect(layer).to.include('count: { vertexCount }')
+        expect(layer).to.not.include('indexBuffer:')
+        expect(layer).to.include("vertexLayout(4, 1, 'float32')")
 
         expect(voronoi).to.include('@location(1) domainSupport: f32')
         expect(voronoi).to.include('@location(3) vTo: vec2f')
@@ -171,36 +175,33 @@ describe('DEM flow layer cleanup', () => {
 
     it('cleans up flow camera listeners and worker resources when removed', () => {
 
-        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
+        const main = read('examples', 'flowLayer', 'main.js')
+        const lifecycle = read('examples', 'flowLayer', 'flow-lifecycle.js')
 
-        expect(layer).to.include('this.cameraInvalidationHandlers = []')
-        expect(layer).to.include('onRemove()')
-        expect(layer).to.include('this.unregisterCameraInvalidation()')
-        expect(layer).to.match(/onRemove\(\) \{[\s\S]*this\.makeVisibility\(false\)/)
-        expect(layer).to.include('this.loadWorker.terminate()')
-        expect(layer).to.include('this.cameraInvalidationHandlers.push({ eventName, handler: clearHistory })')
-        expect(layer).to.include('this.map.off(eventName, handler)')
-        expect(layer).to.match(/onRemove\(\) \{[\s\S]*this\.map = undefined/)
+        expect(main).to.include('lifetime.deferStop({')
+        expect(main).to.include("label: 'flow-camera-listeners'")
+        expect(main).to.include('map.off(eventName, moving)')
+        expect(main).to.include('worker.removeEventListener(\'message\', handleMessage)')
+        expect(lifecycle).to.include("recordAction('release', 'flow-worker', () => worker.terminate())")
+        expect(lifecycle).to.include("recordAction('release', 'maplibre-map', () => map.remove())")
+        expect(lifecycle).to.include("recordAction('release', 'scratch-runtime', () => runtime.dispose())")
+        expect(lifecycle.indexOf("'flow-worker'")).to.be.lessThan(lifecycle.indexOf("'maplibre-map'"))
+        expect(lifecycle.indexOf("'maplibre-map'")).to.be.lessThan(lifecycle.indexOf("'scratch-runtime'"))
     })
 
     it('keeps current flow rendering active while camera movement clears history', () => {
 
-        const layer = read('examples', 'm_flowLayer', 'steadyFlowLayer.js')
-        const idle = methodBody(layer, 'idle')
-        const restart = methodBody(layer, 'restart')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const moving = methodBody(layer, 'setCameraMoving')
+        const settled = methodBody(layer, 'setCameraSettled')
+        const render = methodBody(layer, 'renderFrame')
 
-        expect(idle).to.include('this.swapPasses[0].executable = true')
-        expect(idle).to.include('this.simulationPass.executable = true')
-        expect(idle).to.not.include('this.isIdling = true')
-        expect(idle).to.not.include('this.swapPasses[1].executable = false')
-        expect(idle).to.not.include('this.swapPasses[2].executable = false')
-        expect(idle).to.not.include('this.layerBindings[0].executable = false')
-        expect(idle).to.not.include('this.layerBindings[1].executable = false')
-        expect(idle).to.not.include('this.simulationPass.executable = false')
-
-        expect(restart).to.include('this.isIdling = false')
-        expect(restart).to.include('this.swapPasses[0].executable = false')
-        expect(restart).to.include('this.simulationPass.executable = true')
-        expect(restart).to.include('this.particleRef.value = this.randomFillData')
+        expect(moving).to.include("if (settings.historyMode === 'clear') state.historyClearPending = true")
+        expect(settled).to.include("if (settings.historyMode === 'clear') state.particleResetPending = true")
+        expect(render).to.include('builder.render(graph.passes.voronoi, [ graph.commands.voronoi ])')
+        expect(render).to.include('builder.compute(graph.passes.simulation, [ graph.commands.simulation ])')
+        expect(render).to.include('builder.render(direction.pass, direction.commands)')
+        expect(render).to.include('builder.render(graph.passes.presentation, [ direction.presentation ])')
+        expect(render).to.not.include('.executable')
     })
 })

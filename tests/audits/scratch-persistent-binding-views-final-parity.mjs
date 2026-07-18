@@ -106,6 +106,7 @@ const historicalPaths = Object.freeze({
 const ordinaryExamples = Object.freeze([
     'computeReadback',
     'externalImageUpload',
+    'flowLayer',
     'helloGAW',
     'helloTriangle',
     'helloVertexBuffer',
@@ -117,7 +118,7 @@ const ordinaryExamples = Object.freeze([
     'textureSampling',
     'uniformTriangle',
 ])
-const legacyExamples = Object.freeze([ 'm_demLayer', 'm_flowLayer' ])
+const legacyExamples = Object.freeze([ 'm_demLayer' ])
 const historicalTypeInventory = Object.freeze([
     { name: 'BufferResourceDescriptor', classification: 'restored', current: 'BufferResourceDescriptor' },
     { name: 'NormalizedDrawVertexBufferBinding', classification: 'internal', current: null },
@@ -2916,7 +2917,7 @@ function auditExamples() {
     }
     if (directories.some(name => name.startsWith('scratch_'))) failures.push('scratch-prefixed example remains')
     if (directories.some(name => /hello.?map/i.test(name))) failures.push('Hello Map was restored')
-    if (!directories.includes('m_demLayer') || !directories.includes('m_flowLayer')) {
+    if (!directories.includes('m_demLayer') || !directories.includes('flowLayer')) {
         failures.push('DEM and Flow are not separate examples')
     }
     const targetAudit = fs.readFileSync('tests/scratch-examples-target-api.test.js', 'utf8')

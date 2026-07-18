@@ -300,8 +300,8 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 | Indirect Execution | `examples/indirectExecution/` |
 | Readiness Policies | `examples/readinessPolicies/` |
 | DEM Layer (legacy) | `examples/m_demLayer/` |
-| Flow Layer (legacy) | `examples/m_flowLayer/` |
-| Hello GAW (legacy) | `examples/x_helloGAW/` |
+| Flow Layer | `examples/flowLayer/` |
+| Hello GAW | `examples/helloGAW/` |
 
 ## Development Notes
 

@@ -20,7 +20,7 @@ describe('examples structure', () => {
         'indirectExecution',
         'readinessPolicies',
         'm_demLayer',
-        'm_flowLayer',
+        'flowLayer',
         'helloGAW',
     ]
     const standaloneExamples = [
@@ -36,7 +36,7 @@ describe('examples structure', () => {
         'indirectExecution',
         'readinessPolicies',
         'm_demLayer',
-        'm_flowLayer',
+        'flowLayer',
         'helloGAW',
     ]
 
@@ -113,6 +113,7 @@ describe('examples structure', () => {
             [ 'indirectExecution', 'Indirect Execution' ],
             [ 'readinessPolicies', 'Readiness Policies' ],
             [ 'helloGAW', 'Hello GAW' ],
+            [ 'flowLayer', 'Flow Layer' ],
         ]
 
         for (const [ name, title ] of scratchBackedExamples) {
@@ -129,10 +130,7 @@ describe('examples structure', () => {
 
     it('marks only not-yet-replaced old API examples as legacy in the browser', () => {
         const html = read('examples', 'index.html')
-        const legacyExamples = [
-            'm_demLayer',
-            'm_flowLayer',
-        ]
+        const legacyExamples = [ 'm_demLayer' ]
 
         for (const name of legacyExamples) {
             const linkStart = html.indexOf(`data-id="${name}"`)
@@ -167,7 +165,7 @@ describe('examples structure', () => {
 
     it('loads MapLibre only for the map-backed terrain examples', () => {
         const demHtml = read('examples', 'm_demLayer', 'index.html')
-        const flowHtml = read('examples', 'm_flowLayer', 'index.html')
+        const flowHtml = read('examples', 'flowLayer', 'index.html')
 
         expect(demHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.js')
         expect(demHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.css')
@@ -207,20 +205,23 @@ describe('examples structure', () => {
         expect(source).to.not.include('flowJson.worker')
     })
 
-    it('provides a separate flow layer example on the same map runtime', () => {
-        const source = read('examples', 'm_flowLayer', 'main.js')
-        const mapRuntime = read('examples', 'shared', 'scratchMap.js')
+    it('provides a separate current-API flow layer with its own map host', () => {
+        const source = read('examples', 'flowLayer', 'main.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const mapRuntime = read('examples', 'flowLayer', 'flow-map.js')
 
-        expect(source).to.include('SteadyFlowLayer')
-        expect(source).to.include('new SteadyFlowLayer()')
-        expect(source).to.include('startScratchMap')
+        expect(source).to.include('ScratchRuntime')
+        expect(source).to.include('createFlowLayer')
+        expect(source).to.include('createFlowMap')
+        expect(layer).to.include('runtime.createSubmission(')
         expect(mapRuntime).to.include('globalThis.maplibregl')
-        expect(mapRuntime).to.include('getScratchMercatorMatrix(this.transform)')
+        expect(mapRuntime).to.include('getScratchMercatorMatrix(transform)')
         expect(source).to.not.include('VITE_MAPBOX_ACCESS_TOKEN')
         expect(source).to.not.include('accessToken')
         expect(mapRuntime).to.not.include('_computeCameraPosition')
         expect(mapRuntime).to.not.include('_updateCameraState')
-        expect(mapRuntime).to.not.include('this.transform._camera')
+        expect(source).to.not.include('../shared/scratchMap.js')
+        expect(source).to.not.include('startScratchMap')
         expect(source).to.not.include('TerrainLayer')
     })
 

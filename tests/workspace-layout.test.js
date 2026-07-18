@@ -88,8 +88,9 @@ describe('workspace layout', () => {
             'examples/readinessPolicies/main.js',
             'examples/shared/scratchMap.js',
             'examples/m_demLayer/terrainLayer.js',
-            'examples/m_flowLayer/steadyFlowLayer.js',
-            'examples/m_flowLayer/flowJson.worker.js',
+            'examples/flowLayer/main.js',
+            'examples/flowLayer/flow-layer.js',
+            'examples/flowLayer/flow-map.js',
             'examples/helloGAW/main.js',
         ]
 

@@ -20,7 +20,7 @@ const examplePages = {
   indirectExecution: path.resolve(examplesRoot, 'indirectExecution/index.html'),
   readinessPolicies: path.resolve(examplesRoot, 'readinessPolicies/index.html'),
   demLayer: path.resolve(examplesRoot, 'm_demLayer/index.html'),
-  flowLayer: path.resolve(examplesRoot, 'm_flowLayer/index.html'),
+  flowLayer: path.resolve(examplesRoot, 'flowLayer/index.html'),
   helloGAW: path.resolve(examplesRoot, 'helloGAW/index.html'),
 }
 
