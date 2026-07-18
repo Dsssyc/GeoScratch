@@ -208,6 +208,10 @@ describe('scratch submission native outcome documentation', () => {
         expect(browser).to.include('validateDelayedValidationProbe')
         expect(browser).to.include('claimedCommandOutcome')
         expect(browser).to.include("stage === 'encoder-finish'")
+        expect(browser).to.include('const managesVite = configuredBaseUrl === undefined')
+        expect(browser).to.include('const vite = managesVite ? startVite(port) : undefined')
+        expect(browser).to.include('serverClosed = await waitForPortClosed(port)')
+        expect(browser).to.include('if (managesVite && !serverClosed)')
     })
 
     it('locks the current clean-cut parity runner and resolved integration record', () => {

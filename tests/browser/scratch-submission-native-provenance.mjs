@@ -1,12 +1,18 @@
 import process from 'node:process'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
+import { createConnection, createServer } from 'node:net'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const baseUrl = process.env.SCRATCH_SUBMISSION_BROWSER_BASE_URL ?? 'http://127.0.0.1:4173'
+const examplesRoot = resolve(root, 'examples')
+const viteEntry = resolve(root, 'node_modules/vite/bin/vite.js')
+const configuredBaseUrl = process.env.SCRATCH_SUBMISSION_BROWSER_BASE_URL
+const managesVite = configuredBaseUrl === undefined
+const port = managesVite ? await findAvailablePort() : undefined
+const baseUrl = configuredBaseUrl ?? `http://127.0.0.1:${port}`
 const outputDirectory = resolve(
     process.env.SCRATCH_SUBMISSION_BROWSER_OUTPUT ??
         '/tmp/geoscratch-submission-native-provenance-browser'
@@ -15,41 +21,91 @@ const headless = process.env.SCRATCH_SUBMISSION_BROWSER_HEADLESS === '1'
 const timeout = Number(process.env.SCRATCH_SUBMISSION_BROWSER_TIMEOUT_MS ?? 30_000)
 
 await mkdir(outputDirectory, { recursive: true })
-const regression = runRegressionMatrix()
-const browser = await chromium.launch({
-    channel: 'chrome',
-    headless,
-    args: [ '--enable-unsafe-webgpu' ],
-})
+const vite = managesVite ? startVite(port) : undefined
+let browser
+let browserVersion
+let adapter
+let regression
+let probe
+let fatalError
+let cleanupError
+let serverClosed = !managesVite
 
 try {
-    const adapter = await inspectAdapter(browser)
-    const probe = await verifySubmissionTransactions(browser)
-    const failures = [
-        ...(adapter.available && adapter.adapterAvailable
-            ? []
-            : [ 'adapter: WebGPU adapter is unavailable' ]),
-        ...regression.failures.map(failure => `regression: ${failure}`),
-        ...probe.failures.map(failure => `submission-probe: ${failure}`),
-    ]
-    const result = {
-        schemaVersion: 1,
-        browserVersion: await browser.version(),
+    if (vite !== undefined) await waitForVite(vite, `${baseUrl}/helloTriangle/index.html`)
+    regression = runRegressionMatrix()
+    browser = await chromium.launch({
+        channel: 'chrome',
         headless,
-        baseUrl,
-        outputDirectory,
-        adapter,
-        regression,
-        probe,
-        status: failures.length === 0 ? 'passed' : 'failed',
-        failures,
-    }
-
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
-    if (failures.length > 0) process.exitCode = 1
+        args: [ '--enable-unsafe-webgpu' ],
+    })
+    browserVersion = await browser.version()
+    adapter = await inspectAdapter(browser)
+    probe = await verifySubmissionTransactions(browser)
+} catch (error) {
+    fatalError = serializeError(error)
 } finally {
-    await browser.close()
+    const cleanupFailures = []
+    try {
+        if (browser !== undefined) await browser.close()
+    } catch (error) {
+        cleanupFailures.push(serializeError(error))
+    }
+    try {
+        if (vite !== undefined) await stopVite(vite)
+    } catch (error) {
+        cleanupFailures.push(serializeError(error))
+    }
+    try {
+        if (managesVite) serverClosed = await waitForPortClosed(port)
+    } catch (error) {
+        cleanupFailures.push(serializeError(error))
+    }
+    if (cleanupFailures.length > 0) cleanupError = cleanupFailures.join('\n')
 }
+
+const failures = [
+    ...(fatalError === undefined ? [] : [ `browser probe: ${fatalError}` ]),
+    ...(cleanupError === undefined ? [] : [ `cleanup: ${cleanupError}` ]),
+    ...(adapter?.available && adapter?.adapterAvailable
+        ? []
+        : [ 'adapter: WebGPU adapter is unavailable' ]),
+    ...(regression === undefined
+        ? [ 'regression: report was not produced' ]
+        : regression.failures.map(failure => `regression: ${failure}`)),
+    ...(probe === undefined
+        ? [ 'submission-probe: report was not produced' ]
+        : probe.failures.map(failure => `submission-probe: ${failure}`)),
+]
+if (managesVite && !serverClosed) {
+    failures.push(`managed Vite port ${port} remained open after cleanup`)
+}
+const result = {
+    schemaVersion: 1,
+    browserVersion,
+    headless,
+    baseUrl,
+    outputDirectory,
+    managesVite,
+    vite: vite === undefined ? undefined : {
+        pid: vite.child.pid,
+        exitCode: vite.child.exitCode,
+        signalCode: vite.child.signalCode,
+        serverClosed,
+        stdout: failures.length === 0 ? undefined : vite.stdout,
+        stderr: failures.length === 0 ? undefined : vite.stderr,
+    },
+    adapter,
+    regression,
+    probe,
+    fatalError,
+    cleanupError,
+    status: failures.length === 0 ? 'passed' : 'failed',
+    failures,
+}
+
+process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+if (failures.length > 0) process.exitCode = 1
 
 function runRegressionMatrix() {
 
@@ -684,4 +740,131 @@ function attachFailureListeners(page, consoleFailures, pageErrors, requestFailur
             failure: request.failure()?.errorText ?? 'unknown',
         })
     })
+}
+
+function startVite(selectedPort) {
+
+    const child = spawn(process.execPath, [
+        viteEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(selectedPort),
+        '--strictPort',
+    ], {
+        cwd: examplesRoot,
+        env: { ...process.env, FORCE_COLOR: '0' },
+        stdio: [ 'ignore', 'pipe', 'pipe' ],
+    })
+    const state = { child, stdout: '', stderr: '', spawnError: undefined }
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', chunk => { state.stdout = appendBounded(state.stdout, chunk) })
+    child.stderr.on('data', chunk => { state.stderr = appendBounded(state.stderr, chunk) })
+    child.on('error', error => { state.spawnError = error })
+    return state
+}
+
+async function waitForVite(vite, url) {
+
+    const deadline = Date.now() + timeout
+    while (Date.now() < deadline) {
+        if (vite.spawnError !== undefined) throw vite.spawnError
+        if (vite.child.exitCode !== null) {
+            throw new Error(`Vite exited before readiness with code ${vite.child.exitCode}.`)
+        }
+        try {
+            const response = await fetch(url, { signal: AbortSignal.timeout(1_000) })
+            const ready = response.ok
+            await response.body?.cancel()
+            if (ready) return
+        } catch {
+            // The managed listener is not ready yet.
+        }
+        await delay(100)
+    }
+    throw new Error(`Timed out waiting for managed Vite at ${url}.`)
+}
+
+async function stopVite(vite) {
+
+    if (vite.child.exitCode !== null || vite.child.signalCode !== null) return
+    vite.child.kill('SIGTERM')
+    try {
+        await waitForExit(vite.child, 5_000)
+    } catch {
+        vite.child.kill('SIGKILL')
+        await waitForExit(vite.child, 5_000)
+    }
+}
+
+async function waitForExit(child, waitMs) {
+
+    if (child.exitCode !== null || child.signalCode !== null) return
+    await new Promise((resolvePromise, rejectPromise) => {
+        const timer = setTimeout(() => {
+            child.off('exit', onExit)
+            rejectPromise(new Error(`Process ${child.pid} did not exit within ${waitMs} ms.`))
+        }, waitMs)
+        const onExit = () => {
+            clearTimeout(timer)
+            resolvePromise()
+        }
+        child.once('exit', onExit)
+    })
+}
+
+async function findAvailablePort() {
+
+    const server = createServer()
+    await new Promise((resolvePromise, rejectPromise) => {
+        server.once('error', rejectPromise)
+        server.listen(0, '127.0.0.1', resolvePromise)
+    })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('Failed to select a Vite port.')
+    await new Promise((resolvePromise, rejectPromise) => {
+        server.close(error => error === undefined ? resolvePromise() : rejectPromise(error))
+    })
+    return address.port
+}
+
+async function waitForPortClosed(selectedPort) {
+
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline) {
+        if (!await canConnect(selectedPort)) return true
+        await delay(100)
+    }
+    return false
+}
+
+async function canConnect(selectedPort) {
+
+    return await new Promise((resolvePromise) => {
+        const socket = createConnection({ host: '127.0.0.1', port: selectedPort })
+        const settle = connected => {
+            socket.removeAllListeners()
+            socket.destroy()
+            resolvePromise(connected)
+        }
+        socket.setTimeout(500, () => settle(false))
+        socket.once('connect', () => settle(true))
+        socket.once('error', () => settle(false))
+    })
+}
+
+function appendBounded(current, chunk) {
+
+    return `${current}${chunk}`.slice(-16_384)
+}
+
+function serializeError(error) {
+
+    return error instanceof Error ? error.stack ?? error.message : String(error)
+}
+
+function delay(milliseconds) {
+
+    return new Promise(resolvePromise => setTimeout(resolvePromise, milliseconds))
 }
