@@ -332,5 +332,3 @@ export { UUID } from './core/utils/uuid.js'
 
 export { bloomPass, BloomPass } from './effects/postprocess/bloomPass.js'
 export { fxaaPass, FXAAPass } from './effects/postprocess/fxaaPass.js'
-
-export { LocalTerrain } from './applications/terrain/localTerrain.js'

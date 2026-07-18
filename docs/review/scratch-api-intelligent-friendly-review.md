@@ -262,6 +262,54 @@ The bounded five-scenario proof closes the specific Hello GAW initialization lea
 does not justify a generic disposable stack in Scratch core, automatic lifecycle
 repair, OOM attribution, device-loss recovery, or an unbounded always-on trace.
 
+### DEM Layer Persistent Graph And Application-Owned LoD
+
+The DEM Layer clean cut is a closer rendering-business test than a synthetic API
+probe: MapLibre camera state drives CPU terrain traversal, six changing GPU inputs,
+two dependent render passes, and native indirect draws. The implementation keeps 42
+Scratch identities stable across camera changes and Surface resize; a frame creates
+only a `SubmissionBuilder` and bounded observation bookkeeping.
+
+The following current contracts materially reduced ambiguity for the implementation
+and for an Agent reviewing it:
+
+- `LayoutCodec` owns uniform alignment and packing, so camera, tile, and static
+  records are updated through named fields rather than repeated byte-offset arithmetic.
+- Stable `UploadCommand` objects retain typed-array source identity. Mutating those
+  arrays makes CPU-selected instance counts explicit data, while stable indirect
+  `DrawCommand` objects keep command shape immutable.
+- `contentEpoch: 'current-at-step'`, `SubmittedWork.resourceAccesses`, and producer
+  facts prove the exact node-level, node-box, indirect-argument, and LoD-map chains.
+  The terrain pass can therefore explain which earlier step produced every consumed
+  epoch without a CPU readback or console inference.
+- Explicit BindLayouts, Programs, pipelines, PassSpecs, and commands make persistent
+  graph identity auditable. Surface and depth allocation replacement is separate from
+  graph reconstruction, and stale BindSet preparation is inspected only after resize.
+  Real native validation also exposed the old wrapper's implicit depth default, which
+  the current terrain pipeline now states as depth-write plus `less` comparison.
+- Promise-only pipeline creation, structured diagnostics, bounded deep capture, and
+  source-sanitized evidence localize the deterministic invalid-terrain-WGSL failure
+  without retaining shader source or parsing browser console prose.
+- Runtime transitive ownership and separate `SubmittedWork.nativeOutcome` / `done`
+  observations provide a finite GPU cleanup boundary without claiming ownership of
+  MapLibre, ImageBitmap, listeners, or frame scheduling.
+
+The exercise also identifies responsibilities that correctly remain above Scratch.
+The CPU LoD selector owns terrain bounds, subdivision policy, the 5,000-node cap, and
+serializable selection facts. The map host owns camera interpretation and the normal
+basemap. The page lifecycle owns decoded-image transfer, coalesced render scheduling,
+listener removal, late async settlement, and cleanup order. Visual parity still
+requires a headed browser and pixel evidence; Scratch's logical provenance cannot
+decide whether an application chose the right terrain policy or camera matrix.
+
+The remaining friction is explicit rather than hidden. The application still needs
+substantial proof wiring to publish compact graph, selection, lifecycle, and pixel
+facts. WGSL storage bindings required six mechanical read-only access corrections
+before native validation accepted the preserved shaders. Neither fact warrants a
+DEM-specific core abstraction, an automatic render graph, a generic lifecycle stack,
+or CPU-dynamic command closures. The useful result is that Scratch exposes enough
+stable facts for the application to prove its own policy and ownership decisions.
+
 ## Resolved Review Items
 
 ### Submission Native Outcome And Content Truth

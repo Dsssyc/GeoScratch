@@ -1,5 +1,4 @@
 import { expect } from 'chai'
-import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -300,17 +299,17 @@ describe('scratch submission native outcome documentation', () => {
         }
     })
 
-    it('leaves the remaining DEM legacy example implementation byte-for-byte unchanged', () => {
+    it('moves the final DEM example onto observed current submissions', () => {
 
-        const expected = new Map([
-            [ 'm_demLayer', 'ef22fcc37b806a62873ad1324db120ef6baf23acc5a0eb944cda7a0b8904a576' ],
-        ])
+        const main = read('examples', 'demLayer', 'main.js')
+        const graph = read('examples', 'demLayer', 'dem-layer.js')
 
-        for (const [ example, digest ] of expected) {
-            const source = read('examples', example, 'main.js')
-            const actual = crypto.createHash('sha256').update(source).digest('hex')
-
-            expect(actual, example).to.equal(digest)
-        }
+        expect(graph).to.include('submitted.nativeOutcome')
+        expect(graph).to.include('submitted.done')
+        expect(graph).to.include('observed-succeeded')
+        expect(graph).to.include('runtime.createSubmission({ validation: \'throw\' })')
+        expect(graph).to.include("contentEpoch: 'current-at-step'")
+        expect(main).to.not.include('m_demLayer')
+        expect(graph).to.not.include('LocalTerrain')
     })
 })

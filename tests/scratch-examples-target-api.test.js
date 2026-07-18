@@ -19,6 +19,9 @@ const ordinaryExamples = [
     'readinessPolicies',
 ]
 const additionalOrdinaryFiles = [
+    'examples/demLayer/main.js',
+    'examples/demLayer/dem-layer.js',
+    'examples/demLayer/dem-map.js',
     'examples/flowLayer/main.js',
     'examples/flowLayer/flow-layer.js',
     'examples/flowLayer/flow-map.js',

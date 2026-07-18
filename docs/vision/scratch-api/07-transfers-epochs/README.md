@@ -137,6 +137,13 @@ There is no core `positions.write(...)` method. A convenience helper may be adde
 
 An upload advances the target's `contentEpoch` for the written range and records the producing submission. If upload allocation requires replacing the physical GPU object, it also advances `allocationVersion`.
 
+`UploadCommand` retains its authored byte source by identity. An application may
+mutate a persistent typed array between submissions and reuse the same command;
+each successful execution reads the then-current bytes and advances the target
+epoch once. This supports CPU-produced indirect argument records without
+reconstructing commands. It remains a one-way CPU-to-GPU upload, not a readback
+or roundtrip.
+
 The buffer upload path lowers to `GPUQueue.writeBuffer()`. Its target
 `BufferRegion` offset and selected byte length must both be 4-byte aligned.
 Scratch validates that native requirement before a direct queue call or a

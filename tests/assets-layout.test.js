@@ -21,6 +21,9 @@ describe('asset layout', () => {
         expect(exists('examples', 'helloGAW', 'assets', 'images', 'earth.jpg')).to.equal(true)
         expect(exists('examples', 'helloGAW', 'shaders', 'land.wgsl')).to.equal(true)
         expect(exists('examples', 'flowLayer', 'shaders', 'flow', 'particles.wgsl')).to.equal(true)
+        expect(exists('examples', 'demLayer', 'assets', 'dem.png')).to.equal(true)
+        expect(exists('examples', 'demLayer', 'shaders', 'lod-map.wgsl')).to.equal(true)
+        expect(exists('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')).to.equal(true)
 
         const helloGAW = read('examples', 'helloGAW', 'main.js')
         const flowLayer = read('examples', 'flowLayer', 'flow-layer.js')
@@ -71,23 +74,14 @@ describe('asset layout', () => {
         expect(lines).to.not.include('public/json/examples/*')
     })
 
-    it('keeps library-owned terrain assets next to terrain source', async () => {
+    it('keeps the reachable DEM asset beside its owning example', () => {
 
-        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'assets', 'index.js')).to.equal(true)
-        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'assets', 'dem.png')).to.equal(false)
-        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'assets', 'border.png')).to.equal(false)
-        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'assets', 'demPalette10.png')).to.equal(false)
+        expect(exists('examples', 'demLayer', 'assets', 'dem.png')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain')).to.equal(false)
 
-        const localTerrain = read('packages', 'geoscratch', 'src', 'applications', 'terrain', 'localTerrain.js')
-
-        expect(localTerrain).to.not.include('/images/examples/terrain/')
-        expect(localTerrain).to.include('./assets/index.js')
-
-        const terrainAssets = await import('../packages/geoscratch/src/applications/terrain/assets/index.js')
-
-        expect(terrainAssets.demImageDataUrl).to.match(/^data:image\/png;base64,/)
-        expect(terrainAssets.borderImageDataUrl).to.match(/^data:image\/png;base64,/)
-        expect(terrainAssets.demPaletteImageDataUrl).to.match(/^data:image\/png;base64,/)
+        const main = read('examples', 'demLayer', 'main.js')
+        expect(main).to.include("new URL('./assets/dem.png', import.meta.url)")
+        expect(main).to.not.match(/border|palette/i)
     })
 
     it('keeps library-owned postprocess shaders next to postprocess source', async () => {
@@ -110,19 +104,16 @@ describe('asset layout', () => {
         expect(fxaaShaders.fxaaComputeShader).to.include('@compute')
     })
 
-    it('keeps library-owned terrain shaders next to terrain source', async () => {
+    it('keeps only reachable terrain shaders beside the DEM example', () => {
 
-        expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain', 'shaders', 'index.js')).to.equal(true)
+        expect(exists('examples', 'demLayer', 'shaders', 'lod-map.wgsl')).to.equal(true)
+        expect(exists('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')).to.equal(true)
         expect(exists('examples', 'public', 'shaders', 'examples', 'terrain')).to.equal(false)
 
-        const localTerrain = read('packages', 'geoscratch', 'src', 'applications', 'terrain', 'localTerrain.js')
-
-        expect(localTerrain).to.not.include('/shaders/examples/terrain/')
-
-        const terrainShaders = await import('../packages/geoscratch/src/applications/terrain/shaders/index.js')
-
-        expect(terrainShaders.lodMapShader).to.include('@vertex')
-        expect(terrainShaders.terrainMeshShader).to.include('@vertex')
-        expect(terrainShaders.terrainMeshLineShader).to.include('@vertex')
+        const lodMap = read('examples', 'demLayer', 'shaders', 'lod-map.wgsl')
+        const terrain = read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')
+        expect(lodMap).to.include('@vertex')
+        expect(terrain).to.include('@vertex')
+        expect(`${lodMap}\n${terrain}`).to.not.include('terrainMeshLineShader')
     })
 })
