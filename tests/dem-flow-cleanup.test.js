@@ -75,7 +75,7 @@ describe('DEM flow layer cleanup', () => {
         expect(voronoi).to.include('flowMaskCutoff: f32')
         expect(voronoi).to.include('@location(1) mask: f32')
         expect(voronoi).to.include('length(input.velocity) / max(frameUniform.maxSpeed')
-        expect(voronoi).to.include('output.velocity = input.velocity * velocityMask')
+        expect(voronoi).to.include('output.velocity = input.velocity * speedMask * fieldSupport')
 
         expect(simulation).to.include('var maskTexture: texture_2d<f32>')
         expect(simulation).to.include('getMask(maskTexture, uv)')
@@ -93,7 +93,7 @@ describe('DEM flow layer cleanup', () => {
 
         expect(layer).to.match(/label: 'Flow domain mask',[\s\S]*?format: 'r8unorm'/)
         expect(voronoi).to.include('@location(1) mask: f32')
-        expect(voronoi).to.include('output.mask = maskValue')
+        expect(voronoi).to.include('output.mask = fieldSupport')
         expect(voronoi).to.not.include('@location(1) mask: vec4f')
         expect(voronoi).to.not.include('output.mask = vec4f(maskValue')
     })
@@ -149,7 +149,7 @@ describe('DEM flow layer cleanup', () => {
         }
     })
 
-    it('derives the flow-domain mask from supported Voronoi geometry, not speed alone', () => {
+    it('derives the flow-domain mask from supported geometry and the business display extent', () => {
 
         const layer = read('examples', 'flowLayer', 'flow-layer.js')
         const voronoi = read('examples', 'flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
@@ -167,10 +167,11 @@ describe('DEM flow layer cleanup', () => {
         expect(voronoi).to.include('@location(3) vTo: vec2f')
         expect(voronoi).to.include('output.domainSupport = input.domainSupport')
         expect(voronoi).to.include('let speedMask = step(frameUniform.flowMaskCutoff, speedRate)')
-        expect(voronoi).to.include('let velocityMask = speedMask * input.domainSupport')
-        expect(voronoi).to.include('let maskValue = input.domainSupport')
-        expect(voronoi).to.include('output.velocity = input.velocity * velocityMask')
-        expect(voronoi).to.not.include('let maskValue = speedMask * input.domainSupport')
+        expect(voronoi).to.include('let displaySupport = select(0.0, 1.0,')
+        expect(voronoi).to.include('let fieldSupport = input.domainSupport * displaySupport')
+        expect(voronoi).to.include('output.velocity = input.velocity * speedMask * fieldSupport')
+        expect(voronoi).to.include('output.mask = fieldSupport')
+        expect(voronoi).to.not.include('output.mask = speedMask * fieldSupport')
     })
 
     it('cleans up flow camera listeners and worker resources when removed', () => {

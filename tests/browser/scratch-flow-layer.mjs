@@ -12,6 +12,12 @@ const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const proofFrames = positiveInteger(process.env.FLOW_LAYER_PROOF_FRAMES, 660)
 const expectedFramesPerField = 300
 const expectedFieldCount = 27
+const expectedDisplayExtent = Object.freeze([
+    120.04373606134682,
+    31.173901952209487,
+    121.96623240116922,
+    32.08401085804678,
+])
 const timeout = positiveInteger(process.env.FLOW_LAYER_BROWSER_TIMEOUT_MS, 120_000)
 const outputDirectory = resolve(
     process.env.FLOW_LAYER_BROWSER_OUTPUT ?? '/tmp/geoscratch-flow-layer-browser'
@@ -45,6 +51,7 @@ let browser
 let browserVersion
 let adapter
 let normalProof
+let boundaryProof
 let failureProofs
 let fatalError
 let cleanupError
@@ -61,6 +68,7 @@ try {
     const verified = await verifyNormalFlow(browser)
     adapter = verified.adapter
     normalProof = verified.proof
+    boundaryProof = await verifyBoundaryFlow(browser)
     failureProofs = []
     for (const scenario of failureScenarios) {
         failureProofs.push(await verifyFailureScenario(browser, scenario))
@@ -90,6 +98,7 @@ try {
 const failures = validateResult({
     adapter,
     normalProof,
+    boundaryProof,
     failureProofs,
     fatalError,
     cleanupError,
@@ -112,6 +121,7 @@ const result = {
     },
     adapter,
     normalProof,
+    boundaryProof,
     failureProofs: failureProofs?.map(summarizeFailureResult),
     fatalError,
     cleanupError,
@@ -224,6 +234,58 @@ async function verifyNormalFlow(activeBrowser) {
                 },
                 ...events,
             },
+        }
+    } finally {
+        await context.close()
+    }
+}
+
+async function verifyBoundaryFlow(activeBrowser) {
+
+    const context = await activeBrowser.newContext({
+        viewport: { width: 960, height: 720 },
+        deviceScaleFactor: 1,
+    })
+    const page = await context.newPage()
+    const events = observePage(page)
+
+    try {
+        await page.goto(`${baseUrl}/flowLayer/index.html?proof=1&boundary=1&field=1`, {
+            waitUntil: 'domcontentloaded',
+            timeout,
+        })
+        const facts = await waitForFlowFacts(page, current => (
+            current.status === 'ready' &&
+            Number(current.observedFrames) >= 45 &&
+            Number(current.currentPendingNativeObservations) === 0
+        ))
+        const contract = JSON.parse(facts.graphContract)
+        const boundaryLongitude = contract.displayExtent[2]
+        const boundaryLatitude = (contract.displayExtent[1] + contract.displayExtent[3]) / 2
+        const boundaryPoint = await page.evaluate((lngLat) => {
+            const point = window.__FLOW_LAYER_PROOF__.project(lngLat)
+            return { x: point.x, y: point.y }
+        }, [ boundaryLongitude, boundaryLatitude ])
+        const screenshotPath = resolve(outputDirectory, 'flow-estuary-boundary.png')
+        const png = await page.locator('#GPUFrame').screenshot({ path: screenshotPath })
+        const pixels = await inspectBoundaryPixels(page, png, boundaryPoint.x)
+        const drainedFacts = await page.evaluate(async() => {
+            return await window.__FLOW_LAYER_PROOF__.pauseAndDrain()
+        })
+        const cleanup = await page.evaluate(async() => {
+            return await window.__FLOW_LAYER_PROOF__.dispose()
+        })
+        const terminalStatus = await page.locator('#GPUFrame').getAttribute('data-status')
+
+        return {
+            facts,
+            drainedFacts,
+            cleanup,
+            terminalStatus,
+            boundaryPoint,
+            screenshot: screenshotPath,
+            pixels,
+            ...events,
         }
     } finally {
         await context.close()
@@ -369,6 +431,62 @@ async function inspectPixels(page, png) {
     }, png.toString('base64'))
 }
 
+async function inspectBoundaryPixels(page, png, boundaryX) {
+
+    return await page.evaluate(async({ base64, boundaryX: boundary }) => {
+        const image = new Image()
+        image.src = `data:image/png;base64,${base64}`
+        await image.decode()
+        const target = document.createElement('canvas')
+        target.width = image.naturalWidth
+        target.height = image.naturalHeight
+        const context = target.getContext('2d', { willReadFrequently: true })
+        if (!context) throw new Error('Boundary pixel inspection context is unavailable.')
+        context.drawImage(image, 0, 0)
+        const pixels = context.getImageData(0, 0, target.width, target.height).data
+        const background = [ 16, 20, 24 ]
+        const summarize = ({ x0, x1, y0, y1 }) => {
+            let differentPixels = 0
+            let totalRgbDelta = 0
+            let maximumRgbDelta = 0
+            let sampleCount = 0
+            for (let y = y0; y < y1; y++) {
+                for (let x = x0; x < x1; x++) {
+                    const index = (y * target.width + x) * 4
+                    const delta = Math.abs(pixels[index] - background[0]) +
+                        Math.abs(pixels[index + 1] - background[1]) +
+                        Math.abs(pixels[index + 2] - background[2])
+                    if (delta > 12) differentPixels++
+                    totalRgbDelta += delta
+                    maximumRgbDelta = Math.max(maximumRgbDelta, delta)
+                    sampleCount++
+                }
+            }
+            return {
+                sampleCount,
+                differentPixels,
+                differentRatio: differentPixels / sampleCount,
+                meanRgbDelta: totalRgbDelta / sampleCount,
+                maximumRgbDelta,
+            }
+        }
+        const y0 = 24
+        const y1 = target.height - 24
+        const insideX0 = Math.max(0, Math.floor(boundary - 120))
+        const insideX1 = Math.max(insideX0 + 1, Math.floor(boundary - 24))
+        const outsideX0 = Math.min(target.width - 1, Math.ceil(boundary + 24))
+        const outsideX1 = Math.max(outsideX0 + 1, target.width - 24)
+
+        return {
+            width: target.width,
+            height: target.height,
+            boundaryX: boundary,
+            inside: summarize({ x0: insideX0, x1: insideX1, y0, y1 }),
+            outside: summarize({ x0: outsideX0, x1: outsideX1, y0, y1 }),
+        }
+    }, { base64: png.toString('base64'), boundaryX })
+}
+
 async function inspectPixelPair(page, firstPng, secondPng) {
 
     return await page.evaluate(async({ firstBase64, secondBase64 }) => {
@@ -453,6 +571,11 @@ function validateResult(result) {
     if (result.adapter?.available !== true) failures.push('navigator.gpu was unavailable')
     if (result.adapter?.adapterAvailable !== true) failures.push('WebGPU adapter was unavailable')
     if (result.normalProof !== undefined) validateNormalProof(result.normalProof, failures)
+    if (result.boundaryProof === undefined) {
+        failures.push('estuary boundary proof was not produced')
+    } else {
+        validateBoundaryProof(result.boundaryProof, failures)
+    }
     if (result.failureProofs === undefined) {
         failures.push('failure scenario proofs were not produced')
     } else {
@@ -622,6 +745,46 @@ function validateNormalProof(proof, failures) {
         failures.push('Flow animation did not produce enough changing pixels')
     }
     validateCleanEvents('normal Flow page', proof, failures, 0)
+}
+
+function validateBoundaryProof(proof, failures) {
+
+    validateFlowFacts('estuary boundary', proof.facts, failures)
+    validateMrtFacts('estuary boundary', proof.facts, failures)
+    const contract = parseJson(
+        proof.facts.graphContract,
+        'estuary boundary graph contract',
+        failures
+    )
+    if (JSON.stringify(contract?.displayExtent) !== JSON.stringify(expectedDisplayExtent)) {
+        failures.push('Flow display extent drifted from the legacy estuary boundary')
+    }
+    if (!Array.isArray(contract?.resourceExtent) ||
+        contract.resourceExtent[2] <= expectedDisplayExtent[2]) {
+        failures.push('Flow resource extent did not retain the offshore station domain')
+    }
+    if (proof.boundaryPoint.x <= 0 || proof.boundaryPoint.x >= proof.pixels.width) {
+        failures.push('estuary boundary was outside the browser proof viewport')
+    }
+    if (proof.pixels.inside.differentRatio < 0.05 ||
+        proof.pixels.inside.meanRgbDelta < 2) {
+        failures.push('Flow field was not visible inside the estuary display boundary')
+    }
+    if (proof.pixels.outside.differentRatio > 0.01 ||
+        proof.pixels.outside.meanRgbDelta > 1) {
+        failures.push('Flow field leaked east of the estuary display boundary into the near sea')
+    }
+    if (proof.pixels.inside.differentRatio <= proof.pixels.outside.differentRatio + 0.04) {
+        failures.push('estuary boundary did not create a measurable inside/outside field cutoff')
+    }
+    if (proof.drainedFacts.pendingObservationCount !== '0' ||
+        proof.drainedFacts.currentPendingNativeObservations !== '0') {
+        failures.push('estuary boundary proof retained pending work after drain')
+    }
+    if (proof.terminalStatus !== 'disposed') {
+        failures.push(`estuary boundary terminal page status was ${proof.terminalStatus}`)
+    }
+    validateCleanEvents('estuary boundary Flow page', proof, failures, 0)
 }
 
 function validateFlowFacts(label, facts, failures) {

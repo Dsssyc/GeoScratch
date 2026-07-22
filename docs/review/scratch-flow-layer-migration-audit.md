@@ -2,11 +2,12 @@
 
 ## Audit Status
 
-Implementation-complete candidate on `socu/flow-layer-clean-cut-v1`. This audit is
-anchored to `dev-feature` commit
-`d8e4f4d226f1793a7fcb8cde038566dc4a704afa` and package version `0.0.22`.
-Final acceptance still depends on the complete Goal gate and finite fresh-context
-review protocol.
+Estuary-boundary correction candidate on `socu/flow-layer-legacy-boundary-fix`. The
+fixed legacy source remains
+`d8e4f4d226f1793a7fcb8cde038566dc4a704afa:examples/m_flowLayer`; the correction branch
+starts from `dev-feature` commit `26ed35ffea5114e6968e013be9dca2e302e49ff1` and
+package version `0.0.22`. Final acceptance still depends on the complete Goal gate and
+finite fresh-context review protocol.
 
 ## Scope And Method
 
@@ -32,11 +33,11 @@ contains a demonstrable defect.
 | `m_flowLayer/steadyFlowLayer.js` map-facing portions | `flowLayer/flow-map.js` | Replaced | Camera facts and map defaults are read from a page-owned MapLibre instance without inheriting the legacy `ScratchMap`. |
 | `shaders/flow/flowLayer.wgsl` | Same target path | Byte-identical | SHA-256 `225a94b8fe79c052264a1fcb81f96a7d4ebf36d384bf695645984f551c32382a`. |
 | `shaders/flow/flowShow.wgsl` | Same target path | Byte-identical | SHA-256 `9e515dcef0e7cff01e5a9f1828e3dff7561991abc3b54596f33c017b3544733a`. |
-| `shaders/flow/flowVoronoi.wgsl` | Same target path | Byte-identical | SHA-256 `0b1cc4c6e88d57ecf4d6ca2582a485101c7116eafa64b6bad388dce766a2cb15`. |
-| `shaders/flow/particles.wgsl` | Same target path | Byte-identical | SHA-256 `8105f49ba56bd1929a74b8c7528d5e5732b4c905ffb2cf76388396a383f8c78b`. |
-| `shaders/flow/simulation.compute.wgsl` | Same target path | Byte-identical | SHA-256 `27be5467f1846e59b728f634fb0530f247592a99a9743f1d8dd4f2d7ff8a8671`. |
+| `shaders/flow/flowVoronoi.wgsl` | Same target path | Corrected | SHA-256 `f8fae35c1a5fa35fdbddd8b5cc24f40a53d54877943efa63c7bd8f6e99e7826e`. Carries reconstructed Mercator position to the fragment stage and writes zero velocity/mask outside the legacy estuary display extent. |
+| `shaders/flow/particles.wgsl` | Same target path | Preserved with semantic field rename | SHA-256 `315d1f806fe4326b28b524a78b4520a43ba5358a5210ff0aed6ad2291c85b715`; `extent` is renamed `displayExtent` without changing particle behavior. |
+| `shaders/flow/simulation.compute.wgsl` | Same target path | Preserved with semantic field rename | SHA-256 `aedf78a69868f2a3df565ee6f6f39851c975570bfb87449bedc9af5dd0a84748`; `extent` is renamed `displayExtent` without changing simulation behavior. |
 | `shaders/flow/swap.wgsl` | Same target path | Byte-identical | SHA-256 `a9f08a0a027e059076f11b3f68969241d74d34e56ac464b608bb931aa5220897`. |
-| `shaders/flow/arrow.wgsl` | Same target path | Corrected | Legacy SHA-256 `f11b55d300655f5cab0376ffcda67145180e4840db2fef4085f0fa9ef0b8bf7b`; target SHA-256 `666bdcc55fd9f147f99b2437a2c489cf368a4d441da4aef421760d751149b6d5`. Only four reads change from stride 4 to stride 6, with velocity offsets corrected from 2/3 to 4/5. |
+| `shaders/flow/arrow.wgsl` | Same target path | Corrected | Legacy SHA-256 `f11b55d300655f5cab0376ffcda67145180e4840db2fef4085f0fa9ef0b8bf7b`; target SHA-256 `ffce4cf43b21f44ed6ff65c21b6d3694a0b98faf33d9ebe961649a26cd988547`. Reads use stride 6 with velocity offsets 4/5, consume current longitude/latitude positions directly, and rename `extent` to `displayExtent`. |
 
 All eleven fixed Flow files have a target disposition. No old route, redirect, or
 parallel implementation remains.
@@ -72,6 +73,8 @@ It exists only under `proof=1`; it does not replace the normal remote basemap.
 | Initial and prefetched fields | Load 0 and 1, then request next | Load 0 and 1 concurrently, prefetch 2, then rotate | Preserved. |
 | Maximum speed | Monotonic maximum over loaded fields | Same monotonic maximum | Preserved. |
 | Station triangulation | D3 Delaunay over `station.bin` | Same library and source data | Preserved. |
+| Station resource coverage | `station.bin` includes offshore stations through approximately `123.0563` east | Same complete resource, published as `resourceExtent` | Preserved; source data is not cropped. |
+| Business display extent | Fixed extent ends at `121.96623240116922` east and fixed-source rendering stops at the Yangtze estuary | `FLOW_DISPLAY_EXTENT` is distinct from `resourceExtent`; Voronoi velocity and mask are zeroed outside it | Corrected after the initial migration exposed the full offshore resource domain. |
 | Domain support | Maximum triangle edge against `0.04` | Same calculation and default | Preserved. |
 | Expanded station velocities | Triangle vertex to station index expansion | Same indexed expansion | Preserved. |
 | Velocity interpolation | From/to vertex attributes and progress | Same attributes and progress `0..299 / 299` | Preserved. |
@@ -87,7 +90,7 @@ It exists only under `proof=1`; it does not replace the normal remote basemap.
 | Reprojection | Previous/current camera facts and reverse gather | Same shader and explicit uniform upload | Preserved. |
 | Resize | Legacy screen-dependent implicit replacement | Explicit Surface/texture resize plus stale-only BindSet preparation | Strengthened and made observable. |
 | Optional Voronoi view | Configured true, then binding disabled every active render | Query-controlled and actually executed when enabled | Corrected intended behavior. |
-| Optional arrows | Add call commented out; shader used wrong stride | Query-controlled; stride defect corrected and browser-exercised | Corrected intended behavior. |
+| Optional arrows | Add call commented out; shader used wrong stride and normalized positions | Query-controlled; six-float stride and current longitude/latitude representation are both corrected and browser-exercised | Corrected intended behavior. |
 | Normal blending | Legacy `NormalBlending` | Explicit source-alpha blend state | Preserved. |
 | Map defaults | CARTO, center, zoom, Mercator, max zoom, antialias | Same normal defaults | Preserved. |
 | Hide/show custom-layer methods | MapLibre custom-layer-only control surface | No replacement public method | Intentionally removed with the old custom-layer API; not used by the standalone example. |
@@ -190,6 +193,17 @@ reported `passed` in headed Chrome `150.0.7871.125` with an Apple Metal 3 adapte
 
 The normal proof ran with `arrows=1`, so the corrected optional arrow path compiled,
 submitted, and rendered under the same native validation gate.
+
+The 2026-07-22 correction run also reported `passed` in headed Chrome
+`150.0.7871.130` on Apple Metal 3. Its fixed-camera `flow-estuary-boundary.png` proof
+published the complete station resource extent
+`[120.0449447631836, 29.434587478637695, 123.0562973022461, 32.26061248779297]`
+separately from the legacy display extent
+`[120.04373606134682, 31.173901952209487, 121.96623240116922, 32.08401085804678]`.
+Pixel inspection found a visible field west of the projected eastern boundary and no
+field leakage in the sampled near-sea region east of it. The same run completed all
+660 normal frames, both fault scenarios, browser cleanup, managed Vite cleanup, and
+port-closure checks.
 
 ## Scope Integrity
 

@@ -25,7 +25,7 @@ export const STAGE_ORDER = Object.freeze([
     'history-presentation',
 ])
 
-const FLOW_EXTENT = Object.freeze([
+export const FLOW_DISPLAY_EXTENT = Object.freeze([
     120.04373606134682,
     31.173901952209487,
     121.96623240116922,
@@ -111,6 +111,7 @@ export async function createFlowLayer({
         passes,
         commands,
         historyDirections,
+        resourceExtent: stationGeometry.resourceExtent,
     }
     const state = createFlowState(size, fieldData, random)
     const stableIdentities = stableIdentitySnapshot(graph)
@@ -168,7 +169,7 @@ function createCodecs() {
         ]),
         static: uniform('FlowStaticUniform', [
             { name: 'groupSize', type: 'vec2u' },
-            { name: 'extent', type: 'vec4f' },
+            { name: 'displayExtent', type: 'vec4f' },
         ]),
         camera: uniform('FlowCameraUniform', [
             { name: 'far', type: 'f32' },
@@ -211,7 +212,7 @@ async function createUniformResources(runtime, codecs, settings, size) {
         frame: await createUniform(runtime, 'Flow frame uniform', codecs.frame, {
             randomSeed: 0,
             viewPort: [ size.width, size.height ],
-            mapBounds: FLOW_EXTENT,
+            mapBounds: FLOW_DISPLAY_EXTENT,
             zoomLevel: 9,
             progressRate: 0,
             maxSpeed: 0,
@@ -219,7 +220,7 @@ async function createUniformResources(runtime, codecs, settings, size) {
         }),
         static: await createUniform(runtime, 'Flow static uniform', codecs.static, {
             groupSize: [ GROUP_SIZE_X, GROUP_SIZE_Y ],
-            extent: FLOW_EXTENT,
+            displayExtent: FLOW_DISPLAY_EXTENT,
         }),
         camera: await createUniform(runtime, 'Flow camera uniform', codecs.camera, {
             far: 1,
@@ -278,6 +279,7 @@ async function createStationGeometry(maxEdge, signal) {
 
     const stationCoords = new Float32Array(await fetchArrayBuffer('/json/examples/flow/station.bin', signal))
     const meshes = new Delaunay(stationCoords)
+    const resourceExtent = coordinateExtent(stationCoords)
     const vertices = []
     const domainSupport = []
     const stationIndices = []
@@ -302,6 +304,7 @@ async function createStationGeometry(maxEdge, signal) {
         positions: new Float32Array(vertices),
         domainSupport: new Float32Array(domainSupport),
         stationIndices: new Uint32Array(stationIndices),
+        resourceExtent,
         vertexCount: stationIndices.length,
     })
 }
@@ -315,6 +318,18 @@ function createFieldData(geometry, first, second) {
         toIndex: second.index,
         maxSpeed: Math.max(first.maxSpeed, second.maxSpeed),
     }
+}
+
+function coordinateExtent(coordinates) {
+
+    const extent = [ Infinity, Infinity, -Infinity, -Infinity ]
+    for (let index = 0; index < coordinates.length; index += 2) {
+        extent[0] = Math.min(extent[0], coordinates[index])
+        extent[1] = Math.min(extent[1], coordinates[index + 1])
+        extent[2] = Math.max(extent[2], coordinates[index])
+        extent[3] = Math.max(extent[3], coordinates[index + 1])
+    }
+    return Object.freeze(extent)
 }
 
 function createParticleData(random) {
@@ -448,7 +463,7 @@ async function createBindLayouts(runtime, codecs) {
             group: 0,
             entries: [
                 uniform(0, 'frameUniform', codecs.frame, [ 'vertex', 'fragment' ]),
-                uniform(1, 'staticUniform', codecs.static, [ 'vertex' ]),
+                uniform(1, 'staticUniform', codecs.static, [ 'vertex', 'fragment' ]),
                 uniform(2, 'dynamicUniform', codecs.camera, [ 'vertex' ]),
             ],
         }),
@@ -1288,6 +1303,8 @@ function graphContractSnapshot(graph) {
         fieldCount: FIELD_COUNT,
         velocityFormat: graph.textures.flow.format,
         maskFormat: graph.textures.mask.format,
+        resourceExtent: graph.resourceExtent,
+        displayExtent: FLOW_DISPLAY_EXTENT,
         voronoiTargetFormats: Object.freeze(graph.passes.voronoi.color.map(
             attachment => attachment.target.texture.format
         )),

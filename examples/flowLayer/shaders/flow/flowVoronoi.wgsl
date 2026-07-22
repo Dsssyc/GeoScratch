@@ -9,7 +9,7 @@ struct VertexInput {
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) velocity: vec2f,
-    @location(1) uv: vec2f,
+    @location(1) mercatorPosition: vec2f,
     @location(2) domainSupport: f32,
 };
 
@@ -30,7 +30,7 @@ struct FragmentOutput {
 
 struct StaticUniformBlock {
     groupSize: vec2u,
-    extent: vec4f,
+    displayExtent: vec4f,
 };
 
 struct DynamicUniformBlock {
@@ -66,12 +66,10 @@ fn calcWebMercatorCoord(coord: vec2f) -> vec2f {
 @vertex
 fn vMain(input: VertexInput) -> VertexOutput {
 
-    let x = (input.position.x - staticUniform.extent[0]) / (staticUniform.extent[2] - staticUniform.extent[0]);
-    let y = (input.position.y - staticUniform.extent[1]) / (staticUniform.extent[3] - staticUniform.extent[1]);
-
     var output: VertexOutput;
     output.position = dynamicUniform.uMatrix * vec4f(translateRelativeToEye(vec3f(input.position.xy, 0.0), vec3f(input.position.zw, 0.0)), 1.0);
     output.velocity = mix(input.vFrom, input.vTo, frameUniform.progressRate);
+    output.mercatorPosition = input.position.xy + input.position.zw;
     output.domainSupport = input.domainSupport;
     return output;
 }
@@ -85,11 +83,18 @@ fn fMain(input: VertexOutput) -> FragmentOutput {
 
     let speedRate = length(input.velocity) / max(frameUniform.maxSpeed, 0.000001);
     let speedMask = step(frameUniform.flowMaskCutoff, speedRate);
-    let velocityMask = speedMask * input.domainSupport;
-    let maskValue = input.domainSupport;
+    let displaySouthWest = calcWebMercatorCoord(staticUniform.displayExtent.xy);
+    let displayNorthEast = calcWebMercatorCoord(staticUniform.displayExtent.zw);
+    let displaySupport = select(0.0, 1.0,
+        input.mercatorPosition.x >= displaySouthWest.x &&
+        input.mercatorPosition.x <= displayNorthEast.x &&
+        input.mercatorPosition.y <= displaySouthWest.y &&
+        input.mercatorPosition.y >= displayNorthEast.y
+    );
+    let fieldSupport = input.domainSupport * displaySupport;
 
     var output: FragmentOutput;
-    output.velocity = input.velocity * velocityMask;
-    output.mask = maskValue;
+    output.velocity = input.velocity * speedMask * fieldSupport;
+    output.mask = fieldSupport;
     return output;
 }

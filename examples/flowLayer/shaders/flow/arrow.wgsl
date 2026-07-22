@@ -13,7 +13,7 @@ struct VertexOutput {
 
 struct StaticUniformBlock {
     groupSize: vec2u,
-    extent: vec4f,
+    displayExtent: vec4f,
 }
 
 struct DynamicUniformBlock {
@@ -60,10 +60,10 @@ fn translateRelativeToEye(high: vec3f, low: vec3f) -> vec3f {
 
 fn currentExtent() -> vec4f {
 
-    let lonMin = max(staticUniform.extent.x, frameUniform.mapBounds.x);
-    let latMin = max(staticUniform.extent.y, frameUniform.mapBounds.y);
-    let lonMax = min(staticUniform.extent.z, frameUniform.mapBounds.z);
-    let latMax = min(staticUniform.extent.w, frameUniform.mapBounds.w);
+    let lonMin = max(staticUniform.displayExtent.x, frameUniform.mapBounds.x);
+    let latMin = max(staticUniform.displayExtent.y, frameUniform.mapBounds.y);
+    let lonMax = min(staticUniform.displayExtent.z, frameUniform.mapBounds.z);
+    let latMax = min(staticUniform.displayExtent.w, frameUniform.mapBounds.w);
     return vec4f(lonMin, latMin, lonMax, latMax);
 }
 
@@ -109,9 +109,7 @@ fn vMain(input: VertexInput) -> VertexOutput {
     );
 
     let cExtent = currentExtent();
-    let x = mix(cExtent.x, cExtent.z, position.x);
-    let y = mix(cExtent.y, cExtent.w, position.y);
-    let mercatorPos = calcWebMercatorCoord(vec2f(x, y));
+    let mercatorPos = calcWebMercatorCoord(position);
     let position_CS = dynamicUniform.uMatrix * vec4f(translateRelativeToEye(vec3f(mercatorPos, 0.0), vec3f(0.0, 0.0, 0.0)), 1.0);
     let position_SS = position_CS.xy / position_CS.w;
     let uv = (position_SS + 1.0) / 2.0;

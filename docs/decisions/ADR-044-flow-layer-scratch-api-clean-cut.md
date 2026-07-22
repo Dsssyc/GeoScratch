@@ -37,7 +37,8 @@ map helper.
 
 Flow owns one explicit five-stage Scratch graph:
 
-1. generate the interpolated `rg32float` velocity field and `r8unorm` domain mask;
+1. generate the interpolated `rg32float` velocity field and `r8unorm` domain mask,
+   clipped to the legacy estuary display extent;
 2. simulate the GPU-resident particle state;
 3. select one of two persistent history directions, compose prior history, and draw
    current particles;
@@ -55,6 +56,15 @@ Later stages declare `'current-at-step'` reads for the velocity field, particle 
 and selected history texture produced earlier in the same submission. Particle state
 never returns to CPU memory. Field changes mutate the CPU-owned backing arrays of two
 persistent UploadCommand objects; they do not replace GPU resources or commands.
+
+The station resource domain and the business display domain are different facts. The
+station resource remains complete and currently extends offshore to approximately
+`123.0563` east. The display extent remains
+`[120.04373606134682, 31.173901952209487, 121.96623240116922, 32.08401085804678]`,
+ending at the Yangtze estuary. The Voronoi fragment stage reconstructs each fragment's
+Mercator position and writes zero velocity and zero mask outside that display extent.
+Particle simulation, history cleanup, and optional field visualization therefore
+consume the same bounded field without truncating or rewriting source data.
 
 Resize replaces native allocations behind the five stable logical textures, then
 prepares only BindSets whose allocation-sensitive view facts became stale. Content
@@ -85,10 +95,14 @@ in-memory simulation WGSL. The latter opens one deep capture bounded to one oper
 2,000 ms, and 65,536 evidence bytes, and localizes pipeline, Program, module, and
 compilation outcomes without retaining WGSL source.
 
-Six migrated WGSL files remain byte-identical. `arrow.wgsl` is the documented
-exception: the legacy shader read a six-float particle record with a four-float
-stride. Its four particle reads now use stride six and velocity offsets four and five.
-No other shader expression changed.
+`flowLayer.wgsl`, `flowShow.wgsl`, and `swap.wgsl` remain byte-identical to the fixed
+source. `flowVoronoi.wgsl` explicitly restores the fixed source's effective estuary
+display boundary instead of treating the full station resource domain as visible.
+The static uniform field is named `displayExtent` throughout the remaining consumers
+so its role cannot again be confused with resource coverage. `arrow.wgsl` also uses
+the actual six-float particle record, velocity offsets four and five, and the current
+longitude/latitude particle representation directly instead of applying the legacy
+normalized-coordinate extent mix a second time.
 
 ## Alternatives Considered
 
@@ -113,11 +127,13 @@ workload without an example-shaped public abstraction.
 Rejected. Field data changes content, not resource identity or allocation. Persistent
 uploads and `'current-at-step'` preserve the correct distinction.
 
-### Preserve the broken arrow indexing byte-for-byte
+### Preserve the broken arrow indexing and coordinate mapping byte-for-byte
 
-Rejected. Optional arrow visibility is a required behavior, while the old stride read
-unrelated particle fields. The four-index correction is narrower and more factual
-than emulating a known defect.
+Rejected. Optional arrow visibility is a required behavior. The old shader read the
+wrong record stride, and its normalized-position extent mix no longer matches the
+current longitude/latitude particle state. Reading the actual six-float record and
+using its declared coordinate representation is more factual than emulating either
+known defect.
 
 ### Add raw WebGPU or CPU readback for missing behavior
 
@@ -136,6 +152,7 @@ primitives. No core capability gap was found.
   normal example retains the original CARTO map.
 - Future changes must preserve the five-stage order, 27-field stream, 300-frame
   phases, two explicit history directions, GPU-resident particle state, stale-only
-  BindSet preparation, source-free failure evidence, and managed headed-browser proof.
+  BindSet preparation, source-free failure evidence, the independent resource/display
+  extent facts, and managed headed-browser spatial proof of the estuary cutoff.
 - This decision makes no claim about OOM causality, physical VRAM reclamation,
   device-loss recovery, or MapLibre's internal resource cleanup.

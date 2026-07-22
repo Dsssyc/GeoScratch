@@ -8,12 +8,12 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
 const exists = (...parts) => fs.existsSync(path.join(root, ...parts))
 
 const shaderHashes = Object.freeze({
-    'arrow.wgsl': '666bdcc55fd9f147f99b2437a2c489cf368a4d441da4aef421760d751149b6d5',
+    'arrow.wgsl': 'ffce4cf43b21f44ed6ff65c21b6d3694a0b98faf33d9ebe961649a26cd988547',
     'flowLayer.wgsl': '225a94b8fe79c052264a1fcb81f96a7d4ebf36d384bf695645984f551c32382a',
     'flowShow.wgsl': '9e515dcef0e7cff01e5a9f1828e3dff7561991abc3b54596f33c017b3544733a',
-    'flowVoronoi.wgsl': '0b1cc4c6e88d57ecf4d6ca2582a485101c7116eafa64b6bad388dce766a2cb15',
-    'particles.wgsl': '8105f49ba56bd1929a74b8c7528d5e5732b4c905ffb2cf76388396a383f8c78b',
-    'simulation.compute.wgsl': '27be5467f1846e59b728f634fb0530f247592a99a9743f1d8dd4f2d7ff8a8671',
+    'flowVoronoi.wgsl': 'f8fae35c1a5fa35fdbddd8b5cc24f40a53d54877943efa63c7bd8f6e99e7826e',
+    'particles.wgsl': '315d1f806fe4326b28b524a78b4520a43ba5358a5210ff0aed6ad2291c85b715',
+    'simulation.compute.wgsl': 'aedf78a69868f2a3df565ee6f6f39851c975570bfb87449bedc9af5dd0a84748',
     'swap.wgsl': 'a9f08a0a027e059076f11b3f68969241d74d34e56ac464b608bb931aa5220897',
 })
 
@@ -93,7 +93,9 @@ describe('Flow Layer Scratch clean cut', () => {
         expect(source).to.not.match(/\b(?:StartDash|director|screen|storageBuffer|uniformBuffer|vertexBuffer|renderPass|computePass|renderPipeline|computePipeline|aRef|bRef|asF32|asU32|asVec2u)\b/)
         expect(source).to.not.match(/\.executable\b|runtime\.device\b|runtime\.queue\b|mapAsync\b|getMappedRange\b|readback\b/i)
         expect(source).to.not.include('../shared/scratchMap.js')
-        expect(main).to.include('createFlowMap(canvas, { proof: proofMode })')
+        expect(main).to.include("parameters.get('boundary') === '1'")
+        expect(main).to.include('createFlowMap(canvas, { proof: proofMode, ...boundaryMapOptions })')
+        expect(main).to.include('project: lngLat => map.project(lngLat)')
         expect(map).to.include('style: proof ? flowProofStyle : darkMatterStyle')
     })
 
@@ -156,7 +158,29 @@ describe('Flow Layer Scratch clean cut', () => {
         expect(layer).to.include("lifetime.assertActive('continue Flow graph initialization')")
     })
 
-    it('keeps six Flow shaders byte-identical and fixes the documented arrow stride defect', () => {
+    it('clips the generated velocity field and mask at the legacy estuary display boundary', () => {
+
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const shader = read('examples', 'flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
+
+        expect(layer).to.include('export const FLOW_DISPLAY_EXTENT = Object.freeze([')
+        expect(layer).to.include('121.96623240116922')
+        expect(layer).to.not.include('const FLOW_EXTENT')
+        expect(layer).to.include("{ name: 'displayExtent', type: 'vec4f' }")
+        expect(layer).to.include("uniform(1, 'staticUniform', codecs.static, [ 'vertex', 'fragment' ])")
+        expect(layer).to.include('resourceExtent: graph.resourceExtent')
+        expect(layer).to.include('displayExtent: FLOW_DISPLAY_EXTENT')
+        expect(shader).to.include('@location(1) mercatorPosition: vec2f')
+        expect(shader).to.include('output.mercatorPosition = input.position.xy + input.position.zw')
+        expect(shader).to.include('let displaySouthWest = calcWebMercatorCoord(staticUniform.displayExtent.xy)')
+        expect(shader).to.include('let displayNorthEast = calcWebMercatorCoord(staticUniform.displayExtent.zw)')
+        expect(shader).to.include('let displaySupport = select(0.0, 1.0,')
+        expect(shader).to.include('let fieldSupport = input.domainSupport * displaySupport')
+        expect(shader).to.include('output.velocity = input.velocity * speedMask * fieldSupport')
+        expect(shader).to.include('output.mask = fieldSupport')
+    })
+
+    it('locks the reviewed Flow shader set and retains the documented arrow stride correction', () => {
 
         for (const [ name, expected ] of Object.entries(shaderHashes)) {
             const bytes = fs.readFileSync(path.join(root, 'examples', 'flowLayer', 'shaders', 'flow', name))
@@ -174,6 +198,9 @@ describe('Flow Layer Scratch clean cut', () => {
         expect(arrow).to.include('particles[input.instanceIndex * 6 + 4]')
         expect(arrow).to.include('particles[input.instanceIndex * 6 + 5]')
         expect(arrow).to.not.include('particles[input.instanceIndex * 4')
+        expect(arrow).to.include('let mercatorPos = calcWebMercatorCoord(position)')
+        expect(arrow).to.not.include('mix(cExtent.x, cExtent.z, position.x)')
+        expect(arrow).to.not.include('mix(cExtent.y, cExtent.w, position.y)')
     })
 
     it('provides the required decision, audit, and headed browser verifier', () => {
@@ -194,6 +221,9 @@ describe('Flow Layer Scratch clean cut', () => {
         expect(browser).to.include('const expectedFieldCount = 27')
         expect(browser).to.include('validateTemporalFieldFacts')
         expect(browser).to.include('validateMrtFacts')
+        expect(browser).to.include('verifyBoundaryFlow')
+        expect(browser).to.include('flow-estuary-boundary.png')
+        expect(browser).to.include('validateBoundaryProof')
         expect(browser).to.include("velocityFormat !== 'rg32float'")
         expect(browser).to.include("maskFormat !== 'r8unorm'")
     })

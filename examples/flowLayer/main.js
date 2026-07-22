@@ -24,6 +24,10 @@ const FAILURE_SCENARIOS = Object.freeze([
 ])
 const parameters = new URLSearchParams(window.location.search)
 const proofMode = parameters.get('proof') === '1'
+const boundaryProofMode = proofMode && parameters.get('boundary') === '1'
+const boundaryMapOptions = boundaryProofMode
+    ? Object.freeze({ center: [ 122.35, 31.65 ], zoom: 9 })
+    : Object.freeze({})
 const requestedFailureScenario = parameters.get('fault')
 const failureConfiguration = Object.freeze({
     scenario: proofMode && requestedFailureScenario !== null
@@ -66,7 +70,7 @@ async function main(lifetime, proof) {
     const fieldStream = createFieldStream(worker, lifetime)
     proof.reach(FAILURE_SCENARIOS[0])
 
-    const map = lifetime.ownMap(createFlowMap(canvas, { proof: proofMode }))
+    const map = lifetime.ownMap(createFlowMap(canvas, { proof: proofMode, ...boundaryMapOptions }))
     const mapReady = waitForFlowMap(map, lifetime.signal)
     const runtimeReady = lifetime.acquireRuntime(ScratchRuntime.create({
         label: 'Flow Layer runtime',
@@ -165,6 +169,7 @@ async function main(lifetime, proof) {
         pauseAndDrain,
         dispose: disposePage,
         facts: readPublishedFacts,
+        project: lngLat => map.project(lngLat),
     })
     publishGraphFacts(graph)
 

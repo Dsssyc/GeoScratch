@@ -1,6 +1,6 @@
 struct StaticUniformBlock {
     groupSize: vec2u,
-    extent: vec4f,
+    displayExtent: vec4f,
 };
 
 struct FrameUniformBlock {
@@ -133,10 +133,10 @@ fn translateRelativeToEye(high: vec3f, low: vec3f) -> vec3f {
 
 fn currentExtent() -> vec4f {
 
-    let lonMin = max(staticUniform.extent.x, frameUniform.mapBounds.x);
-    let latMin = max(staticUniform.extent.y, frameUniform.mapBounds.y);
-    let lonMax = min(staticUniform.extent.z, frameUniform.mapBounds.z);
-    let latMax = min(staticUniform.extent.w, frameUniform.mapBounds.w);
+    let lonMin = max(staticUniform.displayExtent.x, frameUniform.mapBounds.x);
+    let latMin = max(staticUniform.displayExtent.y, frameUniform.mapBounds.y);
+    let lonMax = min(staticUniform.displayExtent.z, frameUniform.mapBounds.z);
+    let latMax = min(staticUniform.displayExtent.w, frameUniform.mapBounds.w);
     
     return vec4f(lonMin, latMin, lonMax, latMax);
 }
