@@ -234,14 +234,27 @@ describe('examples structure', () => {
         expect(css).to.include('display: none')
     })
 
-    it('constrains the examples sidebar so its navigation can scroll', () => {
+    it('hides the examples scrollbar without disabling navigation scrolling', () => {
         const css = read('examples', 'shared', 'index.css')
         const sidebarRule = css.match(/\.examples-sidebar\s*\{([^}]*)\}/)?.[1] ?? ''
         const navigationRule = css.match(/\.examples-nav\s*\{([^}]*)\}/)?.[1] ?? ''
+        const webkitScrollbarRule = css.match(/\.examples-nav::-webkit-scrollbar\s*\{([^}]*)\}/)?.[1] ?? ''
 
         expect(sidebarRule).to.match(/min-height:\s*0/)
         expect(navigationRule).to.match(/min-height:\s*0/)
         expect(navigationRule).to.match(/overflow:\s*auto/)
+        expect(navigationRule).to.match(/scrollbar-width:\s*none/)
+        expect(navigationRule).to.match(/-ms-overflow-style:\s*none/)
+        expect(webkitScrollbarRule).to.match(/display:\s*none/)
+    })
+
+    it('distinguishes normal and interactive example item surfaces', () => {
+        const css = read('examples', 'shared', 'index.css')
+        const linkRule = css.match(/\.example-link\s*\{([^}]*)\}/)?.[1] ?? ''
+        const interactiveRule = css.match(/\.example-link:hover,\s*\.example-link:focus,\s*\.example-link\.is-active\s*\{([^}]*)\}/)?.[1] ?? ''
+
+        expect(linkRule).to.match(/background:\s*#1a2028/)
+        expect(interactiveRule).to.match(/background:\s*#202833/)
     })
 
     it('keeps indirect execution GPU-side without readback or mapping', () => {

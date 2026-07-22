@@ -88,7 +88,13 @@ a {
 .examples-nav {
     min-height: 0;
     overflow: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     padding: 10px;
+}
+
+.examples-nav::-webkit-scrollbar {
+    display: none;
 }
 
 .example-link {
@@ -96,6 +102,7 @@ a {
     gap: 4px;
     border-radius: 6px;
     padding: 12px 10px;
+    background: #1a2028;
     text-decoration: none;
 }
 
