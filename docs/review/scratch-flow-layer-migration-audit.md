@@ -2,12 +2,12 @@
 
 ## Audit Status
 
-Estuary-boundary correction candidate on `socu/flow-layer-legacy-boundary-fix`. The
-fixed legacy source remains
-`d8e4f4d226f1793a7fcb8cde038566dc4a704afa:examples/m_flowLayer`; the correction branch
-starts from `dev-feature` commit `26ed35ffea5114e6968e013be9dca2e302e49ff1` and
-package version `0.0.22`. Final acceptance still depends on the complete Goal gate and
-finite fresh-context review protocol.
+Integrated on `dev-feature` through implementation/gate commit `bceb8a2`. The fixed
+legacy source remains
+`d8e4f4d226f1793a7fcb8cde038566dc4a704afa:examples/m_flowLayer`; the migration started
+from `dev-feature` commit `26ed35ffea5114e6968e013be9dca2e302e49ff1` and package
+version `0.0.22`. The combined DEM/Flow tree passed the complete verification contract
+recorded below.
 
 ## Scope And Method
 
@@ -232,8 +232,8 @@ faults, clean browser/server shutdown, and no normal console or GPU errors.
 
 ## Verification Contract
 
-The candidate is not merge-ready until all of the following pass from one committed
-tree and the finite two-review protocol reports no actionable final finding:
+The following remain the regression contract for the integrated implementation. They
+passed from committed tree `bceb8a2` before `dev-feature` integration:
 
 ```bash
 npm run typecheck

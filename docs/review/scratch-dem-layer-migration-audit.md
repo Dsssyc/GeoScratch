@@ -2,10 +2,12 @@
 
 ## Audit Status
 
-Implementation candidate on `socu/dem-layer-clean-cut-v1`, based on accepted Flow
-commit `26ed35ffea5114e6968e013be9dca2e302e49ff1` and package version `0.0.22`.
-The unchanged-core dynamic-count capability proof is commit `5515b31`. Final candidate
-SHA and headed-browser evidence are filled by the finite verification pass.
+Integrated on `dev-feature` through implementation/gate commit `bceb8a2`. The original
+implementation branch was based on accepted Flow commit
+`26ed35ffea5114e6968e013be9dca2e302e49ff1` and package version `0.0.22`; its unchanged-
+core dynamic-count capability proof is commit `5515b31`. Integration also made package
+builds remove stale `dist` output before TypeScript emission, so deleted `LocalTerrain`
+JavaScript and declarations cannot survive from an earlier build.
 
 ## Scope And Method
 
@@ -192,6 +194,12 @@ ordered and complete.
 The script closed headed Chrome, Vite, and its selected port. Screenshots are managed
 ephemeral proof artifacts under `/tmp/geoscratch-dem-layer-browser`; they are not
 repository assets.
+
+The final combined-tree rerun on headed Chrome `150.0.7871.130` again passed with 24
+initial and 56 moved visible nodes, the same 42 persistent identities, both failure
+scenarios, and clean browser/server shutdown. The complete repository suite reported
+941 passing tests and only the two declared pending gates; production emission reported
+100 JavaScript/declaration pairs with no stale, missing, or mismatched output.
 
 ## Remaining Limitations
 
