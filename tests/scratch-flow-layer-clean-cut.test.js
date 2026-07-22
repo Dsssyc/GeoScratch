@@ -25,7 +25,7 @@ describe('Flow Layer Scratch clean cut', () => {
         expect(exists('examples', 'm_flowLayer')).to.equal(false)
 
         const catalog = read('examples', 'index.html')
-        const vite = read('examples', 'vite.config.js')
+        const vite = read('examples', 'vite.config.ts')
         const neutralLinkStart = catalog.indexOf('data-id="flowLayer"')
         const neutralLink = catalog.slice(neutralLinkStart, neutralLinkStart + 420)
 
@@ -64,8 +64,8 @@ describe('Flow Layer Scratch clean cut', () => {
 
     it('preserves the legacy normal presentation and display-paced frame loop', () => {
 
-        const main = read('examples', 'flowLayer', 'main.js')
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const main = read('examples', 'flowLayer', 'main.ts')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
 
         expect(main).to.include("showVoronoi: parameters.get('field') === '1'")
         expect(layer).to.include('showVoronoi: options.showVoronoi ?? false')
@@ -78,9 +78,9 @@ describe('Flow Layer Scratch clean cut', () => {
 
     it('uses only the public current Scratch GPU execution model', () => {
 
-        const main = read('examples', 'flowLayer', 'main.js')
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
-        const map = read('examples', 'flowLayer', 'flow-map.js')
+        const main = read('examples', 'flowLayer', 'main.ts')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
+        const map = read('examples', 'flowLayer', 'flow-map.ts')
         const source = `${main}\n${layer}\n${map}`
 
         for (const required of [
@@ -116,7 +116,7 @@ describe('Flow Layer Scratch clean cut', () => {
 
     it('keeps the long-lived Flow graph explicit and frame-local only at submission', () => {
 
-        const source = read('examples', 'flowLayer', 'flow-layer.js')
+        const source = read('examples', 'flowLayer', 'flow-layer.ts')
 
         expect(source).to.include('const PARTICLE_COUNT = 262_144')
         expect(source).to.include('const PARTICLE_BLOCK_SIZE = 16')
@@ -143,7 +143,7 @@ describe('Flow Layer Scratch clean cut', () => {
 
     it('defines bounded diagnostics and exactly two deterministic failure scenarios', () => {
 
-        const source = read('examples', 'flowLayer', 'main.js')
+        const source = read('examples', 'flowLayer', 'main.ts')
 
         expect(source).to.include("'after-worker-acquisition'")
         expect(source).to.include("'invalid-simulation-pipeline-wgsl'")
@@ -158,8 +158,8 @@ describe('Flow Layer Scratch clean cut', () => {
 
     it('covers asynchronous initialization with the Flow lifecycle authority', () => {
 
-        const main = read('examples', 'flowLayer', 'main.js')
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const main = read('examples', 'flowLayer', 'main.ts')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
         const pagehideRegistration = main.indexOf("window.addEventListener('pagehide'")
         const firstInitializationAwait = main.indexOf('ScratchRuntime.create({')
 
@@ -175,7 +175,7 @@ describe('Flow Layer Scratch clean cut', () => {
 
     it('clips the generated velocity field and mask at the legacy estuary display boundary', () => {
 
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
         const shader = read('examples', 'flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
 
         expect(layer).to.include('export const FLOW_DISPLAY_EXTENT = Object.freeze([')

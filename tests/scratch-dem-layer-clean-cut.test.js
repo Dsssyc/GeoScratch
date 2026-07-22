@@ -3,9 +3,9 @@ import fs from 'node:fs'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { ScratchRuntime } from 'geoscratch'
-import { createDemLayer } from '../examples/demLayer/dem-layer.js'
-import { createDemLifecycle } from '../examples/demLayer/dem-lifecycle.js'
-import { selectTerrainNodes } from '../examples/demLayer/terrain-selection.js'
+import { createDemLayer } from '../examples/demLayer/dem-layer.ts'
+import { createDemLifecycle } from '../examples/demLayer/dem-lifecycle.ts'
+import { selectTerrainNodes } from '../examples/demLayer/terrain-selection.ts'
 import {
     createFakeCanvas,
     createFakeExternalImageSource,
@@ -119,18 +119,18 @@ describe('DEM Layer clean cut', () => {
 
     it('uses only the current public Scratch graph and keeps persistent construction out of frames', () => {
 
-        const layerSource = read('examples', 'demLayer', 'dem-layer.js')
-        const mainSource = read('examples', 'demLayer', 'main.js')
+        const layerSource = read('examples', 'demLayer', 'dem-layer.ts')
+        const mainSource = read('examples', 'demLayer', 'main.ts')
         const frameSource = layerSource.slice(
-            layerSource.indexOf('function renderFrame(camera)'),
-            layerSource.indexOf('async function resize(nextSize)')
+            layerSource.indexOf('function renderFrame(camera: DemCameraState)'),
+            layerSource.indexOf('async function resize(nextSize: SurfaceSize)')
         )
         const allSources = [
             layerSource,
             mainSource,
-            read('examples', 'demLayer', 'dem-map.js'),
-            read('examples', 'demLayer', 'dem-lifecycle.js'),
-            read('examples', 'demLayer', 'terrain-selection.js'),
+            read('examples', 'demLayer', 'dem-map.ts'),
+            read('examples', 'demLayer', 'dem-lifecycle.ts'),
+            read('examples', 'demLayer', 'terrain-selection.ts'),
         ].join('\n')
 
         for (const call of [
@@ -162,7 +162,7 @@ describe('DEM Layer clean cut', () => {
 
     it('locks the finite initialization faults and required migration documentation', () => {
 
-        const mainSource = read('examples', 'demLayer', 'main.js')
+        const mainSource = read('examples', 'demLayer', 'main.ts')
         const lifecycleCreation = mainSource.indexOf('const pageLifetime = createDemLifecycle()')
         const pageHideRegistration = mainSource.indexOf("window.addEventListener('pagehide'")
         const initializationStart = mainSource.indexOf(

@@ -5,6 +5,31 @@ import {
     sphere,
     utils,
 } from 'geoscratch'
+import type {
+    BindLayout,
+    BindLayoutEntry,
+    BindSet,
+    BindVisibility,
+    BufferResource,
+    CommandResourceReadDescriptor,
+    DispatchCommand,
+    DrawCommand,
+    ExternalImageUploadCommand,
+    LayoutCodec,
+    LayoutFieldDescriptor,
+    Program,
+    ProgramBufferLayoutRequirement,
+    ScratchDiagnosticCapture,
+    ScratchDiagnosticCaptureReport,
+    ScratchComputePipeline,
+    ScratchRuntimeDiagnosticsEvidence,
+    SubmittedWork,
+    Surface,
+    SurfaceSize,
+    StaticDispatchCount,
+    TextureResource,
+    UploadCommand,
+} from 'geoscratch'
 import bloomBlurXShader from './shaders/bloom-blur-x.wgsl?raw'
 import bloomBlurYShader from './shaders/bloom-blur-y.wgsl?raw'
 import bloomCombineShader from './shaders/bloom-combine.wgsl?raw'
@@ -19,9 +44,60 @@ import linkShader from './shaders/link.wgsl?raw'
 import particleComputeShader from './shaders/particle.compute.wgsl?raw'
 import pointShader from './shaders/point.wgsl?raw'
 import waterShader from './shaders/water.wgsl?raw'
-import { createPageLifetime } from './page-lifetime.js'
+import { createPageLifetime } from './page-lifetime.ts'
 
-const canvas = document.getElementById('GPUFrame')
+type PageLifetime = ReturnType<typeof createPageLifetime>
+type FailureConfiguration = Readonly<{ scenario: string | undefined }>
+type SceneMatrices = ReturnType<typeof createSceneMatrices>
+type Codecs = ReturnType<typeof createCodecs>
+type UniformResource = Awaited<ReturnType<typeof createUniform>>
+type UniformResources = Awaited<ReturnType<typeof createUniformResources>>
+type BufferWithUpload = Awaited<ReturnType<typeof createBufferWithUpload>>
+type GeometryResources = Awaited<ReturnType<typeof createGeometryResources>>
+type ParticleData = ReturnType<typeof createParticleData>
+type ParticleResources = Awaited<ReturnType<typeof createParticleResources>>
+type RenderTextures = Awaited<ReturnType<typeof createRenderTextures>>
+type ImageResources = Awaited<ReturnType<typeof createImageResources>>
+type Samplers = Awaited<ReturnType<typeof createSamplers>>
+type BindLayouts = Awaited<ReturnType<typeof createBindLayouts>>
+type BindSets = Awaited<ReturnType<typeof createBindSets>> & { gaussian: BindSet }
+type Programs = ReturnType<typeof createPrograms>
+type Pipelines = Awaited<ReturnType<typeof createPipelines>>
+type PostBindSets = Awaited<ReturnType<typeof createPostBindSets>>
+type RenderGraph = Awaited<ReturnType<typeof createRenderGraph>>
+type StableIdentityBaseline = ReturnType<typeof stableIdentitySnapshot>
+type FrameProvenance = ReturnType<typeof verifyFrameProvenance>
+type DisposalReport = Awaited<ReturnType<PageLifetime['dispose']>>
+type FailureProofReport = Readonly<{ scenario: string }>
+type FailureProofController = Readonly<{
+    assertConfiguration(): void
+    ownRuntime(value: ScratchRuntime, lifetime: PageLifetime): void
+    observeSurface(value: Surface): void
+    ownBitmap(name: string, bitmap: ImageBitmap, lifetime: PageLifetime): ReturnType<PageLifetime['defer']>
+    reach(scenario: string): void
+    bloomCombineShader(source: string): string
+    beforeBloomCombinePipeline(value: ScratchRuntime): void
+    captureBeforeDisposal(): void
+    finalize(primaryFailure: unknown, cleanupReport: DisposalReport): FailureProofReport | undefined
+    listenerRegistered(): void
+    listenerRemoved(): void
+    frameWorkScheduled(): void
+    frameWorkCompleted(): void
+    frameWorkCancelled(): void
+}>
+type FailureMetadataError = Error & {
+    code?: string
+    scenario?: string
+    diagnostic?: { code?: unknown }
+}
+
+declare global {
+    interface Window {
+        __HELLO_GAW_INIT_FAILURE_PROOF__?: FailureProofReport
+    }
+}
+
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const EARTH_RADIUS = 400
 const PARTICLE_COUNT = 100
 const PARTICLE_WORKGROUP_SIZE = 10
@@ -72,17 +148,18 @@ const imageSources = Object.freeze({
     cloudNight: new URL('./assets/images/cloud-night.jpg', import.meta.url).href,
     cloudMask: new URL('./assets/images/cloud-alpha.jpg', import.meta.url).href,
 })
+type ImageName = keyof typeof imageSources
 
 const pageLifetime = createPageLifetime()
 const failureProof = createFailureProofController(failureConfiguration)
-let pageFailureSettlement
+let pageFailureSettlement: Promise<void> | undefined
 
 setStatus('loading')
 void main(pageLifetime, failureProof).catch(error => {
     void failPage(error)
 })
 
-async function main(lifetime, proof) {
+async function main(lifetime: PageLifetime, proof: FailureProofController) {
 
     proof.assertConfiguration()
     assertPresentationShaderContract()
@@ -121,9 +198,9 @@ async function main(lifetime, proof) {
         outputCommand,
     } = graph
     let active = true
-    let animationFrame
-    let animationTimer
-    let disposal
+    let animationFrame: number | undefined
+    let animationTimer: number | undefined
+    let disposal: ReturnType<PageLifetime['dispose']> | undefined
     let submittedFrames = 0
     let observedFrames = 0
     let resizeGeneration = 0
@@ -143,7 +220,7 @@ async function main(lifetime, proof) {
     const stableIdentityBaseline = stableIdentitySnapshot(graph)
     publishGraphFacts(graph, stableIdentityBaseline, bloomCommands, fxaaCommand, resizeGeneration)
 
-    const handleUncapturedError = event => fail(event.error)
+    const handleUncapturedError = (event: GPUUncapturedErrorEvent) => fail(event.error)
     runtime.device.addEventListener('uncapturederror', handleUncapturedError)
     proof.listenerRegistered()
     lifetime.defer({
@@ -206,7 +283,7 @@ async function main(lifetime, proof) {
 
         if (disposal !== undefined) return disposal
         disposal = lifetime.dispose()
-        void disposal.then(report => {
+        void disposal.then((report) => {
             if (report.cleanupFailures.length > 0) {
                 reportFatalError(report.cleanupFailures[0].error)
             }
@@ -214,7 +291,7 @@ async function main(lifetime, proof) {
         return disposal
     }
 
-    function fail(error) {
+    function fail(error: unknown) {
 
         if (!active) return
         active = false
@@ -294,7 +371,14 @@ async function main(lifetime, proof) {
     proof.frameWorkScheduled()
 }
 
-async function createRenderGraph(runtime, surface, size, deterministic, lifetime, proof) {
+async function createRenderGraph(
+    runtime: ScratchRuntime,
+    surface: Surface,
+    size: SurfaceSize,
+    deterministic: boolean,
+    lifetime: PageLifetime,
+    proof: FailureProofController
+) {
 
     const matrices = createSceneMatrices(size)
     const codecs = createCodecs()
@@ -315,7 +399,7 @@ async function createRenderGraph(runtime, surface, size, deterministic, lifetime
         post,
         images: images.textures,
         samplers,
-    })
+    }) as BindSets
     const programs = createPrograms(runtime, codecs, proof)
     const pipelines = await createPipelines(runtime, surface, post, layouts, programs, proof)
     const passes = createPasses(runtime, surface, post)
@@ -427,7 +511,9 @@ async function createRenderGraph(runtime, surface, size, deterministic, lifetime
 
 function createCodecs() {
 
-    const uniform = (name, fields) => layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
+    const uniform = (name: string, fields: LayoutFieldDescriptor[]) => (
+        layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
+    )
 
     return Object.freeze({
         sceneDynamic: uniform('HelloGawSceneDynamic', [
@@ -505,7 +591,11 @@ function createCodecs() {
     })
 }
 
-async function createUniformResources(runtime, codecs, matrices) {
+async function createUniformResources(
+    runtime: ScratchRuntime,
+    codecs: Codecs,
+    matrices: SceneMatrices
+) {
 
     const lightAngle = utils.degToRad(-23)
     const lightPosition = [ -600 * Math.cos(lightAngle), -600 * Math.sin(lightAngle), 0 ]
@@ -526,7 +616,7 @@ async function createUniformResources(runtime, codecs, matrices) {
         view: matrices.view,
         minDistance: LINK_RADIUS * 2,
     }
-    const blurSteps = []
+    const blurSteps: UniformResource[] = []
 
     for (let level = 0; level < BLOOM_BLUR_LEVELS; level++) {
         blurSteps.push(await createUniform(runtime, `Hello GAW Bloom steps ${level}`, codecs.bloomSteps, {
@@ -606,7 +696,12 @@ async function createUniformResources(runtime, codecs, matrices) {
     }
 }
 
-async function createUniform(runtime, label, codec, values) {
+async function createUniform(
+    runtime: ScratchRuntime,
+    label: string,
+    codec: LayoutCodec,
+    values: Record<string, unknown>
+) {
 
     const bytes = codec.pack(values)
     const buffer = await runtime.createBuffer({
@@ -627,13 +722,13 @@ async function createUniform(runtime, label, codec, values) {
         buffer,
         region,
         upload,
-        write(nextValues) {
+        write(nextValues: Record<string, unknown>) {
             codec.write(bytes, nextValues)
         },
     }
 }
 
-async function createGeometryResources(runtime) {
+async function createGeometryResources(runtime: ScratchRuntime) {
 
     const generated = sphere(EARTH_RADIUS, 64, 32)
 
@@ -666,7 +761,7 @@ async function createGeometryResources(runtime) {
     }
 }
 
-function createParticleData(deterministic) {
+function createParticleData(deterministic: boolean) {
 
     const random = deterministic ? seededRandom(0x6d2b79f5) : Math.random
     const positions = new Float32Array(PARTICLE_COUNT * 3)
@@ -700,7 +795,7 @@ function createParticleData(deterministic) {
     return { positions, velocities, colors }
 }
 
-async function createParticleResources(runtime, data) {
+async function createParticleResources(runtime: ScratchRuntime, data: ParticleData) {
 
     const connectionData = new Uint32Array(PARTICLE_COUNT)
     const linkIndirectData = new Uint32Array([ LINK_NODE_COUNT, 0, 0, 0 ])
@@ -745,7 +840,12 @@ async function createParticleResources(runtime, data) {
     }
 }
 
-async function createBufferWithUpload(runtime, label, data, usage) {
+async function createBufferWithUpload<T extends ArrayBufferView<ArrayBuffer>>(
+    runtime: ScratchRuntime,
+    label: string,
+    data: T,
+    usage: GPUBufferUsageFlags
+) {
 
     const buffer = await runtime.createBuffer({
         label,
@@ -762,7 +862,7 @@ async function createBufferWithUpload(runtime, label, data, usage) {
     return { buffer, region, data, upload }
 }
 
-async function createRenderTextures(runtime, size) {
+async function createRenderTextures(runtime: ScratchRuntime, size: SurfaceSize) {
 
     const sampledStorageUsage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING
     const scene = await runtime.createTexture({
@@ -842,13 +942,17 @@ async function createRenderTextures(runtime, size) {
     }
 }
 
-async function createImageResources(runtime, lifetime, proof) {
+async function createImageResources(
+    runtime: ScratchRuntime,
+    lifetime: PageLifetime,
+    proof: FailureProofController
+) {
 
     const definitions = Object.entries(imageSources)
-    const textures = {}
-    const bitmaps = []
-    const ownerships = []
-    const uploads = []
+    const textures = {} as Record<ImageName, TextureResource>
+    const bitmaps: ImageBitmap[] = []
+    const ownerships: ReturnType<FailureProofController['ownBitmap']>[] = []
+    const uploads: ExternalImageUploadCommand[] = []
 
     for (const [ name, source ] of definitions) {
         const response = await fetch(source)
@@ -875,14 +979,14 @@ async function createImageResources(runtime, lifetime, proof) {
             premultipliedAlpha: false,
             size: { width: bitmap.width, height: bitmap.height },
         })
-        textures[name] = texture
+        textures[name as ImageName] = texture
         uploads.push(upload)
     }
 
     return { textures, bitmaps, ownerships, uploads }
 }
 
-async function createSamplers(runtime) {
+async function createSamplers(runtime: ScratchRuntime) {
 
     const linear = await runtime.createSampler({
         label: 'Hello GAW linear repeating sampler',
@@ -896,16 +1000,25 @@ async function createSamplers(runtime) {
     return { earth: linear, output: linear }
 }
 
-async function createBindLayouts(runtime, codecs) {
+async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
 
-    const uniformEntry = (binding, name, codec, visibility) => ({
+    const uniformEntry = (
+        binding: number,
+        name: string,
+        codec: LayoutCodec,
+        visibility: readonly BindVisibility[]
+    ): BindLayoutEntry => ({
         binding,
         name,
         type: 'uniform',
         visibility,
         minBindingSize: codec.artifact.byteLength,
     })
-    const textureEntry = (binding, name, visibility = [ 'fragment' ]) => ({
+    const textureEntry = (
+        binding: number,
+        name: string,
+        visibility: readonly BindVisibility[] = [ 'fragment' ]
+    ): BindLayoutEntry => ({
         binding,
         name,
         type: 'texture',
@@ -913,7 +1026,7 @@ async function createBindLayouts(runtime, codecs) {
         viewDimension: '2d',
         visibility,
     })
-    const storageTextureEntry = (binding, name) => ({
+    const storageTextureEntry = (binding: number, name: string): BindLayoutEntry => ({
         binding,
         name,
         type: 'storage-texture',
@@ -1110,7 +1223,16 @@ async function createBindLayouts(runtime, codecs) {
     }
 }
 
-async function createBindSets({ runtime, layouts, uniforms, geometry, particles, post, images, samplers }) {
+async function createBindSets({ runtime, layouts, uniforms, geometry, particles, post, images, samplers }: {
+    runtime: ScratchRuntime
+    layouts: BindLayouts
+    uniforms: UniformResources
+    geometry: GeometryResources
+    particles: ParticleResources
+    post: RenderTextures
+    images: ImageResources['textures']
+    samplers: Samplers
+}) {
 
     return {
         earthUniforms: await runtime.createBindSet(layouts.earthUniforms, {
@@ -1191,9 +1313,14 @@ async function createBindSets({ runtime, layouts, uniforms, geometry, particles,
     }
 }
 
-function createPrograms(runtime, codecs, proof) {
+function createPrograms(runtime: ScratchRuntime, codecs: Codecs, proof: FailureProofController) {
 
-    const requirement = (group, binding, type, codec) => ({
+    const requirement = (
+        group: number,
+        binding: number,
+        type: ProgramBufferLayoutRequirement['type'],
+        codec: LayoutCodec
+    ): ProgramBufferLayoutRequirement => ({
         group,
         binding,
         type,
@@ -1300,24 +1427,35 @@ function createPrograms(runtime, codecs, proof) {
     }
 }
 
-async function createPipelines(runtime, surface, post, layouts, programs, proof) {
+async function createPipelines(
+    runtime: ScratchRuntime,
+    surface: Surface,
+    post: RenderTextures,
+    layouts: BindLayouts,
+    programs: Programs,
+    proof: FailureProofController
+) {
 
-    const normalBlend = {
+    const normalBlend: GPUBlendState = {
         color: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
         alpha: { operation: 'add', srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
     }
-    const additiveBlend = {
+    const additiveBlend: GPUBlendState = {
         color: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one' },
         alpha: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one' },
     }
-    const depthWrite = { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
-    const depthRead = { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less' }
-    const sphereVertexBuffers = [ {
+    const depthWrite: GPUDepthStencilState = {
+        format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less'
+    }
+    const depthRead: GPUDepthStencilState = {
+        format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less'
+    }
+    const sphereVertexBuffers: GPUVertexBufferLayout[] = [ {
         arrayStride: 4,
         stepMode: 'vertex',
         attributes: [ { shaderLocation: 0, offset: 0, format: 'uint32' } ],
     } ]
-    const particleVertexBuffers = [
+    const particleVertexBuffers: GPUVertexBufferLayout[] = [
         {
             arrayStride: 12,
             stepMode: 'instance',
@@ -1329,7 +1467,11 @@ async function createPipelines(runtime, surface, post, layouts, programs, proof)
             attributes: [ { shaderLocation: 1, offset: 0, format: 'float32x4' } ],
         },
     ]
-    const compute = async (label, program, bindLayouts) => {
+    const compute = async (
+        label: string,
+        program: Program,
+        bindLayouts: BindLayout[]
+    ): Promise<ScratchComputePipeline> => {
         if (label === 'Hello GAW Bloom combine pipeline') {
             proof.beforeBloomCombinePipeline(runtime)
         }
@@ -1435,7 +1577,7 @@ async function createPipelines(runtime, surface, post, layouts, programs, proof)
     }
 }
 
-function createPasses(runtime, surface, post) {
+function createPasses(runtime: ScratchRuntime, surface: Surface, post: RenderTextures) {
 
     return {
         simulation: runtime.createComputePass({ label: 'Hello GAW simulation and indexing stage' }),
@@ -1468,7 +1610,24 @@ function createPasses(runtime, surface, post) {
     }
 }
 
-function createPersistentCommands({ runtime, uniforms, geometry, particles, images, bindSets, pipelines }) {
+function createPersistentCommands({
+    runtime,
+    uniforms,
+    geometry,
+    particles,
+    images,
+    bindSets,
+    pipelines,
+}: {
+    runtime: ScratchRuntime
+    uniforms: UniformResources
+    geometry: GeometryResources
+    particles: ParticleResources
+    post: RenderTextures
+    images: ImageResources['textures']
+    bindSets: BindSets
+    pipelines: Pipelines
+}) {
 
     const simulation = runtime.createDispatchCommand({
         label: 'Simulate Hello GAW particles',
@@ -1621,15 +1780,22 @@ function createPersistentCommands({ runtime, uniforms, geometry, particles, imag
     }
 }
 
-async function createPostBindSets({ runtime, layouts, uniforms, post, bindSets }) {
+async function createPostBindSets({ runtime, layouts, uniforms, post, bindSets }: {
+    runtime: ScratchRuntime
+    layouts: BindLayouts
+    uniforms: UniformResources
+    post: RenderTextures
+    gaussian: BufferWithUpload
+    bindSets: BindSets
+}) {
 
     const highlight = await runtime.createBindSet(layouts.bloomHighlight, {
         inTexture: post.views.scene,
         outTexture: post.views.highlight,
     }, { label: 'Hello GAW Bloom highlight textures' })
-    const downsample = []
-    const blurX = []
-    const blurY = []
+    const downsample: BindSet[] = []
+    const blurX: BindSet[] = []
+    const blurY: BindSet[] = []
 
     for (let level = 0; level < BLOOM_BLUR_LEVELS; level++) {
         const downsampleSource = level === 0 ? post.views.highlight : post.views.downsample[level - 1]
@@ -1653,7 +1819,7 @@ async function createPostBindSets({ runtime, layouts, uniforms, post, bindSets }
         }, { label: `Hello GAW Bloom blur Y textures ${level}` }))
     }
 
-    const steps = []
+    const steps: BindSet[] = []
     for (let level = 0; level < BLOOM_BLUR_LEVELS; level++) {
         steps.push(await runtime.createBindSet(layouts.bloomSteps, {
             staticUniform: uniforms.blurSteps[level].region,
@@ -1681,7 +1847,14 @@ async function createPostBindSets({ runtime, layouts, uniforms, post, bindSets }
     }
 }
 
-function createPersistentPostCommands({ runtime, uniforms, post, bindSets, pipelines }) {
+function createPersistentPostCommands({ runtime, uniforms, post, bindSets, pipelines }: {
+    runtime: ScratchRuntime
+    uniforms: UniformResources
+    post: RenderTextures
+    bindSets: BindSets
+    postBindSets: PostBindSets
+    pipelines: Pipelines
+}) {
 
     return {
         output: runtime.createDrawCommand({
@@ -1698,11 +1871,11 @@ function createPersistentPostCommands({ runtime, uniforms, post, bindSets, pipel
     }
 }
 
-function createSizeDependentCommands(graph) {
+function createSizeDependentCommands(graph: RenderGraph) {
 
     const { runtime, uniforms, post, postBindSets, bindSets, pipelines, gaussian } = graph
-    const bloomCommands = []
-    const workgroups = texture => ({
+    const bloomCommands: DispatchCommand[] = []
+    const workgroups = (texture: TextureResource): StaticDispatchCount => ({
         workgroups: [
             Math.ceil(texture.size.width / POST_WORKGROUP_SIZE),
             Math.ceil(texture.size.height / POST_WORKGROUP_SIZE),
@@ -1810,7 +1983,12 @@ function createSizeDependentCommands(graph) {
     return { bloomCommands, fxaaCommand }
 }
 
-async function initializeGraph(runtime, graph, lifetime, proof) {
+async function initializeGraph(
+    runtime: ScratchRuntime,
+    graph: RenderGraph,
+    lifetime: PageLifetime,
+    proof: FailureProofController
+) {
 
     const builder = runtime.createSubmission({ validation: 'throw' })
     for (const upload of graph.initUploads) builder.upload(upload)
@@ -1823,7 +2001,7 @@ async function initializeGraph(runtime, graph, lifetime, proof) {
     await observation
 }
 
-function updateFrameData(graph, delta) {
+function updateFrameData(graph: RenderGraph, delta: number) {
 
     const { matrices, uniforms, particles } = graph
     uniforms.sceneDynamic.write({
@@ -1850,10 +2028,10 @@ function updateFrameData(graph, delta) {
     particles.linkIndirect.data[3] = 0
 }
 
-async function resizeRenderGraph(graph, size) {
+async function resizeRenderGraph(graph: RenderGraph, size: SurfaceSize) {
 
     graph.surface.resize(size)
-    const resizeTargets = [
+    const resizeTargets: [ TextureResource, SurfaceSize ][] = [
         [ graph.post.scene, size ],
         [ graph.post.depth, size ],
         [ graph.post.highlight, size ],
@@ -1870,7 +2048,9 @@ async function resizeRenderGraph(graph, size) {
     }
 
     graph.matrices.size = { width: size.width, height: size.height }
-    graph.matrices.projection = Array.from(mat4.perspective(
+    graph.matrices.projection = Array.from((mat4.perspective as (
+        fieldOfViewYInRadians: number, aspect: number, zNear: number, zFar: number
+    ) => Float32Array)(
         PROJECTION_FOV,
         size.width / size.height,
         1,
@@ -1879,14 +2059,19 @@ async function resizeRenderGraph(graph, size) {
     await prepareStaleBindSets(graph.resizableBindSets)
 }
 
-async function prepareStaleBindSets(bindSets) {
+async function prepareStaleBindSets(bindSets: readonly BindSet[]) {
 
     for (const bindSet of bindSets) {
         if (bindSet.preparationState === 'stale') await bindSet.prepare()
     }
 }
 
-function verifyFrameProvenance(submitted, graph, bloomCommands, fxaaCommand) {
+function verifyFrameProvenance(
+    submitted: SubmittedWork,
+    graph: RenderGraph,
+    bloomCommands: readonly DispatchCommand[],
+    fxaaCommand: DispatchCommand
+) {
 
     const pairs = [
         {
@@ -1956,7 +2141,7 @@ function verifyFrameProvenance(submitted, graph, bloomCommands, fxaaCommand) {
     })
 }
 
-function stableIdentitySnapshot(graph) {
+function stableIdentitySnapshot(graph: RenderGraph) {
 
     const objects = [
         ...Object.values(graph.programs),
@@ -1977,7 +2162,7 @@ function stableIdentitySnapshot(graph) {
     return [ ...new Set(objects.map(object => object.id)) ].sort()
 }
 
-function assertStableIdentities(graph, baseline) {
+function assertStableIdentities(graph: RenderGraph, baseline: StableIdentityBaseline) {
 
     const current = stableIdentitySnapshot(graph)
     if (current.length !== baseline.length || current.some((id, index) => id !== baseline[index])) {
@@ -1985,7 +2170,13 @@ function assertStableIdentities(graph, baseline) {
     }
 }
 
-function publishGraphFacts(graph, baseline, bloomCommands, fxaaCommand, resizeGeneration) {
+function publishGraphFacts(
+    graph: RenderGraph,
+    baseline: StableIdentityBaseline,
+    bloomCommands: readonly DispatchCommand[],
+    fxaaCommand: DispatchCommand,
+    resizeGeneration: number
+) {
 
     canvas.dataset.stageOrder = STAGE_ORDER.join('|')
     canvas.dataset.stageCount = String(STAGE_ORDER.length)
@@ -2004,7 +2195,13 @@ function publishGraphFacts(graph, baseline, bloomCommands, fxaaCommand, resizeGe
     canvas.dataset.indirectGpuOnly = 'true'
 }
 
-function publishFrameFacts(runtime, submittedFrames, observedFrames, resizeGeneration, provenance) {
+function publishFrameFacts(
+    runtime: ScratchRuntime,
+    submittedFrames: number,
+    observedFrames: number,
+    resizeGeneration: number,
+    provenance: FrameProvenance
+) {
 
     const diagnostics = runtime.diagnostics.snapshot()
     const bounded = diagnostics.recorder.retainedOperationCount <= diagnostics.recorder.operationCapacity &&
@@ -2027,7 +2224,7 @@ function publishFrameFacts(runtime, submittedFrames, observedFrames, resizeGener
     canvas.dataset.deviceLosses = String(diagnostics.aggregates.deviceLosses)
 }
 
-async function observeSubmittedWork(submitted) {
+async function observeSubmittedWork(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([
         submitted.nativeOutcome,
@@ -2038,25 +2235,35 @@ async function observeSubmittedWork(submitted) {
     }
 }
 
-function createSceneMatrices(size) {
+function createSceneMatrices(size: SurfaceSize) {
 
-    const modelMatrix = mat4.rotationX(utils.degToRad(32))
+    const modelMatrix = (mat4.rotationX as (angleInRadians: number) => Float32Array)(
+        utils.degToRad(32)
+    )
 
     return {
         size: { width: size.width, height: size.height },
-        view: Array.from(mat4.lookAt([ 0, 0, 1200 ], [ 0, 0, 0 ], [ 0, 1, 0 ])),
-        projection: Array.from(mat4.perspective(
+        view: Array.from((mat4.lookAt as (
+            eye: readonly number[], target: readonly number[], up: readonly number[]
+        ) => Float32Array)([ 0, 0, 1200 ], [ 0, 0, 0 ], [ 0, 1, 0 ])),
+        projection: Array.from((mat4.perspective as (
+            fieldOfViewYInRadians: number, aspect: number, zNear: number, zFar: number
+        ) => Float32Array)(
             PROJECTION_FOV,
             size.width / size.height,
             1,
             4000
         )),
         model: Array.from(modelMatrix),
-        normal: Array.from(mat4.transpose(mat4.inverse(modelMatrix))),
+        normal: Array.from(
+            (mat4.transpose as (matrix: Float32Array) => Float32Array)(
+                (mat4.inverse as (matrix: Float32Array) => Float32Array)(modelMatrix)
+            )
+        ),
     }
 }
 
-function createGaussianKernel(levels) {
+function createGaussianKernel(levels: number) {
 
     const length = 4 + (levels - 1) * 2
     const sigma = (3 + (levels - 1) * 2) / 2
@@ -2068,7 +2275,9 @@ function createGaussianKernel(levels) {
     return values
 }
 
-function currentReads(resources) {
+function currentReads(
+    resources: readonly (BufferResource | TextureResource)[]
+): CommandResourceReadDescriptor[] {
 
     const unique = new Map(resources.map(resource => [ resource.id, resource ]))
     return [ ...unique.values() ].map(resource => ({
@@ -2077,7 +2286,7 @@ function currentReads(resources) {
     }))
 }
 
-function canvasPixelSize(target) {
+function canvasPixelSize(target: HTMLCanvasElement): SurfaceSize {
 
     const ratio = window.devicePixelRatio || 1
     return {
@@ -2086,7 +2295,7 @@ function canvasPixelSize(target) {
     }
 }
 
-function scaledSize(size, level) {
+function scaledSize(size: SurfaceSize, level: number): SurfaceSize {
 
     const divisor = 2 ** level
     return {
@@ -2095,12 +2304,12 @@ function scaledSize(size, level) {
     }
 }
 
-function sameSize(left, right) {
+function sameSize(left: SurfaceSize, right: SurfaceSize) {
 
     return left.width === right.width && left.height === right.height
 }
 
-function seededRandom(seed) {
+function seededRandom(seed: number) {
 
     let state = seed >>> 0
     return () => {
@@ -2112,14 +2321,14 @@ function seededRandom(seed) {
     }
 }
 
-function randomOutsideRadius(random, radius) {
+function randomOutsideRadius(random: () => number, radius: number) {
 
     let value = 0
     while (Math.abs(value) < radius) value = random() * 2 - 1
     return value
 }
 
-function hashStrings(values) {
+function hashStrings(values: readonly string[]) {
 
     let hash = 2166136261
     for (const value of values.join('|')) {
@@ -2138,15 +2347,15 @@ function assertPresentationShaderContract() {
     }
 }
 
-function createFailureProofController(configuration) {
+function createFailureProofController(configuration: FailureConfiguration): FailureProofController {
 
-    let runtime
-    let surface
-    let capture
-    let captureReport
-    let runtimeEvidence
-    let runtimeEvidenceByteLength
-    let evidenceFailure
+    let runtime: ScratchRuntime | undefined
+    let surface: Surface | undefined
+    let capture: ScratchDiagnosticCapture | undefined
+    let captureReport: ScratchDiagnosticCaptureReport | undefined
+    let runtimeEvidence: ScratchRuntimeDiagnosticsEvidence | undefined
+    let runtimeEvidenceByteLength: number | undefined
+    let evidenceFailure: unknown
     let reachedCount = 0
     let runtimeDisposeAttempts = 0
     let runtimeDisposed = false
@@ -2172,7 +2381,7 @@ function createFailureProofController(configuration) {
         }
     }
 
-    function ownRuntime(value, lifetime) {
+    function ownRuntime(value: ScratchRuntime, lifetime: PageLifetime) {
 
         runtime = value
         lifetime.defer({
@@ -2189,12 +2398,12 @@ function createFailureProofController(configuration) {
         })
     }
 
-    function observeSurface(value) {
+    function observeSurface(value: Surface) {
 
         surface = value
     }
 
-    function ownBitmap(name, bitmap, lifetime) {
+    function ownBitmap(name: string, bitmap: ImageBitmap, lifetime: PageLifetime) {
 
         bitmapCreatedCount += 1
         let closed = false
@@ -2214,24 +2423,26 @@ function createFailureProofController(configuration) {
         })
     }
 
-    function reach(scenario) {
+    function reach(scenario: string) {
 
         if (configuration.scenario !== scenario) return
         reachedCount += 1
-        const error = new Error(`Injected Hello GAW initialization failure: ${scenario}.`)
+        const error = new Error(
+            `Injected Hello GAW initialization failure: ${scenario}.`
+        ) as FailureMetadataError
         error.name = 'HelloGawInjectedFailure'
         error.code = 'HELLO_GAW_INJECTED_FAILURE'
         error.scenario = scenario
         throw error
     }
 
-    function bloomCombineShader(source) {
+    function bloomCombineShader(source: string) {
 
         if (configuration.scenario !== 'invalid-bloom-pipeline-wgsl') return source
         return `${source}\n@compute fn helloGawInjectedFailure( {`
     }
 
-    function beforeBloomCombinePipeline(value) {
+    function beforeBloomCombinePipeline(value: ScratchRuntime) {
 
         if (configuration.scenario !== 'invalid-bloom-pipeline-wgsl') return
         reachedCount += 1
@@ -2260,7 +2471,10 @@ function createFailureProofController(configuration) {
         }
     }
 
-    function finalize(primaryFailure, cleanupReport) {
+    function finalize(
+        primaryFailure: unknown,
+        cleanupReport: DisposalReport
+    ): FailureProofReport | undefined {
 
         const scenario = configuration.scenario
         const runtimeWasCreated = runtime !== undefined
@@ -2268,10 +2482,10 @@ function createFailureProofController(configuration) {
         runtimeDisposed = runtimeDisposed || runtime?.isDisposed === true
         const surfaceDisposed = surface?.isDisposed === true
         const diagnostic = primaryFailure && typeof primaryFailure === 'object'
-            ? primaryFailure.diagnostic
+            ? (primaryFailure as { diagnostic?: unknown }).diagnostic
             : undefined
         const incident = primaryFailure && typeof primaryFailure === 'object'
-            ? primaryFailure.incident
+            ? (primaryFailure as { incident?: unknown }).incident
             : undefined
         const cleanup = {
             runtime: {
@@ -2362,7 +2576,7 @@ function createFailureProofController(configuration) {
     })
 }
 
-function serializeFailure(error) {
+function serializeFailure(error: unknown) {
 
     if (!(error instanceof Error)) {
         return { name: 'NonErrorFailure', message: String(error) }
@@ -2371,28 +2585,32 @@ function serializeFailure(error) {
     return {
         name: error.name,
         message: error.message,
-        ...(typeof error.code === 'string' ? { code: error.code } : {}),
-        ...(typeof error.scenario === 'string' ? { scenario: error.scenario } : {}),
-        ...(error.diagnostic?.code !== undefined
-            ? { diagnosticCode: error.diagnostic.code }
+        ...(typeof (error as FailureMetadataError).code === 'string'
+            ? { code: (error as FailureMetadataError).code }
+            : {}),
+        ...(typeof (error as FailureMetadataError).scenario === 'string'
+            ? { scenario: (error as FailureMetadataError).scenario }
+            : {}),
+        ...((error as FailureMetadataError).diagnostic?.code !== undefined
+            ? { diagnosticCode: (error as FailureMetadataError).diagnostic!.code }
             : {}),
         ...(typeof error.stack === 'string' ? { stack: error.stack.slice(0, 8 * 1024) } : {}),
     }
 }
 
-function frozenJson(value) {
+function frozenJson<T>(value: T): T {
 
     return deepFreeze(JSON.parse(JSON.stringify(value)))
 }
 
-function deepFreeze(value) {
+function deepFreeze<T>(value: T): T {
 
     if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
     for (const child of Object.values(value)) deepFreeze(child)
     return Object.freeze(value)
 }
 
-function failPage(error) {
+function failPage(error: unknown): Promise<void> {
 
     if (pageFailureSettlement !== undefined) return pageFailureSettlement
     reportFatalError(error)
@@ -2413,13 +2631,13 @@ function failPage(error) {
     return pageFailureSettlement
 }
 
-function setStatus(status) {
+function setStatus(status: string) {
 
     canvas.dataset.status = status
     document.body.dataset.status = status
 }
 
-function reportFatalError(error) {
+function reportFatalError(error: unknown) {
 
     const diagnostic = error && typeof error === 'object' && 'diagnostic' in error
         ? error.diagnostic

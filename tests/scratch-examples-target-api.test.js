@@ -19,12 +19,12 @@ const ordinaryExamples = [
     'readinessPolicies',
 ]
 const additionalOrdinaryFiles = [
-    'examples/demLayer/main.js',
-    'examples/demLayer/dem-layer.js',
-    'examples/demLayer/dem-map.js',
-    'examples/flowLayer/main.js',
-    'examples/flowLayer/flow-layer.js',
-    'examples/flowLayer/flow-map.js',
+    'examples/demLayer/main.ts',
+    'examples/demLayer/dem-layer.ts',
+    'examples/demLayer/dem-map.ts',
+    'examples/flowLayer/main.ts',
+    'examples/flowLayer/flow-layer.ts',
+    'examples/flowLayer/flow-map.ts',
 ]
 const supportingFactories = new Set([
     'createSampler',
@@ -42,7 +42,7 @@ describe('ordinary Scratch example target API audit', () => {
     it('uses only persistent binding views and Promise-only supporting factories', () => {
 
         const violations = [
-            ...ordinaryExamples.map(name => `examples/${name}/main.js`),
+            ...ordinaryExamples.map(name => `examples/${name}/main.ts`),
             ...additionalOrdinaryFiles,
         ].flatMap(relativePath => auditExample(relativePath))
         expect(violations).to.deep.equal([])

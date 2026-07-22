@@ -1,14 +1,63 @@
 import { ScratchRuntime } from 'geoscratch'
+import type {
+    ScratchDiagnosticCapture,
+    ScratchDiagnosticCaptureReport,
+    ScratchRuntimeDiagnosticsEvidence,
+    Surface,
+    SurfaceSize,
+} from 'geoscratch'
 import {
     DEM_STAGE_ORDER,
     createDemLayer,
-} from './dem-layer.js'
-import { createDemLifecycle } from './dem-lifecycle.js'
-import { createDemMap, readDemCameraState, waitForDemMap } from './dem-map.js'
+} from './dem-layer.ts'
+import { createDemLifecycle } from './dem-lifecycle.ts'
+import { createDemMap, readDemCameraState, waitForDemMap } from './dem-map.ts'
+import type { DemMap } from './dem-map.ts'
 import lodMapShader from './shaders/lod-map.wgsl?raw'
 import terrainShader from './shaders/terrain-mesh.wgsl?raw'
 
-const canvas = document.getElementById('GPUFrame')
+type DemLayer = Awaited<ReturnType<typeof createDemLayer>>
+type DemLifecycle = ReturnType<typeof createDemLifecycle>
+type CleanupReport = Awaited<ReturnType<DemLifecycle['dispose']>>
+type FrameProvenance = ReturnType<DemLayer['renderFrame']>['provenance']
+type FailureConfiguration = Readonly<{ scenario?: string }>
+type FailureProofController = ReturnType<typeof createFailureProofController>
+type FailureProof = Exclude<ReturnType<FailureProofController['finalize']>, undefined>
+type CleanupProof = Readonly<{
+    report: ReturnType<typeof serializeCleanupReport>
+    lifecycle: ReturnType<DemLifecycle['snapshot']>
+    graphState?: ReturnType<DemLayer['state']>
+}>
+type PageSettlement = Promise<FailureProof | CleanupProof | void | undefined>
+type PageContext = { graph: DemLayer; runtime: ScratchRuntime }
+type CameraMoveOptions = Parameters<DemMap['jumpTo']>[0]
+type FrameWork = {
+    scheduled: number
+    completed: number
+    cancelled: number
+    active: number
+}
+type FailureDetails = Error & {
+    code?: unknown
+    scenario?: unknown
+    diagnostic?: { code?: unknown }
+    incident?: unknown
+}
+
+declare global {
+    interface Window {
+        __DEM_LAYER_PROOF__: Readonly<{
+            pauseAndDrain(): Promise<Readonly<DOMStringMap>>
+            dispose(): Promise<FailureProof | CleanupProof | void | undefined>
+            facts(): Readonly<DOMStringMap>
+            moveCamera(options: CameraMoveOptions): void
+        }>
+        __DEM_LAYER_INIT_FAILURE_PROOF__: FailureProof
+        __DEM_LAYER_CLEANUP_PROOF__: CleanupProof
+    }
+}
+
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const demImageUrl = new URL('./assets/dem.png', import.meta.url).href
 const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
 const FAILURE_CAPTURE_BOUNDS = Object.freeze({
@@ -32,8 +81,8 @@ const failureConfiguration = Object.freeze({
 })
 const pageLifetime = createDemLifecycle()
 const failureProof = createFailureProofController(failureConfiguration)
-let pageSettlement
-let pageContext
+let pageSettlement: PageSettlement | undefined
+let pageContext: PageContext | undefined
 const handlePageHide = () => {
     void disposePage()
 }
@@ -54,7 +103,7 @@ void pageInitialization.catch(error => {
     void failPage(error)
 })
 
-async function main(lifetime, proof) {
+async function main(lifetime: DemLifecycle, proof: FailureProofController) {
 
     proof.assertConfiguration()
     const map = lifetime.ownMap(createDemMap(canvas, { proof: proofMode }))
@@ -105,12 +154,12 @@ async function main(lifetime, proof) {
     lifetime.assertActive('continue DEM initialization')
 
     let active = true
-    let animationFrame
+    let animationFrame: number | undefined
     let rendering = false
     let renderRequested = false
     let submittedFrames = 0
     let observedFrames = 0
-    let latestProvenance = []
+    let latestProvenance: FrameProvenance = []
     let frameWorkScheduled = 0
     let frameWorkCompleted = 0
     let frameWorkCancelled = 0
@@ -179,7 +228,7 @@ async function main(lifetime, proof) {
         return readPublishedFacts()
     }
 
-    function moveCamera(options) {
+    function moveCamera(options: CameraMoveOptions) {
 
         if (!active) throw new Error('DEM proof scheduler is stopped')
         map.jumpTo(options)
@@ -241,14 +290,14 @@ async function main(lifetime, proof) {
     requestRender()
 }
 
-async function loadDemImage(url, signal) {
+async function loadDemImage(url: string, signal: AbortSignal) {
 
     const response = await fetch(url, { signal })
     if (!response.ok) throw new Error(`DEM image request failed: HTTP ${response.status}`)
     return createImageBitmap(await response.blob())
 }
 
-function publishGraphFacts(runtime, graph) {
+function publishGraphFacts(runtime: ScratchRuntime, graph: DemLayer) {
 
     canvas.dataset.proofMode = String(proofMode)
     canvas.dataset.stageOrder = DEM_STAGE_ORDER.join('|')
@@ -268,6 +317,14 @@ function publishFrameFacts({
     observedFrames,
     latestProvenance,
     frameWork,
+}: {
+    runtime: ScratchRuntime
+    graph: DemLayer
+    lifetime: DemLifecycle
+    submittedFrames: number
+    observedFrames: number
+    latestProvenance: FrameProvenance
+    frameWork: FrameWork
 }) {
 
     const state = graph.state()
@@ -307,7 +364,7 @@ function publishFrameFacts({
     canvas.dataset.deviceLosses = String(diagnostics.aggregates.deviceLosses)
 }
 
-function adapterFacts(runtime) {
+function adapterFacts(runtime: ScratchRuntime) {
 
     const info = runtime.adapter?.info
     return frozenJson({
@@ -322,15 +379,15 @@ function adapterFacts(runtime) {
     })
 }
 
-function createFailureProofController(configuration) {
+function createFailureProofController(configuration: FailureConfiguration) {
 
-    let runtime
-    let surface
-    let capture
-    let captureReport
-    let runtimeEvidence
-    let runtimeEvidenceByteLength
-    let evidenceFailure
+    let runtime: ScratchRuntime | undefined
+    let surface: Surface | undefined
+    let capture: ScratchDiagnosticCapture | undefined
+    let captureReport: ScratchDiagnosticCaptureReport | undefined
+    let runtimeEvidence: ScratchRuntimeDiagnosticsEvidence | undefined
+    let runtimeEvidenceByteLength: number | undefined
+    let evidenceFailure: unknown
     let reachedCount = 0
     let mapAcquiredCount = 0
     let imageAcquiredCount = 0
@@ -342,24 +399,26 @@ function createFailureProofController(configuration) {
         }
     }
 
-    function reach(scenario) {
+    function reach(scenario: string) {
 
         if (configuration.scenario !== scenario) return
         reachedCount++
-        const error = new Error(`Injected DEM Layer initialization failure: ${scenario}`)
+        const error = new Error(
+            `Injected DEM Layer initialization failure: ${scenario}`
+        ) as FailureDetails
         error.name = 'DemLayerInjectedFailure'
         error.code = 'DEM_LAYER_INJECTED_FAILURE'
         error.scenario = scenario
         throw error
     }
 
-    function terrainShaderForProof(source) {
+    function terrainShaderForProof(source: string) {
 
         if (configuration.scenario !== FAILURE_SCENARIOS[1]) return source
         return `${source}\n@vertex fn demInjectedFailure( {`
     }
 
-    function beforeTerrainPipeline(value) {
+    function beforeTerrainPipeline(value: ScratchRuntime) {
 
         if (configuration.scenario !== FAILURE_SCENARIOS[1]) return
         reachedCount++
@@ -386,11 +445,11 @@ function createFailureProofController(configuration) {
         }
     }
 
-    function finalize(primaryFailure, cleanupReport) {
+    function finalize(primaryFailure: unknown, cleanupReport: CleanupReport) {
 
         if (configuration.scenario === undefined) return undefined
-        const diagnostic = primaryFailure?.diagnostic
-        const incident = primaryFailure?.incident
+        const diagnostic = (primaryFailure as FailureDetails | null | undefined)?.diagnostic
+        const incident = (primaryFailure as FailureDetails | null | undefined)?.incident
         const proof = {
             schemaVersion: 1,
             scenario: configuration.scenario,
@@ -430,14 +489,14 @@ function createFailureProofController(configuration) {
         beforeTerrainPipeline,
         captureBeforeDisposal,
         finalize,
-        observeRuntime: value => { runtime = value },
-        observeSurface: value => { surface = value },
+        observeRuntime: (value: ScratchRuntime) => { runtime = value },
+        observeSurface: (value: Surface) => { surface = value },
         mapAcquired: () => { mapAcquiredCount++ },
         imageAcquired: () => { imageAcquiredCount++ },
     })
 }
 
-async function failPage(error) {
+async function failPage(error: unknown) {
 
     if (pageSettlement !== undefined) return pageSettlement
     reportFatalError(error)
@@ -450,7 +509,7 @@ async function failPage(error) {
             canvas.dataset.failureScenario = proof.scenario
         }
         return proof
-    }).catch(cleanupFailure => {
+    }).catch((cleanupFailure: unknown) => {
         console.error(cleanupFailure)
     })
     return pageSettlement
@@ -473,7 +532,7 @@ async function disposePage() {
     return pageSettlement
 }
 
-function serializeCleanupReport(report) {
+function serializeCleanupReport(report: CleanupReport) {
 
     return {
         primaryFailure: serializeFailure(report.primaryFailure),
@@ -490,23 +549,27 @@ function serializeCleanupReport(report) {
     }
 }
 
-function serializeFailure(error) {
+function serializeFailure(error: unknown) {
 
     if (error === undefined) return undefined
     if (!(error instanceof Error)) return { name: 'NonErrorFailure', message: String(error) }
     return {
         name: error.name,
         message: error.message,
-        ...(typeof error.code === 'string' ? { code: error.code } : {}),
-        ...(typeof error.scenario === 'string' ? { scenario: error.scenario } : {}),
-        ...(error.diagnostic?.code === undefined
+        ...(typeof (error as FailureDetails).code === 'string'
+            ? { code: (error as FailureDetails).code as string }
+            : {}),
+        ...(typeof (error as FailureDetails).scenario === 'string'
+            ? { scenario: (error as FailureDetails).scenario as string }
+            : {}),
+        ...((error as FailureDetails).diagnostic?.code === undefined
             ? {}
-            : { diagnosticCode: error.diagnostic.code }),
+            : { diagnosticCode: (error as FailureDetails).diagnostic!.code }),
         ...(typeof error.stack === 'string' ? { stack: error.stack.slice(0, 8 * 1024) } : {}),
     }
 }
 
-function canvasPixelSize(target) {
+function canvasPixelSize(target: HTMLElement): SurfaceSize {
 
     const ratio = window.devicePixelRatio || 1
     return {
@@ -515,7 +578,7 @@ function canvasPixelSize(target) {
     }
 }
 
-function sameSize(left, right) {
+function sameSize(left: SurfaceSize, right: SurfaceSize) {
 
     return left.width === right.width && left.height === right.height
 }
@@ -525,28 +588,30 @@ function readPublishedFacts() {
     return Object.freeze({ ...canvas.dataset })
 }
 
-function setStatus(status) {
+function setStatus(status: string) {
 
     canvas.dataset.status = status
     document.body.dataset.status = status
 }
 
-function reportFatalError(error) {
+function reportFatalError(error: unknown) {
 
     setStatus('error')
     canvas.dataset.error = error instanceof Error ? error.message : String(error)
-    if (error?.diagnostic !== undefined) canvas.dataset.diagnostic = JSON.stringify(error.diagnostic)
+    if ((error as FailureDetails | null | undefined)?.diagnostic !== undefined) {
+        canvas.dataset.diagnostic = JSON.stringify((error as FailureDetails).diagnostic)
+    }
     console.error(error)
 }
 
-function frozenJson(value) {
+function frozenJson<T>(value: T): T {
 
-    return deepFreeze(JSON.parse(JSON.stringify(value)))
+    return deepFreeze(JSON.parse(JSON.stringify(value)) as unknown as T)
 }
 
-function deepFreeze(value) {
+function deepFreeze<T>(value: T): T {
 
     if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
     for (const child of Object.values(value)) deepFreeze(child)
-    return Object.freeze(value)
+    return Object.freeze(value) as T
 }

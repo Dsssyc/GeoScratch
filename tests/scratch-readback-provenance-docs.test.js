@@ -80,7 +80,7 @@ describe('scratch readback staging and mapping documentation', () => {
             'submissionOrder',
             'textureResize',
         ]) {
-            const source = read('examples', example, 'main.js')
+            const source = read('examples', example, 'main.ts')
             expect(source).to.match(/const\s+readback\s*=\s*await\s+runtime\.createReadbackCommand\(/)
         }
     })

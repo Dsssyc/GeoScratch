@@ -25,8 +25,8 @@ describe('asset layout', () => {
         expect(exists('examples', 'demLayer', 'shaders', 'lod-map.wgsl')).to.equal(true)
         expect(exists('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')).to.equal(true)
 
-        const helloGAW = read('examples', 'helloGAW', 'main.js')
-        const flowLayer = read('examples', 'flowLayer', 'flow-layer.js')
+        const helloGAW = read('examples', 'helloGAW', 'main.ts')
+        const flowLayer = read('examples', 'flowLayer', 'flow-layer.ts')
 
         expect(helloGAW).to.not.include('/images/Earth/')
         expect(helloGAW).to.not.include('/shaders/examples/GAW/')
@@ -46,7 +46,7 @@ describe('asset layout', () => {
 
     it('configures Vite to use examples/public as its public directory', () => {
 
-        const config = read('examples', 'vite.config.js')
+        const config = read('examples', 'vite.config.ts')
 
         expect(config).to.include("const examplesPublic = path.resolve(examplesRoot, 'public')")
         expect(config).to.include('publicDir: examplesPublic')
@@ -79,7 +79,7 @@ describe('asset layout', () => {
         expect(exists('examples', 'demLayer', 'assets', 'dem.png')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'applications', 'terrain')).to.equal(false)
 
-        const main = read('examples', 'demLayer', 'main.js')
+        const main = read('examples', 'demLayer', 'main.ts')
         expect(main).to.include("new URL('./assets/dem.png', import.meta.url)")
         expect(main).to.not.match(/border|palette/i)
     })

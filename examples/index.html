@@ -88,7 +88,7 @@
                         <p id="stage-description">Minimal triangle rendered through the explicit runtime, surface, program, pipeline, command, and submission path.</p>
                     </div>
                     <div class="stage-actions">
-                        <a id="source-link" href="./helloTriangle/main.js">Source</a>
+                        <a id="source-link" href="./helloTriangle/main.ts">Source</a>
                         <a id="standalone-link" href="./helloTriangle/">Standalone</a>
                         <a href="https://github.com/YcSoku/GeoScratch">GitHub</a>
                     </div>
@@ -115,7 +115,7 @@
                 links.forEach((item) => item.classList.toggle('is-active', item === link))
                 title.textContent = link.dataset.title
                 description.textContent = link.dataset.description
-                sourceLink.href = `./${id}/main.js`
+                sourceLink.href = `./${id}/main.ts`
                 standaloneLink.href = path
                 frame.src = path
 

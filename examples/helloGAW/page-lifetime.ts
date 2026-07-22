@@ -1,18 +1,70 @@
-const CLEANUP_PHASES = new Set([ 'stop', 'release' ])
+type CleanupPhase = 'stop' | 'release'
+type CleanupRun = () => unknown | PromiseLike<unknown>
+
+type CleanupAction = {
+    id: number
+    phase: CleanupPhase
+    label: string
+    run: CleanupRun | undefined
+    active: boolean
+    settlement: Promise<void> | undefined
+}
+
+type CleanupActionResult = Readonly<{
+    phase: CleanupPhase
+    label: string
+    status: 'fulfilled' | 'rejected'
+}>
+
+type CleanupFailure = Readonly<{
+    phase: CleanupPhase | 'settle'
+    label: string
+    error: unknown
+}>
+
+type ObservationSettlement =
+    | { status: 'fulfilled', value: unknown }
+    | { status: 'rejected', error: unknown }
+
+type PendingObservation = {
+    id: number
+    label: string
+    settlement: Promise<ObservationSettlement> | undefined
+}
+
+type DisposalReport = Readonly<{
+    primaryFailure: unknown
+    cleanupInvocationCount: number
+    pendingObservationsBefore: number
+    pendingObservationsAfter: number
+    retainedActionCount: 0
+    cleanupActions: readonly CleanupActionResult[]
+    cleanupFailures: readonly CleanupFailure[]
+}>
+
+type PageLifetimeState = 'active' | 'disposing' | 'disposed'
+
+type DeferOptions = {
+    phase: CleanupPhase
+    label: string
+    run: CleanupRun
+}
+
+const CLEANUP_PHASES = new Set<CleanupPhase>([ 'stop', 'release' ])
 
 export function createPageLifetime() {
-    const actions = {
+    const actions: Record<CleanupPhase, CleanupAction[]> = {
         stop: [],
         release: [],
     }
-    const pendingObservations = new Map()
-    const cleanupActions = []
-    const cleanupFailures = []
+    const pendingObservations = new Map<number, PendingObservation>()
+    const cleanupActions: CleanupActionResult[] = []
+    const cleanupFailures: CleanupFailure[] = []
     let nextActionId = 1
     let nextObservationId = 1
-    let state = 'active'
-    let disposal
-    let primaryFailure
+    let state: PageLifetimeState = 'active'
+    let disposal: Promise<DisposalReport> | undefined
+    let primaryFailure: unknown
     let cleanupInvocationCount = 0
 
     function snapshot() {
@@ -24,7 +76,7 @@ export function createPageLifetime() {
         })
     }
 
-    function executeAction(action) {
+    function executeAction(action: CleanupAction) {
         if (action.settlement) {
             return action.settlement
         }
@@ -34,7 +86,7 @@ export function createPageLifetime() {
         }
 
         action.active = false
-        const run = action.run
+        const run = action.run as CleanupRun
         action.run = undefined
         action.settlement = Promise.resolve()
             .then(run)
@@ -63,7 +115,7 @@ export function createPageLifetime() {
         return action.settlement
     }
 
-    function defer({ phase, label, run }) {
+    function defer({ phase, label, run }: DeferOptions) {
         if (state !== 'active') {
             throw new Error('Cannot register cleanup after page disposal has started')
         }
@@ -77,7 +129,7 @@ export function createPageLifetime() {
             throw new TypeError('Cleanup action must be a function')
         }
 
-        const action = {
+        const action: CleanupAction = {
             id: nextActionId,
             phase,
             label,
@@ -104,7 +156,7 @@ export function createPageLifetime() {
         })
     }
 
-    function track(observation, label = 'pending-observation') {
+    function track<T>(observation: T, label = 'pending-observation') {
         if (state !== 'active') {
             throw new Error('Cannot track work after page disposal has started')
         }
@@ -115,14 +167,14 @@ export function createPageLifetime() {
         const id = nextObservationId
         nextObservationId += 1
         const promise = Promise.resolve(observation)
-        const entry = {
+        const entry: PendingObservation = {
             id,
             label,
             settlement: undefined,
         }
         entry.settlement = promise.then(
-            value => ({ status: 'fulfilled', value }),
-            error => ({ status: 'rejected', error })
+            value => ({ status: 'fulfilled' as const, value }),
+            (error: unknown) => ({ status: 'rejected' as const, error })
         ).finally(() => {
             pendingObservations.delete(id)
         })
@@ -130,7 +182,7 @@ export function createPageLifetime() {
         return promise
     }
 
-    async function runPhase(phase) {
+    async function runPhase(phase: CleanupPhase) {
         const phaseActions = actions[phase]
         for (let index = phaseActions.length - 1; index >= 0; index -= 1) {
             const action = phaseActions[index]
@@ -145,11 +197,11 @@ export function createPageLifetime() {
         }
     }
 
-    async function disposeOnce(pendingAtDisposal) {
+    async function disposeOnce(pendingAtDisposal: PendingObservation[]) {
         await runPhase('stop')
 
         const settlements = await Promise.all(
-            pendingAtDisposal.map(({ settlement }) => settlement)
+            pendingAtDisposal.map(({ settlement }) => settlement as Promise<ObservationSettlement>)
         )
         for (let index = 0; index < settlements.length; index += 1) {
             const settlement = settlements[index]
@@ -174,13 +226,13 @@ export function createPageLifetime() {
             cleanupInvocationCount,
             pendingObservationsBefore: pendingAtDisposal.length,
             pendingObservationsAfter: pendingObservations.size,
-            retainedActionCount: 0,
+            retainedActionCount: 0 as const,
             cleanupActions: Object.freeze([ ...cleanupActions ]),
             cleanupFailures: Object.freeze([ ...cleanupFailures ]),
         })
     }
 
-    function dispose(failure) {
+    function dispose(failure?: unknown) {
         if (disposal) {
             return disposal
         }

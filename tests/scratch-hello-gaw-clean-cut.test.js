@@ -14,7 +14,7 @@ describe('Hello GAW Scratch clean cut', () => {
         expect(exists('examples', 'x_helloGAW')).to.equal(false)
 
         const catalog = read('examples', 'index.html')
-        const vite = read('examples', 'vite.config.js')
+        const vite = read('examples', 'vite.config.ts')
         const neutralLinkStart = catalog.indexOf('data-id="helloGAW"')
         const neutralLinkEnd = catalog.indexOf('</a>', neutralLinkStart)
         const neutralLink = catalog.slice(neutralLinkStart, neutralLinkEnd)
@@ -33,7 +33,7 @@ describe('Hello GAW Scratch clean cut', () => {
 
     it('uses only public Scratch ownership and execution APIs', () => {
 
-        const source = read('examples', 'helloGAW', 'main.js')
+        const source = read('examples', 'helloGAW', 'main.ts')
 
         expect(source).to.include("from 'geoscratch'")
         expect(source).to.include('ScratchRuntime')
@@ -76,7 +76,7 @@ describe('Hello GAW Scratch clean cut', () => {
 
     it('keeps the complete GPU workload and exact five-stage order', () => {
 
-        const source = read('examples', 'helloGAW', 'main.js')
+        const source = read('examples', 'helloGAW', 'main.ts')
         const stageMarkers = [
             '.compute(simulationPass, simulationCommands)',
             '.render(scenePass, sceneCommands)',
@@ -189,13 +189,13 @@ describe('Hello GAW Scratch clean cut', () => {
 
     it('locks initialization ownership and source-free failure proof', () => {
 
-        const source = read('examples', 'helloGAW', 'main.js')
-        const lifetime = read('examples', 'helloGAW', 'page-lifetime.js')
+        const source = read('examples', 'helloGAW', 'main.ts')
+        const lifetime = read('examples', 'helloGAW', 'page-lifetime.ts')
         const browser = read('tests', 'browser', 'scratch-hello-gaw-init-failures.mjs')
         const adr = read('docs', 'decisions', 'ADR-043-hello-gaw-initialization-ownership.md')
         const audit = read('docs', 'review', 'scratch-hello-gaw-failure-evidence-audit.md')
 
-        expect(source).to.include("import { createPageLifetime } from './page-lifetime.js'")
+        expect(source).to.include("import { createPageLifetime } from './page-lifetime.ts'")
         expect(source.indexOf('const pageLifetime = createPageLifetime()'))
             .to.be.lessThan(source.indexOf('void main(pageLifetime, failureProof)'))
         for (const scenario of [

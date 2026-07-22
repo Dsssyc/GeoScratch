@@ -1,7 +1,8 @@
 import { ScratchRuntime } from 'geoscratch'
+import type { SubmittedWork, Surface } from 'geoscratch'
 
-const canvas = document.getElementById('GPUFrame')
-const statusElement = document.getElementById('proof-status')
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
+const statusElement = document.getElementById('proof-status') as HTMLElement
 const sourceSize = 4
 const copySize = { width: 2, height: 2 }
 const paddedBytesPerRow = 256
@@ -214,7 +215,7 @@ async function main() {
     }
 }
 
-function drawFinalSourcePattern(context) {
+function drawFinalSourcePattern(context: CanvasRenderingContext2D) {
 
     context.fillStyle = '#111114'
     context.fillRect(0, 0, sourceSize, sourceSize)
@@ -228,7 +229,7 @@ function drawFinalSourcePattern(context) {
     context.fillRect(2, 2, 1, 1)
 }
 
-function rowsEqual(actual, expected) {
+function rowsEqual(actual: readonly (readonly number[])[], expected: readonly (readonly number[])[]) {
 
     return actual.length === expected.length && actual.every((row, rowIndex) => (
         row.length === expected[rowIndex].length &&
@@ -236,7 +237,7 @@ function rowsEqual(actual, expected) {
     ))
 }
 
-function resizeSurface(surface, targetCanvas) {
+function resizeSurface(surface: Surface, targetCanvas: HTMLCanvasElement) {
 
     const devicePixelRatio = window.devicePixelRatio || 1
     const width = Math.max(1, Math.floor(targetCanvas.clientWidth * devicePixelRatio))
@@ -247,7 +248,7 @@ function resizeSurface(surface, targetCanvas) {
     }
 }
 
-async function requireObservedSubmission(submitted) {
+async function requireObservedSubmission(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([
         submitted.nativeOutcome,

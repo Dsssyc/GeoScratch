@@ -41,10 +41,10 @@ describe('DEM flow layer cleanup', () => {
 
     it('wires cleanup controls and camera invalidation from the flow layer', () => {
 
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
-        const main = read('examples', 'flowLayer', 'main.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
+        const main = read('examples', 'flowLayer', 'main.ts')
 
-        expect(layer).to.include('function normalizeOptions(options)')
+        expect(layer).to.include('function normalizeOptions(options: FlowLayerOptions): FlowSettings')
         expect(layer).to.include('trailDecay: options.trailDecay ?? 0.996')
         expect(layer).to.include('trailCutoff: options.trailCutoff ?? 1 / 255')
         expect(layer).to.include('flowMaskCutoff: options.flowMaskCutoff ?? 0')
@@ -59,7 +59,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('wires a flow-domain mask through velocity, simulation, and history cleanup', () => {
 
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
         const voronoi = read('examples', 'flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
         const simulation = read('examples', 'flowLayer', 'shaders', 'flow', 'simulation.compute.wgsl')
         const swap = read('examples', 'flowLayer', 'shaders', 'flow', 'swap.wgsl')
@@ -88,7 +88,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('stores the flow-domain mask as a single-channel render target', () => {
 
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
         const voronoi = read('examples', 'flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
 
         expect(layer).to.match(/label: 'Flow domain mask',[\s\S]*?format: 'r8unorm'/)
@@ -151,7 +151,7 @@ describe('DEM flow layer cleanup', () => {
 
     it('derives the flow-domain mask from supported geometry and the business display extent', () => {
 
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
         const voronoi = read('examples', 'flowLayer', 'shaders', 'flow', 'flowVoronoi.wgsl')
 
         expect(layer).to.include('flowDomainMaxEdge: options.flowDomainMaxEdge ??')
@@ -176,23 +176,23 @@ describe('DEM flow layer cleanup', () => {
 
     it('cleans up flow camera listeners and worker resources when removed', () => {
 
-        const main = read('examples', 'flowLayer', 'main.js')
-        const lifecycle = read('examples', 'flowLayer', 'flow-lifecycle.js')
+        const main = read('examples', 'flowLayer', 'main.ts')
+        const lifecycle = read('examples', 'flowLayer', 'flow-lifecycle.ts')
 
         expect(main).to.include('lifetime.deferStop({')
         expect(main).to.include("label: 'flow-camera-listeners'")
         expect(main).to.include('map.off(eventName, moving)')
         expect(main).to.include('worker.removeEventListener(\'message\', handleMessage)')
-        expect(lifecycle).to.include("recordAction('release', 'flow-worker', () => worker.terminate())")
-        expect(lifecycle).to.include("recordAction('release', 'maplibre-map', () => map.remove())")
-        expect(lifecycle).to.include("recordAction('release', 'scratch-runtime', () => runtime.dispose())")
+        expect(lifecycle).to.include("recordAction('release', 'flow-worker', () => worker!.terminate())")
+        expect(lifecycle).to.include("recordAction('release', 'maplibre-map', () => map!.remove())")
+        expect(lifecycle).to.include("recordAction('release', 'scratch-runtime', () => runtime!.dispose())")
         expect(lifecycle.indexOf("'flow-worker'")).to.be.lessThan(lifecycle.indexOf("'maplibre-map'"))
         expect(lifecycle.indexOf("'maplibre-map'")).to.be.lessThan(lifecycle.indexOf("'scratch-runtime'"))
     })
 
     it('keeps current flow rendering active while camera movement clears history', () => {
 
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
         const moving = methodBody(layer, 'setCameraMoving')
         const settled = methodBody(layer, 'setCameraSettled')
         const render = methodBody(layer, 'renderFrame')
@@ -201,7 +201,7 @@ describe('DEM flow layer cleanup', () => {
         expect(settled).to.include("if (settings.historyMode === 'clear') state.particleResetPending = true")
         expect(render).to.include('builder.render(graph.passes.voronoi, [ graph.commands.voronoi ])')
         expect(render).to.include('builder.compute(graph.passes.simulation, [ graph.commands.simulation ])')
-        expect(render).to.include('builder.render(direction.pass, direction.commands)')
+        expect(render).to.include('builder.render(direction.pass, direction.commands as DrawCommand[])')
         expect(render).to.include('builder.render(graph.passes.presentation, [ direction.presentation ])')
         expect(render).to.not.include('.executable')
     })

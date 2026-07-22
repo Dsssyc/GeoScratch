@@ -1,9 +1,10 @@
 import {
     ScratchRuntime,
 } from 'geoscratch'
+import type { SubmittedWork } from 'geoscratch'
 
-const canvas = document.getElementById('GPUFrame')
-const result = document.getElementById('readback-result')
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
+const result = document.getElementById('readback-result') as HTMLElement
 canvas.dataset.status = 'loading'
 
 const computeWgsl = `
@@ -124,9 +125,9 @@ async function main() {
     renderBars(canvas, numbers)
 }
 
-function renderBars(canvas, values) {
+function renderBars(canvas: HTMLCanvasElement, values: readonly number[]) {
 
-    const context = canvas.getContext('2d')
+    const context = canvas.getContext('2d') as CanvasRenderingContext2D
     const devicePixelRatio = window.devicePixelRatio || 1
     const width = Math.max(1, Math.floor(canvas.clientWidth * devicePixelRatio))
     const height = Math.max(1, Math.floor(canvas.clientHeight * devicePixelRatio))
@@ -159,7 +160,7 @@ function renderBars(canvas, values) {
     }
 }
 
-async function requireObservedSubmission(submitted) {
+async function requireObservedSubmission(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([
         submitted.nativeOutcome,

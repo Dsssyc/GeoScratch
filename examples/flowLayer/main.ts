@@ -1,15 +1,171 @@
 import { ScratchRuntime } from 'geoscratch'
+import type {
+    ScratchDiagnostic,
+    ScratchDiagnosticCapture,
+    ScratchDiagnosticCaptureReport,
+    ScratchGpuIncidentReport,
+    ScratchRuntimeDiagnosticsEvidence,
+    Surface,
+    SurfaceSize,
+} from 'geoscratch'
 import {
     FIELD_COUNT,
     PARTICLE_BLOCK_SIZE,
     PARTICLE_COUNT,
     STAGE_ORDER,
     createFlowLayer,
-} from './flow-layer.js'
-import { createFlowLifecycle } from './flow-lifecycle.js'
-import { createFlowMap, readFlowCameraState, waitForFlowMap } from './flow-map.js'
+} from './flow-layer.ts'
+import type {
+    FlowFailureProof,
+    FlowField,
+    FlowProvenanceFact,
+} from './flow-layer.ts'
+import { createFlowLifecycle } from './flow-lifecycle.ts'
+import type {
+    FlowCleanupAction,
+    FlowCleanupReport,
+    FlowLifecycle,
+    FlowLifecycleSnapshot,
+} from './flow-lifecycle.ts'
+import { createFlowMap, readFlowCameraState, waitForFlowMap } from './flow-map.ts'
+import type { FlowLngLat, FlowMap } from './flow-map.ts'
 
-const canvas = document.getElementById('GPUFrame')
+type FlowLayer = Awaited<ReturnType<typeof createFlowLayer>>
+type FailureScenario = typeof FAILURE_SCENARIOS[number]
+
+type FlowWorkerError = Readonly<{
+    name: string
+    message: string
+}>
+
+type FlowFieldLoadedMessage = Readonly<{
+    type: 'field-loaded'
+    requestId: number
+    index: number
+    url: string
+    maxSpeed: number
+    uvs: Float32Array
+}>
+
+type FlowFieldFailedMessage = Readonly<{
+    type: 'field-failed'
+    requestId: number
+    index: number
+    url: string
+    error: FlowWorkerError
+}>
+
+type FlowWorkerMessage = FlowFieldLoadedMessage | FlowFieldFailedMessage
+
+type PendingFieldRequest = Readonly<{
+    resolve(field: FlowField): void
+    reject(error: unknown): void
+    index: number
+    url: string
+}>
+
+type FlowFieldStreamSnapshot = Readonly<{
+    requests: number
+    responses: number
+    failures: number
+    pending: number
+    listenerRemoved: boolean
+}>
+
+type FlowFieldStream = Readonly<{
+    request(index: number): Promise<FlowField>
+    snapshot(): FlowFieldStreamSnapshot
+}>
+
+type FlowFrameWork = Readonly<{
+    scheduled: number
+    completed: number
+    cancelled: number
+    active: number
+}>
+
+type SerializedFailure = Readonly<{
+    name: string
+    message: string
+    code?: string
+    scenario?: string
+    diagnosticCode?: string
+    stack?: string
+}> | undefined
+
+type SerializedCleanupReport = Readonly<{
+    primaryFailure: SerializedFailure
+    cleanupInvocationCount: number
+    pendingObservationsBefore: number
+    pendingObservationsAfter: number
+    retainedActionCount: number
+    cleanupActions: readonly FlowCleanupAction[]
+    cleanupFailures: readonly Readonly<{
+        phase: string
+        label: string
+        error: SerializedFailure
+    }>[]
+}>
+
+type FailureProofRecord = Readonly<{
+    schemaVersion: number
+    scenario: string
+    reachedCount: number
+    workerAcquiredCount: number
+    primaryFailure: SerializedFailure
+    diagnostic?: ScratchDiagnostic
+    incident?: ScratchGpuIncidentReport
+    runtimeEvidence?: ScratchRuntimeDiagnosticsEvidence
+    runtimeEvidenceByteLength?: number
+    runtimeEvidenceMaxBytes: number
+    captureBounds?: typeof FAILURE_CAPTURE_BOUNDS
+    captureReport?: ScratchDiagnosticCaptureReport
+    evidenceFailure?: SerializedFailure
+    cleanup: SerializedCleanupReport
+}>
+
+type CleanupProofRecord = Readonly<{
+    report: SerializedCleanupReport
+    stream?: FlowFieldStreamSnapshot
+    lifecycle: FlowLifecycleSnapshot
+}>
+
+type FlowProofApi = Readonly<{
+    pauseAndDrain(): Promise<Readonly<Record<string, string | undefined>>>
+    dispose(): Promise<FailureProofRecord | CleanupProofRecord | void | undefined>
+    facts(): Readonly<Record<string, string | undefined>>
+    project(lngLat: [number, number] | FlowLngLat): Readonly<{ x: number; y: number }>
+}>
+
+type FlowError = Error & {
+    code?: string
+    scenario?: string
+    diagnostic?: ScratchDiagnostic
+    incident?: ScratchGpuIncidentReport
+}
+
+type FlowFailureProofController = FlowFailureProof & Readonly<{
+    assertConfiguration(): void
+    reach(scenario: string): void
+    captureBeforeDisposal(): void
+    finalize(
+        primaryFailure: unknown,
+        cleanupReport: FlowCleanupReport
+    ): FailureProofRecord | undefined
+    observeRuntime(runtime: ScratchRuntime): void
+    observeSurface(surface: Surface): void
+    workerAcquired(): void
+}>
+
+declare global {
+    interface Window {
+        __FLOW_LAYER_PROOF__?: FlowProofApi
+        __FLOW_LAYER_INIT_FAILURE_PROOF__?: FailureProofRecord
+        __FLOW_LAYER_CLEANUP_PROOF__?: CleanupProofRecord
+    }
+}
+
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
 const FAILURE_CAPTURE_BOUNDS = Object.freeze({
     maxOperations: 1,
@@ -21,7 +177,7 @@ const FAILURE_CAPTURE_BOUNDS = Object.freeze({
 const FAILURE_SCENARIOS = Object.freeze([
     'after-worker-acquisition',
     'invalid-simulation-pipeline-wgsl',
-])
+] as const)
 const parameters = new URLSearchParams(window.location.search)
 const proofMode = parameters.get('proof') === '1'
 const boundaryProofMode = proofMode && parameters.get('boundary') === '1'
@@ -41,8 +197,8 @@ const flowOptions = Object.freeze({
 })
 const pageLifetime = createFlowLifecycle()
 const failureProof = createFailureProofController(failureConfiguration)
-let pageSettlement
-let pageCleanupContext
+let pageSettlement: Promise<FailureProofRecord | CleanupProofRecord | void | undefined> | undefined
+let pageCleanupContext: Readonly<{ fieldStream: FlowFieldStream }> | undefined
 const handlePageHide = () => {
     void disposePage()
 }
@@ -59,11 +215,11 @@ void main(pageLifetime, failureProof).catch(error => {
     void failPage(error)
 })
 
-async function main(lifetime, proof) {
+async function main(lifetime: FlowLifecycle, proof: FlowFailureProofController): Promise<void> {
 
     proof.assertConfiguration()
     const worker = lifetime.ownWorker(new Worker(
-        new URL('./flow-worker.js', import.meta.url),
+        new URL('./flow-worker.ts', import.meta.url),
         { type: 'module' }
     ))
     proof.workerAcquired()
@@ -108,10 +264,10 @@ async function main(lifetime, proof) {
     })
     lifetime.assertActive('continue Flow initialization')
     let active = true
-    let animationFrame
+    let animationFrame: number | undefined
     let submittedFrames = 0
     let observedFrames = 0
-    let latestProvenance = []
+    let latestProvenance: FlowProvenanceFact[] = []
     let frameWorkScheduled = 0
     let frameWorkCompleted = 0
     let frameWorkCancelled = 0
@@ -212,16 +368,16 @@ async function main(lifetime, proof) {
     scheduleFrame()
 }
 
-function createFieldStream(worker, lifetime) {
+function createFieldStream(worker: Worker, lifetime: FlowLifecycle): FlowFieldStream {
 
-    const pending = new Map()
+    const pending = new Map<number, PendingFieldRequest>()
     let nextRequestId = 1
     let requests = 0
     let responses = 0
     let failures = 0
     let listenerRemoved = false
 
-    const handleMessage = event => {
+    const handleMessage = (event: MessageEvent<FlowWorkerMessage>) => {
         const message = event.data
         if (message?.type !== 'field-loaded' && message?.type !== 'field-failed') return
         const request = pending.get(message.requestId)
@@ -240,7 +396,7 @@ function createFieldStream(worker, lifetime) {
             uvs: message.uvs,
         })
     }
-    const handleError = event => {
+    const handleError = (event: ErrorEvent) => {
         failures++
         const error = new Error(event.message || 'Flow worker failed')
         for (const request of pending.values()) request.reject(error)
@@ -262,7 +418,7 @@ function createFieldStream(worker, lifetime) {
         },
     })
 
-    function request(index) {
+    function request(index: number): Promise<FlowField> {
 
         lifetime.assertActive('request Flow field')
         if (!Number.isInteger(index) || index < 0 || index >= FIELD_COUNT) {
@@ -271,7 +427,7 @@ function createFieldStream(worker, lifetime) {
         const requestId = nextRequestId++
         const url = `/json/examples/flow/uv_${index}.bin`
         requests++
-        const promise = new Promise((resolve, reject) => {
+        const promise = new Promise<FlowField>((resolve, reject) => {
             pending.set(requestId, { resolve, reject, index, url })
         })
         worker.postMessage({ type: 'load-field', requestId, index, url })
@@ -290,7 +446,11 @@ function createFieldStream(worker, lifetime) {
     })
 }
 
-function registerCameraListeners(map, graph, lifetime) {
+function registerCameraListeners(
+    map: FlowMap,
+    graph: FlowLayer,
+    lifetime: FlowLifecycle
+): void {
 
     if (graph.settings.historyMode === 'off') return
     const movingEvents = [
@@ -312,7 +472,7 @@ function registerCameraListeners(map, graph, lifetime) {
     })
 }
 
-function publishGraphFacts(graph) {
+function publishGraphFacts(graph: FlowLayer): void {
 
     canvas.dataset.stageOrder = STAGE_ORDER.join('|')
     canvas.dataset.stageCount = String(STAGE_ORDER.length)
@@ -339,7 +499,16 @@ function publishFrameFacts({
     observedFrames,
     latestProvenance,
     frameWork,
-}) {
+}: Readonly<{
+    runtime: ScratchRuntime
+    graph: FlowLayer
+    fieldStream: FlowFieldStream
+    lifetime: FlowLifecycle
+    submittedFrames: number
+    observedFrames: number
+    latestProvenance: readonly FlowProvenanceFact[]
+    frameWork: FlowFrameWork
+}>): void {
 
     const state = graph.state()
     const stream = fieldStream.snapshot()
@@ -388,43 +557,50 @@ function publishFrameFacts({
     canvas.dataset.deviceLosses = String(diagnostics.aggregates.deviceLosses)
 }
 
-function createFailureProofController(configuration) {
+function createFailureProofController(configuration: Readonly<{
+    scenario?: string
+}>): FlowFailureProofController {
 
-    let runtime
-    let surface
-    let capture
-    let captureReport
-    let runtimeEvidence
-    let runtimeEvidenceByteLength
-    let evidenceFailure
+    let runtime: ScratchRuntime | undefined
+    let surface: Surface | undefined
+    let capture: ScratchDiagnosticCapture | undefined
+    let captureReport: ScratchDiagnosticCaptureReport | undefined
+    let runtimeEvidence: ScratchRuntimeDiagnosticsEvidence | undefined
+    let runtimeEvidenceByteLength: number | undefined
+    let evidenceFailure: unknown
     let reachedCount = 0
     let workerAcquiredCount = 0
 
     function assertConfiguration() {
 
-        if (configuration.scenario !== undefined && !FAILURE_SCENARIOS.includes(configuration.scenario)) {
+        if (
+            configuration.scenario !== undefined &&
+            !FAILURE_SCENARIOS.includes(configuration.scenario as FailureScenario)
+        ) {
             throw new Error(`Unsupported Flow Layer failure scenario: ${configuration.scenario}`)
         }
     }
 
-    function reach(scenario) {
+    function reach(scenario: string): void {
 
         if (configuration.scenario !== scenario) return
         reachedCount++
-        const error = new Error(`Injected Flow Layer initialization failure: ${scenario}`)
+        const error = new Error(
+            `Injected Flow Layer initialization failure: ${scenario}`
+        ) as FlowError
         error.name = 'FlowLayerInjectedFailure'
         error.code = 'FLOW_LAYER_INJECTED_FAILURE'
         error.scenario = scenario
         throw error
     }
 
-    function simulationShader(source) {
+    function simulationShader(source: string): string {
 
         if (configuration.scenario !== FAILURE_SCENARIOS[1]) return source
         return `${source}\n@compute fn flowInjectedFailure( {`
     }
 
-    function beforeSimulationPipeline(value) {
+    function beforeSimulationPipeline(value: ScratchRuntime): void {
 
         if (configuration.scenario !== FAILURE_SCENARIOS[1]) return
         reachedCount++
@@ -432,7 +608,7 @@ function createFailureProofController(configuration) {
         capture = runtime.diagnostics.capture(FAILURE_CAPTURE_BOUNDS)
     }
 
-    function captureBeforeDisposal() {
+    function captureBeforeDisposal(): void {
 
         try {
             if (capture !== undefined) captureReport = capture.stop()
@@ -451,14 +627,17 @@ function createFailureProofController(configuration) {
         }
     }
 
-    function finalize(primaryFailure, cleanupReport) {
+    function finalize(
+        primaryFailure: unknown,
+        cleanupReport: FlowCleanupReport
+    ): FailureProofRecord | undefined {
 
         if (configuration.scenario === undefined) return undefined
         const diagnostic = primaryFailure && typeof primaryFailure === 'object'
-            ? primaryFailure.diagnostic
+            ? (primaryFailure as FlowError).diagnostic
             : undefined
         const incident = primaryFailure && typeof primaryFailure === 'object'
-            ? primaryFailure.incident
+            ? (primaryFailure as FlowError).incident
             : undefined
         const proof = frozenJson({
             schemaVersion: 1,
@@ -493,13 +672,15 @@ function createFailureProofController(configuration) {
         beforeSimulationPipeline,
         captureBeforeDisposal,
         finalize,
-        observeRuntime: value => { runtime = value },
-        observeSurface: value => { surface = value },
+        observeRuntime: (value: ScratchRuntime) => { runtime = value },
+        observeSurface: (value: Surface) => { surface = value },
         workerAcquired: () => { workerAcquiredCount++ },
     })
 }
 
-async function failPage(error) {
+async function failPage(
+    error: unknown
+): Promise<FailureProofRecord | CleanupProofRecord | void | undefined> {
 
     if (pageSettlement !== undefined) return pageSettlement
     reportFatalError(error)
@@ -512,13 +693,13 @@ async function failPage(error) {
             canvas.dataset.failureScenario = proof.scenario
         }
         return proof
-    }).catch(cleanupFailure => {
+    }).catch((cleanupFailure: unknown) => {
         console.error(cleanupFailure)
     })
     return pageSettlement
 }
 
-async function disposePage() {
+async function disposePage(): Promise<FailureProofRecord | CleanupProofRecord | void | undefined> {
 
     if (pageSettlement !== undefined) return pageSettlement
     pageSettlement = pageLifetime.dispose().then(report => {
@@ -537,7 +718,7 @@ async function disposePage() {
     return pageSettlement
 }
 
-function serializeCleanupReport(report) {
+function serializeCleanupReport(report: FlowCleanupReport): SerializedCleanupReport {
 
     return {
         primaryFailure: serializeFailure(report.primaryFailure),
@@ -554,30 +735,34 @@ function serializeCleanupReport(report) {
     }
 }
 
-function serializeFailure(error) {
+function serializeFailure(error: unknown): SerializedFailure {
 
     if (error === undefined) return undefined
     if (!(error instanceof Error)) return { name: 'NonErrorFailure', message: String(error) }
     return {
         name: error.name,
         message: error.message,
-        ...(typeof error.code === 'string' ? { code: error.code } : {}),
-        ...(typeof error.scenario === 'string' ? { scenario: error.scenario } : {}),
-        ...(error.diagnostic?.code !== undefined
-            ? { diagnosticCode: error.diagnostic.code }
+        ...(typeof (error as FlowError).code === 'string'
+            ? { code: (error as FlowError).code }
+            : {}),
+        ...(typeof (error as FlowError).scenario === 'string'
+            ? { scenario: (error as FlowError).scenario }
+            : {}),
+        ...((error as FlowError).diagnostic?.code !== undefined
+            ? { diagnosticCode: (error as FlowError).diagnostic!.code }
             : {}),
         ...(typeof error.stack === 'string' ? { stack: error.stack.slice(0, 8 * 1024) } : {}),
     }
 }
 
-function deserializeWorkerError(error, url) {
+function deserializeWorkerError(error: FlowWorkerError, url: string): Error {
 
     const failure = new Error(error?.message ?? `Flow worker failed for ${url}`)
     failure.name = error?.name ?? 'FlowWorkerError'
     return failure
 }
 
-function canvasPixelSize(target) {
+function canvasPixelSize(target: HTMLElement): SurfaceSize {
 
     const ratio = window.devicePixelRatio || 1
     return {
@@ -586,12 +771,12 @@ function canvasPixelSize(target) {
     }
 }
 
-function sameSize(left, right) {
+function sameSize(left: SurfaceSize, right: SurfaceSize): boolean {
 
     return left.width === right.width && left.height === right.height
 }
 
-function seededRandom(seed) {
+function seededRandom(seed: number): () => number {
 
     let state = seed >>> 0
     return () => {
@@ -603,35 +788,35 @@ function seededRandom(seed) {
     }
 }
 
-function readPublishedFacts() {
+function readPublishedFacts(): Readonly<Record<string, string | undefined>> {
 
     return Object.freeze({ ...canvas.dataset })
 }
 
-function setStatus(status) {
+function setStatus(status: string): void {
 
     canvas.dataset.status = status
     document.body.dataset.status = status
 }
 
-function reportFatalError(error) {
+function reportFatalError(error: unknown): void {
 
     setStatus('error')
     canvas.dataset.error = error instanceof Error ? error.message : String(error)
-    if (error?.diagnostic !== undefined) {
-        canvas.dataset.diagnostic = JSON.stringify(error.diagnostic)
+    if ((error as FlowError | null | undefined)?.diagnostic !== undefined) {
+        canvas.dataset.diagnostic = JSON.stringify((error as FlowError).diagnostic)
     }
     console.error(error)
 }
 
-function frozenJson(value) {
+function frozenJson<T>(value: T): T {
 
-    return deepFreeze(JSON.parse(JSON.stringify(value)))
+    return deepFreeze(JSON.parse(JSON.stringify(value)) as T)
 }
 
-function deepFreeze(value) {
+function deepFreeze<T>(value: T): T {
 
     if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value
     for (const child of Object.values(value)) deepFreeze(child)
-    return Object.freeze(value)
+    return Object.freeze(value) as T
 }

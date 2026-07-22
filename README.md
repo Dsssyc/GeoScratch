@@ -306,7 +306,7 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 ## Development Notes
 
 - Keep public exports routed through `packages/geoscratch/src/index.ts` and package exports pointed at `packages/geoscratch/dist/`.
-- Add browser/WebGPU demos under `examples/<name>/index.html` and `examples/<name>/main.js`.
+- Add browser/WebGPU demos under `examples/<name>/index.html` and `examples/<name>/main.ts`.
 - Examples must import the package as `geoscratch`, not reach into library source by relative path.
 - Keep ordinary example images and shaders beside their owning example, using relative asset URLs or raw shader imports.
 - Keep library-owned runtime assets beside the source module that owns them, under `packages/geoscratch/src/`.

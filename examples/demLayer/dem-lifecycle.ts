@@ -1,42 +1,103 @@
+import type { ScratchRuntime } from 'geoscratch'
+import type { DemMap } from './dem-map.ts'
+
+type LifecycleState = 'active' | 'disposing' | 'disposed'
+type LifecyclePhase = 'stop' | 'release' | 'settle'
+type LifecycleActionRun = () => void | PromiseLike<void>
+
+type StopAction = {
+    id: number
+    label: string
+    run?: LifecycleActionRun
+    active: boolean
+}
+
+type ObservationSettlement =
+    | { status: 'fulfilled'; value: unknown }
+    | { status: 'rejected'; error: unknown }
+
+type ObservationEntry = {
+    id: number
+    label: string
+    settlement: Promise<ObservationSettlement>
+}
+
+type CloseableImage = {
+    close(): void
+}
+
+type BitmapEntry = {
+    id: number
+    label: string
+    value: CloseableImage
+    released: boolean
+}
+
+type CleanupAction = Readonly<{
+    phase: LifecyclePhase
+    label: string
+    status: 'fulfilled' | 'rejected'
+}>
+
+type CleanupFailure = Readonly<{
+    phase: LifecyclePhase
+    label: string
+    error: unknown
+}>
+
+type CleanupReport = Readonly<{
+    primaryFailure: unknown
+    cleanupInvocationCount: number
+    pendingObservationsBefore: number
+    pendingObservationsAfter: number
+    retainedActionCount: number
+    cleanupActions: readonly CleanupAction[]
+    cleanupFailures: readonly CleanupFailure[]
+}>
+
+type LifecycleStoppedError = Error & {
+    code: 'DEM_LIFECYCLE_STOPPED'
+}
+
 export function createDemLifecycle() {
 
     const abortController = new AbortController()
-    const stopActions = []
-    const pendingObservations = new Map()
-    const bitmaps = new Map()
-    const cleanupActions = []
-    const cleanupFailures = []
-    let map
-    let runtime
+    const stopActions: StopAction[] = []
+    const pendingObservations = new Map<number, ObservationEntry>()
+    const bitmaps = new Map<number, BitmapEntry>()
+    const cleanupActions: CleanupAction[] = []
+    const cleanupFailures: CleanupFailure[] = []
+    let map: DemMap | undefined
+    let runtime: ScratchRuntime | undefined
     let nextActionId = 1
     let nextObservationId = 1
     let nextBitmapId = 1
-    let state = 'active'
-    let disposal
-    let primaryFailure
-    let stopError
+    let state: LifecycleState = 'active'
+    let disposal: Promise<CleanupReport> | undefined
+    let primaryFailure: unknown
+    let stopError: LifecycleStoppedError | undefined
     let cleanupInvocationCount = 0
 
     function lifecycleStopError() {
 
         if (stopError !== undefined) return stopError
-        stopError = new Error('DEM lifecycle disposal has started')
+        stopError = new Error('DEM lifecycle disposal has started') as LifecycleStoppedError
         stopError.name = 'DemLifecycleStoppedError'
         stopError.code = 'DEM_LIFECYCLE_STOPPED'
         return stopError
     }
 
-    function isStopError(error) {
+    function isStopError(error: unknown) {
 
-        return error?.code === 'DEM_LIFECYCLE_STOPPED'
+        return (error as { code?: unknown } | null | undefined)?.code === 'DEM_LIFECYCLE_STOPPED'
     }
 
-    function assertActive(action) {
+    function assertActive(action: string) {
 
         if (state !== 'active') throw lifecycleStopError()
     }
 
-    function ownMap(value) {
+    function ownMap(value: DemMap) {
 
         assertActive('own MapLibre map')
         if (value === undefined || value === null) throw new TypeError('MapLibre map must be defined')
@@ -45,7 +106,7 @@ export function createDemLifecycle() {
         return value
     }
 
-    function ownRuntime(value) {
+    function ownRuntime(value: ScratchRuntime) {
 
         assertActive('own Scratch runtime')
         if (value === undefined || value === null) throw new TypeError('Scratch runtime must be defined')
@@ -54,7 +115,7 @@ export function createDemLifecycle() {
         return value
     }
 
-    function ownBitmap(label, value) {
+    function ownBitmap(label: string, value: CloseableImage) {
 
         assertActive('own decoded image')
         if (typeof label !== 'string' || label.length === 0) {
@@ -81,7 +142,7 @@ export function createDemLifecycle() {
         })
     }
 
-    function deferStop({ label, run }) {
+    function deferStop({ label, run }: { label: string; run: LifecycleActionRun }) {
 
         assertActive('register stop action')
         if (typeof label !== 'string' || label.length === 0) {
@@ -89,7 +150,7 @@ export function createDemLifecycle() {
         }
         if (typeof run !== 'function') throw new TypeError('DEM stop action must be a function')
 
-        const action = { id: nextActionId++, label, run, active: true }
+        const action: StopAction = { id: nextActionId++, label, run, active: true }
         stopActions.push(action)
         return Object.freeze({
             cancel() {
@@ -104,7 +165,7 @@ export function createDemLifecycle() {
         })
     }
 
-    function track(observation, label = 'submitted-work') {
+    function track<T>(observation: T | PromiseLike<T>, label = 'submitted-work'): Promise<T> {
 
         assertActive('track work')
         if (typeof label !== 'string' || label.length === 0) {
@@ -113,19 +174,21 @@ export function createDemLifecycle() {
 
         const id = nextObservationId++
         const promise = Promise.resolve(observation)
-        const entry = {
+        const entry: ObservationEntry = {
             id,
             label,
-            settlement: promise.then(
+            settlement: promise.then<ObservationSettlement, ObservationSettlement>(
                 value => ({ status: 'fulfilled', value }),
-                error => ({ status: 'rejected', error })
+                (error: unknown) => ({ status: 'rejected', error })
             ).finally(() => pendingObservations.delete(id)),
         }
         pendingObservations.set(id, entry)
         return promise
     }
 
-    function acquireRuntime(acquisition) {
+    function acquireRuntime(
+        acquisition: ScratchRuntime | PromiseLike<ScratchRuntime>
+    ): Promise<ScratchRuntime> {
 
         assertActive('acquire Scratch runtime')
         const guarded = Promise.resolve(acquisition).then(async value => {
@@ -138,7 +201,10 @@ export function createDemLifecycle() {
         return track(guarded, 'scratch-runtime-acquisition')
     }
 
-    function acquireBitmap(label, acquisition) {
+    function acquireBitmap<T extends CloseableImage>(
+        label: string,
+        acquisition: T | PromiseLike<T>
+    ) {
 
         assertActive('acquire decoded image')
         const guarded = Promise.resolve(acquisition).then(async value => {
@@ -151,7 +217,11 @@ export function createDemLifecycle() {
         return track(guarded, `external-image-acquisition:${label}`)
     }
 
-    async function recordAction(phase, label, run) {
+    async function recordAction(
+        phase: LifecyclePhase,
+        label: string,
+        run: LifecycleActionRun
+    ) {
 
         try {
             await run()
@@ -170,11 +240,11 @@ export function createDemLifecycle() {
             action.active = false
             const run = action.run
             action.run = undefined
-            await recordAction('stop', action.label, run)
+            await recordAction('stop', action.label, run as LifecycleActionRun)
         }
     }
 
-    async function settle(entries) {
+    async function settle(entries: readonly ObservationEntry[]) {
 
         const settlements = await Promise.all(entries.map(entry => entry.settlement))
         for (let index = 0; index < settlements.length; index++) {
@@ -200,7 +270,7 @@ export function createDemLifecycle() {
         return snapshot()
     }
 
-    async function disposeOnce(pendingAtDisposal) {
+    async function disposeOnce(pendingAtDisposal: readonly ObservationEntry[]) {
 
         await runStopActions()
         await settle(pendingAtDisposal)
@@ -212,8 +282,8 @@ export function createDemLifecycle() {
         }
         bitmaps.clear()
 
-        if (map !== undefined) await recordAction('release', 'maplibre-map', () => map.remove())
-        if (runtime !== undefined) await recordAction('release', 'scratch-runtime', () => runtime.dispose())
+        if (map !== undefined) await recordAction('release', 'maplibre-map', () => map!.remove())
+        if (runtime !== undefined) await recordAction('release', 'scratch-runtime', () => runtime!.dispose())
 
         map = undefined
         runtime = undefined
@@ -232,7 +302,7 @@ export function createDemLifecycle() {
         })
     }
 
-    function dispose(failure) {
+    function dispose(failure?: unknown) {
 
         if (disposal !== undefined) return disposal
         state = 'disposing'

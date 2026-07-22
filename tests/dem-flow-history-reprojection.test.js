@@ -50,7 +50,7 @@ describe('DEM flow history reprojection', () => {
 
     it('adds history mode options and camera state for reprojection', () => {
 
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
 
         expect(layer).to.include("const historyMode = options.historyMode ?? (options.clearOnMove === false ? 'off' : 'reproject')")
         expect(layer).to.include('historyMode: historyModeValue(settings.historyMode)')
@@ -63,12 +63,12 @@ describe('DEM flow history reprojection', () => {
         expect(layer).to.include('previousViewport: [ size.width, size.height ]')
         expect(layer).to.include('currentViewport: [ size.width, size.height ]')
         expect(layer).to.include('updateCameraHistory(graph, state, camera)')
-        expect(layer).to.include('function historyModeValue(mode)')
+        expect(layer).to.include('function historyModeValue(mode: FlowHistoryMode): number')
     })
 
     it('keeps reproject movement from clearing history or resetting particles', () => {
 
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
         const moving = methodBody(layer, 'setCameraMoving')
         const settled = methodBody(layer, 'setCameraSettled')
 
@@ -82,16 +82,16 @@ describe('DEM flow history reprojection', () => {
 
     it('exposes history reprojection uniforms to the swap pass', () => {
 
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
 
         expect(layer).to.include('historyMode: historyModeValue(graph.settings.historyMode)')
         expect(layer).to.include('historyValid: state.historyValid')
         expect(layer).to.include("historyReprojecting: state.cameraMoving && graph.settings.historyMode === 'reproject' ? 1 : 0")
-        expect(layer).to.include('previousMatrix: state.historyUniformValues.previousMatrix')
+        expect(layer).to.include('previousMatrix: state.historyUniformValues!.previousMatrix')
         expect(layer).to.include('currentInverseMatrix: state.currentInverseMatrix')
-        expect(layer).to.include('previousCenterHigh: state.historyUniformValues.previousCenterHigh')
+        expect(layer).to.include('previousCenterHigh: state.historyUniformValues!.previousCenterHigh')
         expect(layer).to.include('currentCenterLow: state.currentCenterLow')
-        expect(layer).to.include('previousViewport: state.historyUniformValues.previousViewport')
+        expect(layer).to.include('previousViewport: state.historyUniformValues!.previousViewport')
         expect(layer).to.include('currentViewport: state.currentViewport')
     })
 

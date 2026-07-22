@@ -3,7 +3,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const moduleUrl = pathToFileURL(
-    path.join(process.cwd(), 'examples', 'helloGAW', 'page-lifetime.js')
+    path.join(process.cwd(), 'examples', 'helloGAW', 'page-lifetime.ts')
 ).href
 
 describe('Hello GAW page lifetime authority', () => {

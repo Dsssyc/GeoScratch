@@ -11,7 +11,7 @@
     "build": "npm --workspace geoscratch run build && npm --workspace examples run build",
     "serve": "npm --workspace examples run serve",
     "test": "npm --workspace geoscratch run build && mocha \"tests/**/*.test.js\"",
-    "typecheck": "npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm run typecheck:webgpu",
+    "typecheck": "npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm --workspace examples run typecheck && npm run typecheck:webgpu",
     "typecheck:webgpu": "node node_modules/typescript-webgpu/bin/tsc -p tsconfig.webgpu-types.json"
   },
   "devDependencies": {

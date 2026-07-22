@@ -291,7 +291,7 @@ describe('scratch submission native outcome documentation', () => {
             'textureResize',
             'helloGAW',
         ]) {
-            const source = read('examples', example, 'main.js')
+            const source = read('examples', example, 'main.ts')
 
             expect(source, `${example} native outcome`).to.include('.nativeOutcome')
             expect(source, `${example} completion`).to.include('.done')
@@ -301,8 +301,8 @@ describe('scratch submission native outcome documentation', () => {
 
     it('moves the final DEM example onto observed current submissions', () => {
 
-        const main = read('examples', 'demLayer', 'main.js')
-        const graph = read('examples', 'demLayer', 'dem-layer.js')
+        const main = read('examples', 'demLayer', 'main.ts')
+        const graph = read('examples', 'demLayer', 'dem-layer.ts')
 
         expect(graph).to.include('submitted.nativeOutcome')
         expect(graph).to.include('submitted.done')

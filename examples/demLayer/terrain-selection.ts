@@ -7,13 +7,29 @@ export const TERRAIN_BOUNDARY = Object.freeze([
 
 export const MAX_TERRAIN_NODES = 5000
 
+type NumberSequence = ArrayLike<number> & Iterable<number>
+type TerrainBounds = [ number, number, number, number ]
+type TerrainNode = {
+    level: number
+    id: number
+    bounds: TerrainBounds
+}
+
+type TerrainSelectionOptions = {
+    cameraPos: unknown
+    zoomLevel: unknown
+    maxLevel?: unknown
+    maxNodes?: unknown
+    terrainBoundary?: unknown
+}
+
 export function selectTerrainNodes({
     cameraPos,
     zoomLevel,
     maxLevel = 14,
     maxNodes = MAX_TERRAIN_NODES,
     terrainBoundary = TERRAIN_BOUNDARY,
-}) {
+}: TerrainSelectionOptions) {
 
     assertPoint(cameraPos, 'cameraPos')
     assertFinite(zoomLevel, 'zoomLevel')
@@ -22,13 +38,13 @@ export function selectTerrainNodes({
     assertBounds(terrainBoundary, 'terrainBoundary')
 
     const stack = [ createNode(0, 0), createNode(0, 1) ]
-    const candidates = []
+    const candidates: TerrainNode[] = []
     let maxVisibleLevel = 0
     let sectorRange = [ 0, 0 ]
     const terminalLevel = Math.min(maxLevel, zoomLevel)
 
     while (stack.length > 0) {
-        const node = stack.pop()
+        const node = stack.pop() as TerrainNode
         if (!overlaps(node.bounds, terrainBoundary)) continue
 
         if (!isSubdividable(node, cameraPos) || node.level >= terminalLevel) {
@@ -83,7 +99,7 @@ export function selectTerrainNodes({
     })
 }
 
-function createNode(level, id, parentBounds) {
+function createNode(level: number, id: number, parentBounds?: TerrainBounds): TerrainNode {
 
     const size = 180 / 2 ** level
     const childhoodId = id % 4
@@ -97,7 +113,7 @@ function createNode(level, id, parentBounds) {
     }
 }
 
-function isSubdividable(node, cameraPos) {
+function isSubdividable(node: TerrainNode, cameraPos: NumberSequence) {
 
     const centerX = (node.bounds[0] + node.bounds[2]) / 2
     const centerY = (node.bounds[1] + node.bounds[3]) / 2
@@ -108,49 +124,62 @@ function isSubdividable(node, cameraPos) {
     return Math.max(horizontalDistance, verticalDistance) <= 2
 }
 
-function overlaps(a, b) {
+function overlaps(a: NumberSequence, b: NumberSequence) {
 
     if (a[0] > b[2] || a[2] < b[0]) return false
     if (a[1] > b[3] || a[3] < b[1]) return false
     return true
 }
 
-function freezeArray(values) {
+function freezeArray(values: NumberSequence) {
 
     return Object.freeze(Array.from(values))
 }
 
-function assertFinite(value, name) {
+function assertFinite(value: unknown, name: string): asserts value is number {
 
-    if (!Number.isFinite(value)) throw new TypeError(`${name} must be finite`)
+    if (!Number.isFinite(value as number)) throw new TypeError(`${name} must be finite`)
 }
 
-function assertPoint(value, name) {
+function assertPoint(value: unknown, name: string): asserts value is NumberSequence {
 
     if (!Array.isArray(value) && !ArrayBuffer.isView(value)) {
         throw new TypeError(`${name} must be a two-number sequence`)
     }
-    if (value.length !== 2) throw new TypeError(`${name} must contain two numbers`)
-    assertFinite(value[0], `${name}[0]`)
-    assertFinite(value[1], `${name}[1]`)
+    if ((value as NumberSequence).length !== 2) {
+        throw new TypeError(`${name} must contain two numbers`)
+    }
+    assertFinite((value as NumberSequence)[0], `${name}[0]`)
+    assertFinite((value as NumberSequence)[1], `${name}[1]`)
 }
 
-function assertBounds(value, name) {
+function assertBounds(value: unknown, name: string): asserts value is NumberSequence {
 
     if (!Array.isArray(value) && !ArrayBuffer.isView(value)) {
         throw new TypeError(`${name} must be a four-number sequence`)
     }
-    if (value.length !== 4) throw new TypeError(`${name} must contain four numbers`)
-    for (let index = 0; index < value.length; index++) assertFinite(value[index], `${name}[${index}]`)
-    if (value[0] > value[2] || value[1] > value[3]) throw new RangeError(`${name} must be ordered`)
+    if ((value as NumberSequence).length !== 4) {
+        throw new TypeError(`${name} must contain four numbers`)
+    }
+    for (let index = 0; index < (value as NumberSequence).length; index++) {
+        assertFinite((value as NumberSequence)[index], `${name}[${index}]`)
+    }
+    if (
+        (value as NumberSequence)[0] > (value as NumberSequence)[2] ||
+        (value as NumberSequence)[1] > (value as NumberSequence)[3]
+    ) throw new RangeError(`${name} must be ordered`)
 }
 
-function assertNonNegativeInteger(value, name) {
+function assertNonNegativeInteger(value: unknown, name: string): asserts value is number {
 
-    if (!Number.isInteger(value) || value < 0) throw new TypeError(`${name} must be a non-negative integer`)
+    if (!Number.isInteger(value as number) || (value as number) < 0) {
+        throw new TypeError(`${name} must be a non-negative integer`)
+    }
 }
 
-function assertPositiveInteger(value, name) {
+function assertPositiveInteger(value: unknown, name: string): asserts value is number {
 
-    if (!Number.isInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive integer`)
+    if (!Number.isInteger(value as number) || (value as number) <= 0) {
+        throw new TypeError(`${name} must be a positive integer`)
+    }
 }

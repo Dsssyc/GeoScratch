@@ -2919,13 +2919,13 @@ function auditExamples() {
         .filter(entry => entry.isDirectory())
         .map(entry => entry.name)
     const runnable = directories.filter(name =>
-        fs.existsSync(`examples/${name}/index.html`) && fs.existsSync(`examples/${name}/main.js`)
+        fs.existsSync(`examples/${name}/index.html`) && fs.existsSync(`examples/${name}/main.ts`)
     ).sort()
     const expectedRunnable = [ ...ordinaryExamples, ...legacyExamples ].sort()
     if (!equalSets(runnable, expectedRunnable)) failures.push('runnable example inventory drifted')
 
     for (const name of ordinaryExamples) {
-        const source = fs.readFileSync(`examples/${name}/main.js`, 'utf8')
+        const source = fs.readFileSync(`examples/${name}/main.ts`, 'utf8')
         if (!/from\s+['"]geoscratch['"]/.test(source)) failures.push(`${name} does not import geoscratch`)
         if (source.includes('packages/geoscratch/src') || source.includes('../packages/')) {
             failures.push(`${name} reaches into library source`)

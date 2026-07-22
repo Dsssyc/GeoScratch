@@ -1,11 +1,12 @@
 import { ScratchRuntime } from 'geoscratch'
+import type { SubmittedWork, Surface } from 'geoscratch'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x08
 const GPU_BUFFER_USAGE_INDEX = 0x10
 const GPU_BUFFER_USAGE_STORAGE = 0x80
 const GPU_BUFFER_USAGE_INDIRECT = 0x100
 
-const canvas = document.getElementById('GPUFrame')
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 
 const argumentProgramWgsl = `
 @group(0) @binding(0)
@@ -245,7 +246,7 @@ async function main() {
     window.addEventListener('resize', render)
 }
 
-function resizeSurface(surface, target) {
+function resizeSurface(surface: Surface, target: HTMLCanvasElement) {
 
     const devicePixelRatio = window.devicePixelRatio || 1
     const width = Math.max(1, Math.floor(target.clientWidth * devicePixelRatio))
@@ -256,7 +257,7 @@ function resizeSurface(surface, target) {
     }
 }
 
-async function requireObservedSubmission(submitted) {
+async function requireObservedSubmission(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([
         submitted.nativeOutcome,

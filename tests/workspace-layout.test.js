@@ -23,7 +23,7 @@ describe('workspace layout', () => {
         expect(pkg.scripts.dev).to.equal('npm --workspace geoscratch run build && npm --workspace examples run dev')
         expect(pkg.scripts.build).to.equal('npm --workspace geoscratch run build && npm --workspace examples run build')
         expect(pkg.scripts.test).to.equal('npm --workspace geoscratch run build && mocha "tests/**/*.test.js"')
-        expect(pkg.scripts.typecheck).to.equal('npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm run typecheck:webgpu')
+        expect(pkg.scripts.typecheck).to.equal('npm --workspace geoscratch run build && node node_modules/typescript/bin/tsc -p tsconfig.types.json && npm --workspace examples run typecheck && npm run typecheck:webgpu')
     })
 
     it('publishes the library from packages/geoscratch only', () => {
@@ -75,24 +75,24 @@ describe('workspace layout', () => {
     it('makes examples consume the package API rather than internal source files', () => {
 
         const exampleFiles = [
-            'examples/helloTriangle/main.js',
-            'examples/uniformTriangle/main.js',
-            'examples/computeReadback/main.js',
-            'examples/submissionOrder/main.js',
-            'examples/externalImageUpload/main.js',
-            'examples/textureResize/main.js',
-            'examples/helloVertexBuffer/main.js',
-            'examples/textureSampling/main.js',
-            'examples/renderToTexture/main.js',
-            'examples/indirectExecution/main.js',
-            'examples/readinessPolicies/main.js',
-            'examples/demLayer/main.js',
-            'examples/demLayer/dem-layer.js',
-            'examples/demLayer/dem-map.js',
-            'examples/flowLayer/main.js',
-            'examples/flowLayer/flow-layer.js',
-            'examples/flowLayer/flow-map.js',
-            'examples/helloGAW/main.js',
+            'examples/helloTriangle/main.ts',
+            'examples/uniformTriangle/main.ts',
+            'examples/computeReadback/main.ts',
+            'examples/submissionOrder/main.ts',
+            'examples/externalImageUpload/main.ts',
+            'examples/textureResize/main.ts',
+            'examples/helloVertexBuffer/main.ts',
+            'examples/textureSampling/main.ts',
+            'examples/renderToTexture/main.ts',
+            'examples/indirectExecution/main.ts',
+            'examples/readinessPolicies/main.ts',
+            'examples/demLayer/main.ts',
+            'examples/demLayer/dem-layer.ts',
+            'examples/demLayer/dem-map.ts',
+            'examples/flowLayer/main.ts',
+            'examples/flowLayer/flow-layer.ts',
+            'examples/flowLayer/flow-map.ts',
+            'examples/helloGAW/main.ts',
         ]
 
         for (const file of exampleFiles) {

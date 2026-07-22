@@ -1,8 +1,9 @@
 import {
     ScratchRuntime,
 } from 'geoscratch'
+import type { SubmittedWork, Surface } from 'geoscratch'
 
-const canvas = document.getElementById('GPUFrame')
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 canvas.dataset.status = 'loading'
 
 const vertexBufferWgsl = `
@@ -172,7 +173,7 @@ async function main() {
     render()
 }
 
-function resizeSurface(surface, canvas) {
+function resizeSurface(surface: Surface, canvas: HTMLCanvasElement) {
 
     const devicePixelRatio = window.devicePixelRatio || 1
     const width = Math.max(1, Math.floor(canvas.clientWidth * devicePixelRatio))
@@ -183,7 +184,7 @@ function resizeSurface(surface, canvas) {
     }
 }
 
-async function requireObservedSubmission(submitted) {
+async function requireObservedSubmission(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([
         submitted.nativeOutcome,

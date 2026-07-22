@@ -1,11 +1,128 @@
 import { mat4 } from 'geoscratch'
 
+type Vec3 = readonly [ number, number, number ]
+type Matrix = Float32Array<ArrayBuffer>
+
+type LngLat = {
+    lng: number
+    lat: number
+}
+
+type CameraPosition = {
+    lngLat: LngLat
+    altitude: number
+}
+
+type Point = {
+    x: number
+    y: number
+}
+
+type MapStyle = {
+    readonly version: number
+    readonly sources: {
+        readonly cartoDarkMatter?: {
+            readonly type: 'raster'
+            readonly tiles: readonly string[]
+            readonly tileSize: number
+            readonly attribution: string
+        }
+    }
+    readonly layers: readonly (
+        | {
+            readonly id: string
+            readonly type: 'raster'
+            readonly source: string
+            readonly paint: { readonly 'raster-opacity': number }
+        }
+        | {
+            readonly id: string
+            readonly type: 'background'
+            readonly paint: { readonly 'background-color': string }
+        }
+    )[]
+}
+
+type MapTransform = {
+    height: number
+    width: number
+    mercatorMatrix?: ArrayLike<number> | null
+    farZ: number
+    nearZ: number
+    centerOffset?: Point | null
+    point: Point
+    _fov?: number
+    fov: number
+    _pitch?: number
+    pitch: number
+    angle: number
+    bearing: number
+    worldSize: number
+    elevation?: number
+    _elevation?: number
+    minElevationForCurrentTile?: number
+    cameraToCenterDistance?: number
+    _pixelPerMeter?: number
+    pixelsPerMeter?: number
+    center: { lat: number }
+    getCameraPosition(): CameraPosition
+    getHorizon?(): number
+}
+
+export type DemMap = {
+    transform: MapTransform
+    loaded(): boolean
+    once(event: 'load', listener: () => void): void
+    off(event: 'load', listener: () => void): void
+    getZoom(): number
+    getBounds(): {
+        getWest(): number
+        getSouth(): number
+        getEast(): number
+        getNorth(): number
+    }
+    resize(): void
+    on(event: 'render', listener: () => void): void
+    off(event: 'render' | 'load', listener: () => void): void
+    jumpTo(options: { center?: readonly [ number, number ]; zoom?: number }): void
+    remove(): void
+}
+
+type MapApi = {
+    Map: new (options: {
+        style: MapStyle
+        center: readonly number[]
+        zoom: number
+        projection: string
+        maxZoom: number
+        container: HTMLElement
+        antialias: boolean
+    }) => DemMap
+    MercatorCoordinate: {
+        fromLngLat(lngLat: LngLat, altitude: number): { x: number; y: number; z: number }
+    }
+}
+
+declare global {
+    var maplibregl: MapApi | undefined
+    var mapboxgl: MapApi | undefined
+}
+
+type DemMapOptions = {
+    proof?: boolean
+}
+
+type Viewport = {
+    width: number
+    height: number
+}
+
 const mapApi = globalThis.maplibregl ?? globalThis.mapboxgl
 const underwaterTerrainMinElevation = -80.06899999999999 * 30
 
-if (!mapApi) throw new Error('Map runtime failed to load for Flow Layer')
+if (!mapApi) throw new Error('Map runtime failed to load for DEM Layer')
 
-export const FLOW_MAP_DEFAULTS = Object.freeze({
+export const DEM_MAP_DEFAULTS = Object.freeze({
     center: Object.freeze([ 120.980697, 31.684162 ]),
     zoom: 9,
     projection: 'mercator',
@@ -35,17 +152,17 @@ export const darkMatterStyle = Object.freeze({
     } ],
 })
 
-const flowProofStyle = Object.freeze({
+const demProofStyle = Object.freeze({
     version: 8,
     sources: {},
     layers: [ {
-        id: 'flow-proof-background',
+        id: 'dem-proof-background',
         type: 'background',
         paint: { 'background-color': '#101418' },
     } ],
 })
 
-export function createFlowMap(canvas, options = {}) {
+export function createDemMap(canvas: HTMLCanvasElement, options: DemMapOptions = {}) {
 
     const { proof = false, ...mapOptions } = options
     canvas.style.pointerEvents = 'none'
@@ -55,71 +172,75 @@ export function createFlowMap(canvas, options = {}) {
     mapContainer.id = 'map'
     document.body.appendChild(mapContainer)
 
-    return new mapApi.Map({
-        style: proof ? flowProofStyle : darkMatterStyle,
-        center: FLOW_MAP_DEFAULTS.center,
-        zoom: FLOW_MAP_DEFAULTS.zoom,
-        projection: FLOW_MAP_DEFAULTS.projection,
-        maxZoom: FLOW_MAP_DEFAULTS.maxZoom,
+    return new mapApi!.Map({
+        style: (proof ? demProofStyle : darkMatterStyle) as MapStyle,
+        center: DEM_MAP_DEFAULTS.center,
+        zoom: DEM_MAP_DEFAULTS.zoom,
+        projection: DEM_MAP_DEFAULTS.projection,
+        maxZoom: DEM_MAP_DEFAULTS.maxZoom,
         container: mapContainer,
         antialias: true,
         ...mapOptions,
     })
 }
 
-export function waitForFlowMap(map, signal) {
+export function waitForDemMap(map: DemMap, signal?: AbortSignal): Promise<DemMap> {
 
     if (signal?.aborted) return Promise.reject(signal.reason)
     if (map.loaded()) return Promise.resolve(map)
-    return new Promise((resolve, reject) => {
+    return new Promise<DemMap>((resolve, reject) => {
         const onLoad = () => {
             signal?.removeEventListener('abort', onAbort)
             resolve(map)
         }
         const onAbort = () => {
             map.off('load', onLoad)
-            reject(signal.reason)
+            reject(signal!.reason)
         }
         map.once('load', onLoad)
         signal?.addEventListener('abort', onAbort, { once: true })
     })
 }
 
-export function readFlowCameraState(map, viewport) {
+export function readDemCameraState(map: DemMap, viewport: Viewport) {
 
     const transform = map.transform
     const cameraPosition = transform.getCameraPosition()
-    const mercatorCenter = mapApi.MercatorCoordinate.fromLngLat(
+    const mercatorCenter = mapApi!.MercatorCoordinate.fromLngLat(
         cameraPosition.lngLat,
         cameraPosition.altitude
     )
     const centerX = encodeFloatToDouble(mercatorCenter.x)
     const centerY = encodeFloatToDouble(mercatorCenter.y)
     const centerZ = encodeFloatToDouble(mercatorCenter.z)
-    const centerHigh = [ centerX[0], centerY[0], centerZ[0] ]
-    const centerLow = [ centerX[1], centerY[1], centerZ[1] ]
-    const bounds = map.getBounds()
+    const centerHigh: Vec3 = [ centerX[0], centerY[0], centerZ[0] ]
+    const centerLow: Vec3 = [ centerX[1], centerY[1], centerZ[1] ]
     const { far, near, matrix } = getScratchMercatorMatrix(transform)
 
     return Object.freeze({
         far,
         near,
-        matrix: Array.from(mat4.translate(matrix, centerHigh)),
+        matrix: Array.from((mat4.translate as (
+            matrix: Matrix,
+            vector: Vec3,
+            destination?: Matrix
+        ) => Matrix)(matrix, centerHigh)),
         centerHigh,
         centerLow,
-        bounds: [ bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth() ],
+        cameraPos: [ cameraPosition.lngLat.lng, cameraPosition.lngLat.lat ],
         zoom: map.getZoom(),
         viewport: [ viewport.width, viewport.height ],
     })
 }
 
-function getScratchMercatorMatrix(transform) {
+function getScratchMercatorMatrix(transform: MapTransform) {
 
     if (!transform.height || !transform.mercatorMatrix) {
         return {
             far: transform.farZ,
             near: transform.nearZ,
-            matrix: Float32Array.from(transform.mercatorMatrix ?? mat4.identity()),
+            matrix: Float32Array.from(transform.mercatorMatrix ??
+                (mat4.identity as (destination?: Matrix) => Matrix)()),
         }
     }
 
@@ -132,7 +253,13 @@ function getScratchMercatorMatrix(transform) {
     const angle = radiansFromTransformValue(transform.angle, -transform.bearing)
     const cameraToCenterDistance = getCameraToCenterDistance(transform, fov)
 
-    let matrix = mat4.perspective(fov, transform.width / transform.height, near, far)
+    let matrix = (mat4.perspective as (
+        fieldOfView: number,
+        aspect: number,
+        near: number,
+        far: number,
+        destination?: Matrix
+    ) => Matrix)(fov, transform.width / transform.height, near, far)
     matrix[8] = -offset.x * 2 / transform.width
     matrix[9] = offset.y * 2 / transform.height
     mat4.scale(matrix, [ 1, -1, 1 ], matrix)
@@ -140,12 +267,16 @@ function getScratchMercatorMatrix(transform) {
     mat4.rotateX(matrix, pitch, matrix)
     mat4.rotateZ(matrix, angle, matrix)
     mat4.translate(matrix, [ -point.x, -point.y, 0 ], matrix)
-    matrix = mat4.scale(matrix, [ transform.worldSize, transform.worldSize, transform.worldSize ])
+    matrix = (mat4.scale as (
+        matrix: Matrix,
+        vector: Vec3,
+        destination?: Matrix
+    ) => Matrix)(matrix, [ transform.worldSize, transform.worldSize, transform.worldSize ])
 
     return { far, near, matrix: Float32Array.from(matrix) }
 }
 
-function calculateFarZForTerrainPlane(transform, minElevation) {
+function calculateFarZForTerrainPlane(transform: MapTransform, minElevation: number) {
 
     const fov = radiansFromTransformValue(transform._fov, transform.fov)
     const pitch = radiansFromTransformValue(transform._pitch, transform.pitch)
@@ -185,7 +316,7 @@ function calculateFarZForTerrainPlane(transform, minElevation) {
     return (Math.cos(Math.PI / 2 - pitch) * topHalfMinDistance + lowestPlane) * 1.01
 }
 
-function getCameraToCenterDistance(transform, fov) {
+function getCameraToCenterDistance(transform: MapTransform, fov: number) {
 
     return getFiniteNumber(
         transform.cameraToCenterDistance,
@@ -193,7 +324,7 @@ function getCameraToCenterDistance(transform, fov) {
     )
 }
 
-function getPixelPerMeter(transform) {
+function getPixelPerMeter(transform: MapTransform) {
 
     return getFiniteNumber(
         transform._pixelPerMeter,
@@ -202,33 +333,33 @@ function getPixelPerMeter(transform) {
     )
 }
 
-function radiansFromTransformValue(privateRadians, publicDegrees) {
+function radiansFromTransformValue(privateRadians: number | undefined, publicDegrees: number) {
 
-    return Number.isFinite(privateRadians) ? privateRadians : publicDegrees * Math.PI / 180
+    return Number.isFinite(privateRadians) ? privateRadians as number : publicDegrees * Math.PI / 180
 }
 
-function getFiniteNumber(...values) {
+function getFiniteNumber(...values: readonly (number | undefined)[]): number {
 
-    return values.find(value => Number.isFinite(value))
+    return values.find(value => Number.isFinite(value)) as number
 }
 
-function clamp(value, min, max) {
+function clamp(value: number, min: number, max: number) {
 
     return Math.min(Math.max(value, min), max)
 }
 
-function circumferenceAtLatitude(latitude) {
+function circumferenceAtLatitude(latitude: number) {
 
     const earthRadius = 6371008.8
     return 2 * Math.PI * earthRadius * Math.cos(latitude * Math.PI / 180)
 }
 
-function mercatorZfromAltitude(altitude, latitude) {
+function mercatorZfromAltitude(altitude: number, latitude: number) {
 
     return altitude / circumferenceAtLatitude(latitude)
 }
 
-function encodeFloatToDouble(value) {
+function encodeFloatToDouble(value: number): [ number, number ] {
 
     const high = Math.fround(value)
     return [ high, value - high ]

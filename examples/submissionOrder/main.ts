@@ -1,7 +1,8 @@
 import { ScratchRuntime } from 'geoscratch'
+import type { SubmittedWork } from 'geoscratch'
 
-const canvas = document.getElementById('GPUFrame')
-const resultElement = document.getElementById('submission-result')
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
+const resultElement = document.getElementById('submission-result') as HTMLElement
 
 const incrementWgsl = `
 @group(0) @binding(0)
@@ -119,9 +120,9 @@ async function main() {
     renderResult(String(result), passed ? 'passed' : 'failed')
 }
 
-function renderResult(value, status) {
+function renderResult(value: string, status: string) {
 
-    const context = canvas.getContext('2d')
+    const context = canvas.getContext('2d') as CanvasRenderingContext2D
     const devicePixelRatio = window.devicePixelRatio || 1
     const width = Math.max(1, Math.floor(canvas.clientWidth * devicePixelRatio))
     const height = Math.max(1, Math.floor(canvas.clientHeight * devicePixelRatio))
@@ -140,7 +141,7 @@ function renderResult(value, status) {
     context.fillText('UPLOAD 0  /  +1  /  UPLOAD 10  /  +1', width * 0.5, height * 0.76)
 }
 
-async function requireObservedSubmission(submitted) {
+async function requireObservedSubmission(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([
         submitted.nativeOutcome,

@@ -1,8 +1,9 @@
 import {
     ScratchRuntime,
 } from 'geoscratch'
+import type { SubmittedWork, Surface } from 'geoscratch'
 
-const canvas = document.getElementById('GPUFrame')
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 canvas.dataset.status = 'loading'
 
 const uniformTriangleWgsl = `
@@ -43,7 +44,7 @@ async function main() {
     })
     let failed = false
     let uncapturedErrorCount = 0
-    const fail = (error) => {
+    const fail = (error: unknown) => {
         if (failed) return
         failed = true
         canvas.dataset.status = 'error'
@@ -144,7 +145,7 @@ async function main() {
     canvas.dataset.pipelineId = persistentIds.pipeline
     canvas.dataset.passId = persistentIds.pass
 
-    function render(timestamp) {
+    function render(timestamp: number) {
 
         if (failed) return
 
@@ -223,7 +224,7 @@ async function main() {
     requestAnimationFrame(render)
 }
 
-function updateColor(color, timestamp) {
+function updateColor(color: Float32Array, timestamp: number) {
 
     const phase = timestamp * 0.002
     color[0] = 0.2 + 0.72 * (0.5 + 0.5 * Math.sin(phase))
@@ -231,7 +232,7 @@ function updateColor(color, timestamp) {
     color[2] = 0.18 + 0.7 * (0.5 + 0.5 * Math.sin(phase + 4.2))
 }
 
-function resizeSurface(surface, canvas) {
+function resizeSurface(surface: Surface, canvas: HTMLCanvasElement) {
 
     const devicePixelRatio = window.devicePixelRatio || 1
     const width = Math.max(1, Math.floor(canvas.clientWidth * devicePixelRatio))
@@ -242,7 +243,7 @@ function resizeSurface(surface, canvas) {
     }
 }
 
-async function requireObservedSubmission(submitted) {
+async function requireObservedSubmission(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([
         submitted.nativeOutcome,

@@ -92,7 +92,7 @@ describe('examples structure', () => {
 
         expect(html).to.include('class="example-link is-active" href="?sample=helloTriangle"')
         expect(html).to.include('<h1 id="stage-title">Hello Triangle</h1>')
-        expect(html).to.include('href="./helloTriangle/main.js"')
+        expect(html).to.include('href="./helloTriangle/main.ts"')
         expect(html).to.include('href="./helloTriangle/"')
         expect(html).to.include('src="about:blank"')
         expect(html).to.include('selectExample(currentLinkFromUrl(), false)')
@@ -142,7 +142,7 @@ describe('examples structure', () => {
             const html = read('examples', name, 'index.html')
 
             expect(html).to.include('id="GPUFrame"')
-            expect(html).to.include('src="./main.js"')
+            expect(html).to.include('src="./main.ts"')
             expect(html).to.include('../shared/example.css')
         }
     })
@@ -150,7 +150,7 @@ describe('examples structure', () => {
     it('keeps async example startup compatible with the configured build target', () => {
 
         for (const name of standaloneExamples) {
-            const source = read('examples', name, 'main.js')
+            const source = read('examples', name, 'main.ts')
 
             expect(source, name).to.not.match(/^\s*await\s+main\(\)/m)
             expect(source, name).to.not.include('await await')
@@ -168,7 +168,7 @@ describe('examples structure', () => {
     })
 
     it('builds each runnable example as a Vite input page', () => {
-        const config = read('examples', 'vite.config.js')
+        const config = read('examples', 'vite.config.ts')
 
         for (const name of standaloneExamples) {
             expect(config).to.include(`${name}/index.html`)
@@ -178,9 +178,9 @@ describe('examples structure', () => {
     })
 
     it('keeps the DEM layer example focused on terrain only', () => {
-        const source = read('examples', 'demLayer', 'main.js')
-        const layer = read('examples', 'demLayer', 'dem-layer.js')
-        const mapRuntime = read('examples', 'demLayer', 'dem-map.js')
+        const source = read('examples', 'demLayer', 'main.ts')
+        const layer = read('examples', 'demLayer', 'dem-layer.ts')
+        const mapRuntime = read('examples', 'demLayer', 'dem-map.ts')
 
         expect(source).to.include('ScratchRuntime')
         expect(source).to.include('createDemLayer')
@@ -208,9 +208,9 @@ describe('examples structure', () => {
     })
 
     it('provides a separate current-API flow layer with its own map host', () => {
-        const source = read('examples', 'flowLayer', 'main.js')
-        const layer = read('examples', 'flowLayer', 'flow-layer.js')
-        const mapRuntime = read('examples', 'flowLayer', 'flow-map.js')
+        const source = read('examples', 'flowLayer', 'main.ts')
+        const layer = read('examples', 'flowLayer', 'flow-layer.ts')
+        const mapRuntime = read('examples', 'flowLayer', 'flow-map.ts')
 
         expect(source).to.include('ScratchRuntime')
         expect(source).to.include('createFlowLayer')
@@ -258,7 +258,7 @@ describe('examples structure', () => {
     })
 
     it('keeps indirect execution GPU-side without readback or mapping', () => {
-        const source = read('examples', 'indirectExecution', 'main.js')
+        const source = read('examples', 'indirectExecution', 'main.ts')
 
         expect(source).to.include('count: { indirect: dispatchArguments')
         expect(source).to.include('count: { indirect: drawArguments')
@@ -269,7 +269,7 @@ describe('examples structure', () => {
     it('publishes first-frame completion for continuous Scratch examples', () => {
 
         for (const name of [ 'textureSampling', 'renderToTexture' ]) {
-            const source = read('examples', name, 'main.js')
+            const source = read('examples', name, 'main.ts')
 
             expect(source, name).to.include("canvas.dataset.status = 'loading'")
             expect(source, name).to.include("canvas.dataset.status = 'ready'")
@@ -282,7 +282,7 @@ describe('examples structure', () => {
     })
 
     it('demonstrates readiness policy execution without GPU readback', () => {
-        const source = read('examples', 'readinessPolicies', 'main.js')
+        const source = read('examples', 'readinessPolicies', 'main.ts')
 
         expect(source).to.include("from 'geoscratch'")
         expect(source).to.include("whenMissing: 'use-fallback'")
@@ -295,7 +295,7 @@ describe('examples structure', () => {
 
     it('provides a deterministic ordered submission proof', () => {
         const html = read('examples', 'submissionOrder', 'index.html')
-        const source = read('examples', 'submissionOrder', 'main.js')
+        const source = read('examples', 'submissionOrder', 'main.ts')
 
         expect(html).to.include('<title>Submission Order | GeoScratch Examples</title>')
         expect(html).to.include('id="GPUFrame"')
@@ -313,7 +313,7 @@ describe('examples structure', () => {
     it('provides a deterministic native external image upload proof', () => {
 
         const html = read('examples', 'externalImageUpload', 'index.html')
-        const source = read('examples', 'externalImageUpload', 'main.js')
+        const source = read('examples', 'externalImageUpload', 'main.ts')
 
         expect(html).to.include('<title>External Image Upload | GeoScratch Examples</title>')
         expect(html).to.include('<h1>External Image Upload</h1>')
@@ -345,7 +345,7 @@ describe('examples structure', () => {
     it('provides a deterministic texture allocation replacement proof', () => {
 
         const html = read('examples', 'textureResize', 'index.html')
-        const source = read('examples', 'textureResize', 'main.js')
+        const source = read('examples', 'textureResize', 'main.ts')
 
         expect(html).to.include('<title>Texture Resize | GeoScratch Examples</title>')
         expect(html).to.include('<h1>Texture Resize</h1>')

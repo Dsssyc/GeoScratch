@@ -1,8 +1,16 @@
 import {
     ScratchRuntime,
 } from 'geoscratch'
+import type {
+    DrawCommand,
+    RenderPassSpec,
+    SubmissionExecutionOutcome,
+    SubmissionPassExecutionOutcome,
+    SubmittedWork,
+    Surface,
+} from 'geoscratch'
 
-const canvas = document.getElementById('GPUFrame')
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 
 const patternWgsl = `
 struct VertexOutput {
@@ -321,7 +329,14 @@ async function main() {
     canvas.dataset.status = 'ready'
 }
 
-function createSolidProgram(runtime, { label, bounds, color }) {
+function createSolidProgram(
+    runtime: ScratchRuntime,
+    { label, bounds, color }: {
+        label: string
+        bounds: readonly [ number, number, number, number ]
+        color: readonly [ number, number, number, number ]
+    }
+) {
 
     const [ left, right, bottom, top ] = bounds
     const [ red, green, blue, alpha ] = color
@@ -352,9 +367,24 @@ function createSolidProgram(runtime, { label, bounds, color }) {
     })
 }
 
-function validateExecutionOutcomes(executionOutcomes, expected) {
+function validateExecutionOutcomes(
+    executionOutcomes: readonly SubmissionExecutionOutcome[],
+    expected: {
+        seedPass: RenderPassSpec
+        seedDraw: DrawCommand
+        skippedPass: RenderPassSpec
+        skipPassTrigger: DrawCommand
+        surfacePass: RenderPassSpec
+        primaryDraw: DrawCommand
+        fallbackDraw: DrawCommand
+        optionalDraw: DrawCommand
+        sampleDraw: DrawCommand
+    }
+) {
 
-    const passOutcomes = executionOutcomes.filter(outcome => outcome.outcomeKind === 'pass')
+    const passOutcomes = executionOutcomes.filter(
+        (outcome): outcome is SubmissionPassExecutionOutcome => outcome.outcomeKind === 'pass'
+    )
     const commandOutcomes = executionOutcomes.filter(outcome => outcome.outcomeKind === 'command')
     const seedPassOutcome = findBy(passOutcomes, 'passId', expected.seedPass.id)
     const skippedPassOutcome = findBy(passOutcomes, 'passId', expected.skippedPass.id)
@@ -384,14 +414,14 @@ function validateExecutionOutcomes(executionOutcomes, expected) {
     assertOutcome(optionalOutcome.executedCommandId === undefined, 'skipped command has no executed id')
 }
 
-function findBy(outcomes, key, value) {
+function findBy<T extends object, K extends keyof T>(outcomes: readonly T[], key: K, value: T[K]) {
 
     const outcome = outcomes.find(candidate => candidate[key] === value)
     assertOutcome(outcome !== undefined, `missing execution outcome for ${value}`)
     return outcome
 }
 
-function assertIds(actual, expected, label) {
+function assertIds(actual: readonly string[], expected: readonly string[], label: string) {
 
     assertOutcome(
         actual.length === expected.length && actual.every((id, index) => id === expected[index]),
@@ -399,12 +429,12 @@ function assertIds(actual, expected, label) {
     )
 }
 
-function assertOutcome(condition, message) {
+function assertOutcome(condition: boolean, message: string): asserts condition {
 
     if (!condition) throw new Error(message)
 }
 
-function resizeSurface(surface, targetCanvas) {
+function resizeSurface(surface: Surface, targetCanvas: HTMLCanvasElement) {
 
     const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2)
     const width = Math.max(1, Math.floor(targetCanvas.clientWidth * devicePixelRatio))
@@ -415,7 +445,7 @@ function resizeSurface(surface, targetCanvas) {
     }
 }
 
-async function requireObservedSubmission(submitted) {
+async function requireObservedSubmission(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([
         submitted.nativeOutcome,

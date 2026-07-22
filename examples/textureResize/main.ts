@@ -1,8 +1,9 @@
 import { ScratchRuntime } from 'geoscratch'
+import type { ScratchGpuOperationRecord, SubmittedWork, SurfaceSize, TextureResource } from 'geoscratch'
 
-const canvas = document.getElementById('GPUFrame')
-const statusElement = document.getElementById('proof-status')
-const factsElement = document.getElementById('proof-facts')
+const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
+const statusElement = document.getElementById('proof-status') as HTMLElement
+const factsElement = document.getElementById('proof-facts') as HTMLElement
 const initialSurfaceSize = Object.freeze({ width: 4, height: 3 })
 const resizedSurfaceSize = Object.freeze({ width: 8, height: 6 })
 const paddedBytesPerRow = 256
@@ -254,7 +255,9 @@ async function main() {
     const evidence = runtime.diagnostics.exportEvidence()
     const serializedEvidence = JSON.stringify(evidence)
     const textureOperations = evidence.operations
-        .filter(operation => (
+        .filter((operation): operation is Extract<ScratchGpuOperationRecord, {
+            target: { kind: 'resource' }
+        }> => (
             operation.target.kind === 'resource' &&
             operation.target.resourceId === texture.id
         ))
@@ -263,7 +266,9 @@ async function main() {
     const replacementOperation = textureOperations
         .find(operation => operation.kind === 'texture-replacement')
     const bindSetOperations = evidence.operations
-        .filter(operation => (
+        .filter((operation): operation is Extract<ScratchGpuOperationRecord, {
+            target: { kind: 'bind-set' }
+        }> => (
             operation.kind === 'bind-set-preparation' &&
             operation.target.kind === 'bind-set' &&
             operation.target.bindSetId === bindSet.id
@@ -371,7 +376,7 @@ async function main() {
     }
 }
 
-function observeDestroy(texture) {
+function observeDestroy(texture: GPUTexture) {
 
     let destroyed = false
     const nativeDestroy = texture.destroy
@@ -387,7 +392,7 @@ function observeDestroy(texture) {
     return () => destroyed
 }
 
-function createExpectedPaddedBytes(size, bytesPerRow, texel) {
+function createExpectedPaddedBytes(size: SurfaceSize, bytesPerRow: number, texel: readonly number[]) {
 
     const bytes = new Uint8Array(bytesPerRow * size.height)
     for (let y = 0; y < size.height; y++) {
@@ -399,13 +404,13 @@ function createExpectedPaddedBytes(size, bytesPerRow, texel) {
     return bytes
 }
 
-function bytesEqual(actual, expected) {
+function bytesEqual(actual: Uint8Array, expected: Uint8Array) {
 
     return actual.byteLength === expected.byteLength &&
         actual.every((value, index) => value === expected[index])
 }
 
-async function requireObservedSubmission(submitted) {
+async function requireObservedSubmission(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([
         submitted.nativeOutcome,

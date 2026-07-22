@@ -4,11 +4,128 @@ import {
     mat4,
     plane,
 } from 'geoscratch'
+import type {
+    BindLayoutEntry,
+    BindVisibility,
+    BufferResource,
+    LayoutCodec,
+    LayoutFieldDescriptor,
+    ProgramBufferLayoutRequirement,
+    ScratchRuntimeDiagnosticsSnapshot,
+    SubmittedWork,
+    Surface,
+    SurfaceSize,
+    TextureResource,
+} from 'geoscratch'
 import {
     MAX_TERRAIN_NODES,
     TERRAIN_BOUNDARY,
     selectTerrainNodes,
-} from './terrain-selection.js'
+} from './terrain-selection.ts'
+
+type DemShaders = {
+    lodMap: string
+    terrain: string
+}
+
+type DemFailureProof = {
+    terrainShader(source: string): string
+    beforeTerrainPipeline(runtime: ScratchRuntime): void
+}
+
+type DemCameraState = {
+    far: number
+    near: number
+    matrix: ArrayLike<number>
+    centerLow: ArrayLike<number>
+    centerHigh: ArrayLike<number>
+    cameraPos: ArrayLike<number> & Iterable<number>
+    zoom: number
+    viewport: ArrayLike<number>
+}
+
+type TerrainSelection = ReturnType<typeof selectTerrainNodes>
+type Codecs = ReturnType<typeof createCodecs>
+type Uniforms = Awaited<ReturnType<typeof createUniformResources>>
+type TerrainGeometry = ReturnType<typeof createTerrainGeometry>
+type Buffers = Awaited<ReturnType<typeof createBufferResources>>
+type Textures = Awaited<ReturnType<typeof createTextures>>
+type Layouts = Awaited<ReturnType<typeof createBindLayouts>>
+type BindSets = Awaited<ReturnType<typeof createBindSets>>
+type Programs = ReturnType<typeof createPrograms>
+type Pipelines = Awaited<ReturnType<typeof createPipelines>>
+type Passes = ReturnType<typeof createPasses>
+type Commands = ReturnType<typeof createCommands>
+type LayoutValues = Parameters<LayoutCodec['pack']>[0]
+type BufferData = Float32Array<ArrayBuffer> | Uint32Array<ArrayBuffer>
+type ContentResource = BufferResource | TextureResource
+
+type DemGraph = {
+    runtime: ScratchRuntime
+    surface: Surface
+    codecs: Codecs
+    geometry: TerrainGeometry
+    uniforms: Uniforms
+    buffers: Buffers
+    textures: Textures
+    layouts: Layouts
+    bindSets: BindSets
+    programs: Programs
+    pipelines: Pipelines
+    passes: Passes
+    commands: Commands
+}
+
+type ProvenanceFact = Readonly<{
+    name: string
+    resourceId: string
+    declaredContentEpoch: 'current-at-step'
+    producerContentEpoch: number
+    readContentEpoch: number
+    producerStepIndex: number
+    consumerStepIndex: number
+}>
+
+type ProvenanceVerifier = (
+    submitted: SubmittedWork,
+    graph: DemGraph
+) => readonly ProvenanceFact[]
+
+type ResizeFacts = Readonly<{
+    resizeGeneration: number
+    staleBindSetCount: number
+    preparedBindSetCount: number
+    depthAllocationVersion: number
+}>
+
+type DemState = {
+    initialized: boolean
+    frame: number
+    size: SurfaceSize
+    resizeGeneration: number
+    staleBindSetPreparationCount: number
+    lastResizeFacts?: ResizeFacts
+    selection?: TerrainSelection
+    stageActivity: { 'lod-map': number; terrain: number }
+}
+
+type PersistentFacts = Readonly<{
+    resources: number
+    bindLayouts: number
+    bindSets: number
+    pipelines: number
+    logicalFootprintBytes: number
+}>
+
+type DemLayerOptions = {
+    runtime: ScratchRuntime
+    surface: Surface
+    demImage: ImageBitmap
+    size: SurfaceSize
+    shaders: DemShaders
+    failureProof?: DemFailureProof
+    provenanceVerifier?: ProvenanceVerifier
+}
 
 export const DEM_STAGE_ORDER = Object.freeze([ 'lod-map', 'terrain' ])
 export const LOD_MAP_SIZE = Object.freeze({ width: 512, height: 256 })
@@ -37,7 +154,7 @@ export async function createDemLayer({
     shaders,
     failureProof = defaultFailureProof,
     provenanceVerifier = verifyFrameProvenance,
-}) {
+}: DemLayerOptions) {
 
     if (!(runtime instanceof ScratchRuntime)) throw new TypeError('DEM Layer requires ScratchRuntime')
     assertSize(size)
@@ -93,7 +210,10 @@ export async function createDemLayer({
     const stableIdentityFacts = identityFactSnapshot(graph)
     const stableIdentityHash = stableIdentityFacts.hash
     const persistentBaseline = persistentFactSnapshot(runtime)
-    let initialization
+    let initialization: Readonly<{
+        submitted: SubmittedWork
+        observation: Promise<Readonly<{ submissionId: string; nativeStatus: 'observed-succeeded' }>>
+    }> | undefined
 
     function initialize() {
 
@@ -117,7 +237,7 @@ export async function createDemLayer({
         return initialization
     }
 
-    function renderFrame(camera) {
+    function renderFrame(camera: DemCameraState) {
 
         if (!state.initialized) throw new Error('DEM graph must be initialized before rendering')
         assertCamera(camera)
@@ -142,8 +262,8 @@ export async function createDemLayer({
             .render(passes.terrain, [ commands.drawTerrain ])
             .submit()
         const nativeObservation = observeSubmittedWork(submitted)
-        let provenance = Object.freeze([])
-        let provenanceFailure
+        let provenance: readonly ProvenanceFact[] = Object.freeze([])
+        let provenanceFailure: unknown
         try {
             provenance = provenanceVerifier(submitted, graph)
         } catch (error) {
@@ -166,7 +286,7 @@ export async function createDemLayer({
         })
     }
 
-    async function resize(nextSize) {
+    async function resize(nextSize: SurfaceSize) {
 
         assertSize(nextSize)
         const identityBefore = stableIdentitySnapshot(graph)
@@ -210,14 +330,15 @@ export async function createDemLayer({
     })
 }
 
-const defaultFailureProof = Object.freeze({
-    terrainShader: source => source,
+const defaultFailureProof: DemFailureProof = Object.freeze({
+    terrainShader: (source: string) => source,
     beforeTerrainPipeline() {},
 })
 
 function createCodecs() {
 
-    const uniform = (name, fields) => layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
+    const uniform = (name: string, fields: LayoutFieldDescriptor[]) =>
+        layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
     return Object.freeze({
         map: uniform('DemMapUniform', [
             { name: 'dimensions', type: 'vec2f' },
@@ -243,9 +364,9 @@ function createCodecs() {
     })
 }
 
-async function createUniformResources(runtime, codecs) {
+async function createUniformResources(runtime: ScratchRuntime, codecs: Codecs) {
 
-    const identity = Array.from(mat4.identity())
+    const identity = Array.from((mat4.identity as (destination?: Float32Array) => Float32Array)())
     return {
         map: await createUniform(runtime, 'DEM LoD-map dimensions', codecs.map, {
             dimensions: [ LOD_MAP_SIZE.width, LOD_MAP_SIZE.height ],
@@ -271,7 +392,12 @@ async function createUniformResources(runtime, codecs) {
     }
 }
 
-async function createUniform(runtime, label, codec, values) {
+async function createUniform(
+    runtime: ScratchRuntime,
+    label: string,
+    codec: LayoutCodec,
+    values: LayoutValues
+) {
 
     const bytes = codec.pack(values)
     const buffer = await runtime.createBuffer({
@@ -286,7 +412,7 @@ async function createUniform(runtime, label, codec, values) {
         buffer,
         region,
         upload: runtime.createUploadCommand({ label: `Upload ${label}`, target: region, data: bytes }),
-        write: nextValues => codec.write(bytes, nextValues),
+        write: (nextValues: LayoutValues) => codec.write(bytes, nextValues),
     })
 }
 
@@ -300,7 +426,7 @@ function createTerrainGeometry() {
     })
 }
 
-async function createBufferResources(runtime, geometry) {
+async function createBufferResources(runtime: ScratchRuntime, geometry: TerrainGeometry) {
 
     const nodeLevels = new Uint32Array(MAX_TERRAIN_NODES)
     const nodeBoxes = new Float32Array(MAX_TERRAIN_NODES * 4)
@@ -347,7 +473,12 @@ async function createBufferResources(runtime, geometry) {
     }
 }
 
-async function createBufferWithUpload(runtime, label, data, usage) {
+async function createBufferWithUpload<T extends BufferData>(
+    runtime: ScratchRuntime,
+    label: string,
+    data: T,
+    usage: number
+) {
 
     const buffer = await runtime.createBuffer({ label, size: data.byteLength, usage })
     const region = buffer.region()
@@ -359,7 +490,7 @@ async function createBufferWithUpload(runtime, label, data, usage) {
     })
 }
 
-async function createTextures(runtime, demImage, size) {
+async function createTextures(runtime: ScratchRuntime, demImage: ImageBitmap, size: SurfaceSize) {
 
     const dem = await runtime.createTexture({
         label: 'DEM elevation texture',
@@ -404,16 +535,21 @@ async function createTextures(runtime, demImage, size) {
     }
 }
 
-async function createBindLayouts(runtime, codecs) {
+async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
 
-    const uniform = (binding, name, codec, visibility) => ({
+    const uniform = (
+        binding: number,
+        name: string,
+        codec: LayoutCodec,
+        visibility: readonly BindVisibility[]
+    ): BindLayoutEntry => ({
         binding,
         name,
         type: 'uniform',
         visibility,
         minBindingSize: codec.artifact.byteLength,
     })
-    const readStorage = (binding, name) => ({
+    const readStorage = (binding: number, name: string): BindLayoutEntry => ({
         binding,
         name,
         type: 'read-storage',
@@ -479,7 +615,13 @@ async function createBindLayouts(runtime, codecs) {
     }
 }
 
-async function createBindSets(runtime, layouts, uniforms, buffers, textures) {
+async function createBindSets(
+    runtime: ScratchRuntime,
+    layouts: Layouts,
+    uniforms: Uniforms,
+    buffers: Buffers,
+    textures: Textures
+) {
 
     return {
         lodUniforms: await runtime.createBindSet(layouts.lodUniforms, {
@@ -509,9 +651,18 @@ async function createBindSets(runtime, layouts, uniforms, buffers, textures) {
     }
 }
 
-function createPrograms(runtime, codecs, shaders, failureProof) {
+function createPrograms(
+    runtime: ScratchRuntime,
+    codecs: Codecs,
+    shaders: DemShaders,
+    failureProof: DemFailureProof
+) {
 
-    const requirement = (group, binding, codec) => ({
+    const requirement = (
+        group: number,
+        binding: number,
+        codec: LayoutCodec
+    ): ProgramBufferLayoutRequirement => ({
         group,
         binding,
         type: 'uniform',
@@ -542,7 +693,14 @@ function createPrograms(runtime, codecs, shaders, failureProof) {
     }
 }
 
-async function createPipelines(runtime, surface, textures, layouts, programs, failureProof) {
+async function createPipelines(
+    runtime: ScratchRuntime,
+    surface: Surface,
+    textures: Textures,
+    layouts: Layouts,
+    programs: Programs,
+    failureProof: DemFailureProof
+) {
 
     const lodMap = await runtime.createRenderPipeline({
         label: 'DEM LoD-map pipeline',
@@ -568,7 +726,7 @@ async function createPipelines(runtime, surface, textures, layouts, programs, fa
     return { lodMap, terrain }
 }
 
-function createPasses(runtime, surface, textures) {
+function createPasses(runtime: ScratchRuntime, surface: Surface, textures: Textures) {
 
     return {
         lodMap: runtime.createRenderPass({
@@ -598,7 +756,15 @@ function createPasses(runtime, surface, textures) {
     }
 }
 
-function createCommands(runtime, geometry, uniforms, buffers, textures, bindSets, pipelines) {
+function createCommands(
+    runtime: ScratchRuntime,
+    geometry: TerrainGeometry,
+    uniforms: Uniforms,
+    buffers: Buffers,
+    textures: Textures,
+    bindSets: BindSets,
+    pipelines: Pipelines
+) {
 
     return {
         drawLodMap: runtime.createDrawCommand({
@@ -648,12 +814,16 @@ function createCommands(runtime, geometry, uniforms, buffers, textures, bindSets
     }
 }
 
-function currentReads(resources) {
+function currentReads(resources: readonly ContentResource[]) {
 
-    return resources.map(resource => ({ resource, contentEpoch: 'current-at-step' }))
+    return resources.map(resource => ({ resource, contentEpoch: 'current-at-step' as const }))
 }
 
-function updateFrameData(graph, selection, camera) {
+function updateFrameData(
+    graph: DemGraph,
+    selection: TerrainSelection,
+    camera: DemCameraState
+) {
 
     graph.uniforms.dynamic.write({
         far: camera.far,
@@ -677,7 +847,7 @@ function updateFrameData(graph, selection, camera) {
     graph.buffers.terrainArguments.data[1] = selection.visibleNodeCount
 }
 
-function verifyFrameProvenance(submitted, graph) {
+function verifyFrameProvenance(submitted: SubmittedWork, graph: DemGraph) {
 
     const pairs = [
         {
@@ -744,13 +914,13 @@ function verifyFrameProvenance(submitted, graph) {
     }))
 }
 
-function stableIdentitySnapshot(graph) {
+function stableIdentitySnapshot(graph: DemGraph) {
 
     const objects = Object.values(identityObjectsByKind(graph)).flat()
     return [ ...new Set(objects.map(object => object.id)) ].sort()
 }
 
-function identityFactSnapshot(graph) {
+function identityFactSnapshot(graph: DemGraph) {
 
     const objects = identityObjectsByKind(graph)
     const identities = stableIdentitySnapshot(graph)
@@ -768,7 +938,7 @@ function identityFactSnapshot(graph) {
     })
 }
 
-function identityObjectsByKind(graph) {
+function identityObjectsByKind(graph: DemGraph) {
 
     return {
         resources: [
@@ -792,7 +962,7 @@ function identityObjectsByKind(graph) {
     }
 }
 
-function persistentFactSnapshot(runtime) {
+function persistentFactSnapshot(runtime: ScratchRuntime): PersistentFacts {
 
     const facts = runtime.diagnostics.snapshot()
     return Object.freeze({
@@ -804,7 +974,7 @@ function persistentFactSnapshot(runtime) {
     })
 }
 
-function graphContractSnapshot(graph) {
+function graphContractSnapshot(graph: DemGraph) {
 
     return Object.freeze({
         stageOrder: DEM_STAGE_ORDER,
@@ -824,7 +994,7 @@ function graphContractSnapshot(graph) {
     })
 }
 
-function createState(size) {
+function createState(size: SurfaceSize): DemState {
 
     return {
         initialized: false,
@@ -834,11 +1004,14 @@ function createState(size) {
         staleBindSetPreparationCount: 0,
         lastResizeFacts: undefined,
         selection: undefined,
-        stageActivity: Object.fromEntries(DEM_STAGE_ORDER.map(name => [ name, 0 ])),
+        stageActivity: Object.fromEntries(DEM_STAGE_ORDER.map(name => [ name, 0 ])) as {
+            'lod-map': number
+            terrain: number
+        },
     }
 }
 
-function stateSnapshot(state) {
+function stateSnapshot(state: DemState) {
 
     return Object.freeze({
         initialized: state.initialized,
@@ -853,7 +1026,7 @@ function stateSnapshot(state) {
     })
 }
 
-async function observeSubmittedWork(submitted) {
+async function observeSubmittedWork(submitted: SubmittedWork) {
 
     const [ nativeOutcome ] = await Promise.all([ submitted.nativeOutcome, submitted.done ])
     if (nativeOutcome.status !== 'observed-succeeded') {
@@ -862,23 +1035,27 @@ async function observeSubmittedWork(submitted) {
     return Object.freeze({ submissionId: submitted.id, nativeStatus: nativeOutcome.status })
 }
 
-function assertSameIdentities(before, after, action) {
+function assertSameIdentities(
+    before: readonly string[],
+    after: readonly string[],
+    action: string
+) {
 
     if (before.length !== after.length || before.some((id, index) => id !== after[index])) {
         throw new Error(`Persistent DEM graph identity changed during ${action}`)
     }
 }
 
-function assertPersistentCounts(before, after, action) {
+function assertPersistentCounts(before: PersistentFacts, after: PersistentFacts, action: string) {
 
-    for (const name of [ 'resources', 'bindLayouts', 'bindSets', 'pipelines' ]) {
+    for (const name of [ 'resources', 'bindLayouts', 'bindSets', 'pipelines' ] as const) {
         if (before[name] !== after[name]) {
             throw new Error(`Persistent DEM ${name} count changed during ${action}`)
         }
     }
 }
 
-function hashStrings(values) {
+function hashStrings(values: readonly string[]) {
 
     let hash = 2166136261
     for (const value of values) {
@@ -890,7 +1067,7 @@ function hashStrings(values) {
     return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
-function assertSize(value) {
+function assertSize(value: SurfaceSize) {
 
     if (
         value === undefined ||
@@ -903,7 +1080,7 @@ function assertSize(value) {
     }
 }
 
-function assertDemImage(value) {
+function assertDemImage(value: ImageBitmap) {
 
     if (
         value === undefined ||
@@ -916,14 +1093,14 @@ function assertDemImage(value) {
     }
 }
 
-function assertShaders(value) {
+function assertShaders(value: DemShaders) {
 
     if (typeof value?.lodMap !== 'string' || typeof value?.terrain !== 'string') {
         throw new TypeError('DEM shaders must contain lodMap and terrain WGSL strings')
     }
 }
 
-function assertCamera(value) {
+function assertCamera(value: DemCameraState) {
 
     if (
         value === undefined ||

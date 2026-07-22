@@ -4,7 +4,37 @@ import {
     layoutCodec,
     mat4,
 } from 'geoscratch'
+import type {
+    BindLayout,
+    BindSet,
+    BindVisibility,
+    BufferRegion,
+    BufferResource,
+    CommandResourceReadDescriptor,
+    ComputePassSpec,
+    DispatchCommand,
+    DrawCommand,
+    LayoutCodec,
+    LayoutFieldDescriptor,
+    Program,
+    ProgramBufferLayoutRequirement,
+    RenderPassSpec,
+    RenderPassDepthStencilAttachmentSpec,
+    Resource,
+    ScratchComputePipeline,
+    ScratchRenderPipeline,
+    SubmittedWork,
+    Surface,
+    SurfaceSize,
+    TextureBindLayoutEntry,
+    TextureResource,
+    TextureViewSpec,
+    UniformBindLayoutEntry,
+    UploadCommand,
+} from 'geoscratch'
 import { Delaunay } from 'd3-delaunay'
+import type { FlowLifecycle } from './flow-lifecycle.ts'
+import type { FlowCameraState, FlowMap } from './flow-map.ts'
 import arrowShader from './shaders/flow/arrow.wgsl?raw'
 import flowLayerShader from './shaders/flow/flowLayer.wgsl?raw'
 import flowShowShader from './shaders/flow/flowShow.wgsl?raw'
@@ -23,20 +53,265 @@ export const STAGE_ORDER = Object.freeze([
     'history-particles',
     'flow-visualization',
     'history-presentation',
-])
+] as const)
 
 export const FLOW_DISPLAY_EXTENT = Object.freeze([
     120.04373606134682,
     31.173901952209487,
     121.96623240116922,
     32.08401085804678,
-])
+] as const)
 const GROUP_SIZE_X = Math.ceil(Math.sqrt(PARTICLE_COUNT) / PARTICLE_BLOCK_SIZE)
 const GROUP_SIZE_Y = Math.ceil(Math.sqrt(PARTICLE_COUNT) / PARTICLE_BLOCK_SIZE)
-const normalBlend = Object.freeze({
-    color: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
-    alpha: { operation: 'add', srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+const normalBlend: Readonly<GPUBlendState> = Object.freeze({
+    color: {
+        operation: 'add' as const,
+        srcFactor: 'src-alpha' as const,
+        dstFactor: 'one-minus-src-alpha' as const,
+    },
+    alpha: {
+        operation: 'add' as const,
+        srcFactor: 'one' as const,
+        dstFactor: 'one-minus-src-alpha' as const,
+    },
 })
+
+type FlowHistoryMode = 'off' | 'clear' | 'reproject'
+type FlowStageName = typeof STAGE_ORDER[number]
+type FlowRandom = () => number
+type FlowFrameUniformValues = {
+    randomSeed: number
+    viewPort: readonly number[]
+    mapBounds: readonly number[]
+    zoomLevel: number
+    progressRate: number
+    maxSpeed: number
+    flowMaskCutoff: number
+}
+type FlowStaticUniformValues = {
+    groupSize: readonly number[]
+    displayExtent: readonly number[]
+}
+type FlowCameraUniformValues = {
+    far: number
+    near: number
+    uMatrix: readonly number[]
+    centerLow: readonly number[]
+    centerHigh: readonly number[]
+}
+type FlowControllerUniformValues = {
+    particleNum: number
+    dropRate: number
+    dropRateBump: number
+    speedFactor: number
+    useFlowMask: number
+}
+type FlowCleanupUniformValues = {
+    trailDecay: number
+    trailCutoff: number
+    useFlowMask: number
+    historyMode: number
+    historyValid: number
+    historyReprojecting: number
+    previousMatrix: readonly number[]
+    currentMatrix: readonly number[]
+    currentInverseMatrix: readonly number[]
+    previousCenterHigh: readonly number[]
+    previousCenterLow: readonly number[]
+    currentCenterHigh: readonly number[]
+    currentCenterLow: readonly number[]
+    previousViewport: readonly number[]
+    currentViewport: readonly number[]
+}
+type FlowLayoutValues =
+    | FlowFrameUniformValues
+    | FlowStaticUniformValues
+    | FlowCameraUniformValues
+    | FlowControllerUniformValues
+    | FlowCleanupUniformValues
+
+export type FlowField = Readonly<{
+    index: number
+    url: string
+    maxSpeed: number
+    uvs: Float32Array
+}>
+
+export type FlowFieldLoader = (index: number) => Promise<FlowField>
+
+type FlowLayerOptions = Readonly<{
+    historyMode?: string
+    clearOnMove?: boolean
+    trailDecay?: number
+    trailCutoff?: number
+    useFlowMask?: boolean
+    flowMaskCutoff?: number
+    flowDomainMaxEdge?: number
+    maxHistoryReprojectCenterDelta?: number
+    showVoronoi?: boolean
+    showArrow?: boolean
+}>
+
+type FlowSettings = Readonly<{
+    trailDecay: number
+    trailCutoff: number
+    useFlowMask: boolean
+    flowMaskCutoff: number
+    flowDomainMaxEdge: number
+    historyMode: FlowHistoryMode
+    maxHistoryReprojectCenterDelta: number
+    showVoronoi: boolean
+    showArrow: boolean
+}>
+
+export type FlowFailureProof = Readonly<{
+    simulationShader(source: string): string
+    beforeSimulationPipeline(runtime: ScratchRuntime): void
+}>
+
+type FlowLayerCreateOptions = Readonly<{
+    runtime: ScratchRuntime
+    surface: Surface
+    map: FlowMap
+    lifetime: FlowLifecycle
+    loadField: FlowFieldLoader
+    size: SurfaceSize
+    random?: FlowRandom
+    options?: FlowLayerOptions
+    failureProof: FlowFailureProof
+}>
+
+type FlowStationGeometry = Readonly<{
+    positions: Float32Array
+    domainSupport: Float32Array
+    stationIndices: Uint32Array
+    resourceExtent: readonly number[]
+    vertexCount: number
+}>
+
+type FlowFieldData = {
+    from: Float32Array
+    to: Float32Array
+    fromIndex: number
+    toIndex: number
+    maxSpeed: number
+}
+
+type FlowUniform<T extends FlowLayoutValues> = {
+    codec: LayoutCodec
+    bytes: Uint8Array
+    buffer: BufferResource
+    region: BufferRegion
+    upload: UploadCommand
+    write(nextValues: T): Uint8Array
+}
+
+type FlowBuffer<T extends Float32Array | Uint32Array> = {
+    data: T
+    buffer: BufferResource
+    region: BufferRegion
+    upload: UploadCommand
+}
+
+type FlowPersistentFacts = Readonly<{
+    resources: number
+    bindLayouts: number
+    bindSets: number
+    pipelines: number
+    logicalFootprintBytes: number
+}>
+
+type FlowExpandedField = Readonly<{
+    index: number
+    maxSpeed: number
+    expanded: Float32Array
+}>
+
+type FlowHistoryUniformValues = Readonly<{
+    previousMatrix: number[]
+    previousCenterHigh: number[]
+    previousCenterLow: number[]
+    previousViewport: number[]
+}>
+
+type FlowState = {
+    size: SurfaceSize
+    random: FlowRandom
+    frame: number
+    progress: number
+    maxSpeed: number
+    fromFieldIndex: number
+    toFieldIndex: number
+    nextField: FlowExpandedField | undefined
+    nextFieldPromise: Promise<void> | undefined
+    fieldFailure: unknown
+    transitionUploadsPending: boolean
+    particleResetPending: boolean
+    historyClearPending: boolean
+    historyDirectionIndex: number
+    workerTransitions: number
+    resizeGeneration: number
+    cameraMoving: boolean
+    cameraMoveCount: number
+    cameraSettleCount: number
+    historyReprojectionFrames: number
+    historyClearFrames: number
+    hasHistoryCamera: boolean
+    currentMatrix: number[]
+    currentInverseMatrix: number[]
+    currentCenterHigh: number[]
+    currentCenterLow: number[]
+    currentViewport: number[]
+    historyValid: number
+    stageActivity: Record<FlowStageName, number>
+    persistentFacts?: FlowPersistentFacts
+    stationIndices?: Uint32Array
+    loadField?: FlowFieldLoader
+    historyUniformValues?: FlowHistoryUniformValues
+}
+
+type FlowCodecs = ReturnType<typeof createCodecs>
+type FlowUniforms = Awaited<ReturnType<typeof createUniformResources>>
+type FlowBuffers = Awaited<ReturnType<typeof createBufferResources>>
+type FlowTextures = Awaited<ReturnType<typeof createTextures>>
+type FlowLayouts = Awaited<ReturnType<typeof createBindLayouts>>
+type FlowBindSets = Awaited<ReturnType<typeof createBindSets>>
+type FlowPrograms = ReturnType<typeof createPrograms>
+type FlowPipelines = Awaited<ReturnType<typeof createPipelines>>
+type FlowPasses = ReturnType<typeof createPasses>
+type FlowCommands = ReturnType<typeof createCommands>
+type FlowHistoryDirection = Readonly<{
+    label: string
+    pass: RenderPassSpec
+    commands: readonly DrawCommand[]
+    presentation: DrawCommand
+    target: 'A' | 'B'
+}>
+
+type FlowGraph = {
+    runtime: ScratchRuntime
+    surface: Surface
+    map: FlowMap
+    settings: FlowSettings
+    codecs: FlowCodecs
+    uniforms: FlowUniforms
+    buffers: FlowBuffers
+    textures: FlowTextures
+    layouts: FlowLayouts
+    bindSets: FlowBindSets
+    programs: FlowPrograms
+    pipelines: FlowPipelines
+    passes: FlowPasses
+    commands: FlowCommands
+    historyDirections: readonly FlowHistoryDirection[]
+    resourceExtent: readonly number[]
+}
+
+type IdentityMatrix = (destination?: Float32Array) => Float32Array
+type InverseMatrix = (
+    matrix: readonly number[] | Float32Array,
+    destination?: Float32Array
+) => Float32Array
 
 export async function createFlowLayer({
     runtime,
@@ -48,7 +323,7 @@ export async function createFlowLayer({
     random = Math.random,
     options = {},
     failureProof,
-}) {
+}: FlowLayerCreateOptions) {
 
     if (!(runtime instanceof ScratchRuntime)) throw new TypeError('Flow Layer requires ScratchRuntime')
     const settings = normalizeOptions(options)
@@ -122,8 +397,8 @@ export async function createFlowLayer({
     queueNextField(state, stationGeometry, loadField)
 
     return Object.freeze({
-        renderFrame: camera => renderFrame(graph, state, camera),
-        resize: nextSize => resizeFlowGraph(graph, state, nextSize),
+        renderFrame: (camera: FlowCameraState) => renderFrame(graph, state, camera),
+        resize: (nextSize: SurfaceSize) => resizeFlowGraph(graph, state, nextSize),
         cameraMoving: () => setCameraMoving(state, settings),
         cameraSettled: () => setCameraSettled(state, settings),
         stableIdentities: Object.freeze([ ...stableIdentities ]),
@@ -135,7 +410,7 @@ export async function createFlowLayer({
     })
 }
 
-function normalizeOptions(options) {
+function normalizeOptions(options: FlowLayerOptions): FlowSettings {
 
     const historyMode = options.historyMode ?? (options.clearOnMove === false ? 'off' : 'reproject')
     if (![ 'off', 'clear', 'reproject' ].includes(historyMode)) {
@@ -147,7 +422,7 @@ function normalizeOptions(options) {
         useFlowMask: options.useFlowMask ?? true,
         flowMaskCutoff: options.flowMaskCutoff ?? 0,
         flowDomainMaxEdge: options.flowDomainMaxEdge ?? 0.04,
-        historyMode,
+        historyMode: historyMode as FlowHistoryMode,
         maxHistoryReprojectCenterDelta: options.maxHistoryReprojectCenterDelta ?? 0.25,
         showVoronoi: options.showVoronoi ?? false,
         showArrow: options.showArrow ?? false,
@@ -156,7 +431,9 @@ function normalizeOptions(options) {
 
 function createCodecs() {
 
-    const uniform = (name, fields) => layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
+    const uniform = (name: string, fields: LayoutFieldDescriptor[]) => (
+        layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
+    )
     return Object.freeze({
         frame: uniform('FlowFrameUniform', [
             { name: 'randomSeed', type: 'f32' },
@@ -205,11 +482,20 @@ function createCodecs() {
     })
 }
 
-async function createUniformResources(runtime, codecs, settings, size) {
+async function createUniformResources(
+    runtime: ScratchRuntime,
+    codecs: FlowCodecs,
+    settings: FlowSettings,
+    size: SurfaceSize
+) {
 
-    const identity = Array.from(mat4.identity())
+    const identity = Array.from((mat4.identity as IdentityMatrix)())
     return {
-        frame: await createUniform(runtime, 'Flow frame uniform', codecs.frame, {
+        frame: await createUniform<FlowFrameUniformValues>(
+            runtime,
+            'Flow frame uniform',
+            codecs.frame,
+            {
             randomSeed: 0,
             viewPort: [ size.width, size.height ],
             mapBounds: FLOW_DISPLAY_EXTENT,
@@ -217,26 +503,46 @@ async function createUniformResources(runtime, codecs, settings, size) {
             progressRate: 0,
             maxSpeed: 0,
             flowMaskCutoff: settings.flowMaskCutoff,
-        }),
-        static: await createUniform(runtime, 'Flow static uniform', codecs.static, {
+            }
+        ),
+        static: await createUniform<FlowStaticUniformValues>(
+            runtime,
+            'Flow static uniform',
+            codecs.static,
+            {
             groupSize: [ GROUP_SIZE_X, GROUP_SIZE_Y ],
             displayExtent: FLOW_DISPLAY_EXTENT,
-        }),
-        camera: await createUniform(runtime, 'Flow camera uniform', codecs.camera, {
+            }
+        ),
+        camera: await createUniform<FlowCameraUniformValues>(
+            runtime,
+            'Flow camera uniform',
+            codecs.camera,
+            {
             far: 1,
             near: 0,
             uMatrix: identity,
             centerLow: [ 0, 0, 0 ],
             centerHigh: [ 0, 0, 0 ],
-        }),
-        controller: await createUniform(runtime, 'Flow simulation controller', codecs.controller, {
+            }
+        ),
+        controller: await createUniform<FlowControllerUniformValues>(
+            runtime,
+            'Flow simulation controller',
+            codecs.controller,
+            {
             particleNum: PARTICLE_COUNT,
             dropRate: 0.003,
             dropRateBump: 0.001,
             speedFactor: 1,
             useFlowMask: settings.useFlowMask ? 1 : 0,
-        }),
-        cleanup: await createUniform(runtime, 'Flow history cleanup', codecs.cleanup, {
+            }
+        ),
+        cleanup: await createUniform<FlowCleanupUniformValues>(
+            runtime,
+            'Flow history cleanup',
+            codecs.cleanup,
+            {
             trailDecay: settings.trailDecay,
             trailCutoff: settings.trailCutoff,
             useFlowMask: settings.useFlowMask ? 1 : 0,
@@ -252,11 +558,17 @@ async function createUniformResources(runtime, codecs, settings, size) {
             currentCenterLow: [ 0, 0, 0 ],
             previousViewport: [ size.width, size.height ],
             currentViewport: [ size.width, size.height ],
-        }),
+            }
+        ),
     }
 }
 
-async function createUniform(runtime, label, codec, values) {
+async function createUniform<T extends FlowLayoutValues>(
+    runtime: ScratchRuntime,
+    label: string,
+    codec: LayoutCodec,
+    values: T
+): Promise<FlowUniform<T>> {
 
     const bytes = codec.pack(values)
     const buffer = await runtime.createBuffer({
@@ -271,18 +583,21 @@ async function createUniform(runtime, label, codec, values) {
         buffer,
         region,
         upload: runtime.createUploadCommand({ label: `Upload ${label}`, target: region, data: bytes }),
-        write: nextValues => codec.write(bytes, nextValues),
+        write: (nextValues: T) => codec.write(bytes, nextValues),
     }
 }
 
-async function createStationGeometry(maxEdge, signal) {
+async function createStationGeometry(
+    maxEdge: number,
+    signal: AbortSignal
+): Promise<FlowStationGeometry> {
 
     const stationCoords = new Float32Array(await fetchArrayBuffer('/json/examples/flow/station.bin', signal))
     const meshes = new Delaunay(stationCoords)
     const resourceExtent = coordinateExtent(stationCoords)
-    const vertices = []
-    const domainSupport = []
-    const stationIndices = []
+    const vertices: number[] = []
+    const domainSupport: number[] = []
+    const stationIndices: number[] = []
 
     for (let index = 0; index < meshes.triangles.length; index += 3) {
         const ids = [
@@ -309,7 +624,11 @@ async function createStationGeometry(maxEdge, signal) {
     })
 }
 
-function createFieldData(geometry, first, second) {
+function createFieldData(
+    geometry: Pick<FlowStationGeometry, 'stationIndices'>,
+    first: FlowField,
+    second: FlowField
+): FlowFieldData {
 
     return {
         from: expandStationVelocities(geometry, first.uvs),
@@ -320,7 +639,7 @@ function createFieldData(geometry, first, second) {
     }
 }
 
-function coordinateExtent(coordinates) {
+function coordinateExtent(coordinates: ArrayLike<number>): readonly number[] {
 
     const extent = [ Infinity, Infinity, -Infinity, -Infinity ]
     for (let index = 0; index < coordinates.length; index += 2) {
@@ -332,7 +651,7 @@ function coordinateExtent(coordinates) {
     return Object.freeze(extent)
 }
 
-function createParticleData(random) {
+function createParticleData(random: FlowRandom): Float32Array {
 
     const data = new Float32Array(PARTICLE_COUNT * 6)
     for (let index = 0; index < data.length; index++) {
@@ -341,7 +660,12 @@ function createParticleData(random) {
     return data
 }
 
-async function createBufferResources(runtime, geometry, fields, particles) {
+async function createBufferResources(
+    runtime: ScratchRuntime,
+    geometry: FlowStationGeometry,
+    fields: FlowFieldData,
+    particles: Float32Array
+) {
 
     return {
         stationPositions: await createBufferWithUpload(
@@ -377,7 +701,12 @@ async function createBufferResources(runtime, geometry, fields, particles) {
     }
 }
 
-async function createBufferWithUpload(runtime, label, data, usage) {
+async function createBufferWithUpload<T extends Float32Array | Uint32Array>(
+    runtime: ScratchRuntime,
+    label: string,
+    data: T,
+    usage: GPUBufferUsageFlags
+): Promise<FlowBuffer<T>> {
 
     const buffer = await runtime.createBuffer({ label, size: data.byteLength, usage })
     const region = buffer.region()
@@ -389,7 +718,7 @@ async function createBufferWithUpload(runtime, label, data, usage) {
     }
 }
 
-async function createTextures(runtime, size) {
+async function createTextures(runtime: ScratchRuntime, size: SurfaceSize) {
 
     const sampledTargetUsage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
     const flow = await runtime.createTexture({
@@ -439,16 +768,26 @@ async function createTextures(runtime, size) {
     }
 }
 
-async function createBindLayouts(runtime, codecs) {
+async function createBindLayouts(runtime: ScratchRuntime, codecs: FlowCodecs) {
 
-    const uniform = (binding, name, codec, visibility) => ({
+    const uniform = (
+        binding: number,
+        name: string,
+        codec: LayoutCodec,
+        visibility: BindVisibility[]
+    ): UniformBindLayoutEntry => ({
         binding,
         name,
         type: 'uniform',
         visibility,
         minBindingSize: codec.artifact.byteLength,
     })
-    const texture = (binding, name, visibility, sampleType = 'float') => ({
+    const texture = (
+        binding: number,
+        name: string,
+        visibility: BindVisibility[],
+        sampleType: GPUTextureSampleType = 'float'
+    ): TextureBindLayoutEntry => ({
         binding,
         name,
         type: 'texture',
@@ -536,7 +875,13 @@ async function createBindLayouts(runtime, codecs) {
     }
 }
 
-async function createBindSets(runtime, layouts, uniforms, buffers, textures) {
+async function createBindSets(
+    runtime: ScratchRuntime,
+    layouts: FlowLayouts,
+    uniforms: FlowUniforms,
+    buffers: FlowBuffers,
+    textures: FlowTextures
+) {
 
     return {
         sharedUniforms: await runtime.createBindSet(layouts.sharedUniforms, {
@@ -586,9 +931,18 @@ async function createBindSets(runtime, layouts, uniforms, buffers, textures) {
     }
 }
 
-function createPrograms(runtime, codecs, failureProof) {
+function createPrograms(
+    runtime: ScratchRuntime,
+    codecs: FlowCodecs,
+    failureProof: FlowFailureProof
+) {
 
-    const requirement = (group, binding, type, codec) => ({
+    const requirement = (
+        group: number,
+        binding: number,
+        type: ProgramBufferLayoutRequirement['type'],
+        codec: LayoutCodec
+    ): ProgramBufferLayoutRequirement => ({
         group,
         binding,
         type,
@@ -650,14 +1004,21 @@ function createPrograms(runtime, codecs, failureProof) {
     }
 }
 
-async function createPipelines(runtime, surface, textures, layouts, programs, failureProof) {
+async function createPipelines(
+    runtime: ScratchRuntime,
+    surface: Surface,
+    textures: FlowTextures,
+    layouts: FlowLayouts,
+    programs: FlowPrograms,
+    failureProof: FlowFailureProof
+) {
 
-    const depthWrite = {
+    const depthWrite: GPUDepthStencilState = {
         format: textures.depth.format,
         depthWriteEnabled: true,
         depthCompare: 'less',
     }
-    const depthRead = {
+    const depthRead: GPUDepthStencilState = {
         format: textures.depth.format,
         depthWriteEnabled: false,
         depthCompare: 'less',
@@ -731,7 +1092,11 @@ async function createPipelines(runtime, surface, textures, layouts, programs, fa
     }
 }
 
-function vertexLayout(arrayStride, shaderLocation, format) {
+function vertexLayout(
+    arrayStride: number,
+    shaderLocation: number,
+    format: GPUVertexFormat
+): GPUVertexBufferLayout {
 
     return {
         arrayStride,
@@ -740,9 +1105,9 @@ function vertexLayout(arrayStride, shaderLocation, format) {
     }
 }
 
-function createPasses(runtime, surface, textures) {
+function createPasses(runtime: ScratchRuntime, surface: Surface, textures: FlowTextures) {
 
-    const depth = {
+    const depth: RenderPassDepthStencilAttachmentSpec = {
         target: textures.views.depth,
         depthLoad: 'clear',
         depthStore: 'store',
@@ -786,7 +1151,15 @@ function createPasses(runtime, surface, textures) {
     }
 }
 
-function createCommands(runtime, uniforms, buffers, textures, bindSets, pipelines, vertexCount) {
+function createCommands(
+    runtime: ScratchRuntime,
+    uniforms: FlowUniforms,
+    buffers: FlowBuffers,
+    textures: FlowTextures,
+    bindSets: FlowBindSets,
+    pipelines: FlowPipelines,
+    vertexCount: number
+) {
 
     const sharedUniformResources = [
         uniforms.frame.buffer,
@@ -838,7 +1211,7 @@ function createCommands(runtime, uniforms, buffers, textures, bindSets, pipeline
         },
         whenMissing: 'throw',
     })
-    const cleanup = historyBindSet => runtime.createDrawCommand({
+    const cleanup = (historyBindSet: BindSet) => runtime.createDrawCommand({
         label: historyBindSet === bindSets.historyBToA
             ? 'Compose Flow history B to A'
             : 'Compose Flow history A to B',
@@ -888,7 +1261,8 @@ function createCommands(runtime, uniforms, buffers, textures, bindSets, pipeline
         },
         whenMissing: 'throw',
     })
-    const presentation = (bindSet, texture) => runtime.createDrawCommand({
+    const presentation = (bindSet: BindSet, texture: TextureResource) => (
+        runtime.createDrawCommand({
         label: texture === textures.historyA
             ? 'Present Flow history A'
             : 'Present Flow history B',
@@ -897,7 +1271,8 @@ function createCommands(runtime, uniforms, buffers, textures, bindSets, pipeline
         count: { vertexCount: 4 },
         resources: { read: currentReads([ texture ]), write: [] },
         whenMissing: 'throw',
-    })
+        })
+    )
 
     return {
         voronoi,
@@ -912,7 +1287,10 @@ function createCommands(runtime, uniforms, buffers, textures, bindSets, pipeline
     }
 }
 
-function createHistoryDirections(passes, commands) {
+function createHistoryDirections(
+    passes: FlowPasses,
+    commands: FlowCommands
+): readonly FlowHistoryDirection[] {
 
     return Object.freeze([
         Object.freeze({
@@ -932,9 +1310,13 @@ function createHistoryDirections(passes, commands) {
     ])
 }
 
-function createFlowState(size, fields, random) {
+function createFlowState(
+    size: SurfaceSize,
+    fields: FlowFieldData,
+    random: FlowRandom
+): FlowState {
 
-    const identity = Array.from(mat4.identity())
+    const identity = Array.from((mat4.identity as IdentityMatrix)())
     return {
         size: { ...size },
         random,
@@ -964,12 +1346,14 @@ function createFlowState(size, fields, random) {
         currentCenterLow: [ 0, 0, 0 ],
         currentViewport: [ size.width, size.height ],
         historyValid: 0,
-        stageActivity: Object.fromEntries(STAGE_ORDER.map(name => [ name, 0 ])),
+        stageActivity: Object.fromEntries(
+            STAGE_ORDER.map(name => [ name, 0 ])
+        ) as Record<FlowStageName, number>,
         persistentFacts: undefined,
     }
 }
 
-async function initializeGraph(graph) {
+async function initializeGraph(graph: FlowGraph): Promise<void> {
 
     const uploads = [
         ...Object.values(graph.uniforms).map(uniform => uniform.upload),
@@ -980,7 +1364,7 @@ async function initializeGraph(graph) {
     return observeSubmittedWork(builder.render(graph.passes.historyClear, []).submit())
 }
 
-async function renderFrame(graph, state, camera) {
+async function renderFrame(graph: FlowGraph, state: FlowState, camera: FlowCameraState) {
 
     if (state.fieldFailure !== undefined) throw state.fieldFailure
     advanceFieldState(graph, state)
@@ -1010,9 +1394,9 @@ async function renderFrame(graph, state, camera) {
         state.historyClearPending = false
         state.historyClearFrames++
     }
-    builder.render(direction.pass, direction.commands)
+    builder.render(direction.pass, direction.commands as DrawCommand[])
 
-    const visualizationCommands = []
+    const visualizationCommands: DrawCommand[] = []
     if (graph.settings.showVoronoi) visualizationCommands.push(graph.commands.field)
     if (graph.settings.showArrow) visualizationCommands.push(graph.commands.arrow)
     builder.render(graph.passes.field, visualizationCommands)
@@ -1027,7 +1411,7 @@ async function renderFrame(graph, state, camera) {
     return { submitted, observation: observeSubmittedWork(submitted), provenance }
 }
 
-function advanceFieldState(graph, state) {
+function advanceFieldState(graph: FlowGraph, state: FlowState): void {
 
     if (state.frame === 0) return
     if (state.progress < FRAMES_PER_FIELD - 1) {
@@ -1046,10 +1430,14 @@ function advanceFieldState(graph, state) {
     state.progress = 0
     state.transitionUploadsPending = true
     state.workerTransitions++
-    queueNextField(state, { stationIndices: state.stationIndices }, state.loadField)
+    queueNextField(state, { stationIndices: state.stationIndices! }, state.loadField)
 }
 
-function queueNextField(state, geometry, loadField) {
+function queueNextField(
+    state: FlowState,
+    geometry: Pick<FlowStationGeometry, 'stationIndices'>,
+    loadField?: FlowFieldLoader
+): void {
 
     if (loadField !== undefined) {
         state.stationIndices = geometry.stationIndices
@@ -1057,28 +1445,32 @@ function queueNextField(state, geometry, loadField) {
     }
     if (state.nextFieldPromise !== undefined) return
     const nextIndex = (state.toFieldIndex + 1) % FIELD_COUNT
-    state.nextFieldPromise = state.loadField(nextIndex).then(field => {
+    state.nextFieldPromise = state.loadField!(nextIndex).then(field => {
         state.nextField = {
             index: field.index,
             maxSpeed: field.maxSpeed,
             expanded: expandStationVelocities(
-                { stationIndices: state.stationIndices },
+                { stationIndices: state.stationIndices! },
                 field.uvs
             ),
         }
-    }).catch(error => {
+    }).catch((error: unknown) => {
         state.fieldFailure = error
     })
 }
 
-function updateCameraHistory(graph, state, camera) {
+function updateCameraHistory(
+    graph: FlowGraph,
+    state: FlowState,
+    camera: FlowCameraState
+): void {
 
     const previousMatrix = state.currentMatrix
     const previousCenterHigh = state.currentCenterHigh
     const previousCenterLow = state.currentCenterLow
     const previousViewport = state.currentViewport
     const currentMatrix = Array.from(camera.matrix)
-    const currentInverseMatrix = Array.from(mat4.inverse(currentMatrix))
+    const currentInverseMatrix = Array.from((mat4.inverse as InverseMatrix)(currentMatrix))
     const currentCenterHigh = [ ...camera.centerHigh ]
     const currentCenterLow = [ ...camera.centerLow ]
     const currentViewport = [ ...camera.viewport ]
@@ -1116,7 +1508,7 @@ function updateCameraHistory(graph, state, camera) {
     }
 }
 
-function updateUniforms(graph, state, camera) {
+function updateUniforms(graph: FlowGraph, state: FlowState, camera: FlowCameraState): void {
 
     graph.uniforms.frame.write({
         randomSeed: state.random(),
@@ -1141,33 +1533,37 @@ function updateUniforms(graph, state, camera) {
         historyMode: historyModeValue(graph.settings.historyMode),
         historyValid: state.historyValid,
         historyReprojecting: state.cameraMoving && graph.settings.historyMode === 'reproject' ? 1 : 0,
-        previousMatrix: state.historyUniformValues.previousMatrix,
+        previousMatrix: state.historyUniformValues!.previousMatrix,
         currentMatrix: state.currentMatrix,
         currentInverseMatrix: state.currentInverseMatrix,
-        previousCenterHigh: state.historyUniformValues.previousCenterHigh,
-        previousCenterLow: state.historyUniformValues.previousCenterLow,
+        previousCenterHigh: state.historyUniformValues!.previousCenterHigh,
+        previousCenterLow: state.historyUniformValues!.previousCenterLow,
         currentCenterHigh: state.currentCenterHigh,
         currentCenterLow: state.currentCenterLow,
-        previousViewport: state.historyUniformValues.previousViewport,
+        previousViewport: state.historyUniformValues!.previousViewport,
         currentViewport: state.currentViewport,
     })
 }
 
-function setCameraMoving(state, settings) {
+function setCameraMoving(state: FlowState, settings: FlowSettings): void {
 
     if (!state.cameraMoving) state.cameraMoveCount++
     state.cameraMoving = true
     if (settings.historyMode === 'clear') state.historyClearPending = true
 }
 
-function setCameraSettled(state, settings) {
+function setCameraSettled(state: FlowState, settings: FlowSettings): void {
 
     if (state.cameraMoving) state.cameraSettleCount++
     state.cameraMoving = false
     if (settings.historyMode === 'clear') state.particleResetPending = true
 }
 
-async function resizeFlowGraph(graph, state, size) {
+async function resizeFlowGraph(
+    graph: FlowGraph,
+    state: FlowState,
+    size: SurfaceSize
+): Promise<void> {
 
     const before = stableIdentitySnapshot(graph)
     graph.surface.resize(size)
@@ -1193,8 +1589,8 @@ async function resizeFlowGraph(graph, state, size) {
         throw new Error('Persistent Flow graph identity changed during resize')
     }
     const facts = persistentFactSnapshot(graph.runtime)
-    for (const name of [ 'resources', 'bindLayouts', 'bindSets', 'pipelines' ]) {
-        if (facts[name] !== state.persistentFacts[name]) {
+    for (const name of [ 'resources', 'bindLayouts', 'bindSets', 'pipelines' ] as const) {
+        if (facts[name] !== state.persistentFacts![name]) {
             throw new Error(`Persistent Flow ${name} count changed during resize`)
         }
     }
@@ -1204,14 +1600,26 @@ async function resizeFlowGraph(graph, state, size) {
     state.hasHistoryCamera = false
 }
 
-async function prepareStaleBindSets(bindSets) {
+async function prepareStaleBindSets(bindSets: readonly BindSet[]): Promise<void> {
 
     for (const bindSet of bindSets) {
         if (bindSet.preparationState === 'stale') await bindSet.prepare()
     }
 }
 
-function verifyFrameProvenance(submitted, graph, direction) {
+export type FlowProvenanceFact = Readonly<{
+    name: string
+    resourceId: string
+    declaredContentEpoch: number | 'current-at-step'
+    producerContentEpoch: number
+    readContentEpoch: number
+}>
+
+function verifyFrameProvenance(
+    submitted: SubmittedWork,
+    graph: FlowGraph,
+    direction: FlowHistoryDirection
+): FlowProvenanceFact[] {
 
     const pairs = [
         {
@@ -1264,7 +1672,7 @@ function verifyFrameProvenance(submitted, graph, direction) {
     })
 }
 
-function stableIdentitySnapshot(graph) {
+function stableIdentitySnapshot(graph: FlowGraph): string[] {
 
     const objects = [
         ...Object.values(graph.uniforms).flatMap(value => [ value.buffer, value.upload ]),
@@ -1284,7 +1692,7 @@ function stableIdentitySnapshot(graph) {
     return [ ...new Set(objects.map(object => object.id)) ].sort()
 }
 
-function persistentFactSnapshot(runtime) {
+function persistentFactSnapshot(runtime: ScratchRuntime): FlowPersistentFacts {
 
     const facts = runtime.diagnostics.snapshot()
     return Object.freeze({
@@ -1296,7 +1704,7 @@ function persistentFactSnapshot(runtime) {
     })
 }
 
-function graphContractSnapshot(graph) {
+function graphContractSnapshot(graph: FlowGraph) {
 
     return Object.freeze({
         framesPerField: FRAMES_PER_FIELD,
@@ -1306,12 +1714,12 @@ function graphContractSnapshot(graph) {
         resourceExtent: graph.resourceExtent,
         displayExtent: FLOW_DISPLAY_EXTENT,
         voronoiTargetFormats: Object.freeze(graph.passes.voronoi.color.map(
-            attachment => attachment.target.texture.format
+            attachment => (attachment.target as TextureViewSpec).texture.format
         )),
     })
 }
 
-function flowStateSnapshot(state) {
+function flowStateSnapshot(state: FlowState) {
 
     return Object.freeze({
         frame: state.frame,
@@ -1332,7 +1740,7 @@ function flowStateSnapshot(state) {
     })
 }
 
-async function observeSubmittedWork(submitted) {
+async function observeSubmittedWork(submitted: SubmittedWork): Promise<void> {
 
     const [ nativeOutcome ] = await Promise.all([ submitted.nativeOutcome, submitted.done ])
     if (nativeOutcome.status !== 'observed-succeeded') {
@@ -1340,7 +1748,9 @@ async function observeSubmittedWork(submitted) {
     }
 }
 
-function currentReads(resources) {
+function currentReads(
+    resources: readonly (BufferResource | TextureResource)[]
+): CommandResourceReadDescriptor[] {
 
     const unique = new Map(resources.map(resource => [ resource.id, resource ]))
     return [ ...unique.values() ].map(resource => ({
@@ -1349,7 +1759,10 @@ function currentReads(resources) {
     }))
 }
 
-function expandStationVelocities(geometry, uvs) {
+function expandStationVelocities(
+    geometry: Pick<FlowStationGeometry, 'stationIndices'>,
+    uvs: Float32Array
+): Float32Array {
 
     const expanded = new Float32Array(geometry.stationIndices.length * 2)
     for (let index = 0; index < geometry.stationIndices.length; index++) {
@@ -1360,7 +1773,11 @@ function expandStationVelocities(geometry, uvs) {
     return expanded
 }
 
-function calculateTriangleDomainSupport(points, ids, maxEdge) {
+function calculateTriangleDomainSupport(
+    points: ArrayLike<number>,
+    ids: readonly number[],
+    maxEdge: number
+): number {
 
     return Math.max(
         calculateStationEdgeLength(points, ids[0], ids[1]),
@@ -1369,7 +1786,11 @@ function calculateTriangleDomainSupport(points, ids, maxEdge) {
     ) <= maxEdge ? 1 : 0
 }
 
-function calculateStationEdgeLength(points, a, b) {
+function calculateStationEdgeLength(
+    points: ArrayLike<number>,
+    a: number,
+    b: number
+): number {
 
     return Math.hypot(
         points[a * 2] - points[b * 2],
@@ -1377,37 +1798,37 @@ function calculateStationEdgeLength(points, a, b) {
     )
 }
 
-async function fetchArrayBuffer(url, signal) {
+async function fetchArrayBuffer(url: string, signal: AbortSignal): Promise<ArrayBuffer> {
 
     const response = await fetch(url, { signal })
     if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`)
     return response.arrayBuffer()
 }
 
-function encodeFloatToDouble(value) {
+function encodeFloatToDouble(value: number): [number, number] {
 
     const high = Math.fround(value)
     return [ high, value - high ]
 }
 
-function historyModeValue(mode) {
+function historyModeValue(mode: FlowHistoryMode): number {
 
     if (mode === 'off') return 0
     if (mode === 'clear') return 1
     return 2
 }
 
-function addCenters(high, low) {
+function addCenters(high: readonly number[], low: readonly number[]): number[] {
 
     return [ high[0] + low[0], high[1] + low[1], high[2] + low[2] ]
 }
 
-function isFiniteArray(values) {
+function isFiniteArray(values: readonly number[]): boolean {
 
     return values.every(value => Number.isFinite(value))
 }
 
-function hashStrings(values) {
+function hashStrings(values: readonly string[]): string {
 
     let hash = 2166136261
     for (const value of values.join('|')) {

@@ -303,7 +303,7 @@ async function main() {
 ## 开发说明
 
 - 公开 API 统一从 `packages/geoscratch/src/index.ts` 导出，包入口指向 `packages/geoscratch/dist/`。
-- 浏览器或 WebGPU 示例放在 `examples/<name>/index.html` 和 `examples/<name>/main.js`。
+- 浏览器或 WebGPU 示例放在 `examples/<name>/index.html` 和 `examples/<name>/main.ts`。
 - 示例必须通过 `geoscratch` 包入口导入库，不允许用相对路径进入库源码。
 - 普通示例图片和 shader 放在所属 example 目录旁边，通过相对资源 URL 或 raw shader import 使用。
 - 库自带运行资源放在拥有它的 `packages/geoscratch/src/` 模块旁边。

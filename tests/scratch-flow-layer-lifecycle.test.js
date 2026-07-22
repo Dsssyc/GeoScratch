@@ -6,7 +6,7 @@ const moduleUrl = pathToFileURL(path.join(
     process.cwd(),
     'examples',
     'flowLayer',
-    'flow-lifecycle.js'
+    'flow-lifecycle.ts'
 )).href
 
 describe('Flow Layer lifecycle authority', () => {
