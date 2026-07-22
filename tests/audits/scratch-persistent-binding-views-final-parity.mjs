@@ -1847,6 +1847,16 @@ function emitProductionDeclarationsAt(commit) {
     const readFile = host.readFile.bind(host)
     const fileExists = host.fileExists.bind(host)
     const sourceRoot = `${path.resolve('packages/geoscratch/src')}${path.sep}`
+    const virtualDirectories = new Set([ path.resolve('packages/geoscratch/src') ])
+    for (const sourcePath of virtualSources.keys()) {
+        let directory = path.dirname(sourcePath)
+        while (directory.startsWith(sourceRoot)) {
+            virtualDirectories.add(directory)
+            directory = path.dirname(directory)
+        }
+    }
+    const directoryExists = host.directoryExists?.bind(host)
+    const getDirectories = host.getDirectories?.bind(host)
     host.readFile = fileName => {
         const absolutePath = path.resolve(fileName)
         if (virtualSources.has(absolutePath)) return virtualSources.get(absolutePath)
@@ -1856,6 +1866,20 @@ function emitProductionDeclarationsAt(commit) {
         const absolutePath = path.resolve(fileName)
         return virtualSources.has(absolutePath) ||
             (!absolutePath.startsWith(sourceRoot) && fileExists(fileName))
+    }
+    host.directoryExists = directoryName => {
+        const absolutePath = path.resolve(directoryName)
+        return virtualDirectories.has(absolutePath) ||
+            (!absolutePath.startsWith(sourceRoot) && (directoryExists?.(directoryName) ?? false))
+    }
+    host.getDirectories = directoryName => {
+        const absolutePath = path.resolve(directoryName)
+        if (!absolutePath.startsWith(sourceRoot) && absolutePath !== sourceRoot.slice(0, -1)) {
+            return getDirectories?.(directoryName) ?? []
+        }
+        return [ ...virtualDirectories ]
+            .filter(candidate => path.dirname(candidate) === absolutePath)
+            .map(candidate => path.basename(candidate))
     }
     const outputs = new Map()
     const program = ts.createProgram([ ...virtualSources.keys() ], parsed.options, host)

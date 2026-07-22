@@ -296,8 +296,8 @@ describe('Scratch persistent binding final parity', () => {
             capabilityRowCount: 11,
             officialBindingRowCount: 6,
             nativeCopyQuadrantCount: 4,
-            ordinaryExampleCount: 13,
-            legacyExampleCount: 1,
+            ordinaryExampleCount: 14,
+            legacyExampleCount: 0,
         })
         expect(result.publicSurface.missingBaselineValues).to.deep.equal([])
         expect(result.publicSurface.missingHistoricalValues).to.deep.equal([])
@@ -323,11 +323,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.programPipelineFactSnapshot.mutablePlannerReads).to.deep.equal([])
         expect(result.publicSurface.productionEmitParity).to.deep.include({
             status: 'passed',
-            emittedJavaScriptCount: 103,
-            emittedDeclarationCount: 103,
-            declarationSignatureCount: 4836,
+            emittedJavaScriptCount: 100,
+            emittedDeclarationCount: 100,
+            declarationSignatureCount: 4784,
         })
-        expect(result.publicSurface.productionEmitParity.files).to.have.length(206)
+        expect(result.publicSurface.productionEmitParity.files).to.have.length(200)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
         expect(result.diagnostics).to.deep.include({ schemaVersion: 5 })
         expect(result.diagnostics.unexpectedMissing).to.deep.equal([])

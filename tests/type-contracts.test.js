@@ -28,5 +28,8 @@ describe('type contracts', () => {
         expect(buildConfig.compilerOptions.allowJs).to.equal(true)
         expect(buildConfig.include).to.deep.equal([ 'src/**/*' ])
         expect(exists('packages', 'geoscratch', 'tsconfig.build.json')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'scripts', 'clean-dist.mjs')).to.equal(true)
+        expect(readJson('packages', 'geoscratch', 'package.json').scripts.build)
+            .to.equal('node scripts/clean-dist.mjs && node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json')
     })
 })

@@ -48,7 +48,7 @@ describe('workspace layout', () => {
             'dist',
             'src',
         ])
-        expect(pkg.scripts.build).to.equal('node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json')
+        expect(pkg.scripts.build).to.equal('node scripts/clean-dist.mjs && node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json')
         expect(Object.keys(pkg.dependencies)).to.deep.equal(['@webgpu/types'])
     })
 

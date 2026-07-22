@@ -30,7 +30,7 @@
     "src"
   ],
   "scripts": {
-    "build": "node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json"
+    "build": "node scripts/clean-dist.mjs && node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json"
   },
   "type": "module",
   "repository": {
