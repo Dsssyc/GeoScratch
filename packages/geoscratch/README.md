@@ -298,7 +298,7 @@ Run `npm run dev` and open the examples browser. Each demo also has a standalone
 | Render To Texture | `examples/renderToTexture/` |
 | Indirect Execution | `examples/indirectExecution/` |
 | Readiness Policies | `examples/readinessPolicies/` |
-| DEM Layer (legacy) | `examples/m_demLayer/` |
+| DEM Layer | `examples/demLayer/` |
 | Flow Layer | `examples/flowLayer/` |
 | Hello GAW | `examples/helloGAW/` |
 

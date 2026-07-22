@@ -209,10 +209,19 @@ const drawTriangle = runtime.createDrawCommand({
 ```
 
 CPU-dynamic resolver closures remain future work and are not accepted by the
-current public API. Use immutable static counts or explicit GPU indirect
-regions instead.
+current public API. Direct count fields remain immutable. When CPU work already
+packs a native indirect-argument record, a stable `UploadCommand` may update that
+record in a `COPY_DST | INDIRECT` buffer and a stable command may keep referring
+to its indirect region. The dynamic value is explicit resource data, not a count
+closure or a mutation of the command descriptor.
 
 Indirect counts are the implemented, preferred GPU-driven path when compute produces draw arguments. The indirect and optional index buffers must also appear in `resources.read` with their required content epochs. Scratch validates usage, alignment, range, ownership, disposal, readiness, and epochs without inspecting argument bytes on the CPU.
+
+An indirect record need not be GPU-produced. CPU culling may update the same
+record through an ordered upload before the draw. The upload advances the
+buffer epoch, the draw declares a `'current-at-step'` read, and SubmittedWork
+retains the producer/read chain. This CPU-to-GPU write is not a GPU-to-CPU
+roundtrip and requires no mapping or readback.
 
 ## DispatchCommand
 
@@ -306,7 +315,7 @@ scope, operation record, or wait.
 Draw and dispatch counts span three cases; choose by what the count actually depends on:
 
 - Static, known at record time → use the literal form (`{ vertexCount: 3 }`, `{ workgroups: [64, 64, 1] }`). Do not wrap a constant in a closure.
-- CPU-dynamic — known only after CPU-side work such as culling → a future resolver closure or tracked handle is legitimate (see `02-resources`, dynamic values). Prefer the handle when the value already lives in one.
+- CPU-dynamic — known only after CPU-side work such as culling → use an uploaded indirect-argument record when the application can express the native ABI as explicit resource data. A resolver closure or tracked scalar handle remains future work for cases that do not use such a record (see `02-resources`, dynamic values).
 - GPU-dynamic — produced on the GPU (e.g. compute writes draw or dispatch arguments) → prefer `indirect`. It needs no readback, is fully declarative, and is visible to validation.
 
 Verifiability ladder, prefer the top: indirect buffer > tracked handle > closure.

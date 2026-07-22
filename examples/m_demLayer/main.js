@@ -1,9 +1,0 @@
-import TerrainLayer from './terrainLayer.js'
-import { darkMatterStyle, startScratchMap } from '../shared/scratchMap.js'
-
-startScratchMap({
-    style: darkMatterStyle,
-}, (map) => {
-
-    map.addLayer(new TerrainLayer(14))
-})

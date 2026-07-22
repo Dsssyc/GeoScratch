@@ -50,15 +50,16 @@ describe('Flow Layer Scratch clean cut', () => {
         }
     })
 
-    it('leaves DEM as the only legacy catalog example', () => {
+    it('coexists with the neutral DEM replacement and no legacy catalog entry', () => {
 
         const catalog = read('examples', 'index.html')
-        const demStart = catalog.indexOf('data-id="m_demLayer"')
+        const demStart = catalog.indexOf('data-id="demLayer"')
         const demLink = catalog.slice(demStart, demStart + 420)
 
         expect(demStart).to.be.greaterThan(-1)
-        expect(demLink).to.include('(legacy)')
-        expect(catalog.match(/\(legacy\)/g)).to.have.length(1)
+        expect(demLink).to.include('data-path="./demLayer/"')
+        expect(demLink).to.not.match(/legacy|scratch/i)
+        expect(catalog).to.not.include('(legacy)')
     })
 
     it('preserves the legacy normal presentation and display-paced frame loop', () => {

@@ -195,10 +195,18 @@ const drawTriangle = runtime.createDrawCommand({
 })
 ```
 
-CPU-dynamic resolver closure 仍是未来工作，当前 public API 不接受。应使用不可变
-static count 或显式 GPU indirect region。
+CPU-dynamic resolver closure 仍是未来工作，当前 public API 不接受。Direct count
+字段保持不可变。当 CPU 工作已经能够打包原生 indirect-argument record 时，可以用
+稳定的 `UploadCommand` 更新 `COPY_DST | INDIRECT` buffer 中的记录，并让稳定 command
+继续引用其 indirect region。动态值是显式 resource data，不是 count closure，也不是
+对 command descriptor 的修改。
 
 当 compute 产生 draw arguments 时，indirect count 是已实现且推荐的 GPU-driven 路径。Indirect buffer 与可选 index buffer 还必须以所需 content epoch 出现在 `resources.read` 中。Scratch 会校验 usage、alignment、range、ownership、disposal、readiness 与 epoch，但不会在 CPU 上检查 argument bytes。
+
+Indirect record 不要求必须由 GPU 产生。CPU culling 可以在 draw 前通过有序 upload
+更新同一条记录。Upload 推进 buffer epoch，draw 声明 `'current-at-step'` read，
+SubmittedWork 保留 producer/read chain。这是 CPU-to-GPU 写入，不是 GPU-to-CPU
+roundtrip，也不需要 mapping 或 readback。
 
 ## DispatchCommand
 
@@ -290,7 +298,7 @@ operation record 或 wait。
 draw 与 dispatch count 分三种情况; 按 count 实际依赖什么来选:
 
 - 静态、record 时即可得 → 用字面量形式(`{ vertexCount: 3 }`、`{ workgroups: [64, 64, 1] }`)。不要把常量包进闭包。
-- CPU 动态——只有在 CPU 侧工作(如剔除)之后才知道 → 未来的 resolver closure 或 tracked handle 是合理形式(见 `02-resources` 动态值)。值若已在某个句柄里，优先用句柄。
+- CPU 动态——只有在 CPU 侧工作(如剔除)之后才知道 → 当应用能够把原生 ABI 表达成显式 resource data 时，使用 uploaded indirect-argument record。对于不使用该记录的情形，resolver closure 或 tracked scalar handle 仍是未来工作(见 `02-resources` 动态值)。
 - GPU 动态——由 GPU 产生(例如 compute 写出 draw 或 dispatch arguments)→ 优先 `indirect`。它无需回读、全声明式、对 validation 可见。
 
 可验证性阶梯，优先靠上: indirect buffer > 被追踪的句柄 > 闭包。

@@ -135,6 +135,11 @@ runtime.createSubmission()
 
 Upload 会推进目标写入范围的 `contentEpoch`，并记录 producing submission。如果 upload 分配路径需要替换物理 GPU 对象，则还会推进 `allocationVersion`。
 
+`UploadCommand` 按 identity 保留 authored byte source。应用可以在两次 submission
+之间修改持久 typed array，并复用同一个 command；每次成功执行都会读取当时的 bytes，
+并且只推进一次 target epoch。这允许 CPU-produced indirect argument record 在不重建
+command 的情况下工作。它仍然是单向 CPU-to-GPU upload，不是 readback 或 roundtrip。
+
 Buffer upload path 会降低到 `GPUQueue.writeBuffer()`。其 target
 `BufferRegion` offset 与所选 byte length 都必须满足 4-byte alignment。Scratch
 会在直接 queue call 或 submission timeline 获得任何 effect 前校验这条原生规则。

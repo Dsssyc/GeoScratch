@@ -19,7 +19,7 @@ describe('examples structure', () => {
         'renderToTexture',
         'indirectExecution',
         'readinessPolicies',
-        'm_demLayer',
+        'demLayer',
         'flowLayer',
         'helloGAW',
     ]
@@ -35,7 +35,7 @@ describe('examples structure', () => {
         'renderToTexture',
         'indirectExecution',
         'readinessPolicies',
-        'm_demLayer',
+        'demLayer',
         'flowLayer',
         'helloGAW',
     ]
@@ -112,6 +112,7 @@ describe('examples structure', () => {
             [ 'renderToTexture', 'Render To Texture' ],
             [ 'indirectExecution', 'Indirect Execution' ],
             [ 'readinessPolicies', 'Readiness Policies' ],
+            [ 'demLayer', 'DEM Layer' ],
             [ 'helloGAW', 'Hello GAW' ],
             [ 'flowLayer', 'Flow Layer' ],
         ]
@@ -128,19 +129,12 @@ describe('examples structure', () => {
         }
     })
 
-    it('marks only not-yet-replaced old API examples as legacy in the browser', () => {
+    it('contains no legacy example labels after the clean cuts', () => {
         const html = read('examples', 'index.html')
-        const legacyExamples = [ 'm_demLayer' ]
 
-        for (const name of legacyExamples) {
-            const linkStart = html.indexOf(`data-id="${name}"`)
-            const linkEnd = html.indexOf('</a>', linkStart)
-            const linkHtml = html.slice(linkStart, linkEnd)
-
-            expect(linkStart, `${name} link`).to.be.greaterThan(-1)
-            expect(linkHtml, `${name} legacy label`).to.include('(legacy)')
-            expect(linkHtml, `${name} legacy wording`).to.not.include('Legacy API')
-        }
+        expect(html).to.not.include('(legacy)')
+        expect(html).to.not.include('data-tags="legacy')
+        expect(html).to.not.include('m_demLayer')
     })
 
     it('gives each runnable example its own standalone html shell', () => {
@@ -164,7 +158,7 @@ describe('examples structure', () => {
     })
 
     it('loads MapLibre only for the map-backed terrain examples', () => {
-        const demHtml = read('examples', 'm_demLayer', 'index.html')
+        const demHtml = read('examples', 'demLayer', 'index.html')
         const flowHtml = read('examples', 'flowLayer', 'index.html')
 
         expect(demHtml).to.include('maplibre-gl@4.7.1/dist/maplibre-gl.js')
@@ -184,25 +178,33 @@ describe('examples structure', () => {
     })
 
     it('keeps the DEM layer example focused on terrain only', () => {
-        const source = read('examples', 'm_demLayer', 'main.js')
-        const mapRuntime = read('examples', 'shared', 'scratchMap.js')
+        const source = read('examples', 'demLayer', 'main.js')
+        const layer = read('examples', 'demLayer', 'dem-layer.js')
+        const mapRuntime = read('examples', 'demLayer', 'dem-map.js')
 
-        expect(source).to.include('TerrainLayer')
-        expect(source).to.include('new TerrainLayer(14)')
-        expect(source).to.include('startScratchMap')
+        expect(source).to.include('ScratchRuntime')
+        expect(source).to.include('createDemLayer')
+        expect(source).to.include('createDemMap')
+        expect(layer).to.include('runtime.createSubmission(')
+        expect(layer).to.include("contentEpoch: 'current-at-step'")
+        expect(layer).to.include('count: { indirect: buffers.lodArguments.region }')
+        expect(layer).to.include('count: { indirect: buffers.terrainArguments.region }')
         expect(mapRuntime).to.include('globalThis.maplibregl')
         expect(mapRuntime).to.include('darkMatterStyle')
         expect(mapRuntime).to.include('getCameraPosition()')
         expect(mapRuntime).to.include('underwaterTerrainMinElevation')
-        expect(mapRuntime).to.include('getScratchMercatorMatrix(this.transform)')
+        expect(mapRuntime).to.include('getScratchMercatorMatrix(transform)')
         expect(mapRuntime).to.include('calculateFarZForTerrainPlane')
         expect(source).to.not.include('VITE_MAPBOX_ACCESS_TOKEN')
         expect(source).to.not.include('accessToken')
         expect(mapRuntime).to.not.include('_computeCameraPosition')
         expect(mapRuntime).to.not.include('_updateCameraState')
         expect(mapRuntime).to.not.include('this.transform._camera')
-        expect(source).to.not.include('SteadyFlowLayer')
-        expect(source).to.not.include('flowJson.worker')
+        expect(source).to.not.include('../shared/scratchMap.js')
+        expect(source).to.not.include('startScratchMap')
+        expect(source).to.not.include('LocalTerrain')
+        expect(`${source}\n${layer}`).to.not.match(/runtime\.(?:device|queue)\b/)
+        expect(`${source}\n${layer}`).to.not.match(/mapAsync|getMappedRange|readback/i)
     })
 
     it('provides a separate current-API flow layer with its own map host', () => {
