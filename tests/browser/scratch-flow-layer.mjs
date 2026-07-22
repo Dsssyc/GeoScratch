@@ -651,6 +651,12 @@ function validateNormalProof(proof, failures) {
     const motion = proof.afterMotionFacts
     const after = proof.afterResizeFacts
     const drained = proof.drainedFacts
+    if (before.fieldVisualization !== 'false') {
+        failures.push('normal Flow page enabled the diagnostic field visualization')
+    }
+    if (before.frameScheduler !== 'requestAnimationFrame') {
+        failures.push('normal Flow page was not display-paced by requestAnimationFrame')
+    }
     for (const [ label, facts ] of [
         [ 'before interaction', before ],
         [ 'after motion', motion ],
@@ -751,6 +757,9 @@ function validateBoundaryProof(proof, failures) {
 
     validateFlowFacts('estuary boundary', proof.facts, failures)
     validateMrtFacts('estuary boundary', proof.facts, failures)
+    if (proof.facts.fieldVisualization !== 'true') {
+        failures.push('estuary boundary proof did not enable its diagnostic field visualization')
+    }
     const contract = parseJson(
         proof.facts.graphContract,
         'estuary boundary graph contract',

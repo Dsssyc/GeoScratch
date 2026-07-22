@@ -54,7 +54,7 @@ describe('DEM flow layer cleanup', () => {
         expect(layer).to.include('trailCutoff: settings.trailCutoff')
         expect(main).to.include('registerCameraListeners(map, graph, lifetime)')
         expect(layer).to.include('clearOnMove')
-        expect(layer).to.include('showVoronoi: options.showVoronoi ?? true')
+        expect(layer).to.include('showVoronoi: options.showVoronoi ?? false')
     })
 
     it('wires a flow-domain mask through velocity, simulation, and history cleanup', () => {

@@ -89,7 +89,8 @@ It exists only under `proof=1`; it does not replace the normal remote basemap.
 | Camera invalidation | Map event listeners call `idle()`/`restart()` | Owned listeners call `cameraMoving()`/`cameraSettled()` | Preserved without global flags. |
 | Reprojection | Previous/current camera facts and reverse gather | Same shader and explicit uniform upload | Preserved. |
 | Resize | Legacy screen-dependent implicit replacement | Explicit Surface/texture resize plus stale-only BindSet preparation | Strengthened and made observable. |
-| Optional Voronoi view | Configured true, then binding disabled every active render | Query-controlled and actually executed when enabled | Corrected intended behavior. |
+| Frame cadence | `triggerRepaint()` keeps normal rendering display-paced | One next-frame `requestAnimationFrame()` is scheduled after the prior SubmittedWork observation; no second timer throttles the loop | Preserved with explicit single-frame backpressure. |
+| Optional Voronoi view | Configured true, then binding disabled every active render | Disabled during normal rendering; `field=1` explicitly enables the diagnostic view | Preserved for the normal presentation while retaining an explicit diagnostic path. |
 | Optional arrows | Add call commented out; shader used wrong stride and normalized positions | Query-controlled; six-float stride and current longitude/latitude representation are both corrected and browser-exercised | Corrected intended behavior. |
 | Normal blending | Legacy `NormalBlending` | Explicit source-alpha blend state | Preserved. |
 | Map defaults | CARTO, center, zoom, Mercator, max zoom, antialias | Same normal defaults | Preserved. |
@@ -204,6 +205,18 @@ Pixel inspection found a visible field west of the projected eastern boundary an
 field leakage in the sampled near-sea region east of it. The same run completed all
 660 normal frames, both fault scenarios, browser cleanup, managed Vite cleanup, and
 port-closure checks.
+
+A same-day motion-parity follow-up compared the fixed legacy page and target page at
+`960 x 720` with the same accumulated history and `1200`-delta zoom-out. It exposed two
+migration errors: the target rendered the diagnostic Flow Show command during normal
+frames, and a `22 ms` timer followed by `requestAnimationFrame()` reduced a four-second
+window from display-paced execution to 112 frames. With the normal diagnostic field
+disabled and the redundant timer removed, the same window completed 223 frames and the
+100 ms/500 ms recovery images retained only the reprojected particle history, matching
+the legacy presentation without the full-field/old-viewport brightness rectangle. The
+managed browser gate then passed again with `fieldVisualization=false`,
+`frameScheduler=requestAnimationFrame`, more than 660 drained frames, both diagnostic
+faults, clean browser/server shutdown, and no normal console or GPU errors.
 
 ## Scope Integrity
 

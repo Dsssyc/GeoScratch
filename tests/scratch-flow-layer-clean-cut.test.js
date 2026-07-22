@@ -61,6 +61,20 @@ describe('Flow Layer Scratch clean cut', () => {
         expect(catalog.match(/\(legacy\)/g)).to.have.length(1)
     })
 
+    it('preserves the legacy normal presentation and display-paced frame loop', () => {
+
+        const main = read('examples', 'flowLayer', 'main.js')
+        const layer = read('examples', 'flowLayer', 'flow-layer.js')
+
+        expect(main).to.include("showVoronoi: parameters.get('field') === '1'")
+        expect(layer).to.include('showVoronoi: options.showVoronoi ?? false')
+        expect(main).to.match(/function scheduleFrame\(\)[\s\S]*?animationFrame = requestAnimationFrame\(render\)/)
+        expect(main).to.not.include('animationTimer')
+        expect(main).to.not.include('1000 / 45')
+        expect(main).to.include('canvas.dataset.fieldVisualization = String(graph.settings.showVoronoi)')
+        expect(main).to.include("canvas.dataset.frameScheduler = 'requestAnimationFrame'")
+    })
+
     it('uses only the public current Scratch GPU execution model', () => {
 
         const main = read('examples', 'flowLayer', 'main.js')

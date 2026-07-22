@@ -36,7 +36,7 @@ const failureConfiguration = Object.freeze({
 })
 const flowOptions = Object.freeze({
     historyMode: parameters.get('history') ?? 'reproject',
-    showVoronoi: parameters.get('field') !== '0',
+    showVoronoi: parameters.get('field') === '1',
     showArrow: parameters.get('arrows') === '1',
 })
 const pageLifetime = createFlowLifecycle()
@@ -109,7 +109,6 @@ async function main(lifetime, proof) {
     lifetime.assertActive('continue Flow initialization')
     let active = true
     let animationFrame
-    let animationTimer
     let submittedFrames = 0
     let observedFrames = 0
     let latestProvenance = []
@@ -122,11 +121,6 @@ async function main(lifetime, proof) {
     function stopScheduling() {
 
         active = false
-        if (animationTimer !== undefined) {
-            clearTimeout(animationTimer)
-            animationTimer = undefined
-            frameWorkCancelled++
-        }
         if (animationFrame !== undefined) {
             cancelAnimationFrame(animationFrame)
             animationFrame = undefined
@@ -175,14 +169,8 @@ async function main(lifetime, proof) {
 
     function scheduleFrame() {
 
-        const delay = proofMode ? 0 : 1000 / 45
-        animationTimer = window.setTimeout(() => {
-            animationTimer = undefined
-            frameWorkCompleted++
-            if (!active) return
-            animationFrame = requestAnimationFrame(render)
-            frameWorkScheduled++
-        }, delay)
+        if (!active) return
+        animationFrame = requestAnimationFrame(render)
         frameWorkScheduled++
     }
 
@@ -221,8 +209,7 @@ async function main(lifetime, proof) {
         if (active) scheduleFrame()
     }
 
-    animationFrame = requestAnimationFrame(render)
-    frameWorkScheduled++
+    scheduleFrame()
 }
 
 function createFieldStream(worker, lifetime) {
@@ -338,6 +325,8 @@ function publishGraphFacts(graph) {
     canvas.dataset.seed = proofMode ? '0x6d2b79f5' : 'random'
     canvas.dataset.fixedTimestep = String(proofMode)
     canvas.dataset.historyMode = graph.settings.historyMode
+    canvas.dataset.fieldVisualization = String(graph.settings.showVoronoi)
+    canvas.dataset.frameScheduler = 'requestAnimationFrame'
     canvas.dataset.graphContract = JSON.stringify(graph.contractFacts())
 }
 

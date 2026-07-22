@@ -149,7 +149,7 @@ function normalizeOptions(options) {
         flowDomainMaxEdge: options.flowDomainMaxEdge ?? 0.04,
         historyMode,
         maxHistoryReprojectCenterDelta: options.maxHistoryReprojectCenterDelta ?? 0.25,
-        showVoronoi: options.showVoronoi ?? true,
+        showVoronoi: options.showVoronoi ?? false,
         showArrow: options.showArrow ?? false,
     })
 }
