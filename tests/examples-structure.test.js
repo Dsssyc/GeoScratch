@@ -234,6 +234,16 @@ describe('examples structure', () => {
         expect(css).to.include('display: none')
     })
 
+    it('constrains the examples sidebar so its navigation can scroll', () => {
+        const css = read('examples', 'shared', 'index.css')
+        const sidebarRule = css.match(/\.examples-sidebar\s*\{([^}]*)\}/)?.[1] ?? ''
+        const navigationRule = css.match(/\.examples-nav\s*\{([^}]*)\}/)?.[1] ?? ''
+
+        expect(sidebarRule).to.match(/min-height:\s*0/)
+        expect(navigationRule).to.match(/min-height:\s*0/)
+        expect(navigationRule).to.match(/overflow:\s*auto/)
+    })
+
     it('keeps indirect execution GPU-side without readback or mapping', () => {
         const source = read('examples', 'indirectExecution', 'main.js')
 
