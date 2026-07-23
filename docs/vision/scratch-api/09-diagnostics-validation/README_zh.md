@@ -1,7 +1,7 @@
 # Diagnostics 与 Validation
 
 状态: Vision draft
-日期: 2026-07-16
+日期: 2026-07-23
 
 ## 决策
 
@@ -420,6 +420,27 @@ type PassDiagnosticCode =
     | 'SCRATCH_PASS_RESOLVE_ATTACHMENT_INVALID'
     | 'SCRATCH_PASS_WRONG_RUNTIME'
 ```
+
+Render-stage override constants 与 nullable pipeline slots 仍是 pipeline
+construction facts。非法 constants 使用 `SCRATCH_PIPELINE_CONSTANTS_INVALID`；
+hole、`undefined` 或非法 non-null target state 使用
+`SCRATCH_PIPELINE_TARGET_STATE_INVALID`。Pipeline/pass null-slot 不兼容继续使用
+`SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH`。
+
+Pass validation 会区分非法 non-null color source
+（`SCRATCH_PASS_COLOR_ATTACHMENT_INVALID`）、resolve 不兼容
+（`SCRATCH_PASS_RESOLVE_ATTACHMENT_INVALID`）与非法 draw-count hint
+（`SCRATCH_PASS_MAX_DRAW_COUNT_INVALID`）。结构化 facts 会按需标识 attachment
+slot、source/target resources 与 views、formats、sample counts、extents、usages、
+read-only aspects 和 authored value。
+
+`SCRATCH_COMMAND_RENDER_STATE_INVALID` 同时覆盖非法不可变 authored value，以及
+相对当前 pass extent 变为非法的 full-attachment viewport/scissor。其 facts 会区分
+authored state 与 submission-time resolved state。
+`SCRATCH_COMMAND_CLEAR_BUFFER_INVALID` 覆盖确定性的 target lifecycle、usage、
+alignment 与 current-allocation range failure。同步 native encoder exception 或延后
+native validation/internal/OOM/device-loss outcome 使用既有 submission-native
+diagnostic path；它不会被改写为 prose，也不会被错误归类为确定性 clear validation。
 
 预期的 Draw/Dispatch `skip-command`、`skip-pass` 与成功 `use-fallback` 决策不是 diagnostics，而是不可变的 `SubmittedWork.executionOutcomes`。`SCRATCH_COMMAND_FALLBACK_INVALID` 只用于 missing/forbidden fallback shape、伪造的非 command 节点、kind/runtime/lifecycle/write-set 不兼容，以及重复 object 或 command ID。最终选中的 fallback 无法进入当前 pass 时使用 `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`。
 

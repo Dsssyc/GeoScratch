@@ -1,7 +1,7 @@
 # Transfers And Epochs
 
 Status: Vision draft
-Date: 2026-07-16
+Date: 2026-07-23
 
 ## Decision
 
@@ -68,10 +68,11 @@ Resource identity, lifecycle, readiness, `allocationVersion`, and `contentEpoch`
 
 - `UploadCommand`
 - `CopyCommand` destination writes
+- non-empty `ClearBufferCommand` target writes
 - `DrawCommand` render attachment writes
 - `DispatchCommand` storage buffer or storage texture writes
-- render pass clear, resolve, and store operations
-- explicit clear, resolve, or mipmap generation commands if they become part of the API
+- persistent render-pass resolve-target writes
+- explicit mipmap generation commands if they become part of the API
 
 `contentEpoch` belongs to the parent BufferResource or TextureResource. A BufferRegion or TextureViewSpec does not own an independent epoch. Readback and dependency validation talk about parent content epochs, while binding invalidation talks about allocation versions.
 
@@ -513,13 +514,51 @@ const copyTileStats = runtime.createCopyCommand({
 
 A copy reads the source `contentEpoch` and advances the target `contentEpoch`. If the copy target requires a new physical resource, allocation replacement is represented separately through `allocationVersion`.
 
+## Clear
+
+`ClearBufferCommand` is an explicit ordered GPU write. Its target is one immutable
+`BufferRegion`, and a non-empty region lowers directly to
+`GPUCommandEncoder.clearBuffer()` rather than to a CPU upload or compute emulation:
+
+```ts
+const clearCounters = runtime.createClearBufferCommand({
+    label: 'clear counters',
+    target: counters.region({ offset: 0, size: 256 }),
+})
+
+const submitted = runtime.createSubmission()
+    .clear(clearCounters)
+    .submit()
+```
+
+The current target allocation must have `COPY_DST` usage. Offset and size are
+four-byte aligned and must remain in range when the command reaches its declared
+submission step. A non-empty clear contributes a parent-buffer write, advances one
+content epoch, participates in dependency validation and potential-write tracking,
+and becomes indeterminate if delayed native observation invalidates that still-current
+write. A zero-size region contributes no resource access, epoch, potential write, or
+native command.
+
+Deterministic target, usage, alignment, and range failures use
+`SCRATCH_COMMAND_CLEAR_BUFFER_INVALID`. Native validation, internal, out-of-memory,
+device-loss, and observation failures remain submission outcomes under the shared
+native error model.
+
 ## Rendering Resources
 
 The same model covers graphics resources:
 
-- A render pass attachment is a declared write. Its store, clear, and resolve behavior advances the attachment resource's `contentEpoch`.
+- A non-null writable render attachment is a declared write and advances its parent
+  resource's `contentEpoch` at most once per pass. A null color slot has no resource
+  fact.
+- A persistent resolve target is a separate declared write and advances its parent
+  resource's `contentEpoch` once, independently of whether the multisampled source is
+  stored or discarded. A surface resolve target has lease and native-observation
+  facts but no fabricated persistent epoch.
 - A later pass that samples that texture declares a read of the produced `contentEpoch`.
-- Depth and stencil attachments use the same rule. Load/store policy and read-as-texture use must be explicit enough for dependency validation.
+- A read-only depth or stencil aspect is a declared read and must already be ready.
+  Writable aspects are declared writes. Internal conflict validation is
+  subresource/aspect-aware while public epochs remain whole-resource facts.
 - The surface current texture is a borrowed presentation-submission-scoped target, not a persistent `TextureResource`. It cannot be retained beyond the presentation submission that acquired it.
 - `TextureResource.resize()` advances `allocationVersion` and marks the replacement empty. Dependent BindSets become stale and require explicit acknowledged `prepare()`; PassSpec attachments keep their logical TextureViewSpec and create observed submission-scoped native views. Submission performs no hidden binding repair.
 - Temporal resources such as TAA history, trails, or iterative simulation textures are ordinary resources whose previous-frame contents are represented by content epochs, not by a special core feature.

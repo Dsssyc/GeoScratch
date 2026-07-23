@@ -17,6 +17,7 @@ describe('examples structure', () => {
         'helloVertexBuffer',
         'textureSampling',
         'renderToTexture',
+        'renderPassFeatures',
         'indirectExecution',
         'readinessPolicies',
         'demLayer',
@@ -33,6 +34,7 @@ describe('examples structure', () => {
         'helloVertexBuffer',
         'textureSampling',
         'renderToTexture',
+        'renderPassFeatures',
         'indirectExecution',
         'readinessPolicies',
         'demLayer',
@@ -110,6 +112,7 @@ describe('examples structure', () => {
             [ 'helloVertexBuffer', 'Hello Vertex Buffer' ],
             [ 'textureSampling', 'Texture Sampling' ],
             [ 'renderToTexture', 'Render To Texture' ],
+            [ 'renderPassFeatures', 'Render Pass Features' ],
             [ 'indirectExecution', 'Indirect Execution' ],
             [ 'readinessPolicies', 'Readiness Policies' ],
             [ 'demLayer', 'DEM Layer' ],
@@ -383,5 +386,33 @@ describe('examples structure', () => {
         expect(source).to.include("dataset.status = failedChecks.length === 0 ? 'passed' : 'failed'")
         expect(source).to.not.match(/ResizeObserver|sizeProvider|getImageData|writeTexture/)
         expect(source).to.not.match(/https?:\/\//)
+    })
+
+    it('proves native render-pass features through the public package', () => {
+
+        const html = read('examples', 'renderPassFeatures', 'index.html')
+        const source = read('examples', 'renderPassFeatures', 'main.ts')
+
+        expect(html).to.include('<title>Render Pass Features | GeoScratch Examples</title>')
+        expect(html).to.include('id="GPUFrame"')
+        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include('sampleCount')
+        expect(source).to.include('targets: [')
+        expect(source).to.include('color: [')
+        expect(source).to.include('resolveTarget: surface')
+        expect(source).to.include("store: 'discard'")
+        expect(source).to.include('maxDrawCount: 3')
+        expect(source).to.include('fragmentConstants: { colorMode }')
+        expect(source).to.include('renderState: {')
+        expect(source).to.include('viewport: panels.left')
+        expect(source).to.include('scissor: panels.left')
+        expect(source).to.include('viewport: panels.right')
+        expect(source).to.include('scissor: panels.right')
+        expect(source).to.include('.render(pass, [ fullDraw ])')
+        expect(source).to.include('.render(pass, [ fullDraw, leftDraw, rightDraw ])')
+        expect(source).to.include('await multisampledColor.resize(size)')
+        expect(source).to.include("canvas.dataset.fullAttachmentResized = String(")
+        expect(source).to.not.match(/runtime\.(?:device|queue)\b/)
+        expect(source).to.not.match(/packages\/geoscratch|src\/scratch|\.\.\/\.\.\//)
     })
 })

@@ -1,7 +1,7 @@
 # Passes, Submissions 与 Scheduler
 
 状态: Vision draft
-日期: 2026-07-16
+日期: 2026-07-23
 
 ## 决策
 
@@ -92,12 +92,54 @@ view，并要求单个 mip 与单个选定 array layer。`2d-array` view 通过
 省略 color 与 depth/stencil attachment。Submission preflight 要求 color
 attachment region pairwise disjoint。同一 texture 上选择相同 mip 与 array layer，
 或相同 3D `depthSlice` 的 view 会重叠；不同 layer 与 slice 仍然合法。同一个
-canvas context 在 Surface 创建阶段另有单一 live owner 门禁。Pass 创建与提交阶段
+canvas context 在 Surface 创建阶段另有单一 live owner 门禁。
+
+Color attachment array 保留原生 slot index。显式 `null` slot 被接受并原样降低；
+hole 与 `undefined` 会被拒绝。Null slot 不创建 view、resource access、potential
+write 或 content epoch。Render-pipeline target compatibility 会逐 slot 比较，
+包括 `null/null`，不会压缩 sequence。
+
+Color attachment 可以从 multisampled source 直接 resolve 到 single-sampled
+`TextureViewSpec` 或 `Surface`:
+
+```ts
+color: [
+    null,
+    {
+        target: multisampledColor.view(),
+        resolveTarget: surface,
+        load: 'clear',
+        store: 'discard',
+    },
+]
+```
+
+Scratch 会在 encoder effect 前校验 source/target 当前 sample count、format、physical
+extent、选定 mip/layer/slice footprint、render-attachment usage、resolve support 与
+non-overlap。Surface resolve target 进入与普通 Surface attachment 相同的 submission
+preparation、lease 和 `attachment-view` observation lifecycle。持久 texture resolve
+target 记录一次 pass write，并让 parent epoch 只推进一次；Surface 不伪造持久
+epoch。source 仍然是 write。`store: 'discard'` 与 transient storage 会使 source
+indeterminate，而持久 resolved texture target 会被保留并 ready。
+
+Depth 与 stencil aspect 可以独立 read-only。Read-only aspect 没有 load/store
+operation，且必须已有可读内容；它属于 pass-level read。Writable aspect 属于
+pass-level write。内部冲突分析使用 texture/mip/layer/aspect footprint，因此允许
+draw 采样重叠的 read-only depth aspect，同时拒绝与 writable aspect 重叠。若所有
+存在的 aspect 都是 read-only，则不产生 parent-texture write epoch；任一 aspect
+可写时，parent epoch 至多推进一次。公开 epoch 仍是 whole-resource fact，不引入
+新的公开 subresource epoch model。
+
+`maxDrawCount` 是可选、不可变的非负 JavaScript safe integer，并原样降低到
+`GPURenderPassDescriptor.maxDrawCount`。它只表达 WebGPU implementation
+hint/limit contract，不构成 Scratch 对性能或成功执行的保证。
+
+Pass 创建与提交阶段
 都要求精确 owner，并把完整的 current
 `GPUCanvasContext.getConfiguration()` 及 canvas size 同私有 Surface facts 比较。
 Submission plan 校验完成后，所有 executable Surface attachment 都会在创建任何
-command encoder 前 prepare。该 immutable lease 记录 Surface identity、format 与
-configuration version；之后受观察的 `attachment-view` operation 借用 current
+command encoder 前 prepare。该 immutable lease 记录 Surface identity、format、
+configuration version 与 committed size；之后受观察的 `attachment-view` operation 借用 current
 texture 并创建 view，不会再次读取 configuration。因此 forged alias 或外部
 configuration drift 会在 presentation/encoder effect 前失败。Submission 在检查
 region overlap 时仍会防御性比较 Surface context identity。
@@ -122,6 +164,7 @@ plan。
 
 ```ts
 const submitted = runtime.createSubmission({ validation: 'throw' })
+    .clear(clearCounters)
     .compute(simulationPass, [
         simulateParticles,
     ])
@@ -155,6 +198,7 @@ Submission 职责:
 - 校验 pass 与 command compatibility
 - 校验 resource read/write order
 - prepare 显式 transfer operations
+- 保留原生 buffer clear 的顺序与 write effects
 - 把 command readiness policies 解析成唯一 pre-encoder execution plan
 - 跳过 empty passes
 - 只记录该 plan 最终选中的 commands
@@ -288,7 +332,7 @@ Submission 完成后，`SubmittedWork.resourceAccesses` 与 `producerEpochs` 保
 
 ## 物理 Queue 时间线
 
-`SubmissionBuilder.steps` 在 encoder-backed work 与 queue-side upload 之间定义一个全序。把 command 记录进 encoder 不等于把它送入 queue: `GPUQueue.writeBuffer(...)` 和 `GPUQueue.writeTexture(...)` 在调用时进入 queue，而 copy、readback staging、resolve、compute 与 render work 只有在 finished command buffer 被 submit 时才进入 queue。
+`SubmissionBuilder.steps` 在 encoder-backed work 与 queue-side upload 之间定义一个全序。把 command 记录进 encoder 不等于把它送入 queue: `GPUQueue.writeBuffer(...)` 和 `GPUQueue.writeTexture(...)` 在调用时进入 queue，而 clear、copy、readback staging、resolve、compute 与 render work 只有在 finished command buffer 被 submit 时才进入 queue。
 
 因此 submission lowering 分三阶段:
 
@@ -301,13 +345,13 @@ Submission 完成后，`SubmittedWork.resourceAccesses` 与 `producerEpochs` 保
 command-buffer segment 是一段最大的连续 executed encoder-backed steps。queue-side upload 会结束前一段，并与后一段隔开:
 
 ```text
-copy + compute -> buffer upload -> texture upload -> render + readback
+clear + copy + compute -> buffer upload -> texture upload -> render + readback
 ```
 
 降低为:
 
 ```text
-submit(copy + compute)
+submit(clear + copy + compute)
 writeBuffer
 writeTexture
 submit(render + readback)
@@ -400,7 +444,7 @@ Dependency validation 与 resource readiness policy 是两件事。
 - Validation 检查最终选中的 submission 顺序、required epochs 与 ownership 是否自洽。
 - `whenMissing` 控制所需 resource 在该位置没有可读内容时如何处理。
 
-`SubmissionValidationMode` 控制 optional dependency finding 的 disposition，而不改变 readiness control flow。`off` 仍然解析 skip/fallback 并保留 execution outcomes。Draw 与 Dispatch 实现全部四种 policy; Copy、Readback 与 Resolve 仍然只支持 `throw`。
+`SubmissionValidationMode` 控制 optional dependency finding 的 disposition，而不改变 readiness control flow。`off` 仍然解析 skip/fallback 并保留 execution outcomes。Draw 与 Dispatch 实现全部四种 policy；Copy、Readback 与 Resolve 仍然只支持 `throw`。Clear 没有 source-read readiness policy：合法的非空 clear 是无条件的有序 write。
 
 ## 未来上层编排
 

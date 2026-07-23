@@ -383,6 +383,13 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         format: 'rgba8unorm',
         usage: 0x2 | 0x4,
     })
+    const scratchMultisampledTexture: scr.TextureResource = await runtime.createTexture({
+        label: 'typed scratch multisampled texture',
+        size: { width: 2, height: 2 },
+        sampleCount: 4,
+        format: surface.format,
+        usage: 0x10,
+    })
     const textureCopySource: scr.TextureCopyCommandSourceDescriptor = {
         resource: scratchTexture,
         contentEpoch: scratchTexture.contentEpoch,
@@ -798,6 +805,20 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     externalImageUpload.source = typedImageData
     // @ts-expect-error normalized external source origin is immutable
     externalImageUpload.sourceOrigin.x = 1
+    const clearDescriptor: scr.ClearBufferCommandDescriptor = {
+        label: 'typed scratch clear',
+        target: storageInputRegion,
+    }
+    const compatClearDescriptor: scratchCompat.ClearBufferCommandDescriptor = clearDescriptor
+    const clear: scr.ClearBufferCommand = runtime.createClearBufferCommand(clearDescriptor)
+    const clearAlias: scratchCompat.ClearBufferCommand = runtime.clearBufferCommand(
+        compatClearDescriptor
+    )
+    const clearKind: 'clear' = clear.commandKind
+    // @ts-expect-error ClearBufferCommand target is immutable
+    clear.target = uniformRegion
+    // @ts-expect-error ClearBufferCommand disposal state is read-only
+    clear.isDisposed = false
     const copy: scr.CopyCommand = runtime.createCopyCommand({
         label: 'typed scratch copy',
         source: genericCopySource,
@@ -953,6 +974,28 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const resolveSourceQuerySet: scr.QuerySetResource = resolveQueries.source.querySet
     const resolveSourceSlotEpoch: number = resolveQueries.source.slots[0].contentEpoch
+    const nativeParityPipelineDescriptor: scr.ScratchRenderPipelineDescriptor = {
+        label: 'typed native parity render pipeline',
+        program,
+        vertexBuffers: [
+            null,
+            {
+                arrayStride: 8,
+                attributes: [
+                    { shaderLocation: 1, offset: 0, format: 'float32x2' },
+                ],
+            },
+        ],
+        targets: [
+            null,
+            { format: surface.format },
+        ],
+        vertexConstants: { vertexScale: 1 },
+        fragmentConstants: { colorMode: 2 },
+        multisample: { count: 4 },
+    }
+    const compatNativeParityPipelineDescriptor:
+        scratchCompat.ScratchRenderPipelineDescriptor = nativeParityPipelineDescriptor
     const scratchPipelinePromise: Promise<scr.ScratchRenderPipeline> = runtime.createRenderPipeline({
         label: 'typed scratch pipeline',
         program,
@@ -973,6 +1016,20 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         targets: [ { format: surface.format } ],
     })
     const compatRenderPipeline: scratchCompat.ScratchRenderPipeline = scratchPipelineAlias
+    const drawRenderState: scr.DrawRenderState = {
+        viewport: {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+            minDepth: 0,
+            maxDepth: 1,
+        },
+        scissor: 'full-attachment',
+        blendConstant: [ 0, 0.25, 0.5, 1 ],
+        stencilReference: 7,
+    }
+    const compatDrawRenderState: scratchCompat.DrawRenderState = drawRenderState
     // @ts-expect-error Pipeline construction is runtime-owned and asynchronous
     new scr.ScratchRenderPipeline(runtime, { program, targets: [ { format: surface.format } ] })
     const draw: scr.DrawCommand = runtime.createDrawCommand({
@@ -981,6 +1038,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         vertexBuffers: [
             { slot: 0, region: vertexRegion },
         ],
+        renderState: compatDrawRenderState,
         count: { vertexCount: 3 },
         resources: {
             read: [ uniformRead, vertexRead ],
@@ -1097,6 +1155,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     draw.count = { vertexCount: 6 }
     // @ts-expect-error command resource declarations are immutable after construction
     draw.resources = { read: [], write: [] }
+    // @ts-expect-error normalized per-draw render state is immutable
+    draw.renderState = { viewport: 'full-attachment' }
     // @ts-expect-error normalized command read declarations are immutable
     draw.resources.read.push(indirectRead)
     // @ts-expect-error normalized index bindings are immutable
@@ -1130,6 +1190,27 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         },
         occlusionQuerySet: querySetAlias,
     })
+    const resolveAttachment: scr.RenderPassColorAttachmentSpec = {
+        target: scratchMultisampledTexture.view(),
+        resolveTarget: surface,
+        load: 'clear',
+        store: 'discard',
+        clear: [ 0, 0, 0, 1 ],
+    }
+    const sparseResolvePassDescriptor: scr.RenderPassSpecDescriptor = {
+        color: [ null, resolveAttachment ],
+        maxDrawCount: 3,
+    }
+    const compatSparseResolvePassDescriptor:
+        scratchCompat.RenderPassSpecDescriptor = sparseResolvePassDescriptor
+    const sparseResolvePass: scr.RenderPassSpec = runtime.createRenderPass(
+        compatSparseResolvePassDescriptor
+    )
+    const sparseColorSlot: scr.RenderPassColorAttachmentSpec | null | undefined =
+        sparseResolvePass.color[0]
+    const maxDrawCount: number | undefined = sparseResolvePass.maxDrawCount
+    // @ts-expect-error maxDrawCount is immutable after pass construction
+    sparseResolvePass.maxDrawCount = 4
     // @ts-expect-error normalized render pass attachment arrays are immutable
     passSpec.color = []
     // @ts-expect-error normalized render pass attachments are immutable
@@ -1151,6 +1232,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         depthLoad: 'clear',
         depthStore: 'store',
         depthClear: 1,
+        depthReadOnly: false,
     }
     const compatDepthAttachment: scratchCompat.RenderPassDepthStencilAttachmentSpec = depthAttachment
     const depthPassDescriptor: scr.RenderPassSpecDescriptor = {
@@ -1351,7 +1433,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     // @ts-expect-error texture logical commitment is package-internal submission lowering
     textureUpload._commitLogicalWrite()
     const builder: scr.SubmissionBuilder = runtime.createSubmission(submissionOptions)
-    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).upload(externalImageUpload).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
+    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).upload(externalImageUpload).clear(clear).clear(clearAlias).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
     const nativeOutcome: Promise<scr.ScratchSubmissionNativeOutcome> = submitted.nativeOutcome
     const compatNativeOutcome: Promise<scratchCompat.ScratchSubmissionNativeOutcome> = nativeOutcome
     const readbackNativeOutcome: scr.ScratchReadbackNativeOutcome = {
@@ -1465,6 +1547,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const orderedReadback: scr.ReadbackOperation = readbackCommand.result(readbackCommandResultOptions)
     const compatOrderedReadback: scratchCompat.ReadbackOperation = readbackCommandAlias.result(compatReadbackCommandResultOptions)
     const readbackStepKind: scr.SubmissionStepKind = 'readback'
+    const clearStepKind: scr.SubmissionStepKind = 'clear'
     const submittedReadbackLinks: readonly scr.SubmittedReadbackLink[] = orderedSubmitted.readbacks
     const compatSubmittedReadbackLinks: readonly scratchCompat.SubmittedReadbackLink[] = submittedReadbackLinks
     const readbackRetention: scr.ReadbackRetentionPolicy = 'until-dispose'

@@ -1,6 +1,6 @@
 # Scratch Render/Pass Native Parity Audit
 
-Status: implementation pending
+Status: implementation complete; final specification review and headed-browser gate pending
 Date: 2026-07-23
 Baseline: `18208cadccd8d091758436e2f398b8d62d3d83e8`
 Decision: ADR-046
@@ -22,19 +22,19 @@ to this matrix.
 
 | Capability | Normative WebGPU fact | Fixed Scratch contract | Required evidence | Status |
 | --- | --- | --- | --- | --- |
-| Render override constants | `GPUVertexState` and `GPUFragmentState` inherit `GPUProgrammableStage.constants`. | Independent snapshotted `vertexConstants` and `fragmentConstants`; no shared alias. | Native descriptors, mutation-after-call, invalid record/value, compute regression tests. | pending |
-| Nullable vertex buffers | `GPUVertexState.buffers` is a sequence of nullable layouts and preserves indices. | Explicit null accepted; hole/undefined rejected; only non-null slots require draw buffers. | Native slot preservation and draw binding tests. | pending |
-| Nullable fragment targets | `GPUFragmentState.targets` is a sequence of nullable target states and preserves shader locations. | Explicit null accepted; hole/undefined rejected. | Native slot preservation and pipeline/pass slot compatibility tests. | pending |
-| Nullable color attachments | `GPURenderPassDescriptor.colorAttachments` is a sequence of nullable attachments. | Explicit null accepted; no view/access/epoch for null; hole/undefined rejected. | Native descriptor, ledger, and epoch tests. | pending |
-| Multisample resolve | Source sample count is greater than one; target sample count is one; render extents and formats match; resolve view is non-3D and renderable; format supports resolve. | `resolveTarget` plus optional immutable view descriptor; texture or surface lifecycle; direct native resolve. | Valid native path and sample/format/extent/usage/alias/resize failures. | pending |
-| Resolve retention | Resolve writes the single-sampled target independently of source `storeOp`. | Persistent resolve target advances once; surface has no persistent epoch; discarded/transient source is not readable. | Store/discard/transient/readiness/epoch tests. | pending |
-| Read-only depth/stencil | Read-only aspects set native flags and omit that aspect's load/store operations. | Independent flags; read-only aspect is a pass read; writable aspect is a pass write. | Depth-only, stencil-only, mixed flags, lowering, and readiness tests. | pending |
-| Attachment conflict footprint | WebGPU permits sampling from an attachment aspect declared read-only and rejects writable aliasing. | Internal texture/mip/layer/aspect footprint; public epoch remains whole-resource. | Legal read-only depth sampling and overlapping writable rejection tests. | pending |
-| `maxDrawCount` | Render pass descriptor accepts an unsigned 64-bit draw-count hint with default 50,000,000. | Optional non-negative JavaScript safe integer, frozen and lowered unchanged. | Native descriptor and invalid integer tests. | pending |
-| Viewport | Render pass encoder `setViewport()` owns finite coordinates, dimensions, and depth range. | Every draw resolves an explicit viewport; omission/full means current attachment. | Independent draws, bounds, finite values, and resize tests. | pending |
-| Scissor | Render pass encoder `setScissorRect()` owns integer in-bounds rectangle state. | Every draw resolves an explicit scissor; omission/full means current attachment. | Independent draws, integer/range, and resize tests. | pending |
-| Blend/stencil dynamic state | Render pass encoder owns blend constant and stencil reference state. | Every draw sets an immutable authored or normalized default value. | Native order, snapshots, invalid values, and independence tests. | pending |
-| Native buffer clear | Command encoder `clearBuffer()` requires `COPY_DST`, aligned in-range offset/size, and allows zero size. | `ClearBufferCommand` plus `submission.clear`; direct native operation; zero-size no-op. | Alignment/range/usage/order/epoch/native-failure tests. | pending |
+| Render override constants | `GPUVertexState` and `GPUFragmentState` inherit `GPUProgrammableStage.constants`. | Independent snapshotted `vertexConstants` and `fragmentConstants`; no shared alias. | Native descriptors, mutation-after-call, invalid record/value, compute regression tests. | implemented; Node verified |
+| Nullable vertex buffers | `GPUVertexState.buffers` is a sequence of nullable layouts and preserves indices. | Explicit null accepted; hole/undefined rejected; only non-null slots require draw buffers. | Native slot preservation and draw binding tests. | implemented; Node verified |
+| Nullable fragment targets | `GPUFragmentState.targets` is a sequence of nullable target states and preserves shader locations. | Explicit null accepted; hole/undefined rejected. | Native slot preservation and pipeline/pass slot compatibility tests. | implemented; Node verified |
+| Nullable color attachments | `GPURenderPassDescriptor.colorAttachments` is a sequence of nullable attachments. | Explicit null accepted; no view/access/epoch for null; hole/undefined rejected. | Native descriptor, ledger, and epoch tests. | implemented; Node verified |
+| Multisample resolve | Source sample count is greater than one; target sample count is one; render extents and formats match; resolve view is non-3D and renderable; format supports resolve. | `resolveTarget` plus optional immutable view descriptor; texture or surface lifecycle; direct native resolve. | Valid native path and sample/format/extent/usage/alias/resize failures. | implemented; Node verified; browser pending |
+| Resolve retention | Resolve writes the single-sampled target independently of source `storeOp`. | Persistent resolve target advances once; surface has no persistent epoch; discarded/transient source is not readable. | Store/discard/transient/readiness/epoch tests. | implemented; Node verified |
+| Read-only depth/stencil | Read-only aspects set native flags and omit that aspect's load/store operations. | Independent flags; read-only aspect is a pass read; writable aspect is a pass write. | Depth-only, stencil-only, mixed flags, lowering, and readiness tests. | implemented; Node verified |
+| Attachment conflict footprint | WebGPU permits sampling from an attachment aspect declared read-only and rejects writable aliasing. | Internal texture/mip/layer/aspect footprint; public epoch remains whole-resource. | Legal read-only depth sampling and overlapping writable rejection tests. | implemented; Node verified |
+| `maxDrawCount` | Render pass descriptor accepts an unsigned 64-bit draw-count hint with default 50,000,000. | Optional non-negative JavaScript safe integer, frozen and lowered unchanged. | Native descriptor and invalid integer tests. | implemented; Node verified |
+| Viewport | Render pass encoder `setViewport()` owns finite coordinates, dimensions, and depth range. | Every draw resolves an explicit viewport; omission/full means current attachment. | Independent draws, bounds, finite values, and resize tests. | implemented; Node verified; browser pending |
+| Scissor | Render pass encoder `setScissorRect()` owns integer in-bounds rectangle state. | Every draw resolves an explicit scissor; omission/full means current attachment. | Independent draws, integer/range, and resize tests. | implemented; Node verified; browser pending |
+| Blend/stencil dynamic state | Render pass encoder owns blend constant and stencil reference state. | Every draw sets an immutable authored or normalized default value. | Native order, snapshots, invalid values, and independence tests. | implemented; Node verified |
+| Native buffer clear | Command encoder `clearBuffer()` requires `COPY_DST`, aligned in-range offset/size, and allows zero size. | `ClearBufferCommand` plus `submission.clear`; direct native operation; zero-size no-op. | Alignment/range/usage/order/epoch/native-failure tests. | implemented; Node verified |
 
 ## Diagnostic Matrix
 
@@ -82,5 +82,22 @@ The following current-spec capabilities are deliberately not claimed by this aud
 
 ## Completion Record
 
-Pending implementation, automated gates, type-contract evidence, and headed-browser
-evidence.
+Implementation and public type evidence are present on the feature branch. The
+following phase-five gates passed on 2026-07-23:
+
+- `npm test`: 970 passing, 2 pending;
+- `npm run typecheck`: passed, including package, examples, and WebGPU declarations;
+- `npm run build`: passed, including the standalone `renderPassFeatures` page; and
+- `git diff --check`: passed.
+
+Primary automated evidence lives in
+`tests/scratch-render-pipeline-async.test.js`,
+`tests/scratch-pipeline-command.test.js`,
+`tests/scratch-render-pass-native-parity.test.js`,
+`tests/scratch-render-state-clear.test.js`,
+`tests/scratch-command-lifecycle.test.js`,
+`tests/examples-structure.test.js`, and `tests/types/public-api.ts`.
+
+The final one-to-one specification review, one independent review, and bounded
+headed-browser gate remain pending. This record therefore does not yet claim final
+acceptance.

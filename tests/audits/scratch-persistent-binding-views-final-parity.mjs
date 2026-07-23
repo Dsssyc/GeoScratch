@@ -113,6 +113,7 @@ const ordinaryExamples = Object.freeze([
     'helloVertexBuffer',
     'indirectExecution',
     'readinessPolicies',
+    'renderPassFeatures',
     'renderToTexture',
     'submissionOrder',
     'textureResize',

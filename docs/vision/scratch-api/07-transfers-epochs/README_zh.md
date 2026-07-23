@@ -1,7 +1,7 @@
 # 传输与 Epoch
 
 状态: Vision draft
-日期: 2026-07-16
+日期: 2026-07-23
 
 ## 决策
 
@@ -68,10 +68,11 @@ Resource identity、lifecycle、readiness、`allocationVersion` 与 `contentEpoc
 
 - `UploadCommand`
 - `CopyCommand` 的目标写入
+- 非空 `ClearBufferCommand` 的目标写入
 - `DrawCommand` 的 render attachment 写入
 - `DispatchCommand` 的 storage buffer 或 storage texture 写入
-- render pass clear、resolve、store 操作
-- 如果未来进入 API，显式 clear、resolve、mipmap generation command 也属于内容写入
+- 持久 render-pass resolve target 写入
+- 如果未来进入 API，显式 mipmap generation command 也属于内容写入
 
 `contentEpoch` 属于 parent BufferResource 或 TextureResource。BufferRegion 与 TextureViewSpec 不拥有独立 epoch。Readback 与 dependency validation 讨论 parent content epoch；binding invalidation 讨论 allocation version。
 
@@ -499,13 +500,48 @@ const copyTileStats = runtime.createCopyCommand({
 
 Copy 读取 source `contentEpoch`，并推进 target `contentEpoch`。如果 copy target 需要新的物理资源，则 allocation replacement 通过独立的 `allocationVersion` 表达。
 
+## Clear
+
+`ClearBufferCommand` 是显式有序 GPU 写入。它的 target 是一个不可变
+`BufferRegion`；非空 region 会直接 lower 到 `GPUCommandEncoder.clearBuffer()`，
+而不是 CPU upload 或 compute emulation:
+
+```ts
+const clearCounters = runtime.createClearBufferCommand({
+    label: 'clear counters',
+    target: counters.region({ offset: 0, size: 256 }),
+})
+
+const submitted = runtime.createSubmission()
+    .clear(clearCounters)
+    .submit()
+```
+
+当前 target allocation 必须带有 `COPY_DST` usage。Offset 与 size 必须按四字节
+对齐，并在 command 到达其声明 submission step 时仍位于当前 allocation 范围内。
+非空 clear 会贡献一次 parent-buffer write，推进一个 content epoch，参与 dependency
+validation 与 potential-write tracking；如果延后的 native observation 使这一仍为
+current 的写入失效，其内容会进入 indeterminate。零长度 region 不贡献 resource
+access、epoch、potential write 或 native command。
+
+确定性的 target、usage、alignment 与 range failure 使用
+`SCRATCH_COMMAND_CLEAR_BUFFER_INVALID`。Native validation、internal、
+out-of-memory、device-loss 与 observation failure 仍通过共享 native error model
+成为 submission outcome。
+
 ## 渲染资源
 
 同一模型覆盖图形资源:
 
-- render pass attachment 是声明式写入。它的 store、clear、resolve 行为会推进 attachment resource 的 `contentEpoch`。
+- 非空 writable render attachment 是声明式写入，并且每个 pass 至多推进一次
+  parent resource 的 `contentEpoch`。Null color slot 没有 resource fact。
+- 持久 resolve target 是独立声明式写入，并且无论 multisampled source 被 store
+  还是 discard，都推进一次 parent resource 的 `contentEpoch`。Surface resolve
+  target 只有 lease 与 native-observation facts，不虚构持久 epoch。
 - 后续 pass 采样该 texture 时，声明读取已产生的 `contentEpoch`。
-- depth 与 stencil attachment 使用同一规则。load/store policy 与 read-as-texture 用法必须足够显式，供 dependency validation 判断。
+- Read-only depth 或 stencil aspect 是声明式读取，并且必须已经 ready；writable
+  aspect 是声明式写入。内部 conflict validation 感知 subresource/aspect，而公开
+  epoch 仍是 whole-resource fact。
 - surface current texture 是借来的 presentation-submission-scoped target，不是持久 `TextureResource`。它不能在获取它的 presentation submission 之外保留。
 - `TextureResource.resize()` 会推进 `allocationVersion`，并把 replacement 标为 empty。Dependent BindSet 变为 stale，且要求显式 acknowledged `prepare()`；PassSpec attachment 保留逻辑 TextureViewSpec，并创建受观察的 submission-scoped native view。Submission 不执行隐藏 binding repair。
 - TAA history、trails、迭代仿真纹理这类 temporal resources 都是普通资源; 它们的 previous-frame contents 由 content epochs 表达，而不是内核里的特殊一等特性。

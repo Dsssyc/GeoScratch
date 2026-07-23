@@ -1,7 +1,7 @@
 # Passes, Submissions, And Scheduler
 
 Status: Vision draft
-Date: 2026-07-16
+Date: 2026-07-23
 
 ## Decision
 
@@ -97,11 +97,55 @@ depth/stencil attachments. Submission preflight requires color attachment region
 to be pairwise disjoint. Views of one texture overlap when they select the same
 mip and array layer, or the same 3D `depthSlice`; distinct layers and slices remain
 valid. Surface creation separately enforces one live owner per canvas context.
+
+Color attachment arrays preserve native slot indices. Explicit `null` slots are
+accepted and lower unchanged; holes and `undefined` are rejected. A null slot creates
+no view, resource access, potential write, or content epoch. Render-pipeline target
+compatibility compares every slot, including `null/null`, without compression.
+
+A color attachment may resolve directly from its multisampled source to a
+single-sampled `TextureViewSpec` or `Surface`:
+
+```ts
+color: [
+    null,
+    {
+        target: multisampledColor.view(),
+        resolveTarget: surface,
+        load: 'clear',
+        store: 'discard',
+    },
+]
+```
+
+Scratch validates current source/target sample counts, format, physical extent,
+selected mip/layer/slice footprint, render-attachment usage, resolve support, and
+non-overlap before encoder effects. A Surface resolve target enters the same
+submission preparation, lease, and `attachment-view` observation lifecycle as an
+ordinary Surface attachment. A persistent texture resolve target records one pass
+write and advances its parent epoch once; a Surface has no fabricated persistent
+epoch. The source remains a write. `store: 'discard'` and transient storage leave the
+source indeterminate, while a resolved texture target is retained and ready.
+
+Depth and stencil aspects may be independently read-only. A read-only aspect has no
+load/store operation and must already contain readable content; it is a pass-level
+read. A writable aspect is a pass-level write. Internal conflict analysis uses
+texture/mip/layer/aspect footprints, allowing a draw to sample an overlapping
+read-only depth aspect while rejecting overlap with a writable aspect. If every
+present aspect is read-only, no parent-texture write epoch is produced. If any aspect
+is writable, the parent epoch advances at most once. The public epoch remains a
+whole-resource fact rather than a new public subresource epoch model.
+
+`maxDrawCount` is an optional immutable non-negative JavaScript safe integer and
+lowers unchanged to `GPURenderPassDescriptor.maxDrawCount`. It is the WebGPU
+implementation hint/limit contract, not a Scratch guarantee of performance or
+successful execution.
+
 Pass creation and submission both require the exact owner and compare the complete
 current `GPUCanvasContext.getConfiguration()` plus canvas size with private Surface
 facts. After the submission plan is validated, every executable Surface attachment is
 prepared before any command encoder is created. This immutable lease records Surface
-identity, format, and configuration version; the later observed `attachment-view`
+identity, format, configuration version, and committed size; the later observed `attachment-view`
 operation borrows the current texture and creates its view without another
 configuration read. A forged alias or external configuration drift therefore fails
 before presentation or encoder effects. Submission still compares Surface context
@@ -127,6 +171,7 @@ and `Object.create(PassSpecClass.prototype)` cannot enter the submission plan.
 
 ```ts
 const submitted = runtime.createSubmission({ validation: 'throw' })
+    .clear(clearCounters)
     .compute(simulationPass, [
         simulateParticles,
     ])
@@ -160,6 +205,7 @@ Submission responsibilities:
 - validate pass and command compatibility
 - validate resource read/write order
 - prepare explicit transfer operations
+- preserve native buffer-clear order and write effects
 - resolve command readiness policies into one pre-encoder execution plan
 - skip empty passes
 - record only the commands selected by that plan
@@ -299,7 +345,7 @@ Each resource read access retains `declaredContentEpoch`, containing the authore
 
 ## Physical Queue Timeline
 
-`SubmissionBuilder.steps` defines one total order across encoder-backed work and queue-side uploads. Recording commands into an encoder is not the same as enqueuing them: `GPUQueue.writeBuffer(...)` and `GPUQueue.writeTexture(...)` enter the queue when called, while copy, readback staging, resolve, compute, and render work enter the queue only when a finished command buffer is submitted.
+`SubmissionBuilder.steps` defines one total order across encoder-backed work and queue-side uploads. Recording commands into an encoder is not the same as enqueuing them: `GPUQueue.writeBuffer(...)` and `GPUQueue.writeTexture(...)` enter the queue when called, while clear, copy, readback staging, resolve, compute, and render work enter the queue only when a finished command buffer is submitted.
 
 Submission lowering therefore uses three phases:
 
@@ -312,13 +358,13 @@ The internal action families are command buffer, buffer upload, texture upload, 
 A command-buffer segment is a maximal contiguous sequence of executed encoder-backed steps. A queue-side upload ends the preceding segment and separates it from the next one:
 
 ```text
-copy + compute -> buffer upload -> texture upload -> render + readback
+clear + copy + compute -> buffer upload -> texture upload -> render + readback
 ```
 
 lowers to:
 
 ```text
-submit(copy + compute)
+submit(clear + copy + compute)
 writeBuffer
 writeTexture
 submit(render + readback)
@@ -411,7 +457,7 @@ Dependency validation and resource readiness policy are separate.
 - Validation checks whether the selected submission order, required epochs, and ownership are coherent.
 - `whenMissing` controls what to do if a required resource has no readable content at that position.
 
-`SubmissionValidationMode` controls optional dependency-finding disposition, not readiness control flow. `off` still resolves skip/fallback and preserves execution outcomes. Draw and Dispatch implement all four policies; Copy, Readback, and Resolve remain `throw`-only.
+`SubmissionValidationMode` controls optional dependency-finding disposition, not readiness control flow. `off` still resolves skip/fallback and preserves execution outcomes. Draw and Dispatch implement all four policies; Copy, Readback, and Resolve remain `throw`-only. Clear has no source-read readiness policy: a valid non-empty clear is an unconditional ordered write.
 
 ## Future Upper Orchestration
 

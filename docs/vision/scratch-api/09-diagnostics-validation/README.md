@@ -1,7 +1,7 @@
 # Diagnostics And Validation
 
 Status: Vision draft
-Date: 2026-07-16
+Date: 2026-07-23
 
 ## Decision
 
@@ -420,6 +420,28 @@ type PassDiagnosticCode =
     | 'SCRATCH_PASS_RESOLVE_ATTACHMENT_INVALID'
     | 'SCRATCH_PASS_WRONG_RUNTIME'
 ```
+
+Render-stage override constants and nullable pipeline slots remain pipeline
+construction facts. Invalid constants use `SCRATCH_PIPELINE_CONSTANTS_INVALID`;
+holes, `undefined`, or invalid non-null target states use
+`SCRATCH_PIPELINE_TARGET_STATE_INVALID`. Pipeline/pass null-slot incompatibility
+continues to use `SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH`.
+
+Pass validation distinguishes an invalid non-null color source
+(`SCRATCH_PASS_COLOR_ATTACHMENT_INVALID`) from resolve incompatibility
+(`SCRATCH_PASS_RESOLVE_ATTACHMENT_INVALID`) and an invalid draw-count hint
+(`SCRATCH_PASS_MAX_DRAW_COUNT_INVALID`). Structured facts identify the attachment
+slot, source/target resources and views, formats, sample counts, extents, usages,
+read-only aspects, and authored value where relevant.
+
+`SCRATCH_COMMAND_RENDER_STATE_INVALID` covers both an invalid immutable authored
+value and a full-attachment viewport/scissor that becomes invalid against the current
+pass extent. Its facts distinguish authored state from submission-time resolved
+state. `SCRATCH_COMMAND_CLEAR_BUFFER_INVALID` covers deterministic target lifecycle,
+usage, alignment, and current-allocation range failures. A synchronous native
+encoder exception or delayed native validation/internal/OOM/device-loss outcome uses
+the existing submission-native diagnostic path; it is not rewritten as prose or
+misreported as deterministic clear validation.
 
 Expected Draw/Dispatch `skip-command`, `skip-pass`, and successful `use-fallback` decisions are not diagnostics. They are immutable `SubmittedWork.executionOutcomes`. `SCRATCH_COMMAND_FALLBACK_INVALID` is reserved for missing/forbidden fallback shapes, forged non-command nodes, kind/runtime/lifecycle/write-set incompatibility, and repeated objects or command IDs. A selected fallback that cannot enter the current pass uses `SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE`.
 

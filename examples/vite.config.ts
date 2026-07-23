@@ -17,6 +17,7 @@ const examplePages = {
   helloVertexBuffer: path.resolve(examplesRoot, 'helloVertexBuffer/index.html'),
   textureSampling: path.resolve(examplesRoot, 'textureSampling/index.html'),
   renderToTexture: path.resolve(examplesRoot, 'renderToTexture/index.html'),
+  renderPassFeatures: path.resolve(examplesRoot, 'renderPassFeatures/index.html'),
   indirectExecution: path.resolve(examplesRoot, 'indirectExecution/index.html'),
   readinessPolicies: path.resolve(examplesRoot, 'readinessPolicies/index.html'),
   demLayer: path.resolve(examplesRoot, 'demLayer/index.html'),

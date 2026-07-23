@@ -1,7 +1,7 @@
 # Pipelines And Commands
 
 Status: Vision draft
-Date: 2026-07-16
+Date: 2026-07-23
 
 ## Decision
 
@@ -17,10 +17,11 @@ Render pipelines own stable state:
 
 - program or shader modules, shader stages, and entry points
 - bind layouts
-- vertex buffer layouts
+- vertex buffer layouts, including index-preserving explicit `null` slots
+- independent vertex and fragment override-constant snapshots
 - primitive state
 - depth and stencil state
-- color target compatibility
+- color target compatibility, including index-preserving explicit `null` slots
 - multisample state
 - pipeline cache key
 
@@ -42,6 +43,24 @@ Pipelines do not own:
 
 Pipelines are allowed to cache compiled GPU state. They are not allowed to become the place where concrete resources, visual semantics, and shader code are bundled into a material-like object.
 
+Render-stage constants are explicit and independent:
+
+```ts
+vertexConstants?: Readonly<Record<string, number>>
+fragmentConstants?: Readonly<Record<string, number>>
+```
+
+Scratch snapshots finite numeric values before the asynchronous native pipeline issue
+and lowers them to `GPUVertexState.constants` and `GPUFragmentState.constants`.
+Caller mutation after factory invocation cannot change the pending pipeline. A single
+ambiguous render `constants` alias is not accepted. Compute retains its separate
+`constants` contract.
+
+`vertexBuffers` and `targets` preserve native slot indices. An explicit `null` is a
+real empty slot; an array hole or `undefined` is invalid. Scratch neither compresses
+nor renumbers these sequences. A Draw must bind every non-null vertex slot and must
+not bind a null slot.
+
 ## Command
 
 `Command` is the canonical term because it is closest to the GPU command buffer model.
@@ -51,13 +70,17 @@ Target command families:
 - `DrawCommand`
 - `DispatchCommand`
 - `CopyCommand`
+- `ClearBufferCommand`
 - `UploadCommand`
 - `ResolveQuerySetCommand`
 - `ReadbackCommand` as an explicit ordered-staging escape hatch that produces a `ReadbackOperation`
 - `BeginOcclusionQueryCommand` / `EndOcclusionQueryCommand` as render-pass-only query brackets
-- future explicit clear or attachment-resolve commands, if needed
 
 `CopyCommand` covers WebGPU-native GPU-side copy directions: buffer-to-buffer, texture-to-texture, buffer-to-texture, and texture-to-buffer. CPU upload and CPU readback remain explicit transfer/readback operations rather than substitutes for these command encoder copies.
+
+`ClearBufferCommand` covers the native `GPUCommandEncoder.clearBuffer()` operation.
+Attachment resolve remains part of a render-pass color attachment; it is not a
+standalone resolve command.
 
 Every executable command exposes a one-way lifecycle.
 All normalized command construction facts and payload/resource references are locked:
@@ -75,6 +98,28 @@ irreversible, and neither assignment nor property shadowing can make a disposed 
 usable again. `ResolveQuerySetCommand` owns one deeply frozen source snapshot. Its
 `querySet`, `firstQuery`, and `queryCount` observations are derived from that snapshot, so
 submission readiness and native encoding cannot inspect different slot ranges.
+
+### ClearBufferCommand
+
+```ts
+const clear = runtime.createClearBufferCommand({
+    label: 'clear counters',
+    target: counters.region({ offset: 0, size: 256 }),
+})
+
+const submitted = runtime.submission()
+    .clear(clear)
+    .submit()
+```
+
+The target is exactly one immutable `BufferRegion` whose parent buffer has
+`COPY_DST`. Offset and size are four-byte aligned and are revalidated against the
+current allocation before encoder effects. A non-empty clear is an ordered parent
+buffer write: it participates in dependency validation, resource accesses, potential
+writes, native observation, and one content-epoch advance. A zero-size clear is both
+a physical and logical no-op. Scratch does not emulate clear with CPU bytes or a
+compute pipeline and does not invent a general texture-clear command that WebGPU
+does not provide.
 
 Command-kind authority is also closed inside the module. Every successfully constructed
 executable command registers its exact command-family discriminator in one
@@ -162,13 +207,46 @@ texture view or bind group, calls `prepare()`, waits, retries, or repairs stale 
 state. BindSet preparation is an independently acknowledged
 `bind-set-preparation` operation.
 
-Draw and dispatch execution contracts are normalized and locked at construction. Their pipeline, bind/index/vertex state, count, dynamic offsets, resource declarations, readiness policy, and fallback reference cannot drift between validation and encoding; referenced bind sets expose the same immutable normalized binding table. `dispose()` remains the explicit mutable lifecycle transition, exposed through a read-only `isDisposed` state rather than a writable flag.
+Draw and dispatch execution contracts are normalized and locked at construction. Their pipeline, bind/index/vertex state, count, dynamic offsets, resource declarations, readiness policy, and fallback reference cannot drift between validation and encoding. Draw render state is part of the same immutable snapshot; referenced bind sets expose the same immutable normalized binding table. `dispose()` remains the explicit mutable lifecycle transition, exposed through a read-only `isDisposed` state rather than a writable flag.
 
 Pipeline and command validation findings should use the shared `ScratchDiagnostic` envelope from `09-diagnostics-validation`. `Command` diagnostics should identify the command as `subject` and put related resources, pass specs, pipelines, or bind sets in `related` instead of prose.
 
 Query commands write indexed `QuerySetResource` slots. Resolving a query set writes bytes into a destination buffer and advances that buffer's `contentEpoch`; it does not make CPU-visible data until a `ReadbackOperation` is created or consumed.
 
 ## DrawCommand
+
+Each Draw owns complete declarative render state:
+
+```ts
+type DrawRenderState = Readonly<{
+    viewport?: 'full-attachment' | Readonly<{
+        x: number
+        y: number
+        width: number
+        height: number
+        minDepth?: number
+        maxDepth?: number
+    }>
+    scissor?: 'full-attachment' | Readonly<{
+        x: number
+        y: number
+        width: number
+        height: number
+    }>
+    blendConstant?: Readonly<GPUColor>
+    stencilReference?: number
+}>
+```
+
+Omitted viewport/scissor normalize to `'full-attachment'`; omitted depth range,
+blend constant, and stencil reference normalize to `0..1`, all-zero, and zero.
+Full-attachment values resolve from the pass's current prepared attachment extent
+at submission time, so a reusable Draw follows texture or Surface resize. Every
+Draw emits `setViewport`, `setScissorRect`, `setBlendConstant`, and
+`setStencilReference` before drawing. Its result therefore cannot depend on mutable
+state left by a previous Draw. Scratch validates finite values, WebGPU coordinate and
+size domains, depth ordering, and current scissor bounds without clamping. It does
+not expose standalone state-setting commands.
 
 The implemented native count contract supports static vertex values, static indexed values, and indirect buffers:
 
@@ -361,6 +439,8 @@ This complete policy surface currently belongs only to Draw and Dispatch. Copy, 
 
 - Do not make command counts closures by default.
 - Do not hide indirect draw or dispatch behind a special high-level feature.
+- Do not expose WebGL-style mutable viewport, scissor, blend-constant, or stencil-reference commands.
+- Do not emulate native buffer clear or invent a non-native general texture-clear command.
 - Do not expose pipeline statistics as a core command family while WebGPU lacks that core query type.
 - Do not store command membership in pass specs.
 - Do not encode terrain, flow, tile, or layer concepts in commands.
