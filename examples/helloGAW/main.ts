@@ -1,10 +1,9 @@
 import {
     ScratchRuntime,
     layoutCodec,
-    mat4,
     sphere,
-    utils,
 } from 'geoscratch'
+import { mat4, utils } from 'wgpu-matrix'
 import type {
     BindLayout,
     BindLayoutEntry,

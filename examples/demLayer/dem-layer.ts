@@ -1,9 +1,9 @@
 import {
     ScratchRuntime,
     layoutCodec,
-    mat4,
     plane,
 } from 'geoscratch'
+import { mat4 } from 'wgpu-matrix'
 import type {
     BindLayoutEntry,
     BindVisibility,

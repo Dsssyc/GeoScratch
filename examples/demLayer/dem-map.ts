@@ -1,6 +1,6 @@
-import { mat4 } from 'geoscratch'
+import { mat4 } from 'wgpu-matrix'
 
-type Vec3 = readonly [ number, number, number ]
+type Vec3 = [ number, number, number ]
 type Matrix = Float32Array<ArrayBuffer>
 
 type LngLat = {

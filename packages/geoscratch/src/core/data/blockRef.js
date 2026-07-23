@@ -1,6 +1,13 @@
 import { Numeric } from "../numericType/numeric.js"
 import { UUID } from "../utils/uuid.js"
-import { makeShaderDataDefinitions, makeStructuredView } from "../utils/webgpu-utils.module.js"
+import { makeShaderDataDefinitions, makeStructuredView } from "webgpu-utils"
+
+/**
+ * @typedef {Object} StructuredView
+ * @property {any} views
+ * @property {ArrayBuffer} arrayBuffer
+ * @property {(data: any) => void} set
+ */
 
 /**
  * @typedef {'f32' | 'i32' | 'u32' | 'vec2f' | 'vec2i' | 'vec2u' | 'vec3f' | 'vec3i' | 'vec3u' | 'vec4f' | 'vec4i' | 'vec4u' | 'mat2x2f' | 'mat2x2i' | 'mat2x2u' | 'mat3x3f' | 'mat3x3i' | 'mat3x3u' | 'mat4x4f' | 'mat4x4i' | 'mat4x4u'} BlockValueType
@@ -37,6 +44,7 @@ class BlockRef {
         }`
         const defs = makeShaderDataDefinitions(this.code)
         // console.log(this.code, defs)
+        /** @type {StructuredView} */
         this._view = makeStructuredView(defs.structs.Block)
         
 

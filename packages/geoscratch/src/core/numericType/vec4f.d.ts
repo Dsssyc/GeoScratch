@@ -1,4 +1,4 @@
-import { Mat4 } from "../math/mat4";
+import type { Mat4 } from "wgpu-matrix";
 import { Numeric } from "./numeric"
 export class Vec4f extends Numeric {
 

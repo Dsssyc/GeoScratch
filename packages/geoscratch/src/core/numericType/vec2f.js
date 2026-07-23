@@ -1,5 +1,5 @@
 import { Numeric } from "./numeric.js"
-import { vec2 } from "../math/wgpu-matrix.module.js"
+import { vec2 } from "wgpu-matrix"
 
 export class Vec2f extends Numeric {
      

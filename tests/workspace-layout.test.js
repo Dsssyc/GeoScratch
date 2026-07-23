@@ -49,7 +49,11 @@ describe('workspace layout', () => {
             'src',
         ])
         expect(pkg.scripts.build).to.equal('node scripts/clean-dist.mjs && node ../../node_modules/typescript/bin/tsc -p tsconfig.build.json')
-        expect(Object.keys(pkg.dependencies)).to.deep.equal(['@webgpu/types'])
+        expect(pkg.dependencies).to.deep.equal({
+            '@webgpu/types': '^0.1.71',
+            'webgpu-utils': '1.11.0',
+            'wgpu-matrix': '2.5.1',
+        })
     })
 
     it('keeps example-only dependencies inside the examples workspace', () => {
@@ -64,7 +68,9 @@ describe('workspace layout', () => {
             'd3-delaunay',
             'earcut',
             'hammerjs',
+            'wgpu-matrix',
         ])
+        expect(examplesPkg.dependencies['wgpu-matrix']).to.equal('2.5.1')
         expect(examplesPkg.dependencies).to.not.include.keys([
             '@mapbox/vector-tile',
             'd3-voronoi',
@@ -72,8 +78,9 @@ describe('workspace layout', () => {
         ])
     })
 
-    it('makes examples consume the package API rather than internal source files', () => {
+    it('makes examples consume declared package APIs rather than internal source files', () => {
 
+        const examplesPkg = readJson('examples', 'package.json')
         const exampleFiles = [
             'examples/helloTriangle/main.ts',
             'examples/uniformTriangle/main.ts',
@@ -97,8 +104,16 @@ describe('workspace layout', () => {
 
         for (const file of exampleFiles) {
             const source = read(file)
+            const packageImports = [ ...source.matchAll(/from '([^./][^']*)'/g) ]
+                .map(match => match[1])
 
-            expect(source, file).to.include("from 'geoscratch'")
+            expect(packageImports, file).to.not.be.empty
+            for (const packageImport of packageImports) {
+                expect({
+                    ...examplesPkg.dependencies,
+                    ...examplesPkg.devDependencies,
+                }, `${file}: ${packageImport}`).to.have.property(packageImport)
+            }
             expect(source, file).to.not.include('../../src/')
             expect(source, file).to.not.include('../src/')
         }

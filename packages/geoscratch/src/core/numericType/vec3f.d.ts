@@ -1,5 +1,4 @@
-import { Mat4 } from "../math/mat4";
-import { Vec3 } from "../math/vec3";
+import type { Mat4, Vec3 } from "wgpu-matrix";
 import { Numeric } from "./numeric"
 
 export class Vec3f extends Numeric {

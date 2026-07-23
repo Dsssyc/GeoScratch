@@ -58,11 +58,18 @@ import { ScratchObject } from '../../core/object/object.js'
  */
 
 /**
+ * @typedef {Object} StructuredView
+ * @property {any} views
+ * @property {ArrayBuffer} arrayBuffer
+ * @property {(data: any) => void} set
+ */
+
+/**
  * @typedef {Object} UniformBinding
  * @property {string} name
  * @property {number} [visibility]
  * @property {{[dataName: string]: Function}} map
- * @property {import('./webgpu-utils.module.js').StructuredView} view
+ * @property {StructuredView} view
  * @property {BlockRef} ref
  */
 

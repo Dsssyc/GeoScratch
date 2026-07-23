@@ -1,4 +1,4 @@
-import { mat4 } from 'geoscratch'
+import { mat4 } from 'wgpu-matrix'
 
 type Point = Readonly<{ x: number; y: number }>
 export type FlowLngLat = Readonly<{ lng: number; lat: number }>

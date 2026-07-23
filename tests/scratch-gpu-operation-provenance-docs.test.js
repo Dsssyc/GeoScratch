@@ -73,15 +73,15 @@ describe('scratch GPU operation provenance documentation', () => {
         )
         const inventoryRows = audit.match(/^\| N\d+ \|.*\|$/gm) ?? []
 
-        expect(callSites).to.have.length(16)
-        expect(inventoryRows).to.have.length(16)
+        expect(callSites).to.have.length(9)
+        expect(inventoryRows).to.have.length(9)
         for (const callSite of callSites) {
             expect(audit, callSite).to.include(`\`${callSite}\``)
         }
         expect(inventoryRows.filter(row => row.includes('Covered by this goal'))).to.have.length(3)
         expect(inventoryRows.filter(row => row.includes('Acknowledged readback staging'))).to.have.length(1)
         expect(inventoryRows.filter(row => row.includes('Internal deferred allocation'))).to.have.length(0)
-        expect(inventoryRows.filter(row => row.includes('Raw native escape hatch'))).to.have.length(12)
+        expect(inventoryRows.filter(row => row.includes('Raw native escape hatch'))).to.have.length(5)
         expect(inventoryRows.filter(row => row.includes('Unresolved defect'))).to.have.length(0)
     })
 

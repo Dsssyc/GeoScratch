@@ -43,12 +43,14 @@
     "Geovisualization"
   ],
   "author": "YcSoku",
-  "license": "ISC",
+  "license": "BSD-3-Clause",
   "bugs": {
     "url": "https://github.com/YcSoku/GeoScratch/issues"
   },
   "homepage": "https://github.com/YcSoku/GeoScratch#readme",
   "dependencies": {
-    "@webgpu/types": "^0.1.71"
+    "@webgpu/types": "^0.1.71",
+    "webgpu-utils": "1.11.0",
+    "wgpu-matrix": "2.5.1"
   }
 }

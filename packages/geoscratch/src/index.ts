@@ -308,10 +308,6 @@ export { sphere } from './geometry/sphere/sphere.js'
 export { plane } from './geometry/plane/plane.js'
 export { randomNonZeroBetweenMinusOneAndOne } from './core/math/random.js'
 export {
-	vec2, vec3, vec4, mat3, mat4, utils, quat,
-} from './core/math/wgpu-matrix.module.js'
-
-export {
 	Numeric,
 	i32, asI32, I32,
 	u32, asU32, U32,

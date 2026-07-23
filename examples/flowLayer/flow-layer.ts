@@ -2,8 +2,8 @@ import {
     MercatorCoordinate,
     ScratchRuntime,
     layoutCodec,
-    mat4,
 } from 'geoscratch'
+import { mat4 } from 'wgpu-matrix'
 import type {
     BindLayout,
     BindSet,

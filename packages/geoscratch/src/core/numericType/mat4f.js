@@ -1,5 +1,5 @@
 import { Numeric } from "./numeric.js"
-import { mat4 } from "../math/wgpu-matrix.module.js"
+import { mat4 } from "wgpu-matrix"
 
 export class Mat4f extends Numeric {
 
