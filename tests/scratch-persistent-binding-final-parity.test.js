@@ -305,11 +305,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.historicalTypeInventory.every(entry => entry.status === 'passed')).to.equal(true)
         expect(result.publicSurface.publicMemberParity).to.deep.include({
             goalStartCount: 357,
-            finalCount: 415,
+            finalCount: 431,
             status: 'passed',
         })
-        expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(21)
-        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(12)
+        expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(22)
+        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(13)
         expect(result.publicSurface.programReadonlyPublicContracts.map(
             contract => contract.id
         )).to.deep.equal([ 'Program.runtime', 'Program.id', 'Program.isDisposed' ])
@@ -323,17 +323,17 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.programPipelineFactSnapshot.mutablePlannerReads).to.deep.equal([])
         expect(result.publicSurface.productionEmitParity).to.deep.include({
             status: 'passed',
-            emittedJavaScriptCount: 98,
-            emittedDeclarationCount: 98,
-            declarationSignatureCount: 3772,
+            emittedJavaScriptCount: 99,
+            emittedDeclarationCount: 99,
+            declarationSignatureCount: 3898,
         })
-        expect(result.publicSurface.productionEmitParity.files).to.have.length(196)
+        expect(result.publicSurface.productionEmitParity.files).to.have.length(198)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
         expect(result.diagnostics).to.deep.include({ schemaVersion: 5 })
         expect(result.diagnostics.unexpectedMissing).to.deep.equal([])
         expect(result.officialBindingMatrix.status).to.equal('passed')
         expect(result.officialBindingMatrix.nativeLowering.status).to.equal('passed')
-        expect(result.officialBindingMatrix.externalTextureBoundary.intentionallyExcluded).to.equal(true)
+        expect(result.officialBindingMatrix.externalTextureBoundary.managedAttemptLocal).to.equal(true)
         expect(result.nativeCopyQuadrants.every(entry => (
             entry.status === 'passed' && entry.gpuSide && entry.astResolvedCallCount === 1
         ))).to.equal(true)

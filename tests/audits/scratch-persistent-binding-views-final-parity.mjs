@@ -755,10 +755,12 @@ const goalStartPublicMemberReplacements = Object.freeze({
     'Resource.state:get': 'content-bearing BufferResource/TextureResource only',
     'SamplerResource.constructor:constructor': 'Promise-only ScratchRuntime.createSampler()',
     'SamplerResource.static.create:method': 'Promise-only ScratchRuntime.createSampler()',
+    'Surface.getCurrentTexture:method': 'SubmissionBuilder.surfaceTexture() attempt-local lease authority',
     'TextureResource.createView:method': 'logical TextureResource.view() returning TextureViewSpec',
 })
 const goalStartChangedPublicMemberReplacements = Object.freeze({
     'BindLayout.entrySubject:method': 'accept unknown input so invalid descriptors still receive structured diagnostics',
+    'CopyCommand.encode:method': 'submission-owned attempt-local texture authority for Surface copy endpoints',
     'DispatchCommand.encode:method': 'submission-resolved immediate snapshot for complete per-dispatch state',
     'DrawCommand.encode:method': 'submission-resolved attachment extent and immediate snapshot for complete per-draw state',
     'ReadbackOperation.source:get': 'whole BufferResource source -> explicit BufferRegion source',
@@ -785,6 +787,7 @@ const historicalPublicMethodReplacements = Object.freeze({
     'Resource._advanceContentEpoch:method': 'module-private advanceResourceContentEpoch()',
     'Resource._replaceAllocation:method': 'module-private replaceResourceAllocation()',
     'SamplerResource.static.create:method': 'Promise-only ScratchRuntime.createSampler()',
+    'Surface.getCurrentTexture:method': 'SubmissionBuilder.surfaceTexture() attempt-local lease authority',
     'TextureResource._replaceAllocation:method': 'module-private transactional replacement helper',
     'TextureResource.createView:method': 'logical TextureResource.view() returning TextureViewSpec',
     'TextureResource.static.create:method': 'Promise-only ScratchRuntime.createTexture()',
@@ -1132,20 +1135,24 @@ const bindingLoweringProperties = assignedPropertiesInFunction(
     'lowered'
 )
 const bindingLowering = Object.freeze({
-    expected: [ 'buffer', 'sampler', 'storageTexture', 'texture' ],
+    expected: [ 'buffer', 'externalTexture', 'sampler', 'storageTexture', 'texture' ],
     actual: bindingLoweringProperties,
     status: equalSets(
         bindingLoweringProperties,
-        [ 'buffer', 'sampler', 'storageTexture', 'texture' ]
+        [ 'buffer', 'externalTexture', 'sampler', 'storageTexture', 'texture' ]
     ) ? 'passed' : 'failed',
 })
 const externalTextureBoundary = Object.freeze({
     officialMember: 'externalTexture',
-    intentionallyExcluded: !current.binding.includes("type: 'external-texture'") &&
-        finalDocs.bindings.includes('`externalTexture` is deliberately excluded'),
-    reason: 'separate frame/task lifetime contract required',
-    status: !current.binding.includes("type: 'external-texture'") &&
-        finalDocs.bindings.includes('`externalTexture` is deliberately excluded')
+    managedAttemptLocal: current.binding.includes("type: 'external-texture'") &&
+        bindingLoweringProperties.includes('externalTexture') &&
+        current.submission.includes('AttemptTextureAuthority') &&
+        finalDocs.bindings.includes('`externalTexture` is an attempt-local binding'),
+    reason: 'submission-owned import and frame/task lifetime authority',
+    status: current.binding.includes("type: 'external-texture'") &&
+        bindingLoweringProperties.includes('externalTexture') &&
+        current.submission.includes('AttemptTextureAuthority') &&
+        finalDocs.bindings.includes('`externalTexture` is an attempt-local binding')
         ? 'passed'
         : 'failed',
 })
@@ -1698,7 +1705,7 @@ for (const replacements of Object.values(diagnosticReplacements)) {
 assertParity(
     officialBindingMatrix.every(row => row.status === 'passed') &&
         bindingLowering.status === 'passed' &&
-        externalTextureBoundary.intentionallyExcluded,
+        externalTextureBoundary.managedAttemptLocal,
     `official binding matrix failed: ${failedRows(officialBindingMatrix)}`
 )
 assertParity(
@@ -1777,7 +1784,7 @@ const result = {
         externalTextureBoundary,
         status: officialBindingMatrix.every(row => row.status === 'passed') &&
             bindingLowering.status === 'passed' &&
-            externalTextureBoundary.intentionallyExcluded
+            externalTextureBoundary.managedAttemptLocal
             ? 'passed'
             : 'failed',
     },

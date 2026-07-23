@@ -158,6 +158,7 @@ export function createFakeGpu(options = {}) {
         bindGroups: [],
         textures: [],
         textureViews: [],
+        externalTextures: [],
         samplers: [],
         pipelineLayouts: [],
         renderPipelines: [],
@@ -839,6 +840,16 @@ export function createFakeGpu(options = {}) {
             calls.samplers.push(sampler)
             return sampler
         },
+        importExternalTexture(descriptor) {
+            const invalid = issueNativeMethod('importExternalTexture')
+            const externalTexture = {
+                type: 'externalTexture',
+                descriptor,
+                invalid,
+            }
+            calls.externalTextures.push(externalTexture)
+            return externalTexture
+        },
         createPipelineLayout(descriptor) {
             calls.nativeTimeline.push({ type: 'create-pipeline-layout' })
             applyNativeFailure('createPipelineLayout')
@@ -987,6 +998,7 @@ export function createFakeCanvas() {
         getConfigurationCalls: 0,
         configuration: null,
         currentTextureCalls: 0,
+        currentTextures: [],
         configure(descriptor) {
             this.configureCalls.push(descriptor)
             this.configuration = {
@@ -1008,16 +1020,19 @@ export function createFakeCanvas() {
         },
         getCurrentTexture() {
             this.currentTextureCalls++
-            return {
+            const texture = {
                 createView(descriptor) {
                     const view = {
                         type: 'textureView',
                         descriptor,
+                        texture,
                     }
                     textureViews.push(view)
                     return view
                 },
             }
+            this.currentTextures.push(texture)
+            return texture
         },
     }
 

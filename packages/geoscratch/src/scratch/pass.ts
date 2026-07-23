@@ -3,6 +3,13 @@ import { throwScratchDiagnostic } from './diagnostics.js'
 import { advanceQuerySlotContentEpoch, isQuerySetResource, QuerySetResource } from './query-set.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { isSurfaceReceiver, surfaceFactsFor } from './surface.js'
+import {
+    assertSurfaceTextureLeaseForSubmission,
+    assertSurfaceTextureLeaseUsable,
+    isSurfaceTextureLease,
+    surfaceTextureLeaseFacts,
+    surfaceTextureUsageForRole,
+} from './temporal-texture.js'
 import { TextureResource, TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
 import {
     textureFormatIsColorRenderable,
@@ -12,6 +19,10 @@ import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRec
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { Surface, SurfaceFacts } from './surface.js'
+import type {
+    SurfaceTextureLease,
+    SurfaceTextureLeaseOwner,
+} from './temporal-texture.js'
 
 const TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
 const TEXTURE_USAGE_TRANSIENT_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'TRANSIENT_ATTACHMENT', 0x20)
@@ -40,8 +51,8 @@ export type TimestampWritesSpec = Readonly<{
 }>
 
 export type RenderPassColorAttachmentSpec = Readonly<{
-    target: Surface | TextureViewSpec
-    resolveTarget?: Surface | TextureViewSpec
+    target: Surface | TextureViewSpec | SurfaceTextureLease
+    resolveTarget?: Surface | TextureViewSpec | SurfaceTextureLease
     format?: GPUTextureFormat
     load?: GPULoadOp
     store?: GPUStoreOp
@@ -622,11 +633,11 @@ function normalizeColorAttachment(
         return normalized
     }
 
-    if (!isSurfaceReceiver(target)) {
+    if (!isSurfaceAttachmentTarget(target)) {
         throwColorAttachmentDiagnostic(pass, attachment, index, 'target')
     }
 
-    const surface = surfaceFactsFor(target)
+    const surface = surfaceAttachmentFactsFor(target)
 
     if (surface.runtime !== pass.runtime) {
         throwScratchDiagnostic({
@@ -704,10 +715,10 @@ function normalizeResolveAttachment(
         validateResolveTextureView(pass, resolveTarget, attachment, index)
         normalized.resolveTarget = resolveTarget
     } else {
-        if (!isSurfaceReceiver(resolveTarget)) {
+        if (!isSurfaceAttachmentTarget(resolveTarget)) {
             throwResolveAttachmentDiagnostic(pass, attachment, index, 'target')
         }
-        const surface = surfaceFactsFor(resolveTarget)
+        const surface = surfaceAttachmentFactsFor(resolveTarget)
         if (surface.runtime !== pass.runtime) {
             throwResolveAttachmentDiagnostic(pass, attachment, index, 'runtime')
         }
@@ -1153,7 +1164,7 @@ export function currentRenderPassAttachmentExtent(
     pass.assertUsable()
     for (const [ index, attachment ] of pass.color.entries()) {
         if (attachment === null) continue
-        if (!isTextureViewSpec(attachment.target) && preparedSurfaceExtent !== undefined) {
+        if (isSurfaceReceiver(attachment.target) && preparedSurfaceExtent !== undefined) {
             const extent = preparedSurfaceExtent(attachment.target)
             return Object.freeze({
                 width: extent.width,
@@ -1227,7 +1238,7 @@ function validateResolveAttachment(
 
 function colorAttachmentFacts(
     pass: RenderPassSpec,
-    target: Surface | TextureViewSpec,
+    target: Surface | TextureViewSpec | SurfaceTextureLease,
     viewDescriptor: GPUTextureViewDescriptor | undefined,
     index: number,
     role: 'color' | 'resolve',
@@ -1269,7 +1280,7 @@ function colorAttachmentFacts(
         }
     }
 
-    const surface = surfaceFactsFor(target)
+    const surface = surfaceAttachmentFactsFor(target)
     if (surface.runtime !== pass.runtime) {
         if (role === 'resolve') {
             throwResolveAttachmentDiagnostic(pass, { target, resolveTarget: target }, index, 'runtime')
@@ -1482,6 +1493,44 @@ function snapshotSurfaceAttachmentViewDescriptor(
         if (value !== undefined) snapshot[key] = value
     }
     return Object.freeze(snapshot) as GPUTextureViewDescriptor
+}
+
+function isSurfaceAttachmentTarget(
+    target: unknown
+): target is Surface | SurfaceTextureLease {
+
+    return isSurfaceReceiver(target) || isSurfaceTextureLease(target)
+}
+
+function surfaceAttachmentFactsFor(
+    target: Surface | SurfaceTextureLease
+): SurfaceFacts {
+
+    if (isSurfaceTextureLease(target)) {
+        assertSurfaceTextureLeaseUsable(target)
+        return surfaceTextureLeaseFacts(target).surfaceFacts
+    }
+    return surfaceFactsFor(target)
+}
+
+export function assertRenderPassTemporalDependencies(
+    pass: RenderPassSpec,
+    owner: SurfaceTextureLeaseOwner
+): void {
+
+    pass.assertRuntime(owner.runtime)
+    for (const attachment of pass.color) {
+        if (attachment === null) continue
+        for (const target of [ attachment.target, attachment.resolveTarget ]) {
+            if (!isSurfaceTextureLease(target)) continue
+            assertSurfaceTextureLeaseForSubmission(
+                target,
+                owner,
+                surfaceTextureUsageForRole('render-attachment'),
+                'render-attachment'
+            )
+        }
+    }
 }
 
 function normalizeColorAttachmentOperations(
@@ -1803,7 +1852,7 @@ function throwColorAttachmentDiagnostic(
         message: 'RenderPassSpec color requires dense explicit null or valid color attachment slots.',
         expected: {
             color: 'dense array of RenderPassColorAttachmentSpec | null',
-            target: 'Surface or TextureViewSpec for each non-null slot',
+            target: 'Surface, SurfaceTextureLease, or TextureViewSpec for each non-null slot',
         },
         actual: {
             reason,

@@ -1,8 +1,12 @@
 import { UUID } from '../core/utils/uuid.js'
 import {
     claimReadbackCommand,
+    assertCommandTemporalDependencies,
+    assertCopyCommandTemporalDependencies,
     assertCommandBufferGpuUseAvailable,
     commitUploadCommandLogicalWrite,
+    copyCommandPersistentSource,
+    copyCommandPersistentTarget,
     encodeReadbackCommandClaim,
     markReadbackCommandClaimAdopted,
     markReadbackCommandClaimMapping,
@@ -33,6 +37,7 @@ import {
 } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import {
+    assertRenderPassTemporalDependencies,
     createRenderPassDescriptor,
     currentRenderPassAttachmentExtent,
     isComputePassSpec,
@@ -55,10 +60,17 @@ import {
     compareSubmissionNativeStages,
 } from './submission-native-observation.js'
 import {
-    createPreparedSurfaceAttachmentView,
     prepareSurfaceAttachment,
     preparedSurfaceAttachmentFacts,
 } from './surface.js'
+import {
+    AttemptTextureAuthority,
+    createSurfaceTextureLease,
+    expireSurfaceTextureLeasesForOwner,
+    isSurfaceTextureLease,
+    SurfaceTextureLease,
+    surfaceTextureLeaseFacts,
+} from './temporal-texture.js'
 import { TextureResource, createNativeTextureView, isTextureResource, isTextureViewSpec } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, ClearBufferCommand, CommandResourceReadDescriptor, CommandResourceReadEpoch, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResolvedCommandImmediateData, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
@@ -532,6 +544,11 @@ export class SubmissionBuilder {
         return this
     }
 
+    surfaceTexture(surface: Surface): SurfaceTextureLease {
+
+        return createSurfaceTextureLease(this, surface)
+    }
+
     upload(command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand) {
 
         this.steps.push({
@@ -598,6 +615,7 @@ export class SubmissionBuilder {
 
         const resolvedPlan = resolveSubmissionBeforeEncoding(this)
         applySubmissionValidationDisposition(this, resolvedPlan.report)
+        assertResolvedSubmissionTemporalDependencies(this, resolvedPlan.steps)
         for (const step of resolvedPlan.steps) {
             if (step.kind === 'upload') {
                 validateUploadCommandQueueAction(step.command, this.runtime.queue)
@@ -608,6 +626,7 @@ export class SubmissionBuilder {
             resolvedPlan.steps
         )
         const surfaceAttachments = prepareSubmissionSurfaceAttachments(resolvedPlan.steps)
+        const attemptTextureAuthority = new AttemptTextureAuthority(this)
 
         const submittedId = `scratch-submitted-${UUID()}`
         const nativeIssuePlan = createSubmissionNativeIssuePlan(
@@ -778,17 +797,20 @@ export class SubmissionBuilder {
 
                 if (step.kind === 'copy') {
                     const encoder = getEncoder()
-                    const source = 'region' in step.command.source
-                        ? step.command.source.region.buffer
-                        : step.command.source.resource
-                    const target = isTextureResource(step.command.target)
-                        ? step.command.target
-                        : step.command.target.buffer
-                    trackSegmentResourceWrite(target)
+                    const source = copyCommandPersistentSource(step.command)
+                    const target = copyCommandPersistentTarget(step.command)
+                    if (target !== undefined) trackSegmentResourceWrite(target)
                     const origin = commandAccessOrigin(stepIndex, 'copy', step.command)
                     const accesses = [
-                        captureResourceAccess(source, 'read', origin, step.command.source.contentEpoch),
-                        captureResourceAccess(target, 'write', origin),
+                        ...(source === undefined ? [] : [ captureResourceAccess(
+                            source.resource,
+                            'read',
+                            origin,
+                            source.contentEpoch
+                        ) ]),
+                        ...(target === undefined
+                            ? []
+                            : [ captureResourceAccess(target, 'write', origin) ]),
                     ]
                     issueStandaloneCommandEncoding(
                         nativeObservation,
@@ -796,7 +818,7 @@ export class SubmissionBuilder {
                         stepIndex,
                         step.command,
                         encoder,
-                        () => step.command.encode(encoder)
+                        () => step.command.encode(encoder, attemptTextureAuthority)
                     )
                     completeResourceAccesses(resourceAccesses, accesses)
                     continue
@@ -899,7 +921,8 @@ export class SubmissionBuilder {
                                     stepIndex,
                                     commandIndex,
                                     command
-                                )
+                                ),
+                                attemptTextureAuthority
                             )
                         )
                         completeResourceAccesses(resourceAccesses, accesses)
@@ -933,7 +956,8 @@ export class SubmissionBuilder {
                     submittedId,
                     stepIndex,
                     step.passSpec,
-                    surfaceAttachments
+                    surfaceAttachments,
+                    attemptTextureAuthority
                 )
                 const encoder = getEncoder()
                 const passEncoder = nativeObservation.issue(
@@ -979,7 +1003,8 @@ export class SubmissionBuilder {
                                     stepIndex,
                                     commandIndex,
                                     command
-                                )
+                                ),
+                                attemptTextureAuthority
                             )
                             : command.encode(passEncoder)
                     )
@@ -1063,6 +1088,8 @@ export class SubmissionBuilder {
             throw cause
         }
         } finally {
+            attemptTextureAuthority.close()
+            expireSurfaceTextureLeasesForOwner(this)
             nativeObservation.finish()
         }
 
@@ -1145,6 +1172,33 @@ export class SubmissionBuilder {
         return {
             kind: 'Submission',
             id: this.id,
+        }
+    }
+}
+
+function assertResolvedSubmissionTemporalDependencies(
+    builder: SubmissionBuilder,
+    steps: readonly ResolvedSubmissionStep[]
+): void {
+
+    for (const step of steps) {
+        if (step.kind === 'copy') {
+            assertCopyCommandTemporalDependencies(step.command, builder)
+            continue
+        }
+        if (step.kind === 'compute') {
+            if (step.disposition === 'skip-pass') continue
+            for (const command of step.commands) {
+                assertCommandTemporalDependencies(command, builder)
+            }
+            continue
+        }
+        if (step.kind !== 'render' || step.disposition === 'skip-pass') continue
+        assertRenderPassTemporalDependencies(step.passSpec, builder)
+        for (const command of step.commands) {
+            if (isDrawCommand(command)) {
+                assertCommandTemporalDependencies(command, builder)
+            }
         }
     }
 }
@@ -1234,6 +1288,8 @@ function createSubmissionNativeIssuePlan(
                 if (attachment === null) continue
                 const target = isTextureViewSpec(attachment.target)
                     ? attachment.target
+                    : isSurfaceTextureLease(attachment.target)
+                        ? attachment.target
                     : preparedSurfaceAttachmentFor(surfaceAttachments, attachment.target)
                 encoding.push({
                     stage: 'attachment-view',
@@ -1249,6 +1305,8 @@ function createSubmissionNativeIssuePlan(
                 if (attachment.resolveTarget !== undefined) {
                     const resolveTarget = isTextureViewSpec(attachment.resolveTarget)
                         ? attachment.resolveTarget
+                        : isSurfaceTextureLease(attachment.resolveTarget)
+                            ? attachment.resolveTarget
                         : preparedSurfaceAttachmentFor(
                             surfaceAttachments,
                             attachment.resolveTarget
@@ -1329,6 +1387,7 @@ function prepareSubmissionSurfaceAttachments(
                 if (
                     target === undefined ||
                     isTextureViewSpec(target) ||
+                    isSurfaceTextureLease(target) ||
                     prepared.has(target)
                 ) continue
                 prepared.set(target, prepareSurfaceAttachment(target))
@@ -1353,13 +1412,16 @@ function issueRenderAttachmentViews(
     submissionId: string,
     stepIndex: number,
     passSpec: RenderPassSpec,
-    surfaceAttachments: PreparedSurfaceAttachments
+    surfaceAttachments: PreparedSurfaceAttachments,
+    attemptTextureAuthority: AttemptTextureAuthority
 ): RenderPassNativeAttachments {
 
     const color = passSpec.color.map((attachment, attachmentIndex) => {
         if (attachment === null) return null
         const target = isTextureViewSpec(attachment.target)
             ? attachment.target
+            : isSurfaceTextureLease(attachment.target)
+                ? attachment.target
             : preparedSurfaceAttachmentFor(surfaceAttachments, attachment.target)
         const view = observation.issue(
             'attachment-view',
@@ -1373,13 +1435,23 @@ function issueRenderAttachmentViews(
             ),
             () => isTextureViewSpec(attachment.target)
                 ? createNativeTextureView(attachment.target as TextureViewSpec)
-                : createPreparedSurfaceAttachmentView(target as PreparedSurfaceAttachment, attachment.viewDescriptor)
+                : isSurfaceTextureLease(attachment.target)
+                    ? attemptTextureAuthority.surfaceLeaseView(
+                        attachment.target,
+                        attachment.viewDescriptor
+                    )
+                : attemptTextureAuthority.directSurfaceView(
+                    target as PreparedSurfaceAttachment,
+                    attachment.viewDescriptor
+                )
         )
         const resolveTarget = attachment.resolveTarget === undefined
             ? undefined
             : (() => {
                 const preparedTarget = isTextureViewSpec(attachment.resolveTarget)
                     ? attachment.resolveTarget
+                    : isSurfaceTextureLease(attachment.resolveTarget)
+                        ? attachment.resolveTarget
                     : preparedSurfaceAttachmentFor(
                         surfaceAttachments,
                         attachment.resolveTarget
@@ -1396,7 +1468,12 @@ function issueRenderAttachmentViews(
                     ),
                     () => isTextureViewSpec(attachment.resolveTarget)
                         ? createNativeTextureView(attachment.resolveTarget as TextureViewSpec)
-                        : createPreparedSurfaceAttachmentView(
+                        : isSurfaceTextureLease(attachment.resolveTarget)
+                            ? attemptTextureAuthority.surfaceLeaseView(
+                                attachment.resolveTarget,
+                                attachment.resolveViewDescriptor
+                            )
+                        : attemptTextureAuthority.directSurfaceView(
                             preparedTarget as PreparedSurfaceAttachment,
                             attachment.resolveViewDescriptor
                         )
@@ -1527,8 +1604,26 @@ function renderAttachmentLocation(
     passSpec: RenderPassSpec,
     attachmentKind: 'color' | 'resolve' | 'depth-stencil',
     attachmentIndex: number,
-    target: TextureViewSpec | PreparedSurfaceAttachment
+    target: TextureViewSpec | PreparedSurfaceAttachment | SurfaceTextureLease
 ): ScratchSubmissionNativeLocation {
+
+    if (isSurfaceTextureLease(target)) {
+        if (attachmentKind !== 'color' && attachmentKind !== 'resolve') {
+            throw new TypeError('Surface render attachments must be color or resolve attachments.')
+        }
+        const facts = surfaceTextureLeaseFacts(target)
+        return {
+            kind: 'render-attachment',
+            submissionId,
+            stepIndex,
+            passId: passSpec.id,
+            attachmentKind,
+            attachmentIndex,
+            surfaceId: facts.surfaceFacts.id,
+            surfaceFormat: facts.surfaceFacts.format,
+            configurationVersion: facts.configurationVersion,
+        }
+    }
 
     if (!isTextureViewSpec(target)) {
         if (attachmentKind !== 'color' && attachmentKind !== 'resolve') {
@@ -1663,10 +1758,8 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
         if (step.kind === 'copy') {
             validateCopyStep(builder, step)
             validateCopyReadiness(builder, step, stepIndex, readiness, diagnostics)
-            markSimulatedReady(
-                readiness,
-                isTextureResource(step.command.target) ? step.command.target : step.command.target.buffer
-            )
+            const target = copyCommandPersistentTarget(step.command)
+            if (target !== undefined) markSimulatedReady(readiness, target)
             steps.push(step)
             continue
         }
@@ -1877,6 +1970,7 @@ function validateCopyStep(builder: SubmissionBuilder, step: CopyStep) {
     }
 
     command.assertRuntime(builder.runtime)
+    assertCopyCommandTemporalDependencies(command, builder)
     command.validateCurrentRange()
 }
 
@@ -1888,11 +1982,16 @@ function validateCopyReadiness(
     diagnostics: ScratchDiagnostic[]
 ): void {
 
-    const source = step.command.source
-    validateThrowOnlyCommandReadiness(builder, stepIndex, step.command, [ {
-        resource: 'region' in source ? source.region.buffer : source.resource,
-        contentEpoch: source.contentEpoch,
-    } ], readiness, diagnostics, 'source')
+    const source = copyCommandPersistentSource(step.command)
+    validateThrowOnlyCommandReadiness(
+        builder,
+        stepIndex,
+        step.command,
+        source === undefined ? [] : [ source ],
+        readiness,
+        diagnostics,
+        'source'
+    )
 }
 
 function validateReadbackStep(builder: SubmissionBuilder, step: ReadbackStep) {

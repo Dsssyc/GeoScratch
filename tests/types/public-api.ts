@@ -96,13 +96,28 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const runtime: scr.ScratchRuntime = await scr.ScratchRuntime.create({
         gpu,
         label: 'typed scratch runtime',
+        featureLevel: 'compatibility',
+        xrCompatible: true,
         requiredFeatures: [ 'timestamp-query' ],
-        requiredLimits: { maxBufferSize: 1024 },
+        requiredLimits: { maxBufferSize: 1024, maxStorageBufferBindingSize: undefined },
+        defaultQueue: { label: 'typed scratch queue' },
         diagnostics: {
             submissionScopes: 'summary',
             maxPendingNativeObservations: 8,
         },
     })
+    const requestFacts: scr.ScratchRuntimeRequestFacts = runtime.requestFacts
+    const adapterInfo: scr.ScratchAdapterInfoSnapshot = runtime.adapterInfo
+    const requestedFeatureLevel: scr.ScratchFeatureLevel = requestFacts.adapter.featureLevel
+    const adapterInfoAvailable: boolean = adapterInfo.available
+    // @ts-expect-error Scratch only accepts the frozen WebGPU feature-level values
+    await scr.ScratchRuntime.create({ gpu, featureLevel: 'maximum' })
+    // @ts-expect-error Runtime request facts are immutable
+    requestFacts.adapter.featureLevel = 'core'
+    // @ts-expect-error Adapter facts are immutable
+    adapterInfo.vendor = 'changed'
+    void requestedFeatureLevel
+    void adapterInfoAvailable
     const diagnostics: scr.ScratchRuntimeDiagnostics = runtime.diagnostics
     const compatDiagnostics: scratchCompat.ScratchRuntimeDiagnostics = diagnostics
     const diagnosticsSnapshot: scr.ScratchRuntimeDiagnosticsSnapshot = diagnostics.snapshot()
@@ -265,6 +280,73 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     surface.toneMapping = { mode: 'standard' }
     // @ts-expect-error Surface lifecycle observations are read-only
     surface.isDisposed = false
+    // @ts-expect-error Managed current textures require SubmissionBuilder authority
+    surface.getCurrentTexture()
+
+    const externalTexture: scr.ExternalTextureBinding = runtime.externalTexture({
+        label: 'typed external texture',
+        source: document.createElement('video'),
+        colorSpace: 'srgb',
+    })
+    const externalLayout = await runtime.createBindLayout({
+        group: 0,
+        entries: [ {
+            binding: 0,
+            name: 'external',
+            type: 'external-texture',
+            visibility: [ 'fragment' ],
+        } ],
+    })
+    const externalSet: scr.BindSet = await runtime.createBindSet(externalLayout, {
+        external: externalTexture,
+    })
+    const temporalSubmission = runtime.createSubmission()
+    const surfaceTexture: scr.SurfaceTextureLease = temporalSubmission.surfaceTexture(surface)
+    const surfaceTextureView: scr.SurfaceTextureView = surfaceTexture.view({
+        dimension: '2d',
+    })
+    const temporalPass: scr.RenderPassSpec = runtime.createRenderPass({
+        color: [ {
+            target: surfaceTexture,
+            load: 'clear',
+            store: 'store',
+        } ],
+    })
+    const sampledSurfaceSet: scr.BindSet = await runtime.createBindSet(
+        await runtime.createBindLayout({
+            group: 1,
+            entries: [ {
+                binding: 0,
+                name: 'surface',
+                type: 'texture',
+                visibility: [ 'fragment' ],
+            } ],
+        }),
+        { surface: surfaceTextureView }
+    )
+    runtime.createCopyCommand({
+        source: { surface: surfaceTexture },
+        target: surfaceTexture,
+        size: [ 1, 1 ],
+        whenMissing: 'throw',
+    })
+    // @ts-expect-error External texture descriptions are not persistent textures
+    const persistentExternalTexture: scr.TextureResource = externalTexture
+    // @ts-expect-error Surface texture leases are not persistent textures
+    const persistentSurfaceTexture: scr.TextureResource = surfaceTexture
+    // @ts-expect-error Temporal classes have private construction authority
+    new scr.ExternalTextureBinding()
+    // @ts-expect-error Temporal classes have private construction authority
+    new scr.SurfaceTextureLease()
+    // @ts-expect-error Surface leases do not own persistent resource destruction
+    surfaceTexture.destroy()
+    // @ts-expect-error Surface leases do not own persistent resize
+    await surfaceTexture.resize({ size: [ 2, 2 ] })
+    void externalSet
+    void sampledSurfaceSet
+    void temporalPass
+    void persistentExternalTexture
+    void persistentSurfaceTexture
 
     const buffer: scr.BufferResource = await runtime.createBuffer({
         label: 'typed scratch buffer',

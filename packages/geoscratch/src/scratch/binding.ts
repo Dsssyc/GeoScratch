@@ -18,7 +18,28 @@ import {
     issueSupportingObjectCreation,
     recheckSupportingObjectLifecycle,
 } from './supporting-object-creation.js'
-import { TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
+import {
+    TextureResource,
+    TextureViewSpec,
+    isTextureResource,
+    isTextureViewSpec,
+    prepareTextureViewSpecDescriptor,
+} from './texture.js'
+import {
+    assertExternalTextureBindingUsable,
+    assertSurfaceTextureLeaseForSubmission,
+    assertSurfaceTextureViewForSubmission,
+    AttemptTextureAuthority,
+    ExternalTextureBinding,
+    SurfaceTextureLease,
+    SurfaceTextureView,
+    isExternalTextureBinding,
+    isSurfaceTextureLease,
+    isSurfaceTextureView,
+    surfaceTextureLeaseFacts,
+    surfaceTextureViewFacts,
+    surfaceTextureUsageForRole,
+} from './temporal-texture.js'
 import {
     runtimeSupportsTextureFormatRequirement,
     storageTextureFormatCapabilities,
@@ -41,6 +62,7 @@ import type {
     SupportingObjectFailureKind,
     SupportingObjectObservedFailure,
 } from './supporting-object-creation.js'
+import type { SurfaceTextureLeaseOwner } from './temporal-texture.js'
 
 const SHADER_STAGE_FLAGS = {
     vertex: 0x1,
@@ -59,6 +81,11 @@ const TEXTURE_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([ '1d', '2d', '
 const SAMPLER_BINDING_TYPES = new Set<GPUSamplerBindingType>([ 'filtering', 'non-filtering', 'comparison' ])
 const STORAGE_TEXTURE_ACCESS = new Set<GPUStorageTextureAccess>([ 'write-only', 'read-only', 'read-write' ])
 const STORAGE_TEXTURE_VIEW_DIMENSIONS = new Set<GPUTextureViewDimension>([ '1d', '2d', '2d-array', '3d' ])
+const EXTERNAL_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'rgba8unorm',
+    'bgra8unorm',
+    'rgba16float',
+])
 const FILTERABLE_FLOAT_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
     'r8unorm',
     'r8snorm',
@@ -200,12 +227,20 @@ export type StorageTextureBindLayoutEntry = {
     viewDimension?: GPUTextureViewDimension
 }
 
+export type ExternalTextureBindLayoutEntry = {
+    binding: number
+    name: string
+    type: 'external-texture'
+    visibility: readonly BindVisibility[]
+}
+
 export type BindLayoutEntry =
     | UniformBindLayoutEntry
     | StorageBindLayoutEntry
     | TextureBindLayoutEntry
     | StorageTextureBindLayoutEntry
     | SamplerBindLayoutEntry
+    | ExternalTextureBindLayoutEntry
 
 export type NormalizedUniformBindLayoutEntry = Readonly<{
     binding: number
@@ -253,12 +288,20 @@ export type NormalizedSamplerBindLayoutEntry = Readonly<{
     samplerType: GPUSamplerBindingType
 }>
 
+export type NormalizedExternalTextureBindLayoutEntry = Readonly<{
+    binding: number
+    name: string
+    type: 'external-texture'
+    visibility: readonly BindVisibility[]
+}>
+
 export type NormalizedBindLayoutEntry =
     | NormalizedUniformBindLayoutEntry
     | NormalizedStorageBindLayoutEntry
     | NormalizedTextureBindLayoutEntry
     | NormalizedStorageTextureBindLayoutEntry
     | NormalizedSamplerBindLayoutEntry
+    | NormalizedExternalTextureBindLayoutEntry
 
 type BufferBindingType = UniformBindLayoutEntry['type'] | StorageBindLayoutEntry['type']
 type BufferBindLayoutEntry = UniformBindLayoutEntry | StorageBindLayoutEntry
@@ -271,17 +314,31 @@ export type BindLayoutDescriptor = {
     entries: readonly BindLayoutEntry[]
 }
 
-export type BindSetBindings = Record<string, BufferRegion | TextureViewSpec | SamplerResource>
+export type BindSetBindingResource =
+    | BufferRegion
+    | TextureResource
+    | TextureViewSpec
+    | SamplerResource
+    | ExternalTextureBinding
+    | SurfaceTextureLease
+    | SurfaceTextureView
+
+export type BindSetBindings = Record<string, BindSetBindingResource>
 
 export type BindSetOptions = {
     label?: string
 }
 
-export type BindSetPreparationState = 'preparing' | 'prepared' | 'stale' | 'disposed'
+export type BindSetPreparationState =
+    | 'preparing'
+    | 'prepared'
+    | 'attempt-local'
+    | 'stale'
+    | 'disposed'
 
 type NormalizedBindSetBinding = Readonly<{
     readonly entry: NormalizedBindLayoutEntry
-    readonly resource: BufferRegion | TextureViewSpec | SamplerResource
+    readonly resource: BindSetBindingResource
 }>
 
 type BindSetPreparationSnapshot = Readonly<{
@@ -292,7 +349,7 @@ type BindSetPreparationSnapshot = Readonly<{
 }>
 
 type BindSetPreparationDependency = Readonly<{
-    resource: BufferRegion | TextureViewSpec | SamplerResource
+    resource: BindSetBindingResource
     allocationVersion: number | undefined
 }>
 
@@ -643,6 +700,7 @@ export class BindSet {
 
         const state = bindSetStateFor(this)
         if (state.isDisposed) return 'disposed'
+        if (this.isAttemptLocal) return 'attempt-local'
         if (state.inFlight !== undefined) return 'preparing'
         if (
             state.committed !== undefined &&
@@ -654,6 +712,11 @@ export class BindSet {
     get prepareGeneration(): number {
 
         return bindSetStateFor(this).prepareGeneration
+    }
+
+    get isAttemptLocal(): boolean {
+
+        return bindSetRequiresAttemptRealization(this)
     }
 
     get preparedSnapshotHash(): string | undefined {
@@ -722,6 +785,12 @@ export class BindSet {
 
         assertScratchRuntimeActive(this.runtime)
         this.layout.assertUsable()
+        if (this.isAttemptLocal) {
+            for (const binding of bindingsInNativeOrder(this)) {
+                validateBindingResource(this, binding.entry, binding.resource)
+            }
+            return
+        }
         this.assertPrepared()
     }
 
@@ -764,6 +833,16 @@ export class BindSet {
             phase: 'binding',
             subject: this.subject,
             message: 'BindSet has been disposed.',
+        })
+        if (this.isAttemptLocal) return rejectedBindSetDiagnostic({
+            code: 'SCRATCH_BIND_SET_ATTEMPT_LOCAL',
+            severity: 'error',
+            phase: 'binding',
+            subject: this.subject,
+            related: [ this.layout.subject ],
+            message: 'Attempt-local BindSets are realized by their selected SubmissionBuilder.',
+            expected: { realization: 'SubmissionBuilder.submit()' },
+            actual: { preparationState: 'attempt-local' },
         })
 
         if (
@@ -843,6 +922,13 @@ export async function createBindSet(
     )
 
     try {
+        if (bindSet.isAttemptLocal) {
+            bindSet.assertUsable()
+            registerBindSetOwnership(bindSet)
+            diagnosticsControllerFor(runtime).registerBindSet(bindSet)
+            bindSetStateFor(bindSet).isRegistered = true
+            return bindSet
+        }
         await bindSet.prepare()
         bindSet.assertUsable()
         registerBindSetOwnership(bindSet)
@@ -857,9 +943,127 @@ export async function createBindSet(
 
 export function preparedBindGroupFor(bindSet: BindSet): GPUBindGroup {
 
+    if (bindSet.isAttemptLocal) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_ATTEMPT_AUTHORITY_REQUIRED',
+            severity: 'error',
+            phase: 'binding',
+            subject: bindSet.subject,
+            related: [ bindSet.layout.subject ],
+            message: 'Attempt-local BindSet encoding requires SubmissionBuilder authority.',
+            expected: { authority: 'active submission attempt' },
+            actual: { authority: 'none' },
+        })
+    }
     const candidate = bindSetStateFor(bindSet).committed
     if (candidate === undefined) throw new TypeError('Prepared BindSet candidate is unavailable.')
     return candidate.gpuBindGroup
+}
+
+const attemptBindGroups = new WeakMap<AttemptTextureAuthority, Map<BindSet, GPUBindGroup>>()
+
+export function bindSetRequiresAttemptRealization(bindSet: BindSet): boolean {
+
+    return [ ...bindSet.bindings.values() ].some(binding =>
+        isExternalTextureBinding(binding.resource) ||
+        isSurfaceTextureLease(binding.resource) ||
+        isSurfaceTextureView(binding.resource)
+    )
+}
+
+export function assertBindSetTemporalDependencies(
+    bindSet: BindSet,
+    owner: SurfaceTextureLeaseOwner
+): void {
+
+    bindSet.assertRuntime(owner.runtime)
+    for (const binding of bindSet.bindings.values()) {
+        const resource = binding.resource
+        if (isExternalTextureBinding(resource)) {
+            assertExternalTextureBindingUsable(resource, owner.runtime)
+            continue
+        }
+        if (isSurfaceTextureLease(resource)) {
+            assertSurfaceTextureLeaseForSubmission(
+                resource,
+                owner,
+                surfaceTextureUsageForBindingEntry(binding.entry),
+                binding.entry.type
+            )
+            continue
+        }
+        if (isSurfaceTextureView(resource)) {
+            assertSurfaceTextureViewForSubmission(
+                resource,
+                owner,
+                surfaceTextureUsageForBindingEntry(binding.entry),
+                binding.entry.type
+            )
+        }
+    }
+}
+
+export function realizeAttemptBindGroup(
+    bindSet: BindSet,
+    authority: AttemptTextureAuthority
+): GPUBindGroup {
+
+    bindSet.assertUsable()
+    if (!bindSet.isAttemptLocal) return preparedBindGroupFor(bindSet)
+    let groups = attemptBindGroups.get(authority)
+    if (groups === undefined) {
+        groups = new Map()
+        attemptBindGroups.set(authority, groups)
+    }
+    const existing = groups.get(bindSet)
+    if (existing !== undefined) return existing
+
+    const views = new Map<string, GPUTextureView>()
+    for (const candidate of textureViewPreparationCandidates(bindSet)) {
+        try {
+            views.set(
+                candidate.key,
+                candidate.view.texture.gpuTexture.createView(
+                    prepareTextureViewSpecDescriptor(candidate.view, true)
+                )
+            )
+        } catch (cause) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_BIND_SET_ATTEMPT_REALIZATION_FAILED',
+                severity: 'error',
+                phase: 'submission',
+                subject: bindSetTextureViewCandidateSubject(bindSet, candidate),
+                related: [ bindSet.subject, bindSet.layout.subject ],
+                message: 'Attempt-local binding view creation failed synchronously.',
+                actual: { nativeError: serializeNativeGpuError(cause) },
+            }, { cause })
+        }
+    }
+    const entries = bindingsInNativeOrder(bindSet).map(binding => Object.freeze({
+        binding: binding.entry.binding,
+        resource: nativeAttemptBindingResource(binding, views, authority),
+    }))
+    Object.freeze(entries)
+    let group: GPUBindGroup
+    try {
+        group = bindSet.runtime.device.createBindGroup({
+            label: createScratchNativeLabel(bindSet.label, bindSet.id),
+            layout: bindSet.layout.gpuBindGroupLayout,
+            entries,
+        })
+    } catch (cause) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BIND_SET_ATTEMPT_REALIZATION_FAILED',
+            severity: 'error',
+            phase: 'submission',
+            subject: bindSet.subject,
+            related: [ bindSet.layout.subject ],
+            message: 'Attempt-local bind group creation failed synchronously.',
+            actual: { nativeError: serializeNativeGpuError(cause) },
+        }, { cause })
+    }
+    groups.set(bindSet, group)
+    return group
 }
 
 function constructBindSet(
@@ -1158,7 +1362,7 @@ function bindSetLifecycleFailures(bindSet: BindSet): BindSetPreparationFailure[]
             bindSet.layout.subject
         ))
     }
-    const seenResources = new Set<BufferRegion | TextureViewSpec | SamplerResource>()
+    const seenResources = new Set<BindSetBindingResource>()
     for (const [ index, binding ] of bindingsInNativeOrder(bindSet).entries()) {
         if (!bindingResourceDisposed(binding.resource)) continue
         if (seenResources.has(binding.resource)) continue
@@ -1319,7 +1523,7 @@ function bindSetOperationTarget(
     bindSet: BindSet,
     snapshot: BindSetPreparationSnapshot,
     stage: ScratchGpuBindSetPreparationStage,
-    preparationState: BindSetPreparationState
+    preparationState: Exclude<BindSetPreparationState, 'attempt-local'>
 ) {
 
     return Object.freeze({
@@ -1366,12 +1570,52 @@ function captureBindSetSnapshot(bindSet: BindSet): BindSetPreparationSnapshot {
                 descriptor: canonicalizeSnapshotValue(resource.descriptor),
             })
         }
+        if (isTextureResource(resource)) {
+            return Object.freeze({
+                ...base,
+                resourceKind: 'texture',
+                resourceId: resource.id,
+                allocationVersion: resource.allocationVersion,
+            })
+        }
         if (isSamplerResource(resource)) {
             return Object.freeze({
                 ...base,
                 resourceKind: 'sampler',
                 resourceId: resource.id,
                 allocationVersion: resource.allocationVersion,
+            })
+        }
+        if (isExternalTextureBinding(resource)) {
+            return Object.freeze({
+                ...base,
+                resourceKind: 'external-texture-binding',
+                bindingId: resource.id,
+                sourceKind: resource.sourceKind,
+                colorSpace: resource.colorSpace,
+            })
+        }
+        if (isSurfaceTextureLease(resource)) {
+            const facts = surfaceTextureLeaseFacts(resource)
+            return Object.freeze({
+                ...base,
+                resourceKind: 'surface-texture-lease',
+                leaseId: resource.id,
+                surfaceId: facts.surfaceFacts.id,
+                configurationVersion: facts.configurationVersion,
+                state: facts.state,
+            })
+        }
+        if (isSurfaceTextureView(resource)) {
+            const view = surfaceTextureViewFacts(resource)
+            const facts = surfaceTextureLeaseFacts(view.lease)
+            return Object.freeze({
+                ...base,
+                resourceKind: 'surface-texture-view',
+                leaseId: view.lease.id,
+                surfaceId: facts.surfaceFacts.id,
+                configurationVersion: facts.configurationVersion,
+                descriptor: canonicalizeSnapshotValue(view.descriptor),
             })
         }
         return Object.freeze({
@@ -1429,9 +1673,25 @@ function nativeBindingResource(
             size: resource.size,
         })
     }
+    if (isTextureResource(resource)) return resource.gpuTexture
     if (isTextureViewSpec(resource)) return views.get(textureViewCandidateKey(resource))
     if (isSamplerResource(resource)) return resource.gpuSampler
     return undefined
+}
+
+function nativeAttemptBindingResource(
+    binding: NormalizedBindSetBinding,
+    views: ReadonlyMap<string, GPUTextureView>,
+    authority: AttemptTextureAuthority
+): GPUBindingResource {
+
+    const resource = binding.resource
+    if (isExternalTextureBinding(resource)) return authority.externalTexture(resource)
+    if (isSurfaceTextureLease(resource)) return authority.surfaceTexture(resource)
+    if (isSurfaceTextureView(resource)) return authority.surfaceView(resource)
+    const persistent = nativeBindingResource(binding, views)
+    if (persistent !== undefined) return persistent
+    throw new TypeError('Attempt-local BindSet binding could not be lowered.')
 }
 
 function textureViewCandidateKey(view: TextureViewSpec): string {
@@ -1538,23 +1798,26 @@ function bindSetSnapshotCurrent(
 }
 
 function bindingResourceAllocationVersion(
-    resource: BufferRegion | TextureViewSpec | SamplerResource
+    resource: BindSetBindingResource
 ): number | undefined {
 
     if (isBufferRegion(resource)) return resource.buffer.allocationVersion
+    if (isTextureResource(resource)) return resource.allocationVersion
     if (isTextureViewSpec(resource)) return resource.texture.allocationVersion
     return isSamplerResource(resource) ? resource.allocationVersion : undefined
 }
 
-function bindingResourceDisposed(resource: BufferRegion | TextureViewSpec | SamplerResource): boolean {
+function bindingResourceDisposed(resource: BindSetBindingResource): boolean {
 
     if (isBufferRegion(resource)) return resource.buffer.isDisposed
+    if (isTextureResource(resource)) return resource.isDisposed
     if (isTextureViewSpec(resource)) return resource.texture.isDisposed
-    return isSamplerResource(resource) ? resource.isDisposed : true
+    if (isSamplerResource(resource)) return resource.isDisposed
+    return false
 }
 
 function bindingResourceSubject(
-    resource: BufferRegion | TextureViewSpec | SamplerResource
+    resource: BindSetBindingResource
 ): DiagnosticSubject {
 
     return resource.subject
@@ -1908,6 +2171,14 @@ function normalizeEntries(
             })
         }
 
+        if (typedEntry.type === 'external-texture') {
+            rejectDynamicOffsetFlag(layout, typedEntry)
+            return Object.freeze({
+                ...base,
+                type: typedEntry.type,
+            })
+        }
+
         if (typedEntry.type === 'storage' && base.visibility.includes('vertex')) {
             throwBindEntryDiagnostic(layout, typedEntry)
         }
@@ -1928,7 +2199,13 @@ function normalizeEntries(
 function isSupportedBindingType(type: unknown): type is BindLayoutEntry['type'] {
 
     return typeof type === 'string' &&
-        (isBufferBindingType(type) || type === 'texture' || type === 'storage-texture' || type === 'sampler')
+        (
+            isBufferBindingType(type) ||
+            type === 'texture' ||
+            type === 'storage-texture' ||
+            type === 'sampler' ||
+            type === 'external-texture'
+        )
 }
 
 function normalizeVisibility(
@@ -2017,6 +2294,11 @@ function validateBindingResource(bindSet: BindSet, entry: NormalizedBindLayoutEn
 
     if (entry.type === 'sampler') {
         validateSamplerResource(bindSet, entry, resource)
+        return
+    }
+
+    if (entry.type === 'external-texture') {
+        validateExternalTextureResource(bindSet, entry, resource)
         return
     }
 
@@ -2110,23 +2392,29 @@ function validateTextureResource(
     resource: unknown
 ) {
 
-    if (!isTextureViewSpec(resource)) {
+    if (isSurfaceTextureLease(resource) || isSurfaceTextureView(resource)) {
+        validateSurfaceTextureBindingResource(bindSet, entry, resource)
+        return
+    }
+    if (!isTextureResource(resource) && !isTextureViewSpec(resource)) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
             severity: 'error',
             phase: 'binding',
             subject: bindSet.layout.entrySubject(entry),
             related: [ bindSet.subject ],
-            message: 'BindSet texture entries require TextureViewSpec bindings.',
-            expected: { type: 'TextureViewSpec' },
+            message: 'BindSet texture entries require managed texture or texture-view bindings.',
+            expected: { type: [ 'TextureResource', 'TextureViewSpec' ] },
             actual: { resource: describeValue(resource) },
         })
     }
 
-    resource.texture.assertRuntime(bindSet.runtime)
-    resource.assertUsable()
+    const view = isTextureResource(resource) ? resource.view() : resource
+    const subject = resource.subject
+    view.texture.assertRuntime(bindSet.runtime)
+    view.assertUsable()
 
-    const descriptor = prepareTextureViewSpecDescriptor(resource, true)
+    const descriptor = prepareTextureViewSpecDescriptor(view, true)
     const requiredUsage = entry.type === 'texture'
         ? TEXTURE_USAGE_TEXTURE_BINDING
         : TEXTURE_USAGE_STORAGE_BINDING
@@ -2135,7 +2423,7 @@ function validateTextureResource(
             code: 'SCRATCH_BIND_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'binding',
-            subject: resource.subject,
+            subject,
             related: [ bindSet.layout.entrySubject(entry), bindSet.subject ],
             message: 'Texture binding requires a texture created with compatible usage.',
             expected: {
@@ -2145,23 +2433,23 @@ function validateTextureResource(
             },
             actual: {
                 usage: descriptor.usage,
-                textureUsage: resource.texture.usage,
+                textureUsage: view.texture.usage,
             },
         })
     }
 
     if (descriptor.dimension !== entry.viewDimension) {
-        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, subject, {
             expected: { viewDimension: entry.viewDimension },
             actual: { viewDimension: descriptor.dimension },
         })
     }
     if (!bindSet.runtime.deviceFeatures.has('core-features-and-limits')) {
-        const arrayLayerCount = resource.texture.dimension === '2d'
-            ? resource.texture.depthOrArrayLayers
+        const arrayLayerCount = view.texture.dimension === '2d'
+            ? view.texture.depthOrArrayLayers
             : 1
         if (descriptor.baseArrayLayer !== 0 || descriptor.arrayLayerCount !== arrayLayerCount) {
-            throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            throwBindingCompatibilityDiagnostic(bindSet, entry, subject, {
                 code: 'SCRATCH_BIND_TEXTURE_COMPATIBILITY_MODE_MISMATCH',
                 expected: { baseArrayLayer: 0, arrayLayerCount },
                 actual: {
@@ -2173,24 +2461,24 @@ function validateTextureResource(
     }
 
     if (entry.type === 'texture') {
-        const multisampled = resource.texture.sampleCount > 1
+        const multisampled = view.texture.sampleCount > 1
         if (multisampled !== entry.multisampled) {
-            throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            throwBindingCompatibilityDiagnostic(bindSet, entry, subject, {
                 expected: { multisampled: entry.multisampled },
                 actual: {
                     multisampled,
-                    sampleCount: resource.texture.sampleCount,
+                    sampleCount: view.texture.sampleCount,
                 },
             })
         }
-        if (!textureSampleTypeCompatible(bindSet.runtime, resource, entry.sampleType)) {
-            throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+        if (!textureSampleTypeCompatible(bindSet.runtime, view, entry.sampleType)) {
+            throwBindingCompatibilityDiagnostic(bindSet, entry, subject, {
                 code: 'SCRATCH_BIND_TEXTURE_SAMPLE_TYPE_MISMATCH',
                 expected: { sampleType: entry.sampleType },
                 actual: {
                     format: descriptor.format,
                     aspect: descriptor.aspect,
-                    compatibleSampleTypes: textureViewSampleTypes(bindSet.runtime, resource),
+                    compatibleSampleTypes: textureViewSampleTypes(bindSet.runtime, view),
                 },
             })
         }
@@ -2201,9 +2489,9 @@ function validateTextureResource(
         descriptor.format !== entry.format ||
         descriptor.mipLevelCount !== 1 ||
         descriptor.swizzle !== 'rgba' ||
-        resource.texture.sampleCount !== 1
+        view.texture.sampleCount !== 1
     ) {
-        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, subject, {
             code: 'SCRATCH_BIND_STORAGE_TEXTURE_VIEW_MISMATCH',
             expected: {
                 format: entry.format,
@@ -2215,8 +2503,250 @@ function validateTextureResource(
                 format: descriptor.format,
                 mipLevelCount: descriptor.mipLevelCount,
                 swizzle: descriptor.swizzle,
-                sampleCount: resource.texture.sampleCount,
+                sampleCount: view.texture.sampleCount,
             },
+        })
+    }
+}
+
+function validateSurfaceTextureBindingResource(
+    bindSet: BindSet,
+    entry: NormalizedTextureBindLayoutEntry | NormalizedStorageTextureBindLayoutEntry,
+    resource: SurfaceTextureLease | SurfaceTextureView
+): void {
+
+    const view = isSurfaceTextureView(resource)
+        ? surfaceTextureViewFacts(resource)
+        : undefined
+    const lease = surfaceTextureLeaseFacts(view?.lease ?? resource as SurfaceTextureLease)
+    if (lease.runtime !== bindSet.runtime) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_WRONG_RUNTIME',
+            expected: { runtimeId: bindSet.runtime.id },
+            actual: { runtimeId: lease.runtime.id },
+        })
+    }
+    const descriptor = view?.descriptor
+    const usage = descriptor?.usage ?? lease.surfaceFacts.usage
+    const requiredUsage = entry.type === 'texture'
+        ? TEXTURE_USAGE_TEXTURE_BINDING
+        : TEXTURE_USAGE_STORAGE_BINDING
+    if ((usage & requiredUsage) === 0) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_RESOURCE_USAGE_MISSING',
+            expected: {
+                usage: entry.type === 'texture'
+                    ? 'GPUTextureUsage.TEXTURE_BINDING'
+                    : 'GPUTextureUsage.STORAGE_BINDING',
+            },
+            actual: { usage, surfaceUsage: lease.surfaceFacts.usage },
+        })
+    }
+    const dimension = descriptor?.dimension ?? '2d'
+    if (dimension !== entry.viewDimension) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            expected: { viewDimension: entry.viewDimension },
+            actual: { viewDimension: dimension },
+        })
+    }
+    const format = descriptor?.format ?? lease.surfaceFacts.format
+    const aspect = descriptor?.aspect ?? 'all'
+    if (entry.type === 'storage-texture') {
+        const mipLevelCount = descriptor?.mipLevelCount ?? 1
+        const swizzle = descriptor?.swizzle ?? 'rgba'
+        if (
+            format !== entry.format ||
+            mipLevelCount !== 1 ||
+            swizzle !== 'rgba'
+        ) {
+            throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+                code: 'SCRATCH_BIND_STORAGE_TEXTURE_VIEW_MISMATCH',
+                expected: {
+                    format: entry.format,
+                    mipLevelCount: 1,
+                    swizzle: 'rgba',
+                    sampleCount: 1,
+                },
+                actual: {
+                    format,
+                    mipLevelCount,
+                    swizzle,
+                    sampleCount: 1,
+                },
+            })
+        }
+        return
+    }
+    const compatibleSampleTypes = textureFormatSampleTypes(bindSet.runtime, format, aspect)
+    if (!compatibleSampleTypes.includes(entry.sampleType)) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            code: 'SCRATCH_BIND_TEXTURE_SAMPLE_TYPE_MISMATCH',
+            expected: { sampleType: entry.sampleType },
+            actual: { format, aspect, compatibleSampleTypes },
+        })
+    }
+    if (entry.multisampled) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+            expected: { multisampled: false },
+            actual: { multisampled: true, sampleCount: 1 },
+        })
+    }
+}
+
+function surfaceTextureUsageForBindingEntry(
+    entry: NormalizedBindLayoutEntry
+): GPUTextureUsageFlags {
+
+    return surfaceTextureUsageForRole(
+        entry.type === 'storage-texture'
+            ? 'storage-binding'
+            : 'sampled-binding'
+    )
+}
+
+function validateExternalTextureResource(
+    bindSet: BindSet,
+    entry: NormalizedExternalTextureBindLayoutEntry,
+    resource: unknown
+): void {
+
+    if (isExternalTextureBinding(resource)) {
+        resource.assertRuntime(bindSet.runtime)
+        return
+    }
+    if (isTextureResource(resource)) {
+        resource.assertRuntime(bindSet.runtime)
+        resource.assertUsable()
+        const descriptor = prepareTextureViewSpecDescriptor(resource.view(), true)
+        validateExternalTextureViewFacts(bindSet, entry, resource.subject, {
+            usage: descriptor.usage,
+            dimension: descriptor.dimension,
+            mipLevelCount: descriptor.mipLevelCount,
+            format: descriptor.format,
+            sampleCount: resource.sampleCount,
+        })
+        return
+    }
+    if (isTextureViewSpec(resource)) {
+        resource.texture.assertRuntime(bindSet.runtime)
+        resource.assertUsable()
+        const descriptor = prepareTextureViewSpecDescriptor(resource, true)
+        validateExternalTextureViewFacts(bindSet, entry, resource.subject, {
+            usage: descriptor.usage,
+            dimension: descriptor.dimension,
+            mipLevelCount: descriptor.mipLevelCount,
+            format: descriptor.format,
+            sampleCount: resource.texture.sampleCount,
+        })
+        return
+    }
+    if (isSurfaceTextureLease(resource)) {
+        const lease = surfaceTextureLeaseFacts(resource)
+        validateExternalSurfaceTextureFacts(
+            bindSet,
+            entry,
+            resource.subject,
+            lease
+        )
+        return
+    }
+    if (isSurfaceTextureView(resource)) {
+        const view = surfaceTextureViewFacts(resource)
+        const lease = surfaceTextureLeaseFacts(view.lease)
+        if (lease.runtime !== bindSet.runtime) {
+            throwBindingCompatibilityDiagnostic(bindSet, entry, resource.subject, {
+                code: 'SCRATCH_BIND_WRONG_RUNTIME',
+                expected: { runtimeId: bindSet.runtime.id },
+                actual: { runtimeId: lease.runtime.id },
+            })
+        }
+        validateExternalTextureViewFacts(bindSet, entry, resource.subject, {
+            usage: view.descriptor.usage ?? lease.surfaceFacts.usage,
+            dimension: view.descriptor.dimension ?? '2d',
+            mipLevelCount: view.descriptor.mipLevelCount ?? 1,
+            format: view.descriptor.format ?? lease.surfaceFacts.format,
+            sampleCount: 1,
+        })
+        return
+    }
+    throwScratchDiagnostic({
+        code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
+        severity: 'error',
+        phase: 'binding',
+        subject: bindSet.layout.entrySubject(entry),
+        related: [ bindSet.subject ],
+        message: 'External texture entry requires a managed external or texture binding.',
+        expected: {
+            type: [
+                'ExternalTextureBinding',
+                'TextureResource',
+                'TextureViewSpec',
+                'SurfaceTextureLease',
+                'SurfaceTextureView',
+            ],
+        },
+        actual: { resource: describeValue(resource) },
+    })
+}
+
+function validateExternalSurfaceTextureFacts(
+    bindSet: BindSet,
+    entry: NormalizedExternalTextureBindLayoutEntry,
+    subject: DiagnosticSubject,
+    lease: ReturnType<typeof surfaceTextureLeaseFacts>
+): void {
+
+    if (lease.runtime !== bindSet.runtime) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, subject, {
+            code: 'SCRATCH_BIND_WRONG_RUNTIME',
+            expected: { runtimeId: bindSet.runtime.id },
+            actual: { runtimeId: lease.runtime.id },
+        })
+    }
+    validateExternalTextureViewFacts(bindSet, entry, subject, {
+        usage: lease.surfaceFacts.usage,
+        dimension: '2d',
+        mipLevelCount: 1,
+        format: lease.surfaceFacts.format,
+        sampleCount: 1,
+    })
+}
+
+function validateExternalTextureViewFacts(
+    bindSet: BindSet,
+    entry: NormalizedExternalTextureBindLayoutEntry,
+    subject: DiagnosticSubject,
+    facts: Readonly<{
+        usage: GPUTextureUsageFlags
+        dimension: GPUTextureViewDimension
+        mipLevelCount: number
+        format: GPUTextureFormat
+        sampleCount: number
+    }>
+): void {
+
+    if ((facts.usage & TEXTURE_USAGE_TEXTURE_BINDING) === 0) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, subject, {
+            code: 'SCRATCH_BIND_RESOURCE_USAGE_MISSING',
+            expected: { usage: 'GPUTextureUsage.TEXTURE_BINDING' },
+            actual: { usage: facts.usage },
+        })
+    }
+    if (
+        facts.dimension !== '2d' ||
+        facts.mipLevelCount !== 1 ||
+        !EXTERNAL_TEXTURE_FORMATS.has(facts.format) ||
+        facts.sampleCount !== 1
+    ) {
+        throwBindingCompatibilityDiagnostic(bindSet, entry, subject, {
+            code: 'SCRATCH_BIND_EXTERNAL_TEXTURE_VIEW_MISMATCH',
+            expected: {
+                dimension: '2d',
+                mipLevelCount: 1,
+                format: [ ...EXTERNAL_TEXTURE_FORMATS ],
+                sampleCount: 1,
+            },
+            actual: facts,
         })
     }
 }
@@ -2279,8 +2809,15 @@ function textureViewSampleTypes(
     view: TextureViewSpec
 ): GPUTextureSampleType[] {
 
-    const format = view.descriptor.format
-    const aspect = view.descriptor.aspect
+    return textureFormatSampleTypes(runtime, view.descriptor.format, view.descriptor.aspect)
+}
+
+function textureFormatSampleTypes(
+    runtime: ScratchRuntime,
+    format: GPUTextureFormat,
+    aspect: GPUTextureAspect
+): GPUTextureSampleType[] {
+
     if (
         aspect === 'stencil-only' ||
         (format === 'stencil8' && aspect === 'all')
@@ -2362,6 +2899,11 @@ function lowerBindLayoutEntry(entry: NormalizedBindLayoutEntry): GPUBindGroupLay
 
     if (entry.type === 'sampler') {
         lowered.sampler = { type: entry.samplerType }
+        return lowered
+    }
+
+    if (entry.type === 'external-texture') {
+        lowered.externalTexture = {}
         return lowered
     }
 
@@ -2545,23 +3087,24 @@ export function firstBindingLimitViolation(
 
     for (const stage of [ 'vertex', 'fragment', 'compute' ] as const) {
         const visible = entries.filter(entry => entry.visibility.includes(stage))
+        const externalTextures = visible.filter(entry => entry.type === 'external-texture').length
         checks.push(
             {
                 limit: 'maxUniformBuffersPerShaderStage',
                 maximum: runtime.deviceLimits.maxUniformBuffersPerShaderStage,
-                actual: visible.filter(entry => entry.type === 'uniform').length,
+                actual: visible.filter(entry => entry.type === 'uniform').length + externalTextures,
                 stage,
             },
             {
                 limit: 'maxSamplersPerShaderStage',
                 maximum: runtime.deviceLimits.maxSamplersPerShaderStage,
-                actual: visible.filter(entry => entry.type === 'sampler').length,
+                actual: visible.filter(entry => entry.type === 'sampler').length + externalTextures,
                 stage,
             },
             {
                 limit: 'maxSampledTexturesPerShaderStage',
                 maximum: runtime.deviceLimits.maxSampledTexturesPerShaderStage,
-                actual: visible.filter(entry => entry.type === 'texture').length,
+                actual: visible.filter(entry => entry.type === 'texture').length + externalTextures * 4,
                 stage,
             },
             {
@@ -2693,7 +3236,11 @@ function normalizeDynamicOffsetFlag(
 
 function rejectDynamicOffsetFlag(
     layout: BindLayoutDiagnosticContext,
-    entry: TextureBindLayoutEntry | StorageTextureBindLayoutEntry | SamplerBindLayoutEntry
+    entry:
+        | TextureBindLayoutEntry
+        | StorageTextureBindLayoutEntry
+        | SamplerBindLayoutEntry
+        | ExternalTextureBindLayoutEntry
 ): void {
 
     const hasDynamicOffset = (entry as EntryWithDynamicOffsetFlag).hasDynamicOffset
@@ -2738,7 +3285,15 @@ function throwBindEntryDiagnostic(layout: BindLayoutDiagnosticContext, entry: un
             entry: {
                 name: 'string',
                 binding: 'non-negative integer',
-                type: [ 'uniform', 'read-storage', 'storage', 'texture', 'storage-texture', 'sampler' ],
+                type: [
+                    'uniform',
+                    'read-storage',
+                    'storage',
+                    'texture',
+                    'storage-texture',
+                    'sampler',
+                    'external-texture',
+                ],
                 visibility: [ 'vertex', 'fragment', 'compute' ],
             },
         },

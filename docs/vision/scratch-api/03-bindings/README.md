@@ -106,17 +106,24 @@ command that binds it must declare the parent buffer in both `resources.read` an
 buffer must be initialized by an explicit upload, copy, or earlier GPU producer
 before the command can use the binding.
 
-`externalTexture` is deliberately excluded until its frame/task lifetime has a separate contract. Shader reflection may cross-check an explicit layout, but it is never the production source of truth.
+`externalTexture` is an attempt-local binding. A stable
+`ExternalTextureBinding` records the import intent, while the selected submission
+imports and retains the native `GPUExternalTexture` only for that attempt. Shader
+reflection may cross-check an explicit layout, but it is never the production source
+of truth.
 
 ## BindSet
 
-The only persistent binding values accepted by core are:
+Persistent binding values accepted by core are:
 
 ```ts
-Record<string, BufferRegion | TextureViewSpec | SamplerResource>
+Record<string, BufferRegion | TextureResource | TextureViewSpec | SamplerResource>
 ```
 
-Whole buffers, whole textures, native GPU objects, and legacy wrappers are rejected. Resource selection is explicit and many-to-many:
+Whole buffers, native GPU objects, and legacy wrappers are rejected. A
+`TextureResource` is accepted only where the native binding consumes its complete
+default view; `TextureViewSpec` remains the explicit subresource form. Resource
+selection is explicit and many-to-many:
 
 ```ts
 const terrainSet = await runtime.createBindSet(terrainLayout, {
@@ -126,6 +133,13 @@ const terrainSet = await runtime.createBindSet(terrainLayout, {
     linear: linearSampler,
 })
 ```
+
+An immutable BindSet may instead contain `ExternalTextureBinding`,
+`SurfaceTextureLease`, or `SurfaceTextureView`. Such a set has no persistent native
+bind group: each selected submission realizes its attempt-local entries and bind group
+through one `AttemptTextureAuthority`, then discards every native handle when the
+attempt closes. `SurfaceTextureLease` can also occupy ordinary sampled or storage
+texture slots when the configured Surface usage and exact layout contract permit it.
 
 The binding table is immutable. Its read-only snapshot owns a private map, freezes both
 the snapshot instance and its prototype, and therefore cannot have `get()`, `values()`,

@@ -396,7 +396,8 @@ describe('Surface', () => {
         expect(context.getConfiguration()).to.deep.equal(currentConfiguration)
 
         context.configure = configure
-        expect(surface.getCurrentTexture()).to.equal(context.texture)
+        expect(() => surface.assertUsable()).to.not.throw()
+        expect(context.currentTextureCalls).to.equal(0)
     })
 
     it('verifies and rolls back native state when post-configure observation fails', async() => {
@@ -447,7 +448,8 @@ describe('Surface', () => {
         expect(canvas.width).to.equal(4)
         expect(canvas.height).to.equal(4)
         expect(context.getConfiguration()).to.deep.equal(previousConfiguration)
-        expect(surface.getCurrentTexture()).to.equal(context.texture)
+        expect(() => surface.assertUsable()).to.not.throw()
+        expect(context.currentTextureCalls).to.equal(0)
     })
 
     it('revalidates exact ownership after materializing Surface configuration inputs', async() => {
@@ -488,7 +490,8 @@ describe('Surface', () => {
         expect(context.configureCalls).to.have.length(2)
         expect(surface.isDisposed).to.equal(true)
         expect(replacement.format).to.equal('bgra8unorm')
-        expect(replacement.getCurrentTexture()).to.equal(context.texture)
+        expect(() => replacement.assertUsable()).to.not.throw()
+        expect(context.currentTextureCalls).to.equal(0)
     })
 
     it('rejects a configuration candidate invalidated by reentrant reconfiguration', async() => {
@@ -526,7 +529,8 @@ describe('Surface', () => {
         expect(usageReads).to.equal(1)
         expect(context.configureCalls).to.have.length(2)
         expect(surface.format).to.equal('bgra8unorm')
-        expect(surface.getCurrentTexture()).to.equal(context.texture)
+        expect(() => surface.assertUsable()).to.not.throw()
+        expect(context.currentTextureCalls).to.equal(0)
     })
 
     it('rejects a silently coerced canvas size without publishing candidate facts', async() => {
@@ -676,7 +680,7 @@ describe('Surface', () => {
 
         for (const action of [
             () => alias.configure({ format: 'bgra8unorm', size: { width: 8, height: 8 } }),
-            () => alias.getCurrentTexture(),
+            () => alias.assertUsable(),
             () => alias.dispose(),
         ]) {
             try {
@@ -724,7 +728,7 @@ describe('Surface', () => {
         expect(surface.context).to.equal(context)
         expect(surface.isConfigured).to.equal(true)
         expect(surface.isDisposed).to.equal(false)
-        expect(surface.getCurrentTexture()).to.equal(context.texture)
+        expect(() => surface.assertUsable()).to.not.throw()
 
         try {
             runtime.createSurface(canvas, { format: 'bgra8unorm' })
@@ -738,7 +742,7 @@ describe('Surface', () => {
 
         expect(surface.isDisposed).to.equal(true)
         expect(context.unconfigureCalls).to.equal(1)
-        expect(context.currentTextureCalls).to.equal(1)
+        expect(context.currentTextureCalls).to.equal(0)
         expect(drifted.context.unconfigureCalls).to.equal(0)
         expect(drifted.context.currentTextureCalls).to.equal(0)
 
@@ -770,7 +774,7 @@ describe('Surface', () => {
             }
 
             try {
-                surface.getCurrentTexture()
+                surface.assertUsable()
                 throw new Error('expected external Surface configuration drift to fail')
             } catch (error) {
                 expect(error).to.be.instanceOf(ScratchDiagnosticError)
@@ -812,7 +816,7 @@ describe('Surface', () => {
             })
 
             try {
-                surface.getCurrentTexture()
+                surface.assertUsable()
                 throw new Error(`expected external ${field} drift to fail`)
             } catch (error) {
                 expect(error).to.be.instanceOf(ScratchDiagnosticError)
@@ -922,7 +926,7 @@ describe('Surface', () => {
         surface.dispose()
 
         try {
-            surface.getCurrentTexture()
+            surface.assertUsable()
             throw new Error('expected disposed surface access to fail')
         } catch (error) {
             expect(error).to.be.instanceOf(ScratchDiagnosticError)

@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 0 scope freeze is active on
+Phase 1 runtime and attempt-local texture parity is complete on
 `socu/scratch-webgpu-wgsl-parity-v1`, based on
 `e905b33e7bd8fdc68e9400ffe103a52e89c21488`. This living audit records the
 fixed specification surface and will be finalized only after all seven
@@ -52,12 +52,12 @@ surface inventories.
 
 | Capability family | Frozen baseline | Current status |
 | --- | --- | --- |
-| GPUExternalTexture | Native import, external bind slots, temporal expiry | Known target gap; ADR-049 Proposed |
+| GPUExternalTexture | Native import, external bind slots, temporal expiry | Phase 1 implemented; ADR-049 Accepted |
 | RenderBundle/debug commands | Native bundle encode/execute and encoder debug mixin | Known target gap; ADR-051 Proposed |
 | ShaderModule/Program decomposition | Reusable modules, separate stages, auto-derived layouts | Known target gap; ADR-050 Proposed |
 | Optional fragment | Native fragment omission and no-color-output depth/stencil | Known target gap; ADR-050 Proposed |
-| SurfaceTextureLease | Managed current-texture attachment/copy/binding use | Known target gap; ADR-049 Proposed |
-| Runtime adapter/device parity | feature level, XR request, default queue, immutable adapter facts | Known target gap; ADR-049/Phase 1 boundary |
+| SurfaceTextureLease | Managed current-texture attachment/copy/binding use | Phase 1 implemented; ADR-049 Accepted |
+| Runtime adapter/device parity | feature level, XR request, default queue, immutable adapter facts | Phase 1 implemented |
 | Texture transfer completeness | upload aspect, direct texture readback, mapped lease | Known target gap; ADR-052 Proposed |
 | WGSL type/layout semantics | Recursive host-shareable ABI and buffer views | Known target gap; ADR-053 Proposed |
 
@@ -69,6 +69,39 @@ package entrypoint. It confirms that the old `ProgramDescriptor.modules`
 surface is still present at the baseline. These are inventory facts, not
 completion claims; Phase 2 must remove the old surface and the final audit
 must classify every changed call and export.
+
+## Phase 1 Checkpoint
+
+Phase 1 adds immutable Runtime request facts for adapter/device/queue options,
+partial-or-absent adapter information, external-texture layout and binding
+support, and one submission-owned `AttemptTextureAuthority` shared by external
+imports and current Surface textures. A `SurfaceTextureLease` can be used by
+render/resolve attachments, all native texture copy directions that accept a
+texture endpoint, ordinary sampled/storage bindings, and external-texture slots.
+The former public `Surface.getCurrentTexture()` bypass is removed.
+
+Attempt-local values never become `Resource` instances or persistent prepared
+bind groups. Selected uses are validated before encoder creation, realized once
+per submission attempt, observed under the selected command or attachment
+location, and expired when the attempt closes. Synchronous import, acquisition,
+view, and bind-group failures use stable structured diagnostics; delayed native
+outcomes retain the existing `SubmittedWork` ownership model.
+
+Checkpoint evidence:
+
+- `npm test`: 1063 passing and 2 expected pending;
+- `npm run typecheck`: passed;
+- `npm run build`: passed for the package and all 17 examples;
+- `node tests/audits/scratch-webgpu-wgsl-managed-parity.mjs`: passed with 70
+  current native call sites, 283 Scratch exports, and 374 package exports;
+- submission native provenance inventory: 51/51 current source call sites
+  classified; and
+- `tests/scratch-temporal-texture.test.js`: 17/17 focused attempt-local tests,
+  including the no-Surface-inspection-after-encoder regression.
+
+The frozen manifests retain their baseline classifications. Their target-gap
+labels describe the goal-start snapshot and are not rewritten phase by phase;
+the living matrix above records current implementation status.
 
 ## Required Final Matrices
 

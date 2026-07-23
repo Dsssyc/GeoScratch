@@ -1,7 +1,12 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferRegion, BufferResource, isBufferRegion, isBufferResource } from './buffer.js'
 import { assertBufferAvailableForGpuUse } from './buffer-mapping-authority.js'
-import { isBindSet, preparedBindGroupFor } from './binding.js'
+import {
+    assertBindSetTemporalDependencies,
+    isBindSet,
+    preparedBindGroupFor,
+    realizeAttemptBindGroup,
+} from './binding.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
     describeLayoutCompatibilityDifference,
@@ -41,6 +46,13 @@ import {
     textureFormatIsCompressed,
     textureFormatIsDepthStencil,
 } from './texture.js'
+import {
+    assertSurfaceTextureLeaseForSubmission,
+    assertSurfaceTextureLeaseUsable,
+    isSurfaceTextureLease,
+    surfaceTextureLeaseFacts,
+    surfaceTextureUsageForRole,
+} from './temporal-texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { BindSet, NormalizedBindLayoutEntry } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -57,6 +69,11 @@ import type {
 import type { ScratchRuntime } from './runtime.js'
 import type { ScratchReadbackCommandState } from './runtime-diagnostics.js'
 import type { SubmittedWork } from './submission.js'
+import type {
+    AttemptTextureAuthority,
+    SurfaceTextureLease,
+    SurfaceTextureLeaseOwner,
+} from './temporal-texture.js'
 
 const GPU_BUFFER_USAGE_VERTEX = getGlobalConstant('GPUBufferUsage', 'VERTEX', 0x20)
 const GPU_BUFFER_USAGE_INDEX = getGlobalConstant('GPUBufferUsage', 'INDEX', 0x10)
@@ -248,9 +265,17 @@ export type TextureCopyCommandSourceDescriptor = {
     contentEpoch: number
 }
 
+export type SurfaceTextureCopyCommandSourceDescriptor = {
+    surface: SurfaceTextureLease
+}
+
+export type TextureCopyEndpointSourceDescriptor =
+    | TextureCopyCommandSourceDescriptor
+    | SurfaceTextureCopyCommandSourceDescriptor
+
 export type CopyCommandSourceDescriptor =
     | BufferCopyCommandSourceDescriptor
-    | TextureCopyCommandSourceDescriptor
+    | TextureCopyEndpointSourceDescriptor
 
 export type QuerySetSlotReadDescriptor = Readonly<{
     index: number
@@ -342,11 +367,11 @@ export type TextureCopySize = {
 
 export type TextureToTextureCopyCommandDescriptor = {
     label?: string
-    source: TextureCopyCommandSourceDescriptor
+    source: TextureCopyEndpointSourceDescriptor
     sourceOrigin?: TextureCopyOrigin
     sourceMipLevel?: number
     sourceAspect?: GPUTextureAspect
-    target: TextureResource
+    target: TextureResource | SurfaceTextureLease
     targetOrigin?: TextureCopyOrigin
     targetMipLevel?: number
     targetAspect?: GPUTextureAspect
@@ -358,7 +383,7 @@ export type BufferToTextureCopyCommandDescriptor = {
     label?: string
     source: BufferCopyCommandSourceDescriptor
     sourceLayout: TexelCopyBufferLayout
-    target: TextureResource
+    target: TextureResource | SurfaceTextureLease
     targetOrigin?: TextureCopyOrigin
     targetMipLevel?: number
     targetAspect?: GPUTextureAspect
@@ -368,7 +393,7 @@ export type BufferToTextureCopyCommandDescriptor = {
 
 export type TextureToBufferCopyCommandDescriptor = {
     label?: string
-    source: TextureCopyCommandSourceDescriptor
+    source: TextureCopyEndpointSourceDescriptor
     sourceOrigin?: TextureCopyOrigin
     sourceMipLevel?: number
     sourceAspect?: GPUTextureAspect
@@ -383,6 +408,8 @@ export type CopyCommandDescriptor =
     | TextureToTextureCopyCommandDescriptor
     | BufferToTextureCopyCommandDescriptor
     | TextureToBufferCopyCommandDescriptor
+
+type TextureCopyEndpoint = TextureResource | SurfaceTextureLease
 
 export type ReadbackCommandDescriptor = {
     label?: string
@@ -848,7 +875,8 @@ export class DrawCommand {
     encode(
         passEncoder: GPURenderPassEncoder,
         attachmentExtent: DrawRenderAttachmentExtent,
-        resolvedImmediateData?: ResolvedCommandImmediateData
+        resolvedImmediateData?: ResolvedCommandImmediateData,
+        attemptTextureAuthority?: AttemptTextureAuthority
     ) {
 
         this.assertUsable()
@@ -891,7 +919,12 @@ export class DrawCommand {
             )
         }
         for (const invocation of this.bindSets) {
-            setBindGroupWithDynamicOffsets(this, passEncoder, invocation)
+            setBindGroupWithDynamicOffsets(
+                this,
+                passEncoder,
+                invocation,
+                attemptTextureAuthority
+            )
         }
         if ('indexCount' in this.count) {
             passEncoder.drawIndexed(
@@ -1366,7 +1399,8 @@ export class DispatchCommand {
 
     encode(
         passEncoder: GPUComputePassEncoder,
-        resolvedImmediateData?: ResolvedCommandImmediateData
+        resolvedImmediateData?: ResolvedCommandImmediateData,
+        attemptTextureAuthority?: AttemptTextureAuthority
     ) {
 
         this.assertUsable()
@@ -1376,7 +1410,12 @@ export class DispatchCommand {
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
         setPassEncoderImmediates(passEncoder, immediateBytes)
         for (const invocation of this.bindSets) {
-            setBindGroupWithDynamicOffsets(this, passEncoder, invocation)
+            setBindGroupWithDynamicOffsets(
+                this,
+                passEncoder,
+                invocation,
+                attemptTextureAuthority
+            )
         }
         if ('indirect' in this.count) {
             passEncoder.dispatchWorkgroupsIndirect(
@@ -2638,7 +2677,7 @@ export interface CopyCommand {
     readonly copyKind: 'buffer-to-buffer' | 'texture-to-texture' | 'buffer-to-texture' | 'texture-to-buffer'
     readonly source: CopyCommandSourceDescriptor
     readonly sourceLayout?: Readonly<Required<TexelCopyBufferLayout>>
-    readonly target: BufferRegion | TextureResource
+    readonly target: BufferRegion | TextureResource | SurfaceTextureLease
     readonly targetLayout?: Readonly<Required<TexelCopyBufferLayout>>
     readonly sourceOrigin?: Readonly<{ x: number, y: number, z: number }>
     readonly targetOrigin?: Readonly<{ x: number, y: number, z: number }>
@@ -2659,8 +2698,8 @@ export class CopyCommand {
         assertScratchRuntimeActive(runtime)
 
         const source = normalizeCopySource(runtime, descriptor)
-        const sourceResource = copySourceResource(source)
-        sourceResource.assertRuntime(runtime)
+        assertCopySourceRuntime(runtime, source)
+        const sourceValue = copySourceDiagnosticValue(source)
 
         const mutable = this as Mutable<CopyCommand>
         mutable.runtime = runtime
@@ -2680,23 +2719,24 @@ export class CopyCommand {
             validateBufferCopyUsage(runtime, source.region.buffer, GPU_BUFFER_USAGE_COPY_SRC, 'source', 'GPUBufferUsage.COPY_SRC')
             validateBufferCopyUsage(runtime, target.buffer, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
             validateBufferCopyRange(this)
-        } else if (isTextureCopySource(source) && isTextureResource(descriptor.target)) {
+        } else if (isTextureCopySource(source) && isTextureCopyEndpoint(descriptor.target)) {
             const textureDescriptor = descriptor as TextureToTextureCopyCommandDescriptor
-            const target = normalizeTextureCopyTarget(runtime, textureDescriptor, source.resource)
+            const sourceTexture = textureCopySourceEndpoint(source)
+            const target = normalizeTextureCopyTarget(runtime, textureDescriptor, sourceTexture)
 
             mutable.copyKind = 'texture-to-texture'
             mutable.target = target
             mutable.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.sourceOrigin, 'sourceOrigin')
             mutable.targetOrigin = normalizeTextureCopyOrigin(runtime, textureDescriptor.targetOrigin, 'targetOrigin')
-            mutable.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, source.resource, textureDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
+            mutable.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, sourceTexture, textureDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
             mutable.targetMipLevel = normalizeTextureCopyMipLevel(runtime, target, textureDescriptor.targetMipLevel ?? 0, 'targetMipLevel')
             mutable.sourceAspect = normalizeTextureCopyAspect(runtime, textureDescriptor.sourceAspect ?? 'all', 'sourceAspect')
             mutable.targetAspect = normalizeTextureCopyAspect(runtime, textureDescriptor.targetAspect ?? 'all', 'targetAspect')
-            mutable.size = normalizeTextureCopySize(runtime, source.resource, target, textureDescriptor.size, this.sourceOrigin, this.targetOrigin)
-            validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
+            mutable.size = normalizeTextureCopySize(runtime, sourceTexture, target, textureDescriptor.size, this.sourceOrigin, this.targetOrigin)
+            validateTextureCopyUsage(runtime, sourceTexture, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
             validateTextureCopyUsage(runtime, target, GPU_TEXTURE_USAGE_COPY_DST, 'target', 'GPUTextureUsage.COPY_DST')
             validateTextureCopyRange(this)
-        } else if (isBufferRegionSource(source) && isTextureResource(descriptor.target)) {
+        } else if (isBufferRegionSource(source) && isTextureCopyEndpoint(descriptor.target)) {
             const bufferToTextureDescriptor = descriptor as BufferToTextureCopyCommandDescriptor
             const target = normalizeBufferToTextureCopyTarget(runtime, bufferToTextureDescriptor, source.region.buffer)
 
@@ -2723,33 +2763,34 @@ export class CopyCommand {
             validateBufferToTextureCopyRange(this)
         } else if (isTextureCopySource(source) && isBufferRegion(descriptor.target)) {
             const textureToBufferDescriptor = descriptor as TextureToBufferCopyCommandDescriptor
-            const target = normalizeTextureToBufferCopyTarget(runtime, textureToBufferDescriptor, source.resource)
+            const sourceTexture = textureCopySourceEndpoint(source)
+            const target = normalizeTextureToBufferCopyTarget(runtime, textureToBufferDescriptor, sourceTexture)
 
             mutable.copyKind = 'texture-to-buffer'
             mutable.target = target
             mutable.sourceOrigin = normalizeTextureCopyOrigin(runtime, textureToBufferDescriptor.sourceOrigin, 'sourceOrigin')
-            mutable.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, source.resource, textureToBufferDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
+            mutable.sourceMipLevel = normalizeTextureCopyMipLevel(runtime, sourceTexture, textureToBufferDescriptor.sourceMipLevel ?? 0, 'sourceMipLevel')
             const sourceAspect = normalizeTextureCopyAspect(runtime, textureToBufferDescriptor.sourceAspect ?? 'all', 'sourceAspect')
             mutable.sourceAspect = sourceAspect
-            const size = normalizeTextureCopySize(runtime, source.resource, target.buffer, textureToBufferDescriptor.size, this.sourceOrigin, undefined)
+            const size = normalizeTextureCopySize(runtime, sourceTexture, target.buffer, textureToBufferDescriptor.size, this.sourceOrigin, undefined)
             mutable.size = size
             mutable.targetLayout = normalizeTexelCopyBufferLayout(
                 runtime,
                 target,
-                source.resource,
+                sourceTexture,
                 sourceAspect,
                 'source',
                 textureToBufferDescriptor.targetLayout,
                 size,
                 'targetLayout'
             )
-            validateTextureCopyUsage(runtime, source.resource, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
+            validateTextureCopyUsage(runtime, sourceTexture, GPU_TEXTURE_USAGE_COPY_SRC, 'source', 'GPUTextureUsage.COPY_SRC')
             validateBufferCopyUsage(runtime, target.buffer, GPU_BUFFER_USAGE_COPY_DST, 'target', 'GPUBufferUsage.COPY_DST')
             validateTextureToBufferCopyRange(this)
         } else {
             throwCopyDiagnostic({
                 runtime,
-                source: sourceResource,
+                source: sourceValue,
                 target: descriptor.target,
                 reason: 'target',
             })
@@ -2823,9 +2864,10 @@ export class CopyCommand {
         if (isBufferRegionSource(this.source)) {
             this.source.region.assertUsable()
         } else {
-            this.source.resource.assertUsable()
+            assertTextureCopyEndpointUsable(textureCopySourceEndpoint(this.source))
         }
-        this.target.assertUsable()
+        if (isBufferRegion(this.target)) this.target.assertUsable()
+        else assertTextureCopyEndpointUsable(this.target)
     }
 
     validateCurrentRange(): void {
@@ -2844,10 +2886,27 @@ export class CopyCommand {
         }
     }
 
-    encode(commandEncoder: GPUCommandEncoder) {
+    encode(
+        commandEncoder: GPUCommandEncoder,
+        attemptTextureAuthority?: AttemptTextureAuthority
+    ) {
 
         this.validateCurrentRange()
         assertCommandBufferGpuUseAvailable(this)
+        if (
+            copyCommandRequiresAttemptAuthority(this) &&
+            attemptTextureAuthority === undefined
+        ) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_ATTEMPT_AUTHORITY_REQUIRED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Surface texture copy endpoints require SubmissionBuilder authority.',
+                expected: { authority: 'active submission attempt' },
+                actual: { authority: 'none' },
+            })
+        }
 
         if (this.copyKind === 'buffer-to-buffer') {
             if (!commandEncoder || typeof commandEncoder.copyBufferToBuffer !== 'function') {
@@ -2886,13 +2945,16 @@ export class CopyCommand {
 
             commandEncoder.copyTextureToTexture(
                 {
-                    texture: (this.source as TextureCopyCommandSourceDescriptor).resource.gpuTexture,
+                    texture: nativeTextureCopySource(this.source, attemptTextureAuthority),
                     origin: this.sourceOrigin!,
                     mipLevel: this.sourceMipLevel!,
                     aspect: this.sourceAspect!,
                 },
                 {
-                    texture: (this.target as TextureResource).gpuTexture,
+                    texture: nativeTextureCopyEndpoint(
+                        this.target as TextureResource | SurfaceTextureLease,
+                        attemptTextureAuthority
+                    ),
                     origin: this.targetOrigin!,
                     mipLevel: this.targetMipLevel!,
                     aspect: this.targetAspect!,
@@ -2920,7 +2982,10 @@ export class CopyCommand {
                     ...this.sourceLayout!,
                 },
                 {
-                    texture: (this.target as TextureResource).gpuTexture,
+                    texture: nativeTextureCopyEndpoint(
+                        this.target as TextureResource | SurfaceTextureLease,
+                        attemptTextureAuthority
+                    ),
                     origin: this.targetOrigin!,
                     mipLevel: this.targetMipLevel!,
                     aspect: this.targetAspect!,
@@ -2943,7 +3008,7 @@ export class CopyCommand {
 
             commandEncoder.copyTextureToBuffer(
                 {
-                    texture: (this.source as TextureCopyCommandSourceDescriptor).resource.gpuTexture,
+                    texture: nativeTextureCopySource(this.source, attemptTextureAuthority),
                     origin: this.sourceOrigin!,
                     mipLevel: this.sourceMipLevel!,
                     aspect: this.sourceAspect!,
@@ -2957,7 +3022,11 @@ export class CopyCommand {
             )
         }
 
-        advanceResourceContentEpoch(isTextureResource(this.target) ? this.target : this.target.buffer)
+        if (isTextureResource(this.target)) {
+            advanceResourceContentEpoch(this.target)
+        } else if (isBufferRegion(this.target)) {
+            advanceResourceContentEpoch(this.target.buffer)
+        }
     }
 
     dispose(): void {
@@ -3538,7 +3607,7 @@ function normalizeReadbackCommandSource(
 
     if (!isRecord(source)) throwReadbackCommandSourceDiagnostic(runtime, subject, source)
     const region = source.region
-    const contentEpoch = source.contentEpoch
+    const contentEpoch = 'contentEpoch' in source ? source.contentEpoch : undefined
     if (
         !isBufferRegion(region) ||
         typeof contentEpoch !== 'number' ||
@@ -4693,21 +4762,25 @@ function dynamicOffsetRelatedSubjects(
 function setBindGroupWithDynamicOffsets(
     command: DynamicOffsetCommand,
     passEncoder: GPURenderPassEncoder | GPUComputePassEncoder,
-    invocation: CommandBindSetInvocation
+    invocation: CommandBindSetInvocation,
+    attemptTextureAuthority?: AttemptTextureAuthority
 ): void {
 
     const bindSet = invocation.set
+    const gpuBindGroup = attemptTextureAuthority === undefined
+        ? preparedBindGroupFor(bindSet)
+        : realizeAttemptBindGroup(bindSet, attemptTextureAuthority)
     const contract = commandDynamicOffsetContracts.get(command)?.get(bindSet.layout.group)
     if (contract !== undefined) {
         passEncoder.setBindGroup(
             bindSet.layout.group,
-            preparedBindGroupFor(bindSet),
+            gpuBindGroup,
             contract.nativeOffsets
         )
         return
     }
 
-    passEncoder.setBindGroup(bindSet.layout.group, preparedBindGroupFor(bindSet))
+    passEncoder.setBindGroup(bindSet.layout.group, gpuBindGroup)
 }
 
 function validateProgramLayoutRequirementsForCommand(command: DrawCommand | DispatchCommand): void {
@@ -5045,9 +5118,11 @@ function validateBoundResourceAccess(command: DrawCommand | DispatchCommand): vo
 
             const resource = isBufferRegion(binding.resource)
                 ? binding.resource.buffer
-                : 'texture' in binding.resource
-                    ? binding.resource.texture
-                    : undefined
+                : isTextureResource(binding.resource)
+                    ? binding.resource
+                    : 'texture' in binding.resource
+                        ? binding.resource.texture
+                        : undefined
             if (resource === undefined) continue
 
             const missingRead = access.read && !declaredReads.has(resource)
@@ -5093,6 +5168,7 @@ function boundResourceAccess(entry: NormalizedBindLayoutEntry): BoundResourceAcc
         case 'uniform':
         case 'read-storage':
         case 'texture':
+        case 'external-texture':
             return { read: true, write: false }
         case 'storage':
             return { read: true, write: true }
@@ -5890,23 +5966,26 @@ function validateBufferCopyUsage(
 
 function validateTextureCopyUsage(
     runtime: ScratchRuntime,
-    texture: TextureResource,
+    texture: TextureCopyEndpoint,
     requiredUsage: GPUTextureUsageFlags,
     role: string,
     usageName: string
 ) {
 
-    if ((texture.usage & requiredUsage) !== 0) return
+    const facts = textureCopyEndpointFacts(texture)
+    if ((facts.usage & requiredUsage) !== 0) return
 
     throwScratchDiagnostic({
-        code: 'SCRATCH_RESOURCE_USAGE_MISSING',
+        code: isSurfaceTextureLease(texture)
+            ? 'SCRATCH_SURFACE_TEXTURE_USAGE_MISSING'
+            : 'SCRATCH_RESOURCE_USAGE_MISSING',
         severity: 'error',
-        phase: 'resource',
-        subject: texture.subject,
+        phase: isSurfaceTextureLease(texture) ? 'submission' : 'resource',
+        subject: facts.subject,
         related: [ runtime.subject ],
         message: `CopyCommand ${role} requires ${usageName}.`,
         expected: { usage: usageName },
-        actual: { usage: texture.usage },
+        actual: { usage: facts.usage },
     })
 }
 
@@ -5932,8 +6011,8 @@ function validateCurrentCopyUsage(command: CopyCommand): void {
         return
     }
     if (command.copyKind === 'texture-to-texture') {
-        const source = (command.source as TextureCopyCommandSourceDescriptor).resource
-        const target = command.target as TextureResource
+        const source = textureCopySourceEndpoint(command.source)
+        const target = command.target as TextureCopyEndpoint
         validateTextureCopyUsage(
             command.runtime,
             source,
@@ -5952,7 +6031,7 @@ function validateCurrentCopyUsage(command: CopyCommand): void {
     }
     if (command.copyKind === 'buffer-to-texture') {
         const source = (command.source as BufferCopyCommandSourceDescriptor).region.buffer
-        const target = command.target as TextureResource
+        const target = command.target as TextureCopyEndpoint
         validateBufferCopyUsage(
             command.runtime,
             source,
@@ -5970,7 +6049,7 @@ function validateCurrentCopyUsage(command: CopyCommand): void {
         return
     }
 
-    const source = (command.source as TextureCopyCommandSourceDescriptor).resource
+    const source = textureCopySourceEndpoint(command.source)
     const target = (command.target as BufferRegion).buffer
     validateTextureCopyUsage(
         command.runtime,
@@ -6000,16 +6079,48 @@ function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDes
         })
     }
 
-    const contentEpoch = source.contentEpoch
+    const contentEpoch = 'contentEpoch' in source ? source.contentEpoch : undefined
     const region = 'region' in source ? source.region : undefined
     const resource = 'resource' in source ? source.resource : undefined
-    if (!isBufferRegion(region) && !isTextureResource(resource)) {
+    const surface = 'surface' in source ? source.surface : undefined
+    const selected = [
+        isBufferRegion(region),
+        isTextureResource(resource),
+        isSurfaceTextureLease(surface),
+    ].filter(Boolean).length
+    if (selected !== 1) {
         throwCopySourceDiagnostic({
             runtime,
             source,
             target: descriptor.target,
             reason: 'source.resource-or-region',
         })
+    }
+
+    if (isSurfaceTextureLease(surface)) {
+        if (contentEpoch !== undefined) {
+            throwCopySourceDiagnostic({
+                runtime,
+                source,
+                target: descriptor.target,
+                reason: 'source.contentEpoch',
+            })
+        }
+        assertSurfaceTextureLeaseUsable(surface)
+        const facts = surfaceTextureLeaseFacts(surface)
+        if (facts.runtime !== runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: { kind: 'Command', commandKind: 'copy' },
+                related: [ surface.subject, runtime.subject ],
+                message: 'Surface texture copy source belongs to a different ScratchRuntime.',
+                expected: { runtimeId: runtime.id },
+                actual: { runtimeId: facts.runtime.id },
+            })
+        }
+        return Object.freeze({ surface })
     }
 
     if (typeof contentEpoch !== 'number' || !Number.isInteger(contentEpoch) || contentEpoch < 0) {
@@ -6036,14 +6147,220 @@ function isBufferRegionSource(source: CopyCommandSourceDescriptor): source is Bu
     return 'region' in source
 }
 
-function isTextureCopySource(source: CopyCommandSourceDescriptor): source is TextureCopyCommandSourceDescriptor {
+function isTextureCopySource(
+    source: CopyCommandSourceDescriptor
+): source is TextureCopyEndpointSourceDescriptor {
 
-    return 'resource' in source
+    return 'resource' in source || 'surface' in source
 }
 
-function copySourceResource(source: CopyCommandSourceDescriptor): BufferResource | TextureResource {
+function textureCopySourceEndpoint(
+    source: CopyCommandSourceDescriptor
+): TextureCopyEndpoint {
 
-    return isBufferRegionSource(source) ? source.region.buffer : source.resource
+    if ('resource' in source) return source.resource
+    if ('surface' in source) return source.surface
+    throw new TypeError('Copy source is not a texture endpoint.')
+}
+
+function copySourceDiagnosticValue(
+    source: CopyCommandSourceDescriptor
+): BufferResource | TextureCopyEndpoint {
+
+    return isBufferRegionSource(source) ? source.region.buffer : textureCopySourceEndpoint(source)
+}
+
+function assertCopySourceRuntime(
+    runtime: ScratchRuntime,
+    source: CopyCommandSourceDescriptor
+): void {
+
+    if (isBufferRegionSource(source)) {
+        source.region.buffer.assertRuntime(runtime)
+        return
+    }
+    assertTextureCopyEndpointRuntime(runtime, textureCopySourceEndpoint(source))
+}
+
+type TextureCopyEndpointFacts = Readonly<{
+    subject: DiagnosticSubject
+    format: GPUTextureFormat
+    usage: GPUTextureUsageFlags
+    dimension: GPUTextureDimension
+    mipLevelCount: number
+    sampleCount: number
+    width: number
+    height: number
+    depthOrArrayLayers: number
+}>
+
+function isTextureCopyEndpoint(value: unknown): value is TextureCopyEndpoint {
+
+    return isTextureResource(value) || isSurfaceTextureLease(value)
+}
+
+function textureCopyEndpointFacts(endpoint: TextureCopyEndpoint): TextureCopyEndpointFacts {
+
+    if (isTextureResource(endpoint)) {
+        return {
+            subject: endpoint.subject,
+            format: endpoint.format,
+            usage: endpoint.usage,
+            dimension: endpoint.dimension,
+            mipLevelCount: endpoint.mipLevelCount,
+            sampleCount: endpoint.sampleCount,
+            width: endpoint.width,
+            height: endpoint.height,
+            depthOrArrayLayers: endpoint.depthOrArrayLayers,
+        }
+    }
+
+    const lease = surfaceTextureLeaseFacts(endpoint)
+    return {
+        subject: endpoint.subject,
+        format: lease.surfaceFacts.format,
+        usage: lease.surfaceFacts.usage,
+        dimension: '2d',
+        mipLevelCount: 1,
+        sampleCount: 1,
+        width: lease.surfaceFacts.size.width,
+        height: lease.surfaceFacts.size.height,
+        depthOrArrayLayers: 1,
+    }
+}
+
+function sameTextureCopyEndpoint(
+    left: TextureCopyEndpoint,
+    right: TextureCopyEndpoint
+): boolean {
+
+    if (left === right) return true
+    if (!isSurfaceTextureLease(left) || !isSurfaceTextureLease(right)) return false
+    return surfaceTextureLeaseFacts(left).surface === surfaceTextureLeaseFacts(right).surface
+}
+
+function assertTextureCopyEndpointRuntime(
+    runtime: ScratchRuntime,
+    endpoint: TextureCopyEndpoint
+): void {
+
+    if (isTextureResource(endpoint)) {
+        endpoint.assertRuntime(runtime)
+        return
+    }
+    const facts = surfaceTextureLeaseFacts(endpoint)
+    if (facts.runtime === runtime) return
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+        severity: 'error',
+        phase: 'command',
+        subject: endpoint.subject,
+        related: [ facts.runtime.subject, runtime.subject ],
+        message: 'Surface texture copy endpoint belongs to a different ScratchRuntime.',
+        expected: { runtimeId: runtime.id },
+        actual: { runtimeId: facts.runtime.id },
+    })
+}
+
+function assertTextureCopyEndpointUsable(endpoint: TextureCopyEndpoint): void {
+
+    if (isTextureResource(endpoint)) {
+        endpoint.assertUsable()
+        return
+    }
+    assertSurfaceTextureLeaseUsable(endpoint)
+}
+
+function nativeTextureCopyEndpoint(
+    endpoint: TextureCopyEndpoint,
+    authority?: AttemptTextureAuthority
+): GPUTexture {
+
+    if (isTextureResource(endpoint)) return endpoint.gpuTexture
+    if (authority !== undefined) return authority.surfaceTexture(endpoint)
+    throw new TypeError('Surface texture copy endpoint has no attempt authority.')
+}
+
+function nativeTextureCopySource(
+    source: CopyCommandSourceDescriptor,
+    authority?: AttemptTextureAuthority
+): GPUTexture {
+
+    return nativeTextureCopyEndpoint(textureCopySourceEndpoint(source), authority)
+}
+
+export function copyCommandRequiresAttemptAuthority(command: CopyCommand): boolean {
+
+    return (
+        (!isBufferRegionSource(command.source) &&
+            isSurfaceTextureLease(textureCopySourceEndpoint(command.source))) ||
+        isSurfaceTextureLease(command.target)
+    )
+}
+
+export function assertCopyCommandTemporalDependencies(
+    command: CopyCommand,
+    owner: SurfaceTextureLeaseOwner
+): void {
+
+    if (!isCopyCommand(command)) {
+        throw new TypeError('Temporal copy validation requires a CopyCommand.')
+    }
+    if (!isBufferRegionSource(command.source)) {
+        const source = textureCopySourceEndpoint(command.source)
+        if (isSurfaceTextureLease(source)) {
+            assertSurfaceTextureLeaseForSubmission(
+                source,
+                owner,
+                surfaceTextureUsageForRole('copy-source'),
+                'copy-source'
+            )
+        }
+    }
+    if (isSurfaceTextureLease(command.target)) {
+        assertSurfaceTextureLeaseForSubmission(
+            command.target,
+            owner,
+            surfaceTextureUsageForRole('copy-destination'),
+            'copy-destination'
+        )
+    }
+}
+
+export function copyCommandPersistentSource(
+    command: CopyCommand
+): Readonly<{
+    resource: BufferResource | TextureResource
+    contentEpoch: number
+}> | undefined {
+
+    if ('surface' in command.source) return undefined
+    return Object.freeze({
+        resource: 'region' in command.source
+            ? command.source.region.buffer
+            : command.source.resource,
+        contentEpoch: command.source.contentEpoch,
+    })
+}
+
+export function copyCommandPersistentTarget(
+    command: CopyCommand
+): BufferResource | TextureResource | undefined {
+
+    if (isTextureResource(command.target)) return command.target
+    if (isBufferRegion(command.target)) return command.target.buffer
+    return undefined
+}
+
+export function assertCommandTemporalDependencies(
+    command: DrawCommand | DispatchCommand,
+    owner: SurfaceTextureLeaseOwner
+): void {
+
+    command.assertRuntime(owner.runtime)
+    for (const invocation of command.bindSets) {
+        assertBindSetTemporalDependencies(invocation.set, owner)
+    }
 }
 
 function normalizeCopyReadinessPolicy(command: CopyCommand, whenMissing: ResourceReadinessPolicy): 'throw' {
@@ -6080,10 +6397,14 @@ function normalizeBufferCopyTarget(runtime: ScratchRuntime, descriptor: BufferTo
     return target
 }
 
-function normalizeTextureCopyTarget(runtime: ScratchRuntime, descriptor: TextureToTextureCopyCommandDescriptor, source: TextureResource): TextureResource {
+function normalizeTextureCopyTarget(
+    runtime: ScratchRuntime,
+    descriptor: TextureToTextureCopyCommandDescriptor,
+    source: TextureCopyEndpoint
+): TextureCopyEndpoint {
 
     const target = descriptor.target
-    if (!isTextureResource(target)) {
+    if (!isTextureCopyEndpoint(target)) {
         throwCopyDiagnostic({
             runtime,
             source,
@@ -6095,14 +6416,18 @@ function normalizeTextureCopyTarget(runtime: ScratchRuntime, descriptor: Texture
         })
     }
 
-    target.assertRuntime(runtime)
+    assertTextureCopyEndpointRuntime(runtime, target)
     return target
 }
 
-function normalizeBufferToTextureCopyTarget(runtime: ScratchRuntime, descriptor: BufferToTextureCopyCommandDescriptor, source: BufferResource): TextureResource {
+function normalizeBufferToTextureCopyTarget(
+    runtime: ScratchRuntime,
+    descriptor: BufferToTextureCopyCommandDescriptor,
+    source: BufferResource
+): TextureCopyEndpoint {
 
     const target = descriptor.target
-    if (!isTextureResource(target)) {
+    if (!isTextureCopyEndpoint(target)) {
         throwCopyDiagnostic({
             runtime,
             source,
@@ -6116,11 +6441,15 @@ function normalizeBufferToTextureCopyTarget(runtime: ScratchRuntime, descriptor:
         })
     }
 
-    target.assertRuntime(runtime)
+    assertTextureCopyEndpointRuntime(runtime, target)
     return target
 }
 
-function normalizeTextureToBufferCopyTarget(runtime: ScratchRuntime, descriptor: TextureToBufferCopyCommandDescriptor, source: TextureResource): BufferRegion {
+function normalizeTextureToBufferCopyTarget(
+    runtime: ScratchRuntime,
+    descriptor: TextureToBufferCopyCommandDescriptor,
+    source: TextureCopyEndpoint
+): BufferRegion {
 
     const target = descriptor.target
     if (!isBufferRegion(target)) {
@@ -6175,12 +6504,16 @@ function normalizeTextureCopyOrigin(
 
 function normalizeTextureCopyMipLevel(
     runtime: ScratchRuntime,
-    texture: TextureResource,
+    texture: TextureCopyEndpoint,
     mipLevel: number,
     key: 'sourceMipLevel' | 'targetMipLevel'
 ): number {
 
-    if (!Number.isInteger(mipLevel) || mipLevel < 0 || mipLevel >= texture.mipLevelCount) {
+    if (
+        !Number.isInteger(mipLevel) ||
+        mipLevel < 0 ||
+        mipLevel >= textureCopyEndpointFacts(texture).mipLevelCount
+    ) {
         throwCopyDiagnostic({ runtime, [key]: mipLevel, reason: key })
     }
 
@@ -6237,7 +6570,7 @@ function normalizeTextureCopySize(
 function normalizeTexelCopyBufferLayout(
     runtime: ScratchRuntime,
     region: BufferRegion,
-    texture: TextureResource,
+    texture: TextureCopyEndpoint,
     aspect: GPUTextureAspect,
     direction: 'source' | 'destination',
     layout: TexelCopyBufferLayout,
@@ -6249,7 +6582,11 @@ function normalizeTexelCopyBufferLayout(
         throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: key })
     }
 
-    const footprint = textureFormatCopyFootprint(texture.format, aspect, direction)
+    const footprint = textureFormatCopyFootprint(
+        textureCopyEndpointFacts(texture).format,
+        aspect,
+        direction
+    )
     if (footprint === undefined) {
         throwCopyDiagnostic({ runtime, source: region, target: texture, [key]: layout, size, reason: 'format' })
     }
@@ -6321,25 +6658,27 @@ function validateBufferCopyRange(command: CopyCommand) {
 
 function validateTextureCopyRange(command: CopyCommand) {
 
-    const source = (command.source as TextureCopyCommandSourceDescriptor).resource
-    const target = command.target as TextureResource
+    const source = textureCopySourceEndpoint(command.source)
+    const target = command.target as TextureCopyEndpoint
+    const sourceFacts = textureCopyEndpointFacts(source)
+    const targetFacts = textureCopyEndpointFacts(target)
     const sourceOrigin = command.sourceOrigin!
     const targetOrigin = command.targetOrigin!
     const size = command.size!
     const sourceExtent = textureMipExtent(source, command.sourceMipLevel!)
     const targetExtent = textureMipExtent(target, command.targetMipLevel!)
-    const sourceBlockSize = textureFormatBlockSize(source.format)
-    const targetBlockSize = textureFormatBlockSize(target.format)
+    const sourceBlockSize = textureFormatBlockSize(sourceFacts.format)
+    const targetBlockSize = textureFormatBlockSize(targetFacts.format)
     const subresourcesOverlap = textureCopySubresourcesOverlap(command)
-    const formatsCompatible = textureCopyFormatsCompatible(source.format, target.format)
+    const formatsCompatible = textureCopyFormatsCompatible(sourceFacts.format, targetFacts.format)
     const sampleCountsCompatible =
-        source.sampleCount === target.sampleCount &&
-        (source.sampleCount === 1 || command.runtime.deviceFeatures.has('core-features-and-limits'))
+        sourceFacts.sampleCount === targetFacts.sampleCount &&
+        (sourceFacts.sampleCount === 1 || command.runtime.deviceFeatures.has('core-features-and-limits'))
     const requiresFullPhysicalSubresources =
-        source.sampleCount > 1 ||
-        target.sampleCount > 1 ||
-        textureFormatIsDepthStencil(source.format) ||
-        textureFormatIsDepthStencil(target.format)
+        sourceFacts.sampleCount > 1 ||
+        targetFacts.sampleCount > 1 ||
+        textureFormatIsDepthStencil(sourceFacts.format) ||
+        textureFormatIsDepthStencil(targetFacts.format)
     const physicalSubresourcesCovered = !requiresFullPhysicalSubresources || (
         size.width === sourceExtent.width &&
         size.height === sourceExtent.height &&
@@ -6350,7 +6689,10 @@ function validateTextureCopyRange(command: CopyCommand) {
     )
     const compressedFormatsAllowed =
         command.runtime.deviceFeatures.has('core-features-and-limits') ||
-        (!textureFormatIsCompressed(source.format) && !textureFormatIsCompressed(target.format))
+        (
+            !textureFormatIsCompressed(sourceFacts.format) &&
+            !textureFormatIsCompressed(targetFacts.format)
+        )
     const blockAligned =
         sourceOrigin.x % sourceBlockSize.width === 0 &&
         sourceOrigin.y % sourceBlockSize.height === 0 &&
@@ -6408,25 +6750,30 @@ function validateTextureCopyRange(command: CopyCommand) {
 function validateBufferToTextureCopyRange(command: CopyCommand) {
 
     const source = (command.source as BufferCopyCommandSourceDescriptor).region
-    const target = command.target as TextureResource
+    const target = command.target as TextureCopyEndpoint
+    const targetFacts = textureCopyEndpointFacts(target)
     const targetOrigin = command.targetOrigin!
     const size = command.size!
     const targetExtent = textureMipExtent(target, command.targetMipLevel!)
-    const blockSize = textureFormatBlockSize(target.format)
-    const footprint = textureFormatCopyFootprint(target.format, command.targetAspect!, 'destination')
+    const blockSize = textureFormatBlockSize(targetFacts.format)
+    const footprint = textureFormatCopyFootprint(
+        targetFacts.format,
+        command.targetAspect!,
+        'destination'
+    )
     const blockAligned =
         targetOrigin.x % blockSize.width === 0 &&
         targetOrigin.y % blockSize.height === 0 &&
         size.width % blockSize.width === 0 &&
         size.height % blockSize.height === 0
-    const physicalSubresourceCovered = !textureFormatIsDepthStencil(target.format) || (
+    const physicalSubresourceCovered = !textureFormatIsDepthStencil(targetFacts.format) || (
         size.width === targetExtent.width &&
         size.height === targetExtent.height &&
         size.depthOrArrayLayers === targetExtent.depthOrArrayLayers
     )
 
     if (
-        target.sampleCount !== 1 ||
+        targetFacts.sampleCount !== 1 ||
         footprint === undefined ||
         !blockAligned ||
         !physicalSubresourceCovered ||
@@ -6443,7 +6790,7 @@ function validateBufferToTextureCopyRange(command: CopyCommand) {
             targetMipLevel: command.targetMipLevel,
             targetAspect: command.targetAspect,
             size,
-            reason: target.sampleCount !== 1
+            reason: targetFacts.sampleCount !== 1
                 ? 'sampleCount'
                 : footprint === undefined
                     ? 'aspect'
@@ -6458,29 +6805,34 @@ function validateBufferToTextureCopyRange(command: CopyCommand) {
 
 function validateTextureToBufferCopyRange(command: CopyCommand) {
 
-    const source = (command.source as TextureCopyCommandSourceDescriptor).resource
+    const source = textureCopySourceEndpoint(command.source)
+    const sourceFacts = textureCopyEndpointFacts(source)
     const target = command.target as BufferRegion
     const sourceOrigin = command.sourceOrigin!
     const size = command.size!
     const sourceExtent = textureMipExtent(source, command.sourceMipLevel!)
-    const blockSize = textureFormatBlockSize(source.format)
-    const footprint = textureFormatCopyFootprint(source.format, command.sourceAspect!, 'source')
+    const blockSize = textureFormatBlockSize(sourceFacts.format)
+    const footprint = textureFormatCopyFootprint(
+        sourceFacts.format,
+        command.sourceAspect!,
+        'source'
+    )
     const blockAligned =
         sourceOrigin.x % blockSize.width === 0 &&
         sourceOrigin.y % blockSize.height === 0 &&
         size.width % blockSize.width === 0 &&
         size.height % blockSize.height === 0
-    const physicalSubresourceCovered = !textureFormatIsDepthStencil(source.format) || (
+    const physicalSubresourceCovered = !textureFormatIsDepthStencil(sourceFacts.format) || (
         size.width === sourceExtent.width &&
         size.height === sourceExtent.height &&
         size.depthOrArrayLayers === sourceExtent.depthOrArrayLayers
     )
     const compressedFormatAllowed =
         command.runtime.deviceFeatures.has('core-features-and-limits') ||
-        !textureFormatIsCompressed(source.format)
+        !textureFormatIsCompressed(sourceFacts.format)
 
     if (
-        source.sampleCount !== 1 ||
+        sourceFacts.sampleCount !== 1 ||
         footprint === undefined ||
         !compressedFormatAllowed ||
         !blockAligned ||
@@ -6498,7 +6850,7 @@ function validateTextureToBufferCopyRange(command: CopyCommand) {
             sourceMipLevel: command.sourceMipLevel,
             sourceAspect: command.sourceAspect,
             size,
-            reason: source.sampleCount !== 1
+            reason: sourceFacts.sampleCount !== 1
                 ? 'sampleCount'
                 : footprint === undefined
                     ? 'aspect'
@@ -6513,31 +6865,38 @@ function validateTextureToBufferCopyRange(command: CopyCommand) {
     }
 }
 
-function textureMipExtent(texture: TextureResource, mipLevel: number): { width: number, height: number, depthOrArrayLayers: number } {
+function textureMipExtent(
+    texture: TextureCopyEndpoint,
+    mipLevel: number
+): { width: number, height: number, depthOrArrayLayers: number } {
 
-    const blockSize = textureFormatBlockSize(texture.format)
-    const logicalWidth = Math.max(1, texture.width >> mipLevel)
-    const logicalHeight = Math.max(1, texture.height >> mipLevel)
+    const facts = textureCopyEndpointFacts(texture)
+    const blockSize = textureFormatBlockSize(facts.format)
+    const logicalWidth = Math.max(1, facts.width >> mipLevel)
+    const logicalHeight = Math.max(1, facts.height >> mipLevel)
     return {
         width: Math.ceil(logicalWidth / blockSize.width) * blockSize.width,
         height: Math.ceil(logicalHeight / blockSize.height) * blockSize.height,
-        depthOrArrayLayers: texture.dimension === '3d'
-            ? Math.max(1, texture.depthOrArrayLayers >> mipLevel)
-            : texture.depthOrArrayLayers,
+        depthOrArrayLayers: facts.dimension === '3d'
+            ? Math.max(1, facts.depthOrArrayLayers >> mipLevel)
+            : facts.depthOrArrayLayers,
     }
 }
 
 function textureCopySubresourcesOverlap(command: CopyCommand): boolean {
 
-    const source = (command.source as TextureCopyCommandSourceDescriptor).resource
-    const target = command.target as TextureResource
-    if (source !== target || command.sourceMipLevel !== command.targetMipLevel) return false
+    const source = textureCopySourceEndpoint(command.source)
+    const target = command.target as TextureCopyEndpoint
+    if (
+        !sameTextureCopyEndpoint(source, target) ||
+        command.sourceMipLevel !== command.targetMipLevel
+    ) return false
     if (
         command.sourceAspect !== 'all' &&
         command.targetAspect !== 'all' &&
         command.sourceAspect !== command.targetAspect
     ) return false
-    if (source.dimension !== '2d') return true
+    if (textureCopyEndpointFacts(source).dimension !== '2d') return true
 
     const sourceStart = command.sourceOrigin!.z
     const sourceEnd = sourceStart + command.size!.depthOrArrayLayers

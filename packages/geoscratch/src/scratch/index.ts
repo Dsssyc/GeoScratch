@@ -81,7 +81,14 @@ export type {
     PipelineKind,
 } from './pipeline-compilation.js'
 export { ScratchRuntime } from './runtime.js'
-export type { ScratchRuntimeCreateOptions } from './runtime.js'
+export type {
+    ScratchAdapterInfoSnapshot,
+    ScratchFeatureLevel,
+    ScratchRuntimeAdapterRequestFacts,
+    ScratchRuntimeCreateOptions,
+    ScratchRuntimeDeviceRequestFacts,
+    ScratchRuntimeRequestFacts,
+} from './runtime.js'
 export type { ScratchReadbackOptions, ScratchReadbackPolicy } from './readback-ownership.js'
 export { ScratchDiagnosticCapture, ScratchRuntimeDiagnostics } from './runtime-diagnostics.js'
 export type {
@@ -109,6 +116,15 @@ export type {
 } from './runtime-diagnostics.js'
 export { Surface } from './surface.js'
 export type { SurfaceFormat, SurfaceOptions, SurfaceSize } from './surface.js'
+export {
+    ExternalTextureBinding,
+    SurfaceTextureLease,
+    SurfaceTextureView,
+} from './temporal-texture.js'
+export type {
+    ExternalTextureBindingDescriptor,
+    SurfaceTextureLeaseState,
+} from './temporal-texture.js'
 export { Resource } from './resource.js'
 export type { ResourceState } from './resource.js'
 export { BufferRegion, BufferResource } from './buffer.js'
@@ -145,11 +161,14 @@ export { BindLayout, BindSet } from './binding.js'
 export type {
     BindLayoutDescriptor,
     BindLayoutEntry,
+    BindSetBindingResource,
     BindSetBindings,
     BindSetOptions,
     BindSetPreparationState,
     BindVisibility,
+    ExternalTextureBindLayoutEntry,
     NormalizedBindLayoutEntry,
+    NormalizedExternalTextureBindLayoutEntry,
     NormalizedSamplerBindLayoutEntry,
     NormalizedStorageBindLayoutEntry,
     NormalizedStorageTextureBindLayoutEntry,
@@ -235,7 +254,9 @@ export type {
     StaticDispatchCount,
     StaticDrawCount,
     StaticIndexedDrawCount,
+    SurfaceTextureCopyCommandSourceDescriptor,
     TextureCopyCommandSourceDescriptor,
+    TextureCopyEndpointSourceDescriptor,
     TextureCopyOrigin,
     TextureCopySize,
     TextureToBufferCopyCommandDescriptor,

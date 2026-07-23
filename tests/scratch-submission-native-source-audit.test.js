@@ -9,9 +9,10 @@ const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch')
 const nativeCalls = Object.freeze([
     [ 'GPUDevice.createCommandEncoder', /\b(?:device|this\.runtime\.device)\.createCommandEncoder\(/ ],
     [ 'GPUDevice.createBindGroup', /\b(?:this|bindSet)\.runtime\.device\.createBindGroup\(/ ],
-    [ 'GPUTexture.createView', /(?:\.gpuTexture|\.getCurrentTexture\(\))\.createView\(/ ],
+    [ 'GPUTexture.createView', /(?:\.gpuTexture|\btexture)\.createView\(/ ],
     [ 'GPUCanvasContext.getConfiguration', /\b(?:context|state\.context)\.getConfiguration\(/ ],
-    [ 'GPUCanvasContext.getCurrentTexture', /\b(?:this|identity|state)\.context\.getCurrentTexture\(/ ],
+    [ 'GPUCanvasContext.getCurrentTexture', /\b(?:this|identity|state|facts)\.context\.getCurrentTexture\(/ ],
+    [ 'GPUDevice.importExternalTexture', /\bthis\.#runtime\.device\.importExternalTexture\(/ ],
     [ 'GPUCommandEncoder.finish', /\bencoder!?\.finish\(/ ],
     [ 'GPUCommandEncoder.clearBuffer', /\bcommandEncoder\.clearBuffer\(/ ],
     [ 'GPUCommandEncoder.copyBufferToBuffer', /\b(?:commandEncoder|encoder)\.copyBufferToBuffer\(/ ],
@@ -64,13 +65,14 @@ describe('scratch submission native source audit', () => {
         const callSites = scanNativeCallSites(scratchRoot)
         const inventoryRows = audit.match(/^\| N\d+ \|.*\|$/gm) ?? []
 
-        expect(callSites).to.have.length(49)
+        expect(callSites).to.have.length(51)
         expect(countByFile(callSites)).to.deep.equal({
-            'packages/geoscratch/src/scratch/binding.ts': 2,
+            'packages/geoscratch/src/scratch/binding.ts': 4,
             'packages/geoscratch/src/scratch/command.ts': 29,
             'packages/geoscratch/src/scratch/readback.ts': 4,
             'packages/geoscratch/src/scratch/submission.ts': 9,
-            'packages/geoscratch/src/scratch/surface.ts': 4,
+            'packages/geoscratch/src/scratch/surface.ts': 1,
+            'packages/geoscratch/src/scratch/temporal-texture.ts': 3,
             'packages/geoscratch/src/scratch/texture.ts': 1,
         })
         expect(inventoryRows).to.have.length(callSites.length)
@@ -87,6 +89,7 @@ describe('scratch submission native source audit', () => {
         const pass = read('packages', 'geoscratch', 'src', 'scratch', 'pass.ts')
         const readback = read('packages', 'geoscratch', 'src', 'scratch', 'readback.ts')
         const surface = read('packages', 'geoscratch', 'src', 'scratch', 'surface.ts')
+        const temporal = read('packages', 'geoscratch', 'src', 'scratch', 'temporal-texture.ts')
 
         for (const nativeCall of [
             'createCommandEncoder',
@@ -107,14 +110,15 @@ describe('scratch submission native source audit', () => {
         )
         expect(submission.match(/observation\.issue\(\s*'attachment-view'/g)).to.have.length(3)
         expect(submission).to.match(
-            /observation\.issue\(\s*'attachment-view',[\s\S]{0,650}createNativeTextureView[\s\S]{0,250}createPreparedSurfaceAttachmentView/
+            /observation\.issue\(\s*'attachment-view',[\s\S]{0,650}createNativeTextureView[\s\S]{0,500}attemptTextureAuthority\.(?:surfaceLeaseView|directSurfaceView)/
         )
         expect(submission).to.match(
             /nativeObservation\.issue\(\s*'pass-begin',[\s\S]{0,350}\(\) => encoder\.beginRenderPass\(createRenderPassDescriptor/
         )
         expect(pass).to.not.include('.getCurrentTexture()')
-        expect(surface).to.include('return state.context.getCurrentTexture()')
-        expect(surface).to.include('return state.context.getCurrentTexture().createView(descriptor)')
+        expect(surface).to.not.include('.getCurrentTexture()')
+        expect(temporal).to.include('this.#runtime.device.importExternalTexture({')
+        expect(temporal).to.include('facts.context.getCurrentTexture()')
         expect(submission).to.match(
             /const surfaceAttachments = prepareSubmissionSurfaceAttachments\(resolvedPlan\.steps\)[\s\S]{0,450}createSubmissionNativeIssuePlan/
         )

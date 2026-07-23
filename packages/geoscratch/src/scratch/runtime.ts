@@ -59,6 +59,7 @@ import {
 import { createSamplerResource, SamplerResource } from './sampler.js'
 import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
+import { createExternalTextureBinding, ExternalTextureBinding } from './temporal-texture.js'
 import { createTextureResource, TextureResource } from './texture.js'
 import type { BindLayout, BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './binding.js'
 import type {
@@ -92,27 +93,71 @@ import type {
 import type { SamplerResourceDescriptor } from './sampler.js'
 import type { SubmissionBuilderOptions } from './submission.js'
 import type { SurfaceOptions } from './surface.js'
+import type { ExternalTextureBindingDescriptor } from './temporal-texture.js'
 import type { TextureResourceDescriptor } from './texture.js'
 
 const runtimeToken = Symbol('ScratchRuntime')
 
+export type ScratchFeatureLevel = 'core' | 'compatibility'
+
 export type ScratchRuntimeCreateOptions = {
     gpu?: GPU
     label?: string
+    featureLevel?: ScratchFeatureLevel
     powerPreference?: GPUPowerPreference
     forceFallbackAdapter?: boolean
+    xrCompatible?: boolean
     requiredFeatures?: Iterable<GPUFeatureName>
-    requiredLimits?: Record<string, number>
+    requiredLimits?: Record<string, GPUSize64 | undefined>
+    defaultQueue?: GPUQueueDescriptor
     diagnostics?: ScratchRuntimeDiagnosticsOptions
     readback?: ScratchReadbackOptions
 }
 
-type ScratchRuntimeConstructorOptions = ScratchRuntimeCreateOptions & {
+export type ScratchRuntimeAdapterRequestFacts = Readonly<{
+    featureLevel: ScratchFeatureLevel
+    powerPreference?: GPUPowerPreference
+    forceFallbackAdapter?: boolean
+    xrCompatible?: boolean
+}>
+
+export type ScratchRuntimeDeviceRequestFacts = Readonly<{
+    label?: string
+    requiredFeatures?: readonly GPUFeatureName[]
+    requiredLimits?: Readonly<Record<string, GPUSize64 | undefined>>
+    defaultQueue?: Readonly<GPUQueueDescriptor>
+}>
+
+export type ScratchRuntimeRequestFacts = Readonly<{
+    adapter: ScratchRuntimeAdapterRequestFacts
+    device: ScratchRuntimeDeviceRequestFacts
+}>
+
+export type ScratchAdapterInfoSnapshot = Readonly<{
+    available: boolean
+    vendor?: string
+    architecture?: string
+    device?: string
+    description?: string
+    subgroupMinSize?: number
+    subgroupMaxSize?: number
+    isFallbackAdapter?: boolean
+}>
+
+type ScratchRuntimeConstructorOptions = {
     gpu: GPU
     adapter: GPUAdapter
     device: GPUDevice
+    label?: string
+    requestFacts: ScratchRuntimeRequestFacts
+    adapterInfo: ScratchAdapterInfoSnapshot
     readbackPolicy: ScratchReadbackPolicy
     diagnosticsPolicy: NormalizedScratchRuntimeDiagnosticsOptions
+}
+
+type ScratchNativeRequestAdapterOptions = GPURequestAdapterOptions & {
+    featureLevel?: ScratchFeatureLevel
+    xrCompatible?: boolean
 }
 
 export interface ScratchRuntime {
@@ -127,6 +172,8 @@ export interface ScratchRuntime {
     readonly deviceFeatures: GPUSupportedFeatures
     readonly deviceLimits: GPUSupportedLimits
     readonly wgslLanguageFeatures: readonly string[]
+    readonly requestFacts: ScratchRuntimeRequestFacts
+    readonly adapterInfo: ScratchAdapterInfoSnapshot
     readonly diagnostics: ScratchRuntimeDiagnostics
     readonly readbackPolicy: ScratchReadbackPolicy
     _resources: Set<Resource>
@@ -165,6 +212,8 @@ export class ScratchRuntime {
             wgslLanguageFeatures: immutableRuntimeProperty(
                 snapshotWgslLanguageFeatures(options.gpu)
             ),
+            requestFacts: immutableRuntimeProperty(options.requestFacts),
+            adapterInfo: immutableRuntimeProperty(options.adapterInfo),
             readbackPolicy: immutableRuntimeProperty(options.readbackPolicy),
             isDisposed: immutableRuntimeGetter(() => scratchRuntimeIsDisposed(this)),
             isDeviceLost: immutableRuntimeGetter(() => scratchRuntimeIsDeviceLost(this)),
@@ -218,10 +267,11 @@ export class ScratchRuntime {
 
     static async create(options: ScratchRuntimeCreateOptions = {}) {
 
-        const readbackPolicy = normalizeScratchReadbackPolicy(options.readback, options.label)
+        const request = snapshotRuntimeRequest(options)
+        const readbackPolicy = normalizeScratchReadbackPolicy(options.readback, request.label)
         const diagnosticsPolicy = normalizeScratchRuntimeDiagnosticsOptions(
             options.diagnostics,
-            options.label
+            request.label
         )
         const gpu = options.gpu ?? globalThis.navigator?.gpu
 
@@ -238,8 +288,7 @@ export class ScratchRuntime {
             })
         }
 
-        const adapterOptions = createAdapterOptions(options)
-        const adapter = await gpu.requestAdapter(adapterOptions)
+        const adapter = await gpu.requestAdapter(request.adapterDescriptor)
 
         if (!adapter || typeof adapter.requestDevice !== 'function') {
             throwScratchDiagnostic({
@@ -253,8 +302,8 @@ export class ScratchRuntime {
             })
         }
 
-        const deviceDescriptor = createDeviceDescriptor(options)
-        const device = await adapter.requestDevice(deviceDescriptor)
+        const adapterInfo = snapshotAdapterInfo(adapter)
+        const device = await adapter.requestDevice(request.deviceDescriptor)
 
         if (!device) {
             throwScratchDiagnostic({
@@ -272,10 +321,11 @@ export class ScratchRuntime {
             gpu,
             adapter,
             device,
+            requestFacts: request.facts,
+            adapterInfo,
             readbackPolicy,
             diagnosticsPolicy,
-            ...(options.label !== undefined ? { label: options.label } : {}),
-            ...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
+            ...(request.label !== undefined ? { label: request.label } : {}),
         })
     }
 
@@ -298,6 +348,19 @@ export class ScratchRuntime {
     surface(canvas: HTMLCanvasElement | OffscreenCanvas, options: SurfaceOptions = {}) {
 
         return this.createSurface(canvas, options)
+    }
+
+    createExternalTextureBinding(
+        descriptor: ExternalTextureBindingDescriptor
+    ): ExternalTextureBinding {
+
+        assertScratchRuntimeActive(this)
+        return createExternalTextureBinding(this, descriptor)
+    }
+
+    externalTexture(descriptor: ExternalTextureBindingDescriptor): ExternalTextureBinding {
+
+        return this.createExternalTextureBinding(descriptor)
     }
 
     async createBuffer(descriptor: BufferResourceDescriptor): Promise<BufferResource> {
@@ -661,14 +724,120 @@ export class ScratchRuntime {
     }
 }
 
-function createAdapterOptions(options: ScratchRuntimeCreateOptions): GPURequestAdapterOptions | undefined {
+type RuntimeRequestSnapshot = Readonly<{
+    label?: string
+    adapterDescriptor: Readonly<ScratchNativeRequestAdapterOptions>
+    deviceDescriptor: Readonly<GPUDeviceDescriptor>
+    facts: ScratchRuntimeRequestFacts
+}>
 
-    const adapterOptions: GPURequestAdapterOptions = {}
+function snapshotRuntimeRequest(options: ScratchRuntimeCreateOptions): RuntimeRequestSnapshot {
 
-    if (options.powerPreference !== undefined) adapterOptions.powerPreference = options.powerPreference
-    if (options.forceFallbackAdapter !== undefined) adapterOptions.forceFallbackAdapter = options.forceFallbackAdapter
+    const label = options.label
+    if (label !== undefined && typeof label !== 'string') {
+        throwRuntimeRequestInvalid('label', label, 'string')
+    }
+    const featureLevel = options.featureLevel ?? 'core'
+    if (featureLevel !== 'core' && featureLevel !== 'compatibility') {
+        throwRuntimeRequestInvalid(
+            'featureLevel',
+            featureLevel,
+            [ 'core', 'compatibility' ]
+        )
+    }
 
-    return Object.keys(adapterOptions).length ? adapterOptions : undefined
+    const adapterDescriptor: ScratchNativeRequestAdapterOptions = { featureLevel }
+    if (options.powerPreference !== undefined) {
+        if (
+            options.powerPreference !== 'low-power' &&
+            options.powerPreference !== 'high-performance'
+        ) {
+            throwRuntimeRequestInvalid(
+                'powerPreference',
+                options.powerPreference,
+                [ 'low-power', 'high-performance' ]
+            )
+        }
+        adapterDescriptor.powerPreference = options.powerPreference
+    }
+    if (options.forceFallbackAdapter !== undefined) {
+        if (typeof options.forceFallbackAdapter !== 'boolean') {
+            throwRuntimeRequestInvalid(
+                'forceFallbackAdapter',
+                options.forceFallbackAdapter,
+                'boolean'
+            )
+        }
+        adapterDescriptor.forceFallbackAdapter = options.forceFallbackAdapter
+    }
+    if (options.xrCompatible !== undefined) {
+        if (typeof options.xrCompatible !== 'boolean') {
+            throwRuntimeRequestInvalid(
+                'xrCompatible',
+                options.xrCompatible,
+                'boolean'
+            )
+        }
+        adapterDescriptor.xrCompatible = options.xrCompatible
+    }
+
+    const deviceDescriptor: GPUDeviceDescriptor = {}
+    if (label !== undefined) deviceDescriptor.label = label
+    if (options.requiredFeatures !== undefined) {
+        let requiredFeatures: unknown[]
+        try {
+            requiredFeatures = Array.from(options.requiredFeatures as Iterable<unknown>)
+        } catch {
+            throwRuntimeRequestInvalid(
+                'requiredFeatures',
+                options.requiredFeatures,
+                'iterable of GPUFeatureName strings'
+            )
+        }
+        for (const feature of requiredFeatures) {
+            if (typeof feature !== 'string') {
+                throwRuntimeRequestInvalid(
+                    'requiredFeatures',
+                    feature,
+                    'iterable of GPUFeatureName strings'
+                )
+            }
+        }
+        deviceDescriptor.requiredFeatures = Object.freeze(
+            requiredFeatures
+        ) as unknown as GPUFeatureName[]
+    }
+    if (options.requiredLimits !== undefined) {
+        deviceDescriptor.requiredLimits = snapshotRequiredLimits(options.requiredLimits)
+    }
+    if (options.defaultQueue !== undefined) {
+        deviceDescriptor.defaultQueue = snapshotQueueDescriptor(options.defaultQueue)
+    }
+
+    Object.freeze(adapterDescriptor)
+    Object.freeze(deviceDescriptor)
+    const facts = Object.freeze({
+        adapter: Object.freeze({ ...adapterDescriptor }) as ScratchRuntimeAdapterRequestFacts,
+        device: Object.freeze({
+            ...(deviceDescriptor.label !== undefined ? { label: deviceDescriptor.label } : {}),
+            ...(deviceDescriptor.requiredFeatures !== undefined
+                ? { requiredFeatures: deviceDescriptor.requiredFeatures as readonly GPUFeatureName[] }
+                : {}),
+            ...(deviceDescriptor.requiredLimits !== undefined
+                ? { requiredLimits: deviceDescriptor.requiredLimits }
+                : {}),
+            ...(deviceDescriptor.defaultQueue !== undefined
+                ? { defaultQueue: deviceDescriptor.defaultQueue }
+                : {}),
+        }) as ScratchRuntimeDeviceRequestFacts,
+    })
+
+    return Object.freeze({
+        ...(label !== undefined ? { label } : {}),
+        adapterDescriptor,
+        deviceDescriptor,
+        facts,
+    })
 }
 
 function immutableRuntimeProperty<T>(value: T): PropertyDescriptor {
@@ -690,15 +859,94 @@ function immutableRuntimeGetter<T>(get: () => T): PropertyDescriptor {
     }
 }
 
-function createDeviceDescriptor(options: ScratchRuntimeCreateOptions): GPUDeviceDescriptor {
+function snapshotQueueDescriptor(descriptor: GPUQueueDescriptor): Readonly<GPUQueueDescriptor> {
 
-    const descriptor: GPUDeviceDescriptor = {}
+    if (typeof descriptor !== 'object' || descriptor === null || Array.isArray(descriptor)) {
+        throwRuntimeRequestInvalid('defaultQueue', descriptor, 'GPUQueueDescriptor object')
+    }
+    if (descriptor.label !== undefined && typeof descriptor.label !== 'string') {
+        throwRuntimeRequestInvalid('defaultQueue.label', descriptor.label, 'string')
+    }
+    return Object.freeze({
+        ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
+    })
+}
 
-    if (options.label !== undefined) descriptor.label = options.label
-    if (options.requiredFeatures !== undefined) descriptor.requiredFeatures = Array.from(options.requiredFeatures)
-    if (options.requiredLimits !== undefined) descriptor.requiredLimits = options.requiredLimits
+function snapshotRequiredLimits(
+    limits: Record<string, GPUSize64 | undefined>
+): Readonly<Record<string, GPUSize64 | undefined>> {
 
-    return descriptor
+    if (typeof limits !== 'object' || limits === null || Array.isArray(limits)) {
+        throwRuntimeRequestInvalid(
+            'requiredLimits',
+            limits,
+            'record of GPUSize64 or undefined values'
+        )
+    }
+    let entries: [ string, unknown ][]
+    try {
+        entries = Object.entries(limits)
+    } catch {
+        throwRuntimeRequestInvalid(
+            'requiredLimits',
+            limits,
+            'readable record of GPUSize64 or undefined values'
+        )
+    }
+    const snapshot: Record<string, GPUSize64 | undefined> = {}
+    for (const [ name, value ] of entries) {
+        if (
+            value !== undefined &&
+            (
+                typeof value !== 'number' ||
+                !Number.isSafeInteger(value) ||
+                value < 0
+            )
+        ) {
+            throwRuntimeRequestInvalid(
+                `requiredLimits.${name}`,
+                value,
+                'non-negative safe integer or undefined'
+            )
+        }
+        snapshot[name] = value as GPUSize64 | undefined
+    }
+    return Object.freeze(snapshot)
+}
+
+function throwRuntimeRequestInvalid(
+    field: string,
+    value: unknown,
+    expected: unknown
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_RUNTIME_REQUEST_INVALID',
+        severity: 'error',
+        phase: 'runtime',
+        subject: { kind: 'ScratchRuntime' },
+        message: 'ScratchRuntime request options are invalid.',
+        expected: { field, value: expected },
+        actual: {
+            field,
+            value: runtimeRequestDiagnosticValue(value),
+        },
+    })
+}
+
+function runtimeRequestDiagnosticValue(value: unknown): unknown {
+
+    if (
+        value === undefined ||
+        value === null ||
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean'
+    ) return value
+    if (Array.isArray(value)) {
+        return value.slice(0, 16).map(runtimeRequestDiagnosticValue)
+    }
+    return Object.prototype.toString.call(value)
 }
 
 function snapshotWgslLanguageFeatures(gpu: GPU): readonly string[] {
@@ -711,4 +959,78 @@ function snapshotWgslLanguageFeatures(gpu: GPU): readonly string[] {
         if (typeof feature === 'string') names.add(feature)
     }
     return Object.freeze([ ...names ].sort())
+}
+
+function snapshotAdapterInfo(adapter: GPUAdapter): ScratchAdapterInfoSnapshot {
+
+    let info: Partial<GPUAdapterInfo> | undefined
+    try {
+        info = adapter.info
+    } catch {
+        return Object.freeze({ available: false })
+    }
+    if (info === undefined || info === null || typeof info !== 'object') {
+        return Object.freeze({ available: false })
+    }
+
+    const snapshot: {
+        available: true
+        vendor?: string
+        architecture?: string
+        device?: string
+        description?: string
+        subgroupMinSize?: number
+        subgroupMaxSize?: number
+        isFallbackAdapter?: boolean
+    } = { available: true }
+    snapshotAdapterInfoString(info, snapshot, 'vendor')
+    snapshotAdapterInfoString(info, snapshot, 'architecture')
+    snapshotAdapterInfoString(info, snapshot, 'device')
+    snapshotAdapterInfoString(info, snapshot, 'description')
+    snapshotAdapterInfoNumber(info, snapshot, 'subgroupMinSize')
+    snapshotAdapterInfoNumber(info, snapshot, 'subgroupMaxSize')
+    try {
+        if (typeof info.isFallbackAdapter === 'boolean') {
+            snapshot.isFallbackAdapter = info.isFallbackAdapter
+        }
+    } catch {
+        // A partial implementation remains available with the readable fields.
+    }
+    return Object.freeze(snapshot)
+}
+
+function snapshotAdapterInfoString(
+    info: Partial<GPUAdapterInfo>,
+    snapshot: {
+        vendor?: string
+        architecture?: string
+        device?: string
+        description?: string
+    },
+    field: 'vendor' | 'architecture' | 'device' | 'description'
+): void {
+
+    try {
+        const value = info[field]
+        if (typeof value === 'string') snapshot[field] = value
+    } catch {
+        // Preserve the other readable adapter-info fields.
+    }
+}
+
+function snapshotAdapterInfoNumber(
+    info: Partial<GPUAdapterInfo>,
+    snapshot: {
+        subgroupMinSize?: number
+        subgroupMaxSize?: number
+    },
+    field: 'subgroupMinSize' | 'subgroupMaxSize'
+): void {
+
+    try {
+        const value = info[field]
+        if (typeof value === 'number' && Number.isFinite(value)) snapshot[field] = value
+    } catch {
+        // Preserve the other readable adapter-info fields.
+    }
 }

@@ -894,6 +894,43 @@ Stable pipeline creation failure codes are
 categories are structural facts. Independent Promise outcomes are joined
 without treating settlement order or localized text as causality.
 
+## Runtime Request And Attempt-Local Texture Diagnostics
+
+Runtime request validation uses `SCRATCH_RUNTIME_REQUEST_INVALID` for malformed
+adapter/device/queue options before native request work begins.
+
+Attempt-local binding authority uses stable structural codes by boundary:
+
+- `SCRATCH_EXTERNAL_TEXTURE_SOURCE_INVALID`,
+  `SCRATCH_EXTERNAL_TEXTURE_SOURCE_EXPIRED`, and
+  `SCRATCH_EXTERNAL_TEXTURE_WRONG_RUNTIME` classify invalid, expired, or
+  cross-Runtime external import intents;
+- `SCRATCH_EXTERNAL_TEXTURE_IMPORT_FAILED` retains a synchronous native import
+  failure under the selected command's provenance;
+- `SCRATCH_BIND_EXTERNAL_TEXTURE_VIEW_MISMATCH` reports a regular texture,
+  texture view, or Surface view that cannot legally occupy an external-texture
+  slot;
+- `SCRATCH_BIND_SET_ATTEMPT_LOCAL` and
+  `SCRATCH_ATTEMPT_AUTHORITY_REQUIRED` prevent attempt-local bindings from being
+  mistaken for persistent prepared state or encoded outside a submission;
+- `SCRATCH_BIND_SET_ATTEMPT_REALIZATION_FAILED` attributes synchronous native
+  bind-group realization failure to the selected command;
+- `SCRATCH_SURFACE_TEXTURE_LEASE_INVALID`,
+  `SCRATCH_SURFACE_TEXTURE_LEASE_STALE`,
+  `SCRATCH_SURFACE_TEXTURE_LEASE_WRONG_SUBMISSION`,
+  `SCRATCH_SURFACE_TEXTURE_WRONG_RUNTIME`, and
+  `SCRATCH_SURFACE_TEXTURE_USAGE_MISSING` classify lease identity, lifetime,
+  ownership, Runtime, and configured-usage violations; and
+- `SCRATCH_SURFACE_TEXTURE_VIEW_INVALID`,
+  `SCRATCH_SURFACE_TEXTURE_ACQUISITION_FAILED`, and
+  `SCRATCH_SURFACE_TEXTURE_VIEW_FAILED` separate deterministic view-contract
+  rejection from synchronous current-texture acquisition and view-creation
+  failures.
+
+Delayed validation, internal, OOM, device-loss, and queue-completion outcomes remain
+inside the existing submission native-observation model. These immediate codes do not
+claim synchronous knowledge of asynchronous native outcomes.
+
 ## Immediate Data Diagnostics And Retention
 
 Immediate-data validation uses three stable structured codes:

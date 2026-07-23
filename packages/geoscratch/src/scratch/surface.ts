@@ -73,6 +73,7 @@ export type SurfaceFacts = Readonly<{
     toneMapping?: SurfaceToneMapping
     alphaMode: GPUCanvasAlphaMode
     size: Readonly<SurfaceSize>
+    configurationVersion: number
 }>
 
 export type PreparedSurfaceAttachment = Readonly<{
@@ -252,12 +253,6 @@ export class Surface {
         this.configure({ size })
     }
 
-    getCurrentTexture(): GPUTexture {
-
-        const state = assertSurfaceUsable(this)
-        return state.context.getCurrentTexture()
-    }
-
     dispose(): void {
 
         const currentState = surfaceStates.get(this)
@@ -329,33 +324,6 @@ export function prepareSurfaceAttachment(surface: Surface): PreparedSurfaceAttac
     return prepared
 }
 
-export function createPreparedSurfaceAttachmentView(
-    prepared: PreparedSurfaceAttachment,
-    descriptor?: GPUTextureViewDescriptor
-): GPUTextureView {
-
-    const preparedState = preparedSurfaceAttachments.get(prepared)
-    if (preparedState === undefined) {
-        throw new TypeError('Surface attachment preparation is not owned by Scratch.')
-    }
-    const { surface, state, configurationVersion } = preparedState
-    const currentState = assertSurfaceAliveOwner(surface)
-    if (currentState !== state || state.configurationVersion !== configurationVersion || !state.isConfigured) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_SURFACE_CONFIGURATION_STALE',
-            severity: 'error',
-            phase: 'runtime',
-            subject: surfaceSubject(surface, state),
-            related: [ state.runtime.subject ],
-            message: 'Prepared Surface attachment no longer matches the committed configuration.',
-            expected: { configurationVersion },
-            actual: { configurationVersion: state.configurationVersion, isConfigured: state.isConfigured },
-        })
-    }
-
-    return state.context.getCurrentTexture().createView(descriptor)
-}
-
 export function preparedSurfaceAttachmentFacts(
     prepared: PreparedSurfaceAttachment
 ): PreparedSurfaceAttachmentFacts {
@@ -369,6 +337,53 @@ export function preparedSurfaceAttachmentFacts(
         format: preparedState.format,
         configurationVersion: preparedState.configurationVersion,
         size: preparedState.size,
+    })
+}
+
+export function preparedSurfaceAttachmentSurfaceFacts(
+    prepared: PreparedSurfaceAttachment
+): SurfaceFacts {
+
+    const preparedState = preparedSurfaceAttachments.get(prepared)
+    if (preparedState === undefined) {
+        throw new TypeError('Surface attachment preparation is not owned by Scratch.')
+    }
+    const facts = snapshotSurfaceFacts(preparedState.surface, preparedState.state)
+    assertPreparedSurfaceFactsCurrent(preparedState.surface, facts)
+    return facts
+}
+
+export function assertPreparedSurfaceFactsCurrent(
+    surface: Surface,
+    facts: SurfaceFacts
+): void {
+
+    const state = assertSurfaceAliveOwner(surface)
+    assertScratchRuntimeActive(state.runtime)
+    if (
+        state.runtime === facts.runtime &&
+        state.id === facts.id &&
+        state.context === facts.context &&
+        state.configurationVersion === facts.configurationVersion
+    ) return
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_SURFACE_CONFIGURATION_STALE',
+        severity: 'error',
+        phase: 'submission',
+        subject: surfaceSubject(surface, state),
+        related: [ state.runtime.subject ],
+        message: 'Prepared Surface facts became stale before native texture acquisition.',
+        expected: {
+            runtimeId: facts.runtime.id,
+            surfaceId: facts.id,
+            configurationVersion: facts.configurationVersion,
+        },
+        actual: {
+            runtimeId: state.runtime.id,
+            surfaceId: state.id,
+            configurationVersion: state.configurationVersion,
+        },
     })
 }
 
@@ -977,6 +992,7 @@ function snapshotSurfaceFacts(surface: Surface, state: SurfaceState): SurfaceFac
         ...(configuration.toneMapping === undefined ? {} : { toneMapping: configuration.toneMapping }),
         alphaMode: configuration.alphaMode,
         size: state.size,
+        configurationVersion: state.configurationVersion,
     })
 }
 

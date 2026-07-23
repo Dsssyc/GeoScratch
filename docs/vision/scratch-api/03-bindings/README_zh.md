@@ -101,17 +101,22 @@ command 都必须把 parent buffer 同时声明在 `resources.read` 和
 `resources.write` 中。所需 read epoch 必须已经存在，因此新 buffer 必须先经过
 显式 upload、copy 或更早的 GPU producer 初始化，之后 command 才能使用该 binding。
 
-`externalTexture` 在拥有独立 frame/task lifetime contract 前明确排除。Shader reflection 可以交叉检查显式 layout，但绝不是生产路径的真相来源。
+`externalTexture` 是 attempt-local binding。稳定的 `ExternalTextureBinding`
+只记录 import intent；只有被选中的 submission 才会导入 native
+`GPUExternalTexture`，并且 native handle 只在该次 attempt 内存活。Shader reflection
+可以交叉检查显式 layout，但绝不是生产路径的真相来源。
 
 ## BindSet
 
-核心只接受以下持久 binding value:
+核心接受以下持久 binding value:
 
 ```ts
-Record<string, BufferRegion | TextureViewSpec | SamplerResource>
+Record<string, BufferRegion | TextureResource | TextureViewSpec | SamplerResource>
 ```
 
-Whole buffer、whole texture、native GPU object 与 legacy wrapper 都会被拒绝。资源选择是显式且 many-to-many 的:
+Whole buffer、native GPU object 与 legacy wrapper 都会被拒绝。只有当 native
+binding 消费完整默认 view 时才接受 `TextureResource`；显式 subresource 仍使用
+`TextureViewSpec`。资源选择是显式且 many-to-many 的:
 
 ```ts
 const terrainSet = await runtime.createBindSet(terrainLayout, {
@@ -121,6 +126,13 @@ const terrainSet = await runtime.createBindSet(terrainLayout, {
     linear: linearSampler,
 })
 ```
+
+不可变 BindSet 也可以包含 `ExternalTextureBinding`、`SurfaceTextureLease` 或
+`SurfaceTextureView`。这类 BindSet 不拥有持久 native bind group：每个被选中的
+submission 都通过同一个 `AttemptTextureAuthority` 实例化 attempt-local entry 与
+bind group，并在 attempt 关闭时丢弃全部 native handle。当 Surface 的 configured
+usage 与精确 layout contract 允许时，`SurfaceTextureLease` 也可以占用普通 sampled
+或 storage texture slot。
 
 Binding table 不可变。其 read-only snapshot 持有 private map，并同时冻结 snapshot
 instance 与 prototype，因此构造后不能重定向 `get()`、`values()` 或 iteration。

@@ -880,6 +880,41 @@ in-flight pipeline 只能通过临时 lifecycle subscription 与 diagnostic caus
 category 是结构化事实。独立 Promise outcome 在 join 时不把 settlement order
 或 localized text 当作因果。
 
+## Runtime Request 与 Attempt-Local Texture Diagnostics
+
+Runtime request validation 使用 `SCRATCH_RUNTIME_REQUEST_INVALID`，在 native
+request 开始前拒绝 malformed adapter/device/queue option。
+
+Attempt-local binding authority 按边界使用稳定结构化 code：
+
+- `SCRATCH_EXTERNAL_TEXTURE_SOURCE_INVALID`、
+  `SCRATCH_EXTERNAL_TEXTURE_SOURCE_EXPIRED` 与
+  `SCRATCH_EXTERNAL_TEXTURE_WRONG_RUNTIME` 分别描述非法、已过期或跨 Runtime 的
+  external import intent；
+- `SCRATCH_EXTERNAL_TEXTURE_IMPORT_FAILED` 将同步 native import failure 保留在
+  被选中 command 的 provenance 下；
+- `SCRATCH_BIND_EXTERNAL_TEXTURE_VIEW_MISMATCH` 报告无法合法占用
+  external-texture slot 的普通 texture、texture view 或 Surface view；
+- `SCRATCH_BIND_SET_ATTEMPT_LOCAL` 与
+  `SCRATCH_ATTEMPT_AUTHORITY_REQUIRED` 防止 attempt-local binding 被误当成持久
+  prepared state，或在 submission 外进行 encoding；
+- `SCRATCH_BIND_SET_ATTEMPT_REALIZATION_FAILED` 将同步 native bind-group
+  realization failure 归属于被选中的 command；
+- `SCRATCH_SURFACE_TEXTURE_LEASE_INVALID`、
+  `SCRATCH_SURFACE_TEXTURE_LEASE_STALE`、
+  `SCRATCH_SURFACE_TEXTURE_LEASE_WRONG_SUBMISSION`、
+  `SCRATCH_SURFACE_TEXTURE_WRONG_RUNTIME` 与
+  `SCRATCH_SURFACE_TEXTURE_USAGE_MISSING` 分别描述 lease identity、lifetime、
+  ownership、Runtime 与 configured usage 违规；以及
+- `SCRATCH_SURFACE_TEXTURE_VIEW_INVALID`、
+  `SCRATCH_SURFACE_TEXTURE_ACQUISITION_FAILED` 与
+  `SCRATCH_SURFACE_TEXTURE_VIEW_FAILED` 将确定性的 view-contract 拒绝，与同步
+  current-texture acquisition 和 view-creation failure 分开。
+
+延迟 validation、internal、OOM、device-loss 与 queue-completion outcome 继续进入
+既有 submission native-observation model。这些 immediate code 不声称可以同步
+获知异步 native outcome。
+
 ## Immediate Data Diagnostics 与 Retention
 
 Immediate-data validation 使用三种稳定结构化 code：

@@ -154,9 +154,9 @@ to WebGPU `read-only-storage`; every other row uses native vocabulary directly.
 | Storage texture access | `write-only`, `read-only`, `read-write` | Complete |
 | Storage texture view dimension | `1d`, `2d`, `2d-array`, `3d` | Complete |
 
-`externalTexture` is deliberately excluded because its video/frame/task lifetime is
-not a persistent binding contract. It requires a separate Goal rather than a false
-persistent-resource abstraction.
+`externalTexture` is now covered by the separate ADR-049 attempt-local contract. Its
+stable binding records import intent, while the selected submission owns native import,
+realization, provenance, and expiry; it is not represented as a persistent resource.
 
 The audit AST-extracts each source set, verifies `lowerBindLayoutEntry()` assigns all
 four native descriptor members, and acceptance executes the referenced behavioral
@@ -507,7 +507,9 @@ Resolved tenth review findings:
    `GPUTexture.createView()` in `pass.ts` and the underlying
    `GPUCanvasContext.getCurrentTexture()` in `surface.ts`, bringing the exact total to
    41. Submission lowering owns both calls at `pass-begin`; direct public
-   `Surface.getCurrentTexture()` remains explicitly deferred.
+   The former public `Surface.getCurrentTexture()` bypass is replaced by
+   `SubmissionBuilder.surfaceTexture()` and the submission-owned attempt-local
+   texture authority.
 2. Acceptance previously reported only HEAD while auditing uncommitted files. The
    runner now records commit plus porcelain evidence and rejects acceptance before any
    expensive step unless the entire Git working tree is clean. Structural mode remains
@@ -2210,7 +2212,7 @@ Runtime/Program lifecycle-authority correction verification:
 
 ## Explicit Non-Goals
 
-- `externalTexture` and external-video frame/task lifetime
+- Persistence of `externalTexture` or external-video frame/task native handles
 - Experimental binding arrays
 - Render graphs, tracked dynamic values, or dynamic-value closures
 - Full device-loss rehydration or raw device-object tracking

@@ -205,6 +205,47 @@ describe('Scratch Command bound resource access', () => {
         expect(fake.calls.commandEncoders).to.have.length(0)
     })
 
+    it('accepts directly bound sampled textures and preserves parent-resource access', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const texture = await runtime.createTexture({
+            size: [ 4, 4 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
+        })
+        const bindLayout = await runtime.createBindLayout({
+            group: 0,
+            entries: [ {
+                binding: 0,
+                name: 'image',
+                type: 'texture',
+                visibility: [ 'compute' ],
+            } ],
+        })
+        const bindSet = await runtime.createBindSet(bindLayout, { image: texture })
+        const pipeline = await createPipeline(runtime, bindLayout)
+
+        const diagnostic = expectDiagnostic(() => {
+            createDispatch(runtime, pipeline, bindSet, {
+                read: [],
+                write: [],
+            })
+        }, {
+            code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
+            severity: 'error',
+            phase: 'command',
+        })
+
+        expect(diagnostic.expected).to.deep.include({
+            access: { read: true, write: false },
+            resourceId: texture.id,
+        })
+        expect(fake.calls.bindGroups.at(-1).descriptor.entries[0].resource)
+            .to.equal(texture.gpuTexture)
+        expect(fake.calls.textureViews).to.have.length(0)
+    })
+
     for (const testCase of [
         { access: 'read-only', read: true, write: false },
         { access: 'write-only', read: false, write: true },
@@ -245,4 +286,41 @@ describe('Scratch Command bound resource access', () => {
             expect(fake.calls.commandEncoders).to.have.length(0)
         })
     }
+
+    it('accepts a directly bound storage texture', async() => {
+
+        const fake = createFakeGpu()
+        fake.device.features.add('core-features-and-limits')
+        fake.device.features.add('texture-formats-tier2')
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const texture = await runtime.createTexture({
+            size: [ 4, 4 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_STORAGE_BINDING,
+        })
+        const bindLayout = await runtime.createBindLayout({
+            group: 0,
+            entries: [ {
+                binding: 0,
+                name: 'storageImage',
+                type: 'storage-texture',
+                visibility: [ 'compute' ],
+                access: 'write-only',
+                format: 'rgba8unorm',
+            } ],
+        })
+        const bindSet = await runtime.createBindSet(bindLayout, {
+            storageImage: texture,
+        })
+        const pipeline = await createPipeline(runtime, bindLayout)
+        const command = createDispatch(runtime, pipeline, bindSet, {
+            read: [],
+            write: [ texture ],
+        })
+
+        expect(command).to.be.instanceOf(DispatchCommand)
+        expect(fake.calls.bindGroups.at(-1).descriptor.entries[0].resource)
+            .to.equal(texture.gpuTexture)
+        expect(fake.calls.textureViews).to.have.length(0)
+    })
 })
