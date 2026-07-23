@@ -114,6 +114,74 @@ describe('ScratchRuntime async render pipeline creation', () => {
         expect(calls.uncapturedErrors).to.have.length(0)
     })
 
+    it('snapshots and lowers independent vertex and fragment constants', async() => {
+
+        const { gpu, calls } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const program = createProgram(runtime)
+        const vertexConstants = { vertexScale: 2, vertexMode: 1 }
+        const fragmentConstants = { fragmentAlpha: 0.5 }
+        const promise = runtime.createRenderPipeline({
+            program,
+            vertexConstants,
+            fragmentConstants,
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+
+        vertexConstants.vertexScale = 99
+        fragmentConstants.fragmentAlpha = 0
+
+        const pipeline = await promise
+        const nativeDescriptor = calls.asyncPipelineRequests[0].descriptor
+        expect(nativeDescriptor.vertex.constants).to.deep.equal({
+            vertexScale: 2,
+            vertexMode: 1,
+        })
+        expect(nativeDescriptor.fragment.constants).to.deep.equal({
+            fragmentAlpha: 0.5,
+        })
+        expect(pipeline.vertexConstants).to.deep.equal({
+            vertexScale: 2,
+            vertexMode: 1,
+        })
+        expect(pipeline.fragmentConstants).to.deep.equal({
+            fragmentAlpha: 0.5,
+        })
+        expect(Object.isFrozen(pipeline.vertexConstants)).to.equal(true)
+        expect(Object.isFrozen(pipeline.fragmentConstants)).to.equal(true)
+    })
+
+    it('rejects invalid render constants before native issue', async() => {
+
+        const cases = [
+            { field: 'vertexConstants', value: [ 1 ], reason: 'record' },
+            { field: 'fragmentConstants', value: { alpha: Number.NaN }, reason: 'value' },
+            { field: 'vertexConstants', value: { scale: Number.POSITIVE_INFINITY }, reason: 'value' },
+        ]
+
+        for (const scenario of cases) {
+            const { gpu, calls } = createFakeGpu()
+            const runtime = await ScratchRuntime.create({ gpu })
+            const program = createProgram(runtime)
+            const error = await rejectedDiagnostic(runtime.createRenderPipeline({
+                program,
+                [scenario.field]: scenario.value,
+                targets: [ { format: 'bgra8unorm' } ],
+            }))
+
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_PIPELINE_CONSTANTS_INVALID',
+                severity: 'error',
+                phase: 'pipeline',
+            })
+            expect(error.diagnostic.actual).to.include({
+                stage: scenario.field === 'vertexConstants' ? 'vertex' : 'fragment',
+                reason: scenario.reason,
+            })
+            expect(calls.asyncPipelineRequests).to.have.length(0)
+        }
+    })
+
     it('pops every scope before awaiting and joins arbitrary settlement order', async() => {
 
         const { gpu, calls, errors, pipelines } = createFakeGpu({

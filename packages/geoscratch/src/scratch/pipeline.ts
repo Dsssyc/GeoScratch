@@ -61,8 +61,10 @@ export type RenderPipelineDescriptor = {
     vertex?: string
     fragment?: string
     bindLayouts?: BindLayout[]
-    vertexBuffers?: GPUVertexBufferLayout[]
-    targets: GPUColorTargetState[]
+    vertexBuffers?: readonly (GPUVertexBufferLayout | null)[]
+    targets: readonly (GPUColorTargetState | null)[]
+    vertexConstants?: Readonly<Record<string, number>>
+    fragmentConstants?: Readonly<Record<string, number>>
     primitive?: GPUPrimitiveState
     depthStencil?: GPUDepthStencilState
     multisample?: GPUMultisampleState
@@ -86,9 +88,11 @@ export interface RenderPipeline {
     readonly fragmentEntryPoint: string
     readonly bindLayouts: readonly BindLayout[]
     readonly bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
-    readonly vertexBuffers: readonly GPUVertexBufferLayout[]
-    readonly targets: readonly GPUColorTargetState[]
-    readonly targetFormats: readonly GPUTextureFormat[]
+    readonly vertexBuffers: readonly (GPUVertexBufferLayout | null)[]
+    readonly targets: readonly (GPUColorTargetState | null)[]
+    readonly targetFormats: readonly (GPUTextureFormat | null)[]
+    readonly vertexConstants?: Readonly<Record<string, number>>
+    readonly fragmentConstants?: Readonly<Record<string, number>>
     readonly primitive: Readonly<GPUPrimitiveState>
     readonly depthStencil?: Readonly<GPUDepthStencilState>
     readonly depthStencilFormat?: GPUTextureFormat
@@ -212,9 +216,11 @@ type RenderPipelinePlan = PipelineValidationContext & Readonly<{
     pipelineKind: 'render'
     vertexEntryPoint: string
     fragmentEntryPoint: string
-    vertexBuffers: readonly GPUVertexBufferLayout[]
-    targets: readonly GPUColorTargetState[]
-    targetFormats: readonly GPUTextureFormat[]
+    vertexBuffers: readonly (GPUVertexBufferLayout | null)[]
+    targets: readonly (GPUColorTargetState | null)[]
+    targetFormats: readonly (GPUTextureFormat | null)[]
+    vertexConstants?: Readonly<Record<string, number>>
+    fragmentConstants?: Readonly<Record<string, number>>
     primitive: Readonly<GPUPrimitiveState>
     depthStencil?: Readonly<GPUDepthStencilState>
     depthStencilFormat?: GPUTextureFormat
@@ -268,11 +274,17 @@ export async function createRenderPipeline(
                     module: shaderModule,
                     entryPoint: plan.vertexEntryPoint,
                     buffers: [ ...plan.vertexBuffers ],
+                    ...(plan.vertexConstants !== undefined
+                        ? { constants: plan.vertexConstants }
+                        : {}),
                 },
                 fragment: {
                     module: shaderModule,
                     entryPoint: plan.fragmentEntryPoint,
                     targets: [ ...plan.targets ],
+                    ...(plan.fragmentConstants !== undefined
+                        ? { constants: plan.fragmentConstants }
+                        : {}),
                 },
                 primitive: plan.primitive,
             }
@@ -379,6 +391,8 @@ function prepareRenderPipeline(
     )
     const vertexBuffers = freezeVertexBuffers(normalizeVertexBuffers(context, input.vertexBuffers))
     const targets = freezeColorTargets(normalizeTargets(context, input.targets))
+    const vertexConstants = normalizeRenderConstants(context, input.vertexConstants, 'vertex')
+    const fragmentConstants = normalizeRenderConstants(context, input.fragmentConstants, 'fragment')
     const primitive = Object.freeze({
         topology: 'triangle-list' as GPUPrimitiveTopology,
         ...input.primitive,
@@ -398,7 +412,9 @@ function prepareRenderPipeline(
         fragmentEntryPoint: (input.fragment ?? programFacts.entryPoints.fragment) as string,
         vertexBuffers,
         targets,
-        targetFormats: Object.freeze(targets.map(target => target.format)),
+        targetFormats: Object.freeze(targets.map(target => target?.format ?? null)),
+        ...(vertexConstants !== undefined ? { vertexConstants } : {}),
+        ...(fragmentConstants !== undefined ? { fragmentConstants } : {}),
         primitive,
         ...(depthStencil !== undefined ? {
             depthStencil,
@@ -471,6 +487,12 @@ function renderPipelineDescriptorEvidence(plan: RenderPipelinePlan): {
             ...(plan.label !== undefined ? { label: plan.label } : {}),
             vertexBuffers: plan.vertexBuffers,
             targets: plan.targets,
+            ...(plan.vertexConstants !== undefined
+                ? { vertexConstants: plan.vertexConstants }
+                : {}),
+            ...(plan.fragmentConstants !== undefined
+                ? { fragmentConstants: plan.fragmentConstants }
+                : {}),
             primitive: plan.primitive,
             ...(plan.depthStencil !== undefined ? { depthStencil: plan.depthStencil } : {}),
             ...(plan.multisample !== undefined ? { multisample: plan.multisample } : {}),
@@ -718,10 +740,11 @@ function pipelineFailureAttribution(
 }
 
 function freezeVertexBuffers(
-    layouts: GPUVertexBufferLayout[]
-): readonly GPUVertexBufferLayout[] {
+    layouts: (GPUVertexBufferLayout | null)[]
+): readonly (GPUVertexBufferLayout | null)[] {
 
     return Object.freeze(layouts.map((layout) => {
+        if (layout === null) return null
         const attributes: GPUVertexAttribute[] = layout.attributes
             .map(attribute => Object.freeze({ ...attribute }))
         Object.freeze(attributes)
@@ -730,18 +753,20 @@ function freezeVertexBuffers(
 }
 
 function freezeColorTargets(
-    targets: GPUColorTargetState[]
-): readonly GPUColorTargetState[] {
+    targets: (GPUColorTargetState | null)[]
+): readonly (GPUColorTargetState | null)[] {
 
-    return Object.freeze(targets.map(target => Object.freeze({
-        ...target,
-        ...(target.blend !== undefined ? {
-            blend: Object.freeze({
-                color: Object.freeze({ ...target.blend.color }),
-                alpha: Object.freeze({ ...target.blend.alpha }),
-            }),
-        } : {}),
-    })))
+    return Object.freeze(targets.map(target => target === null
+        ? null
+        : Object.freeze({
+            ...target,
+            ...(target.blend !== undefined ? {
+                blend: Object.freeze({
+                    color: Object.freeze({ ...target.blend.color }),
+                    alpha: Object.freeze({ ...target.blend.alpha }),
+                }),
+            } : {}),
+        })))
 }
 
 function freezeDepthStencil(state: GPUDepthStencilState): Readonly<GPUDepthStencilState> {
@@ -774,6 +799,12 @@ function defineImmutableRenderProperties(
         vertexBuffers: state.vertexBuffers,
         targets: state.targets,
         targetFormats: state.targetFormats,
+        ...(state.vertexConstants !== undefined
+            ? { vertexConstants: state.vertexConstants }
+            : {}),
+        ...(state.fragmentConstants !== undefined
+            ? { fragmentConstants: state.fragmentConstants }
+            : {}),
         primitive: state.primitive,
         shaderModule: state.shaderModule,
         pipelineLayout: state.pipelineLayout,
@@ -1147,20 +1178,45 @@ function computePipelineStateFor(pipeline: ComputePipeline): { isDisposed: boole
     return state
 }
 
-function normalizeVertexBuffers(pipeline: PipelineValidationContext, vertexBuffers: GPUVertexBufferLayout[] = []): GPUVertexBufferLayout[] {
+function normalizeVertexBuffers(
+    pipeline: PipelineValidationContext,
+    vertexBuffers: readonly (GPUVertexBufferLayout | null)[] = []
+): (GPUVertexBufferLayout | null)[] {
 
     if (!Array.isArray(vertexBuffers)) {
         throwVertexLayoutDiagnostic(pipeline, {
-            expected: { vertexBuffers: 'GPUVertexBufferLayout[]' },
-            actual: { vertexBuffers },
+            expected: { vertexBuffers: 'readonly (GPUVertexBufferLayout | null)[]' },
+            actual: { field: 'vertexBuffers', vertexBuffers },
         })
     }
 
-    return vertexBuffers.map((layout: GPUVertexBufferLayout, slot) => {
-        if (!layout || typeof layout !== 'object') {
+    const normalizedLayouts: (GPUVertexBufferLayout | null)[] = []
+    for (let slot = 0; slot < vertexBuffers.length; slot++) {
+        if (!Object.hasOwn(vertexBuffers, slot) || vertexBuffers[slot] === undefined) {
             throwVertexLayoutDiagnostic(pipeline, {
-                expected: { layout: 'GPUVertexBufferLayout' },
-                actual: { slot, layout: describeValue(layout) },
+                expected: { slot: 'explicit GPUVertexBufferLayout or null' },
+                actual: {
+                    field: 'vertexBuffers',
+                    slot,
+                    reason: Object.hasOwn(vertexBuffers, slot) ? 'undefined' : 'hole',
+                },
+            })
+        }
+
+        const layout = vertexBuffers[slot]
+        if (layout === null) {
+            normalizedLayouts.push(null)
+            continue
+        }
+
+        if (typeof layout !== 'object') {
+            throwVertexLayoutDiagnostic(pipeline, {
+                expected: { layout: 'GPUVertexBufferLayout or null' },
+                actual: {
+                    field: 'vertexBuffers',
+                    slot,
+                    layout: describeValue(layout),
+                },
             })
         }
 
@@ -1185,7 +1241,7 @@ function normalizeVertexBuffers(pipeline: PipelineValidationContext, vertexBuffe
             })
         }
 
-        const normalized: GPUVertexBufferLayout = {
+        const normalizedLayout: GPUVertexBufferLayout = {
             arrayStride: layout.arrayStride,
             attributes: layout.attributes.map((attribute: GPUVertexAttribute, attributeIndex: number) => normalizeVertexAttribute(
                 pipeline,
@@ -1194,9 +1250,75 @@ function normalizeVertexBuffers(pipeline: PipelineValidationContext, vertexBuffe
                 attributeIndex
             )),
         }
-        if (layout.stepMode !== undefined) normalized.stepMode = layout.stepMode
+        if (layout.stepMode !== undefined) normalizedLayout.stepMode = layout.stepMode
 
-        return normalized
+        normalizedLayouts.push(normalizedLayout)
+    }
+
+    return normalizedLayouts
+}
+
+function normalizeRenderConstants(
+    pipeline: PipelineValidationContext,
+    constants: Readonly<Record<string, number>> | undefined,
+    stage: 'vertex' | 'fragment'
+): Readonly<Record<string, number>> | undefined {
+
+    if (constants === undefined) return undefined
+
+    let entries: [string, unknown][]
+    try {
+        const prototype = constants !== null && typeof constants === 'object'
+            ? Object.getPrototypeOf(constants)
+            : undefined
+        if (
+            constants === null ||
+            typeof constants !== 'object' ||
+            Array.isArray(constants) ||
+            (prototype !== Object.prototype && prototype !== null)
+        ) {
+            throwRenderConstantsDiagnostic(pipeline, stage, 'record', constants)
+        }
+        entries = Object.entries(constants)
+    } catch (error) {
+        if (error instanceof Error && error.name === 'ScratchDiagnosticError') throw error
+        throwRenderConstantsDiagnostic(pipeline, stage, 'record', constants)
+    }
+
+    for (const [ name, value ] of entries) {
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+            throwRenderConstantsDiagnostic(pipeline, stage, 'value', value, name)
+        }
+    }
+
+    return Object.freeze(Object.fromEntries(entries) as Record<string, number>)
+}
+
+function throwRenderConstantsDiagnostic(
+    pipeline: PipelineValidationContext,
+    stage: 'vertex' | 'fragment',
+    reason: 'record' | 'value',
+    value: unknown,
+    name?: string
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PIPELINE_CONSTANTS_INVALID',
+        severity: 'error',
+        phase: 'pipeline',
+        subject: pipeline.subject,
+        related: [ pipeline.program.subject ],
+        message: 'RenderPipeline stage constants must be a plain record of finite numbers.',
+        expected: {
+            stage,
+            constants: 'Readonly<Record<string, finite number>>',
+        },
+        actual: {
+            stage,
+            reason,
+            ...(name !== undefined ? { name } : {}),
+            value: describeValue(value),
+        },
     })
 }
 
@@ -1347,44 +1469,76 @@ function nativeBindGroupLayouts(
     return nativeLayouts
 }
 
-function normalizeTargets(pipeline: PipelineValidationContext, targets: GPUColorTargetState[]): GPUColorTargetState[] {
+function normalizeTargets(
+    pipeline: PipelineValidationContext,
+    targets: readonly (GPUColorTargetState | null)[]
+): (GPUColorTargetState | null)[] {
 
     if (!Array.isArray(targets)) {
         throwScratchDiagnostic({
-            code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
+            code: 'SCRATCH_PIPELINE_TARGET_STATE_INVALID',
             severity: 'error',
             phase: 'pipeline',
             subject: pipeline.subject,
             message: 'RenderPipeline color targets must be an array.',
-            expected: { targets: 'GPUColorTargetState[]' },
+            expected: { targets: 'readonly (GPUColorTargetState | null)[]' },
             actual: { targets },
         })
     }
 
-    return targets.map((target) => {
-        if (!target || typeof target.format !== 'string') {
+    const normalized: (GPUColorTargetState | null)[] = []
+    for (let slot = 0; slot < targets.length; slot++) {
+        if (!Object.hasOwn(targets, slot) || targets[slot] === undefined) {
             throwScratchDiagnostic({
-                code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
+                code: 'SCRATCH_PIPELINE_TARGET_STATE_INVALID',
                 severity: 'error',
                 phase: 'pipeline',
                 subject: pipeline.subject,
-                message: 'RenderPipeline target requires a texture format.',
-                expected: { format: 'GPUTextureFormat' },
-                actual: { target },
+                message: 'RenderPipeline target slots must be explicit target states or null.',
+                expected: { slot: 'explicit GPUColorTargetState or null' },
+                actual: {
+                    field: 'targets',
+                    slot,
+                    reason: Object.hasOwn(targets, slot) ? 'undefined' : 'hole',
+                },
             })
         }
 
-        return { ...target }
-    })
+        const target = targets[slot]
+        if (target === null) {
+            normalized.push(null)
+            continue
+        }
+
+        if (typeof target !== 'object' || typeof target.format !== 'string') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PIPELINE_TARGET_STATE_INVALID',
+                severity: 'error',
+                phase: 'pipeline',
+                subject: pipeline.subject,
+                message: 'RenderPipeline non-null target requires a texture format.',
+                expected: { format: 'GPUTextureFormat' },
+                actual: {
+                    field: 'targets',
+                    slot,
+                    target: describeValue(target),
+                },
+            })
+        }
+
+        normalized.push({ ...target })
+    }
+
+    return normalized
 }
 
 function validateRenderPipelineHasAttachment(
     pipeline: PipelineValidationContext,
-    targets: readonly GPUColorTargetState[],
+    targets: readonly (GPUColorTargetState | null)[],
     depthStencil: Readonly<GPUDepthStencilState> | undefined
 ): void {
 
-    if (targets.length > 0 || depthStencil !== undefined) return
+    if (targets.some(target => target !== null) || depthStencil !== undefined) return
 
     throwScratchDiagnostic({
         code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',

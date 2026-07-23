@@ -96,6 +96,158 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         expect(calls.renderPipelines[0].descriptor.vertex.buffers).to.deep.equal(vertexBuffers)
     })
 
+    it('preserves explicit null pipeline slots without renumbering', async() => {
+
+        const { gpu, calls } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const program = createProgram(runtime)
+        const layout = {
+            arrayStride: 8,
+            attributes: [
+                { shaderLocation: 0, offset: 0, format: 'float32x2' },
+            ],
+        }
+        const target = { format: 'bgra8unorm' }
+
+        const pipeline = await runtime.createRenderPipeline({
+            program,
+            vertexBuffers: [ null, layout ],
+            targets: [ null, target ],
+        })
+
+        expect(pipeline.vertexBuffers).to.deep.equal([ null, layout ])
+        expect(pipeline.targets).to.deep.equal([ null, target ])
+        expect(pipeline.targetFormats).to.deep.equal([ null, 'bgra8unorm' ])
+        expect(calls.renderPipelines[0].descriptor.vertex.buffers)
+            .to.deep.equal([ null, layout ])
+        expect(calls.renderPipelines[0].descriptor.fragment.targets)
+            .to.deep.equal([ null, target ])
+    })
+
+    it('rejects pipeline array holes and undefined slots with structured diagnostics', async() => {
+
+        const vertexHole = new Array(1)
+        const targetHole = new Array(1)
+        const cases = [
+            {
+                vertexBuffers: vertexHole,
+                targets: [ { format: 'bgra8unorm' } ],
+                code: 'SCRATCH_PIPELINE_VERTEX_LAYOUT_MISMATCH',
+                field: 'vertexBuffers',
+            },
+            {
+                vertexBuffers: [ undefined ],
+                targets: [ { format: 'bgra8unorm' } ],
+                code: 'SCRATCH_PIPELINE_VERTEX_LAYOUT_MISMATCH',
+                field: 'vertexBuffers',
+            },
+            {
+                targets: targetHole,
+                code: 'SCRATCH_PIPELINE_TARGET_STATE_INVALID',
+                field: 'targets',
+            },
+            {
+                targets: [ undefined ],
+                code: 'SCRATCH_PIPELINE_TARGET_STATE_INVALID',
+                field: 'targets',
+            },
+        ]
+
+        for (const scenario of cases) {
+            const { gpu, calls } = createFakeGpu()
+            const runtime = await ScratchRuntime.create({ gpu })
+            const program = createProgram(runtime)
+
+            try {
+                await runtime.createRenderPipeline({
+                    program,
+                    ...(scenario.vertexBuffers !== undefined
+                        ? { vertexBuffers: scenario.vertexBuffers }
+                        : {}),
+                    targets: scenario.targets,
+                })
+                throw new Error('expected sparse pipeline slot validation to fail')
+            } catch (error) {
+                expect(error).to.be.instanceOf(ScratchDiagnosticError)
+                expect(error.diagnostic).to.include({
+                    code: scenario.code,
+                    severity: 'error',
+                    phase: 'pipeline',
+                })
+                expect(error.diagnostic.actual).to.include({
+                    field: scenario.field,
+                    slot: 0,
+                })
+                expect(calls.renderPipelines).to.have.length(0)
+            }
+        }
+    })
+
+    it('requires only non-null vertex slots and rejects bindings to null slots', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const program = createProgram(runtime)
+        const pipeline = await runtime.createRenderPipeline({
+            program,
+            vertexBuffers: [
+                null,
+                {
+                    arrayStride: 8,
+                    attributes: [
+                        { shaderLocation: 0, offset: 0, format: 'float32x2' },
+                    ],
+                },
+            ],
+            targets: [ { format: 'bgra8unorm' } ],
+        })
+        const vertexBuffer = await runtime.createBuffer({
+            size: 24,
+            usage: GPU_BUFFER_USAGE_VERTEX | GPU_BUFFER_USAGE_COPY_DST,
+        })
+
+        const command = runtime.createDrawCommand({
+            pipeline,
+            count: { vertexCount: 3 },
+            vertexBuffers: [ { slot: 1, region: vertexBuffer.region() } ],
+            resources: {
+                read: [ readResource(vertexBuffer) ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+
+        expect(command.vertexBuffers.map(binding => binding.slot)).to.deep.equal([ 1 ])
+
+        try {
+            runtime.createDrawCommand({
+                pipeline,
+                count: { vertexCount: 3 },
+                vertexBuffers: [
+                    { slot: 0, region: vertexBuffer.region() },
+                    { slot: 1, region: vertexBuffer.region() },
+                ],
+                resources: {
+                    read: [ readResource(vertexBuffer) ],
+                    write: [],
+                },
+                whenMissing: 'throw',
+            })
+            throw new Error('expected binding to null vertex slot to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_COMMAND_VERTEX_BUFFER_INVALID',
+                severity: 'error',
+                phase: 'command',
+            })
+            expect(error.diagnostic.actual).to.deep.include({
+                slot: 0,
+                pipelineLayout: null,
+            })
+        }
+    })
+
     it('rejects invalid vertex buffer layouts with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()

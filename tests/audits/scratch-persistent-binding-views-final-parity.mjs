@@ -633,7 +633,7 @@ const capabilityRows = [
             ]) &&
             hasAll(current.pipeline, [
                 'validateRenderPipelineHasAttachment(',
-                'targets.length > 0 || depthStencil !== undefined',
+                'targets.some(target => target !== null) || depthStencil !== undefined',
             ]) &&
             hasAll(current.command, [ 'region.offset % 4 !== 0', "reason: 'writeBufferAlignment'" ]),
         implementation: 'scratch/command.ts, scratch/pass.ts, scratch/submission.ts',

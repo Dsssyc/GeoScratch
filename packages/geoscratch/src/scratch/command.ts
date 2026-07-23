@@ -3753,6 +3753,13 @@ function normalizeVertexBuffers(
             })
         }
 
+        if (command.pipeline.vertexBuffers[binding.slot] === null) {
+            throwVertexBufferDiagnostic(command, {
+                expected: { pipelineLayout: 'non-null GPUVertexBufferLayout' },
+                actual: { slot: binding.slot, pipelineLayout: null },
+            })
+        }
+
         if (slots.has(binding.slot)) {
             throwVertexBufferDiagnostic(command, {
                 expected: { slot: 'unique' },
@@ -3778,7 +3785,9 @@ function normalizeVertexBuffers(
         return normalized
     })
 
-    const requiredSlots = command.pipeline.vertexBuffers.map((_, slot) => slot)
+    const requiredSlots = command.pipeline.vertexBuffers.flatMap((layout, slot) =>
+        layout === null ? [] : [ slot ]
+    )
     const boundSlots = normalized.map(binding => binding.slot)
     const missingSlots = requiredSlots.filter(slot => !slots.has(slot))
     if (missingSlots.length > 0) {
