@@ -1,6 +1,6 @@
 # Scratch Immediate Data Native Parity Audit
 
-Status: implementation complete through Phase 4; final audit and browser gate pending
+Status: verified; this document is the final audit commit payload
 Date: 2026-07-23
 Baseline: `7d0b60c06c4b64699af293638f8bebf30b2cd98a`
 Decision: ADR-047
@@ -39,24 +39,24 @@ declarations.
 
 | Capability | Normative WebGPU/WGSL fact | Fixed Scratch contract | Required evidence | Status |
 | --- | --- | --- | --- | --- |
-| WGSL feature inventory | `GPU.wgslLanguageFeatures` is a readonly setlike of automatically enabled language-extension names. | Runtime snapshots, deduplicates, sorts, and freezes a string array; missing platform field becomes empty. | Runtime construction and immutability tests; public type evidence; docs. | pending |
-| Program language requirements | WGSL `requires` documents extension use and shader creation fails when an extension is unavailable. | Explicit `requiredLanguageFeatures`; no source parsing or rewriting; distinct from device `requiredFeatures`. | Invalid iterable/value, unavailable feature, mutation, and transaction snapshot tests. | pending |
-| Immediate address space | `immediate_address_space` enables read-only module-scope `var<immediate>`; one entry point statically accesses at most one immediate variable. | Program source remains caller-authored; Pipeline declares the byte range; Program declares capability. | Browser shader compilation plus Program/Pipeline tests and docs. | pending |
-| Store-type restriction | Immediate store type is host-shareable and constructible, excluding arrays and structures containing array members. | Raw bytes retain native freedom; LayoutCodec marks current non-array shapes compatible and arrays incompatible. | Codec compatibility and rejection tests. | pending |
-| Device limit | `maxImmediateSize` is the maximum byte size, with CRD default 64. | Pipeline rejects values above the Runtime device limit before native issue. | Boundary and missing/invalid limit tests. | pending |
-| Pipeline layout range | `immediateSize` defaults to 0, is a `GPUSize32`, is four-byte aligned, and does not exceed the device limit. | Shared render/compute normalizer; immutable Pipeline fact; exact native descriptor lowering. | Render and compute descriptor, invalid size, lifecycle, and public type tests. | pending |
-| Pipeline layout equality | Pipeline layouts are equivalent only when bind-group layouts and immediate sizes are equal. | Pipeline compatibility/identity facts include `immediateSize`. | Equality and command/pipeline mismatch tests. | pending |
-| Pipeline shader requirement | A pipeline layout range must be at least the immediate variable's required size. | Scratch validates declared size and capability deterministically; native shader validation remains authoritative for source/type size. | Too-small native validation attribution and browser evidence; docs state the limit. | pending |
-| BufferSource copy | Native `setImmediates()` copies AllowSharedBufferSource bytes on the content timeline. | Each actual submission step copies the source into a private Uint8Array before native effects. | ArrayBuffer, TypedArray, DataView, SharedArrayBuffer, mutation, and current-attempt isolation tests. | pending |
-| Byte semantics | Native TypedArray offsets use elements while ArrayBuffer/DataView offsets use bytes. | Scratch accepts a complete visible view and always interprets it as bytes; no public offset/size overload. | Typed-view subrange and exact-length tests. | pending |
-| Accessible slots | Every 4-byte slot intersecting accessible bytes must be initialized before draw/dispatch. | Every nonzero command issues one `setImmediates(0, completeSnapshot)` call. | Full-range call count/order and independent consecutive-command tests. | pending |
-| Render commands | Immediate state persists natively and can otherwise affect later draws. | Every actual Draw owns complete immediate data; no inheritance or dedupe. | Direct/indexed/indirect render tests. | pending |
-| Compute commands | Immediate state persists natively and can otherwise affect later dispatches. | Every actual Dispatch owns complete immediate data; no inheritance or dedupe. | Direct/indirect compute tests. | pending |
-| Readiness resolution | Native API has no Scratch readiness/fallback policy. | Snapshot only the final executable command after fallback/skip/pass rollback resolution. | skip-command, skip-pass, fallback, and repeated-step tests. | pending |
-| Native error ownership | Validation is asynchronous and belongs to the active pass/submission encoder. | Existing submission observation remains the sole owner; command-encode location records exact selected Command. | Synchronous throw, scoped validation, device loss, and no-side-effect tests. | pending |
-| Resource independence | Immediate bytes are encoder state, not a GPUBuffer binding or queue transfer. | No Resource, allocation version, content epoch, resource ledger, or upload action. | SubmittedWork and epoch regression tests. | pending |
-| Payload retention | The specification requires byte copying for execution, not unbounded diagnostic retention. | Default facts retain metadata only; no payload bytes, values, hashes, source, or handles. | Capture/export/diagnostic redaction tests. | pending |
-| Neutral example | Both render and compute pass encoders inherit the binding commands mixin. | `examples/immediateData/` proves compute then render with stable graph identity and mutable sources. | Build, headed browser facts, resize, nonblank pixels, and zero-error evidence. | pending |
+| WGSL feature inventory | `GPU.wgslLanguageFeatures` is a readonly setlike of automatically enabled language-extension names. | Runtime snapshots, deduplicates, sorts, and freezes a string array; missing platform field becomes empty. | Runtime construction and immutability tests; public type evidence; docs. | verified |
+| Program language requirements | WGSL `requires` documents extension use and shader creation fails when an extension is unavailable. | Explicit `requiredLanguageFeatures`; no source parsing or rewriting; distinct from device `requiredFeatures`. | Invalid iterable/value, unavailable feature, mutation, and transaction snapshot tests. | verified |
+| Immediate address space | `immediate_address_space` enables read-only module-scope `var<immediate>`; one entry point statically accesses at most one immediate variable. | Program source remains caller-authored; Pipeline declares the byte range; Program declares capability. | Browser shader compilation plus Program/Pipeline tests and docs. | verified |
+| Store-type restriction | Immediate store type is host-shareable and constructible, excluding arrays and structures containing array members. | Raw bytes retain native freedom; LayoutCodec marks current non-array shapes compatible and arrays incompatible. | Codec compatibility and rejection tests. | verified |
+| Device limit | `maxImmediateSize` is the maximum byte size, with CRD default 64. | Pipeline rejects values above the Runtime device limit before native issue. | Boundary and missing/invalid limit tests. | verified |
+| Pipeline layout range | `immediateSize` defaults to 0, is a `GPUSize32`, is four-byte aligned, and does not exceed the device limit. | Shared render/compute normalizer; immutable Pipeline fact; exact native descriptor lowering. | Render and compute descriptor, invalid size, lifecycle, and public type tests. | verified |
+| Pipeline layout equality | Pipeline layouts are equivalent only when bind-group layouts and immediate sizes are equal. | Pipeline compatibility/identity facts include `immediateSize`. | Equality and command/pipeline mismatch tests. | verified |
+| Pipeline shader requirement | A pipeline layout range must be at least the immediate variable's required size. | Scratch validates declared size and capability deterministically; native shader validation remains authoritative for source/type size. | Too-small native validation attribution and browser evidence; docs state the limit. | verified |
+| BufferSource copy | Native `setImmediates()` copies AllowSharedBufferSource bytes on the content timeline. | Each actual submission step copies the source into a private Uint8Array before native effects. | ArrayBuffer, TypedArray, DataView, SharedArrayBuffer, mutation, and current-attempt isolation tests. | verified |
+| Byte semantics | Native TypedArray offsets use elements while ArrayBuffer/DataView offsets use bytes. | Scratch accepts a complete visible view and always interprets it as bytes; no public offset/size overload. | Typed-view subrange and exact-length tests. | verified |
+| Accessible slots | Every 4-byte slot intersecting accessible bytes must be initialized before draw/dispatch. | Every nonzero command issues one `setImmediates(0, completeSnapshot)` call. | Full-range call count/order and independent consecutive-command tests. | verified |
+| Render commands | Immediate state persists natively and can otherwise affect later draws. | Every actual Draw owns complete immediate data; no inheritance or dedupe. | Direct/indexed/indirect render tests. | verified |
+| Compute commands | Immediate state persists natively and can otherwise affect later dispatches. | Every actual Dispatch owns complete immediate data; no inheritance or dedupe. | Direct/indirect compute tests. | verified |
+| Readiness resolution | Native API has no Scratch readiness/fallback policy. | Snapshot only the final executable command after fallback/skip/pass rollback resolution. | skip-command, skip-pass, fallback, and repeated-step tests. | verified |
+| Native error ownership | Validation is asynchronous and belongs to the active pass/submission encoder. | Existing submission observation remains the sole owner; command-encode location records exact selected Command. | Synchronous throw, scoped validation, device loss, and no-side-effect tests. | verified |
+| Resource independence | Immediate bytes are encoder state, not a GPUBuffer binding or queue transfer. | No Resource, allocation version, content epoch, resource ledger, or upload action. | SubmittedWork and epoch regression tests. | verified |
+| Payload retention | The specification requires byte copying for execution, not unbounded diagnostic retention. | Default facts retain metadata only; no payload bytes, values, hashes, source, or handles. | Capture/export/diagnostic redaction tests. | verified |
+| Neutral example | Both render and compute pass encoders inherit the binding commands mixin. | `examples/immediateData/` proves compute then render with stable graph identity and mutable sources. | Build, headed browser facts, resize, nonblank pixels, and zero-error evidence. | verified |
 
 ## Diagnostic Matrix
 
@@ -103,6 +103,77 @@ The bounded browser verifier must record:
 The browser gate may run at most twice, with a second attempt allowed only for a
 documented browser, desktop, or harness interruption.
 
+### Recorded Browser Result
+
+The headed gate passed on its first and only attempt. No retry was used.
+
+- Browser: Google Chrome 150.0.7871.130.
+- Adapter: Apple, `metal-3`; `navigator.gpu.wgslLanguageFeatures` contained
+  `immediate_address_space`; adapter `maxImmediateSize` was 64.
+- Before resize: status `ready`, resize generation 1, 767 submitted and observed
+  submissions, compute immediate value `[0.2633,0.5716,0.801,1]`, two independent
+  render values, stable graph identity, resolved compute-to-render dependency, and
+  visible source mutation.
+- After resize to 1280 by 720: status remained `ready`, resize generation advanced
+  to 2, submitted and observed counts both reached 3049, and compute/render values
+  continued changing without rebuilding Program, Pipeline, BindSet, Command, or
+  PassSpec identities.
+- Both screenshots contained two distinct rendered triangles. FFmpeg signal
+  statistics reported luma ranges 23 through 125 before resize and 23 through 154
+  after resize, excluding blank output.
+- Playwright reported zero console warnings and errors. Every counted submission
+  completed both `nativeOutcome` and `done`, and the page never published an error
+  status, covering scoped validation, rejected completion, and device-loss paths.
+
+## Latest Draft Cross-Check
+
+The 2026-07-23 editor drafts were checked after implementation. They retain the
+contract used here:
+
+- `GPUSupportedLimits.maxImmediateSize` defaults to 64 and bounds
+  `GPUPipelineLayoutDescriptor.immediateSize`;
+- pipeline-layout immediate size is four-byte aligned and participates in layout
+  equivalence;
+- `setImmediates()` copies the supplied BufferSource on the content timeline,
+  requires four-byte write granularity, and initializes encoder slots;
+- draw/dispatch validation requires all WGSL `AccessibleSlots` to have been set;
+- WGSL still limits an immediate variable to host-shareable constructible
+  non-array-containing types, at most one statically accessed variable per entry
+  point, and a required size no larger than the pipeline layout range.
+
+Scratch's one complete per-occurrence snapshot remains a stricter compositional
+contract over the native partial-update state machine. No latest-draft fact requires
+scope expansion or a compatibility workaround.
+
+## Independent Review And Correction
+
+Exactly one independent review was performed against
+`7d0b60c06c4b64699af293638f8bebf30b2cd98a..38c8f35`. It found four issues:
+
+1. Immediate LayoutUploadView ranges were incorrectly constrained to the visible
+   `bytes` subview instead of the established `bytes.buffer` range.
+2. Repeated LayoutUploadView accessor reads could leak a raw exception.
+3. Program and Pipeline diagnostics omitted required Runtime and numeric constraint
+   facts.
+4. The too-small shader-required immediate range had no explicit native-attribution
+   regression.
+
+The single concentrated correction at `739232c` resolved all four:
+
+- one guarded construction-time materialization now reads the four LayoutUploadView
+  fields exactly once and uses the explicit range inside backing storage;
+- Runtime subjects and authored/normalized size, alignment, GPUSize32, and device
+  limit facts are machine-readable;
+- a caller-authored `var<immediate>` compute shader with a 16-byte store type and a
+  4-byte pipeline range proves that Scratch does not invent source-size validation
+  and attributes a deterministically injected native validation rejection to
+  pipeline creation; the headed browser separately proves the valid native path;
+- range, accessor, limit-boundary, missing/invalid-limit, and diagnostic regressions
+  were added, and the native-call provenance inventory was resynchronized.
+
+The correction checkpoint passed 1004 tests with 2 opt-in browser tests pending,
+the complete TypeScript gate, and `git diff --check`.
+
 ## Explicit Follow-Ups
 
 - RenderBundle and `executeBundles()`.
@@ -128,6 +199,22 @@ material. The example uses caller-authored `requires immediate_address_space;` a
 `var<immediate>`, stable compute/render Pipelines, BindSets, Commands, and PassSpecs,
 one compute-to-render Resource dependency, and mutable CPU sources.
 
-The matrix remains pending until the fixed sequential final gates, bounded headed
-browser evidence, exactly one independent review, at most one concentrated
-correction, and one final audit commit are complete.
+The bounded headed browser gate, exactly one independent review, and the single
+allowed correction are complete. This document is the sole payload planned for the
+final audit commit.
+
+## Final Sequential Gates
+
+The final fixed-order run passed after all implementation, correction, documentation,
+and audit edits were complete:
+
+1. `npm test`: passed with 1004 passing and 2 opt-in browser gates pending.
+2. `npm run typecheck`: passed package build, public API typecheck, examples
+   typecheck, and canonical WebGPU declaration typecheck.
+3. `npm run build`: passed package and production examples builds, including
+   `dist/examples/immediateData/index.html`.
+4. `git diff --check`: passed.
+5. `git status --short`: reported only this audit document before the final audit
+   commit.
+
+No implementation change follows this gate record.
