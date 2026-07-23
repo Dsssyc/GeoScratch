@@ -104,6 +104,7 @@ const historicalPaths = Object.freeze({
 })
 
 const ordinaryExamples = Object.freeze([
+    'bufferMapping',
     'computeReadback',
     'demLayer',
     'externalImageUpload',

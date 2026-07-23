@@ -85,6 +85,56 @@ Subregion offset 相对 source region，并立即归一化到 parent buffer。La
 
 所有 range consumer 都使用 BufferRegion: upload、readback、copy 的所有 buffer 端、vertex/index binding、indirect argument、query resolve destination 与持久 buffer binding。Parent disposal 会使全部用途失效。Allocation replacement 后，会针对 current native allocation 重新校验 bounds、usage 与 alignment。
 
+### Buffer Host-Mapping Authority
+
+普通 `createBuffer()` 接受
+`Omit<GPUBufferDescriptor, 'mappedAtCreation'>`。只要传入该属性，包括
+`false`，都会以 `SCRATCH_BUFFER_MAPPING_USE_EXPLICIT_FACTORY` 失败；Scratch
+绝不发布隐藏的 mapped allocation。
+
+Creation-time initialization 是显式的，并且不要求 MAP usage：
+
+```ts
+const { buffer, lease } = await runtime.createMappedBuffer({
+    label: 'initial uniforms',
+    size: 256,
+    usage: GPUBufferUsage.UNIFORM,
+})
+
+try {
+    new Float32Array(lease.view).set(values)
+} finally {
+    lease.dispose()
+}
+```
+
+普通 mapping 选择现有 region：
+
+```ts
+const lease = await runtime.mapBuffer({
+    region: staging.region({ offset: 0, size: 64 }),
+    mode: 'read',
+    signal,
+})
+```
+
+`MappedBufferLease` 只能由 Scratch 创建，不能直接构造、继承或通过 prototype
+伪造。它捕获 buffer、region、mode、allocation version 与 mapping 建立时的
+epoch。其 `view` 是原生 mapped `ArrayBuffer`，不是 CPU clone。`dispose()` 幂等；
+release 后 getter 会给出结构化失败，所有先前取得的 view 都由原生 `unmap()`
+detach。
+
+每个 buffer 只有一个 module-private、O(1) mapping authority。一个 pending 或
+active mapping 会让第二次 mapping，以及所有真正的 Scratch GPU buffer use，在
+queue/encoder effect 前失败。Region construction、LayoutCodec CPU 工作、BindSet
+description 与 BindSet preparation 仍然合法，因为它们没有把 ownership 交给
+GPU。动态检查发生在被选中的 command、copy、readback、resolve、clear 或 upload
+真正使用 buffer 时。
+
+`buffer.gpuBuffer` 仍是显式 raw escape hatch。通过它直接执行原生 map/unmap
+对 Scratch 不可见，因此没有 Scratch authority、epoch、readiness 或 diagnostic
+保证。
+
 ## LayoutArtifact 与 LayoutCodec
 
 `LayoutCodec` 从同一个不可变 `LayoutArtifact` 同步准备 CPU packing、WGSL accessor 与 readback view:

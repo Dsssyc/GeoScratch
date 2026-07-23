@@ -88,6 +88,58 @@ Subregion offsets are relative to the source region and immediately normalize to
 
 Every range consumer uses BufferRegion: uploads, readback, all buffer sides of copies, vertex/index bindings, indirect arguments, query resolve destinations, and persistent buffer bindings. Parent disposal invalidates every use. Allocation replacement causes bounds, usage, and alignment to be revalidated against the current native allocation.
 
+### Buffer Host-Mapping Authority
+
+Ordinary `createBuffer()` accepts
+`Omit<GPUBufferDescriptor, 'mappedAtCreation'>`. Supplying that property,
+including `false`, fails with
+`SCRATCH_BUFFER_MAPPING_USE_EXPLICIT_FACTORY`; a hidden mapped allocation is
+never published.
+
+Creation-time initialization is explicit and does not require MAP usage:
+
+```ts
+const { buffer, lease } = await runtime.createMappedBuffer({
+    label: 'initial uniforms',
+    size: 256,
+    usage: GPUBufferUsage.UNIFORM,
+})
+
+try {
+    new Float32Array(lease.view).set(values)
+} finally {
+    lease.dispose()
+}
+```
+
+Ordinary mapping selects an existing region:
+
+```ts
+const lease = await runtime.mapBuffer({
+    region: staging.region({ offset: 0, size: 64 }),
+    mode: 'read',
+    signal,
+})
+```
+
+`MappedBufferLease` is Scratch-created and closed against construction,
+subclassing, or prototype forgery. It captures the buffer, region, mode,
+allocation version, and establishment epoch. Its `view` is the native mapped
+`ArrayBuffer`, not a CPU clone. `dispose()` is idempotent; after release the
+getter fails structurally and every previously obtained view is detached by
+native `unmap()`.
+
+Each buffer has one module-private O(1) mapping authority. One pending or
+active mapping rejects another map and every actual Scratch GPU buffer use
+before queue or encoder effects. Region construction, LayoutCodec CPU work,
+BindSet description, and BindSet preparation remain legal because they do not
+give the GPU ownership. The dynamic check occurs when a selected command,
+copy, readback, resolve, clear, or upload would actually use the buffer.
+
+`buffer.gpuBuffer` remains an explicit raw escape hatch. Direct native
+map/unmap through it is not visible to Scratch and receives no Scratch
+authority, epoch, readiness, or diagnostic guarantees.
+
 ## LayoutArtifact And LayoutCodec
 
 `LayoutCodec` synchronously prepares CPU packing, WGSL accessors, and readback views from one immutable `LayoutArtifact`:

@@ -48,48 +48,48 @@ a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 | --- | --- | --- | --- | --- |
 | N1 | `packages/geoscratch/src/scratch/binding.ts:983` | persistent binding `GPUTexture.createView()` | `bind-set-preparation` candidate transaction; committed atomically with its bind group. | Independently acknowledged before submission |
 | N2 | `packages/geoscratch/src/scratch/binding.ts:1020` | `GPUDevice.createBindGroup()` | `bind-set-preparation` transaction; committed before submission. | Independently acknowledged before submission |
-| N3 | `packages/geoscratch/src/scratch/command.ts:857` | render `setPipeline()` | `issuePassCommandEncoding()` on submission path; manual encode remains raw. | Observed command; manual encode deferred |
-| N4 | `packages/geoscratch/src/scratch/command.ts:859` | `setViewport()` | Same pass-command owner; emitted for every draw from the command snapshot and current attachment extent. | Observed command; manual encode deferred |
-| N5 | `packages/geoscratch/src/scratch/command.ts:867` | `setScissorRect()` | Same pass-command owner; emitted for every draw from the command snapshot and current attachment extent. | Observed command; manual encode deferred |
-| N6 | `packages/geoscratch/src/scratch/command.ts:873` | `setBlendConstant()` | Same pass-command owner; emitted for every draw from the immutable render-state snapshot. | Observed command; manual encode deferred |
-| N7 | `packages/geoscratch/src/scratch/command.ts:874` | `setStencilReference()` | Same pass-command owner; emitted for every draw from the immutable render-state snapshot. | Observed command; manual encode deferred |
-| N8 | `packages/geoscratch/src/scratch/command.ts:876` | `setVertexBuffer()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N9 | `packages/geoscratch/src/scratch/command.ts:884` | `setIndexBuffer()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N10 | `packages/geoscratch/src/scratch/command.ts:895` | `drawIndexed()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N11 | `packages/geoscratch/src/scratch/command.ts:903` | `draw()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N12 | `packages/geoscratch/src/scratch/command.ts:910` | `drawIndirect()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N13 | `packages/geoscratch/src/scratch/command.ts:912` | `drawIndexedIndirect()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N14 | `packages/geoscratch/src/scratch/command.ts:1069` | `beginOcclusionQuery()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N15 | `packages/geoscratch/src/scratch/command.ts:1193` | `endOcclusionQuery()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N16 | `packages/geoscratch/src/scratch/command.ts:1373` | compute `setPipeline()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N17 | `packages/geoscratch/src/scratch/command.ts:1379` | `dispatchWorkgroupsIndirect()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N18 | `packages/geoscratch/src/scratch/command.ts:1384` | `dispatchWorkgroups()` | Same pass-command owner. | Observed command; manual encode deferred |
-| N49 | `packages/geoscratch/src/scratch/command.ts:1896` | `setImmediates()` | One complete private submission snapshot is set after each selected pipeline and before other command state. | Observed command; direct encode requires a resolved snapshot |
-| N19 | `packages/geoscratch/src/scratch/command.ts:2615` | `clearBuffer()` | `issueStandaloneCommandEncoding()` on the submission path; zero-size clears issue no native call. | Observed command; manual encode deferred |
-| N20 | `packages/geoscratch/src/scratch/command.ts:2861` | `copyBufferToBuffer()` | `issueStandaloneCommandEncoding()` on submission path. | Observed command; manual encode deferred |
-| N21 | `packages/geoscratch/src/scratch/command.ts:2882` | `copyTextureToTexture()` | Same standalone-command owner. | Observed command; manual encode deferred |
-| N22 | `packages/geoscratch/src/scratch/command.ts:2911` | `copyBufferToTexture()` | Same standalone-command owner. | Observed command; manual encode deferred |
-| N23 | `packages/geoscratch/src/scratch/command.ts:2939` | `copyTextureToBuffer()` | Same standalone-command owner. | Observed command; manual encode deferred |
-| N24 | `packages/geoscratch/src/scratch/command.ts:3256` | ordered-readback `copyBufferToBuffer()` | Ordered readback step is one standalone command location. | Observed command; manual encode deferred |
-| N25 | `packages/geoscratch/src/scratch/command.ts:3815` | `resolveQuerySet()` | Resolve step is one standalone command location. | Observed command; manual encode deferred |
-| N26 | `packages/geoscratch/src/scratch/command.ts:4187` | `GPUQueue.writeBuffer()` | Submission replay uses one `queue-action`; direct upload execution shares this call site without an owner. | Observed submission; direct execute deferred |
-| N27 | `packages/geoscratch/src/scratch/command.ts:4194` | `GPUQueue.writeTexture()` | Same shared queue-action boundary. | Observed submission; direct execute deferred |
-| N28 | `packages/geoscratch/src/scratch/command.ts:4646` | dynamic-offset `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
-| N29 | `packages/geoscratch/src/scratch/command.ts:4654` | static `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
-| N30 | `packages/geoscratch/src/scratch/command.ts:7501` | `copyExternalImageToTexture()` | Submission replay uses one `queue-action`; direct execution shares this call site without an owner. | Observed submission; direct execute deferred |
-| N31 | `packages/geoscratch/src/scratch/readback.ts:482` | `createCommandEncoder()` | Direct-readback native observation, `encoder-create`. | Observed direct readback |
-| N32 | `packages/geoscratch/src/scratch/readback.ts:484` | `copyBufferToBuffer()` | Direct-readback native observation, `command-encode`. | Observed direct readback |
-| N33 | `packages/geoscratch/src/scratch/readback.ts:493` | `finish()` | Direct-readback native observation, `encoder-finish`. | Observed direct readback |
-| N34 | `packages/geoscratch/src/scratch/readback.ts:497` | `queue.submit()` | Direct-readback native observation, `queue-submit`. | Observed direct readback |
-| N35 | `packages/geoscratch/src/scratch/submission.ts:693` | `createCommandEncoder()` | Submission encoder-segment location, `encoder-create`. | Observed submission |
-| N36 | `packages/geoscratch/src/scratch/submission.ts:716` | `finish()` | Submission encoder-segment location, `encoder-finish`. | Observed submission |
-| N37 | `packages/geoscratch/src/scratch/submission.ts:870` | `beginComputePass()` | Compute pass location, `pass-begin`. | Observed submission |
-| N38 | `packages/geoscratch/src/scratch/submission.ts:905` | compute pass `end()` | Compute pass location, `pass-end`. | Observed submission |
-| N39 | `packages/geoscratch/src/scratch/submission.ts:940` | `beginRenderPass()` | Render pass location, `pass-begin`. | Observed submission |
-| N40 | `packages/geoscratch/src/scratch/submission.ts:1003` | render pass `end()` | Render pass location, `pass-end`. | Observed submission |
-| N41 | `packages/geoscratch/src/scratch/submission.ts:1033` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
-| N42 | `packages/geoscratch/src/scratch/submission.ts:1466` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
-| N43 | `packages/geoscratch/src/scratch/submission.ts:1471` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
+| N3 | `packages/geoscratch/src/scratch/command.ts:859` | render `setPipeline()` | `issuePassCommandEncoding()` on submission path; manual encode remains raw. | Observed command; manual encode deferred |
+| N4 | `packages/geoscratch/src/scratch/command.ts:861` | `setViewport()` | Same pass-command owner; emitted for every draw from the command snapshot and current attachment extent. | Observed command; manual encode deferred |
+| N5 | `packages/geoscratch/src/scratch/command.ts:869` | `setScissorRect()` | Same pass-command owner; emitted for every draw from the command snapshot and current attachment extent. | Observed command; manual encode deferred |
+| N6 | `packages/geoscratch/src/scratch/command.ts:875` | `setBlendConstant()` | Same pass-command owner; emitted for every draw from the immutable render-state snapshot. | Observed command; manual encode deferred |
+| N7 | `packages/geoscratch/src/scratch/command.ts:876` | `setStencilReference()` | Same pass-command owner; emitted for every draw from the immutable render-state snapshot. | Observed command; manual encode deferred |
+| N8 | `packages/geoscratch/src/scratch/command.ts:878` | `setVertexBuffer()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N9 | `packages/geoscratch/src/scratch/command.ts:886` | `setIndexBuffer()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N10 | `packages/geoscratch/src/scratch/command.ts:897` | `drawIndexed()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N11 | `packages/geoscratch/src/scratch/command.ts:905` | `draw()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N12 | `packages/geoscratch/src/scratch/command.ts:912` | `drawIndirect()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N13 | `packages/geoscratch/src/scratch/command.ts:914` | `drawIndexedIndirect()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N14 | `packages/geoscratch/src/scratch/command.ts:1071` | `beginOcclusionQuery()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N15 | `packages/geoscratch/src/scratch/command.ts:1195` | `endOcclusionQuery()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N16 | `packages/geoscratch/src/scratch/command.ts:1376` | compute `setPipeline()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N17 | `packages/geoscratch/src/scratch/command.ts:1382` | `dispatchWorkgroupsIndirect()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N18 | `packages/geoscratch/src/scratch/command.ts:1387` | `dispatchWorkgroups()` | Same pass-command owner. | Observed command; manual encode deferred |
+| N49 | `packages/geoscratch/src/scratch/command.ts:1899` | `setImmediates()` | One complete private submission snapshot is set after each selected pipeline and before other command state. | Observed command; direct encode requires a resolved snapshot |
+| N19 | `packages/geoscratch/src/scratch/command.ts:2619` | `clearBuffer()` | `issueStandaloneCommandEncoding()` on the submission path; zero-size clears issue no native call. | Observed command; manual encode deferred |
+| N20 | `packages/geoscratch/src/scratch/command.ts:2866` | `copyBufferToBuffer()` | `issueStandaloneCommandEncoding()` on submission path. | Observed command; manual encode deferred |
+| N21 | `packages/geoscratch/src/scratch/command.ts:2887` | `copyTextureToTexture()` | Same standalone-command owner. | Observed command; manual encode deferred |
+| N22 | `packages/geoscratch/src/scratch/command.ts:2916` | `copyBufferToTexture()` | Same standalone-command owner. | Observed command; manual encode deferred |
+| N23 | `packages/geoscratch/src/scratch/command.ts:2944` | `copyTextureToBuffer()` | Same standalone-command owner. | Observed command; manual encode deferred |
+| N24 | `packages/geoscratch/src/scratch/command.ts:3262` | ordered-readback `copyBufferToBuffer()` | Ordered readback step is one standalone command location. | Observed command; manual encode deferred |
+| N25 | `packages/geoscratch/src/scratch/command.ts:3822` | `resolveQuerySet()` | Resolve step is one standalone command location. | Observed command; manual encode deferred |
+| N26 | `packages/geoscratch/src/scratch/command.ts:4243` | `GPUQueue.writeBuffer()` | Submission replay uses one `queue-action`; direct upload execution shares this call site without an owner. | Observed submission; direct execute deferred |
+| N27 | `packages/geoscratch/src/scratch/command.ts:4250` | `GPUQueue.writeTexture()` | Same shared queue-action boundary. | Observed submission; direct execute deferred |
+| N28 | `packages/geoscratch/src/scratch/command.ts:4702` | dynamic-offset `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
+| N29 | `packages/geoscratch/src/scratch/command.ts:4710` | static `setBindGroup()` | Enclosed by the owning draw/dispatch command location. | Observed command; manual encode deferred |
+| N30 | `packages/geoscratch/src/scratch/command.ts:7557` | `copyExternalImageToTexture()` | Submission replay uses one `queue-action`; direct execution shares this call site without an owner. | Observed submission; direct execute deferred |
+| N31 | `packages/geoscratch/src/scratch/readback.ts:483` | `createCommandEncoder()` | Direct-readback native observation, `encoder-create`. | Observed direct readback |
+| N32 | `packages/geoscratch/src/scratch/readback.ts:485` | `copyBufferToBuffer()` | Direct-readback native observation, `command-encode`. | Observed direct readback |
+| N33 | `packages/geoscratch/src/scratch/readback.ts:494` | `finish()` | Direct-readback native observation, `encoder-finish`. | Observed direct readback |
+| N34 | `packages/geoscratch/src/scratch/readback.ts:498` | `queue.submit()` | Direct-readback native observation, `queue-submit`. | Observed direct readback |
+| N35 | `packages/geoscratch/src/scratch/submission.ts:695` | `createCommandEncoder()` | Submission encoder-segment location, `encoder-create`. | Observed submission |
+| N36 | `packages/geoscratch/src/scratch/submission.ts:718` | `finish()` | Submission encoder-segment location, `encoder-finish`. | Observed submission |
+| N37 | `packages/geoscratch/src/scratch/submission.ts:872` | `beginComputePass()` | Compute pass location, `pass-begin`. | Observed submission |
+| N38 | `packages/geoscratch/src/scratch/submission.ts:907` | compute pass `end()` | Compute pass location, `pass-end`. | Observed submission |
+| N39 | `packages/geoscratch/src/scratch/submission.ts:942` | `beginRenderPass()` | Render pass location, `pass-begin`. | Observed submission |
+| N40 | `packages/geoscratch/src/scratch/submission.ts:1005` | render pass `end()` | Render pass location, `pass-end`. | Observed submission |
+| N41 | `packages/geoscratch/src/scratch/submission.ts:1035` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
+| N42 | `packages/geoscratch/src/scratch/submission.ts:1487` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
+| N43 | `packages/geoscratch/src/scratch/submission.ts:1492` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
 | N44 | `packages/geoscratch/src/scratch/surface.ts:258` | public `GPUCanvasContext.getCurrentTexture()` | Direct public Surface borrowing validates private ownership/configuration first but has no submission observation owner. | Direct call deferred |
 | N45 | `packages/geoscratch/src/scratch/surface.ts:356` | submission Surface `GPUTexture.createView()` | A prepared Surface lease is consumed only inside the owning submission `attachment-view` issue. | Observed submission attachment |
 | N46 | `packages/geoscratch/src/scratch/surface.ts:356` | submission Surface `GPUCanvasContext.getCurrentTexture()` | Same prepared Surface attachment issue and configuration-version lease as N45. | Observed submission attachment |

@@ -34,7 +34,7 @@ The kernel must reduce low-level WebGPU burden without assuming one geospatial s
 `scratch` should abstract stable GPU-kernel responsibilities:
 
 - GPU resource identity, lifetime, and invalidation
-- CPU/GPU transfer operations and content epochs
+- CPU/GPU transfer operations, buffer host-mapping authority, and content epochs
 - buffer, texture, sampler, layout codec, shader program, binding, pipeline, pass, and command construction
 - bind group layout and bind group lifecycle
 - pipeline creation and reuse
@@ -81,8 +81,12 @@ Descriptor-style APIs become weak when they are asked to model time-varying beha
 - when presentation history is preserved, cleared, or reprojected
 - when a pipeline, layout, or bind group must be rebuilt
 - when a pass should be skipped because its inputs are not ready
+- when CPU host authority temporarily excludes GPU use of a buffer
 
 Dynamic behavior should be represented by resource state, commands, and scheduling, not by overloading one-time descriptors.
+Accordingly, ordinary buffer descriptors do not carry `mappedAtCreation`.
+Mapped creation and ordinary host mapping are explicit Runtime operations that
+return a closed `MappedBufferLease`.
 
 ## Kernel Concepts To Grow Toward
 
@@ -103,6 +107,12 @@ Future designs should make room for:
 - resource usage declarations such as sample, render target, storage read, storage write, copy source, and copy destination
 
 This is broader than any one rendering technique. For example, alternating between two textures across submissions or application frames is only one case of content epoch and resource rotation management, not a kernel feature by itself.
+
+Buffer mapping adds temporal CPU ownership without changing that resource
+shape. One module-private authority per BufferResource rejects conflicting
+maps and actual GPU use before native effects. READ release preserves the
+content epoch; WRITE release advances it exactly once. Region and LayoutCodec
+interpretation remain independent of the mapping lifetime.
 
 ### Binding Model
 
@@ -183,7 +193,7 @@ Future designs should make room for:
 - validation modes that control disposition without changing diagnostic identity
 - repair suggestions that help tooling make local edits without letting scratch silently auto-fix state
 
-The first native asynchronous error slice is now concrete for persistent buffer allocation, texture allocation, and texture replacement. Those APIs return Promises and install a candidate only after exact validation and out-of-memory scopes settle. Runtime evidence is deliberately split into an always-current fact graph, a bounded incident flight recorder, immutable incident reports, and explicit finite deep capture. Default recording omits call stacks and command/submission breadcrumbs; raw-device operations remain escape hatches with temporal or unknown attribution unless native evidence proves more.
+The first native asynchronous error slice is now concrete for persistent buffer allocation, texture allocation, texture replacement, and buffer host mapping. Those APIs return Promises and publish a candidate or mapped lease only after applicable validation, internal, and out-of-memory scopes plus lifecycle facts settle. Runtime evidence is deliberately split into an always-current fact graph, a bounded incident flight recorder, immutable incident reports, and explicit finite deep capture. Default recording omits mapped bytes, call stacks, and command/submission breadcrumbs; raw-device operations remain escape hatches with temporal or unknown attribution unless native evidence proves more.
 
 Logical allocation footprint is inspectable pressure evidence, not physical VRAM. An OOM operation is the exact observation trigger but not automatically the sole pressure cause. Device loss similarly freezes pending/current context without assigning fabricated operation causality or automatic recovery.
 

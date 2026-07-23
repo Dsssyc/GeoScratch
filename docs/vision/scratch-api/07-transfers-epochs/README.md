@@ -117,6 +117,47 @@ The next successful texture upload, external-image upload, copy target write, re
 
 `SubmittedWork` remains historical: later resize cannot alter an earlier submission's allocation-version or producer facts. `ReadbackOperation` captures its source allocation version. The implemented readback source is a buffer, so replacing that captured buffer before materialization rejects with `SCRATCH_READBACK_SOURCE_ALLOCATION_STALE`. Texture data reaches host memory through an explicit texture-to-buffer `CopyCommand`; replacing the texture afterward does not rewrite the already captured destination-buffer provenance. A future direct texture-readback path must use the same allocation-stale rule.
 
+## Buffer Host Mapping
+
+Host mapping is an explicit CPU/GPU ownership transfer with no intermediate
+host copy. It is not a Submission and creates no command producer, queue
+serial, or `SubmittedWork`.
+
+`createMappedBuffer()` acknowledges one native mapped-at-creation allocation
+and returns a WRITE lease for the whole buffer. The logical descriptor does
+not retain `mappedAtCreation`. A successful release advances the parent
+`contentEpoch` exactly once and makes the content ready.
+
+`mapBuffer({ region, mode, signal })` validates MAP usage, the eight-byte
+offset rule, the four-byte size rule, bounds, runtime ownership, lifecycle,
+and the single-map authority before native issue. It invokes native
+`mapAsync()` directly: that operation waits for earlier GPU use of this
+buffer, so Scratch does not add a broad `SubmittedWork.done` or queue-wide
+wait. `AbortSignal` cancels only a pending map and does not destroy a reusable
+buffer.
+
+READ and WRITE have deliberately different epoch effects:
+
+- releasing a READ lease never advances `contentEpoch`; WebGPU discards host
+  writes made through that view;
+- releasing a WRITE or mapped-at-creation lease always advances one epoch,
+  because Scratch cannot prove whether any byte changed;
+- mapping does not change `allocationVersion`; and
+- if WRITE bytes may have been exposed but cleanup or lifecycle completion is
+  uncertain, Scratch advances to an `indeterminate` epoch rather than
+  pretending the prior ready content survived.
+
+Pending and active host authority blocks every Scratch queue write, encoding,
+submission, direct readback, and other GPU buffer use before native effects.
+Earlier already-submitted use remains valid and is ordered by `mapAsync()`.
+Layout interpretation stays independent: the same byte container can be
+mapped through one region and later interpreted through any compatible
+BufferRegion/LayoutCodec contract.
+
+General mapping records a `buffer-mapping` operation and current bounded
+mapping facts. It does not increment `readbackMemory.activeMappings`, retain
+mapped bytes, or grow history with runtime duration.
+
 ## Upload
 
 CPU-to-GPU writes are explicit transfer commands:

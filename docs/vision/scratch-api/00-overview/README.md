@@ -10,7 +10,7 @@ The new `scratch` API should maximize locally-verifiable correctness while prese
 `scratch` should make repeated low-level work easier:
 
 - runtime and device lifecycle
-- truthful resource identity, acknowledged allocation, logical BufferRegion/TextureViewSpec selection, replacement, readiness, content epochs, and explicit transfers
+- truthful resource identity, acknowledged allocation, logical BufferRegion/TextureViewSpec selection, replacement, readiness, content epochs, explicit transfers, and buffer host-mapping authority
 - layout artifacts, layout codecs, and shader accessor generation
 - acknowledged bind-layout construction and explicit BindSet preparation
 - shader program composition and pipeline cache compatibility
@@ -83,6 +83,10 @@ Descriptors are weak for time-varying behavior:
 - whether command counts are static, dynamic, or indirect
 
 Dynamic behavior should live in resource state, command state, and submission scheduling.
+Buffer host mapping is also temporal authority rather than descriptor shape:
+ordinary `createBuffer()` cannot carry `mappedAtCreation`; callers explicitly
+use `createMappedBuffer()` or `mapBuffer()` and receive a bounded-lifetime
+`MappedBufferLease`.
 
 ## Immediate Command Data
 
@@ -113,6 +117,7 @@ The new API should make these boundaries hard to miss:
 - `Surface` owns presentation target configuration, not GPU execution.
 - `Resource` owns logical identity, allocation lifecycle, and disposal. Only BufferResource and TextureResource own scalar content/readiness facts; SamplerResource owns none, and QuerySetResource owns indexed slot facts.
 - `BufferRegion` and `TextureViewSpec` are synchronous immutable selection/interpretation values, not resources or native allocations.
+- `MappedBufferLease` is zero-copy, exclusive host authority over one BufferRegion. READ release preserves the parent epoch; WRITE release advances it once. Pending or active mapping blocks actual Scratch GPU use without invalidating region construction, LayoutCodec work, or BindSet preparation.
 - `QuerySetResource` is an indexed query-slot resource, not an unordered collection or shader binding.
 - Transfer operations move data across CPU/GPU or GPU/GPU boundaries and advance content epochs explicitly.
 - `LayoutCodec` is a preparation artifact that connects CPU packing, WGSL accessors, readback views, and layout diagnostics.

@@ -10,7 +10,7 @@
 `scratch` 应降低这些重复低层工作的负担:
 
 - runtime 与 device 生命周期
-- 真实 resource identity、经确认的 allocation、逻辑 BufferRegion/TextureViewSpec selection、replacement、readiness、content epoch 与显式 transfer
+- 真实 resource identity、经确认的 allocation、逻辑 BufferRegion/TextureViewSpec selection、replacement、readiness、content epoch、显式 transfer 与 buffer host-mapping authority
 - layout artifact、layout codec 与 shader accessor 生成
 - acknowledged bind-layout construction 与显式 BindSet preparation
 - shader program 组合与 pipeline cache 兼容性
@@ -83,6 +83,10 @@ Descriptor 不适合承担时间变化行为:
 - command count 是静态、动态还是 indirect
 
 动态行为应由 resource state、command state 和 submission scheduling 表达。
+Buffer host mapping 同样是 temporal authority，而不是 descriptor shape：
+普通 `createBuffer()` 不能携带 `mappedAtCreation`；调用方必须显式使用
+`createMappedBuffer()` 或 `mapBuffer()`，并获得生命周期有界的
+`MappedBufferLease`。
 
 ## Command Immediate Data
 
@@ -112,6 +116,7 @@ creation-time specialization；buffer upload 转移 Resource 内容；immediate 
 - `Surface` 拥有呈现目标配置，不拥有 GPU 执行上下文。
 - `Resource` 拥有 logical identity、allocation lifecycle 与 disposal。只有 BufferResource 与 TextureResource 拥有 scalar content/readiness fact；SamplerResource 没有这些事实，QuerySetResource 则拥有 indexed slot facts。
 - `BufferRegion` 与 `TextureViewSpec` 是同步、不可变的 selection/interpretation value，不是 resource 或 native allocation。
+- `MappedBufferLease` 是对一个 BufferRegion 的 zero-copy、排他 host authority。READ release 保持 parent epoch；WRITE release 只推进一次。Pending 或 active mapping 会阻止真正的 Scratch GPU use，但不会让 region construction、LayoutCodec 工作或 BindSet preparation 失效。
 - `QuerySetResource` 是 indexed query-slot resource，不是无序集合，也不是 shader binding。
 - Transfer operation 显式移动 CPU/GPU 或 GPU/GPU 边界上的数据，并推进 content epoch。
 - `LayoutCodec` 是连接 CPU packing、WGSL accessor、readback view 与 layout diagnostics 的准备期 artifact。

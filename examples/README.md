@@ -14,6 +14,12 @@ Scratch examples must also `await` render and compute pipeline creation. A pipel
 
 Runtime allocation diagnostics are available through the read-only `runtime.diagnostics` facade. Examples that need machine-readable evidence should publish a bounded `runtime.diagnostics.exportEvidence()` result or selected immutable facts rather than copying browser console text or retaining native GPU handles.
 
+`bufferMapping/` is the deterministic host-ownership proof. It initializes an
+arbitrary-usage source through `createMappedBuffer()`, releases the WRITE
+lease, performs a GPU-side `CopyCommand`, maps the destination through a READ
+lease, verifies exact values, and proves that both native views detach after
+release. It uses only the public `geoscratch` package API.
+
 `submissionOrder/` is the deterministic queue-ordering proof. It must report `document.body.dataset.status === "passed"` and `document.body.dataset.result === "11"` in a WebGPU-capable browser.
 
 `externalImageUpload/` is the deterministic native external-image upload proof. It constructs the command before mutating a local source canvas, uploads a cropped and vertically flipped region, verifies exact padded readback bytes, renders the same texture, and reports the result through `document.body.dataset.status`, `expectedBytes`, and `actualBytes`.

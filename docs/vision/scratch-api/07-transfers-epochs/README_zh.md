@@ -115,6 +115,41 @@ state = empty
 
 `SubmittedWork` 保持历史事实：之后的 resize 不能改变早先 submission 的 allocation-version 或 producer facts。`ReadbackOperation` 会捕获 source allocation version。当前已实现的 readback source 是 buffer，因此 captured buffer 在 materialization 前被替换时，会以 `SCRATCH_READBACK_SOURCE_ALLOCATION_STALE` 拒绝。Texture 数据通过显式 texture-to-buffer `CopyCommand` 到达 host memory；之后替换 texture 不会改写已捕获的 destination-buffer provenance。未来直接 texture-readback 路径必须遵守同一个 allocation-stale 规则。
 
+## Buffer Host Mapping
+
+Host mapping 是不经过中间 host copy 的显式 CPU/GPU ownership transfer。它不是
+Submission，也不会创建 command producer、queue serial 或 `SubmittedWork`。
+
+`createMappedBuffer()` 确认一个原生 mapped-at-creation allocation，并为整个
+buffer 返回 WRITE lease。Logical descriptor 不保留 `mappedAtCreation`。成功
+release 会恰好推进一次 parent `contentEpoch`，并让内容 ready。
+
+`mapBuffer({ region, mode, signal })` 会在原生调用前校验 MAP usage、8-byte offset、
+4-byte size、bounds、runtime ownership、lifecycle 与 single-map authority。它直接
+调用原生 `mapAsync()`：该操作本身会等待这个 buffer 更早的 GPU use，因此 Scratch
+不会再增加广义 `SubmittedWork.done` 或 queue-wide wait。`AbortSignal` 只取消
+pending map，不销毁仍可复用的 buffer。
+
+READ 与 WRITE 有意采用不同 epoch effect：
+
+- release READ lease 永不推进 `contentEpoch`；WebGPU 会丢弃通过该 view 做出的
+  host write；
+- release WRITE 或 mapped-at-creation lease 总是推进一个 epoch，因为 Scratch
+  无法证明 bytes 是否改变；
+- mapping 不改变 `allocationVersion`；
+- 如果 WRITE bytes 可能已经暴露，但 cleanup 或 lifecycle completion 结果不确定，
+  Scratch 会推进到 `indeterminate` epoch，而不是假称先前 ready content 仍有效。
+
+Pending 与 active host authority 会让所有 Scratch queue write、encoding、
+submission、direct readback 与其他 GPU buffer use 在原生 effect 前失败。已经更早
+提交的 use 仍有效，并由 `mapAsync()` 排序。Layout interpretation 保持独立：同一个
+byte container 可以通过一个 region 映射，之后再由任何兼容的
+BufferRegion/LayoutCodec contract 解释。
+
+一般 mapping 记录 `buffer-mapping` operation 与有界 current mapping facts。它不
+增加 `readbackMemory.activeMappings`，不保留 mapped bytes，也不会让历史随 runtime
+存活时间增长。
+
 ## Upload
 
 CPU-to-GPU 写入是显式 transfer command:

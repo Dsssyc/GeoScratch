@@ -11,6 +11,7 @@ const examplePages = {
   helloTriangle: path.resolve(examplesRoot, 'helloTriangle/index.html'),
   uniformTriangle: path.resolve(examplesRoot, 'uniformTriangle/index.html'),
   computeReadback: path.resolve(examplesRoot, 'computeReadback/index.html'),
+  bufferMapping: path.resolve(examplesRoot, 'bufferMapping/index.html'),
   submissionOrder: path.resolve(examplesRoot, 'submissionOrder/index.html'),
   externalImageUpload: path.resolve(examplesRoot, 'externalImageUpload/index.html'),
   textureResize: path.resolve(examplesRoot, 'textureResize/index.html'),

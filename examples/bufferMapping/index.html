@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" type="image/png" href="../../docs/assets/icons/icon_light.png" />
+        <link rel="stylesheet" href="../shared/example.css" />
+        <title>Buffer Mapping | GeoScratch Examples</title>
+        <style>
+            body {
+                color: #eef5f2;
+                font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            }
+
+            .result-panel {
+                position: absolute;
+                left: 24px;
+                bottom: 24px;
+                z-index: 2;
+                max-width: calc(100% - 48px);
+                border-left: 3px solid #79d6c0;
+                padding: 8px 12px;
+                background: rgba(5, 9, 12, 0.82);
+            }
+
+            .result-label,
+            .result-value {
+                margin: 0;
+            }
+
+            .result-label {
+                color: rgba(238, 245, 242, 0.72);
+                font-size: 13px;
+            }
+
+            .result-value {
+                font-size: 24px;
+                font-weight: 700;
+            }
+        </style>
+    </head>
+    <body
+        data-status="pending"
+        data-result="pending"
+        data-write-view-detached="false"
+        data-read-view-detached="false"
+    >
+        <canvas id="GPUFrame"></canvas>
+        <div class="result-panel" aria-live="polite">
+            <p class="result-label">Mapped creation / GPU copy / mapped read</p>
+            <p id="mapping-result" class="result-value">Pending</p>
+        </div>
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

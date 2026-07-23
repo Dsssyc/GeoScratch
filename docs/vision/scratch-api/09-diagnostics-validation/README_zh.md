@@ -225,6 +225,29 @@ type ResourceDiagnosticCode =
     | 'SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED'
     | 'SCRATCH_BUFFER_ALLOCATION_OUT_OF_MEMORY'
     | 'SCRATCH_BUFFER_ALLOCATION_NATIVE_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_USE_EXPLICIT_FACTORY'
+    | 'SCRATCH_BUFFER_MAPPING_DESCRIPTOR_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_REGION_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_RUNTIME_MISMATCH'
+    | 'SCRATCH_BUFFER_MAPPING_MODE_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_RANGE_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_SIGNAL_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_USAGE_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_CONFLICT'
+    | 'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT'
+    | 'SCRATCH_BUFFER_MAPPING_LEASE_INACTIVE'
+    | 'SCRATCH_BUFFER_MAPPING_ABORTED'
+    | 'SCRATCH_BUFFER_MAPPING_DEVICE_LOST'
+    | 'SCRATCH_BUFFER_MAPPING_RUNTIME_DISPOSED'
+    | 'SCRATCH_BUFFER_MAPPING_RESOURCE_DISPOSED'
+    | 'SCRATCH_BUFFER_MAPPING_VALIDATION_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_INTERNAL_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_OUT_OF_MEMORY'
+    | 'SCRATCH_BUFFER_MAPPING_SCOPE_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_NATIVE_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_REJECTED'
+    | 'SCRATCH_BUFFER_MAPPING_MAPPED_RANGE_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_RELEASE_FAILED'
     | 'SCRATCH_TEXTURE_ALLOCATION_VALIDATION_FAILED'
     | 'SCRATCH_TEXTURE_ALLOCATION_OUT_OF_MEMORY'
     | 'SCRATCH_TEXTURE_ALLOCATION_NATIVE_FAILED'
@@ -756,6 +779,26 @@ Always-current `submissionNative` fact 报告 `submissionScopes`、
 `peakPendingNativeObservations` 与 `currentEffectfulSubmittedWork`。即使
 successful operation-history capacity 为零，这些事实与 budget enforcement
 仍保持开启。`off` 是显式 `unobserved` provenance，绝不推断为 success。
+
+一般 buffer host mapping 使用 `buffer-mapping` operation 与
+`buffer-mapping-failure` incident，target 如实指向 BufferResource，选中的
+BufferRegion 作为 related evidence。固定 failure stage 区分 mapping、
+mapped-range access、release 与 lifecycle recheck。独立 native map Promise、
+validation、internal、OOM 与 scope outcome 会先全部 settle，再选择 causal
+primary；abort 与 lifecycle cancellation 保持为不同的结构化事实，不从 native
+prose 推断。
+
+Always-current graph 只包含 pending 或 active `bufferMappings`。每个 fact 只保留
+mapping id、resource id、所选 offset/size、mode、state、allocation version、
+mapping 建立时的 content epoch 与 operation id。独立 `bufferMapping` summary
+报告 current/peak mapping count 与 selected bytes。Terminal mapping 会从 current
+facts 移除，由有界 operation/incident history 保存 outcome。默认不保留 mapped
+bytes、native handle、完整 descriptor 或无界调用栈。
+
+这是 schema v5 的 additive extension：现有 target 仍是 Resource target，新增
+operation/incident discriminator 与 snapshot field 不重新解释任何旧字段。一般
+host mapping 绝不增加 allocation aggregate 或
+`readbackMemory.activeMappings`。
 
 Readback provenance 使用 `readback-staging-allocation`、`readback-mapping` 与
 `readback-staging-release` operation，以及 `readback-failure` incident。Direct

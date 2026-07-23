@@ -52,7 +52,7 @@ device calls and are excluded. Every actual `device.createBuffer()` and
 
 | ID | Native call site | Native object | Classification | Fact |
 | --- | --- | --- | --- | --- |
-| N1 | `packages/geoscratch/src/scratch/buffer.ts:544` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
+| N1 | `packages/geoscratch/src/scratch/buffer.ts:591` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
 | N2 | `packages/geoscratch/src/scratch/readback-staging.ts:143` | Buffer | Acknowledged readback staging | Shared direct and ordered staging allocation transaction covered by ADR-034. |
 | N3 | `packages/geoscratch/src/gpu/director/director.js:195` | Buffer | Raw native escape hatch | Legacy director persistent buffer creation. |
 | N4 | `packages/geoscratch/src/gpu/director/director.js:371` | Buffer | Raw native escape hatch | Legacy director temporary texture-copy staging buffer. |

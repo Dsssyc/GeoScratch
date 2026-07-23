@@ -225,6 +225,29 @@ type ResourceDiagnosticCode =
     | 'SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED'
     | 'SCRATCH_BUFFER_ALLOCATION_OUT_OF_MEMORY'
     | 'SCRATCH_BUFFER_ALLOCATION_NATIVE_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_USE_EXPLICIT_FACTORY'
+    | 'SCRATCH_BUFFER_MAPPING_DESCRIPTOR_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_REGION_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_RUNTIME_MISMATCH'
+    | 'SCRATCH_BUFFER_MAPPING_MODE_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_RANGE_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_SIGNAL_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_USAGE_INVALID'
+    | 'SCRATCH_BUFFER_MAPPING_CONFLICT'
+    | 'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT'
+    | 'SCRATCH_BUFFER_MAPPING_LEASE_INACTIVE'
+    | 'SCRATCH_BUFFER_MAPPING_ABORTED'
+    | 'SCRATCH_BUFFER_MAPPING_DEVICE_LOST'
+    | 'SCRATCH_BUFFER_MAPPING_RUNTIME_DISPOSED'
+    | 'SCRATCH_BUFFER_MAPPING_RESOURCE_DISPOSED'
+    | 'SCRATCH_BUFFER_MAPPING_VALIDATION_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_INTERNAL_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_OUT_OF_MEMORY'
+    | 'SCRATCH_BUFFER_MAPPING_SCOPE_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_NATIVE_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_REJECTED'
+    | 'SCRATCH_BUFFER_MAPPING_MAPPED_RANGE_FAILED'
+    | 'SCRATCH_BUFFER_MAPPING_RELEASE_FAILED'
     | 'SCRATCH_TEXTURE_ALLOCATION_VALIDATION_FAILED'
     | 'SCRATCH_TEXTURE_ALLOCATION_OUT_OF_MEMORY'
     | 'SCRATCH_TEXTURE_ALLOCATION_NATIVE_FAILED'
@@ -763,6 +786,27 @@ The always-current `submissionNative` fact reports `submissionScopes`,
 facts and budget enforcement remain active when successful operation-history
 capacity is zero. `off` is explicit `unobserved` provenance, never inferred
 success.
+
+General buffer host mapping uses `buffer-mapping` operations and
+`buffer-mapping-failure` incidents with a truthful BufferResource target and
+the selected BufferRegion as related evidence. Fixed failure stages distinguish
+mapping, mapped-range access, release, and lifecycle recheck. Independent
+native map Promise, validation, internal, OOM, and scope outcomes settle before
+causal selection; abort and lifecycle cancellation remain distinct structural
+facts rather than being classified from native prose.
+
+The always-current graph contains only pending or active `bufferMappings`.
+Each fact is bounded to mapping id, resource id, selected offset/size, mode,
+state, allocation version, establishment content epoch, and operation id.
+The separate `bufferMapping` summary reports current/peak mapping count and
+selected bytes. Terminal mappings are removed; bounded operation/incident
+history records their outcome. No mapped bytes, native handle, complete
+descriptor, or unbounded call stack is retained by default.
+
+This is an additive schema-v5 extension: the existing target is still a
+Resource target, and the new operation/incident discriminators and snapshot
+fields do not reinterpret existing fields. General host mappings never
+increment allocation aggregates or `readbackMemory.activeMappings`.
 
 Readback provenance uses `readback-staging-allocation`, `readback-mapping`, and
 `readback-staging-release` operations plus `readback-failure` incidents. Direct
