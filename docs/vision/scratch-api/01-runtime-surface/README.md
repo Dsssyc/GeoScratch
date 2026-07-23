@@ -272,6 +272,17 @@ graph exposes `submissionScopes`, `maxPendingNativeObservations`,
 not runtime age; bounded operation and incident history remains a separate
 retention concern.
 
+## WGSL Language-Feature Facts
+
+Runtime creation snapshots `GPU.wgslLanguageFeatures` into a sorted, deduplicated,
+frozen `readonly string[]`. A platform without that field produces an empty snapshot.
+The fact contains names only; it exposes neither the native setlike nor a GPU object.
+
+Programs declare their own `requiredLanguageFeatures` and revalidate them for every
+future pipeline transaction. Device features remain a separate capability domain.
+`deviceLimits.maxImmediateSize` is the authoritative Runtime limit used before a
+nonzero render or compute pipeline immediate range can reach native creation.
+
 ## Device Loss
 
 `ScratchRuntime` owns device-loss handling. After device loss:

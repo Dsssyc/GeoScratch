@@ -17,6 +17,7 @@ declare const typedProgramDescriptor: scr.ProgramDescriptor
 declare const typedProgramEntryPoints: scr.ProgramEntryPoints
 declare const typedRenderPipelineDescriptor: scr.ScratchRenderPipelineDescriptor
 declare const typedComputePipelineDescriptor: scr.ScratchComputePipelineDescriptor
+declare const typedCommandImmediateData: scr.CommandImmediateData
 declare const typedSurfaceFormat: scr.SurfaceFormat
 declare const typedSurfaceOptions: scr.SurfaceOptions
 declare const typedSurfaceSize: scr.SurfaceSize
@@ -29,6 +30,7 @@ const compatProgramDescriptor: scratchCompat.ProgramDescriptor = typedProgramDes
 const compatProgramEntryPoints: scratchCompat.ProgramEntryPoints = typedProgramEntryPoints
 const compatRenderPipelineDescriptor: scratchCompat.ScratchRenderPipelineDescriptor = typedRenderPipelineDescriptor
 const compatComputePipelineDescriptor: scratchCompat.ScratchComputePipelineDescriptor = typedComputePipelineDescriptor
+const compatCommandImmediateData: scratchCompat.CommandImmediateData = typedCommandImmediateData
 const compatSurfaceFormat: scratchCompat.SurfaceFormat = typedSurfaceFormat
 const compatSurfaceOptions: scratchCompat.SurfaceOptions = typedSurfaceOptions
 const compatSurfaceSize: scratchCompat.SurfaceSize = typedSurfaceSize
@@ -559,6 +561,22 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const reinterpretedRegion: scr.BufferRegion = typedRegion.interpretAs(codec.artifact)
     const regionElementCount: number | undefined = reinterpretedRegion.elementCount
     const usageCompatibility: scr.LayoutUsageCompatibility = codec.artifact.usageCompatibility
+    const immediateCompatibility: boolean = usageCompatibility.immediate
+    const immediateUsage: scr.LayoutCodecUsage = 'immediate'
+    const immediateCodec = scr.layoutCodec({
+        name: 'TypedImmediate',
+        fields: [
+            { name: 'color', type: 'vec4f' },
+        ],
+    }, {
+        usage: [ immediateUsage ],
+    })
+    const immediateUpload: scr.CommandImmediateData = immediateCodec.uploadView({
+        color: [ 1, 0, 0, 1 ],
+    })
+    const immediateRaw: scr.CommandImmediateData = new Uint8Array(16)
+    // @ts-expect-error Command immediate data is a byte source, not text
+    const invalidImmediateData: scr.CommandImmediateData = 'immediate'
     const readbackCount: number = typedReadback.count
     const readbackObject: Record<string, unknown> = typedReadback.toObject()
     const layoutBuffer: scr.BufferResource = await runtime.createBuffer({
@@ -993,6 +1011,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         vertexConstants: { vertexScale: 1 },
         fragmentConstants: { colorMode: 2 },
         multisample: { count: 4 },
+        immediateSize: 16,
     }
     const compatNativeParityPipelineDescriptor:
         scratchCompat.ScratchRenderPipelineDescriptor = nativeParityPipelineDescriptor
@@ -1034,6 +1053,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     new scr.ScratchRenderPipeline(runtime, { program, targets: [ { format: surface.format } ] })
     const draw: scr.DrawCommand = runtime.createDrawCommand({
         pipeline: scratchPipeline,
+        immediateData: immediateUpload,
         bindSets: [ { set: bindSet } ],
         vertexBuffers: [
             { slot: 0, region: vertexRegion },
@@ -1295,6 +1315,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const computePipelinePromise: Promise<scr.ScratchComputePipeline> = runtime.createComputePipeline({
         program: computeProgram,
         bindLayouts: [ storageLayout ],
+        immediateSize: 16,
     })
     const computePipeline: scr.ScratchComputePipeline = await computePipelinePromise
     const computePipelineAlias: scr.ScratchComputePipeline = await runtime.computePipeline({
@@ -1317,6 +1338,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const dispatch: scr.DispatchCommand = runtime.createDispatchCommand({
         pipeline: computePipeline,
+        immediateData: immediateRaw,
         bindSets: [ { set: storageSet } ],
         count: { workgroups: [ 1 ] },
         resources: {

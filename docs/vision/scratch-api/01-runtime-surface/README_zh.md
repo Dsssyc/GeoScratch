@@ -259,6 +259,17 @@ observation 共享的有限上限。budget 耗尽会在 encoder 或 queue effect
 `currentEffectfulSubmittedWork`。这些事实随 unsettled ownership 变化，不随
 runtime 年龄增长；有界 operation/incident history 是另一项 retention concern。
 
+## WGSL Language-Feature Facts
+
+Runtime 创建时把 `GPU.wgslLanguageFeatures` 快照为排序、去重、冻结的
+`readonly string[]`。平台缺少该字段时得到空 snapshot。该 fact 只包含名称，
+既不暴露原生 setlike，也不暴露 GPU object。
+
+Program 分别声明自己的 `requiredLanguageFeatures`，并在每个未来 pipeline
+transaction 中重新校验。Device feature 仍是另一套 capability domain。
+`deviceLimits.maxImmediateSize` 是非零 render/compute pipeline immediate range
+进入 native creation 前使用的权威 Runtime limit。
+
 ## Device Loss
 
 `ScratchRuntime` 拥有 device-loss 处理。Device loss 后:

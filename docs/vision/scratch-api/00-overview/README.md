@@ -84,6 +84,26 @@ Descriptors are weak for time-varying behavior:
 
 Dynamic behavior should live in resource state, command state, and submission scheduling.
 
+## Immediate Command Data
+
+WGSL language features, pipeline immediate ranges, and command immediate values use
+three separate contracts. `ScratchRuntime.wgslLanguageFeatures` is a frozen capability
+snapshot. `Program.requiredLanguageFeatures` states what caller-authored WGSL needs.
+Render and compute Pipelines declare `immediateSize`, while each Draw or Dispatch owns
+one complete `CommandImmediateData` source.
+
+The Command freezes source identity, not contents. Submission resolves readiness and
+fallback first, then copies the current visible bytes once for every actual command
+occurrence before any native effect. The private attempt snapshot feeds exactly one
+full-range `setImmediates()` call. No preceding command state is inherited.
+
+Immediate data is encoder input, not a Resource or transfer. It has no allocation
+version, content epoch, resource-ledger entry, upload operation, or retained payload
+history. This keeps four commonly confused mechanisms distinct: pipeline override
+constants specialize pipeline creation; buffer uploads transfer Resource contents;
+immediate data supplies per-command encoder bytes; render state supplies per-draw
+rasterization state.
+
 ## Required Mental Model
 
 The new API should make these boundaries hard to miss:
@@ -101,6 +121,8 @@ The new API should make these boundaries hard to miss:
 - `Program` describes shader source, generated modules, entry points, and required layouts without owning concrete resources.
 - `Pipeline` describes stable WebGPU executable state for a `Program` entry point. Public render and compute factories are Promise-only transactions and expose a wrapper only after native async creation, compilation evidence, supporting-object scopes, and lifecycle checks settle successfully.
 - `Command` describes one executable GPU action.
+- Draw and Dispatch may own complete per-command immediate data whose bytes are copied
+  for each actual submission step without becoming Resource state.
 - A Draw/Dispatch resource read declares either one exact numeric content epoch or `'current-at-step'`. The latter resolves once against explicit prior submission steps at the final selected command position, before that command's own writes; it does not reorder work or mutate the command.
 - `ScratchDiagnostic` is the unified machine-readable validation contract; prose messages are not the stable API.
 - `runtime.diagnostics` separates always-current facts, bounded recent operations, immutable incidents, and explicit temporary deep capture.

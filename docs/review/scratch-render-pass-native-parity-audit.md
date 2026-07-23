@@ -74,13 +74,17 @@ The following current-spec capabilities are deliberately not claimed by this aud
 
 - render bundles;
 - external textures;
-- immediate data and `setImmediates`;
 - public debug marker commands;
 - shader compilation hints;
 - adapter option expansion;
 - mapped buffer leases and direct texture readback;
 - public subresource/aspect epochs; and
 - complete WebGPU or WGSL parity.
+
+Immediate data and `setImmediates()` were outside this audit's implementation scope
+and are now governed separately by ADR-047 and
+`scratch-immediate-data-audit.md`; this historical audit does not retroactively claim
+their evidence.
 
 ## Final Specification Cross-Check
 

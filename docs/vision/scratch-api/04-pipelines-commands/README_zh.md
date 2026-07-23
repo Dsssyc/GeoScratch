@@ -413,6 +413,34 @@ type CommandReadinessDescriptor<FallbackCommand> =
 
 当前只有 Draw 与 Dispatch 拥有这套完整 policy surface。Copy、ordered Readback 与 query Resolve descriptor 仍然只接受 `whenMissing: 'throw'`。
 
+## Per-Command Immediate Data
+
+Render 与 compute pipeline 把可选 `immediateSize` 归一化为不可变、非负、
+4-byte aligned、且不大于 `deviceLimits.maxImmediateSize` 的 `GPUSize32`。非零
+range 还要求 Program contract 包含 `immediate_address_space`；该值直接降低到
+原生 pipeline layout。
+
+Draw 与 Dispatch descriptor 接受：
+
+```ts
+type CommandImmediateData =
+    | ArrayBuffer
+    | ArrayBufferView
+    | LayoutUploadView
+```
+
+零尺寸 pipeline 禁止提供数据；非零 pipeline 要求 source 的可见 byte length
+与声明尺寸精确相等。View 始终按 byte range 解释，不存在 typed-element offset
+语义、截断、补零、callback 或 partial-update alias。Command identity、pipeline、
+expected length 与 source identity 不可变；调用方可以在 submission 之间修改
+source 内容。
+
+每个实际 command 获得一份完整的 attempt-local snapshot。Render 降低顺序是
+`setPipeline`、`setImmediates`、完整 render state、vertex/index buffer、
+bind group、draw；compute 顺序是 `setPipeline`、`setImmediates`、bind group、
+dispatch。零尺寸 command 不调用，非零 command 精确调用一次。Scratch 不公开
+partial-state command，也不跨 command 去重。
+
 ## 非目标
 
 - 不让 command count 默认就是闭包。
@@ -424,3 +452,5 @@ type CommandReadinessDescriptor<FallbackCommand> =
 - 不在 command 中编码 terrain、flow、tile 或 layer 概念。
 - 不引入 `Material` 作为 `Program` + `BindSet` + render semantics 的快捷组合。
 - 不把 pipeline 或 command validation 暴露成 prose-only errors。
+- 不公开 partial `SetImmediatesCommand`，也不让 command 含义依赖前序 encoder
+  state。

@@ -459,6 +459,24 @@ Dependency validation and resource readiness policy are separate.
 
 `SubmissionValidationMode` controls optional dependency-finding disposition, not readiness control flow. `off` still resolves skip/fallback and preserves execution outcomes. Draw and Dispatch implement all four policies; Copy, Readback, and Resolve remain `throw`-only. Clear has no source-read readiness policy: a valid non-empty clear is an unconditional ordered write.
 
+## Immediate Snapshot Preparation
+
+Immediate sources participate in preparation, not scheduling. Submission first
+resolves readiness, fallback, skip-command, and transactional skip-pass behavior. It
+then visits only the final Draw/Dispatch occurrences, revalidates each visible range,
+and copies one private `Uint8Array` per actual step. A repeated Command therefore has
+separate occurrence facts and command-indexed native attribution.
+
+All selected immediate snapshots and all remaining preflight finish before encoder
+creation, queue action, resource epoch, or `SubmittedWork` effect. Skipped commands,
+rolled-back passes, and unselected fallback candidates are never read. A selected
+fallback uses only its own source. Validation mode cannot soften detached, resized,
+forged, wrong-sized, or incompatible immediate data.
+
+The private bytes live only for the submission attempt. `SubmittedWork` may expose
+bounded source-kind, length, identity, and native-location metadata, but never the
+payload or a payload hash.
+
 ## Future Upper Orchestration
 
 Automatic sorting should not be part of the first core scheduler. A future upper layer may provide:

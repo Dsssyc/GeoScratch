@@ -2,6 +2,7 @@ import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
     ScratchRuntime,
+    layoutCodec,
 } from 'geoscratch'
 import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
@@ -432,6 +433,82 @@ describe('scratch immediate data command and submission contract', () => {
         ])
     })
 
+    it('accepts compatible LayoutUploadView and SharedArrayBuffer views only', async() => {
+
+        const fixture = await createImmediateRenderFixture()
+        const codec = layoutCodec({
+            name: 'ImmediateValues',
+            fields: [
+                { name: 'color', type: 'vec4f' },
+            ],
+        }, {
+            usage: [ 'immediate' ],
+        })
+        const uploadView = codec.uploadView({
+            color: [ 0.25, 0.5, 0.75, 1 ],
+        })
+        const shared = new Uint8Array(new SharedArrayBuffer(16))
+        shared.set([ 7, 8, 9, 10 ])
+        const uploadCommand = createDraw(
+            fixture.runtime,
+            fixture.pipeline,
+            uploadView
+        )
+        const sharedCommand = createDraw(
+            fixture.runtime,
+            fixture.pipeline,
+            shared
+        )
+
+        fixture.runtime.submission()
+            .render(fixture.pass, [ uploadCommand, sharedCommand ])
+            .submit()
+
+        expect(fixture.calls.immediateWrites).to.have.length(2)
+        expect(new Float32Array(
+            fixture.calls.immediateWrites[0].bytes.buffer,
+            fixture.calls.immediateWrites[0].bytes.byteOffset,
+            4
+        )).to.deep.equal(new Float32Array([ 0.25, 0.5, 0.75, 1 ]))
+        expect([ ...fixture.calls.immediateWrites[1].bytes.slice(0, 4) ])
+            .to.deep.equal([ 7, 8, 9, 10 ])
+
+        const incompatibleCodec = layoutCodec({
+            name: 'ImmediateArray',
+            fields: [
+                { name: 'values', type: { element: 'u32', count: 4 } },
+            ],
+        }, {
+            usage: [ 'storage' ],
+        })
+        await expectDiagnostic(
+            () => Promise.resolve(createDraw(
+                fixture.runtime,
+                fixture.pipeline,
+                incompatibleCodec.uploadView({ values: [ 1, 2, 3, 4 ] })
+            )),
+            'SCRATCH_COMMAND_IMMEDIATE_DATA_INVALID',
+            'command'
+        )
+        await expectDiagnostic(
+            () => Promise.resolve(createDraw(
+                fixture.runtime,
+                fixture.pipeline,
+                {
+                    bytes: new Uint8Array(16),
+                    byteOffset: 0,
+                    byteLength: 16,
+                    artifact: {
+                        kind: 'LayoutArtifact',
+                        usageCompatibility: { immediate: true },
+                    },
+                }
+            )),
+            'SCRATCH_COMMAND_IMMEDIATE_DATA_INVALID',
+            'command'
+        )
+    })
+
     it('requires exact command data presence and length for the pipeline contract', async() => {
 
         const fixture = await createImmediateRenderFixture()
@@ -508,6 +585,32 @@ describe('scratch immediate data command and submission contract', () => {
                 [ 1, 2, 3, 4 ],
                 [ 9, 8, 7, 6 ],
             ])
+    })
+
+    it('keeps the current attempt isolated from mutation after snapshot preparation', async() => {
+
+        const fixture = await createImmediateRenderFixture()
+        const source = new Uint8Array(16).fill(17)
+        const command = createDraw(fixture.runtime, fixture.pipeline, source)
+        const createCommandEncoder = fixture.device.createCommandEncoder.bind(fixture.device)
+        let mutated = false
+        fixture.device.createCommandEncoder = descriptor => {
+            if (!mutated) {
+                source.fill(34)
+                mutated = true
+            }
+            return createCommandEncoder(descriptor)
+        }
+
+        fixture.runtime.submission()
+            .render(fixture.pass, [ command ])
+            .submit()
+        fixture.runtime.submission()
+            .render(fixture.pass, [ command ])
+            .submit()
+
+        expect(fixture.calls.immediateWrites.map(write => write.bytes[0]))
+            .to.deep.equal([ 17, 34 ])
     })
 
     it('sets complete render and compute immediate state exactly once per command', async() => {
@@ -889,6 +992,11 @@ describe('scratch immediate data command and submission contract', () => {
             },
         })
         expect(submitted.resourceAccesses).to.deep.equal([])
+        expect(submitted.producerEpochs).to.deep.equal([])
+        expect(submitted.potentialWrites).to.deep.equal([])
+        const submittedEvidence = JSON.stringify(submitted)
+        expect(submittedEvidence).not.to.include('"immediateData"')
+        expect(submittedEvidence).not.to.include('"bytes"')
         const evidence = JSON.stringify({
             capture: capture.stop(),
             exported: fixture.runtime.diagnostics.exportEvidence(),

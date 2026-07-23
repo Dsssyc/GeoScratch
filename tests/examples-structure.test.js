@@ -18,6 +18,7 @@ describe('examples structure', () => {
         'textureSampling',
         'renderToTexture',
         'renderPassFeatures',
+        'immediateData',
         'indirectExecution',
         'readinessPolicies',
         'demLayer',
@@ -35,6 +36,7 @@ describe('examples structure', () => {
         'textureSampling',
         'renderToTexture',
         'renderPassFeatures',
+        'immediateData',
         'indirectExecution',
         'readinessPolicies',
         'demLayer',
@@ -113,6 +115,7 @@ describe('examples structure', () => {
             [ 'textureSampling', 'Texture Sampling' ],
             [ 'renderToTexture', 'Render To Texture' ],
             [ 'renderPassFeatures', 'Render Pass Features' ],
+            [ 'immediateData', 'Immediate Data' ],
             [ 'indirectExecution', 'Indirect Execution' ],
             [ 'readinessPolicies', 'Readiness Policies' ],
             [ 'demLayer', 'DEM Layer' ],
@@ -412,6 +415,38 @@ describe('examples structure', () => {
         expect(source).to.include('.render(pass, [ fullDraw, leftDraw, rightDraw ])')
         expect(source).to.include('await multisampledColor.resize(size)')
         expect(source).to.include("canvas.dataset.fullAttachmentResized = String(")
+        expect(source).to.not.match(/runtime\.(?:device|queue)\b/)
+        expect(source).to.not.match(/packages\/geoscratch|src\/scratch|\.\.\/\.\.\//)
+    })
+
+    it('proves per-command immediate data through the public package', () => {
+
+        const html = read('examples', 'immediateData', 'index.html')
+        const source = read('examples', 'immediateData', 'main.ts')
+
+        expect(html).to.include('<title>Immediate Data | GeoScratch Examples</title>')
+        expect(html).to.include('id="GPUFrame"')
+        expect(source).to.include("from 'geoscratch'")
+        expect(source).to.include('requires immediate_address_space;')
+        expect(source).to.include('var<immediate>')
+        expect(source).to.include("usage: [ 'immediate' ]")
+        expect(source).to.include('computeCodec.uploadView')
+        expect(source).to.include('renderCodec.uploadView')
+        expect(source).to.include('immediateSize: computeCodec.artifact.byteLength')
+        expect(source).to.include('immediateSize: renderCodec.artifact.byteLength')
+        expect(source).to.include('immediateData: computeImmediate')
+        expect(source).to.include('immediateData: leftImmediate')
+        expect(source).to.include('immediateData: rightImmediate')
+        expect(source).to.include('.compute(computePass, [ dispatch ])')
+        expect(source).to.include('.render(renderPass, [ leftDraw, rightDraw ])')
+        expect(source).to.include("contentEpoch: 'current-at-step'")
+        expect(source).to.include('canvas.dataset.computeImmediate')
+        expect(source).to.include('canvas.dataset.renderImmediate')
+        expect(source).to.include('canvas.dataset.stableCommandIdentity')
+        expect(source).to.include('canvas.dataset.submissionCount')
+        expect(source).to.include('canvas.dataset.resizeGeneration')
+        expect(source).to.include('canvas.dataset.observedSubmissions')
+        expect(source).to.include("canvas.dataset.status = 'ready'")
         expect(source).to.not.match(/runtime\.(?:device|queue)\b/)
         expect(source).to.not.match(/packages\/geoscratch|src\/scratch|\.\.\/\.\.\//)
     })

@@ -435,6 +435,35 @@ Only the final selected command reaches its existing native encoder method. A se
 
 This complete policy surface currently belongs only to Draw and Dispatch. Copy, ordered Readback, and query Resolve descriptors remain `whenMissing: 'throw'` only.
 
+## Per-Command Immediate Data
+
+Render and compute pipelines normalize an optional `immediateSize` to an immutable
+non-negative, four-byte-aligned `GPUSize32` no greater than
+`deviceLimits.maxImmediateSize`. A nonzero range also requires the Program contract
+`immediate_address_space`; the value lowers directly into the native pipeline layout.
+
+Draw and Dispatch descriptors accept:
+
+```ts
+type CommandImmediateData =
+    | ArrayBuffer
+    | ArrayBufferView
+    | LayoutUploadView
+```
+
+Zero-size pipelines forbid data; nonzero pipelines require a source whose visible byte
+length is exactly the declared size. Views are always byte ranges, with no typed-element
+offset semantics, truncation, padding, callback, or partial-update alias. Command
+identity, pipeline, expected length, and source identity are immutable; callers may
+mutate source contents between submissions.
+
+Every actual command receives one complete attempt-local snapshot. Render lowering is
+`setPipeline`, `setImmediates`, complete render state, vertex/index buffers, bind
+groups, then draw. Compute lowering is `setPipeline`, `setImmediates`, bind groups,
+then dispatch. A zero-size command makes no call; a nonzero command makes exactly one
+call. Scratch deliberately exposes no public partial-state command and performs no
+cross-command deduplication.
+
 ## Non-Goals
 
 - Do not make command counts closures by default.
@@ -446,3 +475,5 @@ This complete policy surface currently belongs only to Draw and Dispatch. Copy, 
 - Do not encode terrain, flow, tile, or layer concepts in commands.
 - Do not introduce `Material` as a shortcut for `Program` + `BindSet` + render semantics.
 - Do not expose pipeline or command validation as prose-only errors.
+- Do not expose a public partial `SetImmediatesCommand` or make command meaning depend
+  on preceding encoder state.

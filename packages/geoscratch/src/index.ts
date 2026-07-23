@@ -55,6 +55,7 @@ export type {
     BufferToBufferCopyCommandDescriptor,
     BufferToTextureCopyCommandDescriptor,
     CommandBindSetInvocation,
+    CommandImmediateData,
     CommandReadinessDescriptor,
     CommandResourceAccessDescriptor,
     CommandResourceReadDescriptor,

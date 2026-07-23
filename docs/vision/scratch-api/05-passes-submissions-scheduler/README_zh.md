@@ -446,6 +446,24 @@ Dependency validation 与 resource readiness policy 是两件事。
 
 `SubmissionValidationMode` 控制 optional dependency finding 的 disposition，而不改变 readiness control flow。`off` 仍然解析 skip/fallback 并保留 execution outcomes。Draw 与 Dispatch 实现全部四种 policy；Copy、Readback 与 Resolve 仍然只支持 `throw`。Clear 没有 source-read readiness policy：合法的非空 clear 是无条件的有序 write。
 
+## Immediate Snapshot Preparation
+
+Immediate source 参与 preparation，而不参与 scheduling。Submission 先解析
+readiness、fallback、skip-command 与事务化 skip-pass，再只访问最终 Draw/Dispatch
+occurrence，重新校验每个可见 range，并为每个实际 step 复制一份私有
+`Uint8Array`。同一个 Command 重复出现时，因此拥有分离的 occurrence fact 与
+带 command index 的 native attribution。
+
+所有选中 immediate snapshot 与其余 preflight 都在 encoder creation、queue
+action、resource epoch 或 `SubmittedWork` effect 前完成。被跳过的 command、
+回滚的 pass 与未选中的 fallback candidate 从不被读取；选中的 fallback 只使用
+自己的 source。Validation mode 不能放宽 detached、resized、forged、错误长度或
+不兼容的 immediate data。
+
+私有 bytes 只存活于该 submission attempt。`SubmittedWork` 可以暴露有界的
+source kind、length、identity 与 native-location metadata，但绝不暴露 payload
+或 payload hash。
+
 ## 未来上层编排
 
 自动排序不进入第一版核心 scheduler。未来上层可提供:

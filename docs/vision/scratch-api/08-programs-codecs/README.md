@@ -248,6 +248,25 @@ The runtime should be able to inspect artifact metadata and confirm that:
 
 Diagnostic payloads for these checks should use structured subjects such as `LayoutArtifact`, `LayoutField`, `Program`, `ShaderBinding`, and `BindLayoutEntry`, so tooling can repair the local artifact or declaration without parsing prose.
 
+## WGSL Language Contracts And Immediate Layouts
+
+`Program.requiredLanguageFeatures` is an explicit iterable of WGSL language-extension
+names, separate from device `requiredFeatures`. Program creation and every future
+pipeline transaction validate the requirement against the Runtime snapshot. Scratch
+does not parse or rewrite `requires` directives; caller-authored WGSL remains the
+source of truth.
+
+`LayoutCodecUsage` includes `'immediate'`.
+`LayoutArtifact.usageCompatibility.immediate` is true for the current scalar, vector,
+and `mat4x4f` field vocabulary and false for any array member. Explicitly requesting
+an incompatible immediate usage fails with a structured LayoutCodec diagnostic.
+Only a compatible LayoutUploadView can be command immediate data.
+
+Generated accessors continue to emit structs, constants, and field readers only. They
+never inject `requires immediate_address_space;` or `var<immediate>`. Raw ArrayBuffer
+and ArrayBufferView sources remain available so the current codec vocabulary does not
+limit legal WGSL store types.
+
 ## Industrial Lesson To Keep, Not Copy
 
 Mature engines often provide materials, shader graphs, node materials, custom shader chunks, plugins, and compute shader helpers. The useful lesson for scratch is not the material layer itself. The useful lesson is:

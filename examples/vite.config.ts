@@ -18,6 +18,7 @@ const examplePages = {
   textureSampling: path.resolve(examplesRoot, 'textureSampling/index.html'),
   renderToTexture: path.resolve(examplesRoot, 'renderToTexture/index.html'),
   renderPassFeatures: path.resolve(examplesRoot, 'renderPassFeatures/index.html'),
+  immediateData: path.resolve(examplesRoot, 'immediateData/index.html'),
   indirectExecution: path.resolve(examplesRoot, 'indirectExecution/index.html'),
   readinessPolicies: path.resolve(examplesRoot, 'readinessPolicies/index.html'),
   demLayer: path.resolve(examplesRoot, 'demLayer/index.html'),

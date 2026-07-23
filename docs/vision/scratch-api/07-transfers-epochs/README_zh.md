@@ -747,6 +747,18 @@ type ReadbackDiagnostic = ScratchDiagnostic & {
 
 Readback-specific diagnostics 应从一开始就遵循共享 machine-readable pattern。Readback-specific state 应放在 common `ScratchDiagnostic` envelope 内，通常进入 `subject`、`related`、`actual` 与 `evidence`。
 
+## Immediate Data 不是 Transfer
+
+`CommandImmediateData` 通过 `setImmediates()` 复制进原生 render/compute encoder
+state。它不是 UploadCommand、queue write、mapped range、BufferResource 或临时
+storage binding，因此不会创建 allocation version、content epoch、producer
+epoch、resource access、potential write 或 readback interpretation。
+
+Buffer upload 仍是显式 CPU-to-GPU Resource transfer。Pipeline override constant
+仍是 pipeline-creation specialization。Immediate data 只作为 per-command encoder
+input，render state 则只作为 rasterization state。分离这些路径可避免虚构
+Resource 与错误 dependency edge。
+
 ## 非目标
 
 - 不暴露核心 `resource.toArray()` 或 `resource.toBytes()` 糖。

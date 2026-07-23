@@ -49,6 +49,7 @@ describe('scratch LayoutCodec', () => {
             storage: true,
             readback: true,
             vertex: false,
+            immediate: true,
         })
         expect(codec.artifact.abiHash).to.match(/^layout-abi-[0-9a-f]{16}$/)
         expect(codec.artifact.schemaHash).to.match(/^layout-schema-[0-9a-f]{16}$/)
@@ -216,6 +217,57 @@ describe('scratch LayoutCodec', () => {
             arrayStride: 16,
         })
         expect(alignedArray.artifact.usageCompatibility.uniform).to.equal(true)
+    })
+
+    it('reports and enforces immediate-address-space compatibility', () => {
+
+        const codec = layoutCodec({
+            name: 'ImmediateParameters',
+            fields: [
+                { name: 'origin', type: 'vec2f' },
+                { name: 'scale', type: 'f32' },
+                { name: 'mode', type: 'u32' },
+                { name: 'transform', type: 'mat4x4f' },
+            ],
+        }, {
+            usage: [ 'immediate' ],
+        })
+
+        expect(codec.artifact.usages).to.deep.equal([ 'immediate' ])
+        expect(codec.artifact.usageCompatibility.immediate).to.equal(true)
+        expect(Object.isFrozen(codec.artifact.usageCompatibility)).to.equal(true)
+        const wgsl = codec.wgslAccessors({ namespace: 'ImmediateParametersLayout' })
+        expect(wgsl).to.not.include('requires immediate_address_space')
+        expect(wgsl).to.not.include('var<immediate>')
+
+        const arraySpec = {
+            name: 'ImmediateArray',
+            fields: [
+                { name: 'values', type: { element: 'u32', count: 4 } },
+            ],
+        }
+        const storageCodec = layoutCodec(arraySpec, {
+            usage: [ 'storage' ],
+        })
+        expect(storageCodec.artifact.usageCompatibility.immediate).to.equal(false)
+
+        try {
+            layoutCodec(arraySpec, {
+                usage: [ 'immediate' ],
+            })
+            throw new Error('expected incompatible immediate usage to fail')
+        } catch (error) {
+            expect(error).to.be.instanceOf(ScratchDiagnosticError)
+            expect(error.diagnostic).to.include({
+                code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
+                severity: 'error',
+                phase: 'layout-codec',
+            })
+            expect(error.diagnostic.actual).to.deep.include({
+                usage: 'immediate',
+                reason: 'usage-incompatible',
+            })
+        }
     })
 
     it('packs arrays with struct stride and creates readback views', () => {

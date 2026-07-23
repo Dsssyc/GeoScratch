@@ -825,6 +825,28 @@ in-flight pipeline 只能通过临时 lifecycle subscription 与 diagnostic caus
 category 是结构化事实。独立 Promise outcome 在 join 时不把 settlement order
 或 localized text 当作因果。
 
+## Immediate Data Diagnostics 与 Retention
+
+Immediate-data validation 使用三种稳定结构化 code：
+
+- `SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE`：WGSL language requirement
+  malformed 或 unavailable；
+- `SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID`：range、limit 或 Program coupling
+  非法；
+- `SCRATCH_COMMAND_IMMEDIATE_DATA_INVALID`：command source 缺失、禁止、长度错误、
+  detached、resized、forged、不可读或 layout-incompatible。
+
+显式不兼容的 LayoutCodec usage 继续使用 codec 的结构化 unsupported-format
+diagnostic。由于 native issue 无法修复这些问题，它们在 `throw`、`warn` 与 `off`
+mode 中都是 hard failure。
+
+同步 `setImmediates()` exception 与延迟 validation/internal/OOM/device loss
+继续归属于既有 submission native-observation owner。Pass-command location 包含
+step index、command index、pass identity 与最终选中 command identity。默认
+diagnostics、capture、export 与 SubmittedWork 可以保留 source kind、可见/预期
+length、layout hash、identity、feature name 与 native stage；绝不保留 bytes、
+typed value、payload hash、WGSL source 或 native handle。
+
 ## 非目标
 
 - 不把 prose error message 做成稳定 API。

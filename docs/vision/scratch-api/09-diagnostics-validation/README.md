@@ -837,6 +837,29 @@ Stable pipeline creation failure codes are
 categories are structural facts. Independent Promise outcomes are joined
 without treating settlement order or localized text as causality.
 
+## Immediate Data Diagnostics And Retention
+
+Immediate-data validation uses three stable structured codes:
+
+- `SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE` for malformed or unavailable WGSL
+  language requirements;
+- `SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID` for invalid range, limit, or Program
+  coupling; and
+- `SCRATCH_COMMAND_IMMEDIATE_DATA_INVALID` for missing, forbidden, wrong-sized,
+  detached, resized, forged, unreadable, or layout-incompatible command sources.
+
+Explicitly incompatible LayoutCodec usage continues to use the codec's structured
+unsupported-format diagnostic. These structural failures remain hard in `throw`,
+`warn`, and `off` modes because native issue cannot repair them.
+
+Synchronous `setImmediates()` exceptions and delayed validation/internal/OOM/device
+loss stay inside the existing submission native-observation owner. A pass-command
+location includes step index, command index, pass identity, and selected command
+identity. Default diagnostics, captures, exports, and SubmittedWork may retain source
+kind, visible/expected lengths, layout hashes, identities, feature names, and native
+stage. They never retain bytes, typed values, payload hashes, WGSL source, or native
+handles.
+
 ## Non-Goals
 
 - Do not make prose error messages the stable API.

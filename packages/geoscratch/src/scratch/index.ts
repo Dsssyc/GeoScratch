@@ -190,6 +190,7 @@ export type {
     BeginOcclusionQueryCommandDescriptor,
     ClearBufferCommandDescriptor,
     CommandBindSetInvocation,
+    CommandImmediateData,
     CommandReadinessDescriptor,
     CommandResourceAccessDescriptor,
     CommandResourceReadDescriptor,

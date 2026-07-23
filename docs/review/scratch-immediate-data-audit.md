@@ -1,6 +1,6 @@
 # Scratch Immediate Data Native Parity Audit
 
-Status: in progress; specification and design fixed, implementation pending
+Status: implementation complete through Phase 4; final audit and browser gate pending
 Date: 2026-07-23
 Baseline: `7d0b60c06c4b64699af293638f8bebf30b2cd98a`
 Decision: ADR-047
@@ -117,5 +117,17 @@ documented browser, desktop, or harness interruption.
 
 ## Completion Record
 
-Pending implementation, tests, documentation synchronization, one independent review,
-one bounded correction, sequential final gates, and the headed browser gate.
+Phase 1 fixed ADR-047 and this matrix at commit `2a17ce8`. Phase 2 added Runtime,
+Program, and render/compute Pipeline contracts at `f0eef3a`. Phase 3 added
+per-occurrence snapshots, readiness/fallback behavior, complete native lowering, and
+command-level native attribution at `6a55905`.
+
+Phase 4 now includes LayoutCodec immediate compatibility, public TypeScript routing,
+the neutral `examples/immediateData/` consumer, and synchronized bilingual vision
+material. The example uses caller-authored `requires immediate_address_space;` and
+`var<immediate>`, stable compute/render Pipelines, BindSets, Commands, and PassSpecs,
+one compute-to-render Resource dependency, and mutable CPU sources.
+
+The matrix remains pending until the fixed sequential final gates, bounded headed
+browser evidence, exactly one independent review, at most one concentrated
+correction, and one final audit commit are complete.

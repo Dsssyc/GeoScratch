@@ -239,6 +239,24 @@ runtime 应能 inspect artifact metadata，并确认:
 
 这些检查的 diagnostic payload 应使用 `LayoutArtifact`、`LayoutField`、`Program`、`ShaderBinding` 与 `BindLayoutEntry` 等结构化 subjects，使 tooling 无需解析 prose 也能修复局部 artifact 或声明。
 
+## WGSL Language Contract 与 Immediate Layout
+
+`Program.requiredLanguageFeatures` 是显式 WGSL language-extension name iterable，
+与 device `requiredFeatures` 分离。Program 创建及每个未来 pipeline transaction
+都会针对 Runtime snapshot 校验该 requirement。Scratch 不解析或重写 `requires`
+directive；调用方 WGSL source 仍是事实来源。
+
+`LayoutCodecUsage` 包含 `'immediate'`。
+`LayoutArtifact.usageCompatibility.immediate` 对当前 scalar、vector 与 `mat4x4f`
+field vocabulary 为 true，对任何 array member 为 false。显式请求不兼容的
+immediate usage 会产生结构化 LayoutCodec diagnostic。只有 compatible
+LayoutUploadView 才能作为 command immediate data。
+
+生成 accessor 仍只输出 struct、constant 与 field reader，绝不注入
+`requires immediate_address_space;` 或 `var<immediate>`。Raw ArrayBuffer 与
+ArrayBufferView 路径继续存在，因此当前 codec vocabulary 不会限制合法 WGSL
+store type。
+
 ## 吸收工业经验，但不照搬
 
 成熟引擎常提供 material、shader graph、node material、custom shader chunk、plugin 和 compute shader helper。scratch 要吸收的不是 material 层本身，而是:

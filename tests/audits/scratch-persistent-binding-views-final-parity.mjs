@@ -111,6 +111,7 @@ const ordinaryExamples = Object.freeze([
     'helloGAW',
     'helloTriangle',
     'helloVertexBuffer',
+    'immediateData',
     'indirectExecution',
     'readinessPolicies',
     'renderPassFeatures',

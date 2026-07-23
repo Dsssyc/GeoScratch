@@ -765,6 +765,18 @@ type ReadbackDiagnostic = ScratchDiagnostic & {
 
 Readback-specific diagnostics should follow the shared machine-readable pattern from the start. Readback-specific state lives inside the common `ScratchDiagnostic` envelope, usually in `subject`, `related`, `actual`, and `evidence`.
 
+## Immediate Data Is Not A Transfer
+
+`CommandImmediateData` is copied into native render/compute encoder state by
+`setImmediates()`. It is not an UploadCommand, queue write, mapped range, BufferResource,
+or temporary storage binding. Consequently it creates no allocation version, content
+epoch, producer epoch, resource access, potential write, or readback interpretation.
+
+Buffer upload remains the explicit CPU-to-GPU Resource transfer path. Pipeline
+override constants remain pipeline-creation specialization. Immediate data remains
+per-command encoder input, while render state remains rasterization state. Keeping
+these paths separate prevents artificial resources and false dependency edges.
+
 ## Non-Goals
 
 - Do not expose core `resource.toArray()` or `resource.toBytes()` sugar.

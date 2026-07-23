@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" type="image/png" href="../../docs/assets/icons/icon_light.png" />
+        <link rel="stylesheet" href="../shared/example.css" />
+        <title>Immediate Data | GeoScratch Examples</title>
+        <style>
+            #example-status {
+                position: absolute;
+                inset: auto 16px 16px 16px;
+                z-index: 2;
+                padding: 10px 12px;
+                border: 1px solid #394553;
+                background: #10161d;
+                color: #edf3f7;
+                font: 13px/1.45 system-ui, sans-serif;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="GPUFrame" data-status="loading"></canvas>
+        <output id="example-status" role="status" hidden></output>
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

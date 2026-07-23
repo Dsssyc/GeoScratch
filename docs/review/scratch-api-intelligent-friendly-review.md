@@ -9,6 +9,26 @@ Accepted vision still lives under `docs/vision/scratch-api/`. This review file i
 
 ## Recently Resolved
 
+### Declarative Per-Command Immediate Data
+
+Resolved in ADR-047 and the bilingual Runtime, Program/Codec, Command, Submission,
+Transfer, and Diagnostic vision modules. Runtime capability facts, explicit Program
+language requirements, immutable Pipeline ranges, stable Command source identities,
+and per-occurrence submission snapshots now express the native
+`immediate_address_space` path without inventing a Resource or exposing partial
+encoder state.
+
+This preserves the intelligent-friendly property tested by the application examples:
+an agent can understand one Draw or Dispatch from its Pipeline and complete local
+data source, without reconstructing previous `setImmediates()` calls. Frame-varying
+values do not force graph reconstruction because source contents remain mutable
+between submissions. Readiness/fallback resolution remains authoritative, and
+diagnostics retain bounded metadata without retaining payloads.
+
+The boundary is intentionally narrow: Scratch does not parse WGSL, infer immediate
+size, expose callbacks, deduplicate state across commands, or claim complete
+WebGPU/WGSL parity. See `scratch-immediate-data-audit.md`.
+
 ### Stable Commands And Submission-Step Current Content
 
 Resolved in ADR-041 and the bilingual resource, command, submission, transfer, and diagnostic vision modules. DrawCommand and DispatchCommand now accept one closed read-epoch union: an exact non-negative number or `'current-at-step'`. The sentinel resolves only for the final selected command at its explicit submission position, after prior step effects and before its own writes. It does not add callbacks, aliases, command mutation, automatic ordering, retries, or transfer/query API drift.

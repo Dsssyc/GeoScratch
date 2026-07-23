@@ -37,7 +37,7 @@ export type LayoutSpec = {
     fields: LayoutFieldDescriptor[]
 }
 
-export type LayoutCodecUsage = 'uniform' | 'storage' | 'readback' | 'vertex'
+export type LayoutCodecUsage = 'uniform' | 'storage' | 'readback' | 'vertex' | 'immediate'
 
 export type LayoutUsageCompatibility = Record<LayoutCodecUsage, boolean>
 
@@ -635,6 +635,22 @@ function lowerLayoutArtifact(spec: LayoutSpec, options: LayoutCodecOptions): Lay
         }
     })
     const usageCompatibility = computeUsageCompatibility(fields)
+    if (usages.includes('immediate') && !usageCompatibility.immediate) {
+        throwUnsupportedFormat(artifactSubject(spec), {
+            expected: {
+                usage: 'immediate',
+                fields: 'scalar, vector, or mat4x4f fields without array members',
+            },
+            actual: {
+                usage: 'immediate',
+                reason: 'usage-incompatible',
+                arrayFields: fields
+                    .filter(field => field.arrayLength !== undefined)
+                    .map(field => field.path),
+            },
+            message: 'LayoutSpec is not compatible with WGSL immediate address space.',
+        })
+    }
 
     const abiCanonical = {
         alignmentMode: 'host-shareable',
@@ -757,7 +773,7 @@ function normalizeUsages(spec: LayoutSpec, usage: unknown): LayoutCodecUsage[] {
     for (const value of usage) {
         if (!isUsage(value)) {
             throwUnsupportedFormat(artifactSubject(spec), {
-                expected: { usage: [ 'uniform', 'storage', 'readback', 'vertex' ] },
+                expected: { usage: [ 'uniform', 'storage', 'readback', 'vertex', 'immediate' ] },
                 actual: { usage: value },
                 message: 'LayoutCodec usage includes an unsupported value.',
             })
@@ -785,6 +801,7 @@ function computeUsageCompatibility(fields: LayoutFieldArtifact[]): LayoutUsageCo
         storage: true,
         readback: true,
         vertex: fields.every(field => field.arrayLength === undefined && field.type !== 'mat4x4f'),
+        immediate: fields.every(field => field.arrayLength === undefined),
     }
 }
 
@@ -1022,7 +1039,11 @@ function isPrimitiveType(type: string): type is LayoutPrimitiveType {
 
 function isUsage(value: unknown): value is LayoutCodecUsage {
 
-    return value === 'uniform' || value === 'storage' || value === 'readback' || value === 'vertex'
+    return value === 'uniform' ||
+        value === 'storage' ||
+        value === 'readback' ||
+        value === 'vertex' ||
+        value === 'immediate'
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
