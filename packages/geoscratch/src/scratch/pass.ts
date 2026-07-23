@@ -554,7 +554,7 @@ function normalizeColorAttachments(
 
     const normalized: (RenderPassColorAttachmentSpec | null)[] = []
     for (let index = 0; index < color.length; index++) {
-        if (!(index in color)) {
+        if (!Object.hasOwn(color, index)) {
             throwColorAttachmentDiagnostic(pass, undefined, index, 'hole')
         }
         const attachment = color[index]
@@ -941,7 +941,11 @@ function normalizeDepthStencilAttachment(
 
     if (hasDepth) {
         if (depthReadOnly) {
-            if (attachment.depthLoad !== undefined || attachment.depthStore !== undefined) {
+            if (
+                attachment.depthLoad !== undefined ||
+                attachment.depthStore !== undefined ||
+                attachment.depthClear !== undefined
+            ) {
                 throwDepthStencilAttachmentDiagnostic(pass, attachment, 'depthReadOnlyOperations')
             }
             normalized.depthReadOnly = true
@@ -967,7 +971,11 @@ function normalizeDepthStencilAttachment(
     }
     if (hasStencil) {
         if (stencilReadOnly) {
-            if (attachment.stencilLoad !== undefined || attachment.stencilStore !== undefined) {
+            if (
+                attachment.stencilLoad !== undefined ||
+                attachment.stencilStore !== undefined ||
+                attachment.stencilClear !== undefined
+            ) {
                 throwDepthStencilAttachmentDiagnostic(pass, attachment, 'stencilReadOnlyOperations')
             }
             normalized.stencilReadOnly = true

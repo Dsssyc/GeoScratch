@@ -1939,6 +1939,9 @@ export class ClearBufferCommand {
 
         assertScratchRuntimeActive(runtime)
 
+        if (!isRecord(descriptor) || Array.isArray(descriptor)) {
+            throwClearBufferDiagnostic(runtime, descriptor, 'descriptor')
+        }
         const target = descriptor.target
         if (!isBufferRegion(target)) {
             throwClearBufferDiagnostic(runtime, target, 'target')
@@ -5148,7 +5151,7 @@ function validateClearBufferTarget(command: ClearBufferCommand): void {
 function throwClearBufferDiagnostic(
     runtime: ScratchRuntime,
     target: unknown,
-    reason: 'target' | 'usage' | 'alignment' | 'range',
+    reason: 'descriptor' | 'target' | 'usage' | 'alignment' | 'range',
     command?: ClearBufferCommand
 ): never {
 
@@ -5165,6 +5168,7 @@ function throwClearBufferDiagnostic(
         ].filter(isDefined),
         message: 'ClearBufferCommand requires a current, aligned COPY_DST BufferRegion.',
         expected: {
+            descriptor: '{ label?, target: BufferRegion }',
             target: 'BufferRegion',
             usage: 'GPUBufferUsage.COPY_DST',
             offsetAlignment: 4,

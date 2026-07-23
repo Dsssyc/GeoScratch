@@ -42,6 +42,27 @@ function readResource(resource, contentEpoch = resource.contentEpoch) {
     return { resource, contentEpoch }
 }
 
+async function createResolvePass(runtime, format) {
+
+    const source = await runtime.createTexture({
+        size: [ 8, 8 ],
+        sampleCount: 4,
+        format,
+        usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+    })
+    const target = await runtime.createTexture({
+        size: [ 8, 8 ],
+        format,
+        usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+    })
+    return runtime.createRenderPass({
+        color: [ {
+            target: source.view(),
+            resolveTarget: target.view(),
+        } ],
+    })
+}
+
 describe('scratch render/pass native parity', () => {
 
     it('preserves nullable color slots and lowers maxDrawCount without resource effects', async() => {
@@ -103,9 +124,15 @@ describe('scratch render/pass native parity', () => {
         })
         const sparse = new Array(2)
         sparse[1] = { target: target.view() }
+        const inheritedHole = new Array(2)
+        inheritedHole[1] = { target: target.view() }
+        const inheritedIndex = Object.create(Array.prototype)
+        Object.defineProperty(inheritedIndex, 0, { value: null })
+        Object.setPrototypeOf(inheritedHole, inheritedIndex)
 
         for (const color of [
             sparse,
+            inheritedHole,
             [ undefined ],
         ]) {
             const diagnostic = await expectScratchDiagnostic(() => runtime.createRenderPass({
@@ -348,6 +375,181 @@ describe('scratch render/pass native parity', () => {
         })
         expect(fake.calls.commandEncoders).to.have.length(0)
         expect(fake.calls.textureViews).to.have.length(0)
+    })
+
+    it('matches resolve-capable formats and feature requirements from the fixed CRD', async() => {
+
+        const tierFake = createFakeGpu()
+        tierFake.device.features.add('texture-formats-tier1')
+        const tierRuntime = await ScratchRuntime.create({ gpu: tierFake.gpu })
+
+        for (const format of [
+            'r8snorm',
+            'rg8snorm',
+            'rgba8snorm',
+            'rg11b10ufloat',
+        ]) {
+            const pass = await createResolvePass(tierRuntime, format)
+            expect(pass.color[0].format).to.equal(format)
+        }
+
+        for (const format of [ 'r16unorm', 'rgba16float' ]) {
+            await expectScratchDiagnostic(() => createResolvePass(tierRuntime, format), {
+                code: 'SCRATCH_PASS_RESOLVE_ATTACHMENT_INVALID',
+                severity: 'error',
+                phase: 'submission',
+            })
+        }
+
+        const coreFake = createFakeGpu()
+        coreFake.device.features.add('core-features-and-limits')
+        const coreRuntime = await ScratchRuntime.create({ gpu: coreFake.gpu })
+        const corePass = await createResolvePass(coreRuntime, 'rgba16float')
+        expect(corePass.color[0].format).to.equal('rgba16float')
+    })
+
+    it('compares complete render layouts while ignoring only trailing null color slots', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const target = await runtime.createTexture({
+            size: [ 16, 16 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const program = await createRenderProgram(runtime)
+        const pipelineWithTrailingNull = await runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'rgba8unorm' }, null ],
+        })
+        const pipelineWithoutTrailingNull = await runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'rgba8unorm' } ],
+        })
+        const drawWithTrailingNull = runtime.createDrawCommand({
+            pipeline: pipelineWithTrailingNull,
+            count: { vertexCount: 3 },
+            resources: { read: [], write: [] },
+            whenMissing: 'throw',
+        })
+        const drawWithoutTrailingNull = runtime.createDrawCommand({
+            pipeline: pipelineWithoutTrailingNull,
+            count: { vertexCount: 3 },
+            resources: { read: [], write: [] },
+            whenMissing: 'throw',
+        })
+        const compactPass = runtime.createRenderPass({
+            color: [ { target: target.view() } ],
+        })
+        const passWithTrailingNull = runtime.createRenderPass({
+            color: [ { target: target.view() }, null ],
+        })
+
+        const first = runtime.submission()
+            .render(compactPass, [ drawWithTrailingNull ])
+            .submit()
+        const second = runtime.submission()
+            .render(passWithTrailingNull, [ drawWithoutTrailingNull ])
+            .submit()
+
+        expect(fake.calls.drawCalls).to.have.length(2)
+        expect(first.diagnostics).to.deep.equal([])
+        expect(second.diagnostics).to.deep.equal([])
+        await Promise.all([ first.done, second.done ])
+    })
+
+    it('rejects render layout sample-count and depth-format absence before encoding', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const color = await runtime.createTexture({
+            size: [ 16, 16 ],
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const multisampledColor = await runtime.createTexture({
+            size: [ 16, 16 ],
+            sampleCount: 4,
+            format: 'rgba8unorm',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const depth = await runtime.createTexture({
+            size: [ 16, 16 ],
+            format: 'depth24plus',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const program = await createRenderProgram(runtime)
+        const pipeline = await runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'rgba8unorm' } ],
+        })
+        const draw = runtime.createDrawCommand({
+            pipeline,
+            count: { vertexCount: 3 },
+            resources: { read: [], write: [] },
+            whenMissing: 'throw',
+        })
+
+        await expectScratchDiagnostic(() => runtime.submission()
+            .render(runtime.createRenderPass({
+                color: [ { target: multisampledColor.view() } ],
+            }), [ draw ])
+            .submit(), {
+            code: 'SCRATCH_PIPELINE_SAMPLE_COUNT_MISMATCH',
+            severity: 'error',
+            phase: 'pipeline',
+        })
+        await expectScratchDiagnostic(() => runtime.submission()
+            .render(runtime.createRenderPass({
+                color: [ { target: color.view() } ],
+                depth: { target: depth.view() },
+            }), [ draw ])
+            .submit(), {
+            code: 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH',
+            severity: 'error',
+            phase: 'pipeline',
+        })
+
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        expect(fake.calls.textureViews).to.have.length(0)
+    })
+
+    it('rejects clear values on read-only depth and stencil aspects', async() => {
+
+        const fake = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const depth = await runtime.createTexture({
+            size: [ 16, 16 ],
+            format: 'depth24plus',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+        const stencil = await runtime.createTexture({
+            size: [ 16, 16 ],
+            format: 'stencil8',
+            usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
+        })
+
+        for (const attachment of [
+            {
+                target: depth.view(),
+                depthReadOnly: true,
+                depthClear: 0.25,
+            },
+            {
+                target: stencil.view(),
+                stencilReadOnly: true,
+                stencilClear: 3,
+            },
+        ]) {
+            await expectScratchDiagnostic(() => runtime.createRenderPass({
+                color: [],
+                depth: attachment,
+            }), {
+                code: 'SCRATCH_PASS_DEPTH_STENCIL_ATTACHMENT_INVALID',
+                severity: 'error',
+                phase: 'submission',
+            })
+        }
     })
 
     it('lowers read-only depth as a pass read without advancing its content epoch', async() => {

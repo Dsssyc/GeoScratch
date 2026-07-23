@@ -132,17 +132,24 @@ const TIER_2_READ_WRITE_STORAGE_TEXTURE_FORMATS = [
     'rgba32float',
 ] as const satisfies readonly GPUTextureFormat[]
 
-const RESOLVE_CAPABLE_COLOR_FORMATS = new Set<GPUTextureFormat>([
-    'r8unorm',
-    'rg8unorm',
-    'rgba8unorm',
-    'rgba8unorm-srgb',
-    'bgra8unorm',
-    'bgra8unorm-srgb',
-    'r16float',
-    'rg16float',
-    'rgba16float',
-    'rgb10a2unorm',
+const RESOLVE_FORMAT_REQUIREMENTS = new Map<
+    GPUTextureFormat,
+    TextureFormatFeatureRequirement
+>([
+    [ 'r8unorm', 'base' ],
+    [ 'r8snorm', 'texture-formats-tier1' ],
+    [ 'rg8unorm', 'base' ],
+    [ 'rg8snorm', 'texture-formats-tier1' ],
+    [ 'rgba8unorm', 'base' ],
+    [ 'rgba8unorm-srgb', 'base' ],
+    [ 'rgba8snorm', 'texture-formats-tier1' ],
+    [ 'bgra8unorm', 'base' ],
+    [ 'bgra8unorm-srgb', 'core-features-and-limits' ],
+    [ 'r16float', 'base' ],
+    [ 'rg16float', 'base' ],
+    [ 'rgba16float', 'core-features-and-limits' ],
+    [ 'rgb10a2unorm', 'base' ],
+    [ 'rg11b10ufloat', 'rg11b10ufloat-renderable' ],
 ])
 
 const RENDERABLE_FORMAT_REQUIREMENTS = createRenderableFormatRequirements()
@@ -171,7 +178,9 @@ export function textureFormatSupportsResolve(
     format: GPUTextureFormat
 ): boolean {
 
-    return RESOLVE_CAPABLE_COLOR_FORMATS.has(format) &&
+    const requirement = RESOLVE_FORMAT_REQUIREMENTS.get(format)
+    return requirement !== undefined &&
+        runtimeSupportsTextureFormatRequirement(runtime, requirement) &&
         textureFormatIsColorRenderable(runtime, format)
 }
 

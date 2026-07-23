@@ -37,6 +37,7 @@ import {
     isRenderPassSpec,
     validateRenderPassAttachments,
 } from './pass.js'
+import { renderPipelineLayoutFor } from './pipeline.js'
 import { createScheduledReadbackOperation } from './readback.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
@@ -4134,8 +4135,11 @@ function describeTextureSubresourceFootprint(
 
 function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec) {
 
-    const targetFormats = command.pipeline.targetFormats
-    if (targetFormats.length !== passSpec.color.length) {
+    const pipelineLayout = renderPipelineLayoutFor(command.pipeline)
+    const passLayout = currentRenderPassLayout(passSpec)
+    const pipelineColorFormats = withoutTrailingNulls(pipelineLayout.colorFormats)
+    const passColorFormats = withoutTrailingNulls(passLayout.colorFormats)
+    if (pipelineColorFormats.length !== passColorFormats.length) {
         throwScratchDiagnostic({
             code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
             severity: 'error',
@@ -4145,15 +4149,21 @@ function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec)
                 command.subject,
                 passSpec.subject,
             ],
-            message: 'RenderPipeline color target count does not match RenderPassSpec attachment count.',
-            expected: { targetCount: passSpec.color.length },
-            actual: { targetCount: targetFormats.length },
+            message: 'RenderPipeline color target layout does not match RenderPassSpec attachment layout.',
+            expected: {
+                colorFormats: passLayout.colorFormats,
+                effectiveTargetCount: passColorFormats.length,
+            },
+            actual: {
+                colorFormats: pipelineLayout.colorFormats,
+                effectiveTargetCount: pipelineColorFormats.length,
+            },
         })
     }
 
-    for (let index = 0; index < passSpec.color.length; index++) {
-        const expected = passSpec.color[index]?.format ?? null
-        const actual = targetFormats[index]
+    for (let index = 0; index < passColorFormats.length; index++) {
+        const expected = passColorFormats[index]
+        const actual = pipelineColorFormats[index]
 
         if (expected !== actual) {
             throwScratchDiagnostic({
@@ -4173,6 +4183,71 @@ function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec)
     }
 
     validatePipelineDepthStencil(command, passSpec)
+
+    if (pipelineLayout.depthStencilFormat !== passLayout.depthStencilFormat) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: command.pipeline.subject,
+            related: [
+                command.subject,
+                passSpec.subject,
+                passSpec.depth?.target.subject,
+            ].filter(isDefined),
+            message: 'RenderPipeline depth/stencil layout does not match RenderPassSpec.',
+            expected: { depthStencilFormat: passLayout.depthStencilFormat },
+            actual: { depthStencilFormat: pipelineLayout.depthStencilFormat },
+        })
+    }
+
+    if (pipelineLayout.sampleCount !== passLayout.sampleCount) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_SAMPLE_COUNT_MISMATCH',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: command.pipeline.subject,
+            related: [
+                command.subject,
+                passSpec.subject,
+            ],
+            message: 'RenderPipeline sample count does not match RenderPassSpec attachments.',
+            expected: { sampleCount: passLayout.sampleCount },
+            actual: { sampleCount: pipelineLayout.sampleCount },
+        })
+    }
+}
+
+function currentRenderPassLayout(passSpec: RenderPassSpec): Readonly<{
+    colorFormats: readonly (GPUTextureFormat | null)[]
+    depthStencilFormat?: GPUTextureFormat
+    sampleCount: number
+}> {
+
+    const firstColor = passSpec.color.find(attachment => attachment !== null)
+    const sampleCount = firstColor === undefined
+        ? passSpec.depth!.target.texture.sampleCount
+        : isTextureViewSpec(firstColor.target)
+            ? firstColor.target.texture.sampleCount
+            : 1
+    return Object.freeze({
+        colorFormats: Object.freeze(passSpec.color.map(attachment =>
+            attachment?.format ?? null
+        )),
+        ...(passSpec.depth !== undefined
+            ? { depthStencilFormat: passSpec.depth.target.descriptor.format }
+            : {}),
+        sampleCount,
+    })
+}
+
+function withoutTrailingNulls(
+    formats: readonly (GPUTextureFormat | null)[]
+): readonly (GPUTextureFormat | null)[] {
+
+    let length = formats.length
+    while (length > 0 && formats[length - 1] === null) length--
+    return formats.slice(0, length)
 }
 
 function validatePipelineDepthStencil(command: DrawCommand, passSpec: RenderPassSpec) {

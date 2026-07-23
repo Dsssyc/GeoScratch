@@ -54,6 +54,13 @@ const pipelineProgramLayoutRequirements = new WeakMap<
     RenderPipeline | ComputePipeline,
     readonly ProgramBufferLayoutRequirement[]
 >()
+const renderPipelineLayouts = new WeakMap<RenderPipeline, RenderPipelineLayoutSnapshot>()
+
+export type RenderPipelineLayoutSnapshot = Readonly<{
+    colorFormats: readonly (GPUTextureFormat | null)[]
+    depthStencilFormat?: GPUTextureFormat
+    sampleCount: number
+}>
 
 export type RenderPipelineDescriptor = {
     label?: string
@@ -118,6 +125,13 @@ export class RenderPipeline {
         }
         renderPipelineStates.set(this, { isDisposed: false })
         pipelineProgramLayoutRequirements.set(this, state.layoutRequirements)
+        renderPipelineLayouts.set(this, Object.freeze({
+            colorFormats: state.targetFormats,
+            ...(state.depthStencilFormat !== undefined
+                ? { depthStencilFormat: state.depthStencilFormat }
+                : {}),
+            sampleCount: state.multisample?.count ?? 1,
+        }))
         defineImmutableRenderProperties(this, state)
         Object.preventExtensions(this)
     }
@@ -1561,6 +1575,17 @@ export function programLayoutRequirementsForPipeline(
     const requirements = pipelineProgramLayoutRequirements.get(pipeline)
     if (requirements === undefined) throw new TypeError('Pipeline Program layout requirement snapshot is unavailable.')
     return requirements
+}
+
+export function renderPipelineLayoutFor(
+    pipeline: RenderPipeline
+): RenderPipelineLayoutSnapshot {
+
+    const layout = renderPipelineLayouts.get(pipeline)
+    if (layout === undefined) {
+        throw new TypeError('RenderPipeline render-pass layout snapshot is unavailable.')
+    }
+    return layout
 }
 
 function validateProgramLayoutRequirements(pipeline: PipelineValidationContext): void {

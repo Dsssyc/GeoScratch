@@ -420,6 +420,10 @@ describe('scratch ClearBufferCommand', () => {
         })
 
         for (const descriptor of [
+            null,
+            7,
+            'clear',
+            [],
             { target: undefined },
             { target: sourceOnly.region({ offset: 0, size: 4 }) },
             { target: target.region({ offset: 2, size: 4 }) },

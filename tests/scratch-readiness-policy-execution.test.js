@@ -29,7 +29,7 @@ async function createRenderFixture() {
         targets: [ { format: 'rgba8unorm' } ],
     })
 
-    return { ...fake, runtime, pipeline }
+    return { ...fake, runtime, program, pipeline }
 }
 
 async function createComputeFixture() {
@@ -51,6 +51,15 @@ async function createComputeFixture() {
 async function createRenderSkipPassFixture() {
 
     const fixture = await createRenderFixture()
+    const depthPipeline = await fixture.runtime.createRenderPipeline({
+        program: fixture.program,
+        targets: [ { format: 'rgba8unorm' } ],
+        depthStencil: {
+            format: 'depth24plus',
+            depthWriteEnabled: true,
+            depthCompare: 'less',
+        },
+    })
     const colorTarget = await fixture.runtime.createTexture({
         label: 'skipped color target',
         size: { width: 4, height: 4 },
@@ -95,8 +104,9 @@ async function createRenderSkipPassFixture() {
         occlusionQuerySet,
     })
     const missing = await fixture.runtime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_STORAGE })
-    const draw = createDraw(fixture)
+    const draw = createDraw(fixture, { pipeline: depthPipeline })
     const trigger = createDraw(fixture, {
+        pipeline: depthPipeline,
         resources: {
             read: [ { resource: missing, contentEpoch: 0 } ],
             write: [],
@@ -111,6 +121,7 @@ async function createRenderSkipPassFixture() {
 
     return {
         ...fixture,
+        depthPipeline,
         colorTarget,
         depthTarget,
         timestampQuerySet,

@@ -85,6 +85,11 @@ surface source attachment. A persistent texture resolve target is one pass-level
 write and advances its parent content epoch once after successful encoding. A surface
 does not acquire a fabricated persistent epoch.
 
+Resolve support follows the fixed CRD's per-format feature requirements rather than
+a format-name shortcut. In particular, tier-one signed-normalized formats,
+`rg11b10ufloat`, and core-feature formats are accepted only when their defining
+device feature is present.
+
 The source attachment remains a write even when it resolves. `store: 'store'`
 retains readable source content. `store: 'discard'` and transient source attachments
 do not advertise readable retained content. The resolve target is the retained result
@@ -101,6 +106,10 @@ Internal same-pass conflict validation uses texture, mip, layer/depth slice, and
 aspect footprints. This permits a draw to sample an overlapping read-only depth
 aspect and still rejects access overlapping a writable attachment aspect. The public
 resource ledger and epoch API remain parent-resource facts.
+
+Before encoding a draw, Scratch compares the complete render-pass layout required by
+WebGPU: color formats are equal after ignoring trailing null slots, depth/stencil
+formats are equal including absence, and sample counts are equal.
 
 `RenderPassSpecDescriptor` also gains immutable `maxDrawCount?: number`. It accepts a
 non-negative safe integer and lowers unchanged to
@@ -160,6 +169,7 @@ New deterministic validation uses the existing `ScratchDiagnostic` envelope:
 | --- | --- |
 | `SCRATCH_PIPELINE_CONSTANTS_INVALID` | A render-stage constants record or value is invalid. |
 | `SCRATCH_PIPELINE_TARGET_STATE_INVALID` | A render target array contains a hole, `undefined`, or invalid non-null state. |
+| `SCRATCH_PIPELINE_SAMPLE_COUNT_MISMATCH` | A render pipeline and pass use different sample counts. |
 | `SCRATCH_PASS_COLOR_ATTACHMENT_INVALID` | A color attachment array or non-null source attachment is invalid. |
 | `SCRATCH_PASS_RESOLVE_ATTACHMENT_INVALID` | A resolve source/target pair violates resolve constraints. |
 | `SCRATCH_PASS_MAX_DRAW_COUNT_INVALID` | `maxDrawCount` is not a non-negative safe integer. |

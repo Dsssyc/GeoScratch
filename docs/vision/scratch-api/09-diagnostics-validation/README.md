@@ -380,9 +380,13 @@ type PipelineDiagnosticCode =
     | 'SCRATCH_PIPELINE_TARGET_STATE_INVALID'
     | 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH'
     | 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH'
+    | 'SCRATCH_PIPELINE_SAMPLE_COUNT_MISMATCH'
     | 'SCRATCH_PIPELINE_VERTEX_LAYOUT_MISMATCH'
     | 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE'
 ```
+
+`SCRATCH_PIPELINE_SAMPLE_COUNT_MISMATCH` identifies a render pipeline/pass layout
+whose attachment sample counts differ before encoder creation.
 
 ### Command
 
