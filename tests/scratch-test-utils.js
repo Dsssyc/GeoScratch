@@ -46,6 +46,36 @@ export function advanceQuerySlotContentEpochForTest(querySet, index) {
     advanceQuerySlotContentEpoch(querySet, index)
 }
 
+export function defaultRenderStateActions(width, height) {
+
+    return [
+        {
+            type: 'setViewport',
+            x: 0,
+            y: 0,
+            width,
+            height,
+            minDepth: 0,
+            maxDepth: 1,
+        },
+        {
+            type: 'setScissorRect',
+            x: 0,
+            y: 0,
+            width,
+            height,
+        },
+        {
+            type: 'setBlendConstant',
+            color: [ 0, 0, 0, 0 ],
+        },
+        {
+            type: 'setStencilReference',
+            reference: 0,
+        },
+    ]
+}
+
 export function createFakeExternalImageSource(
     kind = 'ImageData',
     { width = 4, height = 4, ...properties } = {}
@@ -150,6 +180,7 @@ export function createFakeGpu(options = {}) {
         textureCopies: [],
         bufferTextureCopies: [],
         textureBufferCopies: [],
+        clearBuffers: [],
         resolveQueries: [],
         maps: [],
         mappedRanges: [],
@@ -1057,6 +1088,12 @@ function createFakeCommandEncoder(calls, descriptor, issueNativeMethod, initiall
                 size,
             })
         },
+        clearBuffer(buffer, offset = 0, size = buffer.data.byteLength - offset) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'clearBuffer')) return
+            const call = { buffer, offset, size }
+            calls.clearBuffers.push(call)
+            commands.push({ type: 'clear-buffer', ...call })
+        },
         resolveQuerySet(querySet, firstQuery, queryCount, destination, destinationOffset) {
             if (issueEncoderMethod(this, issueNativeMethod, 'resolveQuerySet')) return
             const call = {
@@ -1116,6 +1153,11 @@ function executeFakeCommandBuffer(commandBuffer) {
                     true
                 )
             }
+            continue
+        }
+
+        if (command.type === 'clear-buffer') {
+            command.buffer.data.fill(0, command.offset, command.offset + command.size)
         }
     }
 }
@@ -1157,6 +1199,30 @@ function createFakeRenderPassEncoder(
         setIndexBuffer(buffer, indexFormat, offset, size) {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'setIndexBuffer')) return
             this.actions.push({ type: 'setIndexBuffer', buffer, indexFormat, offset, size })
+        },
+        setViewport(x, y, width, height, minDepth, maxDepth) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'setViewport')) return
+            this.actions.push({
+                type: 'setViewport',
+                x,
+                y,
+                width,
+                height,
+                minDepth,
+                maxDepth,
+            })
+        },
+        setScissorRect(x, y, width, height) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'setScissorRect')) return
+            this.actions.push({ type: 'setScissorRect', x, y, width, height })
+        },
+        setBlendConstant(color) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'setBlendConstant')) return
+            this.actions.push({ type: 'setBlendConstant', color: [ ...color ] })
+        },
+        setStencilReference(reference) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'setStencilReference')) return
+            this.actions.push({ type: 'setStencilReference', reference })
         },
         draw(vertexCount, instanceCount, firstVertex, firstInstance) {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'draw')) return

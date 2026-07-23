@@ -7,6 +7,7 @@ import {
 } from 'geoscratch'
 import {
     createFakeGpu,
+    defaultRenderStateActions,
     replaceResourceAllocationForTest,
     triangleWgsl,
 } from './scratch-test-utils.js'
@@ -125,6 +126,7 @@ describe('scratch native indexed and indirect execution', () => {
         expect(draw).to.be.instanceOf(DrawCommand)
         expect(fixture.calls.renderPasses[0].actions).to.deep.equal([
             { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
+            ...defaultRenderStateActions(4, 4),
             {
                 type: 'setIndexBuffer',
                 buffer: indexBuffer.gpuBuffer,
@@ -173,7 +175,9 @@ describe('scratch native indexed and indirect execution', () => {
             .render(fixture.pass, [ draw ])
             .submit()
 
-        expect(fixture.calls.renderPasses[0].actions[1]).to.deep.equal({
+        expect(fixture.calls.renderPasses[0].actions.find(
+            action => action.type === 'setIndexBuffer'
+        )).to.deep.equal({
             type: 'setIndexBuffer',
             buffer: indexBuffer.gpuBuffer,
             indexFormat: 'uint32',
@@ -216,11 +220,13 @@ describe('scratch native indexed and indirect execution', () => {
 
         expect(render.calls.renderPasses[0].actions).to.deep.equal([
             { type: 'setPipeline', pipeline: render.pipeline.gpuPipeline },
+            ...defaultRenderStateActions(4, 4),
             {
                 type: 'draw',
                 call: { vertexCount: 0, instanceCount: 0, firstVertex: 0, firstInstance: 0 },
             },
             { type: 'setPipeline', pipeline: render.pipeline.gpuPipeline },
+            ...defaultRenderStateActions(4, 4),
             {
                 type: 'setIndexBuffer',
                 buffer: indexBuffer.gpuBuffer,
@@ -720,8 +726,10 @@ describe('scratch native indexed and indirect execution', () => {
 
         expect(fixture.calls.renderPasses[0].actions).to.deep.equal([
             { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
+            ...defaultRenderStateActions(4, 4),
             { type: 'drawIndirect', buffer: drawArguments.gpuBuffer, offset: 0 },
             { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
+            ...defaultRenderStateActions(4, 4),
             {
                 type: 'setIndexBuffer',
                 buffer: indexBuffer.gpuBuffer,

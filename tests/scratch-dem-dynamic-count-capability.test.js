@@ -1,6 +1,10 @@
 import { expect } from 'chai'
 import { ScratchRuntime } from 'geoscratch'
-import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    createFakeGpu,
+    defaultRenderStateActions,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x08
 const GPU_BUFFER_USAGE_INDIRECT = 0x100
@@ -135,15 +139,19 @@ describe('scratch DEM CPU-dynamic count capability', () => {
         expect(fake.calls.renderPasses.map(renderPass => renderPass.actions)).to.deep.equal([
             [
                 { type: 'setPipeline', pipeline: pipeline.gpuPipeline },
+                ...defaultRenderStateActions(4, 4),
                 { type: 'drawIndirect', buffer: lodArguments.gpuBuffer, offset: 0 },
                 { type: 'setPipeline', pipeline: pipeline.gpuPipeline },
+                ...defaultRenderStateActions(4, 4),
                 { type: 'drawIndirect', buffer: terrainArguments.gpuBuffer, offset: 0 },
                 { type: 'end' },
             ],
             [
                 { type: 'setPipeline', pipeline: pipeline.gpuPipeline },
+                ...defaultRenderStateActions(4, 4),
                 { type: 'drawIndirect', buffer: lodArguments.gpuBuffer, offset: 0 },
                 { type: 'setPipeline', pipeline: pipeline.gpuPipeline },
+                ...defaultRenderStateActions(4, 4),
                 { type: 'drawIndirect', buffer: terrainArguments.gpuBuffer, offset: 0 },
                 { type: 'end' },
             ],

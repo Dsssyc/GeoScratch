@@ -328,12 +328,24 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             setPipeline(pipelineValue) {
                 calls.drawCalls.push({ type: 'setPipeline', pipeline: pipelineValue })
             },
+            setViewport(x, y, width, height, minDepth, maxDepth) {
+                calls.drawCalls.push({ type: 'setViewport', x, y, width, height, minDepth, maxDepth })
+            },
+            setScissorRect(x, y, width, height) {
+                calls.drawCalls.push({ type: 'setScissorRect', x, y, width, height })
+            },
+            setBlendConstant(color) {
+                calls.drawCalls.push({ type: 'setBlendConstant', color: [ ...color ] })
+            },
+            setStencilReference(reference) {
+                calls.drawCalls.push({ type: 'setStencilReference', reference })
+            },
             draw(vertexCount, instanceCount, firstVertex, firstInstance) {
                 calls.drawCalls.push({ vertexCount, instanceCount, firstVertex, firstInstance })
             },
         }
 
-        command.encode(passEncoder)
+        command.encode(passEncoder, { width: 64, height: 48 })
 
         expect(command).to.be.instanceOf(DrawCommand)
         expect(command.commandKind).to.equal('draw')
@@ -343,6 +355,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         expect(command.whenMissing).to.equal('throw')
         expect(calls.drawCalls).to.deep.equal([
             { type: 'setPipeline', pipeline: pipeline.gpuPipeline },
+            { type: 'setViewport', x: 0, y: 0, width: 64, height: 48, minDepth: 0, maxDepth: 1 },
+            { type: 'setScissorRect', x: 0, y: 0, width: 64, height: 48 },
+            { type: 'setBlendConstant', color: [ 0, 0, 0, 0 ] },
+            { type: 'setStencilReference', reference: 0 },
             { vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0 },
         ])
     })
@@ -405,6 +421,18 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             setPipeline(pipelineValue) {
                 calls.drawCalls.push({ type: 'setPipeline', pipeline: pipelineValue })
             },
+            setViewport(x, y, width, height, minDepth, maxDepth) {
+                calls.drawCalls.push({ type: 'setViewport', x, y, width, height, minDepth, maxDepth })
+            },
+            setScissorRect(x, y, width, height) {
+                calls.drawCalls.push({ type: 'setScissorRect', x, y, width, height })
+            },
+            setBlendConstant(color) {
+                calls.drawCalls.push({ type: 'setBlendConstant', color: [ ...color ] })
+            },
+            setStencilReference(reference) {
+                calls.drawCalls.push({ type: 'setStencilReference', reference })
+            },
             setVertexBuffer(slot, buffer, offset, size) {
                 calls.drawCalls.push({ type: 'setVertexBuffer', slot, buffer, offset, size })
             },
@@ -413,7 +441,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             },
         }
 
-        command.encode(passEncoder)
+        command.encode(passEncoder, { width: 64, height: 48 })
 
         expect(command.vertexBuffers).to.deep.equal([
             { slot: 0, region: vertexRegion },
@@ -428,6 +456,10 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         })
         expect(calls.drawCalls).to.deep.equal([
             { type: 'setPipeline', pipeline: pipeline.gpuPipeline },
+            { type: 'setViewport', x: 0, y: 0, width: 64, height: 48, minDepth: 0, maxDepth: 1 },
+            { type: 'setScissorRect', x: 0, y: 0, width: 64, height: 48 },
+            { type: 'setBlendConstant', color: [ 0, 0, 0, 0 ] },
+            { type: 'setStencilReference', reference: 0 },
             { type: 'setVertexBuffer', slot: 0, buffer: vertexBuffer.gpuBuffer, offset: 0, size: 60 },
             { type: 'setVertexBuffer', slot: 1, buffer: instanceBuffer.gpuBuffer, offset: 0, size: 4 },
             { type: 'draw', vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0 },

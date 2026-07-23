@@ -7,6 +7,7 @@ import { runtimeBindLayoutSnapshot, runtimeBindSetSnapshot } from './binding-own
 import { BufferResource, createBufferResource } from './buffer.js'
 import {
     BeginOcclusionQueryCommand,
+    ClearBufferCommand,
     CopyCommand,
     createReadbackCommand as createScratchReadbackCommand,
     DispatchCommand,
@@ -55,7 +56,7 @@ import { Surface } from './surface.js'
 import { createTextureResource, TextureResource } from './texture.js'
 import type { BindLayout, BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './binding.js'
 import type { BufferResourceDescriptor } from './buffer.js'
-import type { BeginOcclusionQueryCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
+import type { BeginOcclusionQueryCommandDescriptor, ClearBufferCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpecDescriptor, RenderPassSpecDescriptor } from './pass.js'
 import type {
@@ -441,6 +442,17 @@ export class ScratchRuntime {
     uploadCommand(descriptor: UploadCommandDescriptor) {
 
         return this.createUploadCommand(descriptor)
+    }
+
+    createClearBufferCommand(descriptor: ClearBufferCommandDescriptor) {
+
+        assertScratchRuntimeActive(this)
+        return new ClearBufferCommand(this, descriptor)
+    }
+
+    clearBufferCommand(descriptor: ClearBufferCommandDescriptor) {
+
+        return this.createClearBufferCommand(descriptor)
     }
 
     createCopyCommand(descriptor: CopyCommandDescriptor) {

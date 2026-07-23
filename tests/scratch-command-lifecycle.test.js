@@ -1,6 +1,7 @@
 import { expect } from 'chai'
 import {
     BeginOcclusionQueryCommand,
+    ClearBufferCommand,
     CopyCommand,
     DispatchCommand,
     DrawCommand,
@@ -22,7 +23,7 @@ const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 
 describe('scratch executable command lifecycle', () => {
 
-    it('keeps construction facts and disposal immutable for every legacy command family', async() => {
+    it('keeps construction facts and disposal immutable for every command family', async() => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
@@ -57,6 +58,9 @@ describe('scratch executable command lifecycle', () => {
             runtime.createUploadCommand({
                 target: source.region(),
                 data: new Uint8Array(8),
+            }),
+            runtime.createClearBufferCommand({
+                target: target.region({ offset: 0, size: 4 }),
             }),
             runtime.createCopyCommand({
                 source: { region: source.region(), contentEpoch: 0 },
@@ -195,6 +199,7 @@ describe('scratch executable command lifecycle', () => {
             DrawCommand,
             DispatchCommand,
             UploadCommand,
+            ClearBufferCommand,
             CopyCommand,
             BeginOcclusionQueryCommand,
             EndOcclusionQueryCommand,

@@ -10,7 +10,11 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
 } from 'geoscratch'
-import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    createFakeGpu,
+    defaultRenderStateActions,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const GPU_BUFFER_USAGE_COPY_SRC = 0x4
 const GPU_BUFFER_USAGE_QUERY_RESOLVE = 0x200
@@ -194,6 +198,7 @@ describe('scratch occlusion query bracket commands', () => {
         expect(fixture.calls.renderPasses[0].actions.map((action) => action.type)).to.deep.equal([
             'beginOcclusionQuery',
             'setPipeline',
+            ...defaultRenderStateActions(4, 4).map(action => action.type),
             'draw',
             'endOcclusionQuery',
             'end',

@@ -13,6 +13,7 @@ const nativeCalls = Object.freeze([
     [ 'GPUCanvasContext.getConfiguration', /\b(?:context|state\.context)\.getConfiguration\(/ ],
     [ 'GPUCanvasContext.getCurrentTexture', /\b(?:this|identity|state)\.context\.getCurrentTexture\(/ ],
     [ 'GPUCommandEncoder.finish', /\bencoder!?\.finish\(/ ],
+    [ 'GPUCommandEncoder.clearBuffer', /\bcommandEncoder\.clearBuffer\(/ ],
     [ 'GPUCommandEncoder.copyBufferToBuffer', /\b(?:commandEncoder|encoder)\.copyBufferToBuffer\(/ ],
     [ 'GPUCommandEncoder.copyTextureToTexture', /\bcommandEncoder\.copyTextureToTexture\(/ ],
     [ 'GPUCommandEncoder.copyBufferToTexture', /\bcommandEncoder\.copyBufferToTexture\(/ ],
@@ -23,6 +24,10 @@ const nativeCalls = Object.freeze([
     [ 'GPUPassEncoder.end', /\bpassEncoder\.end\(/ ],
     [ 'GPUPassEncoder.setPipeline', /\bpassEncoder\.setPipeline\(/ ],
     [ 'GPUPassEncoder.setBindGroup', /\bpassEncoder\.setBindGroup\(/ ],
+    [ 'GPURenderPassEncoder.setViewport', /\bpassEncoder\.setViewport\(/ ],
+    [ 'GPURenderPassEncoder.setScissorRect', /\bpassEncoder\.setScissorRect\(/ ],
+    [ 'GPURenderPassEncoder.setBlendConstant', /\bpassEncoder\.setBlendConstant\(/ ],
+    [ 'GPURenderPassEncoder.setStencilReference', /\bpassEncoder\.setStencilReference\(/ ],
     [ 'GPURenderPassEncoder.setVertexBuffer', /\bpassEncoder\.setVertexBuffer\(/ ],
     [ 'GPURenderPassEncoder.setIndexBuffer', /\bpassEncoder\.setIndexBuffer\(/ ],
     [ 'GPURenderPassEncoder.draw', /\bpassEncoder\.draw\(/ ],
@@ -58,10 +63,10 @@ describe('scratch submission native source audit', () => {
         const callSites = scanNativeCallSites(scratchRoot)
         const inventoryRows = audit.match(/^\| N\d+ \|.*\|$/gm) ?? []
 
-        expect(callSites).to.have.length(43)
+        expect(callSites).to.have.length(48)
         expect(countByFile(callSites)).to.deep.equal({
             'packages/geoscratch/src/scratch/binding.ts': 2,
-            'packages/geoscratch/src/scratch/command.ts': 23,
+            'packages/geoscratch/src/scratch/command.ts': 28,
             'packages/geoscratch/src/scratch/readback.ts': 4,
             'packages/geoscratch/src/scratch/submission.ts': 9,
             'packages/geoscratch/src/scratch/surface.ts': 4,

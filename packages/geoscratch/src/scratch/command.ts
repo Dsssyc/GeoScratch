@@ -12,6 +12,7 @@ import {
 } from './layout-codec.js'
 import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
 import { isComputePipeline, isRenderPipeline, programLayoutRequirementsForPipeline } from './pipeline.js'
+import { currentRenderPassAttachmentExtent } from './pass.js'
 import { QuerySetResource, isQuerySetResource } from './query-set.js'
 import {
     registerRuntimeReadbackCommand,
@@ -192,6 +193,34 @@ export type DrawIndexBufferBinding = {
     format: GPUIndexFormat
 }
 
+export type DrawViewport = Readonly<{
+    x: number
+    y: number
+    width: number
+    height: number
+    minDepth?: number
+    maxDepth?: number
+}>
+
+export type DrawScissorRect = Readonly<{
+    x: number
+    y: number
+    width: number
+    height: number
+}>
+
+export type DrawRenderState = Readonly<{
+    viewport?: 'full-attachment' | DrawViewport
+    scissor?: 'full-attachment' | DrawScissorRect
+    blendConstant?: Readonly<GPUColor>
+    stencilReference?: number
+}>
+
+export type DrawRenderAttachmentExtent = Readonly<{
+    width: number
+    height: number
+}>
+
 export type CommandBindSetInvocation = Readonly<{
     set: BindSet
     dynamicOffsets?: Readonly<Record<string, number>>
@@ -242,6 +271,7 @@ type DrawCommandDescriptorBase = {
     pipeline: RenderPipeline
     bindSets?: CommandBindSetInvocation[]
     vertexBuffers?: DrawVertexBufferBinding[]
+    renderState?: DrawRenderState
     resources: CommandResourceAccessDescriptor
 }
 
@@ -275,6 +305,11 @@ export type UploadCommandDescriptor = {
     data: ArrayBuffer | ArrayBufferView | LayoutUploadView
     dataOffset?: number
     size?: number
+}
+
+export type ClearBufferCommandDescriptor = {
+    label?: string
+    target: BufferRegion
 }
 
 export type TexelCopyBufferLayout = {
@@ -574,6 +609,7 @@ type CommandBrand =
     | 'end-occlusion-query'
     | 'dispatch'
     | 'buffer-upload'
+    | 'clear'
     | 'copy'
     | 'readback'
     | 'resolve-query-set'
@@ -591,6 +627,7 @@ export interface DrawCommand {
     readonly bindSets: readonly CommandBindSetInvocation[]
     readonly vertexBuffers: readonly Readonly<NormalizedDrawVertexBufferBinding>[]
     readonly indexBuffer?: Readonly<NormalizedDrawIndexBufferBinding>
+    readonly renderState: DrawRenderState
     readonly count: Readonly<StaticDrawCount> | Readonly<StaticIndexedDrawCount> | Readonly<NormalizedIndirectCommandCount>
     readonly resources: CommandResourceAccessDescriptor
     readonly whenMissing: ResourceReadinessPolicy
@@ -635,6 +672,7 @@ export class DrawCommand {
         mutable.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
         const indexBuffer = normalizeIndexBuffer(this, descriptor.indexBuffer)
         if (indexBuffer !== undefined) mutable.indexBuffer = indexBuffer
+        mutable.renderState = normalizeDrawRenderState(this, descriptor.renderState)
         mutable.count = normalizeDrawCount(this, descriptor.count, indexBuffer)
         this.#producesDeclaredWrites = drawCountProducesDeclaredWrites(mutable.count)
         mutable.resources = normalizeResourceAccess(this, descriptor.resources)
@@ -753,13 +791,35 @@ export class DrawCommand {
                 actual: { passKind: passSpec.passKind },
             })
         }
+
+        resolveDrawRenderState(this, currentRenderPassAttachmentExtent(passSpec))
     }
 
-    encode(passEncoder: GPURenderPassEncoder) {
+    encode(
+        passEncoder: GPURenderPassEncoder,
+        attachmentExtent: DrawRenderAttachmentExtent
+    ) {
 
         this.assertUsable()
+        const renderState = resolveDrawRenderState(this, attachmentExtent)
 
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
+        passEncoder.setViewport(
+            renderState.viewport.x,
+            renderState.viewport.y,
+            renderState.viewport.width,
+            renderState.viewport.height,
+            renderState.viewport.minDepth,
+            renderState.viewport.maxDepth
+        )
+        passEncoder.setScissorRect(
+            renderState.scissor.x,
+            renderState.scissor.y,
+            renderState.scissor.width,
+            renderState.scissor.height
+        )
+        passEncoder.setBlendConstant(renderState.blendConstant)
+        passEncoder.setStencilReference(renderState.stencilReference)
         for (const invocation of this.bindSets) {
             setBindGroupWithDynamicOffsets(this, passEncoder, invocation)
         }
@@ -1290,6 +1350,285 @@ function dispatchCountProducesDeclaredWrites(count: DispatchCommand['count']): b
     return count.workgroups.every(value => value > 0)
 }
 
+type NormalizedDrawViewport = Readonly<{
+    x: number
+    y: number
+    width: number
+    height: number
+    minDepth: number
+    maxDepth: number
+}>
+
+type NormalizedDrawScissorRect = Readonly<{
+    x: number
+    y: number
+    width: number
+    height: number
+}>
+
+type NormalizedDrawBlendConstant = readonly [ number, number, number, number ]
+
+type ResolvedDrawRenderState = Readonly<{
+    viewport: NormalizedDrawViewport
+    scissor: NormalizedDrawScissorRect
+    blendConstant: NormalizedDrawBlendConstant
+    stencilReference: number
+}>
+
+function normalizeDrawRenderState(
+    command: DrawCommand,
+    value: unknown
+): DrawRenderState {
+
+    if (value !== undefined && !isRecord(value)) {
+        throwDrawRenderStateDiagnostic(command, value, 'renderState')
+    }
+    const state = value === undefined ? {} : value
+    const allowed = new Set([ 'viewport', 'scissor', 'blendConstant', 'stencilReference' ])
+    const unknown = Object.keys(state).filter(key => !allowed.has(key))
+    if (unknown.length > 0) {
+        throwDrawRenderStateDiagnostic(command, value, 'unknownFields', {
+            fields: [ ...allowed ],
+        }, { unknown })
+    }
+
+    const viewport = normalizeDrawViewport(command, state.viewport)
+    const scissor = normalizeDrawScissor(command, state.scissor)
+    const blendConstant = normalizeDrawBlendConstant(command, state.blendConstant)
+    const stencilReference = state.stencilReference ?? 0
+    if (!isGpuSize32(stencilReference)) {
+        throwDrawRenderStateDiagnostic(command, value, 'stencilReference', {
+            stencilReference: 'GPUStencilValue integer in [0, 4294967295]',
+        }, { stencilReference: describeValue(state.stencilReference) })
+    }
+
+    return Object.freeze({
+        viewport,
+        scissor,
+        blendConstant,
+        stencilReference,
+    })
+}
+
+function normalizeDrawViewport(
+    command: DrawCommand,
+    value: unknown
+): 'full-attachment' | NormalizedDrawViewport {
+
+    if (value === undefined || value === 'full-attachment') return 'full-attachment'
+    if (!isRecord(value)) {
+        throwDrawRenderStateDiagnostic(command, value, 'viewport')
+    }
+    const allowed = new Set([ 'x', 'y', 'width', 'height', 'minDepth', 'maxDepth' ])
+    const unknown = Object.keys(value).filter(key => !allowed.has(key))
+    const x = value.x
+    const y = value.y
+    const width = value.width
+    const height = value.height
+    const minDepth = value.minDepth ?? 0
+    const maxDepth = value.maxDepth ?? 1
+    const maximumDimension = command.runtime.deviceLimits.maxTextureDimension2D
+    const maximumRange = maximumDimension * 2
+    const valid = unknown.length === 0 &&
+        [ x, y, width, height, minDepth, maxDepth ].every(isFiniteNumber) &&
+        (x as number) >= -maximumRange &&
+        (y as number) >= -maximumRange &&
+        (width as number) >= 0 &&
+        (width as number) <= maximumDimension &&
+        (height as number) >= 0 &&
+        (height as number) <= maximumDimension &&
+        (x as number) + (width as number) <= maximumRange - 1 &&
+        (y as number) + (height as number) <= maximumRange - 1 &&
+        (minDepth as number) >= 0 &&
+        (minDepth as number) <= 1 &&
+        (maxDepth as number) >= 0 &&
+        (maxDepth as number) <= 1 &&
+        (minDepth as number) <= (maxDepth as number)
+    if (!valid) {
+        throwDrawRenderStateDiagnostic(command, value, 'viewport', {
+            x: `finite number >= ${-maximumRange}`,
+            y: `finite number >= ${-maximumRange}`,
+            width: `finite number in [0, ${maximumDimension}]`,
+            height: `finite number in [0, ${maximumDimension}]`,
+            maximumX: maximumRange - 1,
+            maximumY: maximumRange - 1,
+            depthRange: '0 <= minDepth <= maxDepth <= 1',
+            fields: [ ...allowed ],
+        }, {
+            viewport: describeValue(value),
+            unknown,
+        })
+    }
+
+    return Object.freeze({
+        x: x as number,
+        y: y as number,
+        width: width as number,
+        height: height as number,
+        minDepth: minDepth as number,
+        maxDepth: maxDepth as number,
+    })
+}
+
+function normalizeDrawScissor(
+    command: DrawCommand,
+    value: unknown
+): 'full-attachment' | NormalizedDrawScissorRect {
+
+    if (value === undefined || value === 'full-attachment') return 'full-attachment'
+    if (!isRecord(value)) {
+        throwDrawRenderStateDiagnostic(command, value, 'scissor')
+    }
+    const allowed = new Set([ 'x', 'y', 'width', 'height' ])
+    const unknown = Object.keys(value).filter(key => !allowed.has(key))
+    if (
+        unknown.length > 0 ||
+        ![ value.x, value.y, value.width, value.height ].every(isGpuSize32)
+    ) {
+        throwDrawRenderStateDiagnostic(command, value, 'scissor', {
+            x: 'GPUIntegerCoordinate',
+            y: 'GPUIntegerCoordinate',
+            width: 'GPUIntegerCoordinate',
+            height: 'GPUIntegerCoordinate',
+            fields: [ ...allowed ],
+        }, {
+            scissor: describeValue(value),
+            unknown,
+        })
+    }
+
+    return Object.freeze({
+        x: value.x as number,
+        y: value.y as number,
+        width: value.width as number,
+        height: value.height as number,
+    })
+}
+
+function normalizeDrawBlendConstant(
+    command: DrawCommand,
+    value: unknown
+): NormalizedDrawBlendConstant {
+
+    if (value === undefined) return Object.freeze([ 0, 0, 0, 0 ])
+
+    let components: unknown[] | undefined
+    if (
+        value !== null &&
+        typeof value !== 'string' &&
+        typeof (value as Iterable<unknown>)[Symbol.iterator] === 'function'
+    ) {
+        components = [ ...(value as Iterable<unknown>) ]
+    } else if (isRecord(value)) {
+        components = [ value.r, value.g, value.b, value.a ]
+    }
+    if (
+        components === undefined ||
+        components.length !== 4 ||
+        !components.every(isFiniteNumber)
+    ) {
+        throwDrawRenderStateDiagnostic(command, value, 'blendConstant', {
+            blendConstant: 'GPUColor with exactly four finite components',
+        }, { blendConstant: describeValue(value) })
+    }
+
+    return Object.freeze([
+        components[0] as number,
+        components[1] as number,
+        components[2] as number,
+        components[3] as number,
+    ])
+}
+
+function resolveDrawRenderState(
+    command: DrawCommand,
+    attachmentExtent: DrawRenderAttachmentExtent | undefined
+): ResolvedDrawRenderState {
+
+    if (
+        attachmentExtent === undefined ||
+        !isGpuSize32(attachmentExtent.width) ||
+        !isGpuSize32(attachmentExtent.height) ||
+        attachmentExtent.width === 0 ||
+        attachmentExtent.height === 0
+    ) {
+        throwDrawRenderStateDiagnostic(command, attachmentExtent, 'attachmentExtent', {
+            attachmentExtent: 'positive current render attachment width and height',
+        }, { attachmentExtent: describeValue(attachmentExtent) })
+    }
+
+    const viewport = command.renderState.viewport === 'full-attachment' ||
+        command.renderState.viewport === undefined
+        ? Object.freeze({
+            x: 0,
+            y: 0,
+            width: attachmentExtent.width,
+            height: attachmentExtent.height,
+            minDepth: 0,
+            maxDepth: 1,
+        })
+        : command.renderState.viewport as NormalizedDrawViewport
+    const scissor = command.renderState.scissor === 'full-attachment' ||
+        command.renderState.scissor === undefined
+        ? Object.freeze({
+            x: 0,
+            y: 0,
+            width: attachmentExtent.width,
+            height: attachmentExtent.height,
+        })
+        : command.renderState.scissor as NormalizedDrawScissorRect
+
+    if (
+        scissor.x + scissor.width > attachmentExtent.width ||
+        scissor.y + scissor.height > attachmentExtent.height
+    ) {
+        throwDrawRenderStateDiagnostic(command, command.renderState, 'scissorBounds', {
+            scissor: {
+                maximumX: attachmentExtent.width,
+                maximumY: attachmentExtent.height,
+            },
+        }, {
+            scissor,
+            attachmentExtent,
+        })
+    }
+
+    return Object.freeze({
+        viewport,
+        scissor,
+        blendConstant: (
+            command.renderState.blendConstant ??
+            Object.freeze([ 0, 0, 0, 0 ])
+        ) as NormalizedDrawBlendConstant,
+        stencilReference: command.renderState.stencilReference ?? 0,
+    })
+}
+
+function throwDrawRenderStateDiagnostic(
+    command: DrawCommand,
+    value: unknown,
+    reason: string,
+    expected: Record<string, unknown> = {
+        renderState: 'object with viewport, scissor, blendConstant, and stencilReference',
+    },
+    actual: Record<string, unknown> = { renderState: describeValue(value) }
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_RENDER_STATE_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [ command.pipeline.subject ],
+        message: 'DrawCommand renderState is invalid for the current runtime or render pass.',
+        expected,
+        actual: {
+            reason,
+            ...actual,
+        },
+    })
+}
+
 export function isDrawCommand(value: unknown): value is DrawCommand {
 
     return hasCommandBrand(value, 'draw', DrawCommand.prototype)
@@ -1333,6 +1672,11 @@ export function isCopyCommand(value: unknown): value is CopyCommand {
     return hasCommandBrand(value, 'copy', CopyCommand.prototype)
 }
 
+export function isClearBufferCommand(value: unknown): value is ClearBufferCommand {
+
+    return hasCommandBrand(value, 'clear', ClearBufferCommand.prototype)
+}
+
 export function isReadbackCommand(value: unknown): value is ReadbackCommand {
 
     return hasCommandBrand(value, 'readback', ReadbackCommand.prototype)
@@ -1357,6 +1701,10 @@ function lockDrawCommandContract(command: DrawCommand): void {
     for (const binding of command.vertexBuffers) Object.freeze(binding)
     Object.freeze(command.vertexBuffers)
     if (command.indexBuffer !== undefined) Object.freeze(command.indexBuffer)
+    if (command.renderState.viewport !== 'full-attachment') Object.freeze(command.renderState.viewport)
+    if (command.renderState.scissor !== 'full-attachment') Object.freeze(command.renderState.scissor)
+    if (command.renderState.blendConstant !== undefined) Object.freeze(command.renderState.blendConstant)
+    Object.freeze(command.renderState)
     Object.freeze(command.count)
     lockCommandResources(command.resources)
     lockCommandProperties(command, [
@@ -1368,6 +1716,7 @@ function lockDrawCommandContract(command: DrawCommand): void {
         'bindSets',
         'vertexBuffers',
         'indexBuffer',
+        'renderState',
         'count',
         'resources',
         'whenMissing',
@@ -1563,6 +1912,147 @@ export class UploadCommand {
         validateUploadCommandQueueAction(this, queue)
         writeUploadCommandQueueAction(this, queue)
         commitUploadCommandLogicalWrite(this)
+    }
+
+    dispose(): void {
+
+        this.#isDisposed = true
+    }
+}
+
+export interface ClearBufferCommand {
+    readonly runtime: ScratchRuntime
+    readonly id: string
+    readonly label?: string
+    readonly commandKind: 'clear'
+    readonly target: BufferRegion
+}
+
+export class ClearBufferCommand {
+
+    #isDisposed = false
+
+    constructor(
+        runtime: ScratchRuntime,
+        descriptor: ClearBufferCommandDescriptor = {} as ClearBufferCommandDescriptor
+    ) {
+
+        assertScratchRuntimeActive(runtime)
+
+        const target = descriptor.target
+        if (!isBufferRegion(target)) {
+            throwClearBufferDiagnostic(runtime, target, 'target')
+        }
+        target.buffer.assertRuntime(runtime)
+
+        const mutable = this as Mutable<ClearBufferCommand>
+        mutable.runtime = runtime
+        mutable.id = `scratch-command-${UUID()}`
+        if (descriptor.label !== undefined) mutable.label = descriptor.label
+        mutable.commandKind = 'clear'
+        mutable.target = target
+
+        validateClearBufferTarget(this)
+        commandBrands.set(this, 'clear')
+        lockCommandProperties(this, [
+            'runtime',
+            'id',
+            'label',
+            'commandKind',
+            'target',
+        ])
+        Object.preventExtensions(this)
+    }
+
+    get subject(): DiagnosticSubject {
+
+        const subject: DiagnosticSubject = {
+            kind: 'Command',
+            id: this.id,
+            commandKind: 'clear',
+        }
+        if (this.label !== undefined) subject.label = this.label
+
+        return subject
+    }
+
+    get isDisposed(): boolean {
+
+        return this.#isDisposed
+    }
+
+    get hasContentEffect(): boolean {
+
+        return this.target.size > 0
+    }
+
+    assertRuntime(runtime: ScratchRuntime): void {
+
+        this.assertUsable()
+
+        if (runtime !== this.runtime) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                related: [
+                    this.runtime.subject,
+                    runtime?.subject,
+                ].filter(Boolean),
+                message: 'Command belongs to a different ScratchRuntime.',
+                expected: { runtimeId: this.runtime.id },
+                actual: { runtimeId: runtime?.id },
+            })
+        }
+    }
+
+    assertUsable(): void {
+
+        if (this.#isDisposed) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_COMMAND_DISPOSED',
+                severity: 'error',
+                phase: 'command',
+                subject: this.subject,
+                message: 'Command has been disposed.',
+            })
+        }
+
+        assertScratchRuntimeActive(this.runtime)
+        this.target.buffer.assertUsable()
+        validateClearBufferTarget(this)
+    }
+
+    validateCurrentRange(): void {
+
+        this.assertUsable()
+    }
+
+    encode(commandEncoder: GPUCommandEncoder): void {
+
+        this.validateCurrentRange()
+        if (!this.hasContentEffect) return
+
+        if (!commandEncoder || typeof commandEncoder.clearBuffer !== 'function') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
+                severity: 'error',
+                phase: 'runtime',
+                subject: this.runtime.subject,
+                related: [ this.subject, this.target.buffer.subject ],
+                message: 'ScratchRuntime command encoder cannot clear GPU buffers.',
+                expected: { commandEncoder: 'GPUCommandEncoder with clearBuffer()' },
+                actual: { clearBuffer: typeof commandEncoder?.clearBuffer },
+            })
+        }
+
+        commandEncoder.clearBuffer(
+            this.target.buffer.gpuBuffer,
+            this.target.offset,
+            this.target.size
+        )
+        advanceResourceContentEpoch(this.target.buffer)
     }
 
     dispose(): void {
@@ -4637,6 +5127,62 @@ function validateBufferUploadUsage(runtime: ScratchRuntime, target: BufferRegion
     })
 }
 
+function validateClearBufferTarget(command: ClearBufferCommand): void {
+
+    const target = command.target
+    const buffer = target.buffer
+    if ((buffer.usage & GPU_BUFFER_USAGE_COPY_DST) === 0) {
+        throwClearBufferDiagnostic(command.runtime, target, 'usage', command)
+    }
+    if (target.offset % 4 !== 0 || target.size % 4 !== 0) {
+        throwClearBufferDiagnostic(command.runtime, target, 'alignment', command)
+    }
+    if (
+        !Number.isSafeInteger(target.offset + target.size) ||
+        target.offset + target.size > buffer.size
+    ) {
+        throwClearBufferDiagnostic(command.runtime, target, 'range', command)
+    }
+}
+
+function throwClearBufferDiagnostic(
+    runtime: ScratchRuntime,
+    target: unknown,
+    reason: 'target' | 'usage' | 'alignment' | 'range',
+    command?: ClearBufferCommand
+): never {
+
+    const region = isBufferRegion(target) ? target : undefined
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_CLEAR_BUFFER_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command?.subject ?? { kind: 'Command', commandKind: 'clear' },
+        related: [
+            runtime.subject,
+            region?.subject,
+            region?.buffer.subject,
+        ].filter(isDefined),
+        message: 'ClearBufferCommand requires a current, aligned COPY_DST BufferRegion.',
+        expected: {
+            target: 'BufferRegion',
+            usage: 'GPUBufferUsage.COPY_DST',
+            offsetAlignment: 4,
+            sizeAlignment: 4,
+            range: 'within the current BufferResource allocation',
+        },
+        actual: {
+            reason,
+            target: describeValue(target),
+            resourceId: region?.buffer.id,
+            usage: region?.buffer.usage,
+            bufferSize: region?.buffer.size,
+            offset: region?.offset,
+            size: region?.size,
+        },
+    })
+}
+
 function validateUploadLayout(command: UploadCommand) {
 
     const targetLayout = command.target.layout
@@ -6778,6 +7324,11 @@ function isGpuSize32(value: unknown): value is number {
     return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= GPU_SIZE_32_MAX
 }
 
+function isFiniteNumber(value: unknown): value is number {
+
+    return typeof value === 'number' && Number.isFinite(value)
+}
+
 function isGpuSignedOffset32(value: unknown): value is number {
 
     return Number.isInteger(value) &&
@@ -6789,6 +7340,7 @@ for (const commandPrototype of [
     DrawCommand.prototype,
     DispatchCommand.prototype,
     UploadCommand.prototype,
+    ClearBufferCommand.prototype,
     CopyCommand.prototype,
     BeginOcclusionQueryCommand.prototype,
     EndOcclusionQueryCommand.prototype,

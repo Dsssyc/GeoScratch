@@ -10,6 +10,7 @@ import {
     advanceResourceContentEpochForTest,
     createFakeCanvas,
     createFakeGpu,
+    defaultRenderStateActions,
     replaceResourceAllocationForTest,
 } from './scratch-test-utils.js'
 
@@ -231,6 +232,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         })
         expect(fixture.calls.renderPasses[0].actions).to.deep.equal([
             { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },
+            ...defaultRenderStateActions(64, 64),
             {
                 type: 'setBindGroup',
                 group: 0,

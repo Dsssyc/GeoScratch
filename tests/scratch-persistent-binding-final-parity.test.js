@@ -167,7 +167,7 @@ describe('Scratch persistent binding final parity', () => {
             'rejects direct buffer uploads on a queue not owned by the command runtime',
             'rejects direct texture uploads on a queue not owned by the command runtime',
             'freezes one resolve slot snapshot for readiness and native encoding',
-            'keeps construction facts and disposal immutable for every legacy command family',
+            'keeps construction facts and disposal immutable for every command family',
             'accepts the WGSL u32 boundary and rejects unsafe layout-size arithmetic',
             'rejects direct execution on a queue that is not owned by the command runtime',
             'rejects invalid descriptors and unaligned regions with structured diagnostics',
@@ -305,11 +305,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.historicalTypeInventory.every(entry => entry.status === 'passed')).to.equal(true)
         expect(result.publicSurface.publicMemberParity).to.deep.include({
             goalStartCount: 357,
-            finalCount: 388,
+            finalCount: 400,
             status: 'passed',
         })
         expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(21)
-        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(10)
+        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(11)
         expect(result.publicSurface.programReadonlyPublicContracts.map(
             contract => contract.id
         )).to.deep.equal([ 'Program.runtime', 'Program.id', 'Program.isDisposed' ])
@@ -325,7 +325,7 @@ describe('Scratch persistent binding final parity', () => {
             status: 'passed',
             emittedJavaScriptCount: 96,
             emittedDeclarationCount: 96,
-            declarationSignatureCount: 3619,
+            declarationSignatureCount: 3674,
         })
         expect(result.publicSurface.productionEmitParity.files).to.have.length(192)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)

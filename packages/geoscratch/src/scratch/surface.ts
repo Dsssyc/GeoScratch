@@ -83,6 +83,7 @@ export type PreparedSurfaceAttachmentFacts = Readonly<{
     surfaceId: string
     format: GPUTextureFormat
     configurationVersion: number
+    size: Readonly<SurfaceSize>
 }>
 
 type PreparedSurfaceAttachmentState = Readonly<{
@@ -90,6 +91,7 @@ type PreparedSurfaceAttachmentState = Readonly<{
     state: SurfaceState
     format: GPUTextureFormat
     configurationVersion: number
+    size: Readonly<SurfaceSize>
 }>
 
 const TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
@@ -322,6 +324,7 @@ export function prepareSurfaceAttachment(surface: Surface): PreparedSurfaceAttac
         state,
         format: state.configuration.format,
         configurationVersion: state.configurationVersion,
+        size: Object.freeze({ ...state.size }),
     }))
     return prepared
 }
@@ -365,6 +368,7 @@ export function preparedSurfaceAttachmentFacts(
         surfaceId: preparedState.state.id,
         format: preparedState.format,
         configurationVersion: preparedState.configurationVersion,
+        size: preparedState.size,
     })
 }
 

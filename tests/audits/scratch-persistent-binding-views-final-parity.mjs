@@ -756,6 +756,7 @@ const goalStartPublicMemberReplacements = Object.freeze({
 })
 const goalStartChangedPublicMemberReplacements = Object.freeze({
     'BindLayout.entrySubject:method': 'accept unknown input so invalid descriptors still receive structured diagnostics',
+    'DrawCommand.encode:method': 'submission-resolved attachment extent for declarative per-draw render state',
     'ReadbackOperation.source:get': 'whole BufferResource source -> explicit BufferRegion source',
     'ScratchRuntime.bindLayout:method': 'Promise-only acknowledged BindLayout factory',
     'ScratchRuntime.bindSet:method': 'Promise-only initially prepared BindSet factory',
@@ -1038,7 +1039,7 @@ const behaviorTestContracts = [
         'accepts the WGSL u32 boundary and rejects unsafe layout-size arithmetic',
     ]),
     behaviorTestContract('tests/scratch-command-lifecycle.test.js', [
-        'keeps construction facts and disposal immutable for every legacy command family',
+        'keeps construction facts and disposal immutable for every command family',
         'shadows absent normalized facts against inherited command mutation',
         'locks Draw and Dispatch label facts as immutable own properties',
         'freezes every executable command prototype authority',

@@ -1135,6 +1135,47 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
     validateMatchingRenderAttachmentExtents(pass, extents)
 }
 
+export function currentRenderPassAttachmentExtent(
+    pass: RenderPassSpec,
+    preparedSurfaceExtent?: (
+        surface: Surface
+    ) => Readonly<{ width: number, height: number }>
+): Readonly<{ width: number, height: number }> {
+
+    pass.assertUsable()
+    for (const [ index, attachment ] of pass.color.entries()) {
+        if (attachment === null) continue
+        if (!isTextureViewSpec(attachment.target) && preparedSurfaceExtent !== undefined) {
+            const extent = preparedSurfaceExtent(attachment.target)
+            return Object.freeze({
+                width: extent.width,
+                height: extent.height,
+            })
+        }
+        const extent = colorAttachmentFacts(
+            pass,
+            attachment.target,
+            attachment.viewDescriptor,
+            index,
+            'color',
+            attachment.depthSlice
+        ).extent
+        return Object.freeze({
+            width: extent.width,
+            height: extent.height,
+        })
+    }
+    if (pass.depth !== undefined) {
+        const extent = textureRenderAttachmentExtent(pass.depth.target)
+        return Object.freeze({
+            width: extent.width,
+            height: extent.height,
+        })
+    }
+
+    throw new TypeError('RenderPassSpec has no current attachment extent.')
+}
+
 function validateResolveAttachment(
     pass: RenderPassSpec,
     attachment: RenderPassColorAttachmentSpec,

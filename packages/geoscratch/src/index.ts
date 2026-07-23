@@ -23,6 +23,7 @@ export {
     RenderPipeline as ScratchRenderPipeline,
     ComputePipeline as ScratchComputePipeline,
     BeginOcclusionQueryCommand,
+    ClearBufferCommand,
     EndOcclusionQueryCommand,
     DrawCommand,
     DispatchCommand,
@@ -40,6 +41,7 @@ export {
 } from './scratch/index.js'
 export type {
     BeginOcclusionQueryCommandDescriptor,
+    ClearBufferCommandDescriptor,
     BindLayoutDescriptor,
     BindLayoutEntry,
     BindSetBindings,
@@ -70,7 +72,11 @@ export type {
     DrawCount,
     DrawCommandDescriptor,
     DrawIndexBufferBinding,
+    DrawRenderAttachmentExtent,
+    DrawRenderState,
+    DrawScissorRect,
     DrawVertexBufferBinding,
+    DrawViewport,
     EndOcclusionQueryCommandDescriptor,
     ExternalImageUploadCommandDescriptor,
     ExternalImageUploadSize,

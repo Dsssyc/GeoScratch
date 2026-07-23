@@ -10,6 +10,7 @@ import {
     registerReadbackCommandResult,
     releaseReadbackCommandClaim,
     isCopyCommand,
+    isClearBufferCommand,
     isDispatchCommand,
     isDrawCommand,
     isReadbackCommand,
@@ -31,6 +32,7 @@ import {
 import { serializeNativeGpuError } from './gpu-operation.js'
 import {
     createRenderPassDescriptor,
+    currentRenderPassAttachmentExtent,
     isComputePassSpec,
     isRenderPassSpec,
     validateRenderPassAttachments,
@@ -56,7 +58,7 @@ import {
 } from './surface.js'
 import { TextureResource, createNativeTextureView, isTextureResource, isTextureViewSpec } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
-import type { BeginOcclusionQueryCommand, CommandResourceReadDescriptor, CommandResourceReadEpoch, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
+import type { BeginOcclusionQueryCommand, ClearBufferCommand, CommandResourceReadDescriptor, CommandResourceReadEpoch, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassNativeAttachments, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
@@ -97,7 +99,7 @@ const STENCIL_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
 
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 
-export type SubmissionStepKind = 'upload' | 'copy' | 'readback' | 'resolve' | 'compute' | 'render'
+export type SubmissionStepKind = 'upload' | 'clear' | 'copy' | 'readback' | 'resolve' | 'compute' | 'render'
 
 export type SubmissionResourceAccessKind = 'read' | 'write'
 
@@ -262,6 +264,11 @@ type CopyStep = {
     command: CopyCommand
 }
 
+type ClearStep = {
+    kind: 'clear'
+    command: ClearBufferCommand
+}
+
 type ReadbackStep = {
     kind: 'readback'
     command: ReadbackCommand
@@ -272,7 +279,7 @@ type ResolveStep = {
     command: ResolveQuerySetCommand
 }
 
-type SubmissionStep = RenderStep | ComputeStep | UploadStep | CopyStep | ReadbackStep | ResolveStep
+type SubmissionStep = RenderStep | ComputeStep | UploadStep | ClearStep | CopyStep | ReadbackStep | ResolveStep
 
 type ResolvedPassDisposition =
     | { disposition: 'execute', triggerCommandId?: never }
@@ -286,6 +293,7 @@ type ResolvedSubmissionStep =
     | ResolvedRenderStep
     | ResolvedComputeStep
     | UploadStep
+    | ClearStep
     | CopyStep
     | ReadbackStep
     | ResolveStep
@@ -526,6 +534,16 @@ export class SubmissionBuilder {
         return this
     }
 
+    clear(command: ClearBufferCommand) {
+
+        this.steps.push({
+            kind: 'clear',
+            command,
+        })
+
+        return this
+    }
+
     copy(command: CopyCommand) {
 
         this.steps.push({
@@ -722,6 +740,30 @@ export class SubmissionBuilder {
                     continue
                 }
 
+                if (step.kind === 'clear') {
+                    if (!step.command.hasContentEffect) continue
+                    const encoder = getEncoder()
+                    const target = step.command.target.buffer
+                    trackSegmentResourceWrite(target)
+                    const accesses = [
+                        captureResourceAccess(
+                            target,
+                            'write',
+                            commandAccessOrigin(stepIndex, 'clear', step.command)
+                        ),
+                    ]
+                    issueStandaloneCommandEncoding(
+                        nativeObservation,
+                        submittedId,
+                        stepIndex,
+                        step.command,
+                        encoder,
+                        () => step.command.encode(encoder)
+                    )
+                    completeResourceAccesses(resourceAccesses, accesses)
+                    continue
+                }
+
                 if (step.kind === 'copy') {
                     const encoder = getEncoder()
                     const source = 'region' in step.command.source
@@ -859,6 +901,12 @@ export class SubmissionBuilder {
                     stepIndex,
                     step.passSpec
                 )
+                const attachmentExtent = currentRenderPassAttachmentExtent(
+                    step.passSpec,
+                    surface => preparedSurfaceAttachmentFacts(
+                        preparedSurfaceAttachmentFor(surfaceAttachments, surface)
+                    ).size
+                )
                 const nativeAttachments = issueRenderAttachmentViews(
                     nativeObservation,
                     submittedId,
@@ -900,7 +948,9 @@ export class SubmissionBuilder {
                         step.passSpec,
                         command,
                         passEncoder,
-                        () => command.encode(passEncoder)
+                        () => command.commandKind === 'draw'
+                            ? command.encode(passEncoder, attachmentExtent)
+                            : command.encode(passEncoder)
                     )
                     if (command.commandKind === 'begin-occlusion-query') {
                         activeOcclusionQueryCommand = command
@@ -1105,7 +1155,13 @@ function createSubmissionNativeIssuePlan(
             queueActions.push(uploadQueueActionKind(step.command))
             continue
         }
-        if (step.kind === 'copy' || step.kind === 'readback' || step.kind === 'resolve') {
+        if (step.kind === 'clear' && !step.command.hasContentEffect) continue
+        if (
+            step.kind === 'clear' ||
+            step.kind === 'copy' ||
+            step.kind === 'readback' ||
+            step.kind === 'resolve'
+        ) {
             ensureEncoder()
             encoding.push({
                 stage: 'command-encode',
@@ -1541,6 +1597,15 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
             continue
         }
 
+        if (step.kind === 'clear') {
+            validateClearStep(builder, step)
+            if (step.command.hasContentEffect) {
+                markSimulatedReady(readiness, step.command.target.buffer)
+            }
+            steps.push(step)
+            continue
+        }
+
         if (step.kind === 'copy') {
             validateCopyStep(builder, step)
             validateCopyReadiness(builder, step, stepIndex, readiness, diagnostics)
@@ -1674,6 +1739,30 @@ function validateUploadStep(builder: SubmissionBuilder, step: UploadStep) {
     }
 
     command.assertRuntime(builder.runtime)
+}
+
+function validateClearStep(builder: SubmissionBuilder, step: ClearStep): void {
+
+    const command = step.command
+
+    if (!isClearBufferCommand(command)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'submission',
+            subject: builder.subject,
+            message: 'Submission clear step requires a ClearBufferCommand.',
+            expected: { command: 'ClearBufferCommand' },
+            actual: {
+                command: command === undefined || command === null
+                    ? String(command)
+                    : typeof command,
+            },
+        })
+    }
+
+    command.assertRuntime(builder.runtime)
+    command.validateCurrentRange()
 }
 
 function validateCopyStep(builder: SubmissionBuilder, step: CopyStep) {
