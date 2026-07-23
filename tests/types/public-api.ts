@@ -12,6 +12,8 @@ declare const typedCanvasElement: HTMLCanvasElement
 declare const typedOffscreenCanvas: OffscreenCanvas
 declare const typedPipelineCompilationReport: scr.PipelineCompilationReport
 declare const typedBufferResourceDescriptor: scr.BufferResourceDescriptor
+declare const typedMappedBufferResourceDescriptor: scr.MappedBufferResourceDescriptor
+declare const typedBufferMappingDescriptor: scr.BufferMappingDescriptor
 declare const typedDiagnosticInput: scr.ScratchDiagnosticInput
 declare const typedProgramDescriptor: scr.ProgramDescriptor
 declare const typedProgramEntryPoints: scr.ProgramEntryPoints
@@ -269,6 +271,28 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 1,
     })
+    // @ts-expect-error Ordinary Scratch buffer creation cannot hide a mapped state
+    await runtime.createBuffer({
+        label: 'invalid hidden mapped state',
+        size: 16,
+        usage: 1,
+        mappedAtCreation: false,
+    })
+    const mappedCreation: scr.MappedBufferCreation =
+        await runtime.createMappedBuffer(typedMappedBufferResourceDescriptor)
+    const mappedCreationLease: scr.MappedBufferLease = mappedCreation.lease
+    const mappedCreationView: ArrayBuffer = mappedCreationLease.view
+    mappedCreationLease.dispose()
+    const mappedLease: scr.MappedBufferLease =
+        await runtime.mapBuffer(typedBufferMappingDescriptor)
+    const mappedLeaseMode: scr.BufferMappingMode = mappedLease.mode
+    const mappedLeaseState: scr.MappedBufferLeaseState = mappedLease.state
+    const mappedLeaseView: ArrayBuffer = mappedLease.view
+    void mappedCreationView
+    void mappedLeaseMode
+    void mappedLeaseState
+    void mappedLeaseView
+    mappedLease.dispose()
     const wholeBufferRegion: scr.BufferRegion = buffer.region()
     const slicedBufferRegion: scr.BufferRegion = buffer.region({ offset: 4, size: 8 })
     const normalizedSubregion: scr.BufferRegion = slicedBufferRegion.subregion({ offset: 4 })
