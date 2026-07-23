@@ -30,6 +30,7 @@ export type GpuOperationKind =
     | 'pipeline-disposal'
     | 'readback-staging-allocation'
     | 'readback-mapping'
+    | 'buffer-mapping'
     | 'readback-staging-release'
     | 'readback-native-observation'
     | 'submission-native-observation'
@@ -375,6 +376,7 @@ export type ScratchGpuResourceOperationRecord = ScratchGpuOperationRecordBase & 
         | 'texture-replacement'
         | 'sampler-allocation'
         | 'query-set-allocation'
+        | 'buffer-mapping'
         | 'resource-disposal'
     nativeLabels?: never
     compilationReport?: never
@@ -525,6 +527,7 @@ export type ScratchGpuIncidentEvidenceCompleteness = Readonly<{
 
 export type ScratchGpuIncidentKind =
     | 'allocation-failure'
+    | 'buffer-mapping-failure'
     | 'supporting-object-failure'
     | 'pipeline-failure'
     | 'readback-failure'
@@ -552,6 +555,12 @@ export type ScratchReadbackFailureStage =
     | 'budget'
     | 'lifecycle-recheck'
 
+export type ScratchBufferMappingFailureStage =
+    | 'mapping'
+    | 'mapped-range'
+    | 'release'
+    | 'lifecycle-recheck'
+
 export type ScratchSubmissionFailureStage =
     | ScratchSubmissionNativeStage
     | 'budget'
@@ -565,6 +574,7 @@ export type ScratchSupportingObjectFailureStage =
 export type ScratchGpuIncidentFailureStage =
     | ScratchGpuPipelineFailureStage
     | ScratchReadbackFailureStage
+    | ScratchBufferMappingFailureStage
     | ScratchSubmissionFailureStage
     | ScratchSupportingObjectFailureStage
 
@@ -615,6 +625,18 @@ export type ScratchGpuResourceIncidentReport = ScratchGpuIncidentReportBase & Re
     target: ScratchGpuContentResourceOperationTarget
     kind: 'allocation-failure'
     pressure: ScratchGpuPressureEvidence
+}>
+
+export type ScratchGpuBufferMappingIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
+    target: ScratchGpuContentResourceOperationTarget & Readonly<{
+        resourceKind: 'BufferResource'
+    }>
+    kind: 'buffer-mapping-failure'
+    failureStage: ScratchBufferMappingFailureStage
+    outcomes?: readonly ScratchGpuIncidentOutcome[]
+    pressure?: ScratchGpuPressureEvidence
+    compilationReport?: never
+    pipelineErrorReason?: never
 }>
 
 export type ScratchGpuSupportingObjectIncidentReport = ScratchGpuIncidentReportBase & Readonly<{
@@ -669,6 +691,7 @@ export type ScratchGpuRuntimeIncidentReport = ScratchGpuIncidentReportBase & Rea
 
 export type ScratchGpuIncidentReport =
     | ScratchGpuResourceIncidentReport
+    | ScratchGpuBufferMappingIncidentReport
     | ScratchGpuSupportingObjectIncidentReport
     | ScratchGpuPipelineIncidentReport
     | ScratchGpuReadbackIncidentReport
@@ -869,6 +892,7 @@ export function createGpuIncidentReport(
     const related = completeRelated.slice(0, MAX_INCIDENT_RELATED_SUBJECTS)
     const outcomes = (
         input.kind === 'supporting-object-failure' ||
+        input.kind === 'buffer-mapping-failure' ||
         input.target.kind === 'pipeline' ||
         input.target.kind === 'command' ||
         input.target.kind === 'readback' ||
@@ -912,6 +936,12 @@ export function createGpuIncidentReport(
     ])
     if (input.target.kind === 'resource') {
         copyJsonDefined(report, input, [ 'currentResources', 'pressure' ])
+    }
+    if (input.kind === 'buffer-mapping-failure') {
+        copyJsonDefined(report, input, [ 'failureStage' ])
+        if (outcomes !== undefined) {
+            report.outcomes = cloneJsonValue(outcomes, new Set<object>(), true)
+        }
     }
     if (input.kind === 'supporting-object-failure') {
         copyJsonDefined(report, input, [ 'failureStage', 'pressure' ])
@@ -1144,6 +1174,7 @@ export function assertGpuOperationTarget(
 
     switch (kind) {
         case 'buffer-allocation':
+        case 'buffer-mapping':
             if (target.kind === 'resource' && target.resourceKind === 'BufferResource') return
             throw new TypeError(`GPU operation ${kind} requires a BufferResource target.`)
         case 'texture-allocation':
@@ -1202,6 +1233,8 @@ function assertIncidentTarget(input: ScratchGpuIncidentReportInput): void {
             input.target.resourceKind === 'BufferResource' ||
             input.target.resourceKind === 'TextureResource'
         )
+        : input.kind === 'buffer-mapping-failure'
+            ? input.target.kind === 'resource' && input.target.resourceKind === 'BufferResource'
         : input.kind === 'supporting-object-failure'
             ? (
                 input.target.kind === 'bind-layout' ||
@@ -1223,6 +1256,7 @@ function assertIncidentTarget(input: ScratchGpuIncidentReportInput): void {
     }
     if ((
         input.kind === 'supporting-object-failure' ||
+        input.kind === 'buffer-mapping-failure' ||
         input.kind === 'pipeline-failure' ||
         input.kind === 'readback-failure' ||
         input.kind === 'submission-failure'

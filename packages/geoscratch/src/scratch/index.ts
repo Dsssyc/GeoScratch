@@ -29,6 +29,8 @@ export type {
     ScratchGpuBindSetOperationRecord,
     ScratchGpuBindSetOperationTarget,
     ScratchGpuBindSetPreparationStage,
+    ScratchGpuBufferMappingIncidentReport,
+    ScratchBufferMappingFailureStage,
     ScratchGpuContentResourceOperationTarget,
     ScratchGpuOperationRecord,
     ScratchGpuOperationTarget,
@@ -102,6 +104,7 @@ export type {
     ScratchRuntimeQuerySetResourceFact,
     ScratchRuntimeReadbackCommandFact,
     ScratchRuntimeReadbackOperationFact,
+    ScratchRuntimeBufferMappingFact,
     ScratchRuntimeResourceFact,
 } from './runtime-diagnostics.js'
 export { Surface } from './surface.js'
@@ -114,6 +117,12 @@ export type {
     BufferResourceDescriptor,
     BufferSubregionDescriptor,
 } from './buffer.js'
+export { MappedBufferLease } from './buffer-mapping.js'
+export type {
+    BufferMappingDescriptor,
+    BufferMappingMode,
+    MappedBufferLeaseState,
+} from './buffer-mapping.js'
 export { TextureResource, TextureViewSpec } from './texture.js'
 export type {
     NormalizedTextureViewDescriptor,

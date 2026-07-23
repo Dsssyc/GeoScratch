@@ -1,5 +1,9 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
+    disposeBufferMappingAuthority,
+    initializeBufferMappingAuthority,
+} from './buffer-mapping-authority.js'
+import {
     describeLayoutCompatibilityDifference,
     isLayoutArtifact,
     layoutArtifactSubject,
@@ -129,6 +133,7 @@ export class BufferResource extends Resource {
         })
         registerResource(this)
         bufferResources.add(this)
+        initializeBufferMappingAuthority(this)
         Object.preventExtensions(this)
     }
 
@@ -162,6 +167,7 @@ export class BufferResource extends Resource {
 
         if (this.isDisposed) return
 
+        disposeBufferMappingAuthority(this)
         if (this.gpuBuffer && typeof this.gpuBuffer.destroy === 'function') {
             this.gpuBuffer.destroy()
         }

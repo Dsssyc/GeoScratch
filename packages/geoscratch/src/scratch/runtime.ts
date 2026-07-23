@@ -5,6 +5,7 @@ import {
 } from './binding.js'
 import { runtimeBindLayoutSnapshot, runtimeBindSetSnapshot } from './binding-ownership.js'
 import { BufferResource, createBufferResource } from './buffer.js'
+import { mapBufferResource, MappedBufferLease } from './buffer-mapping.js'
 import {
     BeginOcclusionQueryCommand,
     ClearBufferCommand,
@@ -56,6 +57,7 @@ import { Surface } from './surface.js'
 import { createTextureResource, TextureResource } from './texture.js'
 import type { BindLayout, BindLayoutDescriptor, BindSetBindings, BindSetOptions } from './binding.js'
 import type { BufferResourceDescriptor } from './buffer.js'
+import type { BufferMappingDescriptor } from './buffer-mapping.js'
 import type { BeginOcclusionQueryCommandDescriptor, ClearBufferCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpecDescriptor, RenderPassSpecDescriptor } from './pass.js'
@@ -295,6 +297,12 @@ export class ScratchRuntime {
     buffer(descriptor: BufferResourceDescriptor): Promise<BufferResource> {
 
         return this.createBuffer(descriptor)
+    }
+
+    async mapBuffer(descriptor: BufferMappingDescriptor): Promise<MappedBufferLease> {
+
+        assertScratchRuntimeActive(this)
+        return mapBufferResource(this, descriptor)
     }
 
     async createTexture(descriptor: TextureResourceDescriptor): Promise<TextureResource> {

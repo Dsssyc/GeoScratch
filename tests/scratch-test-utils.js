@@ -363,6 +363,9 @@ export function createFakeGpu(options = {}) {
         request.settled = true
         request.buffer.mapped = outcome.kind === 'resolve'
         request.buffer.mapState = outcome.kind === 'resolve' ? 'mapped' : 'unmapped'
+        request.buffer.mapping = outcome.kind === 'resolve'
+            ? createFakeBufferMapping(request.mode, request.offset, request.size)
+            : undefined
         if (outcome.kind === 'resolve') request.resolve(outcome.value)
         else request.reject(outcome.error)
     }
@@ -383,6 +386,28 @@ export function createFakeGpu(options = {}) {
         request.buffer.mapped = false
         request.buffer.mapState = 'unmapped'
         request.reject(new DOMException('The mapping was cancelled.', 'OperationError'))
+    }
+
+    function createFakeBufferMapping(mode, offset, size) {
+
+        return {
+            mode,
+            offset,
+            size,
+            ranges: [],
+        }
+    }
+
+    function releaseFakeBufferMapping(buffer) {
+
+        const mapping = buffer.mapping
+        if (mapping === undefined) return
+        for (const { offset, range } of mapping.ranges) {
+            if (mapping.mode === 0x2 && range.byteLength > 0) {
+                buffer.data.set(new Uint8Array(range), offset)
+            }
+            if (range.byteLength > 0) structuredClone(range, { transfer: [ range ] })
+        }
     }
 
     function applyNativeFailure(method) {
@@ -670,8 +695,11 @@ export function createFakeGpu(options = {}) {
                 descriptor,
                 data,
                 destroyed: false,
-                mapped: false,
-                mapState: 'unmapped',
+                mapped: descriptor.mappedAtCreation === true,
+                mapState: descriptor.mappedAtCreation === true ? 'mapped' : 'unmapped',
+                mapping: descriptor.mappedAtCreation === true
+                    ? createFakeBufferMapping(0x2, 0, data.byteLength)
+                    : undefined,
                 mapAsync(mode, offset = 0, size = data.byteLength - offset) {
                     applyNativeFailure('mapAsync')
                     this.mapState = 'pending'
@@ -686,6 +714,9 @@ export function createFakeGpu(options = {}) {
                     if (!options.deferMaps) {
                         this.mapped = outcome.kind === 'resolve'
                         this.mapState = outcome.kind === 'resolve' ? 'mapped' : 'unmapped'
+                        this.mapping = outcome.kind === 'resolve'
+                            ? createFakeBufferMapping(mode, offset, size)
+                            : undefined
                         return outcome.kind === 'resolve'
                             ? Promise.resolve(outcome.value)
                             : Promise.reject(outcome.error)
@@ -707,7 +738,8 @@ export function createFakeGpu(options = {}) {
                 getMappedRange(offset = 0, size = data.byteLength - offset) {
                     applyNativeFailure('getMappedRange')
                     calls.mappedRanges.push({ buffer: this, offset, size })
-                    const range = data.buffer.slice(offset, offset + size)
+                    const range = data.slice(offset, offset + size).buffer
+                    this.mapping?.ranges.push({ offset, range })
                     if (shouldDetachNextMappedRange) {
                         shouldDetachNextMappedRange = false
                         structuredClone(range, { transfer: [ range ] })
@@ -718,16 +750,20 @@ export function createFakeGpu(options = {}) {
                     applyNativeFailure('unmap')
                     calls.unmaps.push({ buffer: this })
                     cancelPendingMap(this)
+                    releaseFakeBufferMapping(this)
                     this.mapped = false
                     this.mapState = 'unmapped'
+                    this.mapping = undefined
                 },
                 destroy() {
                     applyNativeFailure('destroyBuffer')
                     calls.bufferDestroys.push({ buffer: this })
                     cancelPendingMap(this)
+                    releaseFakeBufferMapping(this)
                     this.destroyed = true
                     this.mapped = false
                     this.mapState = 'unmapped'
+                    this.mapping = undefined
                 },
             }
             calls.buffers.push(buffer)

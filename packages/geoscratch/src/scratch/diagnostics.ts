@@ -13,6 +13,7 @@ export type DiagnosticPhase =
     | 'submission'
     | 'query'
     | 'readback'
+    | 'buffer-mapping'
 
 export type DiagnosticSubject = {
     kind: string

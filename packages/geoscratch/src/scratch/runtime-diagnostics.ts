@@ -218,6 +218,18 @@ export type ScratchRuntimeReadbackOperationFact = Readonly<{
     lastMappingOperationId?: string
 }>
 
+export type ScratchRuntimeBufferMappingFact = Readonly<{
+    id: string
+    resourceId: string
+    offset: number
+    size: number
+    mode: 'read' | 'write'
+    state: 'pending' | 'mapped'
+    allocationVersion: number
+    contentEpoch: number
+    operationId: string
+}>
+
 export type ScratchReadbackStagingReservation = Readonly<{
     id: string
     byteLength: number
@@ -239,6 +251,7 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
     pipelines: readonly ScratchRuntimePipelineFact[]
     readbackCommands: readonly ScratchRuntimeReadbackCommandFact[]
     readbacks: readonly ScratchRuntimeReadbackOperationFact[]
+    bufferMappings: readonly ScratchRuntimeBufferMappingFact[]
     pendingOperations: readonly ScratchPendingGpuOperationFact[]
     pressure: Readonly<{
         currentScratchLogicalFootprintBytes: number
@@ -254,6 +267,12 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
         peakRetainedHostBytes: number
         activeMappings: number
         peakActiveMappings: number
+    }>
+    bufferMapping: Readonly<{
+        currentMappings: number
+        peakMappings: number
+        currentSelectedBytes: number
+        peakSelectedBytes: number
     }>
     submissionNative: Readonly<{
         submissionScopes: ScratchSubmissionScopeMode
@@ -582,6 +601,7 @@ export class ScratchRuntimeDiagnosticsController {
     #pipelineFacts = new Map<string, ScratchRuntimePipelineFact>()
     #readbackCommandFacts = new Map<string, ScratchRuntimeReadbackCommandFact>()
     #readbackFacts = new Map<string, ScratchRuntimeReadbackOperationFact>()
+    #bufferMappingFacts = new Map<string, ScratchRuntimeBufferMappingFact>()
     #readbackStagingReservations = new Map<string, number>()
     #submissionNativeObservationReservations = new Set<string>()
     #effectfulSubmittedWorkReservations = new Set<string>()
@@ -607,6 +627,9 @@ export class ScratchRuntimeDiagnosticsController {
     #peakRetainedHostBytes = 0
     #activeMappings = 0
     #peakActiveMappings = 0
+    #currentBufferMappingBytes = 0
+    #peakBufferMappingBytes = 0
+    #peakBufferMappings = 0
     #currentPendingNativeObservations = 0
     #peakPendingNativeObservations = 0
     #currentEffectfulSubmittedWork = 0
@@ -862,6 +885,8 @@ export class ScratchRuntimeDiagnosticsController {
             .sort((left, right) => left.id.localeCompare(right.id))
         const readbacks = [ ...this.#readbackFacts.values() ]
             .sort((left, right) => left.id.localeCompare(right.id))
+        const bufferMappings = [ ...this.#bufferMappingFacts.values() ]
+            .sort((left, right) => left.id.localeCompare(right.id))
         const pendingOperations = [ ...this.#pendingOperations.values() ]
             .sort((left, right) => left.sequence - right.sequence)
             .map(operation => pendingFact(operation))
@@ -880,6 +905,7 @@ export class ScratchRuntimeDiagnosticsController {
             pipelines,
             readbackCommands,
             readbacks,
+            bufferMappings,
             pendingOperations,
             pressure: {
                 currentScratchLogicalFootprintBytes: this.#currentLogicalFootprintBytes,
@@ -895,6 +921,12 @@ export class ScratchRuntimeDiagnosticsController {
                 peakRetainedHostBytes: this.#peakRetainedHostBytes,
                 activeMappings: this.#activeMappings,
                 peakActiveMappings: this.#peakActiveMappings,
+            },
+            bufferMapping: {
+                currentMappings: this.#bufferMappingFacts.size,
+                peakMappings: this.#peakBufferMappings,
+                currentSelectedBytes: this.#currentBufferMappingBytes,
+                peakSelectedBytes: this.#peakBufferMappingBytes,
             },
             submissionNative: {
                 submissionScopes: this.#options.submissionScopes,
@@ -994,21 +1026,17 @@ export class ScratchRuntimeDiagnosticsController {
             this.#activeMappings++
             this.#peakActiveMappings = Math.max(this.#peakActiveMappings, this.#activeMappings)
         }
-        if (
-            target.kind === 'resource' ||
-            target.kind === 'bind-layout' ||
-            target.kind === 'bind-set'
-        ) {
+        if (isAllocationAttemptKind(kind)) {
             this.#aggregates = {
                 ...this.#aggregates,
                 allocationAttempts: this.#aggregates.allocationAttempts + 1,
             }
-        } else if (target.kind === 'pipeline') {
+        } else if (isPipelineCreationKind(kind)) {
             this.#aggregates = {
                 ...this.#aggregates,
                 pipelineCreationAttempts: this.#aggregates.pipelineCreationAttempts + 1,
             }
-        } else if (target.kind !== 'submission') {
+        } else if (isReadbackAttemptKind(kind)) {
             this.#aggregates = {
                 ...this.#aggregates,
                 readbackOperationAttempts: this.#aggregates.readbackOperationAttempts + 1,
@@ -1069,7 +1097,10 @@ export class ScratchRuntimeDiagnosticsController {
         }
         this.#recordCompletionAggregate(operation, completion)
         if (completion.status === 'succeeded') {
-            if (operation.target.kind === 'resource') {
+            if (
+                operation.target.kind === 'resource' &&
+                isResourceAllocationKind(operation.kind)
+            ) {
                 this.linkResourceOperation(operation.target.resourceId, operation.id)
             }
         }
@@ -1299,6 +1330,42 @@ export class ScratchRuntimeDiagnosticsController {
         this.#resourceFacts.delete(resource.id)
         this.#recalculatePressure()
         if (fact !== undefined) this.#recordResourceDisposal(resource, fact)
+    }
+
+    registerBufferMapping(fact: ScratchRuntimeBufferMappingFact): void {
+
+        if (this.#bufferMappingFacts.has(fact.id)) {
+            throw new TypeError(`Buffer mapping ${fact.id} is already registered.`)
+        }
+        const retained = Object.freeze({ ...fact })
+        this.#bufferMappingFacts.set(fact.id, retained)
+        this.#currentBufferMappingBytes += retained.size
+        this.#peakBufferMappings = Math.max(
+            this.#peakBufferMappings,
+            this.#bufferMappingFacts.size
+        )
+        this.#peakBufferMappingBytes = Math.max(
+            this.#peakBufferMappingBytes,
+            this.#currentBufferMappingBytes
+        )
+    }
+
+    updateBufferMapping(id: string, state: ScratchRuntimeBufferMappingFact['state']): void {
+
+        const fact = this.#bufferMappingFacts.get(id)
+        if (fact === undefined) throw new TypeError(`Buffer mapping ${id} is not registered.`)
+        this.#bufferMappingFacts.set(id, Object.freeze({ ...fact, state }))
+    }
+
+    unregisterBufferMapping(id: string): void {
+
+        const fact = this.#bufferMappingFacts.get(id)
+        if (fact === undefined) return
+        this.#bufferMappingFacts.delete(id)
+        this.#currentBufferMappingBytes = Math.max(
+            0,
+            this.#currentBufferMappingBytes - fact.size
+        )
     }
 
     registerPipeline(registration: ScratchRuntimePipelineRegistration): void {
@@ -1575,11 +1642,13 @@ export class ScratchRuntimeDiagnosticsController {
         this.#bindLayoutFacts.clear()
         this.#bindSets.clear()
         this.#readbackFacts.clear()
+        this.#bufferMappingFacts.clear()
         this.#readbackStagingReservations.clear()
         this.#submissionNativeObservationReservations.clear()
         this.#effectfulSubmittedWorkReservations.clear()
         this.#currentReadbackStagingBytes = 0
         this.#currentRetainedHostBytes = 0
+        this.#currentBufferMappingBytes = 0
         this.#currentPendingNativeObservations = 0
         this.#currentEffectfulSubmittedWork = 0
     }
@@ -1733,18 +1802,14 @@ export class ScratchRuntimeDiagnosticsController {
     ): void {
 
         const next = { ...this.#aggregates }
-        if (
-            operation.target.kind === 'resource' ||
-            operation.target.kind === 'bind-layout' ||
-            operation.target.kind === 'bind-set'
-        ) {
+        if (isAllocationAttemptKind(operation.kind)) {
             if (completion.status === 'succeeded') next.successfulAllocations++
             if (completion.status === 'cancelled') next.cancelledAllocations++
-        } else if (operation.target.kind === 'pipeline') {
+        } else if (isPipelineCreationKind(operation.kind)) {
             if (completion.status === 'succeeded') next.successfulPipelineCreations++
             if (completion.status === 'failed') next.failedPipelineCreations++
             if (completion.status === 'cancelled') next.cancelledPipelineCreations++
-        } else if (operation.target.kind !== 'submission') {
+        } else if (isReadbackAttemptKind(operation.kind)) {
             if (completion.status === 'succeeded') next.successfulReadbackOperations++
             if (completion.status === 'failed') next.failedReadbackOperations++
             if (completion.status === 'cancelled') next.cancelledReadbackOperations++
@@ -1782,6 +1847,7 @@ export class ScratchRuntimeDiagnosticsController {
                 const target = value.target
                 if (
                     target.kind !== 'resource' ||
+                    !isResourceChurnKind(value.kind) ||
                     (target.resourceKind !== 'BufferResource' && target.resourceKind !== 'TextureResource')
                 ) return []
                 return [ {
@@ -2347,6 +2413,39 @@ function pendingFact(operation: ScratchPendingGpuOperation): ScratchPendingGpuOp
     })
 }
 
+function isResourceAllocationKind(kind: GpuOperationKind): boolean {
+
+    return kind === 'buffer-allocation' ||
+        kind === 'texture-allocation' ||
+        kind === 'texture-replacement' ||
+        kind === 'sampler-allocation' ||
+        kind === 'query-set-allocation'
+}
+
+function isAllocationAttemptKind(kind: GpuOperationKind): boolean {
+
+    return isResourceAllocationKind(kind) ||
+        kind === 'bind-layout-allocation' ||
+        kind === 'bind-set-preparation'
+}
+
+function isPipelineCreationKind(kind: GpuOperationKind): boolean {
+
+    return kind === 'render-pipeline-creation' || kind === 'compute-pipeline-creation'
+}
+
+function isReadbackAttemptKind(kind: GpuOperationKind): boolean {
+
+    return kind === 'readback-staging-allocation' ||
+        kind === 'readback-mapping' ||
+        kind === 'readback-native-observation'
+}
+
+function isResourceChurnKind(kind: GpuOperationKind): boolean {
+
+    return isResourceAllocationKind(kind) || kind === 'resource-disposal'
+}
+
 function assertPendingGpuOperationKind(
     kind: unknown
 ): asserts kind is ScratchPendingGpuOperationKind {
@@ -2363,6 +2462,7 @@ function assertPendingGpuOperationKind(
         kind === 'compute-pipeline-creation' ||
         kind === 'readback-staging-allocation' ||
         kind === 'readback-mapping' ||
+        kind === 'buffer-mapping' ||
         kind === 'readback-native-observation' ||
         kind === 'submission-native-observation'
     ) return
