@@ -60,7 +60,7 @@ type ImageResources = Awaited<ReturnType<typeof createImageResources>>
 type Samplers = Awaited<ReturnType<typeof createSamplers>>
 type BindLayouts = Awaited<ReturnType<typeof createBindLayouts>>
 type BindSets = Awaited<ReturnType<typeof createBindSets>> & { gaussian: BindSet }
-type Programs = ReturnType<typeof createPrograms>
+type Programs = Awaited<ReturnType<typeof createPrograms>>
 type Pipelines = Awaited<ReturnType<typeof createPipelines>>
 type PostBindSets = Awaited<ReturnType<typeof createPostBindSets>>
 type RenderGraph = Awaited<ReturnType<typeof createRenderGraph>>
@@ -75,7 +75,7 @@ type FailureProofController = Readonly<{
     ownBitmap(name: string, bitmap: ImageBitmap, lifetime: PageLifetime): ReturnType<PageLifetime['defer']>
     reach(scenario: string): void
     bloomCombineShader(source: string): string
-    beforeBloomCombinePipeline(value: ScratchRuntime): void
+    beforeBloomCombineShaderModule(value: ScratchRuntime): void
     captureBeforeDisposal(): void
     finalize(primaryFailure: unknown, cleanupReport: DisposalReport): FailureProofReport | undefined
     listenerRegistered(): void
@@ -126,7 +126,7 @@ const proofMode = proofParameters.get('proof') === '1'
 const FAILURE_SCENARIOS = Object.freeze([
     'after-runtime-created',
     'after-first-image-decoded',
-    'invalid-bloom-pipeline-wgsl',
+    'invalid-bloom-shader-wgsl',
     'after-graph-created',
     'after-initial-submit-issued',
 ])
@@ -399,8 +399,8 @@ async function createRenderGraph(
         images: images.textures,
         samplers,
     }) as BindSets
-    const programs = createPrograms(runtime, codecs, proof)
-    const pipelines = await createPipelines(runtime, surface, post, layouts, programs, proof)
+    const programs = await createPrograms(runtime, codecs, proof)
+    const pipelines = await createPipelines(runtime, surface, post, layouts, programs)
     const passes = createPasses(runtime, surface, post)
     const commands = createPersistentCommands({
         runtime,
@@ -1312,7 +1312,7 @@ async function createBindSets({ runtime, layouts, uniforms, geometry, particles,
     }
 }
 
-function createPrograms(runtime: ScratchRuntime, codecs: Codecs, proof: FailureProofController) {
+async function createPrograms(runtime: ScratchRuntime, codecs: Codecs, proof: FailureProofController) {
 
     const requirement = (
         group: number,
@@ -1332,97 +1332,112 @@ function createPrograms(runtime: ScratchRuntime, codecs: Codecs, proof: FailureP
         requirement(0, 2, 'uniform', codecs.light),
         requirement(0, 3, 'uniform', codecs.material),
     ]
+    const renderProgram = async(
+        label: string,
+        code: string,
+        layoutRequirements: readonly ProgramBufferLayoutRequirement[] = []
+    ) => {
+        const module = await runtime.createShaderModule({
+            label: `${label} shader`,
+            sourceParts: [ { code } ],
+        })
+        return runtime.createProgram({
+            label,
+            vertex: { module, entryPoint: 'vMain' },
+            fragment: { module, entryPoint: 'fMain' },
+            layoutRequirements,
+        })
+    }
+    const computeProgram = async(
+        label: string,
+        code: string,
+        layoutRequirements: readonly ProgramBufferLayoutRequirement[] = [],
+        blockSize = POST_WORKGROUP_SIZE
+    ) => {
+        if (label === 'Hello GAW Bloom combine program') {
+            proof.beforeBloomCombineShaderModule(runtime)
+        }
+        const module = await runtime.createShaderModule({
+            label: `${label} shader`,
+            sourceParts: [ { code } ],
+        })
+        return runtime.createProgram({
+            label,
+            compute: {
+                module,
+                entryPoint: 'cMain',
+                constants: { blockSize },
+            },
+            layoutRequirements,
+        })
+    }
 
     return {
-        land: runtime.createProgram({
-            label: 'Hello GAW land program',
-            modules: [ landShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
-            layoutRequirements: earthRequirements,
-        }),
-        water: runtime.createProgram({
-            label: 'Hello GAW water program',
-            modules: [ waterShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
-            layoutRequirements: earthRequirements,
-        }),
-        cloud: runtime.createProgram({
-            label: 'Hello GAW cloud program',
-            modules: [ cloudShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
-            layoutRequirements: earthRequirements,
-        }),
-        particle: runtime.createProgram({
-            label: 'Hello GAW particle program',
-            modules: [ pointShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
-            layoutRequirements: [
+        land: await renderProgram('Hello GAW land program', landShader, earthRequirements),
+        water: await renderProgram('Hello GAW water program', waterShader, earthRequirements),
+        cloud: await renderProgram('Hello GAW cloud program', cloudShader, earthRequirements),
+        particle: await renderProgram(
+            'Hello GAW particle program',
+            pointShader,
+            [
                 requirement(0, 0, 'uniform', codecs.particleDynamic),
                 requirement(0, 1, 'uniform', codecs.particleStatic),
-            ],
-        }),
-        link: runtime.createProgram({
-            label: 'Hello GAW link program',
-            modules: [ linkShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
-            layoutRequirements: [
+            ]
+        ),
+        link: await renderProgram(
+            'Hello GAW link program',
+            linkShader,
+            [
                 requirement(0, 0, 'uniform', codecs.linkDynamic),
                 requirement(0, 1, 'uniform', codecs.linkStatic),
-            ],
-        }),
-        simulation: runtime.createProgram({
-            label: 'Hello GAW simulation program',
-            modules: [ particleComputeShader ],
-            entryPoints: { compute: 'cMain' },
-            layoutRequirements: [ requirement(0, 0, 'uniform', codecs.simulationStatic) ],
-        }),
-        indexing: runtime.createProgram({
-            label: 'Hello GAW indexing program',
-            modules: [ linkComputeShader ],
-            entryPoints: { compute: 'cMain' },
-            layoutRequirements: [ requirement(0, 0, 'uniform', codecs.indexingStatic) ],
-        }),
-        bloomHighlight: runtime.createProgram({
-            label: 'Hello GAW Bloom highlight program',
-            modules: [ bloomShader ],
-            entryPoints: { compute: 'cMain' },
-            layoutRequirements: [ requirement(0, 0, 'uniform', codecs.bloomThreshold) ],
-        }),
-        bloomDownsample: runtime.createProgram({
-            label: 'Hello GAW Bloom downsample program',
-            modules: [ bloomDownsampleShader ],
-            entryPoints: { compute: 'cMain' },
-        }),
-        bloomBlurX: runtime.createProgram({
-            label: 'Hello GAW Bloom blur X program',
-            modules: [ bloomBlurXShader ],
-            entryPoints: { compute: 'cMain' },
-            layoutRequirements: [ requirement(0, 0, 'uniform', codecs.bloomSteps) ],
-        }),
-        bloomBlurY: runtime.createProgram({
-            label: 'Hello GAW Bloom blur Y program',
-            modules: [ bloomBlurYShader ],
-            entryPoints: { compute: 'cMain' },
-            layoutRequirements: [ requirement(0, 0, 'uniform', codecs.bloomSteps) ],
-        }),
-        bloomCombine: runtime.createProgram({
-            label: 'Hello GAW Bloom combine program',
-            modules: [ proof.bloomCombineShader(bloomCombineShader) ],
-            entryPoints: { compute: 'cMain' },
-            layoutRequirements: [ requirement(0, 0, 'uniform', codecs.bloomStrength) ],
-        }),
-        fxaa: runtime.createProgram({
-            label: 'Hello GAW FXAA program',
-            modules: [ fxaaShader ],
-            entryPoints: { compute: 'cMain' },
-            layoutRequirements: [ requirement(0, 0, 'uniform', codecs.fxaa) ],
-        }),
-        output: runtime.createProgram({
-            label: 'Hello GAW output program',
-            modules: [ lastShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
-            layoutRequirements: [ requirement(0, 0, 'uniform', codecs.output) ],
-        }),
+            ]
+        ),
+        simulation: await computeProgram(
+            'Hello GAW simulation program',
+            particleComputeShader,
+            [ requirement(0, 0, 'uniform', codecs.simulationStatic) ],
+            PARTICLE_WORKGROUP_SIZE
+        ),
+        indexing: await computeProgram(
+            'Hello GAW indexing program',
+            linkComputeShader,
+            [ requirement(0, 0, 'uniform', codecs.indexingStatic) ],
+            PARTICLE_WORKGROUP_SIZE
+        ),
+        bloomHighlight: await computeProgram(
+            'Hello GAW Bloom highlight program',
+            bloomShader,
+            [ requirement(0, 0, 'uniform', codecs.bloomThreshold) ]
+        ),
+        bloomDownsample: await computeProgram(
+            'Hello GAW Bloom downsample program',
+            bloomDownsampleShader
+        ),
+        bloomBlurX: await computeProgram(
+            'Hello GAW Bloom blur X program',
+            bloomBlurXShader,
+            [ requirement(0, 0, 'uniform', codecs.bloomSteps) ]
+        ),
+        bloomBlurY: await computeProgram(
+            'Hello GAW Bloom blur Y program',
+            bloomBlurYShader,
+            [ requirement(0, 0, 'uniform', codecs.bloomSteps) ]
+        ),
+        bloomCombine: await computeProgram(
+            'Hello GAW Bloom combine program',
+            proof.bloomCombineShader(bloomCombineShader),
+            [ requirement(0, 0, 'uniform', codecs.bloomStrength) ]
+        ),
+        fxaa: await computeProgram(
+            'Hello GAW FXAA program',
+            fxaaShader,
+            [ requirement(0, 0, 'uniform', codecs.fxaa) ]
+        ),
+        output: await renderProgram(
+            'Hello GAW output program',
+            lastShader,
+            [ requirement(0, 0, 'uniform', codecs.output) ]
+        ),
     }
 }
 
@@ -1431,8 +1446,7 @@ async function createPipelines(
     surface: Surface,
     post: RenderTextures,
     layouts: BindLayouts,
-    programs: Programs,
-    proof: FailureProofController
+    programs: Programs
 ) {
 
     const normalBlend: GPUBlendState = {
@@ -1471,16 +1485,10 @@ async function createPipelines(
         program: Program,
         bindLayouts: BindLayout[]
     ): Promise<ScratchComputePipeline> => {
-        if (label === 'Hello GAW Bloom combine pipeline') {
-            proof.beforeBloomCombinePipeline(runtime)
-        }
         return await runtime.createComputePipeline({
             label,
             program,
-            bindLayouts,
-            constants: { blockSize: label.includes('simulation') || label.includes('indexing')
-                ? PARTICLE_WORKGROUP_SIZE
-                : POST_WORKGROUP_SIZE },
+            layout: { mode: 'explicit', bindLayouts },
         })
     }
 
@@ -1488,7 +1496,14 @@ async function createPipelines(
         land: await runtime.createRenderPipeline({
             label: 'Hello GAW land pipeline',
             program: programs.land,
-            bindLayouts: [ layouts.earthUniforms, layouts.sphereStorage, layouts.earthTextures ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [
+                    layouts.earthUniforms,
+                    layouts.sphereStorage,
+                    layouts.earthTextures,
+                ],
+            },
             vertexBuffers: sphereVertexBuffers,
             targets: [ { format: post.scene.format, blend: normalBlend } ],
             depthStencil: depthWrite,
@@ -1496,7 +1511,14 @@ async function createPipelines(
         water: await runtime.createRenderPipeline({
             label: 'Hello GAW water pipeline',
             program: programs.water,
-            bindLayouts: [ layouts.earthUniforms, layouts.sphereStorage, layouts.earthTextures ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [
+                    layouts.earthUniforms,
+                    layouts.sphereStorage,
+                    layouts.earthTextures,
+                ],
+            },
             vertexBuffers: sphereVertexBuffers,
             targets: [ { format: post.scene.format, blend: normalBlend } ],
             depthStencil: depthWrite,
@@ -1504,7 +1526,14 @@ async function createPipelines(
         cloud: await runtime.createRenderPipeline({
             label: 'Hello GAW cloud pipeline',
             program: programs.cloud,
-            bindLayouts: [ layouts.earthUniforms, layouts.sphereStorage, layouts.cloudTextures ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [
+                    layouts.earthUniforms,
+                    layouts.sphereStorage,
+                    layouts.cloudTextures,
+                ],
+            },
             vertexBuffers: sphereVertexBuffers,
             targets: [ { format: post.scene.format, blend: additiveBlend } ],
             depthStencil: depthWrite,
@@ -1512,7 +1541,10 @@ async function createPipelines(
         particle: await runtime.createRenderPipeline({
             label: 'Hello GAW particle pipeline',
             program: programs.particle,
-            bindLayouts: [ layouts.particleUniforms ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ layouts.particleUniforms ],
+            },
             vertexBuffers: particleVertexBuffers,
             targets: [ { format: post.scene.format, blend: normalBlend } ],
             primitive: { topology: 'triangle-strip' },
@@ -1521,7 +1553,10 @@ async function createPipelines(
         link: await runtime.createRenderPipeline({
             label: 'Hello GAW link pipeline',
             program: programs.link,
-            bindLayouts: [ layouts.linkUniforms, layouts.linkStorage ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ layouts.linkUniforms, layouts.linkStorage ],
+            },
             targets: [ { format: post.scene.format } ],
             primitive: { topology: 'line-strip' },
             depthStencil: depthRead,
@@ -1569,7 +1604,10 @@ async function createPipelines(
         output: await runtime.createRenderPipeline({
             label: 'Hello GAW output pipeline',
             program: programs.output,
-            bindLayouts: [ layouts.outputUniforms, layouts.outputTexture ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ layouts.outputUniforms, layouts.outputTexture ],
+            },
             targets: [ { format: surface.format } ],
             primitive: { topology: 'triangle-strip' },
         }),
@@ -2437,13 +2475,13 @@ function createFailureProofController(configuration: FailureConfiguration): Fail
 
     function bloomCombineShader(source: string) {
 
-        if (configuration.scenario !== 'invalid-bloom-pipeline-wgsl') return source
+        if (configuration.scenario !== 'invalid-bloom-shader-wgsl') return source
         return `${source}\n@compute fn helloGawInjectedFailure( {`
     }
 
-    function beforeBloomCombinePipeline(value: ScratchRuntime) {
+    function beforeBloomCombineShaderModule(value: ScratchRuntime) {
 
-        if (configuration.scenario !== 'invalid-bloom-pipeline-wgsl') return
+        if (configuration.scenario !== 'invalid-bloom-shader-wgsl') return
         reachedCount += 1
         capture = value.diagnostics.capture(FAILURE_CAPTURE_BOUNDS)
     }
@@ -2564,7 +2602,7 @@ function createFailureProofController(configuration: FailureConfiguration): Fail
         ownBitmap,
         reach,
         bloomCombineShader,
-        beforeBloomCombinePipeline,
+        beforeBloomCombineShaderModule,
         captureBeforeDisposal,
         finalize,
         listenerRegistered: () => { listenerRegisteredCount += 1 },

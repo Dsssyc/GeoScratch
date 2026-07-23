@@ -8,6 +8,10 @@ Accepted
 
 2026-07-17
 
+ADR-050 supersedes only the invalid-WGSL proof's pipeline-owned compilation
+attribution. The page lifetime decision remains accepted; the migrated proof captures
+the Bloom-combine ShaderModule acknowledgement directly.
+
 ## Context
 
 ADR-042 replaced Hello GAW with one explicit Scratch command graph, but the page still

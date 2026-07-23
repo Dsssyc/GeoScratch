@@ -5,31 +5,35 @@
 
 ## 决策
 
-`Program` 描述 shader source contract。`Pipeline` 描述某个 `Program` entry point 的稳定 WebGPU 可执行状态。`Command` 描述一个可执行 GPU 动作。
+`ShaderModule` 拥有已确认的 WGSL source 与原生 compilation evidence。
+`Program` 描述引用这些 module 的不可变 stage contract。`Pipeline` 描述一个
+`Program` 的稳定 WebGPU 可执行状态。`Command` 描述一个可执行 GPU 动作。
 
 这会替代旧模式中 shader code、binding、range、executable flags、pipeline、pass membership 混在一起的做法。
 
-source-level `Program`、layout codec 与 shader composition 模型见 `08-programs-codecs`。本模块从可执行 pipeline 与 command 层开始。
+`ShaderModule`、`Program`、layout codec 与 source composition 模型见
+`08-programs-codecs`。本模块从可执行 pipeline 与 command 层开始。
 
 ## Pipelines
 
 Render pipeline 拥有稳定状态:
 
-- program 或 shader modules、shader stages 与 entry points
-- bind layouts
+- 一个不可变 Program stage snapshot 与可复用的原生 ShaderModule
+- 显式 BindLayout 或显式原生 `layout: "auto"`
 - vertex buffer layouts，包括保留索引的显式 `null` slot
-- 相互独立的 vertex 与 fragment override-constant snapshot
+- stage 自有的 vertex 与可选 fragment override-constant snapshot
 - primitive state
 - depth 与 stencil state
-- color target compatibility，包括保留索引的显式 `null` slot
+- 可选 fragment state 与精确 color target compatibility，包括保留索引的显式
+  `null` slot
 - multisample state
 - pipeline cache key
 
 Compute pipeline 拥有:
 
-- program 或 shader module、shader stage 与 entry point
-- bind layouts
-- constants
+- 一个不可变 Program compute-stage snapshot 与可复用的原生 ShaderModule
+- 显式 BindLayout 或显式原生 `layout: "auto"`
+- stage 自有 constants
 - pipeline cache key
 
 Pipeline 不拥有:
@@ -41,19 +45,43 @@ Pipeline 不拥有:
 - material 或 style 参数
 - scene-object assignment
 
-Pipeline 可以缓存编译好的 GPU state。它不能变成把具体资源、视觉语义和 shader code 打包在一起的 material-like object。
+Pipeline 保留已确认的原生 pipeline 与无源码 creation report。Shader source 与
+compilation message 仍由 `ShaderModule` 拥有；pipeline 绝不重新创建 module。
+它不能变成把具体资源、视觉语义和 shader code 打包在一起的 material-like object。
 
-Render stage constants 显式且相互独立:
+Stage constants 显式且相互独立:
 
 ```ts
-vertexConstants?: Readonly<Record<string, number>>
-fragmentConstants?: Readonly<Record<string, number>>
+const program = runtime.createProgram({
+    vertex: { module: vertexModule, entryPoint: 'vsMain', constants: vertexConstants },
+    fragment: { module: fragmentModule, entryPoint: 'fsMain', constants: fragmentConstants },
+})
 ```
 
-Scratch 会在异步原生 pipeline issue 前快照有限数值，并分别降低到
-`GPUVertexState.constants` 与 `GPUFragmentState.constants`。Factory 发起后调用方
-再修改对象，也不能改变 pending pipeline。不接受含义模糊的单一 render
-`constants` alias；compute 继续保留自己的独立 `constants` contract。
+Program 构造会快照原生 `GPUPipelineConstantValue` domain。Pipeline descriptor
+不再提供 stage、entry-point 或 constants alias。
+
+省略 `layout` 表示零 BindLayout 的 explicit mode。Auto mode 必须显式选择:
+
+```ts
+const pipeline = await runtime.createComputePipeline({
+    program,
+    layout: { mode: 'auto' },
+})
+const group0 = await pipeline.getBindLayout({
+    group: 0,
+    entries: declaredBindingSchema,
+})
+```
+
+派生 wrapper 记录 `origin: "native-derived"` 与
+`validationConfidence: "native-authoritative"`。同一 group 的重复请求必须使用
+相同 normalized schema。Explicit-layout pipeline 禁止派生 layout。
+
+Render Program 可以省略 `fragment`。此时 Scratch 省略原生 fragment descriptor
+并禁止 `targets`，直接表达 depth-only 或其他 no-color-output workload。存在
+fragment stage 时必须显式提供 targets sequence；需要原生空 sequence 时也应显式
+传入空数组。
 
 `vertexBuffers` 与 `targets` 保留原生 slot index。显式 `null` 是真正的空 slot；
 array hole 或 `undefined` 非法。Scratch 不压缩也不重新编号这些 sequence。Draw

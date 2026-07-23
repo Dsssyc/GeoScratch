@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     BindLayout,
@@ -478,33 +479,34 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             format: 'bgra8unorm',
             size: { width: 8, height: 8 },
         })
-        const program = fixture.runtime.createProgram({
-            modules: [
-                `
-                    @group(0) @binding(0) var colorTexture: texture_2d<f32>;
-                    @group(0) @binding(1) var colorSampler: sampler;
+        const program = await createTestProgram(fixture.runtime, {
+            sourceParts: [
+            `
+            @group(0) @binding(0) var colorTexture: texture_2d<f32>;
+            @group(0) @binding(1) var colorSampler: sampler;
 
-                    @vertex
-                    fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
-                        var positions = array<vec2f, 3>(
-                            vec2f(0.0, 0.8),
-                            vec2f(-0.8, -0.8),
-                            vec2f(0.8, -0.8)
-                        );
-                        return vec4f(positions[vertexIndex], 0.0, 1.0);
-                    }
+            @vertex
+            fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+            var positions = array<vec2f, 3>(
+            vec2f(0.0, 0.8),
+            vec2f(-0.8, -0.8),
+            vec2f(0.8, -0.8)
+            );
+            return vec4f(positions[vertexIndex], 0.0, 1.0);
+            }
 
-                    @fragment
-                    fn fsMain() -> @location(0) vec4f {
-                        return textureSampleLevel(colorTexture, colorSampler, vec2f(0.5), 0.0);
-                    }
-                `,
+            @fragment
+            fn fsMain() -> @location(0) vec4f {
+            return textureSampleLevel(colorTexture, colorSampler, vec2f(0.5), 0.0);
+            }
+            `,
             ],
-            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+            vertex: 'vsMain',
+            fragment: 'fsMain',
         })
         const pipeline = await fixture.runtime.createRenderPipeline({
             program,
-            bindLayouts: [ fixture.bindLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ fixture.bindLayout ] },
             targets: [ { format: surface.format } ],
         })
         const draw = fixture.runtime.createDrawCommand({
@@ -582,22 +584,22 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
         const bindSet = await fixture.runtime.createBindSet(bindLayout, {
             colorTexture: fixture.texture.view(),
         })
-        const program = fixture.runtime.createProgram({
-            modules: [
-                `
-                    @group(0) @binding(0) var colorTexture: texture_2d<f32>;
+        const program = await createTestProgram(fixture.runtime, {
+            sourceParts: [
+            `
+            @group(0) @binding(0) var colorTexture: texture_2d<f32>;
 
-                    @compute @workgroup_size(1)
-                    fn csMain() {
-                        _ = textureLoad(colorTexture, vec2i(0, 0), 0);
-                    }
-                `,
+            @compute @workgroup_size(1)
+            fn csMain() {
+            _ = textureLoad(colorTexture, vec2i(0, 0), 0);
+            }
+            `,
             ],
-            entryPoints: { compute: 'csMain' },
+            compute: 'csMain',
         })
         const pipeline = await fixture.runtime.createComputePipeline({
             program,
-            bindLayouts: [ bindLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         })
         const dispatch = fixture.runtime.createDispatchCommand({
             pipeline,

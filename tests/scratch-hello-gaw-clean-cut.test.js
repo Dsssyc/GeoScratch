@@ -201,7 +201,7 @@ describe('Hello GAW Scratch clean cut', () => {
         for (const scenario of [
             'after-runtime-created',
             'after-first-image-decoded',
-            'invalid-bloom-pipeline-wgsl',
+            'invalid-bloom-shader-wgsl',
             'after-graph-created',
             'after-initial-submit-issued',
         ]) {
@@ -220,7 +220,7 @@ describe('Hello GAW Scratch clean cut', () => {
         expect(browser).to.include("page.on('requestfailed'")
         expect(browser).to.include('response.status() >= 400')
         expect(browser).to.include('isDeepFrozen')
-        expect(browser).to.include('SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED')
+        expect(browser).to.include('SCRATCH_SHADER_MODULE_COMPILATION_FAILED')
         expect(browser).to.include('const postProofQuietMs = 250')
         expect(browser).to.include('expectedRuntimeEvidenceMaxBytes = 512 * 1024')
         expect(browser).to.include('expectedCaptureBounds')

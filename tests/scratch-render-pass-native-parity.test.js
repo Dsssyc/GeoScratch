@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
@@ -28,12 +29,10 @@ async function expectScratchDiagnostic(action, expected) {
 
 async function createRenderProgram(runtime) {
 
-    return runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    return await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
 }
 
@@ -728,34 +727,32 @@ describe('scratch render/pass native parity', () => {
         const bindSet = await runtime.createBindSet(bindLayout, {
             depthTexture: depthStencil.view({ aspect: 'depth-only' }),
         })
-        const program = runtime.createProgram({
-            modules: [ `
-                @group(0) @binding(0) var depthTexture: texture_depth_2d;
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ `
+            @group(0) @binding(0) var depthTexture: texture_depth_2d;
 
-                @vertex
-                fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
-                    var positions = array<vec2f, 3>(
-                        vec2f(0.0, 0.5),
-                        vec2f(-0.5, -0.5),
-                        vec2f(0.5, -0.5)
-                    );
-                    return vec4f(positions[vertexIndex], 0.0, 1.0);
-                }
+            @vertex
+            fn vsMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+            var positions = array<vec2f, 3>(
+            vec2f(0.0, 0.5),
+            vec2f(-0.5, -0.5),
+            vec2f(0.5, -0.5)
+            );
+            return vec4f(positions[vertexIndex], 0.0, 1.0);
+            }
 
-                @fragment
-                fn fsMain() -> @location(0) vec4f {
-                    let depth = textureLoad(depthTexture, vec2i(0, 0), 0);
-                    return vec4f(depth, depth, depth, 1.0);
-                }
+            @fragment
+            fn fsMain() -> @location(0) vec4f {
+            let depth = textureLoad(depthTexture, vec2i(0, 0), 0);
+            return vec4f(depth, depth, depth, 1.0);
+            }
             ` ],
-            entryPoints: {
-                vertex: 'vsMain',
-                fragment: 'fsMain',
-            },
+            vertex: 'vsMain',
+            fragment: 'fsMain',
         })
         const pipeline = await runtime.createRenderPipeline({
             program,
-            bindLayouts: [ bindLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
             targets: [ { format: 'rgba8unorm' } ],
             depthStencil: {
                 format: 'depth24plus-stencil8',

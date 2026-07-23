@@ -146,9 +146,9 @@ describe('Flow Layer Scratch clean cut', () => {
         const source = read('examples', 'flowLayer', 'main.ts')
 
         expect(source).to.include("'after-worker-acquisition'")
-        expect(source).to.include("'invalid-simulation-pipeline-wgsl'")
+        expect(source).to.include("'invalid-simulation-shader-wgsl'")
         expect(source.match(/'after-worker-acquisition'/g)).to.have.length(1)
-        expect(source.match(/'invalid-simulation-pipeline-wgsl'/g)).to.have.length(1)
+        expect(source.match(/'invalid-simulation-shader-wgsl'/g)).to.have.length(1)
         expect(source).to.include('maxOperations: 1')
         expect(source).to.include('maxDurationMs: 2_000')
         expect(source).to.include('maxEvidenceBytes: 64 * 1024')

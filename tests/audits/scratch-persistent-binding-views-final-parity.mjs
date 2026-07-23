@@ -127,7 +127,7 @@ const historicalTypeInventory = Object.freeze([
     { name: 'BufferResourceDescriptor', classification: 'restored', current: 'BufferResourceDescriptor' },
     { name: 'NormalizedDrawVertexBufferBinding', classification: 'internal', current: null },
     { name: 'ProgramDescriptor', classification: 'restored', current: 'ProgramDescriptor' },
-    { name: 'ProgramEntryPoints', classification: 'restored', current: 'ProgramEntryPoints' },
+    { name: 'ProgramEntryPoints', classification: 'replaced', current: 'ProgramStage' },
     { name: 'QuerySetResourceDescriptor', classification: 'restored', current: 'QuerySetResourceDescriptor' },
     { name: 'QuerySetType', classification: 'restored', current: 'QuerySetType' },
     { name: 'ResourceOptions', classification: 'internal', current: null },
@@ -240,15 +240,16 @@ const closedBrandGuards = Object.freeze({
     Program: current.program.includes('const programStates = new WeakMap<Program, ProgramState>()') &&
         current.program.includes('readonly runtime: ScratchRuntime') &&
         current.program.includes('readonly id: string') &&
-        current.program.includes('readonly isDisposed: boolean') &&
+        current.program.includes('get isDisposed(): boolean') &&
         current.program.includes('Object.defineProperties(this, {') &&
         current.program.includes('Object.getPrototypeOf(value) === Program.prototype') &&
         current.program.includes('programStates.has(value as Program)') &&
         current.program.includes('state.lifecycleEpoch += 1') &&
         current.program.includes('assertProgramPipelineAuthority(authority)') &&
         current.program.includes('export function snapshotProgramPipelineFacts(') &&
-        current.program.includes('const sampled = runProgramFactPhase(') &&
-        current.program.includes('validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)') &&
+        current.program.includes('const facts = Object.freeze({') &&
+        current.program.includes('stage.module.assertRuntime(runtime)') &&
+        current.program.includes('validateRequiredFeatures(program, runtime, facts.requiredFeatures)') &&
         !current.program.includes('this.isDisposed =') &&
         current.pipeline.split('if (!isProgram(program))').length === 3 &&
         current.shaderInspection.includes('if (!isProgram(program))'),
@@ -296,9 +297,10 @@ const pipelineMutableProgramFactReads = Object.freeze([
 const programPipelineFactSnapshot = Object.freeze({
     internalTransaction: hasAll(current.program, [
         'export function snapshotProgramPipelineFacts(',
-        'materializeProgramPipelineFacts(program)',
-        'runProgramFactPhase(authority',
-        'validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)',
+        'const facts = Object.freeze({',
+        'assertProgramPipelineAuthority(authority)',
+        'stage.module.assertRuntime(runtime)',
+        'validateRequiredFeatures(program, runtime, facts.requiredFeatures)',
     ]),
     sharedPlanners:
         current.pipeline.split('snapshotProgramPipelineFacts(program, runtime)').length === 3,
@@ -312,9 +314,10 @@ const programPipelineFactSnapshot = Object.freeze({
     ]),
     status: hasAll(current.program, [
         'export function snapshotProgramPipelineFacts(',
-        'materializeProgramPipelineFacts(program)',
-        'runProgramFactPhase(authority',
-        'validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)',
+        'const facts = Object.freeze({',
+        'assertProgramPipelineAuthority(authority)',
+        'stage.module.assertRuntime(runtime)',
+        'validateRequiredFeatures(program, runtime, facts.requiredFeatures)',
     ]) &&
         current.pipeline.split('snapshotProgramPipelineFacts(program, runtime)').length === 3 &&
         pipelineMutableProgramFactReads.length === 0 &&
@@ -690,6 +693,11 @@ const historicalMissingValues = difference(historicalValueExports, currentValueE
 
 const baselineTypeReplacements = Object.freeze({
     CommandDynamicOffsets: 'CommandBindSetInvocation',
+    PipelineCompilationMessage: 'ShaderModuleCompilationMessage',
+    PipelineCompilationModuleFact: 'ShaderModuleCompilationSourcePartFact',
+    PipelineCompilationModuleLocation: 'ShaderModuleCompilationSourcePartLocation',
+    PipelineCompilationNativeLocation: 'ShaderModuleCompilationNativeLocation',
+    PipelineCompilationReport: 'ShaderModuleCompilationReport',
     ReadbackRange: 'BufferRegion',
 })
 const baselineMissingTypes = difference(
@@ -840,7 +848,7 @@ const programReadonlyPublicContracts = Object.freeze([
     {
         id: 'Program.isDisposed',
         mutableDeclaration: 'isDisposed: boolean;',
-        readonlyDeclaration: 'readonly isDisposed: boolean;',
+        readonlyDeclaration: 'get isDisposed(): boolean;',
         typeTestMarkers: [
             '// @ts-expect-error Program disposal is a readonly lifecycle observation',
             'program.isDisposed = false',
@@ -870,6 +878,17 @@ const diagnosticReplacements = Object.freeze({
         'SCRATCH_LAYOUT_ABI_MISMATCH',
         'SCRATCH_CODEC_SCHEMA_MISMATCH',
     ],
+    SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED: [
+        'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
+    ],
+    SCRATCH_PROGRAM_ENTRY_POINT_MISSING: [
+        'SCRATCH_PROGRAM_ENTRY_POINT_INVALID',
+    ],
+    SCRATCH_PROGRAM_MODULES_INVALID: [
+        'SCRATCH_PROGRAM_DESCRIPTOR_INVALID',
+        'SCRATCH_PROGRAM_STAGE_INVALID',
+        'SCRATCH_SHADER_INSPECTION_INPUT_INVALID',
+    ],
     SCRATCH_READBACK_RANGE_INVALID: [
         'SCRATCH_BUFFER_REGION_RANGE_INVALID',
         'SCRATCH_BUFFER_REGION_LAYOUT_INVALID',
@@ -898,13 +917,13 @@ const behaviorTestContracts = [
         'rejects prototype-derived Program identities before native pipeline creation',
         'keeps Program identity and runtime ownership authoritative after public mutation attempts',
         'keeps Program disposal authoritative after public mutation attempts',
-        'revalidates caller-owned Program required features before future native pipeline work',
-        'rejects render Program disposal during caller-owned fact snapshot before native work',
-        'rejects compute Program disposal during caller-owned fact snapshot before native work',
+        'freezes Program required features before future native pipeline work',
+        'keeps render Program facts immutable before native work',
+        'keeps compute Program facts immutable before native work',
         'rejects render Program disposal during pipeline descriptor snapshot before native work',
         'rejects compute Program disposal during pipeline descriptor snapshot before native work',
-        'keeps render Pipeline Program lifecycle authoritative after public assertion shadowing',
-        'keeps compute Pipeline Program lifecycle authoritative after public assertion shadowing',
+        'keeps render Pipeline Program lifecycle authoritative',
+        'keeps compute Pipeline Program lifecycle authoritative',
         'rejects prototype-derived Pipeline and BindSet identities before command creation',
         'rejects prototype-derived pass and command identities before native submission effects',
         'does not use open instanceof checks as Scratch-owned internal brands',
@@ -954,8 +973,8 @@ const behaviorTestContracts = [
         'settles scopes and preserves all causal failures across simultaneous lifecycle changes',
     ]),
     behaviorTestContract('tests/scratch-compute-pipeline-async.test.js', [
-        'rejects local validation through a Promise without native or operation effects',
-        'creates one ready immutable wrapper through the native async compute path',
+        'rejects local validation through a Promise before pipeline-native effects',
+        'creates one immutable wrapper from an acknowledged ShaderModule',
     ]),
     behaviorTestContract('tests/scratch-resource-views.test.js', [
         'keeps BufferResource native allocation identity authoritative through its prototype',

@@ -168,12 +168,12 @@ describe('DEM Layer clean cut', () => {
         const initializationStart = mainSource.indexOf(
             'Promise.resolve().then(() => main(pageLifetime, failureProof))'
         )
-        const faultNames = [ ...mainSource.matchAll(/'((?:after-map-acquisition|invalid-terrain-pipeline-wgsl))'/g) ]
+        const faultNames = [ ...mainSource.matchAll(/'((?:after-map-acquisition|invalid-terrain-shader-wgsl))'/g) ]
             .map(match => match[1])
 
         expect(faultNames).to.deep.equal([
             'after-map-acquisition',
-            'invalid-terrain-pipeline-wgsl',
+            'invalid-terrain-shader-wgsl',
         ])
         expect(lifecycleCreation).to.be.greaterThan(-1)
         expect(pageHideRegistration).to.be.greaterThan(lifecycleCreation)

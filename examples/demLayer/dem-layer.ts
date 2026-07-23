@@ -30,7 +30,7 @@ type DemShaders = {
 
 type DemFailureProof = {
     terrainShader(source: string): string
-    beforeTerrainPipeline(runtime: ScratchRuntime): void
+    beforeTerrainShaderModule(runtime: ScratchRuntime): void
 }
 
 type DemCameraState = {
@@ -52,7 +52,7 @@ type Buffers = Awaited<ReturnType<typeof createBufferResources>>
 type Textures = Awaited<ReturnType<typeof createTextures>>
 type Layouts = Awaited<ReturnType<typeof createBindLayouts>>
 type BindSets = Awaited<ReturnType<typeof createBindSets>>
-type Programs = ReturnType<typeof createPrograms>
+type Programs = Awaited<ReturnType<typeof createPrograms>>
 type Pipelines = Awaited<ReturnType<typeof createPipelines>>
 type Passes = ReturnType<typeof createPasses>
 type Commands = ReturnType<typeof createCommands>
@@ -171,14 +171,13 @@ export async function createDemLayer({
     const textures = await createTextures(runtime, demImage, size)
     const layouts = await createBindLayouts(runtime, codecs)
     const bindSets = await createBindSets(runtime, layouts, uniforms, buffers, textures)
-    const programs = createPrograms(runtime, codecs, shaders, failureProof)
+    const programs = await createPrograms(runtime, codecs, shaders, failureProof)
     const pipelines = await createPipelines(
         runtime,
         surface,
         textures,
         layouts,
-        programs,
-        failureProof
+        programs
     )
     const passes = createPasses(runtime, surface, textures)
     const commands = createCommands(
@@ -332,7 +331,7 @@ export async function createDemLayer({
 
 const defaultFailureProof: DemFailureProof = Object.freeze({
     terrainShader: (source: string) => source,
-    beforeTerrainPipeline() {},
+    beforeTerrainShaderModule() {},
 })
 
 function createCodecs() {
@@ -651,7 +650,7 @@ async function createBindSets(
     }
 }
 
-function createPrograms(
+async function createPrograms(
     runtime: ScratchRuntime,
     codecs: Codecs,
     shaders: DemShaders,
@@ -669,11 +668,20 @@ function createPrograms(
         hasDynamicOffset: false,
         layout: codec.artifact,
     })
+    failureProof.beforeTerrainShaderModule(runtime)
+    const terrainShader = await runtime.createShaderModule({
+        label: 'DEM terrain shader',
+        sourceParts: [ { code: failureProof.terrainShader(shaders.terrain) } ],
+    })
+    const lodMapShader = await runtime.createShaderModule({
+        label: 'DEM LoD-map shader',
+        sourceParts: [ { code: shaders.lodMap } ],
+    })
     return {
         lodMap: runtime.createProgram({
             label: 'DEM LoD-map program',
-            modules: [ shaders.lodMap ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
+            vertex: { module: lodMapShader, entryPoint: 'vMain' },
+            fragment: { module: lodMapShader, entryPoint: 'fMain' },
             layoutRequirements: [
                 requirement(0, 0, codecs.map),
                 requirement(0, 1, codecs.tile),
@@ -682,8 +690,8 @@ function createPrograms(
         }),
         terrain: runtime.createProgram({
             label: 'DEM terrain program',
-            modules: [ failureProof.terrainShader(shaders.terrain) ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
+            vertex: { module: terrainShader, entryPoint: 'vMain' },
+            fragment: { module: terrainShader, entryPoint: 'fMain' },
             layoutRequirements: [
                 requirement(0, 0, codecs.tile),
                 requirement(0, 1, codecs.static),
@@ -698,22 +706,30 @@ async function createPipelines(
     surface: Surface,
     textures: Textures,
     layouts: Layouts,
-    programs: Programs,
-    failureProof: DemFailureProof
+    programs: Programs
 ) {
 
     const lodMap = await runtime.createRenderPipeline({
         label: 'DEM LoD-map pipeline',
         program: programs.lodMap,
-        bindLayouts: [ layouts.lodUniforms, layouts.lodStorage ],
+        layout: {
+            mode: 'explicit',
+            bindLayouts: [ layouts.lodUniforms, layouts.lodStorage ],
+        },
         targets: [ { format: textures.lodMap.format } ],
         primitive: { topology: 'triangle-strip', cullMode: 'none' },
     })
-    failureProof.beforeTerrainPipeline(runtime)
     const terrain = await runtime.createRenderPipeline({
         label: 'DEM terrain pipeline',
         program: programs.terrain,
-        bindLayouts: [ layouts.terrainUniforms, layouts.terrainStorage, layouts.terrainTextures ],
+        layout: {
+            mode: 'explicit',
+            bindLayouts: [
+                layouts.terrainUniforms,
+                layouts.terrainStorage,
+                layouts.terrainTextures,
+            ],
+        },
         targets: [ { format: surface.format } ],
         primitive: { topology: 'triangle-list', cullMode: 'none' },
         depthStencil: {

@@ -166,7 +166,7 @@ type FlowSettings = Readonly<{
 
 export type FlowFailureProof = Readonly<{
     simulationShader(source: string): string
-    beforeSimulationPipeline(runtime: ScratchRuntime): void
+    beforeSimulationShaderModule(runtime: ScratchRuntime): void
 }>
 
 type FlowLayerCreateOptions = Readonly<{
@@ -276,7 +276,7 @@ type FlowBuffers = Awaited<ReturnType<typeof createBufferResources>>
 type FlowTextures = Awaited<ReturnType<typeof createTextures>>
 type FlowLayouts = Awaited<ReturnType<typeof createBindLayouts>>
 type FlowBindSets = Awaited<ReturnType<typeof createBindSets>>
-type FlowPrograms = ReturnType<typeof createPrograms>
+type FlowPrograms = Awaited<ReturnType<typeof createPrograms>>
 type FlowPipelines = Awaited<ReturnType<typeof createPipelines>>
 type FlowPasses = ReturnType<typeof createPasses>
 type FlowCommands = ReturnType<typeof createCommands>
@@ -349,14 +349,13 @@ export async function createFlowLayer({
     lifetime.assertActive('continue Flow graph initialization')
     const bindSets = await createBindSets(runtime, layouts, uniforms, buffers, textures)
     lifetime.assertActive('continue Flow graph initialization')
-    const programs = createPrograms(runtime, codecs, failureProof)
+    const programs = await createPrograms(runtime, codecs, failureProof)
     const pipelines = await createPipelines(
         runtime,
         surface,
         textures,
         layouts,
-        programs,
-        failureProof
+        programs
     )
     lifetime.assertActive('continue Flow graph initialization')
     const passes = createPasses(runtime, surface, textures)
@@ -931,7 +930,7 @@ async function createBindSets(
     }
 }
 
-function createPrograms(
+async function createPrograms(
     runtime: ScratchRuntime,
     codecs: FlowCodecs,
     failureProof: FlowFailureProof
@@ -954,17 +953,44 @@ function createPrograms(
         requirement(0, 1, 'uniform', codecs.static),
         requirement(0, 2, 'uniform', codecs.camera),
     ]
+    const createShader = (label: string, code: string) => runtime.createShaderModule({
+        label,
+        sourceParts: [ { code } ],
+    })
+    failureProof.beforeSimulationShaderModule(runtime)
+    const simulationModule = await createShader(
+        'Flow simulation shader',
+        failureProof.simulationShader(simulationShader)
+    )
+    const [
+        voronoiShader,
+        cleanupShader,
+        particlesModule,
+        fieldShader,
+        presentationShader,
+        arrowModule,
+    ] = await Promise.all([
+        createShader('Flow Voronoi shader', flowVoronoiShader),
+        createShader('Flow history cleanup shader', swapShader),
+        createShader('Flow particle draw shader', particlesShader),
+        createShader('Flow visualization shader', flowShowShader),
+        createShader('Flow presentation shader', flowLayerShader),
+        createShader('Flow arrow shader', arrowShader),
+    ])
     return {
         voronoi: runtime.createProgram({
             label: 'Flow Voronoi program',
-            modules: [ flowVoronoiShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
+            vertex: { module: voronoiShader, entryPoint: 'vMain' },
+            fragment: { module: voronoiShader, entryPoint: 'fMain' },
             layoutRequirements: sharedRequirements,
         }),
         simulation: runtime.createProgram({
             label: 'Flow simulation program',
-            modules: [ failureProof.simulationShader(simulationShader) ],
-            entryPoints: { compute: 'cMain' },
+            compute: {
+                module: simulationModule,
+                entryPoint: 'cMain',
+                constants: { blockSize: PARTICLE_BLOCK_SIZE },
+            },
             layoutRequirements: [
                 requirement(0, 0, 'uniform', codecs.controller),
                 requirement(0, 1, 'uniform', codecs.frame),
@@ -974,31 +1000,31 @@ function createPrograms(
         }),
         cleanup: runtime.createProgram({
             label: 'Flow history cleanup program',
-            modules: [ swapShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
+            vertex: { module: cleanupShader, entryPoint: 'vMain' },
+            fragment: { module: cleanupShader, entryPoint: 'fMain' },
             layoutRequirements: [ requirement(0, 0, 'uniform', codecs.cleanup) ],
         }),
         particles: runtime.createProgram({
             label: 'Flow particle draw program',
-            modules: [ particlesShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
+            vertex: { module: particlesModule, entryPoint: 'vMain' },
+            fragment: { module: particlesModule, entryPoint: 'fMain' },
             layoutRequirements: sharedRequirements,
         }),
         field: runtime.createProgram({
             label: 'Flow visualization program',
-            modules: [ flowShowShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
+            vertex: { module: fieldShader, entryPoint: 'vMain' },
+            fragment: { module: fieldShader, entryPoint: 'fMain' },
             layoutRequirements: [ requirement(0, 0, 'uniform', codecs.frame) ],
         }),
         presentation: runtime.createProgram({
             label: 'Flow presentation program',
-            modules: [ flowLayerShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
+            vertex: { module: presentationShader, entryPoint: 'vMain' },
+            fragment: { module: presentationShader, entryPoint: 'fMain' },
         }),
         arrow: runtime.createProgram({
             label: 'Flow arrow program',
-            modules: [ arrowShader ],
-            entryPoints: { vertex: 'vMain', fragment: 'fMain' },
+            vertex: { module: arrowModule, entryPoint: 'vMain' },
+            fragment: { module: arrowModule, entryPoint: 'fMain' },
             layoutRequirements: sharedRequirements,
         }),
     }
@@ -1009,8 +1035,7 @@ async function createPipelines(
     surface: Surface,
     textures: FlowTextures,
     layouts: FlowLayouts,
-    programs: FlowPrograms,
-    failureProof: FlowFailureProof
+    programs: FlowPrograms
 ) {
 
     const depthWrite: GPUDepthStencilState = {
@@ -1023,24 +1048,24 @@ async function createPipelines(
         depthWriteEnabled: false,
         depthCompare: 'less',
     }
-    failureProof.beforeSimulationPipeline(runtime)
-
     const simulation = await runtime.createComputePipeline({
         label: 'Flow simulation pipeline',
         program: programs.simulation,
-        bindLayouts: [
-            layouts.simulationUniforms,
-            layouts.simulationStorage,
-            layouts.simulationTextures,
-        ],
-        constants: { blockSize: PARTICLE_BLOCK_SIZE },
+        layout: {
+            mode: 'explicit',
+            bindLayouts: [
+                layouts.simulationUniforms,
+                layouts.simulationStorage,
+                layouts.simulationTextures,
+            ],
+        },
     })
 
     return {
         voronoi: await runtime.createRenderPipeline({
             label: 'Flow Voronoi pipeline',
             program: programs.voronoi,
-            bindLayouts: [ layouts.sharedUniforms ],
+            layout: { mode: 'explicit', bindLayouts: [ layouts.sharedUniforms ] },
             vertexBuffers: [
                 vertexLayout(16, 0, 'float32x4'),
                 vertexLayout(4, 1, 'float32'),
@@ -1055,7 +1080,10 @@ async function createPipelines(
         cleanup: await runtime.createRenderPipeline({
             label: 'Flow history cleanup pipeline',
             program: programs.cleanup,
-            bindLayouts: [ layouts.cleanupUniform, layouts.historyTextures ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ layouts.cleanupUniform, layouts.historyTextures ],
+            },
             targets: [ { format: textures.historyA.format } ],
             primitive: { topology: 'triangle-strip' },
             depthStencil: depthRead,
@@ -1063,7 +1091,10 @@ async function createPipelines(
         particles: await runtime.createRenderPipeline({
             label: 'Flow particle draw pipeline',
             program: programs.particles,
-            bindLayouts: [ layouts.sharedUniforms, layouts.particleStorage ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ layouts.sharedUniforms, layouts.particleStorage ],
+            },
             targets: [ { format: textures.historyA.format, blend: normalBlend } ],
             primitive: { topology: 'line-list' },
             depthStencil: depthWrite,
@@ -1071,21 +1102,30 @@ async function createPipelines(
         field: await runtime.createRenderPipeline({
             label: 'Flow visualization pipeline',
             program: programs.field,
-            bindLayouts: [ layouts.fieldUniform, layouts.fieldTexture ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ layouts.fieldUniform, layouts.fieldTexture ],
+            },
             targets: [ { format: surface.format, blend: normalBlend } ],
             primitive: { topology: 'triangle-strip' },
         }),
         presentation: await runtime.createRenderPipeline({
             label: 'Flow presentation pipeline',
             program: programs.presentation,
-            bindLayouts: [ layouts.presentationTexture ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ layouts.presentationTexture ],
+            },
             targets: [ { format: surface.format, blend: normalBlend } ],
             primitive: { topology: 'triangle-strip' },
         }),
         arrow: await runtime.createRenderPipeline({
             label: 'Flow arrow pipeline',
             program: programs.arrow,
-            bindLayouts: [ layouts.sharedUniforms, layouts.particleStorage ],
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ layouts.sharedUniforms, layouts.particleStorage ],
+            },
             targets: [ { format: surface.format, blend: normalBlend } ],
             primitive: { topology: 'triangle-strip' },
         }),

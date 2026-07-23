@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
@@ -178,17 +179,15 @@ async function createRenderFixture(entries = [ dynamicUniformEntry() ]) {
     const bindSet = await fixture.runtime.createBindSet(bindLayout, bindings, {
         label: 'dynamic render bind set',
     })
-    const program = fixture.runtime.createProgram({
-        modules: [ renderWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(fixture.runtime, {
+        sourceParts: [ renderWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await fixture.runtime.createRenderPipeline({
         label: 'dynamic render pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         targets: [ { format: surface.format } ],
     })
     const pass = fixture.runtime.createRenderPass({
@@ -226,16 +225,14 @@ async function createComputeFixture(entries = [ dynamicReadStorageEntry(), dynam
     const bindSet = await fixture.runtime.createBindSet(bindLayout, bindings, {
         label: 'dynamic compute bind set',
     })
-    const program = fixture.runtime.createProgram({
-        modules: [ computeWgsl ],
-        entryPoints: {
-            compute: 'csMain',
-        },
+    const program = await createTestProgram(fixture.runtime, {
+        sourceParts: [ computeWgsl ],
+        compute: 'csMain',
     })
     const pipeline = await fixture.runtime.createComputePipeline({
         label: 'dynamic compute pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
     })
     const pass = fixture.runtime.createComputePass({
         label: 'dynamic compute pass',

@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
@@ -17,12 +18,10 @@ async function createRenderFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const program = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await runtime.createRenderPipeline({
         program,
@@ -36,9 +35,9 @@ async function createComputeFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const program = runtime.createProgram({
-        modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
-        entryPoints: { compute: 'csMain' },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+        compute: 'csMain',
     })
     const pipeline = await runtime.createComputePipeline({
         program,

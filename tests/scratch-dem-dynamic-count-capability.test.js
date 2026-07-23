@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import { ScratchRuntime } from 'geoscratch'
 import {
@@ -44,9 +45,10 @@ describe('scratch DEM CPU-dynamic count capability', () => {
 
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-        const program = runtime.createProgram({
-            modules: [ triangleWgsl ],
-            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ triangleWgsl ],
+            vertex: 'vsMain',
+            fragment: 'fsMain',
         })
         const pipeline = await runtime.createRenderPipeline({
             program,

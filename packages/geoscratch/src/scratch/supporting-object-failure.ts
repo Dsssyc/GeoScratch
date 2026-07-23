@@ -6,8 +6,10 @@ import type { DiagnosticPhase, DiagnosticSubject } from './diagnostics.js'
 import type {
     GpuNativeErrorCategory,
     ScratchGpuIncidentOutcome,
+    ScratchNativeGpuErrorFacts,
     ScratchSupportingObjectFailureStage,
 } from './gpu-operation.js'
+import type { ShaderModuleCompilationReport } from './pipeline-compilation.js'
 import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 import type {
@@ -33,6 +35,9 @@ export function throwSupportingObjectCreationFailure<T>(
         phase: DiagnosticPhase
         subject: DiagnosticSubject
         related?: readonly DiagnosticSubject[]
+        failureStage?: ScratchSupportingObjectFailureStage
+        serializeNativeError?: (error: unknown) => ScratchNativeGpuErrorFacts
+        shaderModuleCompilationReport?: ShaderModuleCompilationReport
     }>
 ): never {
 
@@ -47,8 +52,15 @@ export function throwSupportingObjectCreationFailure<T>(
     const controller = diagnosticsControllerFor(runtime)
     const code = failureCode(primary.kind, codes)
     const nativeErrorCategory = failureNativeCategory(primary.kind)
+    const serializeError = input.serializeNativeError ?? serializeNativeGpuError
     const incidentOutcomes = Object.freeze(failures
-        .map(failure => incidentOutcome(failure, codes, input.subject)))
+        .map(failure => incidentOutcome(
+            failure,
+            codes,
+            input.subject,
+            serializeError,
+            input.failureStage
+        )))
 
     const deviceLossIncident = primary.kind === 'device-lost'
         ? controller.recordDeviceLoss((primary.deviceLostInfo ?? runtime.deviceLostInfo ?? {
@@ -75,9 +87,12 @@ export function throwSupportingObjectCreationFailure<T>(
             ...(deviceLossIncident !== undefined ? [ deviceLossIncident.subject ] : []),
         ],
         ...(primary.cause !== undefined
-            ? { nativeError: serializeNativeGpuError(primary.cause) }
+            ? { nativeError: serializeError(primary.cause) }
             : {}),
-        failureStage: failureStage(primary.kind),
+        failureStage: input.failureStage ?? failureStage(primary.kind),
+        ...(input.shaderModuleCompilationReport !== undefined
+            ? { shaderModuleCompilationReport: input.shaderModuleCompilationReport }
+            : {}),
         outcomes: incidentOutcomes,
     })
 
@@ -147,16 +162,18 @@ function selectPrimaryFailure(
 function incidentOutcome(
     failure: SupportingObjectObservedFailure,
     codes: SupportingObjectDiagnosticCodes,
-    subject: DiagnosticSubject
+    subject: DiagnosticSubject,
+    serializeNativeError: (error: unknown) => ScratchNativeGpuErrorFacts,
+    stage?: ScratchSupportingObjectFailureStage
 ): ScratchGpuIncidentOutcome {
 
     return Object.freeze({
-        stage: failureStage(failure.kind),
+        stage: stage ?? failureStage(failure.kind),
         diagnosticCode: failureCode(failure.kind, codes),
         nativeErrorCategory: failureNativeCategory(failure.kind),
         subject,
         ...(failure.cause !== undefined
-            ? { nativeError: serializeNativeGpuError(failure.cause) }
+            ? { nativeError: serializeNativeError(failure.cause) }
             : {}),
     })
 }

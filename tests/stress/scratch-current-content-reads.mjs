@@ -2,7 +2,7 @@ import os from 'node:os'
 import process from 'node:process'
 import { performance } from 'node:perf_hooks'
 import { ScratchRuntime } from '../../packages/geoscratch/dist/index.js'
-import { createFakeGpu } from '../scratch-test-utils.js'
+import { createFakeGpu, createTestProgram } from '../scratch-test-utils.js'
 
 const iterations = positiveInteger(
     process.env.SCRATCH_CURRENT_CONTENT_ITERATIONS,
@@ -53,9 +53,9 @@ async function stressCurrentContentReads(submissionCount) {
     }, {
         label: 'current-content stress set',
     })
-    const program = runtime.createProgram({
+    const program = await createTestProgram(runtime, {
         label: 'current-content stress program',
-        modules: [ `
+        sourceParts: [ `
             @group(0) @binding(0)
             var<storage, read> inputValues: array<u32>;
 
@@ -64,12 +64,12 @@ async function stressCurrentContentReads(submissionCount) {
                 _ = inputValues[0];
             }
         ` ],
-        entryPoints: { compute: 'csMain' },
+        compute: 'csMain',
     })
     const pipeline = await runtime.createComputePipeline({
         label: 'current-content stress pipeline',
         program,
-        bindLayouts: [ layout ],
+        layout: { mode: 'explicit', bindLayouts: [ layout ] },
     })
     const pass = runtime.createComputePass({ label: 'current-content stress pass' })
     const data = new Uint32Array(4)

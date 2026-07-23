@@ -294,21 +294,38 @@ type LayoutCodecDiagnosticCode =
 
 ### Program
 
-Program diagnostics cover WGSL modules, generated accessors, entry points, required features, reflection cross-checks, and shader/layout contracts.
+ShaderModule diagnostics cover source composition, native acknowledgement,
+compilation information, and module lifecycle. Program diagnostics cover
+immutable stages, entry points, required capabilities, reflection cross-checks,
+and shader/layout contracts.
 
 Candidate codes:
 
 ```ts
 type ProgramDiagnosticCode =
-    | 'SCRATCH_PROGRAM_ENTRY_POINT_MISSING'
+    | 'SCRATCH_PROGRAM_DESCRIPTOR_INVALID'
+    | 'SCRATCH_PROGRAM_ENTRY_POINT_INVALID'
     | 'SCRATCH_PROGRAM_FEATURE_UNAVAILABLE'
     | 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE'
+    | 'SCRATCH_PROGRAM_LIMIT_UNAVAILABLE'
     | 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH'
-    | 'SCRATCH_PROGRAM_MODULES_INVALID'
+    | 'SCRATCH_PROGRAM_STAGE_INVALID'
+    | 'SCRATCH_PROGRAM_STAGE_MISSING'
     | 'SCRATCH_PROGRAM_WRONG_RUNTIME'
     | 'SCRATCH_PROGRAM_DISPOSED'
     | 'SCRATCH_PROGRAM_LIFECYCLE_CHANGED'
     | 'SCRATCH_PROGRAM_SHADER_REFLECTION_INCONCLUSIVE'
+    | 'SCRATCH_SHADER_INSPECTION_INPUT_INVALID'
+    | 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED'
+    | 'SCRATCH_SHADER_MODULE_COMPILATION_INFO_FAILED'
+    | 'SCRATCH_SHADER_MODULE_CONSTRUCTOR_PRIVATE'
+    | 'SCRATCH_SHADER_MODULE_CREATION_INTERNAL_FAILED'
+    | 'SCRATCH_SHADER_MODULE_CREATION_NATIVE_FAILED'
+    | 'SCRATCH_SHADER_MODULE_CREATION_OUT_OF_MEMORY'
+    | 'SCRATCH_SHADER_MODULE_CREATION_VALIDATION_FAILED'
+    | 'SCRATCH_SHADER_MODULE_DESCRIPTOR_INVALID'
+    | 'SCRATCH_SHADER_MODULE_DISPOSED'
+    | 'SCRATCH_SHADER_MODULE_WRONG_RUNTIME'
 ```
 
 Reflection is still a guard, not the source of truth. A reflection parser that cannot understand newer WGSL should usually produce a warn-level inconclusive diagnostic, not block valid explicit layouts.
@@ -397,16 +414,24 @@ type PipelineDiagnosticCode =
     | 'SCRATCH_PIPELINE_CREATION_PROGRAM_LIFECYCLE_CHANGED'
     | 'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED'
     | 'SCRATCH_PIPELINE_CREATION_RUNTIME_LIFECYCLE_CHANGED'
+    | 'SCRATCH_PIPELINE_CREATION_SHADER_MODULE_DISPOSED'
+    | 'SCRATCH_PIPELINE_COMPUTE_STAGE_MISSING'
     | 'SCRATCH_PIPELINE_DISPOSED'
     | 'SCRATCH_PIPELINE_CONSTANTS_INVALID'
+    | 'SCRATCH_PIPELINE_FRAGMENT_FIELDS_FORBIDDEN'
     | 'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID'
+    | 'SCRATCH_PIPELINE_LAYOUT_DERIVATION_DESCRIPTOR_MISMATCH'
+    | 'SCRATCH_PIPELINE_LAYOUT_DERIVATION_FORBIDDEN'
+    | 'SCRATCH_PIPELINE_LAYOUT_MODE_INVALID'
     | 'SCRATCH_PIPELINE_PROGRAM_INVALID'
     | 'SCRATCH_PIPELINE_WRONG_RUNTIME'
+    | 'SCRATCH_PIPELINE_TARGETS_INVALID'
     | 'SCRATCH_PIPELINE_TARGET_STATE_INVALID'
     | 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH'
     | 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH'
     | 'SCRATCH_PIPELINE_SAMPLE_COUNT_MISMATCH'
     | 'SCRATCH_PIPELINE_VERTEX_LAYOUT_MISMATCH'
+    | 'SCRATCH_PIPELINE_VERTEX_STAGE_MISSING'
     | 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE'
 ```
 
@@ -708,7 +733,8 @@ type ScratchGpuOperationTarget =
     | ScratchGpuResourceOperationTarget
     | { kind: 'bind-layout'; bindLayoutId: string; group: number; entries: readonly unknown[]; acknowledgementState: 'pending' }
     | { kind: 'bind-set'; bindSetId: string; bindLayoutId: string; preparationState: string; generation: number; snapshotHash: string; preparationStage: string }
-    | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programSourceHash: string }
+    | { kind: 'shader-module'; shaderModuleId: string; sourceHash: string; sourcePartCount: number; compilationHintCount: number }
+    | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programContractHash: string }
     | { kind: 'command'; commandId: string; commandKind: 'readback' }
     | {
         kind: 'readback'
@@ -726,7 +752,8 @@ type ScratchGpuOperationTarget =
 ```
 
 Schema v5 adds `sampler-allocation`, `query-set-allocation`,
-`bind-layout-allocation`, and `bind-set-preparation`. Sampler targets never gain
+`bind-layout-allocation`, `bind-set-preparation`, and
+`shader-module-creation`. Sampler targets never gain
 content/readiness/footprint fields. QuerySet targets report bounded indexed slot
 facts and no scalar epoch. BindLayout reports ABI shape and acknowledgement;
 BindSet reports preparation state, generation, snapshot, and stage without
@@ -862,30 +889,46 @@ source bytes, command payload, mutable operation, or SubmittedWork. Setting
 `operationCapacity: 0` may omit operation history, but it does not disable
 current facts, incidents, budgets, or cleanup.
 
-Each successful pipeline exposes an immutable source-free compilation report.
-It retains at most 64 native messages, at most 4096 UTF-16 code units per
-message, and at most 64 KiB of serialized compilation evidence. Counts and
+Each acknowledged ShaderModule exposes an immutable source-free compilation
+report. It retains at most 64 native messages, at most 4096 UTF-16 code units
+per message, and at most 64 KiB of serialized compilation evidence. Counts and
 omission fields remain even when evidence is truncated. Native order is
 preserved; native prose is not parsed; zero-valued unknown locations and
-separator locations are not assigned invented module coordinates. Before
-retention, exact Program identifiers/numeric literals of at least three UTF-16
-code units and exact contiguous Program spans of at least eight UTF-16 code
-units are replaced. Tokenization follows WGSL Unicode-XID identifiers and its
-complete decimal/hexadecimal integer and float lexical forms, including
+separator locations are not assigned invented source-part coordinates. Before
+retention, exact ShaderModule identifiers/numeric literals of at least three
+UTF-16 code units and exact contiguous source spans of at least eight UTF-16
+code units are replaced. Tokenization follows WGSL Unicode-XID identifiers and
+its complete decimal/hexadecimal integer and float lexical forms, including
 leading-dot floats. `sourceExcerptRedacted` distinguishes that sanitization
-from `messageTruncated`. Retained pipeline, supporting-scope, structural, and
-lifecycle native-error strings use the same source sanitizer; the original
-native object is allowed only as a transient diagnostic cause. The sanitizer
-uses one lazy Bloom workspace capped at 32 KiB per report or native-error
-settlement. Collisions can only cause conservative over-redaction. A global
-device-loss event has no unique Program context, so Scratch permanently omits
-its native message instead: `runtime.deviceLostInfo` and the runtime incident
-retain the structural reason, a fixed omission marker, and
-`nativeMessageOmitted: true`. An in-flight pipeline may use the original info
-only through a temporary lifecycle subscription and diagnostic cause.
+from `messageTruncated`. Retained ShaderModule, pipeline supporting-scope,
+structural, and lifecycle native-error strings use the same source sanitizer;
+the original native object is allowed only as a transient diagnostic cause.
+The sanitizer uses one lazy Bloom workspace capped at 32 KiB per report or
+native-error settlement. Collisions can only cause conservative
+over-redaction. A global device-loss event has no unique ShaderModule context,
+so Scratch permanently omits its native message instead:
+`runtime.deviceLostInfo` and the runtime incident retain the structural reason,
+a fixed omission marker, and `nativeMessageOmitted: true`. An in-flight
+ShaderModule or pipeline may use original native information only through a
+temporary lifecycle subscription and diagnostic cause.
 
-Stable pipeline creation failure codes are
-`SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`,
+Pipeline creation exposes a separate immutable source-free creation report.
+It identifies the Program contract, selected stages, ShaderModule IDs, entry
+points, override values, and explicit or auto layout mode. It does not
+duplicate ShaderModule compilation messages or retain WGSL source.
+When ShaderModule acknowledgement rejects because compilation messages contain
+errors, the same bounded report is retained as
+`shaderModuleCompilationReport` on that exact supporting-object incident. It
+is not copied into unrelated operation history.
+
+Stable ShaderModule acknowledgement failure codes are
+`SCRATCH_SHADER_MODULE_CREATION_VALIDATION_FAILED`,
+`SCRATCH_SHADER_MODULE_CREATION_INTERNAL_FAILED`,
+`SCRATCH_SHADER_MODULE_CREATION_OUT_OF_MEMORY`,
+`SCRATCH_SHADER_MODULE_CREATION_NATIVE_FAILED`,
+`SCRATCH_SHADER_MODULE_COMPILATION_INFO_FAILED`, and
+`SCRATCH_SHADER_MODULE_COMPILATION_FAILED`. Stable pipeline creation failure
+codes are
 `SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED`,
 `SCRATCH_PIPELINE_CREATION_INTERNAL_FAILED`,
 `SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED`,

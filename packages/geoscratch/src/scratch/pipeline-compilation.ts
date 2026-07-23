@@ -1,5 +1,22 @@
 export type PipelineKind = 'render' | 'compute'
 
+export type PipelineCreationStageFact = Readonly<{
+    stage: 'vertex' | 'fragment' | 'compute'
+    shaderModuleId: string
+    sourceHash: string
+    entryPoint?: string
+    constantKeys: readonly string[]
+}>
+
+export type PipelineCreationReport = Readonly<{
+    version: 1
+    pipelineId: string
+    pipelineKind: PipelineKind
+    programId: string
+    contractHash: string
+    stages: readonly PipelineCreationStageFact[]
+}>
+
 export const PIPELINE_COMPILATION_MAX_MODULE_FACTS = 256
 export const PIPELINE_COMPILATION_MAX_MESSAGES = 64
 export const PIPELINE_COMPILATION_MAX_MESSAGE_LENGTH = 4_096
@@ -35,12 +52,14 @@ export type PipelineCompilationModuleFact = Readonly<{
     lineCount: number
 }>
 
-export type PipelineCompilationNativeLocation = Readonly<{
+export type ShaderModuleCompilationNativeLocation = Readonly<{
     offset: number
     length: number
     lineNum: number
     linePos: number
 }>
+
+export type PipelineCompilationNativeLocation = ShaderModuleCompilationNativeLocation
 
 export type PipelineCompilationModuleLocation = Readonly<{
     moduleIndex: number
@@ -57,7 +76,7 @@ export type PipelineCompilationMessage = Readonly<{
     messageTruncated: boolean
     sourceExcerptRedacted: boolean
     locationKind: 'unknown' | 'module' | 'separator' | 'unmapped'
-    nativeLocation: PipelineCompilationNativeLocation
+    nativeLocation: ShaderModuleCompilationNativeLocation
     moduleLocation?: PipelineCompilationModuleLocation
 }>
 
@@ -79,6 +98,75 @@ export type PipelineCompilationReport = Readonly<{
     omittedMessageCount: number
     retainedEvidenceBytes: number
     messages: readonly PipelineCompilationMessage[]
+}>
+
+export type ShaderModuleCompilationSourcePartFact = Readonly<{
+    index: number
+    label?: string
+    hash: string
+    startOffset: number
+    endOffset: number
+    startLine: number
+    endLine: number
+    lineCount: number
+    layoutDependencies: readonly Readonly<{
+        abiHash: string
+        schemaHash: string
+    }>[]
+}>
+
+export type ShaderModuleCompilationSourcePartLocation = Readonly<{
+    sourcePartIndex: number
+    offset: number
+    length: number
+    lineNum: number
+    linePos: number
+}>
+
+export type ShaderModuleCompilationMessage = Readonly<{
+    nativeIndex: number
+    type: GPUCompilationMessageType
+    message: string
+    messageTruncated: boolean
+    sourceExcerptRedacted: boolean
+    locationKind: 'unknown' | 'source-part' | 'separator' | 'unmapped'
+    nativeLocation: ShaderModuleCompilationNativeLocation
+    sourcePartLocation?: ShaderModuleCompilationSourcePartLocation
+}>
+
+export type ShaderModuleCompilationReport = Readonly<{
+    version: 1
+    shaderModuleId: string
+    sourceHash: string
+    sourcePartCount: number
+    retainedSourcePartCount: number
+    omittedSourcePartCount: number
+    sourceParts: readonly ShaderModuleCompilationSourcePartFact[]
+    errorCount: number
+    warningCount: number
+    infoCount: number
+    nativeMessageCount: number
+    retainedMessageCount: number
+    omittedMessageCount: number
+    retainedEvidenceBytes: number
+    messages: readonly ShaderModuleCompilationMessage[]
+}>
+
+export type ShaderModuleSourceSnapshot = Readonly<{
+    shaderModuleId: string
+    sourceParts: readonly Readonly<{
+        label?: string
+        code: string
+        layoutDependencies: readonly Readonly<{
+            abiHash: string
+            schemaHash: string
+        }>[]
+    }>[]
+    combinedSource: string
+    sourceHash: string
+    sourcePartFacts: readonly ShaderModuleCompilationSourcePartFact[]
+    separatorOffsets: readonly number[]
+    sourcePartLineStarts: readonly (readonly number[])[]
 }>
 
 export type PipelineSourceSnapshot = Readonly<{
@@ -172,6 +260,94 @@ export function snapshotPipelineSource(program: {
     })
 }
 
+export function snapshotShaderModuleSource(input: {
+    id: string
+    sourceParts: readonly Readonly<{
+        label?: string
+        code: string
+        layoutDependencies?: readonly Readonly<{
+            abiHash: string
+            schemaHash: string
+        }>[]
+    }>[]
+}): ShaderModuleSourceSnapshot {
+
+    if (typeof input?.id !== 'string') {
+        throw new TypeError('ShaderModule source snapshot requires a ShaderModule ID.')
+    }
+    if (
+        !Array.isArray(input.sourceParts) ||
+        input.sourceParts.length === 0 ||
+        !input.sourceParts.every(part =>
+            isRecord(part) &&
+            typeof part.code === 'string' &&
+            (part.label === undefined || typeof part.label === 'string') &&
+            (
+                part.layoutDependencies === undefined ||
+                Array.isArray(part.layoutDependencies)
+            )
+        )
+    ) {
+        throw new TypeError('ShaderModule source snapshot requires non-empty source parts.')
+    }
+
+    const sourceParts = Object.freeze(input.sourceParts.map(part => Object.freeze({
+        ...(part.label !== undefined ? { label: part.label } : {}),
+        code: part.code,
+        layoutDependencies: Object.freeze(
+            (part.layoutDependencies ?? []).map((dependency: Readonly<{
+                abiHash: string
+                schemaHash: string
+            }>) => Object.freeze({
+                abiHash: dependency.abiHash,
+                schemaHash: dependency.schemaHash,
+            }))
+        ),
+    })))
+    const sourcePartFacts: ShaderModuleCompilationSourcePartFact[] = []
+    const separatorOffsets: number[] = []
+    const sourcePartLineStarts: (readonly number[])[] = []
+    let combinedOffset = 0
+    let combinedLine = 1
+
+    for (let index = 0; index < sourceParts.length; index++) {
+        const part = sourceParts[index]
+        const hasSeparator = index < sourceParts.length - 1
+        const lineStarts = Object.freeze(sourceLineStarts(part.code, hasSeparator))
+        const lineCount = lineStarts.length
+        sourcePartLineStarts.push(lineStarts)
+        sourcePartFacts.push(Object.freeze({
+            index,
+            ...(part.label !== undefined ? { label: part.label } : {}),
+            hash: hashPipelineSource(part.code),
+            startOffset: combinedOffset,
+            endOffset: combinedOffset + part.code.length,
+            startLine: combinedLine,
+            endLine: combinedLine + lineCount - 1,
+            lineCount,
+            layoutDependencies: part.layoutDependencies,
+        }))
+        combinedOffset += part.code.length
+        combinedLine += lineCount - 1
+        if (hasSeparator) {
+            separatorOffsets.push(combinedOffset)
+            combinedOffset++
+            combinedLine++
+        }
+    }
+
+    const combinedSource = sourceParts.map(part => part.code).join('\n')
+    return Object.freeze({
+        shaderModuleId: input.id,
+        sourceParts,
+        combinedSource,
+        sourceHash: hashPipelineSource(combinedSource),
+        sourcePartFacts: Object.freeze(sourcePartFacts),
+        separatorOffsets: Object.freeze(separatorOffsets),
+        sourcePartLineStarts: Object.freeze(sourcePartLineStarts),
+    })
+}
+
 export function hashPipelineSource(source: string): string {
 
     if (typeof source !== 'string') throw new TypeError('Pipeline source hash requires a string.')
@@ -181,6 +357,75 @@ export function hashPipelineSource(source: string): string {
         hash = Math.imul(hash, 0x01000193)
     }
     return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`
+}
+
+export function createPipelineCreationReport(input: {
+    pipelineId: string
+    pipelineKind: PipelineKind
+    programId: string
+    stages: readonly Readonly<{
+        stage: 'vertex' | 'fragment' | 'compute'
+        shaderModuleId: string
+        sourceHash: string
+        entryPoint?: string
+        constantKeys?: readonly string[]
+    }>[]
+}): PipelineCreationReport {
+
+    if (
+        typeof input?.pipelineId !== 'string' ||
+        (input.pipelineKind !== 'render' && input.pipelineKind !== 'compute') ||
+        typeof input.programId !== 'string' ||
+        !Array.isArray(input.stages) ||
+        input.stages.length === 0
+    ) {
+        throw new TypeError('Pipeline creation report identity is invalid.')
+    }
+    const stages = Object.freeze(input.stages.map(stage => Object.freeze({
+        stage: stage.stage,
+        shaderModuleId: stage.shaderModuleId,
+        sourceHash: stage.sourceHash,
+        ...(stage.entryPoint !== undefined ? { entryPoint: stage.entryPoint } : {}),
+        constantKeys: Object.freeze([ ...(stage.constantKeys ?? []) ].sort()),
+    })))
+    return Object.freeze({
+        version: 1,
+        pipelineId: input.pipelineId,
+        pipelineKind: input.pipelineKind,
+        programId: input.programId,
+        contractHash: hashPipelineSource(JSON.stringify(stages)),
+        stages,
+    })
+}
+
+export function normalizePipelineCreationReport(
+    input: PipelineCreationReport,
+    identity: Readonly<{
+        pipelineId: string
+        pipelineKind: PipelineKind
+        programId: string
+        contractHash: string
+    }>
+): PipelineCreationReport {
+
+    if (
+        input.pipelineId !== identity.pipelineId ||
+        input.pipelineKind !== identity.pipelineKind ||
+        input.programId !== identity.programId ||
+        input.contractHash !== identity.contractHash
+    ) {
+        throw new TypeError('Pipeline creation report identity does not match its target.')
+    }
+    const normalized = createPipelineCreationReport({
+        pipelineId: input.pipelineId,
+        pipelineKind: input.pipelineKind,
+        programId: input.programId,
+        stages: input.stages,
+    })
+    if (normalized.contractHash !== input.contractHash) {
+        throw new TypeError('Pipeline creation report contract hash is invalid.')
+    }
+    return normalized
 }
 
 export function createPipelineCompilationReport(
@@ -252,6 +497,82 @@ export function createPipelineCompilationReport(
         retainedEvidenceBytes: 0,
         messages: retainedMessages,
     }, identity)
+}
+
+export function createShaderModuleCompilationReport(input: {
+    shaderModuleId: string
+    sourceSnapshot: ShaderModuleSourceSnapshot
+    compilationInfo: GPUCompilationInfo
+}): ShaderModuleCompilationReport {
+
+    if (
+        typeof input?.shaderModuleId !== 'string' ||
+        input.sourceSnapshot?.shaderModuleId !== input.shaderModuleId
+    ) {
+        throw new TypeError('ShaderModule compilation identity is invalid.')
+    }
+
+    const pipelineSnapshot: PipelineSourceSnapshot = Object.freeze({
+        programId: input.shaderModuleId,
+        modules: Object.freeze(input.sourceSnapshot.sourceParts.map(part => part.code)),
+        combinedSource: input.sourceSnapshot.combinedSource,
+        combinedSourceHash: input.sourceSnapshot.sourceHash,
+        moduleFacts: Object.freeze(input.sourceSnapshot.sourcePartFacts.map(part => Object.freeze({
+            index: part.index,
+            hash: part.hash,
+            startOffset: part.startOffset,
+            endOffset: part.endOffset,
+            startLine: part.startLine,
+            endLine: part.endLine,
+            lineCount: part.lineCount,
+        }))),
+        separatorOffsets: input.sourceSnapshot.separatorOffsets,
+        moduleLineStarts: input.sourceSnapshot.sourcePartLineStarts,
+    })
+    const report = createPipelineCompilationReport({
+        pipelineId: input.shaderModuleId,
+        pipelineKind: 'compute',
+        sourceSnapshot: pipelineSnapshot,
+        compilationInfo: input.compilationInfo,
+    })
+    const messages = Object.freeze(report.messages.map(message => Object.freeze({
+        nativeIndex: message.nativeIndex,
+        type: message.type,
+        message: message.message,
+        messageTruncated: message.messageTruncated,
+        sourceExcerptRedacted: message.sourceExcerptRedacted,
+        locationKind: message.locationKind === 'module'
+            ? 'source-part' as const
+            : message.locationKind,
+        nativeLocation: message.nativeLocation,
+        ...(message.moduleLocation !== undefined ? {
+            sourcePartLocation: Object.freeze({
+                sourcePartIndex: message.moduleLocation.moduleIndex,
+                offset: message.moduleLocation.offset,
+                length: message.moduleLocation.length,
+                lineNum: message.moduleLocation.lineNum,
+                linePos: message.moduleLocation.linePos,
+            }),
+        } : {}),
+    })))
+
+    return Object.freeze({
+        version: 1,
+        shaderModuleId: input.shaderModuleId,
+        sourceHash: input.sourceSnapshot.sourceHash,
+        sourcePartCount: input.sourceSnapshot.sourcePartFacts.length,
+        retainedSourcePartCount: input.sourceSnapshot.sourcePartFacts.length,
+        omittedSourcePartCount: 0,
+        sourceParts: input.sourceSnapshot.sourcePartFacts,
+        errorCount: report.errorCount,
+        warningCount: report.warningCount,
+        infoCount: report.infoCount,
+        nativeMessageCount: report.nativeMessageCount,
+        retainedMessageCount: messages.length,
+        omittedMessageCount: report.nativeMessageCount - messages.length,
+        retainedEvidenceBytes: report.retainedEvidenceBytes,
+        messages,
+    })
 }
 
 export function normalizePipelineCompilationReport(

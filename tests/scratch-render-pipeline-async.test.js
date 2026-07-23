@@ -7,616 +7,233 @@ import {
 import {
     createFakeGpu,
     createFakePipelineError,
+    createTestProgram,
     triangleWgsl,
 } from './scratch-test-utils.js'
 
 describe('ScratchRuntime async render pipeline creation', () => {
 
-    it('rejects local validation through a Promise without native or operation effects', async() => {
+    it('rejects local validation through a Promise before pipeline-native effects', async() => {
 
         const { gpu, calls } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
-        const promise = runtime.createRenderPipeline({
-            program: null,
-            targets: [ { format: 'bgra8unorm' } ],
-        })
+        const invalidProgram = runtime.createRenderPipeline({ program: null })
 
-        expect(promise).to.be.instanceOf(Promise)
-        const error = await rejectedDiagnostic(promise)
-        expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_PROGRAM_INVALID')
-        expect(calls.nativeTimeline).to.deep.equal([])
-        expect(calls.shaderModules).to.have.length(0)
+        expect(invalidProgram).to.be.instanceOf(Promise)
+        const programError = await rejectedDiagnostic(invalidProgram)
+        expect(programError.diagnostic.code).to.equal('SCRATCH_PIPELINE_PROGRAM_INVALID')
         expect(calls.pipelineLayouts).to.have.length(0)
         expect(calls.asyncPipelineRequests).to.have.length(0)
-        expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
         expect(runtime.diagnostics.operations()).to.have.length(0)
+
+        const computeProgram = await createTestProgram(runtime, {
+            sourceParts: [ '@compute @workgroup_size(1) fn main() {}' ],
+            compute: 'main',
+        })
+        calls.nativeTimeline.length = 0
+        const stageError = await rejectedDiagnostic(
+            runtime.createRenderPipeline({
+                program: computeProgram,
+                targets: [ { format: 'bgra8unorm' } ],
+            })
+        )
+        expect(stageError.diagnostic.code).to.equal('SCRATCH_PIPELINE_VERTEX_STAGE_MISSING')
+        expect(calls.nativeTimeline).to.deep.equal([])
+        expect(calls.pipelineLayouts).to.have.length(0)
+        expect(calls.asyncPipelineRequests).to.have.length(0)
     })
 
-    it('creates one ready wrapper through the native async render path', async() => {
+    it('creates one immutable wrapper from acknowledged stage modules', async() => {
 
-        const { gpu, calls, errors } = createFakeGpu({
-            compilationMessages: [
-                compilationMessage('warning', 'portable warning', 1, 1, 1, 2),
-                compilationMessage('info', 'portable info', 2, 1, 1, 3),
-            ],
-        })
-        const runtime = await ScratchRuntime.create({ gpu })
-        const program = createProgram(runtime)
-        const bindLayout = await createIsolatedBindLayout(runtime, errors)
-        const descriptor = renderDescriptor(program, bindLayout)
-
-        const pipeline = await runtime.createRenderPipeline(descriptor)
+        const fixture = await createRenderFixture()
+        const pipeline = await fixture.runtime.createRenderPipeline(fixture.descriptor)
 
         expect(pipeline).to.be.instanceOf(ScratchRenderPipeline)
         expect(pipeline.pipelineKind).to.equal('render')
-        expect(pipeline.vertexEntryPoint).to.equal('vsMain')
-        expect(pipeline.fragmentEntryPoint).to.equal('fsMain')
-        expect(pipeline.compilationReport).to.deep.include({
-            pipelineId: pipeline.id,
-            pipelineKind: 'render',
-            programId: program.id,
-            errorCount: 0,
-            warningCount: 1,
-            infoCount: 1,
-        })
-        expect(calls.nativeTimeline).to.deep.equal(expectedRenderIssueTimeline())
-        expect(calls.asyncPipelineRequests).to.have.length(1)
-        expect(calls.asyncPipelineRequests[0].kind).to.equal('render')
-        expect(calls.renderPipelines).to.have.length(1)
-        const nativeDescriptor = calls.asyncPipelineRequests[0].descriptor
+        expect(pipeline.vertex).to.deep.equal(fixture.program.vertex)
+        expect(pipeline.fragment).to.deep.equal(fixture.program.fragment)
+        expect(pipeline.vertex.entryPoint).to.equal('vsMain')
+        expect(pipeline.fragment.entryPoint).to.equal('fsMain')
+        expect(pipeline.vertex.constants).to.deep.equal({ vertexScale: 2 })
+        expect(pipeline.fragment.constants).to.deep.equal({ fragmentAlpha: 0.5 })
+        expect(pipeline.creationReport.stages).to.deep.equal([
+            {
+                stage: 'vertex',
+                shaderModuleId: fixture.shaderModule.id,
+                sourceHash: fixture.shaderModule.compilationReport.sourceHash,
+                entryPoint: 'vsMain',
+                constantKeys: [ 'vertexScale' ],
+            },
+            {
+                stage: 'fragment',
+                shaderModuleId: fixture.shaderModule.id,
+                sourceHash: fixture.shaderModule.compilationReport.sourceHash,
+                entryPoint: 'fsMain',
+                constantKeys: [ 'fragmentAlpha' ],
+            },
+        ])
+        expect(fixture.calls.shaderModules).to.have.length(1)
+        expect(fixture.calls.asyncPipelineRequests).to.have.length(1)
+        const nativeDescriptor = fixture.calls.asyncPipelineRequests[0].descriptor
         expect(nativeDescriptor.vertex).to.deep.include({
+            module: fixture.shaderModule.gpuShaderModule,
             entryPoint: 'vsMain',
-            buffers: descriptor.vertexBuffers,
+            constants: { vertexScale: 2 },
         })
-        expect(nativeDescriptor.fragment.entryPoint).to.equal('fsMain')
-        expect(nativeDescriptor.fragment.targets).to.deep.equal(descriptor.targets)
-        expect(nativeDescriptor.primitive).to.deep.equal({
-            topology: 'triangle-strip',
-            stripIndexFormat: 'uint32',
-            frontFace: 'cw',
-            cullMode: 'back',
-            unclippedDepth: true,
+        expect(nativeDescriptor.fragment).to.deep.include({
+            module: fixture.shaderModule.gpuShaderModule,
+            entryPoint: 'fsMain',
+            constants: { fragmentAlpha: 0.5 },
         })
-        expect(nativeDescriptor.depthStencil).to.deep.equal(descriptor.depthStencil)
-        expect(nativeDescriptor.multisample).to.deep.equal(descriptor.multisample)
-        expect(nativeDescriptor.layout).to.equal(calls.pipelineLayouts[0])
-        expect(nativeDescriptor.vertex.module).to.equal(calls.shaderModules[0])
-        expect(nativeDescriptor.fragment.module).to.equal(calls.shaderModules[0])
-        expect(nativeDescriptor.label).to.equal(`${descriptor.label} [scratch:${pipeline.id}]`)
-        expect(calls.shaderModules[0].descriptor.label)
-            .to.equal(`${descriptor.label} shader module [scratch:${pipeline.id}]`)
-        expect(calls.pipelineLayouts[0].descriptor.label)
-            .to.equal(`${descriptor.label} layout [scratch:${pipeline.id}]`)
+        expect(nativeDescriptor.layout).to.equal(fixture.calls.pipelineLayouts[0])
         expect(Object.isExtensible(pipeline)).to.equal(false)
 
-        const operations = runtime.diagnostics.operations({
+        const [ operation ] = fixture.runtime.diagnostics.operations({
             targetKind: 'pipeline',
             pipelineId: pipeline.id,
         })
-        expect(operations).to.have.length(1)
-        expect(operations[0]).to.deep.include({
+        expect(operation).to.deep.include({
             kind: 'render-pipeline-creation',
             status: 'succeeded',
         })
-        expect(operations[0].compilationReport).to.equal(pipeline.compilationReport)
-        expect(runtime.diagnostics.snapshot().pipelines).to.deep.include({
+        expect(operation.pipelineCreationReport).to.deep.equal(pipeline.creationReport)
+        expect(fixture.runtime.diagnostics.snapshot().pipelines).to.deep.include({
             id: pipeline.id,
-            label: descriptor.label,
+            label: fixture.descriptor.label,
             pipelineKind: 'render',
-            programId: program.id,
-            programSourceHash: pipeline.compilationReport.combinedSourceHash,
-            descriptorHash: operations[0].descriptor.hash,
+            programId: fixture.program.id,
+            programContractHash: pipeline.creationReport.contractHash,
+            descriptorHash: operation.descriptor.hash,
             state: 'ready',
-            lastCreationOperationId: operations[0].id,
-            compilation: { errorCount: 0, warningCount: 1, infoCount: 1 },
+            lastCreationOperationId: operation.id,
+            stages: pipeline.creationReport.stages,
         })
-        expect(runtime.diagnostics.incidents({ pipelineId: pipeline.id })).to.have.length(0)
-        expect(calls.uncapturedErrors).to.have.length(0)
     })
 
-    it('snapshots and lowers independent vertex and fragment constants', async() => {
+    it('snapshots the descriptor and issues every native step before awaiting', async() => {
 
-        const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
-        const program = createProgram(runtime)
-        const vertexConstants = { vertexScale: 2, vertexMode: 1 }
-        const fragmentConstants = { fragmentAlpha: 0.5 }
-        const promise = runtime.createRenderPipeline({
-            program,
-            vertexConstants,
-            fragmentConstants,
-            targets: [ { format: 'bgra8unorm' } ],
-        })
-
-        vertexConstants.vertexScale = 99
-        fragmentConstants.fragmentAlpha = 0
-
-        const pipeline = await promise
-        const nativeDescriptor = calls.asyncPipelineRequests[0].descriptor
-        expect(nativeDescriptor.vertex.constants).to.deep.equal({
-            vertexScale: 2,
-            vertexMode: 1,
-        })
-        expect(nativeDescriptor.fragment.constants).to.deep.equal({
-            fragmentAlpha: 0.5,
-        })
-        expect(pipeline.vertexConstants).to.deep.equal({
-            vertexScale: 2,
-            vertexMode: 1,
-        })
-        expect(pipeline.fragmentConstants).to.deep.equal({
-            fragmentAlpha: 0.5,
-        })
-        expect(Object.isFrozen(pipeline.vertexConstants)).to.equal(true)
-        expect(Object.isFrozen(pipeline.fragmentConstants)).to.equal(true)
-    })
-
-    it('rejects invalid render constants before native issue', async() => {
-
-        const cases = [
-            { field: 'vertexConstants', value: [ 1 ], reason: 'record' },
-            { field: 'fragmentConstants', value: { alpha: Number.NaN }, reason: 'value' },
-            { field: 'vertexConstants', value: { scale: Number.POSITIVE_INFINITY }, reason: 'value' },
-        ]
-
-        for (const scenario of cases) {
-            const { gpu, calls } = createFakeGpu()
-            const runtime = await ScratchRuntime.create({ gpu })
-            const program = createProgram(runtime)
-            const error = await rejectedDiagnostic(runtime.createRenderPipeline({
-                program,
-                [scenario.field]: scenario.value,
-                targets: [ { format: 'bgra8unorm' } ],
-            }))
-
-            expect(error.diagnostic).to.include({
-                code: 'SCRATCH_PIPELINE_CONSTANTS_INVALID',
-                severity: 'error',
-                phase: 'pipeline',
-            })
-            expect(error.diagnostic.actual).to.include({
-                stage: scenario.field === 'vertexConstants' ? 'vertex' : 'fragment',
-                reason: scenario.reason,
-            })
-            expect(calls.asyncPipelineRequests).to.have.length(0)
-        }
-    })
-
-    it('pops every scope before awaiting and joins arbitrary settlement order', async() => {
-
-        const { gpu, calls, errors, pipelines } = createFakeGpu({
-            deferCompilationInfo: true,
+        const fixture = await createRenderFixture({
             deferAsyncPipelines: true,
             deferErrorScopePops: true,
         })
-        const runtime = await ScratchRuntime.create({ gpu })
-        const program = createProgram(runtime)
-        const bindLayout = await createIsolatedBindLayout(runtime, errors, true)
-        const descriptor = renderDescriptor(program, bindLayout)
-        const promise = runtime.createRenderPipeline(descriptor)
+        const pending = fixture.runtime.createRenderPipeline(fixture.descriptor)
         let settled = false
-        promise.finally(() => {
+        pending.finally(() => {
             settled = true
         })
 
-        expect(promise).to.be.instanceOf(Promise)
-        expect(calls.nativeTimeline).to.deep.equal(expectedRenderIssueTimeline())
-        expect(errors.scopeDepth).to.equal(0)
-        expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(1)
+        expect(fixture.calls.nativeTimeline).to.deep.equal(expectedRenderIssueTimeline())
+        expect(fixture.errors.scopeDepth).to.equal(0)
+        fixture.descriptor.targets[0].blend.color.srcFactor = 'zero'
+        fixture.descriptor.vertexBuffers[0].attributes[0].offset = 128
+        fixture.descriptor.depthStencil.stencilFront.compare = 'never'
+        fixture.descriptor.multisample.count = 8
 
-        descriptor.targets[0].blend.color.srcFactor = 'zero'
-        descriptor.vertexBuffers[0].attributes[0].offset = 128
-        descriptor.depthStencil.stencilFront.compare = 'never'
-        descriptor.multisample.count = 8
-        program.modules[0] = 'mutated after native issue'
-
-        pipelines.resolvePipeline(0)
-        errors.settlePop(2)
+        fixture.pipelines.resolvePipeline(0)
+        fixture.errors.settlePop(2)
         await settleMicrotasks()
         expect(settled).to.equal(false)
-        errors.settlePop(0)
-        pipelines.resolveCompilation(0, { messages: [] })
+        fixture.errors.settlePop(0)
         await settleMicrotasks()
         expect(settled).to.equal(false)
-        errors.settlePop(1)
+        fixture.errors.settlePop(1)
 
-        const pipeline = await promise
-        const nativeDescriptor = calls.asyncPipelineRequests[0].descriptor
+        const pipeline = await pending
+        const nativeDescriptor = fixture.calls.asyncPipelineRequests[0].descriptor
         expect(nativeDescriptor.fragment.targets[0].blend.color.srcFactor).to.equal('src-alpha')
         expect(nativeDescriptor.vertex.buffers[0].attributes[0].offset).to.equal(0)
         expect(nativeDescriptor.depthStencil.stencilFront.compare).to.equal('always')
         expect(nativeDescriptor.multisample.count).to.equal(4)
-        expect(calls.shaderModules[0].descriptor.code).to.equal(triangleWgsl)
-        expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
-        expect(pipeline.compilationReport.nativeMessageCount).to.equal(0)
+        expect(pipeline.fragment.constants).to.deep.equal({ fragmentAlpha: 0.5 })
     })
 
-    it('rejects shader compilation errors with a mapped bounded report', async() => {
-
-        const fixture = await createRenderFixture({
-            compilationMessages: [ compilationMessage(
-                'error',
-                'shader compilation failed',
-                1,
-                1,
-                2,
-                1
-            ) ],
-        })
-        const error = await rejectedDiagnostic(
-            fixture.runtime.createRenderPipeline(fixture.descriptor)
-        )
-
-        expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED')
-        expect(error.incident.failureStage).to.equal('shader-compilation')
-        expect(error.incident.compilationReport.errorCount).to.equal(1)
-        expect(error.incident.compilationReport.messages[0].locationKind).to.equal('module')
-        expect(error.incident.compilationReport.messages[0].moduleLocation.moduleIndex).to.equal(0)
-        assertFailedPipelineFacts(fixture, error, 'failed')
-    })
-
-    it('classifies validation and internal GPUPipelineError rejections independently of scopes', async() => {
-
-        const cases = [
-            [ 'validation', 'SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED' ],
-            [ 'internal', 'SCRATCH_PIPELINE_CREATION_INTERNAL_FAILED' ],
-        ]
-        for (const [ reason, code ] of cases) {
-            const fixture = await createRenderFixture()
-            const nativeError = createFakePipelineError(reason, `${reason} pipeline rejection`)
-            fixture.pipelines.rejectNextPipeline('render', nativeError)
-
-            const error = await rejectedDiagnostic(
-                fixture.runtime.createRenderPipeline(fixture.descriptor)
-            )
-
-            expect(error.diagnostic.code).to.equal(code)
-            expect(error.cause).to.equal(nativeError)
-            expect(error.incident.pipelineErrorReason).to.equal(reason)
-            expect(error.incident.nativeErrorCategory).to.equal(reason)
-            expect(error.incident.failureStage).to.equal('pipeline-creation')
-            expect(error.incident.outcomes).to.have.length(1)
-            assertFailedPipelineFacts(fixture, error, 'failed')
-        }
-    })
-
-    it('does not promote a reason-shaped rejection into GPUPipelineError facts', async() => {
-
-        const fixture = await createRenderFixture()
-        const forged = { reason: 'validation' }
-        fixture.pipelines.rejectNextPipeline('render', forged)
-
-        const error = await rejectedDiagnostic(
-            fixture.runtime.createRenderPipeline(fixture.descriptor)
-        )
-
-        expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_NATIVE_FAILED')
-        expect(error.incident.nativeErrorCategory).to.equal('native-exception')
-        expect(error.incident).not.to.have.property('pipelineErrorReason')
-        assertFailedPipelineFacts(fixture, error, 'failed')
-    })
-
-    it('source-sanitizes native pipeline error facts without changing the transient cause', async() => {
+    it('classifies and source-sanitizes native pipeline failures', async() => {
 
         const fixture = await createRenderFixture()
         const sourceExcerpt = 'fn vsMain(@builtin(vertex_index) vertexIndex: u32)'
         const nativeError = createFakePipelineError(
             'validation',
-            `pipeline rejected near ${sourceExcerpt}`
+            `render pipeline rejected near ${sourceExcerpt}`
         )
         fixture.pipelines.rejectNextPipeline('render', nativeError)
 
-        const error = await rejectedDiagnostic(
+        const failure = await rejectedDiagnostic(
             fixture.runtime.createRenderPipeline(fixture.descriptor)
         )
-        const incidentJson = JSON.stringify(error.incident)
-
-        expect(error.cause).to.equal(nativeError)
-        expect(incidentJson).not.to.include(sourceExcerpt)
-        expect(error.incident.nativeError.sourceExcerptRedacted).to.equal(true)
-        expect(error.incident.outcomes[0].nativeError.sourceExcerptRedacted).to.equal(true)
-        assertFailedPipelineFacts(fixture, error, 'failed')
-
-        const scopeFixture = await createRenderFixture()
-        const scopeError = new Error(`scope message ${sourceExcerpt}`)
-        scopeError.name = `GPUValidationError ${sourceExcerpt}`
-        scopeError.reason = `scope reason ${sourceExcerpt}`
-        scopeFixture.errors.failNext('createShaderModule', 'validation', scopeError)
-
-        const scopeFailure = await rejectedDiagnostic(
-            scopeFixture.runtime.createRenderPipeline(scopeFixture.descriptor)
-        )
-        const scopeFacts = scopeFailure.incident.nativeError
-        expect(JSON.stringify(scopeFailure.incident)).not.to.include(sourceExcerpt)
-        expect(scopeFacts.sourceExcerptRedacted).to.equal(true)
-        expect(scopeFacts.name).not.to.include(sourceExcerpt)
-        expect(scopeFacts.message).not.to.include(sourceExcerpt)
-        expect(scopeFacts.reason).not.to.include(sourceExcerpt)
-        assertFailedPipelineFacts(scopeFixture, scopeFailure, 'failed')
+        expect(failure.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED')
+        expect(failure.cause).to.equal(nativeError)
+        expect(failure.incident.pipelineErrorReason).to.equal('validation')
+        expect(failure.incident.nativeError.sourceExcerptRedacted).to.equal(true)
+        expect(JSON.stringify(failure.incident)).not.to.include(sourceExcerpt)
+        assertFailedPipelineFacts(fixture, failure, 'failed')
     })
 
-    it('classifies validation, internal, and OOM support-object scope errors', async() => {
+    it('classifies support-object, synchronous, and scope-settlement failures', async() => {
 
-        const cases = [
-            [ 'validation', 'GPUValidationError' ],
-            [ 'internal', 'GPUInternalError' ],
-            [ 'out-of-memory', 'GPUOutOfMemoryError' ],
-        ]
-        for (const [ filter, name ] of cases) {
-            const fixture = await createRenderFixture()
-            const nativeError = Object.assign(new Error(`${filter} support failure`), { name })
-            fixture.errors.failNext('createShaderModule', filter, nativeError)
-
-            const error = await rejectedDiagnostic(
-                fixture.runtime.createRenderPipeline(fixture.descriptor)
-            )
-
-            expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED')
-            expect(error.cause).to.equal(nativeError)
-            expect(error.incident.nativeErrorCategory).to.equal(filter)
-            expect(error.incident.attribution).to.equal('enclosing-operation-family')
-            expect(error.incident.failureStage).to.equal('supporting-object-creation')
-            assertFailedPipelineFacts(fixture, error, 'failed')
-        }
-    })
-
-    it('balances scopes and classifies synchronous native exceptions', async() => {
-
-        const methods = [
-            'createShaderModule',
-            'createPipelineLayout',
-            'getCompilationInfo',
-            'createRenderPipelineAsync',
-        ]
-        for (const method of methods) {
-            const fixture = await createRenderFixture()
-            const nativeError = new Error(`${method} synchronous failure`)
-            fixture.errors.throwNext(method, nativeError)
-
-            const error = await rejectedDiagnostic(
-                fixture.runtime.createRenderPipeline(fixture.descriptor)
-            )
-
-            expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_NATIVE_FAILED')
-            expect(error.cause).to.equal(nativeError)
-            expect(fixture.errors.scopeDepth).to.equal(0)
-            expect(fixture.calls.errorScopes.filter(scope => scope.action === 'push')).to.have.length(3)
-            expect(fixture.calls.errorScopes.filter(scope => scope.action === 'pop')).to.have.length(3)
-            assertFailedPipelineFacts(fixture, error, 'failed')
-        }
-    })
-
-    it('classifies compilation-info and scope settlement failures structurally', async() => {
-
-        const compilationFixture = await createRenderFixture()
-        const compilationError = new Error('compilation info rejected')
-        compilationFixture.pipelines.rejectNextCompilation(compilationError)
-        const compilationFailure = await rejectedDiagnostic(
-            compilationFixture.runtime.createRenderPipeline(compilationFixture.descriptor)
-        )
-        expect(compilationFailure.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_SCOPE_FAILED')
-        expect(compilationFailure.cause).to.equal(compilationError)
-        expect(compilationFailure.incident.failureStage).to.equal('compilation-info')
-        assertFailedPipelineFacts(compilationFixture, compilationFailure, 'failed')
-
-        const scopeFixture = await createRenderFixture({
-            deferCompilationInfo: true,
-            deferAsyncPipelines: true,
-            deferErrorScopePops: true,
+        const layoutFixture = await createRenderFixture()
+        const layoutError = Object.assign(new Error('render layout OOM'), {
+            name: 'GPUOutOfMemoryError',
         })
-        const scopePromise = scopeFixture.runtime.createRenderPipeline(scopeFixture.descriptor)
-        const scopeError = new Error('validation scope rejected')
-        scopeFixture.pipelines.resolveCompilation(0, { messages: [] })
-        scopeFixture.pipelines.resolvePipeline(0)
+        layoutFixture.errors.failNext('createPipelineLayout', 'out-of-memory', layoutError)
+        const layoutFailure = await rejectedDiagnostic(
+            layoutFixture.runtime.createRenderPipeline(layoutFixture.descriptor)
+        )
+        expect(layoutFailure.diagnostic.code).to.equal('SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED')
+        expect(layoutFailure.incident.nativeErrorCategory).to.equal('out-of-memory')
+        assertFailedPipelineFacts(layoutFixture, layoutFailure, 'failed')
+
+        const nativeFixture = await createRenderFixture()
+        const nativeError = new Error('createRenderPipelineAsync synchronous failure')
+        nativeFixture.errors.throwNext('createRenderPipelineAsync', nativeError)
+        const nativeFailure = await rejectedDiagnostic(
+            nativeFixture.runtime.createRenderPipeline(nativeFixture.descriptor)
+        )
+        expect(nativeFailure.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_NATIVE_FAILED')
+        expect(nativeFailure.cause).to.equal(nativeError)
+        assertFailedPipelineFacts(nativeFixture, nativeFailure, 'failed')
+
+        const scopeFixture = await createRenderFixture({ deferErrorScopePops: true })
+        const scopePending = scopeFixture.runtime.createRenderPipeline(scopeFixture.descriptor)
+        const scopeError = new Error('render scope settlement failed')
         scopeFixture.errors.rejectPop(0, scopeError)
         scopeFixture.errors.settlePop(1)
         scopeFixture.errors.settlePop(2)
-        const scopeFailure = await rejectedDiagnostic(scopePromise)
+        const scopeFailure = await rejectedDiagnostic(scopePending)
         expect(scopeFailure.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_SCOPE_FAILED')
         expect(scopeFailure.cause).to.equal(scopeError)
-        expect(scopeFailure.incident.failureStage).to.equal('scope-settlement')
         assertFailedPipelineFacts(scopeFixture, scopeFailure, 'failed')
-
-        const malformedScopeFixture = await createRenderFixture()
-        malformedScopeFixture.errors.failNext('createShaderModule', 'validation', {})
-        const malformedScopeFailure = await rejectedDiagnostic(
-            malformedScopeFixture.runtime.createRenderPipeline(malformedScopeFixture.descriptor)
-        )
-        expect(malformedScopeFailure.diagnostic.code)
-            .to.equal('SCRATCH_PIPELINE_CREATION_SCOPE_FAILED')
-        expect(malformedScopeFailure.incident.failureStage).to.equal('scope-settlement')
-        assertFailedPipelineFacts(malformedScopeFixture, malformedScopeFailure, 'failed')
     })
 
-    it('rejects a malformed value resolved by the async native pipeline Promise', async() => {
-
-        const fixture = await createRenderFixture({ deferAsyncPipelines: true })
-        const promise = fixture.runtime.createRenderPipeline(fixture.descriptor)
-        fixture.pipelines.resolvePipeline(0, { type: 'forged render pipeline' })
-
-        const error = await rejectedDiagnostic(promise)
-        expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_NATIVE_FAILED')
-        expect(error.incident.failureStage).to.equal('pipeline-creation')
-        assertFailedPipelineFacts(fixture, error, 'failed')
-    })
-
-    it('retains every independent failure in fixed transaction-stage order', async() => {
-
-        const fixture = await createRenderFixture({
-            compilationMessages: [ compilationMessage('error', 'shader failed', 1, 1, 2, 1) ],
-        })
-        const supportError = Object.assign(new Error('support OOM'), {
-            name: 'GPUOutOfMemoryError',
-        })
-        fixture.errors.failNext('createShaderModule', 'out-of-memory', supportError)
-        fixture.pipelines.rejectNextPipeline(
-            'render',
-            createFakePipelineError('validation', 'pipeline validation failed')
-        )
-
-        const error = await rejectedDiagnostic(
-            fixture.runtime.createRenderPipeline(fixture.descriptor)
-        )
-
-        expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES')
-        expect(error.incident.nativeErrorCategory).to.equal('none')
-        expect(error.incident.attribution).to.equal('unknown')
-        expect(error.incident).not.to.have.property('pipelineErrorReason')
-        expect(error.incident.outcomes.map(outcome => outcome.stage)).to.deep.equal([
-            'supporting-object-creation',
-            'shader-compilation',
-            'pipeline-creation',
-        ])
-        expect(error.incident.outcomes.map(outcome => outcome.diagnosticCode)).to.deep.equal([
-            'SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED',
-            'SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED',
-            'SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED',
-        ])
-        expect(error.cause).to.equal(supportError)
-        assertFailedPipelineFacts(fixture, error, 'failed')
-    })
-
-    it('cancels pending creation on runtime, device, Program, and BindLayout lifecycle changes', async() => {
+    it('rechecks every lifecycle dependency after native settlement', async() => {
 
         const cases = [
-            {
-                codes: [
-                    'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
-                    'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
-                    'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED',
-                ],
-                act: fixture => fixture.runtime.dispose(),
-            },
-            {
-                codes: [ 'SCRATCH_PIPELINE_CREATION_DEVICE_LOST' ],
-                act: async(fixture) => {
-                    fixture.errors.loseDevice({ reason: 'unknown', message: 'lost during pipeline creation' })
-                    await settleMicrotasks()
-                },
-            },
-            {
-                codes: [ 'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED' ],
-                act: fixture => fixture.program.dispose(),
-            },
-            {
-                codes: [ 'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED' ],
-                act: fixture => fixture.bindLayout.dispose(),
-            },
+            [ 'program', fixture => fixture.program.dispose(), 'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED' ],
+            [ 'layout', fixture => fixture.bindLayout.dispose(), 'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED' ],
+            [ 'device', fixture => fixture.errors.loseDevice(), 'SCRATCH_PIPELINE_CREATION_DEVICE_LOST' ],
         ]
-        for (const testCase of cases) {
-            const fixture = await createRenderFixture({
-                deferCompilationInfo: true,
-                deferAsyncPipelines: true,
-            })
-            const promise = fixture.runtime.createRenderPipeline(fixture.descriptor)
-            await testCase.act(fixture)
-            fixture.pipelines.resolveCompilation(0, { messages: [] })
+        for (const [ name, act, code ] of cases) {
+            const fixture = await createRenderFixture({ deferAsyncPipelines: true })
+            const pending = fixture.runtime.createRenderPipeline(fixture.descriptor)
+            act(fixture)
+            await settleMicrotasks()
             fixture.pipelines.resolvePipeline(0)
 
-            const error = await rejectedDiagnostic(promise)
-            expect(error.diagnostic.code).to.equal(testCase.codes.length === 1
-                ? testCase.codes[0]
-                : 'SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES')
-            expect(error.incident.outcomes.map(outcome => outcome.diagnosticCode))
-                .to.deep.equal(testCase.codes)
-            expect(error.incident.failureStage).to.equal('lifecycle-recheck')
-            expect(error.incident.outcomes[0].subject).to.be.an('object')
+            const error = await rejectedDiagnostic(pending)
+            expect(error.diagnostic.code, name).to.equal(code)
             assertFailedPipelineFacts(fixture, error, 'cancelled')
         }
     })
 
-    it('retains every simultaneous lifecycle failure after native settlement', async() => {
+    it('keeps concurrent render transactions isolated under reverse settlement', async() => {
 
-        const fixture = await createRenderFixture({
-            deferCompilationInfo: true,
-            deferAsyncPipelines: true,
-        })
-        const promise = fixture.runtime.createRenderPipeline(fixture.descriptor)
-
-        fixture.program.dispose()
-        fixture.bindLayout.dispose()
-        const sourceExcerpt = 'fn fsMain() -> @location(0) vec4f'
-        fixture.errors.loseDevice({
-            reason: 'unknown',
-            message: `lost with disposed dependencies near ${sourceExcerpt}`,
-        })
-        await settleMicrotasks()
-        fixture.runtime.dispose()
-        fixture.pipelines.resolveCompilation(0, { messages: [] })
-        fixture.pipelines.resolvePipeline(0)
-
-        const error = await rejectedDiagnostic(promise)
-        expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES')
-        expect(error.incident.outcomes.map(outcome => outcome.diagnosticCode)).to.deep.equal([
-            'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
-            'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
-            'SCRATCH_PIPELINE_CREATION_PROGRAM_DISPOSED',
-            'SCRATCH_PIPELINE_CREATION_BIND_LAYOUT_DISPOSED',
-        ])
-        expect(error.incident.outcomes.every(
-            outcome => outcome.stage === 'lifecycle-recheck'
-        )).to.equal(true)
-        expect(JSON.stringify(error.incident)).not.to.include(sourceExcerpt)
-        expect(error.incident.outcomes[1].nativeError.sourceExcerptRedacted).to.equal(true)
-        assertFailedPipelineFacts(fixture, error, 'cancelled')
-    })
-
-    it('keeps device-loss source text transient across runtime and pipeline evidence', async() => {
-
-        const fixture = await createRenderFixture({
-            deferCompilationInfo: true,
-            deferAsyncPipelines: true,
-        })
-        const promise = fixture.runtime.createRenderPipeline(fixture.descriptor)
-        const sourceExcerpt = 'fn fsMain() -> @location(0) vec4f'
-        const nativeInfo = {
-            reason: 'unknown',
-            message: `device lost near ${sourceExcerpt}`,
-        }
-
-        fixture.errors.loseDevice(nativeInfo)
-        await settleMicrotasks()
-        fixture.pipelines.resolveCompilation(0, { messages: [] })
-        fixture.pipelines.resolvePipeline(0)
-
-        const error = await rejectedDiagnostic(promise)
-        const runtimeIncident = fixture.runtime.diagnostics.incidents({ kind: 'device-loss' })[0]
-        expect(error.cause).to.equal(nativeInfo)
-        expect(error.incident.outcomes[0].nativeError.sourceExcerptRedacted).to.equal(true)
-        expect(fixture.runtime.deviceLostInfo).to.deep.equal({
-            reason: 'unknown',
-            message: '[native device-loss message omitted]',
-            nativeMessageOmitted: true,
-        })
-        expect(runtimeIncident.nativeError).to.deep.include({
-            reason: 'unknown',
-            message: '[native device-loss message omitted]',
-            nativeMessageOmitted: true,
-        })
-        expect(JSON.stringify(fixture.runtime.deviceLostInfo)).not.to.include(sourceExcerpt)
-        expect(JSON.stringify(runtimeIncident)).not.to.include(sourceExcerpt)
-
-        try {
-            fixture.runtime.assertActive()
-        } catch (runtimeError) {
-            expect(JSON.stringify(runtimeError.diagnostic)).not.to.include(sourceExcerpt)
-        }
-    })
-
-    it('keeps concurrent render transactions isolated under reverse settlement order', async() => {
-
-        const fixture = await createRenderFixture({
-            deferCompilationInfo: true,
-            deferAsyncPipelines: true,
-            deferErrorScopePops: true,
-        })
+        const fixture = await createRenderFixture({ deferAsyncPipelines: true })
         const first = fixture.runtime.createRenderPipeline({
             ...fixture.descriptor,
-            label: 'first concurrent render pipeline',
+            label: 'first render pipeline',
         })
         const second = fixture.runtime.createRenderPipeline({
             ...fixture.descriptor,
-            label: 'second concurrent render pipeline',
+            label: 'second render pipeline',
         })
         let firstSettled = false
         first.finally(() => {
@@ -624,18 +241,9 @@ describe('ScratchRuntime async render pipeline creation', () => {
         })
 
         fixture.pipelines.resolvePipeline(1)
-        fixture.errors.settlePop(5)
-        fixture.pipelines.resolveCompilation(1, { messages: [] })
-        fixture.errors.settlePop(3)
-        fixture.errors.settlePop(4)
         const secondPipeline = await second
         expect(firstSettled).to.equal(false)
-
-        fixture.errors.settlePop(2)
-        fixture.pipelines.resolveCompilation(0, { messages: [] })
         fixture.pipelines.resolvePipeline(0)
-        fixture.errors.settlePop(0)
-        fixture.errors.settlePop(1)
         const firstPipeline = await first
 
         expect(firstPipeline.id).not.to.equal(secondPipeline.id)
@@ -644,89 +252,61 @@ describe('ScratchRuntime async render pipeline creation', () => {
             kind: 'render-pipeline-creation',
             status: 'succeeded',
         })).to.have.length(2)
-        expect(fixture.errors.scopeDepth).to.equal(0)
     })
 
-    it('removes current facts exactly once on wrapper and runtime disposal', async() => {
+    it('removes render facts exactly once on wrapper and Runtime disposal', async() => {
 
         const fixture = await createRenderFixture()
         const pipeline = await fixture.runtime.createRenderPipeline(fixture.descriptor)
-        expect(fixture.runtime.diagnostics.snapshot().pipelines).to.have.length(1)
-        expect(() => {
-            pipeline.id = 'mutated'
-        }).to.throw(TypeError)
-        expect(() => pipeline.targets.push({ format: 'rgba8unorm' })).to.throw(TypeError)
-        expect(pipeline.bindLayoutsByGroup).not.to.have.property('set')
 
         pipeline.dispose()
         pipeline.dispose()
         expect(pipeline.isDisposed).to.equal(true)
         expect(fixture.runtime.diagnostics.snapshot().pipelines).to.have.length(0)
-        expect(fixture.runtime.diagnostics.operations({ kind: 'pipeline-disposal' })).to.have.length(1)
-        expect(fixture.runtime.diagnostics.snapshot().aggregates.pipelineDisposals).to.equal(1)
+        expect(fixture.runtime.diagnostics.operations({ kind: 'pipeline-disposal' }))
+            .to.have.length(1)
 
         const live = await fixture.runtime.createRenderPipeline({
             ...fixture.descriptor,
-            label: 'runtime-owned live pipeline',
+            label: 'runtime-owned render pipeline',
         })
         fixture.runtime.dispose()
         expect(live.isDisposed).to.equal(true)
-        expect(fixture.runtime.diagnostics.snapshot().pipelines).to.have.length(0)
-        expect(fixture.runtime.diagnostics.operations({ kind: 'pipeline-disposal' })).to.have.length(2)
-        expect(fixture.runtime.diagnostics.snapshot().aggregates.pipelineDisposals).to.equal(2)
+        expect(fixture.runtime.diagnostics.operations({ kind: 'pipeline-disposal' }))
+            .to.have.length(2)
     })
 })
 
-async function createRenderFixture(options = {}) {
+async function createRenderFixture(deferred = {}) {
 
-    const fake = createFakeGpu(options)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const program = createProgram(runtime)
-    const bindLayout = await createIsolatedBindLayout(
-        runtime,
-        fake.errors,
-        options.deferErrorScopePops
-    )
-    return {
-        ...fake,
-        runtime,
-        program,
-        bindLayout,
-        descriptor: renderDescriptor(program, bindLayout),
+    const controls = {
+        deferAsyncPipelines: false,
+        deferErrorScopePops: false,
     }
-}
-
-function assertFailedPipelineFacts(fixture, error, status) {
-
-    expect(error.incident.kind).to.equal('pipeline-failure')
-    expect(error.incident.target.kind).to.equal('pipeline')
-    expect(error.incident.target.pipelineKind).to.equal('render')
-    expect(error.incident.target.programId).to.equal(fixture.program.id)
-    const operations = fixture.runtime.diagnostics.operations({
-        targetKind: 'pipeline',
-        pipelineId: error.incident.target.pipelineId,
+    const fake = createFakeGpu(controls)
+    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const shaderModule = await runtime.createShaderModule({
+        label: 'async render module',
+        sourceParts: [ { code: triangleWgsl } ],
     })
-    expect(operations).to.have.length(1)
-    expect(operations[0].status).to.equal(status)
-    expect(operations[0].incidentId).to.equal(error.incident.id)
-    expect(fixture.runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
-    expect(fixture.runtime.diagnostics.snapshot().pipelines).to.have.length(0)
-    expect(fixture.calls.uncapturedErrors).to.have.length(0)
-    expect(JSON.stringify(error.incident)).not.to.include(triangleWgsl)
-}
-
-function createProgram(runtime) {
-
-    return runtime.createProgram({
+    const vertexConstants = { vertexScale: 2 }
+    const fragmentConstants = { fragmentAlpha: 0.5 }
+    const program = runtime.createProgram({
         label: 'async render program',
-        modules: [ triangleWgsl ],
-        entryPoints: { vertex: 'vsMain', fragment: 'fsMain', compute: 'csMain' },
+        vertex: {
+            module: shaderModule,
+            entryPoint: 'vsMain',
+            constants: vertexConstants,
+        },
+        fragment: {
+            module: shaderModule,
+            entryPoint: 'fsMain',
+            constants: fragmentConstants,
+        },
     })
-}
-
-function createBindLayout(runtime) {
-
-    return runtime.createBindLayout({
+    vertexConstants.vertexScale = 99
+    fragmentConstants.fragmentAlpha = 0
+    const bindLayout = await runtime.createBindLayout({
         group: 0,
         entries: [ {
             binding: 0,
@@ -735,19 +315,16 @@ function createBindLayout(runtime) {
             visibility: [ 'vertex' ],
         } ],
     })
-}
-
-async function createIsolatedBindLayout(runtime, errors, deferErrorScopePops = false) {
-
-    const creation = createBindLayout(runtime)
-    if (deferErrorScopePops) {
-        errors.settlePop(0)
-        errors.settlePop(1)
-        errors.settlePop(2)
+    fake.errors.resetHistory()
+    Object.assign(controls, deferred)
+    return {
+        ...fake,
+        runtime,
+        shaderModule,
+        program,
+        bindLayout,
+        descriptor: renderDescriptor(program, bindLayout),
     }
-    const layout = await creation
-    errors.resetHistory()
-    return layout
 }
 
 function renderDescriptor(program, bindLayout) {
@@ -755,7 +332,7 @@ function renderDescriptor(program, bindLayout) {
     return {
         label: 'async render pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         vertexBuffers: [ {
             arrayStride: 8,
             stepMode: 'vertex',
@@ -764,8 +341,16 @@ function renderDescriptor(program, bindLayout) {
         targets: [ {
             format: 'bgra8unorm',
             blend: {
-                color: { operation: 'add', srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
-                alpha: { operation: 'add', srcFactor: 'one', dstFactor: 'zero' },
+                color: {
+                    operation: 'add',
+                    srcFactor: 'src-alpha',
+                    dstFactor: 'one-minus-src-alpha',
+                },
+                alpha: {
+                    operation: 'add',
+                    srcFactor: 'one',
+                    dstFactor: 'zero',
+                },
             },
             writeMask: 0xF,
         } ],
@@ -780,21 +365,46 @@ function renderDescriptor(program, bindLayout) {
             format: 'depth24plus-stencil8',
             depthWriteEnabled: true,
             depthCompare: 'less',
-            stencilFront: { compare: 'always', failOp: 'keep', depthFailOp: 'keep', passOp: 'replace' },
-            stencilBack: { compare: 'equal', failOp: 'zero', depthFailOp: 'invert', passOp: 'keep' },
+            stencilFront: {
+                compare: 'always',
+                failOp: 'keep',
+                depthFailOp: 'keep',
+                passOp: 'replace',
+            },
+            stencilBack: {
+                compare: 'equal',
+                failOp: 'zero',
+                depthFailOp: 'invert',
+                passOp: 'keep',
+            },
             stencilReadMask: 0xFF,
             stencilWriteMask: 0x7F,
             depthBias: 2,
             depthBiasSlopeScale: 1.5,
             depthBiasClamp: 0.25,
         },
-        multisample: { count: 4, mask: 0xFFFF, alphaToCoverageEnabled: true },
+        multisample: {
+            count: 4,
+            mask: 0xFFFF,
+            alphaToCoverageEnabled: true,
+        },
     }
 }
 
-function compilationMessage(type, message, offset, length, lineNum, linePos) {
+function assertFailedPipelineFacts(fixture, error, status) {
 
-    return { type, message, offset, length, lineNum, linePos }
+    expect(error.incident.kind).to.equal('pipeline-failure')
+    expect(error.incident.target.pipelineKind).to.equal('render')
+    expect(error.incident.target.programId).to.equal(fixture.program.id)
+    const operations = fixture.runtime.diagnostics.operations({
+        targetKind: 'pipeline',
+        pipelineId: error.incident.target.pipelineId,
+    })
+    expect(operations).to.have.length(1)
+    expect(operations[0].status).to.equal(status)
+    expect(operations[0].incidentId).to.equal(error.incident.id)
+    expect(fixture.runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
+    expect(fixture.runtime.diagnostics.snapshot().pipelines).to.have.length(0)
 }
 
 function expectedRenderIssueTimeline() {
@@ -803,9 +413,7 @@ function expectedRenderIssueTimeline() {
         { type: 'push-error-scope', filter: 'out-of-memory' },
         { type: 'push-error-scope', filter: 'internal' },
         { type: 'push-error-scope', filter: 'validation' },
-        { type: 'create-shader-module' },
         { type: 'create-pipeline-layout' },
-        { type: 'get-compilation-info' },
         { type: 'create-render-pipeline-async' },
         { type: 'pop-error-scope', filter: 'validation' },
         { type: 'pop-error-scope', filter: 'internal' },

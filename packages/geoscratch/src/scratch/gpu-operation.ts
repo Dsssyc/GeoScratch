@@ -1,8 +1,9 @@
 import type { DiagnosticSubject } from './diagnostics.js'
-import { normalizePipelineCompilationReport } from './pipeline-compilation.js'
+import { normalizePipelineCreationReport } from './pipeline-compilation.js'
 import type {
-    PipelineCompilationReport,
+    PipelineCreationReport,
     PipelineKind,
+    ShaderModuleCompilationReport,
 } from './pipeline-compilation.js'
 
 const MAX_INCIDENT_RELATED_SUBJECTS = 64
@@ -24,6 +25,7 @@ export type GpuOperationKind =
     | 'query-set-allocation'
     | 'bind-layout-allocation'
     | 'bind-set-preparation'
+    | 'shader-module-creation'
     | 'resource-disposal'
     | 'render-pipeline-creation'
     | 'compute-pipeline-creation'
@@ -135,7 +137,15 @@ export type ScratchGpuPipelineOperationTarget = Readonly<{
     pipelineId: string
     pipelineKind: PipelineKind
     programId: string
-    programSourceHash: string
+    programContractHash: string
+}>
+
+export type ScratchGpuShaderModuleOperationTarget = Readonly<{
+    kind: 'shader-module'
+    shaderModuleId: string
+    sourceHash: string
+    sourcePartCount: number
+    compilationHintCount: number
 }>
 
 export type ScratchGpuCommandOperationTarget = Readonly<{
@@ -164,6 +174,7 @@ export type ScratchGpuSubmissionOperationTarget = Readonly<{
 
 export type ScratchGpuOperationTarget =
     | ScratchGpuResourceOperationTarget
+    | ScratchGpuShaderModuleOperationTarget
     | ScratchGpuPipelineOperationTarget
     | ScratchGpuBindLayoutOperationTarget
     | ScratchGpuBindSetOperationTarget
@@ -345,8 +356,7 @@ export type ScratchPipelineNativeLabelFact = Readonly<{
 
 export type ScratchPipelineNativeLabelEvidence = Readonly<{
     pipeline: ScratchPipelineNativeLabelFact
-    shaderModule: ScratchPipelineNativeLabelFact
-    pipelineLayout: ScratchPipelineNativeLabelFact
+    pipelineLayout?: ScratchPipelineNativeLabelFact
 }>
 
 type ScratchGpuOperationRecordBase = Readonly<{
@@ -360,7 +370,7 @@ type ScratchGpuOperationRecordBase = Readonly<{
     descriptor: GpuDescriptorEvidence
     nativeLabel?: string
     nativeLabels?: ScratchPipelineNativeLabelEvidence
-    compilationReport?: PipelineCompilationReport
+    pipelineCreationReport?: PipelineCreationReport
     nativeErrorCategory?: GpuNativeErrorCategory
     incidentId?: string
     startedAtMs?: number
@@ -379,7 +389,7 @@ export type ScratchGpuResourceOperationRecord = ScratchGpuOperationRecordBase & 
         | 'buffer-mapping'
         | 'resource-disposal'
     nativeLabels?: never
-    compilationReport?: never
+    pipelineCreationReport?: never
     nativeOutcome?: never
 }>
 
@@ -387,7 +397,7 @@ export type ScratchGpuBindLayoutOperationRecord = ScratchGpuOperationRecordBase 
     target: ScratchGpuBindLayoutOperationTarget
     kind: 'bind-layout-allocation'
     nativeLabels?: never
-    compilationReport?: never
+    pipelineCreationReport?: never
     nativeOutcome?: never
 }>
 
@@ -395,7 +405,7 @@ export type ScratchGpuBindSetOperationRecord = ScratchGpuOperationRecordBase & R
     target: ScratchGpuBindSetOperationTarget
     kind: 'bind-set-preparation'
     nativeLabels?: never
-    compilationReport?: never
+    pipelineCreationReport?: never
     nativeOutcome?: never
 }>
 
@@ -405,11 +415,19 @@ export type ScratchGpuPipelineOperationRecord = ScratchGpuOperationRecordBase & 
     nativeOutcome?: never
 }>
 
+export type ScratchGpuShaderModuleOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
+    target: ScratchGpuShaderModuleOperationTarget
+    kind: 'shader-module-creation'
+    nativeLabels?: never
+    pipelineCreationReport?: never
+    nativeOutcome?: never
+}>
+
 export type ScratchGpuCommandOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
     target: ScratchGpuCommandOperationTarget
     kind: 'readback-staging-allocation' | 'readback-staging-release'
     nativeLabels?: never
-    compilationReport?: never
+    pipelineCreationReport?: never
     nativeOutcome?: never
 }>
 
@@ -418,14 +436,14 @@ export type ScratchGpuReadbackOperationRecord =
         target: ScratchGpuReadbackOperationTarget
         kind: 'readback-staging-allocation' | 'readback-mapping' | 'readback-staging-release'
         nativeLabels?: never
-        compilationReport?: never
+        pipelineCreationReport?: never
         nativeOutcome?: never
     }>
     | ScratchGpuOperationRecordBase & Readonly<{
         target: ScratchGpuReadbackOperationTarget
         kind: 'readback-native-observation'
         nativeLabels?: never
-        compilationReport?: never
+        pipelineCreationReport?: never
         nativeOutcome?: ScratchReadbackNativeOutcome
     }>
 
@@ -434,11 +452,12 @@ export type ScratchGpuSubmissionOperationRecord = ScratchGpuOperationRecordBase 
     kind: 'submission-native-observation'
     nativeOutcome?: ScratchSubmissionNativeOutcome
     nativeLabels?: never
-    compilationReport?: never
+    pipelineCreationReport?: never
 }>
 
 export type ScratchGpuOperationRecord =
     | ScratchGpuResourceOperationRecord
+    | ScratchGpuShaderModuleOperationRecord
     | ScratchGpuPipelineOperationRecord
     | ScratchGpuBindLayoutOperationRecord
     | ScratchGpuBindSetOperationRecord
@@ -456,7 +475,7 @@ export type ScratchGpuOperationRecordInput = Readonly<{
     descriptor: GpuDescriptorEvidence
     nativeLabel?: string
     nativeLabels?: ScratchPipelineNativeLabelEvidence
-    compilationReport?: PipelineCompilationReport
+    pipelineCreationReport?: PipelineCreationReport
     nativeErrorCategory?: GpuNativeErrorCategory
     incidentId?: string
     startedAtMs?: number
@@ -567,6 +586,8 @@ export type ScratchSubmissionFailureStage =
 
 export type ScratchSupportingObjectFailureStage =
     | 'native-issue'
+    | 'compilation-info'
+    | 'shader-compilation'
     | 'scope-settlement'
     | 'lifecycle-recheck'
     | ScratchGpuBindSetPreparationStage
@@ -593,7 +614,7 @@ export type ScratchGpuIncidentPipelineFact = Readonly<{
     label?: string
     pipelineKind: PipelineKind
     programId: string
-    programSourceHash: string
+    programContractHash: string
     descriptorHash: string
     state: string
     lastCreationOperationId?: string
@@ -635,7 +656,7 @@ export type ScratchGpuBufferMappingIncidentReport = ScratchGpuIncidentReportBase
     failureStage: ScratchBufferMappingFailureStage
     outcomes?: readonly ScratchGpuIncidentOutcome[]
     pressure?: ScratchGpuPressureEvidence
-    compilationReport?: never
+    pipelineCreationReport?: never
     pipelineErrorReason?: never
 }>
 
@@ -645,11 +666,13 @@ export type ScratchGpuSupportingObjectIncidentReport = ScratchGpuIncidentReportB
         | ScratchGpuQuerySetOperationTarget
         | ScratchGpuBindLayoutOperationTarget
         | ScratchGpuBindSetOperationTarget
+        | ScratchGpuShaderModuleOperationTarget
     kind: 'supporting-object-failure'
     failureStage: ScratchSupportingObjectFailureStage
     outcomes?: readonly ScratchGpuIncidentOutcome[]
     pressure?: ScratchGpuPressureEvidence
-    compilationReport?: never
+    shaderModuleCompilationReport?: ShaderModuleCompilationReport
+    pipelineCreationReport?: never
     pipelineErrorReason?: never
 }>
 
@@ -658,7 +681,8 @@ export type ScratchGpuPipelineIncidentReport = ScratchGpuIncidentReportBase & Re
     kind: 'pipeline-failure'
     failureStage: ScratchGpuPipelineFailureStage
     pipelineErrorReason?: GPUPipelineErrorReason
-    compilationReport?: PipelineCompilationReport
+    pipelineCreationReport?: PipelineCreationReport
+    shaderModuleCompilationReport?: ShaderModuleCompilationReport
     outcomes?: readonly ScratchGpuIncidentOutcome[]
     pressure?: never
 }>
@@ -669,7 +693,7 @@ export type ScratchGpuReadbackIncidentReport = ScratchGpuIncidentReportBase & Re
     failureStage: ScratchReadbackFailureStage
     outcomes?: readonly ScratchGpuIncidentOutcome[]
     pressure?: never
-    compilationReport?: never
+    pipelineCreationReport?: never
     pipelineErrorReason?: never
 }>
 
@@ -679,7 +703,7 @@ export type ScratchGpuSubmissionIncidentReport = ScratchGpuIncidentReportBase & 
     failureStage: ScratchSubmissionFailureStage
     outcomes?: readonly ScratchGpuIncidentOutcome[]
     pressure?: never
-    compilationReport?: never
+    pipelineCreationReport?: never
     pipelineErrorReason?: never
 }>
 
@@ -719,7 +743,8 @@ export type ScratchGpuIncidentReportInput = Readonly<{
     pressure?: ScratchGpuPressureEvidence
     failureStage?: ScratchGpuIncidentFailureStage
     pipelineErrorReason?: GPUPipelineErrorReason
-    compilationReport?: PipelineCompilationReport
+    pipelineCreationReport?: PipelineCreationReport
+    shaderModuleCompilationReport?: ShaderModuleCompilationReport
     outcomes?: readonly ScratchGpuIncidentOutcome[]
     omittedOutcomeCount?: number
     evidence: ScratchGpuIncidentEvidenceCompleteness
@@ -753,9 +778,9 @@ export function createGpuOperationRecord(
                 input.target.pipelineId
             )
         }
-        if (input.compilationReport !== undefined) {
-            record.compilationReport = normalizeCompilationReportEvidence(
-                input.compilationReport,
+        if (input.pipelineCreationReport !== undefined) {
+            record.pipelineCreationReport = normalizePipelineCreationReportEvidence(
+                input.pipelineCreationReport,
                 input.target
             )
         }
@@ -948,6 +973,16 @@ export function createGpuIncidentReport(
         if (outcomes !== undefined) {
             report.outcomes = cloneJsonValue(outcomes, new Set<object>(), true)
         }
+        if (
+            input.target.kind === 'shader-module' &&
+            input.shaderModuleCompilationReport !== undefined
+        ) {
+            report.shaderModuleCompilationReport =
+                normalizeShaderModuleCompilationReportEvidence(
+                    input.shaderModuleCompilationReport,
+                    input.target
+                )
+        }
     }
     if (input.target.kind === 'pipeline') {
         copyJsonDefined(report, input, [
@@ -958,9 +993,9 @@ export function createGpuIncidentReport(
         if (outcomes !== undefined) {
             report.outcomes = cloneJsonValue(outcomes, new Set<object>(), true)
         }
-        if (input.compilationReport !== undefined) {
-            report.compilationReport = normalizeCompilationReportEvidence(
-                input.compilationReport,
+        if (input.pipelineCreationReport !== undefined) {
+            report.pipelineCreationReport = normalizePipelineCreationReportEvidence(
+                input.pipelineCreationReport,
                 input.target
             )
         }
@@ -998,22 +1033,38 @@ function normalizePipelineNativeLabels(
     }
     return deepFreeze({
         pipeline: normalize(evidence.pipeline),
-        shaderModule: normalize(evidence.shaderModule),
-        pipelineLayout: normalize(evidence.pipelineLayout),
+        ...(evidence.pipelineLayout !== undefined
+            ? { pipelineLayout: normalize(evidence.pipelineLayout) }
+            : {}),
     })
 }
 
-function normalizeCompilationReportEvidence(
-    input: PipelineCompilationReport,
+function normalizePipelineCreationReportEvidence(
+    input: PipelineCreationReport,
     target: ScratchGpuPipelineOperationTarget
-): PipelineCompilationReport {
+): PipelineCreationReport {
 
-    return normalizePipelineCompilationReport(input, {
+    return normalizePipelineCreationReport(input, {
         pipelineId: target.pipelineId,
         pipelineKind: target.pipelineKind,
         programId: target.programId,
-        combinedSourceHash: target.programSourceHash,
+        contractHash: target.programContractHash,
     })
+}
+
+function normalizeShaderModuleCompilationReportEvidence(
+    input: ShaderModuleCompilationReport,
+    target: ScratchGpuShaderModuleOperationTarget
+): ShaderModuleCompilationReport {
+
+    if (
+        input.shaderModuleId !== target.shaderModuleId ||
+        input.sourceHash !== target.sourceHash ||
+        input.sourcePartCount !== target.sourcePartCount
+    ) {
+        throw new TypeError('ShaderModule compilation report identity does not match its incident target.')
+    }
+    return cloneJsonValue(input, new Set<object>(), true) as ShaderModuleCompilationReport
 }
 
 export function serializeNativeGpuError(error: unknown): ScratchNativeGpuErrorFacts {
@@ -1106,6 +1157,9 @@ function createIncidentRelatedSubjects(input: ScratchGpuIncidentReportInput): Di
         })
         related.push({ kind: 'Program', id: input.target.programId })
     }
+    if (input.target.kind === 'shader-module') {
+        related.push({ kind: 'ShaderModule', id: input.target.shaderModuleId })
+    }
     if (input.target.kind === 'command') {
         related.push({
             kind: 'Command',
@@ -1140,6 +1194,9 @@ function createIncidentSubject(input: ScratchGpuIncidentReportInput): Diagnostic
             id: input.target.pipelineId,
             pipelineKind: input.target.pipelineKind,
         }
+    }
+    if (input.target.kind === 'shader-module') {
+        return { kind: 'ShaderModule', id: input.target.shaderModuleId }
     }
     if (input.target.kind === 'command') {
         return {
@@ -1193,6 +1250,9 @@ export function assertGpuOperationTarget(
         case 'bind-set-preparation':
             if (target.kind === 'bind-set') return
             throw new TypeError(`GPU operation ${kind} requires a BindSet target.`)
+        case 'shader-module-creation':
+            if (target.kind === 'shader-module') return
+            throw new TypeError(`GPU operation ${kind} requires a ShaderModule target.`)
         case 'resource-disposal':
             if (target.kind === 'resource') return
             break
@@ -1239,6 +1299,7 @@ function assertIncidentTarget(input: ScratchGpuIncidentReportInput): void {
             ? (
                 input.target.kind === 'bind-layout' ||
                 input.target.kind === 'bind-set' ||
+                input.target.kind === 'shader-module' ||
                 input.target.kind === 'resource' && (
                     input.target.resourceKind === 'SamplerResource' ||
                     input.target.resourceKind === 'QuerySetResource'
@@ -1289,6 +1350,7 @@ function operationTargetId(target: ScratchGpuOperationTarget): string {
 
     switch (target.kind) {
         case 'resource': return target.resourceId
+        case 'shader-module': return target.shaderModuleId
         case 'pipeline': return target.pipelineId
         case 'bind-layout': return target.bindLayoutId
         case 'bind-set': return target.bindSetId

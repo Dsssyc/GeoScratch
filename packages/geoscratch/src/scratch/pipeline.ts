@@ -1,10 +1,18 @@
 import { UUID } from '../core/utils/uuid.js'
-import { firstBindingLimitViolation, isBindLayout } from './binding.js'
+import {
+    createNativeDerivedBindLayout,
+    firstBindingLimitViolation,
+    isBindLayout,
+    normalizeBindLayoutDescriptor,
+} from './binding.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
     issuePipelineCreation,
 } from './pipeline-creation.js'
-import { snapshotPipelineSource } from './pipeline-compilation.js'
+import {
+    createPipelineCreationReport,
+    snapshotPipelineSource,
+} from './pipeline-compilation.js'
 import { createPipelineNativeErrorSerializer } from './pipeline-native-error.js'
 import { registerRuntimePipeline, unregisterRuntimePipeline } from './pipeline-ownership.js'
 import { describeValue } from './type-utils.js'
@@ -18,13 +26,18 @@ import {
     programLayoutRequirementSubject,
     snapshotProgramPipelineFacts,
 } from './program.js'
+import { shaderModuleSourceSnapshot } from './shader-module.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import {
     assertScratchRuntimeActive,
     scratchRuntimeAuthoritySubject,
 } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
-import type { BindLayout } from './binding.js'
+import type {
+    BindLayout,
+    BindLayoutDescriptor,
+    NormalizedBindLayoutDescriptor,
+} from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type {
     GpuAttributionConfidence,
@@ -37,19 +50,29 @@ import type {
     PipelineCreationObservedFailure,
     PipelineNativeLabels,
 } from './pipeline-creation.js'
-import type { PipelineCompilationReport, PipelineSourceSnapshot } from './pipeline-compilation.js'
+import type {
+    PipelineCreationReport,
+    PipelineSourceSnapshot,
+} from './pipeline-compilation.js'
 import type {
     Program,
     ProgramBufferLayoutRequirement,
     ProgramPipelineAuthorityStamp,
+    ProgramStage,
 } from './program.js'
 import type { ScratchGpuOperationCompletion, ScratchPendingGpuOperation } from './runtime-diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 
 const renderPipelineToken = Symbol('RenderPipeline')
-const renderPipelineStates = new WeakMap<RenderPipeline, { isDisposed: boolean }>()
+type PipelineObjectState = {
+    isDisposed: boolean
+    bindLayoutsByGroup: Map<number, BindLayout>
+    derivedLayoutPromises: Map<number, Promise<BindLayout>>
+    derivedLayoutSignatures: Map<number, string>
+}
+const renderPipelineStates = new WeakMap<RenderPipeline, PipelineObjectState>()
 const computePipelineToken = Symbol('ComputePipeline')
-const computePipelineStates = new WeakMap<ComputePipeline, { isDisposed: boolean }>()
+const computePipelineStates = new WeakMap<ComputePipeline, PipelineObjectState>()
 const pipelineProgramLayoutRequirements = new WeakMap<
     RenderPipeline | ComputePipeline,
     readonly ProgramBufferLayoutRequirement[]
@@ -66,13 +89,9 @@ export type RenderPipelineLayoutSnapshot = Readonly<{
 export type RenderPipelineDescriptor = {
     label?: string
     program: Program
-    vertex?: string
-    fragment?: string
-    bindLayouts?: BindLayout[]
+    layout?: PipelineLayoutDescriptor
     vertexBuffers?: readonly (GPUVertexBufferLayout | null)[]
-    targets: readonly (GPUColorTargetState | null)[]
-    vertexConstants?: Readonly<Record<string, number>>
-    fragmentConstants?: Readonly<Record<string, number>>
+    targets?: readonly (GPUColorTargetState | null)[]
     primitive?: GPUPrimitiveState
     depthStencil?: GPUDepthStencilState
     multisample?: GPUMultisampleState
@@ -82,11 +101,18 @@ export type RenderPipelineDescriptor = {
 export type ComputePipelineDescriptor = {
     label?: string
     program: Program
-    compute?: string
-    bindLayouts?: BindLayout[]
-    constants?: Record<string, GPUPipelineConstantValue>
+    layout?: PipelineLayoutDescriptor
     immediateSize?: number
 }
+
+export type PipelineLayoutDescriptor =
+    | Readonly<{
+        mode: 'explicit'
+        bindLayouts?: readonly BindLayout[]
+    }>
+    | Readonly<{
+        mode: 'auto'
+    }>
 
 export interface RenderPipeline {
     readonly runtime: ScratchRuntime
@@ -94,23 +120,22 @@ export interface RenderPipeline {
     readonly label?: string
     readonly pipelineKind: 'render'
     readonly program: Program
-    readonly vertexEntryPoint: string
-    readonly fragmentEntryPoint: string
+    readonly vertex: ProgramStage
+    readonly fragment?: ProgramStage
+    readonly layoutMode: 'explicit' | 'auto'
     readonly bindLayouts: readonly BindLayout[]
     readonly bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
     readonly vertexBuffers: readonly (GPUVertexBufferLayout | null)[]
     readonly targets: readonly (GPUColorTargetState | null)[]
     readonly targetFormats: readonly (GPUTextureFormat | null)[]
-    readonly vertexConstants?: Readonly<Record<string, number>>
-    readonly fragmentConstants?: Readonly<Record<string, number>>
     readonly primitive: Readonly<GPUPrimitiveState>
     readonly depthStencil?: Readonly<GPUDepthStencilState>
     readonly depthStencilFormat?: GPUTextureFormat
     readonly immediateSize: number
-    readonly shaderModule: GPUShaderModule
-    readonly pipelineLayout: GPUPipelineLayout
+    readonly pipelineLayout?: GPUPipelineLayout
     readonly gpuPipeline: GPURenderPipeline
-    readonly compilationReport: PipelineCompilationReport
+    readonly creationReport: PipelineCreationReport
+    getBindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout>
 }
 
 export class RenderPipeline {
@@ -127,7 +152,14 @@ export class RenderPipeline {
                 hints: [ 'Use await runtime.createRenderPipeline(descriptor).' ],
             })
         }
-        renderPipelineStates.set(this, { isDisposed: false })
+        renderPipelineStates.set(this, {
+            isDisposed: false,
+            bindLayoutsByGroup: new Map(
+                state.bindLayouts.map(layout => [ layout.group, layout ])
+            ),
+            derivedLayoutPromises: new Map(),
+            derivedLayoutSignatures: new Map(),
+        })
         pipelineProgramLayoutRequirements.set(this, state.layoutRequirements)
         renderPipelineLayouts.set(this, Object.freeze({
             colorFormats: state.targetFormats,
@@ -198,11 +230,17 @@ export class RenderPipeline {
         }
     }
 
+    async getBindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout> {
+
+        return getPipelineBindLayout(this, descriptor)
+    }
+
     dispose(): void {
 
         const state = renderPipelineStateFor(this)
         if (state.isDisposed) return
         state.isDisposed = true
+        disposeDerivedPipelineLayouts(state)
         unregisterRuntimePipeline(this.runtime, this)
     }
 }
@@ -222,6 +260,7 @@ type PipelineValidationContext = {
     program: Program
     programAuthority: ProgramPipelineAuthorityStamp
     subject: DiagnosticSubject
+    layoutMode: 'explicit' | 'auto'
     bindLayouts: readonly BindLayout[]
     bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
     layoutRequirements: readonly ProgramBufferLayoutRequirement[]
@@ -230,30 +269,28 @@ type PipelineValidationContext = {
 type PipelineCreationPlan = PipelineValidationContext & Readonly<{
     immediateSize: number
     sourceSnapshot: PipelineSourceSnapshot
+    creationReport: PipelineCreationReport
 }>
 
 type RenderPipelinePlan = PipelineValidationContext & Readonly<{
     pipelineKind: 'render'
     immediateSize: number
-    vertexEntryPoint: string
-    fragmentEntryPoint: string
+    vertex: ProgramStage
+    fragment?: ProgramStage
     vertexBuffers: readonly (GPUVertexBufferLayout | null)[]
     targets: readonly (GPUColorTargetState | null)[]
     targetFormats: readonly (GPUTextureFormat | null)[]
-    vertexConstants?: Readonly<Record<string, number>>
-    fragmentConstants?: Readonly<Record<string, number>>
     primitive: Readonly<GPUPrimitiveState>
     depthStencil?: Readonly<GPUDepthStencilState>
     depthStencilFormat?: GPUTextureFormat
     multisample?: Readonly<GPUMultisampleState>
     sourceSnapshot: PipelineSourceSnapshot
+    creationReport: PipelineCreationReport
 }>
 
 type RenderPipelineState = RenderPipelinePlan & Readonly<{
-    shaderModule: GPUShaderModule
-    pipelineLayout: GPUPipelineLayout
+    pipelineLayout?: GPUPipelineLayout
     gpuPipeline: GPURenderPipeline
-    compilationReport: PipelineCompilationReport
 }>
 
 export async function createRenderPipeline(
@@ -270,7 +307,7 @@ export async function createRenderPipeline(
         pipelineId: plan.id,
         pipelineKind: 'render' as const,
         programId: plan.program.id,
-        programSourceHash: plan.sourceSnapshot.combinedSourceHash,
+        programContractHash: plan.creationReport.contractHash,
     }
     const descriptorEvidence = renderPipelineDescriptorEvidence(plan)
     const operation = controller.beginOperation({
@@ -286,29 +323,39 @@ export async function createRenderPipeline(
         pipelineKind: 'render',
         sourceSnapshot: plan.sourceSnapshot,
         nativeLabels,
-        bindGroupLayouts: nativeBindGroupLayouts(plan.bindLayouts),
-        immediateSize: plan.immediateSize,
-        lowerPipelineDescriptor: (shaderModule, pipelineLayout) => {
+        layout: plan.layoutMode === 'auto'
+            ? 'auto'
+            : {
+                bindGroupLayouts: nativeBindGroupLayouts(plan.bindLayouts),
+                immediateSize: plan.immediateSize,
+            },
+        lowerPipelineDescriptor: (pipelineLayout) => {
             const nativeDescriptor: GPURenderPipelineDescriptor = {
                 label: nativeLabels.pipeline,
                 layout: pipelineLayout,
                 vertex: {
-                    module: shaderModule,
-                    entryPoint: plan.vertexEntryPoint,
+                    module: plan.vertex.module.gpuShaderModule,
                     buffers: [ ...plan.vertexBuffers ],
-                    ...(plan.vertexConstants !== undefined
-                        ? { constants: plan.vertexConstants }
+                    ...(plan.vertex.entryPoint !== undefined
+                        ? { entryPoint: plan.vertex.entryPoint }
                         : {}),
-                },
-                fragment: {
-                    module: shaderModule,
-                    entryPoint: plan.fragmentEntryPoint,
-                    targets: [ ...plan.targets ],
-                    ...(plan.fragmentConstants !== undefined
-                        ? { constants: plan.fragmentConstants }
+                    ...(plan.vertex.constants !== undefined
+                        ? { constants: plan.vertex.constants }
                         : {}),
                 },
                 primitive: plan.primitive,
+            }
+            if (plan.fragment !== undefined) {
+                nativeDescriptor.fragment = {
+                    module: plan.fragment.module.gpuShaderModule,
+                    ...(plan.fragment.entryPoint !== undefined
+                        ? { entryPoint: plan.fragment.entryPoint }
+                        : {}),
+                    targets: [ ...plan.targets ],
+                    ...(plan.fragment.constants !== undefined
+                        ? { constants: plan.fragment.constants }
+                        : {}),
+                }
             }
             if (plan.depthStencil !== undefined) nativeDescriptor.depthStencil = plan.depthStencil
             if (plan.multisample !== undefined) nativeDescriptor.multisample = plan.multisample
@@ -322,10 +369,8 @@ export async function createRenderPipeline(
     ]
     if (
         failures.length > 0 ||
-        issue.shaderModule === undefined ||
-        issue.pipelineLayout === undefined ||
         issue.nativePipeline === undefined ||
-        issue.compilationReport === undefined
+        (plan.layoutMode === 'explicit' && issue.pipelineLayout === undefined)
     ) {
         throwPipelineCreationFailure(
             plan,
@@ -339,7 +384,7 @@ export async function createRenderPipeline(
     const completion = {
         status: 'succeeded' as const,
         nativeLabels: nativeLabelEvidence(nativeLabels),
-        compilationReport: issue.compilationReport,
+        pipelineCreationReport: plan.creationReport,
     }
     const creationRecord = controller.completeOperation(operation, completion)
     if (
@@ -354,10 +399,8 @@ export async function createRenderPipeline(
     ) => RenderPipeline
     const pipeline = new Constructor(renderPipelineToken, {
         ...plan,
-        shaderModule: issue.shaderModule,
-        pipelineLayout: issue.pipelineLayout,
+        ...(issue.pipelineLayout !== undefined ? { pipelineLayout: issue.pipelineLayout } : {}),
         gpuPipeline: issue.nativePipeline as GPURenderPipeline,
-        compilationReport: creationRecord.compilationReport!,
     })
     registerRuntimePipeline(runtime, pipeline, creationRecord)
     return pipeline
@@ -403,11 +446,14 @@ function prepareRenderPipeline(
         program,
         programAuthority: programSnapshot.authority,
         subject,
+        layoutMode: 'explicit',
         bindLayouts: Object.freeze([]),
         bindLayoutsByGroup: readonlyMapSnapshot(new Map()),
         layoutRequirements,
     }
-    const bindLayouts = Object.freeze(normalizeBindLayouts(context, input.bindLayouts))
+    const normalizedLayout = normalizePipelineLayout(context, input.layout)
+    context.layoutMode = normalizedLayout.mode
+    const bindLayouts = normalizedLayout.bindLayouts
     const bindLayoutsByGroup = readonlyMapSnapshot(
         new Map(bindLayouts.map(layout => [ layout.group, layout ]))
     )
@@ -417,9 +463,10 @@ function prepareRenderPipeline(
         programFacts.requiredLanguageFeatures
     )
     const vertexBuffers = freezeVertexBuffers(normalizeVertexBuffers(context, input.vertexBuffers))
-    const targets = freezeColorTargets(normalizeTargets(context, input.targets))
-    const vertexConstants = normalizeRenderConstants(context, input.vertexConstants, 'vertex')
-    const fragmentConstants = normalizeRenderConstants(context, input.fragmentConstants, 'fragment')
+    const vertex = programFacts.vertex
+    if (vertex === undefined) throwMissingProgramStage(context, 'vertex')
+    const fragment = programFacts.fragment
+    const targets = normalizeRenderTargetsForFragment(context, fragment, input.targets)
     const primitive = Object.freeze({
         topology: 'triangle-list' as GPUPrimitiveTopology,
         ...input.primitive,
@@ -433,29 +480,42 @@ function prepareRenderPipeline(
         : Object.freeze({ ...input.multisample })
     const draft: Omit<RenderPipelinePlan, 'sourceSnapshot'> = {
         ...context,
+        layoutMode: normalizedLayout.mode,
         bindLayouts,
         bindLayoutsByGroup,
         immediateSize,
-        vertexEntryPoint: (input.vertex ?? programFacts.entryPoints.vertex) as string,
-        fragmentEntryPoint: (input.fragment ?? programFacts.entryPoints.fragment) as string,
+        vertex,
+        ...(fragment !== undefined ? { fragment } : {}),
         vertexBuffers,
         targets,
         targetFormats: Object.freeze(targets.map(target => target?.format ?? null)),
-        ...(vertexConstants !== undefined ? { vertexConstants } : {}),
-        ...(fragmentConstants !== undefined ? { fragmentConstants } : {}),
         primitive,
         ...(depthStencil !== undefined ? {
             depthStencil,
             depthStencilFormat: depthStencil.format,
         } : {}),
         ...(multisample !== undefined ? { multisample } : {}),
+        creationReport: createPipelineCreationReport({
+            pipelineId: id,
+            pipelineKind: 'render',
+            programId: program.id,
+            stages: [
+                pipelineCreationStage('vertex', vertex),
+                ...(fragment !== undefined
+                    ? [ pipelineCreationStage('fragment', fragment) ]
+                    : []),
+            ],
+        }),
     }
-    validateEntryPoints(draft)
-    validateProgramLayoutRequirements(draft)
+    if (draft.layoutMode === 'explicit') validateProgramLayoutRequirements(draft)
 
     const plan = Object.freeze({
         ...draft,
-        sourceSnapshot: snapshotProgramSource(program, programFacts.modules, subject),
+        sourceSnapshot: snapshotProgramSource(
+            program,
+            [ vertex, fragment ].filter((stage): stage is ProgramStage => stage !== undefined),
+            subject
+        ),
     })
     assertProgramPipelineAuthority(plan.programAuthority)
     return plan
@@ -463,24 +523,30 @@ function prepareRenderPipeline(
 
 function snapshotProgramSource(
     program: Program,
-    modules: readonly string[],
+    stages: readonly ProgramStage[],
     pipelineSubject: DiagnosticSubject
 ): PipelineSourceSnapshot {
 
     try {
+        const modules: string[] = []
+        const seen = new Set<string>()
+        for (const stage of stages) {
+            const snapshot = shaderModuleSourceSnapshot(stage.module)
+            if (seen.has(snapshot.shaderModuleId)) continue
+            seen.add(snapshot.shaderModuleId)
+            modules.push(...snapshot.sourceParts.map(part => part.code))
+        }
         return snapshotPipelineSource({ id: program.id, modules })
     } catch {
         throwScratchDiagnostic({
-            code: 'SCRATCH_PROGRAM_MODULES_INVALID',
+            code: 'SCRATCH_PROGRAM_STAGE_INVALID',
             severity: 'error',
             phase: 'program',
             subject: programAuthoritySubject(program),
             related: [ pipelineSubject ],
-            message: 'Program modules are invalid at the pipeline snapshot boundary.',
-            expected: { modules: 'non-empty string[]' },
-            actual: {
-                modules: modules.map(module => typeof module),
-            },
+            message: 'Program ShaderModule stages are invalid at the pipeline snapshot boundary.',
+            expected: { stages: 'usable ShaderModule stages' },
+            actual: { stageCount: stages.length },
         })
     }
 }
@@ -493,12 +559,10 @@ function renderPipelineDescriptorEvidence(plan: RenderPipelinePlan): {
     const identity = {
         pipelineKind: plan.pipelineKind,
         programId: plan.program.id,
-        programSourceHash: plan.sourceSnapshot.combinedSourceHash,
-        entryPoints: {
-            vertex: plan.vertexEntryPoint,
-            fragment: plan.fragmentEntryPoint,
-        },
+        programContractHash: plan.creationReport.contractHash,
+        stages: plan.creationReport.stages,
         immediateSize: plan.immediateSize,
+        layoutMode: plan.layoutMode,
         bindLayouts: plan.bindLayouts.map(layout => ({ id: layout.id, group: layout.group })),
     }
     return {
@@ -516,12 +580,6 @@ function renderPipelineDescriptorEvidence(plan: RenderPipelinePlan): {
             ...(plan.label !== undefined ? { label: plan.label } : {}),
             vertexBuffers: plan.vertexBuffers,
             targets: plan.targets,
-            ...(plan.vertexConstants !== undefined
-                ? { vertexConstants: plan.vertexConstants }
-                : {}),
-            ...(plan.fragmentConstants !== undefined
-                ? { fragmentConstants: plan.fragmentConstants }
-                : {}),
             primitive: plan.primitive,
             ...(plan.depthStencil !== undefined ? { depthStencil: plan.depthStencil } : {}),
             ...(plan.multisample !== undefined ? { multisample: plan.multisample } : {}),
@@ -536,13 +594,11 @@ function pipelineNativeLabels(label: string | undefined, pipelineId: string): Pi
         const fallback = `scratch:${pipelineId}`
         return Object.freeze({
             pipeline: fallback,
-            shaderModule: fallback,
             pipelineLayout: fallback,
         })
     }
     return Object.freeze({
         pipeline: `${label}${suffix}`,
-        shaderModule: `${label} shader module${suffix}`,
         pipelineLayout: `${label} layout${suffix}`,
     })
 }
@@ -551,7 +607,6 @@ function nativeLabelEvidence(labels: PipelineNativeLabels): ScratchPipelineNativ
 
     return Object.freeze({
         pipeline: Object.freeze({ value: labels.pipeline, truncated: false }),
-        shaderModule: Object.freeze({ value: labels.shaderModule, truncated: false }),
         pipelineLayout: Object.freeze({ value: labels.pipelineLayout, truncated: false }),
     })
 }
@@ -598,6 +653,14 @@ function pipelineLifecycleFailures(
             'SCRATCH_PIPELINE_CREATION_PROGRAM_LIFECYCLE_CHANGED',
             'none',
             programAuthoritySubject(plan.program)
+        ))
+    }
+    for (const stage of pipelineStages(plan)) {
+        if (!stage.module.isDisposed) continue
+        failures.push(lifecycleFailure(serializeNativeError,
+            'SCRATCH_PIPELINE_CREATION_SHADER_MODULE_DISPOSED',
+            'none',
+            stage.module.subject
         ))
     }
     for (const layout of plan.bindLayouts) {
@@ -685,9 +748,7 @@ function throwPipelineCreationFailure(
         status: cancelled ? 'cancelled' : 'failed',
         nativeErrorCategory,
         nativeLabels: nativeLabelEvidence(nativeLabels),
-        ...(issue.compilationReport !== undefined
-            ? { compilationReport: issue.compilationReport }
-            : {}),
+        pipelineCreationReport: plan.creationReport,
     }
     const controller = diagnosticsControllerFor(plan.runtime)
     const record = controller.completeOperation(operation, completion)
@@ -711,9 +772,7 @@ function throwPipelineCreationFailure(
             ? { pipelineErrorReason: single.pipelineErrorReason }
             : {}),
         ...(single?.nativeError !== undefined ? { nativeError: single.nativeError } : {}),
-        ...(issue.compilationReport !== undefined
-            ? { compilationReport: issue.compilationReport }
-            : {}),
+        pipelineCreationReport: plan.creationReport,
         outcomes,
     })
     const retainedOutcomes = incident.kind === 'pipeline-failure'
@@ -821,25 +880,19 @@ function defineImmutableRenderProperties(
         id: state.id,
         pipelineKind: state.pipelineKind,
         program: state.program,
-        vertexEntryPoint: state.vertexEntryPoint,
-        fragmentEntryPoint: state.fragmentEntryPoint,
-        bindLayouts: state.bindLayouts,
-        bindLayoutsByGroup: state.bindLayoutsByGroup,
+        vertex: state.vertex,
+        ...(state.fragment !== undefined ? { fragment: state.fragment } : {}),
+        layoutMode: state.layoutMode,
         vertexBuffers: state.vertexBuffers,
         targets: state.targets,
         targetFormats: state.targetFormats,
-        ...(state.vertexConstants !== undefined
-            ? { vertexConstants: state.vertexConstants }
-            : {}),
-        ...(state.fragmentConstants !== undefined
-            ? { fragmentConstants: state.fragmentConstants }
-            : {}),
         primitive: state.primitive,
         immediateSize: state.immediateSize,
-        shaderModule: state.shaderModule,
-        pipelineLayout: state.pipelineLayout,
+        ...(state.pipelineLayout !== undefined
+            ? { pipelineLayout: state.pipelineLayout }
+            : {}),
         gpuPipeline: state.gpuPipeline,
-        compilationReport: state.compilationReport,
+        creationReport: state.creationReport,
         ...(state.label !== undefined ? { label: state.label } : {}),
         ...(state.depthStencil !== undefined ? { depthStencil: state.depthStencil } : {}),
         ...(state.depthStencilFormat !== undefined
@@ -854,9 +907,12 @@ function defineImmutableRenderProperties(
             writable: false,
         } ])
     ))
+    Object.defineProperties(pipeline, pipelineBindLayoutProperties(
+        () => renderPipelineStateFor(pipeline)
+    ))
 }
 
-function renderPipelineStateFor(pipeline: RenderPipeline): { isDisposed: boolean } {
+function renderPipelineStateFor(pipeline: RenderPipeline): PipelineObjectState {
 
     const state = renderPipelineStates.get(pipeline)
     if (state === undefined) throw new TypeError('RenderPipeline state is unavailable.')
@@ -869,15 +925,15 @@ export interface ComputePipeline {
     readonly label?: string
     readonly pipelineKind: 'compute'
     readonly program: Program
-    readonly computeEntryPoint: string
+    readonly compute: ProgramStage
+    readonly layoutMode: 'explicit' | 'auto'
     readonly bindLayouts: readonly BindLayout[]
     readonly bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
-    readonly constants?: Readonly<Record<string, GPUPipelineConstantValue>>
     readonly immediateSize: number
-    readonly shaderModule: GPUShaderModule
-    readonly pipelineLayout: GPUPipelineLayout
+    readonly pipelineLayout?: GPUPipelineLayout
     readonly gpuPipeline: GPUComputePipeline
-    readonly compilationReport: PipelineCompilationReport
+    readonly creationReport: PipelineCreationReport
+    getBindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout>
 }
 
 export class ComputePipeline {
@@ -894,7 +950,14 @@ export class ComputePipeline {
                 hints: [ 'Use await runtime.createComputePipeline(descriptor).' ],
             })
         }
-        computePipelineStates.set(this, { isDisposed: false })
+        computePipelineStates.set(this, {
+            isDisposed: false,
+            bindLayoutsByGroup: new Map(
+                state.bindLayouts.map(layout => [ layout.group, layout ])
+            ),
+            derivedLayoutPromises: new Map(),
+            derivedLayoutSignatures: new Map(),
+        })
         pipelineProgramLayoutRequirements.set(this, state.layoutRequirements)
         defineImmutableComputeProperties(this, state)
         Object.preventExtensions(this)
@@ -957,11 +1020,17 @@ export class ComputePipeline {
         }
     }
 
+    async getBindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout> {
+
+        return getPipelineBindLayout(this, descriptor)
+    }
+
     dispose(): void {
 
         const state = computePipelineStateFor(this)
         if (state.isDisposed) return
         state.isDisposed = true
+        disposeDerivedPipelineLayouts(state)
         unregisterRuntimePipeline(this.runtime, this)
     }
 }
@@ -975,15 +1044,13 @@ export function isComputePipeline(value: unknown): value is ComputePipeline {
 
 type ComputePipelinePlan = PipelineCreationPlan & Readonly<{
     pipelineKind: 'compute'
-    computeEntryPoint: string
-    constants?: Readonly<Record<string, GPUPipelineConstantValue>>
+    compute: ProgramStage
+    creationReport: PipelineCreationReport
 }>
 
 type ComputePipelineState = ComputePipelinePlan & Readonly<{
-    shaderModule: GPUShaderModule
-    pipelineLayout: GPUPipelineLayout
+    pipelineLayout?: GPUPipelineLayout
     gpuPipeline: GPUComputePipeline
-    compilationReport: PipelineCompilationReport
 }>
 
 export async function createComputePipeline(
@@ -1000,7 +1067,7 @@ export async function createComputePipeline(
         pipelineId: plan.id,
         pipelineKind: 'compute' as const,
         programId: plan.program.id,
-        programSourceHash: plan.sourceSnapshot.combinedSourceHash,
+        programContractHash: plan.creationReport.contractHash,
     }
     const descriptorEvidence = computePipelineDescriptorEvidence(plan)
     const operation = controller.beginOperation({
@@ -1016,14 +1083,22 @@ export async function createComputePipeline(
         pipelineKind: 'compute',
         sourceSnapshot: plan.sourceSnapshot,
         nativeLabels,
-        bindGroupLayouts: nativeBindGroupLayouts(plan.bindLayouts),
-        immediateSize: plan.immediateSize,
-        lowerPipelineDescriptor: (shaderModule, pipelineLayout) => {
+        layout: plan.layoutMode === 'auto'
+            ? 'auto'
+            : {
+                bindGroupLayouts: nativeBindGroupLayouts(plan.bindLayouts),
+                immediateSize: plan.immediateSize,
+            },
+        lowerPipelineDescriptor: (pipelineLayout) => {
             const compute: GPUProgrammableStage = {
-                module: shaderModule,
-                entryPoint: plan.computeEntryPoint,
+                module: plan.compute.module.gpuShaderModule,
+                ...(plan.compute.entryPoint !== undefined
+                    ? { entryPoint: plan.compute.entryPoint }
+                    : {}),
             }
-            if (plan.constants !== undefined) compute.constants = plan.constants
+            if (plan.compute.constants !== undefined) {
+                compute.constants = plan.compute.constants
+            }
             return {
                 label: nativeLabels.pipeline,
                 layout: pipelineLayout,
@@ -1038,10 +1113,8 @@ export async function createComputePipeline(
     ]
     if (
         failures.length > 0 ||
-        issue.shaderModule === undefined ||
-        issue.pipelineLayout === undefined ||
         issue.nativePipeline === undefined ||
-        issue.compilationReport === undefined
+        (plan.layoutMode === 'explicit' && issue.pipelineLayout === undefined)
     ) {
         throwPipelineCreationFailure(
             plan,
@@ -1055,7 +1128,7 @@ export async function createComputePipeline(
     const completion = {
         status: 'succeeded' as const,
         nativeLabels: nativeLabelEvidence(nativeLabels),
-        compilationReport: issue.compilationReport,
+        pipelineCreationReport: plan.creationReport,
     }
     const creationRecord = controller.completeOperation(operation, completion)
     if (
@@ -1070,10 +1143,8 @@ export async function createComputePipeline(
     ) => ComputePipeline
     const pipeline = new Constructor(computePipelineToken, {
         ...plan,
-        shaderModule: issue.shaderModule,
-        pipelineLayout: issue.pipelineLayout,
+        ...(issue.pipelineLayout !== undefined ? { pipelineLayout: issue.pipelineLayout } : {}),
         gpuPipeline: issue.nativePipeline as GPUComputePipeline,
-        compilationReport: creationRecord.compilationReport!,
     })
     registerRuntimePipeline(runtime, pipeline, creationRecord)
     return pipeline
@@ -1119,11 +1190,14 @@ function prepareComputePipeline(
         program,
         programAuthority: programSnapshot.authority,
         subject,
+        layoutMode: 'explicit',
         bindLayouts: Object.freeze([]),
         bindLayoutsByGroup: readonlyMapSnapshot(new Map()),
         layoutRequirements,
     }
-    const bindLayouts = Object.freeze(normalizeBindLayouts(context, input.bindLayouts))
+    const normalizedLayout = normalizePipelineLayout(context, input.layout)
+    context.layoutMode = normalizedLayout.mode
+    const bindLayouts = normalizedLayout.bindLayouts
     const bindLayoutsByGroup = readonlyMapSnapshot(
         new Map(bindLayouts.map(layout => [ layout.group, layout ]))
     )
@@ -1132,23 +1206,27 @@ function prepareComputePipeline(
         input.immediateSize,
         programFacts.requiredLanguageFeatures
     )
-    const constants = input.constants === undefined
-        ? undefined
-        : Object.freeze({ ...input.constants })
+    const compute = programFacts.compute
+    if (compute === undefined) throwMissingProgramStage(context, 'compute')
     const draft: Omit<ComputePipelinePlan, 'sourceSnapshot'> = {
         ...context,
+        layoutMode: normalizedLayout.mode,
         bindLayouts,
         bindLayoutsByGroup,
         immediateSize,
-        computeEntryPoint: (input.compute ?? programFacts.entryPoints.compute) as string,
-        ...(constants !== undefined ? { constants } : {}),
+        compute,
+        creationReport: createPipelineCreationReport({
+            pipelineId: id,
+            pipelineKind: 'compute',
+            programId: program.id,
+            stages: [ pipelineCreationStage('compute', compute) ],
+        }),
     }
-    if (!draft.computeEntryPoint) throwMissingEntryPoint(draft, 'compute')
-    validateProgramLayoutRequirements(draft)
+    if (draft.layoutMode === 'explicit') validateProgramLayoutRequirements(draft)
 
     const plan = Object.freeze({
         ...draft,
-        sourceSnapshot: snapshotProgramSource(program, programFacts.modules, subject),
+        sourceSnapshot: snapshotProgramSource(program, [ compute ], subject),
     })
     assertProgramPipelineAuthority(plan.programAuthority)
     return plan
@@ -1162,20 +1240,23 @@ function computePipelineDescriptorEvidence(plan: ComputePipelinePlan): {
     const identity = {
         pipelineKind: plan.pipelineKind,
         programId: plan.program.id,
-        programSourceHash: plan.sourceSnapshot.combinedSourceHash,
-        entryPoints: { compute: plan.computeEntryPoint },
+        programContractHash: plan.creationReport.contractHash,
+        stages: plan.creationReport.stages,
         immediateSize: plan.immediateSize,
+        layoutMode: plan.layoutMode,
         bindLayouts: plan.bindLayouts.map(layout => ({ id: layout.id, group: layout.group })),
     }
     return {
         summary: {
             ...identity,
-            constantNames: Object.keys(plan.constants ?? {}).sort(),
+            constantNames: Object.keys(plan.compute.constants ?? {}).sort(),
         },
         full: {
             ...identity,
             ...(plan.label !== undefined ? { label: plan.label } : {}),
-            ...(plan.constants !== undefined ? { constants: plan.constants } : {}),
+            ...(plan.compute.constants !== undefined
+                ? { constants: plan.compute.constants }
+                : {}),
         },
     }
 }
@@ -1190,16 +1271,15 @@ function defineImmutableComputeProperties(
         id: state.id,
         pipelineKind: state.pipelineKind,
         program: state.program,
-        computeEntryPoint: state.computeEntryPoint,
-        bindLayouts: state.bindLayouts,
-        bindLayoutsByGroup: state.bindLayoutsByGroup,
+        compute: state.compute,
+        layoutMode: state.layoutMode,
         immediateSize: state.immediateSize,
-        shaderModule: state.shaderModule,
-        pipelineLayout: state.pipelineLayout,
+        ...(state.pipelineLayout !== undefined
+            ? { pipelineLayout: state.pipelineLayout }
+            : {}),
         gpuPipeline: state.gpuPipeline,
-        compilationReport: state.compilationReport,
+        creationReport: state.creationReport,
         ...(state.label !== undefined ? { label: state.label } : {}),
-        ...(state.constants !== undefined ? { constants: state.constants } : {}),
     }
     Object.defineProperties(pipeline, Object.fromEntries(
         Object.entries(values).map(([ key, value ]) => [ key, {
@@ -1209,13 +1289,132 @@ function defineImmutableComputeProperties(
             writable: false,
         } ])
     ))
+    Object.defineProperties(pipeline, pipelineBindLayoutProperties(
+        () => computePipelineStateFor(pipeline)
+    ))
 }
 
-function computePipelineStateFor(pipeline: ComputePipeline): { isDisposed: boolean } {
+function computePipelineStateFor(pipeline: ComputePipeline): PipelineObjectState {
 
     const state = computePipelineStates.get(pipeline)
     if (state === undefined) throw new TypeError('ComputePipeline state is unavailable.')
     return state
+}
+
+function pipelineBindLayoutProperties(
+    state: () => PipelineObjectState
+): PropertyDescriptorMap {
+
+    return {
+        bindLayouts: {
+            get: () => Object.freeze([ ...state().bindLayoutsByGroup.values() ]),
+            enumerable: true,
+            configurable: false,
+        },
+        bindLayoutsByGroup: {
+            get: () => readonlyMapSnapshot(state().bindLayoutsByGroup),
+            enumerable: true,
+            configurable: false,
+        },
+    }
+}
+
+async function getPipelineBindLayout(
+    pipeline: RenderPipeline | ComputePipeline,
+    descriptor: BindLayoutDescriptor
+): Promise<BindLayout> {
+
+    pipeline.assertUsable()
+    if (pipeline.layoutMode !== 'auto') {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_LAYOUT_DERIVATION_FORBIDDEN',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: pipeline.subject,
+            message: 'Only an auto-layout Pipeline can derive native BindLayouts.',
+            expected: { layoutMode: 'auto' },
+            actual: { layoutMode: pipeline.layoutMode },
+        })
+    }
+    const state = pipeline.pipelineKind === 'render'
+        ? renderPipelineStateFor(pipeline)
+        : computePipelineStateFor(pipeline)
+    const normalizedDescriptor = normalizeBindLayoutDescriptor(
+        pipeline.runtime,
+        `${pipeline.id}:derived-bind-layout`,
+        descriptor
+    )
+    const group = normalizedDescriptor.group
+    const signature = normalizedBindLayoutDescriptorSignature(normalizedDescriptor)
+    const establishedSignature = state.derivedLayoutSignatures.get(group)
+    if (establishedSignature !== undefined && establishedSignature !== signature) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_LAYOUT_DERIVATION_DESCRIPTOR_MISMATCH',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: pipeline.subject,
+            message: 'An auto-layout Pipeline group may retain only one declared binding schema.',
+            expected: {
+                group,
+                descriptorSignature: establishedSignature,
+            },
+            actual: {
+                group,
+                descriptorSignature: signature,
+            },
+        })
+    }
+    const cached = state.bindLayoutsByGroup.get(group)
+    if (cached !== undefined) return cached
+    const pending = state.derivedLayoutPromises.get(group)
+    if (pending !== undefined) return pending
+
+    state.derivedLayoutSignatures.set(group, signature)
+    const creation = createNativeDerivedBindLayout(
+        pipeline.runtime,
+        {
+            pipelineId: pipeline.id,
+            pipelineKind: pipeline.pipelineKind,
+            gpuPipeline: pipeline.gpuPipeline,
+        },
+        normalizedDescriptor
+    ).then(layout => {
+        try {
+            pipeline.assertUsable()
+        } catch (cause) {
+            layout.dispose()
+            throw cause
+        }
+        state.bindLayoutsByGroup.set(group, layout)
+        return layout
+    }).finally(() => {
+        state.derivedLayoutPromises.delete(group)
+        if (!state.bindLayoutsByGroup.has(group)) {
+            state.derivedLayoutSignatures.delete(group)
+        }
+    })
+    state.derivedLayoutPromises.set(group, creation)
+    return creation
+}
+
+function disposeDerivedPipelineLayouts(state: PipelineObjectState): void {
+
+    for (const layout of state.bindLayoutsByGroup.values()) {
+        if (layout.origin === 'native-derived') layout.dispose()
+    }
+    state.bindLayoutsByGroup.clear()
+    state.derivedLayoutSignatures.clear()
+}
+
+function normalizedBindLayoutDescriptorSignature(
+    descriptor: NormalizedBindLayoutDescriptor
+): string {
+
+    return JSON.stringify({
+        ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
+        group: descriptor.group,
+        entries: descriptor.entries,
+    })
 }
 
 function normalizePipelineImmediateSize(
@@ -1578,6 +1777,67 @@ function normalizeBindLayouts(
     return normalized
 }
 
+function normalizePipelineLayout(
+    pipeline: PipelineValidationContext,
+    value: unknown
+): Readonly<{
+    mode: 'explicit' | 'auto'
+    bindLayouts: readonly BindLayout[]
+}> {
+
+    if (value === undefined) {
+        return Object.freeze({
+            mode: 'explicit' as const,
+            bindLayouts: Object.freeze([]),
+        })
+    }
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throwPipelineLayoutModeInvalid(pipeline, value)
+    }
+    const descriptor = value as Record<string, unknown>
+    if (descriptor.mode === 'auto') {
+        if (Object.prototype.hasOwnProperty.call(descriptor, 'bindLayouts')) {
+            throwPipelineLayoutModeInvalid(pipeline, value)
+        }
+        return Object.freeze({
+            mode: 'auto' as const,
+            bindLayouts: Object.freeze([]),
+        })
+    }
+    if (descriptor.mode !== 'explicit') {
+        throwPipelineLayoutModeInvalid(pipeline, value)
+    }
+    const bindLayouts = Object.freeze(normalizeBindLayouts(
+        pipeline,
+        (descriptor.bindLayouts ?? []) as BindLayout[]
+    ))
+    return Object.freeze({
+        mode: 'explicit' as const,
+        bindLayouts,
+    })
+}
+
+function throwPipelineLayoutModeInvalid(
+    pipeline: PipelineValidationContext,
+    actual: unknown
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PIPELINE_LAYOUT_MODE_INVALID',
+        severity: 'error',
+        phase: 'pipeline',
+        subject: pipeline.subject,
+        message: `${pipelineDisplayName(pipeline)} layout must select explicit or auto mode.`,
+        expected: {
+            layout: [
+                '{ mode: "explicit", bindLayouts?: BindLayout[] }',
+                '{ mode: "auto" }',
+            ],
+        },
+        actual: { layout: describeValue(actual) },
+    })
+}
+
 function nativeBindGroupLayouts(
     bindLayouts: readonly BindLayout[]
 ): readonly (GPUBindGroupLayout | null)[] {
@@ -1594,7 +1854,7 @@ function nativeBindGroupLayouts(
 
 function normalizeTargets(
     pipeline: PipelineValidationContext,
-    targets: readonly (GPUColorTargetState | null)[]
+    targets: unknown
 ): (GPUColorTargetState | null)[] {
 
     if (!Array.isArray(targets)) {
@@ -1608,10 +1868,11 @@ function normalizeTargets(
             actual: { targets },
         })
     }
+    const targetSlots = targets as readonly (GPUColorTargetState | null)[]
 
     const normalized: (GPUColorTargetState | null)[] = []
-    for (let slot = 0; slot < targets.length; slot++) {
-        if (!Object.hasOwn(targets, slot) || targets[slot] === undefined) {
+    for (let slot = 0; slot < targetSlots.length; slot++) {
+        if (!Object.hasOwn(targetSlots, slot) || targetSlots[slot] === undefined) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_PIPELINE_TARGET_STATE_INVALID',
                 severity: 'error',
@@ -1627,7 +1888,7 @@ function normalizeTargets(
             })
         }
 
-        const target = targets[slot]
+        const target = targetSlots[slot]
         if (target === null) {
             normalized.push(null)
             continue
@@ -1653,6 +1914,94 @@ function normalizeTargets(
     }
 
     return normalized
+}
+
+function normalizeRenderTargetsForFragment(
+    pipeline: PipelineValidationContext,
+    fragment: ProgramStage | undefined,
+    value: unknown
+): readonly (GPUColorTargetState | null)[] {
+
+    if (fragment === undefined) {
+        if (value !== undefined) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PIPELINE_FRAGMENT_FIELDS_FORBIDDEN',
+                severity: 'error',
+                phase: 'pipeline',
+                subject: pipeline.subject,
+                related: [ programAuthoritySubject(pipeline.program) ],
+                message: 'Fragmentless RenderPipeline forbids color targets.',
+                expected: { targets: 'omitted' },
+                actual: { targets: describeValue(value) },
+            })
+        }
+        return Object.freeze([])
+    }
+    if (value === undefined) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_TARGETS_INVALID',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: pipeline.subject,
+            related: [ programAuthoritySubject(pipeline.program) ],
+            message: 'RenderPipeline with a fragment stage requires an explicit targets sequence.',
+            expected: { targets: '(GPUColorTargetState | null)[]' },
+            actual: { targets: 'undefined' },
+        })
+    }
+    return freezeColorTargets(normalizeTargets(pipeline, value))
+}
+
+function throwMissingProgramStage(
+    pipeline: PipelineValidationContext,
+    stage: 'vertex' | 'compute'
+): never {
+
+    throwScratchDiagnostic({
+        code: stage === 'vertex'
+            ? 'SCRATCH_PIPELINE_VERTEX_STAGE_MISSING'
+            : 'SCRATCH_PIPELINE_COMPUTE_STAGE_MISSING',
+        severity: 'error',
+        phase: 'pipeline',
+        subject: pipeline.subject,
+        related: [ programAuthoritySubject(pipeline.program) ],
+        message: `${pipelineDisplayName(pipeline)} requires a Program ${stage} stage.`,
+        expected: { stage },
+        actual: { stage: 'missing' },
+    })
+}
+
+function pipelineCreationStage(
+    stage: 'vertex' | 'fragment' | 'compute',
+    descriptor: ProgramStage
+) {
+
+    return {
+        stage,
+        shaderModuleId: descriptor.module.id,
+        sourceHash: descriptor.module.compilationReport.sourceHash,
+        ...(descriptor.entryPoint !== undefined
+            ? { entryPoint: descriptor.entryPoint }
+            : {}),
+        constantKeys: Object.keys(descriptor.constants ?? {}),
+    }
+}
+
+function pipelineStages(plan: PipelineCreationPlan): readonly ProgramStage[] {
+
+    if (plan.pipelineKind === 'compute') {
+        return [ (plan as ComputePipelinePlan).compute ]
+    }
+    const render = plan as RenderPipelinePlan
+    return [
+        render.vertex,
+        ...(render.fragment !== undefined ? [ render.fragment ] : []),
+    ]
+}
+
+function pipelineDisplayName(pipeline: PipelineValidationContext): string {
+
+    return pipeline.pipelineKind === 'render' ? 'RenderPipeline' : 'ComputePipeline'
 }
 
 function validateRenderPipelineHasAttachment(
@@ -1810,40 +2159,6 @@ function throwProgramLayoutMismatch(
         message: 'Pipeline bind layouts do not satisfy Program buffer layout requirements.',
         expected: programLayoutRequirementExpected(requirement),
         actual: details.actual,
-    })
-}
-
-function validateEntryPoints(pipeline: PipelineValidationContext & {
-    vertexEntryPoint: string
-    fragmentEntryPoint: string
-}) {
-
-    if (!pipeline.vertexEntryPoint) {
-        throwMissingEntryPoint(pipeline, 'vertex')
-    }
-
-    if (!pipeline.fragmentEntryPoint) {
-        throwMissingEntryPoint(pipeline, 'fragment')
-    }
-}
-
-function throwMissingEntryPoint(pipeline: PipelineValidationContext, stage: 'vertex' | 'fragment' | 'compute') {
-
-    const pipelineName = pipeline.pipelineKind === 'render' ? 'RenderPipeline' : 'ComputePipeline'
-    throwScratchDiagnostic({
-        code: 'SCRATCH_PROGRAM_ENTRY_POINT_MISSING',
-        severity: 'error',
-        phase: 'program',
-        subject: {
-            kind: 'ShaderEntryPoint',
-            programId: pipeline.program.id,
-            name: '',
-            stage,
-        },
-        related: [ pipeline.program.subject, pipeline.subject ],
-        message: `${pipelineName} requires a Program entry point for each shader stage.`,
-        expected: { stage, entryPoint: 'string' },
-        actual: { entryPoint: undefined },
     })
 }
 

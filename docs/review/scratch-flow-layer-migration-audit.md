@@ -9,6 +9,11 @@ from `dev-feature` commit `26ed35ffea5114e6968e013be9dca2e302e49ff1` and package
 version `0.0.22`. The combined DEM/Flow tree passed the complete verification contract
 recorded below.
 
+ADR-050 update, 2026-07-24: Shader compilation now belongs to first-class
+`ShaderModule` acknowledgement. The failure probe and its bounded capture were
+moved to the simulation ShaderModule boundary. The previous headed result below
+remains historical; Phase 6 reruns the migrated probe before final acceptance.
+
 ## Scope And Method
 
 The fixed source is `d8e4f4d:examples/m_flowLayer` plus only the portions of
@@ -161,7 +166,7 @@ Exactly two fault scenarios exist:
 | Scenario | Boundary and evidence | Cleanup proof |
 | --- | --- | --- |
 | `after-worker-acquisition` | One `FLOW_LAYER_INJECTED_FAILURE` immediately after Worker/listener ownership; no runtime evidence is fabricated. | Worker and pagehide listener removal, then Worker termination; zero pending observations and no retained action. |
-| `invalid-simulation-pipeline-wgsl` | In-memory module mutation immediately before simulation pipeline creation. One deep capture stops at the one-operation limit. Structured evidence identifies compute pipeline ID, Program ID, one module hash/range, compilation messages, and `SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`. | Listener, Worker, map, then runtime; original `SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES` remains primary. |
+| `invalid-simulation-shader-wgsl` | In-memory source-part mutation immediately before simulation ShaderModule acknowledgement. One deep capture stops at the one-operation limit. Structured evidence identifies the ShaderModule ID, source hash, one source-part hash/range, compilation messages, and `SCRATCH_SHADER_MODULE_COMPILATION_FAILED`. | Listener, Worker, map, then runtime; the exact ShaderModule compilation diagnostic remains primary. |
 
 The invalid-WGSL evidence contains hashes, ranges, redacted messages, and native labels,
 but no WGSL source field or injected source text. Runtime export remains under 512 KiB;

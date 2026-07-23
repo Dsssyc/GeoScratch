@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     DrawCommand,
@@ -87,31 +88,29 @@ function createRequirement(codec, overrides = {}) {
     }
 }
 
-function createProgram(runtime, codec, overrides = {}) {
+async function createProgram(runtime, codec, overrides = {}) {
 
-    return runtime.createProgram({
+    return await createTestProgram(runtime, {
         label: 'particle program',
-        modules: [ computeWgsl ],
-        entryPoints: { compute: 'csMain' },
+        sourceParts: [ computeWgsl ],
+        compute: 'csMain',
         layoutRequirements: [ createRequirement(codec, overrides) ],
     })
 }
 
-function createRenderProgram(runtime, codec, overrides = {}) {
+async function createRenderProgram(runtime, codec, overrides = {}) {
 
-    return runtime.createProgram({
+    return await createTestProgram(runtime, {
         label: 'particle render program',
-        modules: [ renderWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        sourceParts: [ renderWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
         layoutRequirements: [
-            createRequirement(codec, {
-                type: 'read-storage',
-                visibility: [ 'vertex' ],
-                ...overrides,
-            }),
+        createRequirement(codec, {
+        type: 'read-storage',
+        visibility: [ 'vertex' ],
+        ...overrides,
+        }),
         ],
     })
 }
@@ -205,7 +204,7 @@ describe('scratch Program buffer layout requirements', () => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
-        const program = createProgram(runtime, codec)
+        const program = await createProgram(runtime, codec)
 
         expect(program).to.be.instanceOf(Program)
         expect(program.layoutRequirements).to.deep.equal([
@@ -231,9 +230,9 @@ describe('scratch Program buffer layout requirements', () => {
     it('keeps programs without layout requirements valid', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const program = runtime.createProgram({
-            modules: [ computeWgsl ],
-            entryPoints: { compute: 'csMain' },
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ computeWgsl ],
+            compute: 'csMain',
         })
 
         expect(program.layoutRequirements).to.deep.equal([])
@@ -244,8 +243,8 @@ describe('scratch Program buffer layout requirements', () => {
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
 
-        const diagnostic = expectProgramLayoutDiagnostic(() => {
-            createProgram(runtime, codec, {
+        const diagnostic = await expectAsyncProgramLayoutDiagnostic(async () => {
+            await createProgram(runtime, codec, {
                 layout: {
                     kind: 'LayoutArtifact',
                     name: 'Broken',
@@ -308,8 +307,8 @@ describe('scratch Program buffer layout requirements', () => {
         ]
 
         for (const testCase of cases) {
-            const diagnostic = expectProgramLayoutDiagnostic(() => {
-                createProgram(runtime, codec, testCase.overrides)
+            const diagnostic = await expectAsyncProgramLayoutDiagnostic(async () => {
+                await createProgram(runtime, codec, testCase.overrides)
             })
             expect(diagnostic.expected).to.deep.equal(testCase.expected)
             expect(diagnostic.actual).to.deep.equal(testCase.actual)
@@ -321,13 +320,13 @@ describe('scratch Program buffer layout requirements', () => {
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
 
-        const diagnostic = expectProgramLayoutDiagnostic(() => {
-            runtime.createProgram({
-                modules: [ computeWgsl ],
-                entryPoints: { compute: 'csMain' },
+        const diagnostic = await expectAsyncProgramLayoutDiagnostic(async () => {
+            await createTestProgram(runtime, {
+                sourceParts: [ computeWgsl ],
+                compute: 'csMain',
                 layoutRequirements: [
-                    createRequirement(codec),
-                    createRequirement(codec, { name: 'duplicateParticles' }),
+                createRequirement(codec),
+                createRequirement(codec, { name: 'duplicateParticles' }),
                 ],
             })
         })
@@ -348,8 +347,8 @@ describe('scratch Program buffer layout requirements', () => {
         const { runtime } = await createRuntimeFixture()
         const renderCodec = createParticleCodec('RenderParticle')
         const computeCodec = createParticleCodec('ComputeParticle')
-        const renderProgram = createRenderProgram(runtime, renderCodec)
-        const computeProgram = createProgram(runtime, computeCodec)
+        const renderProgram = await createRenderProgram(runtime, renderCodec)
+        const computeProgram = await createProgram(runtime, computeCodec)
         const renderLayout = await createBindLayout(runtime, {
             visibility: [ 'vertex', 'fragment' ],
         })
@@ -359,12 +358,12 @@ describe('scratch Program buffer layout requirements', () => {
 
         const renderPipeline = await runtime.createRenderPipeline({
             program: renderProgram,
-            bindLayouts: [ renderLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ renderLayout ] },
             targets: [ { format: 'bgra8unorm' } ],
         })
         const computePipeline = await runtime.createComputePipeline({
             program: computeProgram,
-            bindLayouts: [ computeLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ computeLayout ] },
         })
 
         expect(renderPipeline).to.be.instanceOf(ScratchRenderPipeline)
@@ -375,12 +374,12 @@ describe('scratch Program buffer layout requirements', () => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
-        const program = createProgram(runtime, codec)
+        const program = await createProgram(runtime, codec)
 
         const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
             await runtime.createComputePipeline({
                 program,
-                bindLayouts: [],
+                layout: { mode: 'explicit', bindLayouts: [] },
             })
         })
 
@@ -410,13 +409,13 @@ describe('scratch Program buffer layout requirements', () => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
-        const program = createProgram(runtime, codec, { binding: 1 })
+        const program = await createProgram(runtime, codec, { binding: 1 })
         const bindLayout = await createBindLayout(runtime)
 
         const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
             await runtime.createComputePipeline({
                 program,
-                bindLayouts: [ bindLayout ],
+                layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
             })
         })
 
@@ -454,12 +453,12 @@ describe('scratch Program buffer layout requirements', () => {
         ]
 
         for (const testCase of cases) {
-            const program = createProgram(runtime, codec, testCase.requirement)
+            const program = await createProgram(runtime, codec, testCase.requirement)
             const bindLayout = await createBindLayout(runtime, testCase.entry)
             const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
                 await runtime.createComputePipeline({
                     program,
-                    bindLayouts: [ bindLayout ],
+                    layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
                 })
             })
             expect(diagnostic.actual).to.deep.equal(testCase.actual)
@@ -470,14 +469,14 @@ describe('scratch Program buffer layout requirements', () => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
-        const program = createProgram(runtime, codec)
+        const program = await createProgram(runtime, codec)
         const bindLayout = await createBindLayout(runtime, {
             hasDynamicOffset: true,
         })
         const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
             await runtime.createComputePipeline({
                 program,
-                bindLayouts: [ bindLayout ],
+                layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
             })
         })
 
@@ -489,7 +488,7 @@ describe('scratch Program buffer layout requirements', () => {
 
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
-        const program = createProgram(runtime, codec)
+        const program = await createProgram(runtime, codec)
         const deferredLayout = await createBindLayout(runtime, {
             minBindingSize: 0,
         })
@@ -499,12 +498,12 @@ describe('scratch Program buffer layout requirements', () => {
 
         const pipeline = await runtime.createComputePipeline({
             program,
-            bindLayouts: [ deferredLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ deferredLayout ] },
         })
         const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
             await runtime.createComputePipeline({
                 program,
-                bindLayouts: [ tooSmallLayout ],
+                layout: { mode: 'explicit', bindLayouts: [ tooSmallLayout ] },
             })
         })
 
@@ -529,16 +528,16 @@ describe('scratch Program buffer layout requirements', () => {
         const computeLayout = await createBindLayout(runtime, {
             visibility: [ 'compute' ],
         })
-        const renderProgram = createRenderProgram(runtime, renderCodec)
-        const computeProgram = createProgram(runtime, computeCodec)
+        const renderProgram = await createRenderProgram(runtime, renderCodec)
+        const computeProgram = await createProgram(runtime, computeCodec)
         const renderPipeline = await runtime.createRenderPipeline({
             program: renderProgram,
-            bindLayouts: [ renderLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ renderLayout ] },
             targets: [ { format: 'bgra8unorm' } ],
         })
         const computePipeline = await runtime.createComputePipeline({
             program: computeProgram,
-            bindLayouts: [ computeLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ computeLayout ] },
         })
         const renderSet = await runtime.createBindSet(renderLayout, {
             particles: await createLayoutBuffer(runtime, renderCodec),
@@ -577,16 +576,18 @@ describe('scratch Program buffer layout requirements', () => {
         const { runtime } = await createRuntimeFixture()
         const codec = createParticleCodec()
         const layout = await createBindLayout(runtime)
-        const program = createProgram(runtime, codec)
+        const program = await createProgram(runtime, codec)
         const pipeline = await runtime.createComputePipeline({
             program,
-            bindLayouts: [ layout ],
+            layout: { mode: 'explicit', bindLayouts: [ layout ] },
         })
         const bindSet = await runtime.createBindSet(layout, {
             particles: await createRawBuffer(runtime),
         })
 
-        program.layoutRequirements = []
+        expect(() => {
+            program.layoutRequirements = []
+        }).to.throw(TypeError)
 
         const diagnostic = expectProgramLayoutDiagnostic(() => {
             runtime.createDispatchCommand({
@@ -619,13 +620,13 @@ describe('scratch Program buffer layout requirements', () => {
             visibility: [ 'compute' ],
         })
         const renderPipeline = await runtime.createRenderPipeline({
-            program: createRenderProgram(runtime, codec),
-            bindLayouts: [ renderLayout ],
+            program: await createRenderProgram(runtime, codec),
+            layout: { mode: 'explicit', bindLayouts: [ renderLayout ] },
             targets: [ { format: 'bgra8unorm' } ],
         })
         const computePipeline = await runtime.createComputePipeline({
-            program: createProgram(runtime, codec),
-            bindLayouts: [ computeLayout ],
+            program: await createProgram(runtime, codec),
+            layout: { mode: 'explicit', bindLayouts: [ computeLayout ] },
         })
 
         const drawDiagnostic = expectProgramLayoutDiagnostic(() => {
@@ -668,13 +669,13 @@ describe('scratch Program buffer layout requirements', () => {
             visibility: [ 'compute' ],
         })
         const renderPipeline = await runtime.createRenderPipeline({
-            program: createRenderProgram(runtime, codec),
-            bindLayouts: [ renderLayout ],
+            program: await createRenderProgram(runtime, codec),
+            layout: { mode: 'explicit', bindLayouts: [ renderLayout ] },
             targets: [ { format: 'bgra8unorm' } ],
         })
         const computePipeline = await runtime.createComputePipeline({
-            program: createProgram(runtime, codec),
-            bindLayouts: [ computeLayout ],
+            program: await createProgram(runtime, codec),
+            layout: { mode: 'explicit', bindLayouts: [ computeLayout ] },
         })
         const renderSet = await runtime.createBindSet(renderLayout, {
             particles: await createRawBuffer(runtime),
@@ -728,13 +729,13 @@ describe('scratch Program buffer layout requirements', () => {
             visibility: [ 'compute' ],
         })
         const renderPipeline = await runtime.createRenderPipeline({
-            program: createRenderProgram(runtime, codec),
-            bindLayouts: [ renderLayout ],
+            program: await createRenderProgram(runtime, codec),
+            layout: { mode: 'explicit', bindLayouts: [ renderLayout ] },
             targets: [ { format: 'bgra8unorm' } ],
         })
         const computePipeline = await runtime.createComputePipeline({
-            program: createProgram(runtime, codec),
-            bindLayouts: [ computeLayout ],
+            program: await createProgram(runtime, codec),
+            layout: { mode: 'explicit', bindLayouts: [ computeLayout ] },
         })
         const renderSet = await runtime.createBindSet(renderLayout, {
             particles: await createLayoutBuffer(runtime, otherCodec),
@@ -791,8 +792,8 @@ describe('scratch Program buffer layout requirements', () => {
         const actualCodec = createAbiMismatchCodec()
         const bindLayout = await createBindLayout(runtime)
         const pipeline = await runtime.createComputePipeline({
-            program: createProgram(runtime, expectedCodec),
-            bindLayouts: [ bindLayout ],
+            program: await createProgram(runtime, expectedCodec),
+            layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         })
         const bindSet = await runtime.createBindSet(bindLayout, {
             particles: await createLayoutBuffer(runtime, actualCodec),

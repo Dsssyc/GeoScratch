@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     BindLayout,
@@ -85,17 +86,15 @@ async function createUniformFixture(format = 'bgra8unorm') {
     }, {
         label: 'triangle uniforms set',
     })
-    const program = runtime.createProgram({
-        modules: [ uniformTriangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ uniformTriangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await runtime.createRenderPipeline({
         label: 'uniform triangle pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         targets: [ { format } ],
     })
     const draw = runtime.createDrawCommand({
@@ -308,7 +307,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         try {
             await fixtureA.runtime.createRenderPipeline({
                 program: fixtureA.program,
-                bindLayouts: [ fixtureB.bindLayout ],
+                layout: { mode: 'explicit', bindLayouts: [ fixtureB.bindLayout ] },
                 targets: [ { format: fixtureA.surface.format } ],
             })
             throw new Error('expected wrong-runtime bind layout to fail')

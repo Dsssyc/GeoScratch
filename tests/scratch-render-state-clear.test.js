@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
@@ -34,12 +35,10 @@ async function createRenderFixture(size = [ 32, 24 ]) {
         format: 'rgba8unorm',
         usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
     })
-    const program = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await runtime.createRenderPipeline({
         program,

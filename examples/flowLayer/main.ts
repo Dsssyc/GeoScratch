@@ -176,7 +176,7 @@ const FAILURE_CAPTURE_BOUNDS = Object.freeze({
 })
 const FAILURE_SCENARIOS = Object.freeze([
     'after-worker-acquisition',
-    'invalid-simulation-pipeline-wgsl',
+    'invalid-simulation-shader-wgsl',
 ] as const)
 const parameters = new URLSearchParams(window.location.search)
 const proofMode = parameters.get('proof') === '1'
@@ -600,7 +600,7 @@ function createFailureProofController(configuration: Readonly<{
         return `${source}\n@compute fn flowInjectedFailure( {`
     }
 
-    function beforeSimulationPipeline(value: ScratchRuntime): void {
+    function beforeSimulationShaderModule(value: ScratchRuntime): void {
 
         if (configuration.scenario !== FAILURE_SCENARIOS[1]) return
         reachedCount++
@@ -669,7 +669,7 @@ function createFailureProofController(configuration: Readonly<{
         assertConfiguration,
         reach,
         simulationShader,
-        beforeSimulationPipeline,
+        beforeSimulationShaderModule,
         captureBeforeDisposal,
         finalize,
         observeRuntime: (value: ScratchRuntime) => { runtime = value },

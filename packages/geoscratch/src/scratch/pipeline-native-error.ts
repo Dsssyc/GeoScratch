@@ -9,7 +9,7 @@ import type { PipelineSourceSnapshot } from './pipeline-compilation.js'
 export type PipelineNativeErrorSerializer = (error: unknown) => ScratchNativeGpuErrorFacts
 
 export function createPipelineNativeErrorSerializer(
-    sourceSnapshot: PipelineSourceSnapshot
+    sourceSnapshot: Pick<PipelineSourceSnapshot, 'combinedSource'>
 ): PipelineNativeErrorSerializer {
 
     let sourceIndex: ReturnType<typeof createPipelineSourceRedactionIndex> | undefined

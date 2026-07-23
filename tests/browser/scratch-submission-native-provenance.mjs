@@ -393,15 +393,19 @@ async function verifySubmissionTransactions(browser) {
                     return vec4f(0.2, 0.7, 0.5, 1.0);
                 }
             `
+            const shaderModule = await runtime.createShaderModule({
+                label: 'browser delayed validation module',
+                sourceParts: [ { code: source } ],
+            })
             const program = runtime.createProgram({
                 label: 'browser delayed validation program',
-                modules: [ source ],
-                entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+                vertex: { module: shaderModule, entryPoint: 'vsMain' },
+                fragment: { module: shaderModule, entryPoint: 'fsMain' },
             })
             const pipeline = await runtime.createRenderPipeline({
                 label: 'browser delayed validation pipeline',
                 program,
-                bindLayouts: [ bindLayout ],
+                layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
                 targets: [ { format: 'rgba8unorm' } ],
             })
             const pass = runtime.createRenderPass({

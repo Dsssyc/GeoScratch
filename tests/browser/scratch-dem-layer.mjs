@@ -28,7 +28,7 @@ const requiredProvenanceNames = Object.freeze([
 ])
 const failureScenarios = Object.freeze([
     'after-map-acquisition',
-    'invalid-terrain-pipeline-wgsl',
+    'invalid-terrain-shader-wgsl',
 ])
 
 await mkdir(outputDirectory, { recursive: true })
@@ -695,29 +695,29 @@ function validateFailureProof(result, failures) {
     if (proof?.imageAcquiredCount !== 1) {
         failures.push(`${prefix} did not acquire exactly one external image`)
     }
-    if (proof?.diagnostic?.code !== 'SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES') {
-        failures.push(`${prefix} did not retain the pipeline multiple-failure envelope`)
+    if (proof?.diagnostic?.code !== 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED') {
+        failures.push(`${prefix} did not retain the ShaderModule compilation failure`)
     }
     const target = proof?.incident?.target
-    if (target?.kind !== 'pipeline' || target?.pipelineKind !== 'render' ||
-        typeof target?.pipelineId !== 'string' || typeof target?.programId !== 'string') {
-        failures.push(`${prefix} did not localize the render pipeline and Program`)
+    if (target?.kind !== 'shader-module' || typeof target?.shaderModuleId !== 'string') {
+        failures.push(`${prefix} did not localize the terrain ShaderModule`)
     }
-    const compilation = proof?.incident?.compilationReport
-    if (compilation?.pipelineId !== target?.pipelineId ||
-        compilation?.programId !== target?.programId ||
-        compilation?.moduleCount !== 1 || compilation?.retainedModuleCount !== 1 ||
+    const compilation = proof?.incident?.shaderModuleCompilationReport
+    if (compilation?.shaderModuleId !== target?.shaderModuleId ||
+        compilation?.sourceHash !== target?.sourceHash ||
+        compilation?.sourcePartCount !== 1 ||
+        compilation?.retainedSourcePartCount !== 1 ||
         compilation?.errorCount < 1) {
-        failures.push(`${prefix} did not retain one localized module compilation report`)
+        failures.push(`${prefix} did not retain one localized source-part compilation report`)
     }
-    if (proof?.captureBounds?.maxOperations !== 2 ||
+    if (proof?.captureBounds?.maxOperations !== 1 ||
         proof?.captureBounds?.maxDurationMs !== 2_000 ||
         proof?.captureBounds?.maxEvidenceBytes !== 65_536) {
         failures.push(`${prefix} deep capture bounds drifted`)
     }
     const capture = proof?.captureReport
-    if (!Array.isArray(capture?.operations) || capture.operations.length < 1 ||
-        capture.operations.length > 2 || capture.retainedEvidenceBytes > 65_536 ||
+    if (!Array.isArray(capture?.operations) || capture.operations.length !== 1 ||
+        capture.retainedEvidenceBytes > 65_536 ||
         capture.stoppedAtMs - capture.startedAtMs > 2_000) {
         failures.push(`${prefix} deep capture exceeded its finite bounds`)
     }
@@ -824,7 +824,7 @@ function summarizeFacts(facts, selection) {
 function summarizeFailureProof(result) {
 
     const proof = result.proof
-    const compilation = proof?.incident?.compilationReport
+    const compilation = proof?.incident?.shaderModuleCompilationReport
     const capture = proof?.captureReport
     return {
         scenario: result.scenario,
@@ -845,12 +845,11 @@ function summarizeFailureProof(result) {
                 diagnosticCode: proof.incident.diagnosticCode,
                 target: proof.incident.target,
                 outcomeCodes: proof.incident.outcomes?.map(outcome => outcome.diagnosticCode),
-                compilationReport: compilation === undefined ? undefined : {
-                    pipelineId: compilation.pipelineId,
-                    programId: compilation.programId,
-                    combinedSourceHash: compilation.combinedSourceHash,
-                    moduleCount: compilation.moduleCount,
-                    retainedModuleCount: compilation.retainedModuleCount,
+                shaderModuleCompilationReport: compilation === undefined ? undefined : {
+                    shaderModuleId: compilation.shaderModuleId,
+                    sourceHash: compilation.sourceHash,
+                    sourcePartCount: compilation.sourcePartCount,
+                    retainedSourcePartCount: compilation.retainedSourcePartCount,
                     errorCount: compilation.errorCount,
                     retainedEvidenceBytes: compilation.retainedEvidenceBytes,
                 },

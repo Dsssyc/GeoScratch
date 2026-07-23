@@ -314,6 +314,12 @@ export type BindLayoutDescriptor = {
     entries: readonly BindLayoutEntry[]
 }
 
+export type NormalizedBindLayoutDescriptor = Readonly<{
+    label?: string
+    group: number
+    entries: readonly NormalizedBindLayoutEntry[]
+}>
+
 export type BindSetBindingResource =
     | BufferRegion
     | TextureResource
@@ -421,6 +427,9 @@ export interface BindLayout {
     readonly label?: string
     readonly group: number
     readonly entries: readonly NormalizedBindLayoutEntry[]
+    readonly origin: 'explicit' | 'native-derived'
+    readonly validationConfidence: 'scratch-verified' | 'native-authoritative'
+    readonly sourcePipelineId?: string
     readonly gpuBindGroupLayout: GPUBindGroupLayout
 }
 
@@ -434,6 +443,9 @@ export class BindLayout {
             label?: string
             group: number
             entries: readonly NormalizedBindLayoutEntry[]
+            origin: 'explicit' | 'native-derived'
+            validationConfidence: 'scratch-verified' | 'native-authoritative'
+            sourcePipelineId?: string
         }>,
         gpuBindGroupLayout: GPUBindGroupLayout
     ) {
@@ -447,6 +459,13 @@ export class BindLayout {
             id: immutableEnumerableProperty(id),
             group: immutableEnumerableProperty(descriptor.group),
             entries: immutableEnumerableProperty(descriptor.entries),
+            origin: immutableEnumerableProperty(descriptor.origin),
+            validationConfidence: immutableEnumerableProperty(
+                descriptor.validationConfidence
+            ),
+            ...(descriptor.sourcePipelineId !== undefined ? {
+                sourcePipelineId: immutableEnumerableProperty(descriptor.sourcePipelineId),
+            } : {}),
             gpuBindGroupLayout: immutableEnumerableProperty(gpuBindGroupLayout),
             ...(descriptor.label !== undefined
                 ? { label: immutableEnumerableProperty(descriptor.label) }
@@ -529,8 +548,13 @@ export async function createBindLayout(
     assertScratchRuntimeActive(runtime)
     const id = `scratch-bind-layout-${UUID()}`
     const normalizedDescriptor = normalizeBindLayoutDescriptor(runtime, id, descriptor)
-    const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, id)
-    const nativeEntries = normalizedDescriptor.entries.map(lowerBindLayoutEntry)
+    const ownedDescriptor = Object.freeze({
+        ...normalizedDescriptor,
+        origin: 'explicit' as const,
+        validationConfidence: 'scratch-verified' as const,
+    })
+    const nativeLabel = createScratchNativeLabel(ownedDescriptor.label, id)
+    const nativeEntries = ownedDescriptor.entries.map(lowerBindLayoutEntry)
     Object.freeze(nativeEntries)
     const nativeDescriptor: GPUBindGroupLayoutDescriptor = {
         label: nativeLabel,
@@ -543,18 +567,19 @@ export async function createBindLayout(
         target: {
             kind: 'bind-layout',
             bindLayoutId: id,
-            group: normalizedDescriptor.group,
-            entries: normalizedDescriptor.entries,
+            group: ownedDescriptor.group,
+            entries: ownedDescriptor.entries,
             acknowledgementState: 'pending',
         },
         descriptorSummary: {
-            group: normalizedDescriptor.group,
-            entryCount: normalizedDescriptor.entries.length,
-            entryTypes: normalizedDescriptor.entries.map(entry => entry.type),
+            group: ownedDescriptor.group,
+            entryCount: ownedDescriptor.entries.length,
+            entryTypes: ownedDescriptor.entries.map(entry => entry.type),
+            origin: ownedDescriptor.origin,
         },
         fullDescriptor: {
-            ...normalizedDescriptor,
-            entries: normalizedDescriptor.entries,
+            ...ownedDescriptor,
+            entries: ownedDescriptor.entries,
         },
         nativeLabel,
     })
@@ -565,7 +590,7 @@ export async function createBindLayout(
             () => runtime.device.createBindGroupLayout(nativeDescriptor)
         )
     )
-    const subject = bindLayoutSubject(id, normalizedDescriptor.label)
+    const subject = bindLayoutSubject(id, ownedDescriptor.label)
 
     if (outcome.failures.length > 0 || outcome.candidate === undefined) {
         return throwSupportingObjectCreationFailure(
@@ -586,7 +611,7 @@ export async function createBindLayout(
         layout = constructBindLayout(
             runtime,
             id,
-            normalizedDescriptor,
+            ownedDescriptor,
             outcome.candidate
         )
         registerBindLayoutOwnership(layout)
@@ -603,6 +628,104 @@ export async function createBindLayout(
             BIND_LAYOUT_ALLOCATION_CODES,
             {
                 operationName: 'BindLayout allocation',
+                phase: 'binding',
+                subject,
+            }
+        )
+    }
+
+    controller.completeOperation(operation, { status: 'succeeded' })
+    return layout
+}
+
+export async function createNativeDerivedBindLayout(
+    runtime: ScratchRuntime,
+    source: Readonly<{
+        pipelineId: string
+        pipelineKind: 'render' | 'compute'
+        gpuPipeline: GPURenderPipeline | GPUComputePipeline
+    }>,
+    descriptor: BindLayoutDescriptor
+): Promise<BindLayout> {
+
+    assertScratchRuntimeActive(runtime)
+    const id = `scratch-bind-layout-${UUID()}`
+    const normalizedDescriptor = normalizeBindLayoutDescriptor(runtime, id, descriptor)
+    const ownedDescriptor = Object.freeze({
+        ...normalizedDescriptor,
+        origin: 'native-derived' as const,
+        validationConfidence: 'native-authoritative' as const,
+        sourcePipelineId: source.pipelineId,
+    })
+    const controller = diagnosticsControllerFor(runtime)
+    const operation = controller.beginOperation({
+        kind: 'bind-layout-allocation',
+        target: {
+            kind: 'bind-layout',
+            bindLayoutId: id,
+            group: ownedDescriptor.group,
+            entries: ownedDescriptor.entries,
+            acknowledgementState: 'pending',
+        },
+        descriptorSummary: {
+            group: ownedDescriptor.group,
+            entryCount: ownedDescriptor.entries.length,
+            entryTypes: ownedDescriptor.entries.map(entry => entry.type),
+            origin: ownedDescriptor.origin,
+            sourcePipelineId: source.pipelineId,
+            sourcePipelineKind: source.pipelineKind,
+        },
+        fullDescriptor: {
+            ...ownedDescriptor,
+            entries: ownedDescriptor.entries,
+        },
+        nativeLabel: createScratchNativeLabel(ownedDescriptor.label, id),
+    })
+    const outcome = recheckSupportingObjectLifecycle(
+        runtime,
+        await issueSupportingObjectCreation(
+            runtime,
+            () => source.gpuPipeline.getBindGroupLayout(ownedDescriptor.group)
+        )
+    )
+    const subject = bindLayoutSubject(id, ownedDescriptor.label)
+
+    if (outcome.failures.length > 0 || outcome.candidate === undefined) {
+        return throwSupportingObjectCreationFailure(
+            runtime,
+            operation,
+            outcome,
+            BIND_LAYOUT_ALLOCATION_CODES,
+            {
+                operationName: 'native-derived BindLayout allocation',
+                phase: 'binding',
+                subject,
+            }
+        )
+    }
+
+    let layout: BindLayout | undefined
+    try {
+        layout = constructBindLayout(
+            runtime,
+            id,
+            ownedDescriptor,
+            outcome.candidate
+        )
+        registerBindLayoutOwnership(layout)
+        controller.registerBindLayout(layout, operation.id)
+    } catch (cause) {
+        if (layout !== undefined) unregisterBindLayoutOwnership(layout)
+        return throwSupportingObjectCreationFailure(
+            runtime,
+            operation,
+            {
+                candidate: outcome.candidate,
+                failures: [ { kind: 'native-exception', cause } ],
+            },
+            BIND_LAYOUT_ALLOCATION_CODES,
+            {
+                operationName: 'native-derived BindLayout allocation',
                 phase: 'binding',
                 subject,
             }
@@ -1955,6 +2078,9 @@ function constructBindLayout(
         label?: string
         group: number
         entries: readonly NormalizedBindLayoutEntry[]
+        origin: 'explicit' | 'native-derived'
+        validationConfidence: 'scratch-verified' | 'native-authoritative'
+        sourcePipelineId?: string
     }>,
     gpuBindGroupLayout: GPUBindGroupLayout
 ): BindLayout {
@@ -1967,6 +2093,9 @@ function constructBindLayout(
             label?: string
             group: number
             entries: readonly NormalizedBindLayoutEntry[]
+            origin: 'explicit' | 'native-derived'
+            validationConfidence: 'scratch-verified' | 'native-authoritative'
+            sourcePipelineId?: string
         }>,
         gpuBindGroupLayout: GPUBindGroupLayout
     ) => BindLayout
@@ -1990,15 +2119,11 @@ function immutableEnumerableProperty<T>(value: T): PropertyDescriptor {
     }
 }
 
-function normalizeBindLayoutDescriptor(
+export function normalizeBindLayoutDescriptor(
     runtime: ScratchRuntime,
     id: string,
     descriptor: unknown
-): Readonly<{
-    label?: string
-    group: number
-    entries: readonly NormalizedBindLayoutEntry[]
-}> {
+): NormalizedBindLayoutDescriptor {
 
     if (!runtime?.device || typeof runtime.device.createBindGroupLayout !== 'function') {
         throwScratchDiagnostic({

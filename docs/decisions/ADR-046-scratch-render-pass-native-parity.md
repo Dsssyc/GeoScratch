@@ -8,6 +8,10 @@ Accepted
 
 2026-07-23
 
+ADR-050 supersedes the public pipeline-level override fields: overrides now belong to
+immutable Program stages. Render-pass state and lowering decisions in this ADR remain
+accepted.
+
 ## Context
 
 Scratch already expresses stable render and compute pipelines, persistent pass specs,

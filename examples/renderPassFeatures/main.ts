@@ -1,6 +1,7 @@
 import { ScratchRuntime } from 'geoscratch'
 import type {
     ScratchRenderPipeline,
+    ShaderModule,
     SubmittedWork,
     Surface,
     SurfaceSize,
@@ -56,31 +57,27 @@ async function main() {
         format: surface.format,
         usage: GPUTextureUsage.RENDER_ATTACHMENT,
     })
-    const program = runtime.createProgram({
-        label: 'render pass features program',
-        modules: [ renderWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const shaderModule = await runtime.createShaderModule({
+        label: 'render pass features shader',
+        sourceParts: [ { code: renderWgsl } ],
     })
     const backgroundPipeline = await createPipeline(
         runtime,
-        program,
+        shaderModule,
         surface,
         'render pass background pipeline',
         0
     )
     const leftPipeline = await createPipeline(
         runtime,
-        program,
+        shaderModule,
         surface,
         'render pass left pipeline',
         1
     )
     const rightPipeline = await createPipeline(
         runtime,
-        program,
+        shaderModule,
         surface,
         'render pass right pipeline',
         2
@@ -179,12 +176,21 @@ async function main() {
 
 async function createPipeline(
     runtime: ScratchRuntime,
-    program: Parameters<ScratchRuntime['createRenderPipeline']>[0]['program'],
+    shaderModule: ShaderModule,
     surface: Surface,
     label: string,
     colorMode: number
 ): Promise<ScratchRenderPipeline> {
 
+    const program = runtime.createProgram({
+        label: `${label} program`,
+        vertex: { module: shaderModule, entryPoint: 'vsMain' },
+        fragment: {
+            module: shaderModule,
+            entryPoint: 'fsMain',
+            constants: { colorMode },
+        },
+    })
     return await runtime.createRenderPipeline({
         label,
         program,
@@ -192,7 +198,6 @@ async function createPipeline(
             null,
             { format: surface.format },
         ],
-        fragmentConstants: { colorMode },
         multisample: { count: sampleCount },
     })
 }

@@ -103,7 +103,7 @@ async function benchmarkProfile(definition) {
                 ? { diagnostics: diagnosticsOptions(definition.recorderKind) }
                 : {}),
         })
-        const programs = createPrograms(runtime)
+        const programs = await createPrograms(runtime)
 
         await runCycles({
             runtime,
@@ -207,15 +207,17 @@ async function runCycles({
             : runtime.createComputePipeline({
                 label: `benchmark compute ${index}`,
                 program: programs.compute,
-                constants: { scale: index + 1 },
             })
         const issuedAt = performance.now()
         const pipeline = await pending
         const settledAt = performance.now()
 
         const expectedMessageCount = reportKind === 'populated' ? populatedMessages.length : 0
+        const compilationReport = pipelineKind === 'render'
+            ? programs.renderModule.compilationReport
+            : programs.computeModule.compilationReport
         assertBenchmark(
-            pipeline.compilationReport.nativeMessageCount === expectedMessageCount,
+            compilationReport.nativeMessageCount === expectedMessageCount,
             `${pipelineKind}/${reportKind} compilation-message count drifted`
         )
         if (timed) {
@@ -260,7 +262,7 @@ async function benchmarkLongRun(count) {
             evidenceByteCapacity: 64 * 1024,
         },
     })
-    const programs = createPrograms(runtime)
+    const programs = await createPrograms(runtime)
     const halfway = Math.floor(count / 2)
 
     await runAlternatingCycles(runtime, fake, programs, halfway)
@@ -310,22 +312,33 @@ async function runAlternatingCycles(runtime, fake, programs, count, offset = 0) 
     clearFakeCallRetention(fake)
 }
 
-function createPrograms(runtime) {
+async function createPrograms(runtime) {
 
+    const renderModule = await runtime.createShaderModule({
+        sourceParts: [ { code: triangleWgsl } ],
+    })
+    const computeModule = await runtime.createShaderModule({
+        sourceParts: [ { code: `
+            override scale: f32 = 1.0;
+            @compute @workgroup_size(1)
+            fn csMain() {
+                let value = scale;
+            }
+        ` } ],
+    })
     return Object.freeze({
+        renderModule,
+        computeModule,
         render: runtime.createProgram({
-            modules: [ triangleWgsl ],
-            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+            vertex: { module: renderModule, entryPoint: 'vsMain' },
+            fragment: { module: renderModule, entryPoint: 'fsMain' },
         }),
         compute: runtime.createProgram({
-            modules: [ `
-                override scale: f32 = 1.0;
-                @compute @workgroup_size(1)
-                fn csMain() {
-                    let value = scale;
-                }
-            ` ],
-            entryPoints: { compute: 'csMain' },
+            compute: {
+                module: computeModule,
+                entryPoint: 'csMain',
+                constants: { scale: 1 },
+            },
         }),
     })
 }

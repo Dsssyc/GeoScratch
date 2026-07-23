@@ -8,17 +8,72 @@ import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
 describe('scratch Program', () => {
 
+    it('captures ShaderModule stage contracts, override facts, and device limits', async() => {
+
+        const { gpu } = createFakeGpu()
+        const runtime = await ScratchRuntime.create({ gpu })
+        const vertexModule = await runtime.createShaderModule({
+            sourceParts: [ { code: triangleWgsl } ],
+        })
+        const fragmentModule = await runtime.createShaderModule({
+            sourceParts: [ { code: triangleWgsl } ],
+        })
+        const program = runtime.createProgram({
+            label: 'split triangle program',
+            vertex: {
+                module: vertexModule,
+                entryPoint: 'vsMain',
+                constants: { scale: 2 },
+            },
+            fragment: {
+                module: fragmentModule,
+                entryPoint: 'fsMain',
+                constants: { alpha: 0.5 },
+            },
+            requiredFeatures: [ 'timestamp-query' ],
+            requiredLimits: {
+                maxBindGroups: 2,
+                minUniformBufferOffsetAlignment: 256,
+            },
+        })
+
+        expect(program.vertex).to.deep.equal({
+            module: vertexModule,
+            entryPoint: 'vsMain',
+            constants: { scale: 2 },
+        })
+        expect(program.fragment).to.deep.equal({
+            module: fragmentModule,
+            entryPoint: 'fsMain',
+            constants: { alpha: 0.5 },
+        })
+        expect(program.compute).to.equal(undefined)
+        expect(program.requiredLimits).to.deep.equal({
+            maxBindGroups: 2,
+            minUniformBufferOffsetAlignment: 256,
+        })
+        expect(program).not.to.have.property('modules')
+        expect(program).not.to.have.property('entryPoints')
+        expect(Object.isFrozen(program.vertex)).to.equal(true)
+        expect(Object.isFrozen(program.vertex.constants)).to.equal(true)
+    })
+
     it('creates an explicit runtime-owned shader contract without resources', async() => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
-
+        const shaderModule = await runtime.createShaderModule({
+            sourceParts: [ { code: triangleWgsl } ],
+        })
         const program = runtime.createProgram({
             label: 'hello triangle program',
-            modules: [ triangleWgsl ],
-            entryPoints: {
-                vertex: 'vsMain',
-                fragment: 'fsMain',
+            vertex: {
+                module: shaderModule,
+                entryPoint: 'vsMain',
+            },
+            fragment: {
+                module: shaderModule,
+                entryPoint: 'fsMain',
             },
             requiredFeatures: [ 'timestamp-query' ],
         })
@@ -27,11 +82,8 @@ describe('scratch Program', () => {
         expect(program.runtime).to.equal(runtime)
         expect(program.id).to.be.a('string').and.not.equal('')
         expect(program.label).to.equal('hello triangle program')
-        expect(program.modules).to.deep.equal([ triangleWgsl ])
-        expect(program.entryPoints).to.deep.equal({
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        })
+        expect(program.vertex.module).to.equal(shaderModule)
+        expect(program.fragment.module).to.equal(shaderModule)
         expect(program.requiredFeatures).to.deep.equal([ 'timestamp-query' ])
         expect(program.isDisposed).to.equal(false)
         expect(program.bindSets).to.equal(undefined)
@@ -42,13 +94,15 @@ describe('scratch Program', () => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
+        const shaderModule = await runtime.createShaderModule({
+            sourceParts: [ { code: triangleWgsl } ],
+        })
 
         try {
             runtime.createProgram({
-                modules: [ triangleWgsl ],
-                entryPoints: {
-                    vertex: 'vsMain',
-                    fragment: 'fsMain',
+                vertex: {
+                    module: shaderModule,
+                    entryPoint: 'vsMain',
                 },
                 requiredFeatures: [ 'texture-compression-astc' ],
             })
@@ -70,12 +124,14 @@ describe('scratch Program', () => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
+        const shaderModule = await runtime.createShaderModule({
+            sourceParts: [ { code: triangleWgsl } ],
+        })
         const program = runtime.createProgram({
             label: 'hello triangle program',
-            modules: [ triangleWgsl ],
-            entryPoints: {
-                vertex: 'vsMain',
-                fragment: 'fsMain',
+            vertex: {
+                module: shaderModule,
+                entryPoint: 'vsMain',
             },
         })
 

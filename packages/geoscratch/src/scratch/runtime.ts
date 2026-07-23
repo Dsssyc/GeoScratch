@@ -57,6 +57,8 @@ import {
     scratchRuntimeIsDisposed,
 } from './runtime-authority.js'
 import { createSamplerResource, SamplerResource } from './sampler.js'
+import { createShaderModule as createScratchShaderModule, ShaderModule } from './shader-module.js'
+import { runtimeShaderModuleSnapshot } from './shader-module-ownership.js'
 import { SubmissionBuilder } from './submission.js'
 import { Surface } from './surface.js'
 import { createExternalTextureBinding, ExternalTextureBinding } from './temporal-texture.js'
@@ -91,6 +93,7 @@ import type {
     NormalizedScratchRuntimeDiagnosticsOptions,
 } from './runtime-diagnostics.js'
 import type { SamplerResourceDescriptor } from './sampler.js'
+import type { ShaderModuleDescriptor } from './shader-module.js'
 import type { SubmissionBuilderOptions } from './submission.js'
 import type { SurfaceOptions } from './surface.js'
 import type { ExternalTextureBindingDescriptor } from './temporal-texture.js'
@@ -410,6 +413,17 @@ export class ScratchRuntime {
         return this.createSampler(descriptor)
     }
 
+    async createShaderModule(descriptor: ShaderModuleDescriptor): Promise<ShaderModule> {
+
+        assertScratchRuntimeActive(this)
+        return createScratchShaderModule(this, descriptor)
+    }
+
+    shaderModule(descriptor: ShaderModuleDescriptor): Promise<ShaderModule> {
+
+        return this.createShaderModule(descriptor)
+    }
+
     async createQuerySet(descriptor: QuerySetResourceDescriptor): Promise<QuerySetResource> {
 
         assertScratchRuntimeActive(this)
@@ -670,6 +684,10 @@ export class ScratchRuntime {
 
         for (const pipeline of runtimePipelineSnapshot(this)) {
             dispose(() => pipeline.dispose())
+        }
+
+        for (const shaderModule of runtimeShaderModuleSnapshot(this)) {
+            dispose(() => shaderModule.dispose())
         }
 
         for (const bindSet of runtimeBindSetSnapshot(this)) {

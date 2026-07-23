@@ -41,6 +41,8 @@ export type {
     ScratchGpuPressureEvidence,
     ScratchGpuResourceOperationRecord,
     ScratchGpuResourceOperationTarget,
+    ScratchGpuShaderModuleOperationRecord,
+    ScratchGpuShaderModuleOperationTarget,
     ScratchGpuSamplerOperationTarget,
     ScratchGpuQuerySetOperationTarget,
     ScratchGpuQuerySetSlotFact,
@@ -73,12 +75,14 @@ export type {
     ScratchSupportingObjectFailureStage,
 } from './gpu-operation.js'
 export type {
-    PipelineCompilationMessage,
-    PipelineCompilationModuleFact,
-    PipelineCompilationModuleLocation,
-    PipelineCompilationNativeLocation,
-    PipelineCompilationReport,
+    PipelineCreationReport,
+    PipelineCreationStageFact,
     PipelineKind,
+    ShaderModuleCompilationMessage,
+    ShaderModuleCompilationNativeLocation,
+    ShaderModuleCompilationReport,
+    ShaderModuleCompilationSourcePartFact,
+    ShaderModuleCompilationSourcePartLocation,
 } from './pipeline-compilation.js'
 export { ScratchRuntime } from './runtime.js'
 export type {
@@ -202,8 +206,17 @@ export { Program } from './program.js'
 export type {
     ProgramBufferLayoutRequirement,
     ProgramDescriptor,
-    ProgramEntryPoints,
+    ProgramStage,
 } from './program.js'
+export { ShaderModule } from './shader-module.js'
+export type {
+    NormalizedShaderModuleSourcePart,
+    ShaderModuleCompilationHint,
+    ShaderModuleCompilationHintFact,
+    ShaderModuleCompilationHintLayout,
+    ShaderModuleDescriptor,
+    ShaderModuleSourcePart,
+} from './shader-module.js'
 export { inspectShader } from './shader-inspection.js'
 export type {
     ShaderBindLayoutComparisonOptions,

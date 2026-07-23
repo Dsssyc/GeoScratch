@@ -1,9 +1,15 @@
 # Scratch Hello GAW Initialization Failure Evidence Audit
 
-Status: Implementation and real-browser failure matrix complete
+Status: ADR-050 static migration complete; migrated real-browser rerun pending Phase 6
 Date: 2026-07-17
 Fixed candidate baseline: `d8b277e90cb79cab6eaec48e23628f73f42f9ea3`
 Feature branch: `socu/hello-gaw-init-failure-proof-v1`
+
+ADR-050 update, 2026-07-24: Bloom compilation is now acknowledged by a
+first-class ShaderModule before Program or Pipeline creation. The failure scenario,
+capture boundary, and source-free evidence assertions below use that owner. Earlier
+pipeline-owned browser measurements are historical and are not reused as current
+evidence.
 
 ## Scope
 
@@ -45,7 +51,7 @@ not treated as constants.
 | --- | --- | ---: | ---: | ---: | ---: |
 | `after-runtime-created` | yes / not created | 0 / 0 | 0 / 0 | 1 | 0 |
 | `after-first-image-decoded` | yes / yes | 1 / 1 | 0 / 0 | 2 | 0 |
-| `invalid-bloom-pipeline-wgsl` | yes / yes | 8 / 8 | 0 / 0 | 9 | 1 |
+| `invalid-bloom-shader-wgsl` | yes / yes | 8 / 8 | 0 / 0 | 9 | 1 |
 | `after-graph-created` | yes / yes | 8 / 8 | 0 / 0 | 9 | 0 |
 | `after-initial-submit-issued` | yes / yes | 8 / 8 | 1 / 0 | 9 | 0 |
 
@@ -65,38 +71,37 @@ open for a fixed 250 ms quiet interval before the final unhandled-rejection snap
 
 ## Source-Blind Failure Localization
 
-The invalid mode appends malformed text only to the in-memory Bloom-combine Program
-module. The checked-in WGSL file is unchanged. One capture starts immediately before
-the Bloom-combine compute-pipeline operation with these hard bounds:
+The invalid mode appends malformed text only to the in-memory Bloom-combine
+ShaderModule source part. The checked-in WGSL file is unchanged. One capture starts
+immediately before ShaderModule acknowledgement with these hard bounds:
 
 - maximum operations: 1;
 - maximum duration: 2,000 ms;
 - maximum evidence bytes: 65,536;
 - stacks and bounded descriptors enabled only inside that finite capture.
 
-The headed Chrome runs stopped by `operation-limit`, retained one failed
-`compute-pipeline-creation` operation, omitted zero operations, and used about 4.2 KiB
-of capture evidence. The compilation report retained one module, two error messages,
-and about 1.1 KiB of compilation evidence.
+The migrated verifier requires `operation-limit`, one failed
+`shader-module-creation` operation, zero omitted operations, and finite evidence under
+the configured bounds. The exact incident retains one bounded compilation report with
+one source-part fact and source-part-relative message locations. Updated numeric
+browser evidence is recorded only after the Phase 6 headed rerun.
 
 The source-blind localization bundle exposes these structural links:
 
 | Required question | Machine-readable fact |
 | --- | --- |
 | Which operation failed? | Capture operation kind and failed status |
-| Which pipeline? | `target.pipelineId` and `pipelineKind: 'compute'` |
-| Which Program? | `target.programId` and matching compilation `programId` |
-| Which module? | One compilation module fact with hash plus message `moduleIndex: 0` |
-| Which failure family? | Incident outcome `SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED` |
+| Which ShaderModule? | `target.shaderModuleId` and matching compilation `shaderModuleId` |
+| Which source part? | One source-part fact with hash plus message `sourcePartIndex: 0` |
+| Which failure family? | Incident outcome `SCRATCH_SHADER_MODULE_COMPILATION_FAILED` |
 | Which stage? | Matching incident outcome stage `shader-compilation` |
-| Is the top-level error complete? | `SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES` plus all three outcomes |
-| Is source retained? | No WGSL source; module hashes, bounded locations, and sanitized messages only |
+| Is the top-level error exact? | `SCRATCH_SHADER_MODULE_COMPILATION_FAILED` on the supporting-object incident |
+| Is source retained? | No WGSL source; source-part hashes, bounded locations, and sanitized messages only |
 
-Chrome also produced supporting-object and async-pipeline validation outcomes for the
-same invalid module. The top-level multiple-failure envelope is therefore correct; an
-Agent must inspect `incident.outcomes` rather than assume the first native settlement
-is the sole cause. The compilation outcome and report are sufficient to direct repair
-to the Bloom-combine Program module without source access or console parsing.
+The compilation outcome and report are sufficient to direct repair to the
+Bloom-combine ShaderModule source part without source access or console parsing.
+Pipeline creation is never started for an unacknowledged module, so no pipeline
+identity or pipeline failure is fabricated.
 
 ## Runtime Evidence Bounds
 

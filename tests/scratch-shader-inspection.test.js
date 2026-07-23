@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchRuntime,
@@ -416,17 +417,17 @@ describe('scratch shader inspection', () => {
     it('uses Program subject for Program input parser uncertainty', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const program = runtime.createProgram({
+        const program = await createTestProgram(runtime, {
             label: 'unsupported binding program',
-            modules: [
-                `
-                    @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
-                    @compute @workgroup_size(1)
-                    fn csMain() {
-                    }
-                `,
+            sourceParts: [
+            `
+            @group(0) @binding(0) var outputTexture: texture_storage_2d<rgba8unorm, write>;
+            @compute @workgroup_size(1)
+            fn csMain() {
+            }
+            `,
             ],
-            entryPoints: { compute: 'csMain' },
+            compute: 'csMain',
         })
         const inspection = inspectShader(program)
 
@@ -472,17 +473,17 @@ describe('scratch shader inspection', () => {
     it('includes Program context for Program input comparisons', async() => {
 
         const { runtime } = await createRuntimeFixture()
-        const program = runtime.createProgram({
+        const program = await createTestProgram(runtime, {
             label: 'inspection program',
-            modules: [
-                `
-                    @group(0) @binding(0) var<uniform> camera: Camera;
-                    @compute @workgroup_size(1)
-                    fn csMain() {
-                    }
-                `,
+            sourceParts: [
+            `
+            @group(0) @binding(0) var<uniform> camera: Camera;
+            @compute @workgroup_size(1)
+            fn csMain() {
+            }
+            `,
             ],
-            entryPoints: { compute: 'csMain' },
+            compute: 'csMain',
         })
         const bindLayout = await createBindLayout(runtime, [
             { binding: 0, name: 'camera', type: 'storage', visibility: [ 'compute' ] },

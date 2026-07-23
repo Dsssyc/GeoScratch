@@ -8,6 +8,7 @@ import {
     observeScratchRuntimeAuthority,
     scratchRuntimeAuthoritySubject,
 } from './runtime-authority.js'
+import { isShaderModule } from './shader-module.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { BindVisibility } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -17,12 +18,18 @@ import type {
     ScratchRuntimeAuthorityObservation,
     ScratchRuntimeAuthorityStamp,
 } from './runtime-authority.js'
+import type { ShaderModule } from './shader-module.js'
 
-export type ProgramEntryPoints = {
-    vertex?: string
-    fragment?: string
-    compute?: string
-}
+const ALIGNMENT_LIMITS = new Set([
+    'minUniformBufferOffsetAlignment',
+    'minStorageBufferOffsetAlignment',
+])
+
+export type ProgramStage = Readonly<{
+    module: ShaderModule
+    entryPoint?: string
+    constants?: Readonly<Record<string, GPUPipelineConstantValue>>
+}>
 
 export type ProgramBufferLayoutRequirement = Readonly<{
     group: number
@@ -34,14 +41,16 @@ export type ProgramBufferLayoutRequirement = Readonly<{
     layout: LayoutArtifact
 }>
 
-export type ProgramDescriptor = {
+export type ProgramDescriptor = Readonly<{
     label?: string
-    modules: string[]
-    entryPoints?: ProgramEntryPoints
+    vertex?: ProgramStage
+    fragment?: ProgramStage
+    compute?: ProgramStage
     requiredFeatures?: Iterable<GPUFeatureName>
+    requiredLimits?: Readonly<Record<string, GPUSize64 | undefined>>
     requiredLanguageFeatures?: Iterable<string>
     layoutRequirements?: readonly ProgramBufferLayoutRequirement[]
-}
+}>
 
 type ProgramState = {
     runtime: ScratchRuntime
@@ -49,12 +58,15 @@ type ProgramState = {
     lifecycleEpoch: number
 }
 
-type ProgramPipelineFacts = Readonly<{
-    modules: readonly string[]
-    entryPoints: Readonly<ProgramEntryPoints>
+export type ProgramPipelineFacts = Readonly<{
+    vertex?: ProgramStage
+    fragment?: ProgramStage
+    compute?: ProgramStage
     requiredFeatures: readonly GPUFeatureName[]
+    requiredLimits: Readonly<Record<string, GPUSize64 | undefined>>
     requiredLanguageFeatures: readonly string[]
     layoutRequirements: readonly ProgramBufferLayoutRequirement[]
+    sourcePartDependencies: readonly LayoutArtifact[]
 }>
 
 type ProgramPipelineFactsSnapshot = Readonly<{
@@ -75,26 +87,20 @@ export type ProgramPipelineAuthorityObservation = Readonly<{
     runtime: ScratchRuntimeAuthorityObservation
 }>
 
-type SampledProgramPipelineFacts = Readonly<{
-    modules: unknown
-    entryPoints: unknown
-    requiredFeatures: unknown
-    requiredLanguageFeatures: unknown
-    layoutRequirements: unknown
-}>
-
 const programStates = new WeakMap<Program, ProgramState>()
 
 export interface Program {
     readonly runtime: ScratchRuntime
     readonly id: string
-    label?: string
-    modules: string[]
-    entryPoints: ProgramEntryPoints
-    requiredFeatures: GPUFeatureName[]
-    requiredLanguageFeatures: string[]
-    layoutRequirements: readonly ProgramBufferLayoutRequirement[]
-    readonly isDisposed: boolean
+    readonly label?: string
+    readonly vertex?: ProgramStage
+    readonly fragment?: ProgramStage
+    readonly compute?: ProgramStage
+    readonly requiredFeatures: readonly GPUFeatureName[]
+    readonly requiredLimits: Readonly<Record<string, GPUSize64 | undefined>>
+    readonly requiredLanguageFeatures: readonly string[]
+    readonly layoutRequirements: readonly ProgramBufferLayoutRequirement[]
+    readonly sourcePartDependencies: readonly LayoutArtifact[]
 }
 
 export class Program {
@@ -102,40 +108,43 @@ export class Program {
     constructor(runtime: ScratchRuntime, descriptor: ProgramDescriptor) {
 
         const runtimeAuthority = captureScratchRuntimeAuthority(runtime)
+        const id = `scratch-program-${UUID()}`
+        const subject = programSubjectFrom(id, descriptor?.label)
+        const normalized = normalizeProgramDescriptor(runtime, subject, descriptor)
+        assertScratchRuntimeAuthority(runtimeAuthority)
 
         programStates.set(this, { runtime, isDisposed: false, lifecycleEpoch: 0 })
         Object.defineProperties(this, {
-            runtime: {
-                value: runtime,
-                enumerable: true,
-                configurable: false,
-                writable: false,
-            },
-            id: {
-                value: `scratch-program-${UUID()}`,
-                enumerable: true,
-                configurable: false,
-                writable: false,
-            },
-            isDisposed: {
-                get: () => programStateFor(this).isDisposed,
-                enumerable: true,
-                configurable: false,
-            },
+            runtime: immutableEnumerableProperty(runtime),
+            id: immutableEnumerableProperty(id),
+            ...(normalized.label !== undefined
+                ? { label: immutableEnumerableProperty(normalized.label) }
+                : {}),
+            ...(normalized.vertex !== undefined
+                ? { vertex: immutableEnumerableProperty(normalized.vertex) }
+                : {}),
+            ...(normalized.fragment !== undefined
+                ? { fragment: immutableEnumerableProperty(normalized.fragment) }
+                : {}),
+            ...(normalized.compute !== undefined
+                ? { compute: immutableEnumerableProperty(normalized.compute) }
+                : {}),
+            requiredFeatures: immutableEnumerableProperty(normalized.requiredFeatures),
+            requiredLimits: immutableEnumerableProperty(normalized.requiredLimits),
+            requiredLanguageFeatures: immutableEnumerableProperty(
+                normalized.requiredLanguageFeatures
+            ),
+            layoutRequirements: immutableEnumerableProperty(normalized.layoutRequirements),
+            sourcePartDependencies: immutableEnumerableProperty(
+                normalized.sourcePartDependencies
+            ),
         })
-        if (descriptor.label !== undefined) this.label = descriptor.label
-        this.modules = normalizeModules(this, descriptor.modules)
-        this.entryPoints = normalizeEntryPoints(this, descriptor.entryPoints)
-        this.requiredFeatures = normalizeRequiredFeatures(descriptor.requiredFeatures)
-        this.requiredLanguageFeatures = normalizeRequiredLanguageFeatures(
-            this,
-            descriptor.requiredLanguageFeatures
-        )
-        this.layoutRequirements = normalizeLayoutRequirements(this, descriptor.layoutRequirements)
+        Object.preventExtensions(this)
+    }
 
-        validateRequiredFeatures(this, runtime, this.requiredFeatures)
-        validateRequiredLanguageFeatures(this, runtime, this.requiredLanguageFeatures)
-        assertScratchRuntimeAuthority(runtimeAuthority)
+    get isDisposed(): boolean {
+
+        return programStateFor(this).isDisposed
     }
 
     get subject(): DiagnosticSubject {
@@ -175,31 +184,27 @@ export function snapshotProgramPipelineFacts(
 ): ProgramPipelineFactsSnapshot {
 
     const authority = captureProgramPipelineAuthority(program, runtime)
-    const state = programStateFor(program)
-    const sampled = runProgramFactPhase(authority, () => materializeProgramPipelineFacts(program))
-    const normalized = runProgramFactPhase(authority, () => Object.freeze({
-        modules: Object.freeze(normalizeModules(program, sampled.modules)),
-        entryPoints: Object.freeze(normalizeEntryPoints(program, sampled.entryPoints)),
-        requiredFeatures: Object.freeze(normalizeRequiredFeatures(
-            sampled.requiredFeatures as Iterable<GPUFeatureName> | undefined
-        )),
-        requiredLanguageFeatures: Object.freeze(normalizeRequiredLanguageFeatures(
-            program,
-            sampled.requiredLanguageFeatures
-        )),
-        layoutRequirements: normalizeLayoutRequirements(program, sampled.layoutRequirements),
-    }))
-
-    runProgramFactPhase(authority, () => {
-        validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)
-        validateRequiredLanguageFeatures(
-            program,
-            state.runtime,
-            normalized.requiredLanguageFeatures
-        )
+    const facts = Object.freeze({
+        ...(program.vertex !== undefined ? { vertex: snapshotProgramStage(program.vertex) } : {}),
+        ...(program.fragment !== undefined ? { fragment: snapshotProgramStage(program.fragment) } : {}),
+        ...(program.compute !== undefined ? { compute: snapshotProgramStage(program.compute) } : {}),
+        requiredFeatures: program.requiredFeatures,
+        requiredLimits: program.requiredLimits,
+        requiredLanguageFeatures: program.requiredLanguageFeatures,
+        layoutRequirements: program.layoutRequirements,
+        sourcePartDependencies: program.sourcePartDependencies,
     })
+    assertProgramPipelineAuthority(authority)
+    for (const stage of [ facts.vertex, facts.fragment, facts.compute ]) {
+        if (stage === undefined) continue
+        stage.module.assertRuntime(runtime)
+    }
+    validateRequiredFeatures(program, runtime, facts.requiredFeatures)
+    validateRequiredLimits(program, runtime, facts.requiredLimits)
+    validateRequiredLanguageFeatures(program, runtime, facts.requiredLanguageFeatures)
+    assertProgramPipelineAuthority(authority)
 
-    return Object.freeze({ facts: normalized, authority })
+    return Object.freeze({ facts, authority })
 }
 
 export function assertProgramUsableAuthority(program: Program): void {
@@ -222,7 +227,7 @@ export function assertProgramPipelineAuthority(stamp: ProgramPipelineAuthoritySt
             message: 'Program lifecycle changed after pipeline preparation.',
             expected: { lifecycleEpoch: stamp.lifecycleEpoch },
             actual: { lifecycleEpoch: state.lifecycleEpoch },
-            hints: [ 'Prepare a new pipeline candidate from the current Program lifecycle.' ],
+            hints: [ 'Create a new pipeline candidate from a current Program.' ],
         })
     }
     assertScratchRuntimeAuthority(stamp.runtimeAuthority)
@@ -243,43 +248,480 @@ export function observeProgramPipelineAuthority(
 
 export function programAuthoritySubject(program: Program): DiagnosticSubject {
 
+    return programSubjectFrom(program.id, program.label)
+}
+
+export function programLayoutRequirementSubject(
+    requirement: Pick<ProgramBufferLayoutRequirement, 'group' | 'binding'> & {
+        name?: unknown
+    }
+): DiagnosticSubject {
+
     const subject: DiagnosticSubject = {
-        kind: 'Program',
-        id: program.id,
+        kind: 'ShaderBinding',
+        group: requirement.group,
+        binding: requirement.binding,
+        stage: 'buffer',
     }
-    let label: unknown
-    try {
-        label = program.label
-    } catch {
-        label = undefined
-    }
-    if (typeof label === 'string') subject.label = label
+    if (typeof requirement.name === 'string') subject.name = requirement.name
     return subject
 }
 
-function programStateFor(program: Program): ProgramState {
+export function programLayoutRequirementExpected(
+    requirement: ProgramBufferLayoutRequirement
+) {
 
-    const state = programStates.get(program)
-    if (state === undefined) throw new TypeError('Program private state is unavailable.')
-    return state
+    return {
+        group: requirement.group,
+        binding: requirement.binding,
+        ...(requirement.name !== undefined ? { name: requirement.name } : {}),
+        type: requirement.type,
+        ...(requirement.visibility !== undefined ? { visibility: requirement.visibility } : {}),
+        hasDynamicOffset: requirement.hasDynamicOffset,
+        abiByteLength: requirement.layout.byteLength,
+        minBindingSize: `0 or >= ${requirement.layout.byteLength}`,
+        abiHash: requirement.layout.abiHash,
+        schemaHash: requirement.layout.schemaHash,
+    }
 }
 
-function runProgramFactPhase<T>(authority: ProgramPipelineAuthorityStamp, phase: () => T): T {
+function normalizeProgramDescriptor(
+    runtime: ScratchRuntime,
+    subject: DiagnosticSubject,
+    descriptor: unknown
+): ProgramPipelineFacts & Readonly<{ label?: string }> {
 
-    let value: T | undefined
-    let failure: unknown
-    let failed = false
-
-    try {
-        value = phase()
-    } catch (error) {
-        failed = true
-        failure = error
+    if (!isRecord(descriptor)) {
+        throwProgramDescriptorInvalid(subject, 'descriptor', descriptor)
+    }
+    if (descriptor.label !== undefined && typeof descriptor.label !== 'string') {
+        throwProgramDescriptorInvalid(subject, 'label', descriptor.label)
+    }
+    const vertex = normalizeProgramStage(runtime, subject, 'vertex', descriptor.vertex)
+    const fragment = normalizeProgramStage(runtime, subject, 'fragment', descriptor.fragment)
+    const compute = normalizeProgramStage(runtime, subject, 'compute', descriptor.compute)
+    if (vertex === undefined && fragment === undefined && compute === undefined) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PROGRAM_STAGE_MISSING',
+            severity: 'error',
+            phase: 'program',
+            subject,
+            message: 'Program requires at least one ShaderModule stage.',
+            expected: { stages: 'vertex, fragment, or compute' },
+            actual: { vertex: false, fragment: false, compute: false },
+        })
     }
 
-    assertProgramPipelineAuthority(authority)
-    if (failed) throw failure
-    return value as T
+    const requiredFeatures = Object.freeze(
+        normalizeStringIterable<GPUFeatureName>(
+            subject,
+            'requiredFeatures',
+            descriptor.requiredFeatures
+        )
+    )
+    const requiredLimits = normalizeRequiredLimits(
+        subject,
+        descriptor.requiredLimits
+    )
+    const requiredLanguageFeatures = Object.freeze(
+        normalizeStringIterable(
+            subject,
+            'requiredLanguageFeatures',
+            descriptor.requiredLanguageFeatures
+        )
+    )
+    const layoutRequirements = normalizeLayoutRequirements(
+        subject,
+        descriptor.layoutRequirements
+    )
+    const sourcePartDependencies = collectSourcePartDependencies([
+        vertex,
+        fragment,
+        compute,
+    ])
+
+    const normalized = Object.freeze({
+        ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
+        ...(vertex !== undefined ? { vertex } : {}),
+        ...(fragment !== undefined ? { fragment } : {}),
+        ...(compute !== undefined ? { compute } : {}),
+        requiredFeatures,
+        requiredLimits,
+        requiredLanguageFeatures,
+        layoutRequirements,
+        sourcePartDependencies,
+    })
+    const placeholder = {
+        id: typeof subject.id === 'string' ? subject.id : 'scratch-program-pending',
+        runtime,
+        label: descriptor.label,
+        subject,
+    } as unknown as Program
+    validateRequiredFeatures(placeholder, runtime, requiredFeatures)
+    validateRequiredLimits(placeholder, runtime, requiredLimits)
+    validateRequiredLanguageFeatures(placeholder, runtime, requiredLanguageFeatures)
+    return normalized
+}
+
+function normalizeProgramStage(
+    runtime: ScratchRuntime,
+    subject: DiagnosticSubject,
+    stageName: 'vertex' | 'fragment' | 'compute',
+    value: unknown
+): ProgramStage | undefined {
+
+    if (value === undefined) return undefined
+    if (!isRecord(value) || !isShaderModule(value.module)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PROGRAM_STAGE_INVALID',
+            severity: 'error',
+            phase: 'program',
+            subject: {
+                kind: 'ShaderEntryPoint',
+                programId: subject.id,
+                stage: stageName,
+            },
+            related: [ subject ],
+            message: 'Program stage requires an acknowledged ShaderModule.',
+            expected: { module: 'ShaderModule' },
+            actual: { module: describeValue(isRecord(value) ? value.module : value) },
+        })
+    }
+    value.module.assertRuntime(runtime)
+    if (
+        value.entryPoint !== undefined &&
+        (
+            typeof value.entryPoint !== 'string' ||
+            value.entryPoint.length === 0
+        )
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PROGRAM_ENTRY_POINT_INVALID',
+            severity: 'error',
+            phase: 'program',
+            subject: {
+                kind: 'ShaderEntryPoint',
+                programId: subject.id,
+                stage: stageName,
+                name: String(value.entryPoint),
+            },
+            related: [ subject, value.module.subject ],
+            message: 'Program stage entry point must be a non-empty string when present.',
+            expected: { entryPoint: 'non-empty string or omitted' },
+            actual: { entryPoint: value.entryPoint },
+        })
+    }
+    const constants = normalizeStageConstants(subject, stageName, value.constants)
+    return Object.freeze({
+        module: value.module,
+        ...(value.entryPoint !== undefined ? { entryPoint: value.entryPoint } : {}),
+        ...(constants !== undefined ? { constants } : {}),
+    })
+}
+
+function normalizeStageConstants(
+    subject: DiagnosticSubject,
+    stage: string,
+    value: unknown
+): Readonly<Record<string, GPUPipelineConstantValue>> | undefined {
+
+    if (value === undefined) return undefined
+    if (!isRecord(value)) {
+        throwProgramDescriptorInvalid(subject, `${stage}.constants`, value)
+    }
+    const normalized: Record<string, GPUPipelineConstantValue> = {}
+    for (const [ name, constant ] of Object.entries(value)) {
+        if (
+            typeof constant !== 'number' ||
+            !Number.isFinite(constant)
+        ) {
+            throwProgramDescriptorInvalid(
+                subject,
+                `${stage}.constants.${name}`,
+                constant
+            )
+        }
+        normalized[name] = constant
+    }
+    return Object.freeze(normalized)
+}
+
+function snapshotProgramStage(stage: ProgramStage): ProgramStage {
+
+    return Object.freeze({
+        module: stage.module,
+        ...(stage.entryPoint !== undefined ? { entryPoint: stage.entryPoint } : {}),
+        ...(stage.constants !== undefined
+            ? { constants: Object.freeze({ ...stage.constants }) }
+            : {}),
+    })
+}
+
+function normalizeStringIterable<T extends string>(
+    subject: DiagnosticSubject,
+    field: string,
+    value: unknown
+): T[] {
+
+    if (value === undefined) return []
+    if (
+        value === null ||
+        typeof value === 'string' ||
+        (
+            typeof value !== 'object' &&
+            typeof value !== 'function'
+        )
+    ) {
+        throwProgramDescriptorInvalid(subject, field, value)
+    }
+    let values: unknown[]
+    try {
+        values = [ ...(value as Iterable<unknown>) ]
+    } catch {
+        throwProgramDescriptorInvalid(subject, field, value, 'iterator failed')
+    }
+    if (!values.every(item => typeof item === 'string' && item.length > 0)) {
+        throwProgramDescriptorInvalid(subject, field, values)
+    }
+    return values as T[]
+}
+
+function normalizeRequiredLimits(
+    subject: DiagnosticSubject,
+    value: unknown
+): Readonly<Record<string, GPUSize64 | undefined>> {
+
+    if (value === undefined) return Object.freeze({})
+    if (!isRecord(value)) {
+        throwProgramDescriptorInvalid(subject, 'requiredLimits', value)
+    }
+    const limits: Record<string, GPUSize64 | undefined> = {}
+    for (const [ name, limit ] of Object.entries(value)) {
+        if (
+            limit !== undefined &&
+            (
+                typeof limit !== 'number' ||
+                !Number.isSafeInteger(limit) ||
+                limit < 0
+            )
+        ) {
+            throwProgramDescriptorInvalid(subject, `requiredLimits.${name}`, limit)
+        }
+        limits[name] = limit as GPUSize64 | undefined
+    }
+    return Object.freeze(limits)
+}
+
+function normalizeLayoutRequirements(
+    subject: DiagnosticSubject,
+    value: unknown
+): readonly ProgramBufferLayoutRequirement[] {
+
+    if (value === undefined) return Object.freeze([])
+    if (!Array.isArray(value)) {
+        throwLayoutRequirementDiagnostic(subject, {}, {
+            expected: { layoutRequirements: 'ProgramBufferLayoutRequirement[]' },
+            actual: { layoutRequirements: describeValue(value) },
+        })
+    }
+    const seen = new Set<string>()
+    const normalized = value.map(requirement => {
+        const result = normalizeLayoutRequirement(subject, requirement)
+        const key = `${result.group}:${result.binding}`
+        if (seen.has(key)) {
+            throwLayoutRequirementDiagnostic(subject, result, {
+                expected: { unique: [ 'group', 'binding' ] },
+                actual: { group: result.group, binding: result.binding },
+            })
+        }
+        seen.add(key)
+        return result
+    })
+    return Object.freeze(normalized)
+}
+
+function normalizeLayoutRequirement(
+    subject: DiagnosticSubject,
+    requirement: unknown
+): ProgramBufferLayoutRequirement {
+
+    if (!isRecord(requirement)) {
+        throwLayoutRequirementDiagnostic(subject, {}, {
+            expected: { requirement: 'ProgramBufferLayoutRequirement' },
+            actual: { requirement: describeValue(requirement) },
+        })
+    }
+    const { group, binding, name, type, visibility, hasDynamicOffset, layout } = requirement
+    if (typeof group !== 'number' || !Number.isInteger(group) || group < 0) {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: { group: 'non-negative integer' },
+            actual: { group },
+        })
+    }
+    if (typeof binding !== 'number' || !Number.isInteger(binding) || binding < 0) {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: { binding: 'non-negative integer' },
+            actual: { binding },
+        })
+    }
+    if (name !== undefined && (typeof name !== 'string' || name.length === 0)) {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: { name: 'non-empty string' },
+            actual: { name },
+        })
+    }
+    if (type !== 'uniform' && type !== 'read-storage' && type !== 'storage') {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: { type: [ 'uniform', 'read-storage', 'storage' ] },
+            actual: { type },
+        })
+    }
+    const normalizedVisibility = normalizeVisibility(subject, requirement, visibility)
+    if (typeof hasDynamicOffset !== 'boolean') {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: { hasDynamicOffset: 'boolean' },
+            actual: { hasDynamicOffset },
+        })
+    }
+    if (!isLayoutArtifact(layout)) {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: { layout: 'LayoutArtifact' },
+            actual: { layout: describeValue(layout) },
+        })
+    }
+    return Object.freeze({
+        group,
+        binding,
+        ...(name !== undefined ? { name } : {}),
+        type,
+        ...(normalizedVisibility !== undefined ? { visibility: normalizedVisibility } : {}),
+        hasDynamicOffset,
+        layout,
+    })
+}
+
+function normalizeVisibility(
+    subject: DiagnosticSubject,
+    requirement: Record<string, unknown>,
+    value: unknown
+): readonly BindVisibility[] | undefined {
+
+    if (value === undefined) return undefined
+    if (!Array.isArray(value) || value.length === 0) {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: { visibility: 'non-empty stage array' },
+            actual: { visibility: value },
+        })
+    }
+    if (!value.every(stage =>
+        stage === 'vertex' || stage === 'fragment' || stage === 'compute'
+    )) {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: { visibility: [ 'vertex', 'fragment', 'compute' ] },
+            actual: { visibility: value },
+        })
+    }
+    return Object.freeze([ ...value ]) as readonly BindVisibility[]
+}
+
+function collectSourcePartDependencies(
+    stages: readonly (ProgramStage | undefined)[]
+): readonly LayoutArtifact[] {
+
+    const dependencies = new Set<LayoutArtifact>()
+    for (const stage of stages) {
+        if (stage === undefined) continue
+        for (const sourcePart of stage.module.sourceParts) {
+            for (const dependency of sourcePart.layoutDependencies) {
+                dependencies.add(dependency)
+            }
+        }
+    }
+    return Object.freeze([ ...dependencies ])
+}
+
+function validateRequiredFeatures(
+    program: Program,
+    runtime: ScratchRuntime,
+    requiredFeatures: readonly GPUFeatureName[]
+): void {
+
+    for (const feature of requiredFeatures) {
+        if (runtime.deviceFeatures?.has?.(feature)) continue
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PROGRAM_FEATURE_UNAVAILABLE',
+            severity: 'error',
+            phase: 'program',
+            subject: programSubjectForValidation(program),
+            message: 'Program requires a WebGPU feature unavailable on this Runtime.',
+            expected: { feature },
+            actual: { features: [ ...(runtime.deviceFeatures ?? []) ] },
+        })
+    }
+}
+
+function validateRequiredLimits(
+    program: Program,
+    runtime: ScratchRuntime,
+    requiredLimits: Readonly<Record<string, GPUSize64 | undefined>>
+): void {
+
+    const limits = runtime.deviceLimits as unknown as Record<string, unknown>
+    for (const [ name, required ] of Object.entries(requiredLimits)) {
+        if (required === undefined) continue
+        const available = limits[name]
+        if (typeof available !== 'number') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_PROGRAM_LIMIT_UNAVAILABLE',
+                severity: 'error',
+                phase: 'program',
+                subject: programSubjectForValidation(program),
+                message: 'Program requires an unknown WebGPU device limit.',
+                expected: { limit: name, required },
+                actual: { available: describeValue(available) },
+            })
+        }
+        const satisfied = ALIGNMENT_LIMITS.has(name)
+            ? available <= required
+            : available >= required
+        if (satisfied) continue
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PROGRAM_LIMIT_UNAVAILABLE',
+            severity: 'error',
+            phase: 'program',
+            subject: programSubjectForValidation(program),
+            message: 'Program requires a WebGPU device limit unavailable on this Runtime.',
+            expected: {
+                limit: name,
+                required,
+                comparison: ALIGNMENT_LIMITS.has(name)
+                    ? 'available <= required'
+                    : 'available >= required',
+            },
+            actual: { available },
+        })
+    }
+}
+
+function validateRequiredLanguageFeatures(
+    program: Program,
+    runtime: ScratchRuntime,
+    features: readonly string[]
+): void {
+
+    for (const languageFeature of features) {
+        if (runtime.wgslLanguageFeatures.includes(languageFeature)) continue
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
+            severity: 'error',
+            phase: 'program',
+            subject: programSubjectForValidation(program),
+            related: [ runtime.subject ],
+            message: 'Program requires a WGSL language feature unavailable on this Runtime.',
+            expected: { languageFeature },
+            actual: { wgslLanguageFeatures: runtime.wgslLanguageFeatures },
+        })
+    }
 }
 
 function captureProgramPipelineAuthority(
@@ -301,7 +743,6 @@ function assertProgramRuntimeAuthority(program: Program, runtime: ScratchRuntime
     const state = programStateFor(program)
     assertProgramUsableAuthority(program)
     if (runtime === state.runtime) return
-
     throwScratchDiagnostic({
         code: 'SCRATCH_PROGRAM_WRONG_RUNTIME',
         severity: 'error',
@@ -310,7 +751,7 @@ function assertProgramRuntimeAuthority(program: Program, runtime: ScratchRuntime
         related: [
             scratchRuntimeAuthoritySubject(state.runtime),
             relatedRuntimeSubject(runtime),
-        ].filter((subject): subject is DiagnosticSubject => subject !== undefined),
+        ].filter((value): value is DiagnosticSubject => value !== undefined),
         message: 'Program belongs to a different ScratchRuntime.',
         expected: { runtimeId: state.runtime.id },
         actual: { runtimeId: runtime?.id },
@@ -329,6 +770,40 @@ function assertProgramNotDisposed(program: Program, state: ProgramState): void {
     })
 }
 
+function programStateFor(program: Program): ProgramState {
+
+    const state = programStates.get(program)
+    if (state === undefined) throw new TypeError('Program private state is unavailable.')
+    return state
+}
+
+function programSubjectForValidation(program: Program): DiagnosticSubject {
+
+    try {
+        return program.subject
+    } catch {
+        const candidate = program as unknown as {
+            id?: unknown
+            label?: unknown
+            subject?: unknown
+        }
+        if (isRecord(candidate.subject)) return candidate.subject as DiagnosticSubject
+        return programSubjectFrom(
+            typeof candidate.id === 'string' ? candidate.id : 'scratch-program-pending',
+            typeof candidate.label === 'string' ? candidate.label : undefined
+        )
+    }
+}
+
+function programSubjectFrom(id: string, label?: unknown): DiagnosticSubject {
+
+    return {
+        kind: 'Program',
+        id,
+        ...(typeof label === 'string' ? { label } : {}),
+    }
+}
+
 function relatedRuntimeSubject(runtime: ScratchRuntime | undefined): DiagnosticSubject | undefined {
 
     if (runtime === undefined || runtime === null) return undefined
@@ -339,437 +814,31 @@ function relatedRuntimeSubject(runtime: ScratchRuntime | undefined): DiagnosticS
     }
 }
 
-function materializeProgramPipelineFacts(program: Program): SampledProgramPipelineFacts {
-
-    const modules = program.modules as unknown
-    const entryPoints = program.entryPoints as unknown
-    const requiredFeatures = program.requiredFeatures as unknown
-    const requiredLanguageFeatures = program.requiredLanguageFeatures as unknown
-    const layoutRequirements = program.layoutRequirements as unknown
-
-    return Object.freeze({
-        modules: materializeProgramModules(modules),
-        entryPoints: materializeProgramEntryPoints(entryPoints),
-        requiredFeatures: materializeProgramRequiredFeatures(requiredFeatures),
-        requiredLanguageFeatures,
-        layoutRequirements: materializeProgramLayoutRequirements(layoutRequirements),
-    })
-}
-
-function materializeProgramModules(modules: unknown): unknown {
-
-    return Array.isArray(modules) ? [ ...modules ] : modules
-}
-
-function materializeProgramEntryPoints(entryPoints: unknown): unknown {
-
-    if (!isRecord(entryPoints)) return entryPoints
-    return {
-        vertex: entryPoints.vertex,
-        fragment: entryPoints.fragment,
-        compute: entryPoints.compute,
-    }
-}
-
-function materializeProgramRequiredFeatures(requiredFeatures: unknown): unknown {
-
-    if (requiredFeatures === undefined) return undefined
-    return [ ...(requiredFeatures as Iterable<unknown>) ]
-}
-
-function materializeProgramLayoutRequirements(layoutRequirements: unknown): unknown {
-
-    if (!Array.isArray(layoutRequirements)) return layoutRequirements
-    return layoutRequirements.map(requirement => materializeProgramLayoutRequirement(requirement))
-}
-
-function materializeProgramLayoutRequirement(requirement: unknown): unknown {
-
-    if (!isRecord(requirement)) return requirement
-    const visibility = requirement.visibility
-    return {
-        group: requirement.group,
-        binding: requirement.binding,
-        name: requirement.name,
-        type: requirement.type,
-        visibility: Array.isArray(visibility) ? [ ...visibility ] : visibility,
-        hasDynamicOffset: requirement.hasDynamicOffset,
-        layout: requirement.layout,
-    }
-}
-
-export function programLayoutRequirementSubject(requirement: Pick<ProgramBufferLayoutRequirement, 'group' | 'binding'> & { name?: unknown }): DiagnosticSubject {
-
-    const subject: DiagnosticSubject = {
-        kind: 'ShaderBinding',
-        group: requirement.group,
-        binding: requirement.binding,
-        stage: 'buffer',
-    }
-    if (typeof requirement.name === 'string') subject.name = requirement.name
-
-    return subject
-}
-
-export function programLayoutRequirementExpected(requirement: ProgramBufferLayoutRequirement) {
-
-    return {
-        group: requirement.group,
-        binding: requirement.binding,
-        ...(requirement.name !== undefined ? { name: requirement.name } : {}),
-        type: requirement.type,
-        ...(requirement.visibility !== undefined ? { visibility: requirement.visibility } : {}),
-        hasDynamicOffset: requirement.hasDynamicOffset,
-        abiByteLength: requirement.layout.byteLength,
-        minBindingSize: `0 or >= ${requirement.layout.byteLength}`,
-        abiHash: requirement.layout.abiHash,
-        schemaHash: requirement.layout.schemaHash,
-    }
-}
-
-function normalizeModules(program: Program, modules: unknown): string[] {
-
-    if (
-        !Array.isArray(modules) ||
-        modules.length === 0 ||
-        !modules.every((module): module is string => typeof module === 'string')
-    ) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_PROGRAM_MODULES_INVALID',
-            severity: 'error',
-            phase: 'program',
-            subject: program.subject,
-            message: 'Program requires at least one WGSL source module string.',
-            expected: { modules: 'non-empty string[]' },
-            actual: { modules: Array.isArray(modules) ? modules.map(module => typeof module) : typeof modules },
-        })
-    }
-
-    return [ ...modules ]
-}
-
-function normalizeEntryPoints(program: Program, entryPoints: unknown): ProgramEntryPoints {
-
-    if (entryPoints !== undefined && !isRecord(entryPoints)) {
-        throwEntryPointDiagnostic(program, 'entryPoints', entryPoints)
-    }
-
-    const vertex = entryPoints?.vertex
-    const fragment = entryPoints?.fragment
-    const compute = entryPoints?.compute
-    const normalized: ProgramEntryPoints = {}
-
-    if (vertex !== undefined && typeof vertex !== 'string') {
-        throwEntryPointDiagnostic(program, 'vertex', vertex)
-    }
-
-    if (fragment !== undefined && typeof fragment !== 'string') {
-        throwEntryPointDiagnostic(program, 'fragment', fragment)
-    }
-
-    if (compute !== undefined && typeof compute !== 'string') {
-        throwEntryPointDiagnostic(program, 'compute', compute)
-    }
-
-    if (vertex !== undefined) normalized.vertex = vertex
-    if (fragment !== undefined) normalized.fragment = fragment
-    if (compute !== undefined) normalized.compute = compute
-
-    return normalized
-}
-
-function normalizeRequiredFeatures(requiredFeatures: Iterable<GPUFeatureName> | undefined): GPUFeatureName[] {
-
-    if (requiredFeatures === undefined) return []
-    return [ ...requiredFeatures ]
-}
-
-function normalizeRequiredLanguageFeatures(
-    program: Program,
-    requiredLanguageFeatures: unknown
-): string[] {
-
-    if (requiredLanguageFeatures === undefined) return []
-    if (
-        requiredLanguageFeatures === null ||
-        typeof requiredLanguageFeatures === 'string' ||
-        (
-            typeof requiredLanguageFeatures !== 'object' &&
-            typeof requiredLanguageFeatures !== 'function'
-        )
-    ) {
-        throwRequiredLanguageFeatureDiagnostic(program, requiredLanguageFeatures)
-    }
-
-    let iterator: unknown
-    try {
-        iterator = (requiredLanguageFeatures as { [Symbol.iterator]?: unknown })[Symbol.iterator]
-    } catch {
-        throwRequiredLanguageFeatureDiagnostic(
-            program,
-            requiredLanguageFeatures,
-            'iterator property threw'
-        )
-    }
-    if (typeof iterator !== 'function') {
-        throwRequiredLanguageFeatureDiagnostic(program, requiredLanguageFeatures)
-    }
-
-    let features: unknown[]
-    try {
-        features = [ ...(requiredLanguageFeatures as Iterable<unknown>) ]
-    } catch {
-        throwRequiredLanguageFeatureDiagnostic(program, requiredLanguageFeatures, 'iterator threw')
-    }
-
-    if (!features.every(feature => typeof feature === 'string' && feature.length > 0)) {
-        throwRequiredLanguageFeatureDiagnostic(program, features)
-    }
-
-    return features as string[]
-}
-
-function normalizeLayoutRequirements(program: Program, layoutRequirements: unknown): readonly ProgramBufferLayoutRequirement[] {
-
-    if (layoutRequirements === undefined) return Object.freeze([])
-
-    if (!Array.isArray(layoutRequirements)) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH',
-            severity: 'error',
-            phase: 'program',
-            subject: program.subject,
-            message: 'Program layoutRequirements must be an array.',
-            expected: { layoutRequirements: 'ProgramBufferLayoutRequirement[]' },
-            actual: { layoutRequirements: describeValue(layoutRequirements) },
-        })
-    }
-
-    const seen = new Set<string>()
-    const normalized = layoutRequirements.map((requirement) => {
-        const normalized = normalizeLayoutRequirement(program, requirement)
-        const key = `${normalized.group}:${normalized.binding}`
-        if (seen.has(key)) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH',
-                severity: 'error',
-                phase: 'program',
-                subject: programLayoutRequirementSubject(normalized),
-                related: [ program.subject ],
-                message: 'Program layoutRequirements must not duplicate a group and binding pair.',
-                expected: { unique: [ 'group', 'binding' ] },
-                actual: { group: normalized.group, binding: normalized.binding },
-            })
-        }
-        seen.add(key)
-
-        return normalized
-    })
-    return Object.freeze(normalized)
-}
-
-function normalizeLayoutRequirement(program: Program, requirement: unknown): ProgramBufferLayoutRequirement {
-
-    if (!isRecord(requirement)) {
-        throwLayoutRequirementDiagnostic(program, { group: undefined, binding: undefined }, {
-            expected: { requirement: 'ProgramBufferLayoutRequirement' },
-            actual: { requirement: describeValue(requirement) },
-        })
-    }
-
-    const group = requirement.group
-    const binding = requirement.binding
-    const name = requirement.name
-    const type = requirement.type
-    const visibility = requirement.visibility
-    const hasDynamicOffset = requirement.hasDynamicOffset
-    const layout = requirement.layout
-    const subjectInput = {
-        group,
-        binding,
-        name,
-    }
-
-    if (typeof group !== 'number' || !Number.isInteger(group) || group < 0) {
-        throwLayoutRequirementDiagnostic(program, subjectInput, {
-            expected: { group: 'non-negative integer' },
-            actual: { group },
-        })
-    }
-
-    if (typeof binding !== 'number' || !Number.isInteger(binding) || binding < 0) {
-        throwLayoutRequirementDiagnostic(program, subjectInput, {
-            expected: { binding: 'non-negative integer' },
-            actual: { binding },
-        })
-    }
-
-    if (name !== undefined && (typeof name !== 'string' || name.length === 0)) {
-        throwLayoutRequirementDiagnostic(program, subjectInput, {
-            expected: { name: 'non-empty string' },
-            actual: { name },
-        })
-    }
-
-    if (!isProgramBufferLayoutRequirementType(type)) {
-        throwLayoutRequirementDiagnostic(program, subjectInput, {
-            expected: { type: [ 'uniform', 'read-storage', 'storage' ] },
-            actual: { type },
-        })
-    }
-
-    const normalizedVisibility = normalizeLayoutRequirementVisibility(program, subjectInput, visibility)
-
-    if (typeof hasDynamicOffset !== 'boolean') {
-        throwLayoutRequirementDiagnostic(program, subjectInput, {
-            expected: { hasDynamicOffset: 'boolean' },
-            actual: { hasDynamicOffset },
-        })
-    }
-
-    if (!isLayoutArtifact(layout)) {
-        throwLayoutRequirementDiagnostic(program, subjectInput, {
-            expected: { layout: 'LayoutArtifact' },
-            actual: { layout: describeValue(layout) },
-        })
-    }
-
-    const normalized: ProgramBufferLayoutRequirement = {
-        group,
-        binding,
-        ...(name !== undefined ? { name } : {}),
-        type,
-        ...(normalizedVisibility !== undefined ? { visibility: normalizedVisibility } : {}),
-        hasDynamicOffset,
-        layout,
-    }
-
-    return Object.freeze(normalized)
-}
-
-function normalizeLayoutRequirementVisibility(
-    program: Program,
-    subjectInput: { group: unknown, binding: unknown, name: unknown },
-    visibility: unknown
-): readonly BindVisibility[] | undefined {
-
-    if (visibility === undefined) return undefined
-
-    if (!Array.isArray(visibility) || visibility.length === 0) {
-        throwLayoutRequirementDiagnostic(program, subjectInput, {
-            expected: { visibility: 'non-empty stage array' },
-            actual: { visibility },
-        })
-    }
-
-    for (const stage of visibility) {
-        if (!isBindVisibility(stage)) {
-            throwLayoutRequirementDiagnostic(program, subjectInput, {
-                expected: { visibility: [ 'vertex', 'fragment', 'compute' ] },
-                actual: { visibility },
-            })
-        }
-    }
-
-    return Object.freeze([ ...visibility ])
-}
-
-function isProgramBufferLayoutRequirementType(type: unknown): type is ProgramBufferLayoutRequirement['type'] {
-
-    return type === 'uniform' || type === 'read-storage' || type === 'storage'
-}
-
-function isBindVisibility(stage: unknown): stage is BindVisibility {
-
-    return stage === 'vertex' || stage === 'fragment' || stage === 'compute'
-}
-
-function validateRequiredFeatures(
-    program: Program,
-    runtime: ScratchRuntime,
-    requiredFeatures: readonly GPUFeatureName[]
-): void {
-
-    for (const feature of requiredFeatures) {
-        if (!runtime.deviceFeatures?.has?.(feature)) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_PROGRAM_FEATURE_UNAVAILABLE',
-                severity: 'error',
-                phase: 'program',
-                subject: program.subject,
-                message: 'Program requires a WebGPU feature that is not available on this runtime.',
-                expected: { feature },
-                actual: { features: [ ...(runtime.deviceFeatures ?? []) ] },
-            })
-        }
-    }
-}
-
-function validateRequiredLanguageFeatures(
-    program: Program,
-    runtime: ScratchRuntime,
-    requiredLanguageFeatures: readonly string[]
-): void {
-
-    for (const languageFeature of requiredLanguageFeatures) {
-        if (runtime.wgslLanguageFeatures.includes(languageFeature)) continue
-        throwScratchDiagnostic({
-            code: 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
-            severity: 'error',
-            phase: 'program',
-            subject: program.subject,
-            related: [ runtime.subject ],
-            message: 'Program requires a WGSL language feature that is unavailable on this runtime.',
-            expected: { languageFeature },
-            actual: { wgslLanguageFeatures: runtime.wgslLanguageFeatures },
-        })
-    }
-}
-
-function throwRequiredLanguageFeatureDiagnostic(
-    program: Program,
+function throwProgramDescriptorInvalid(
+    subject: DiagnosticSubject,
+    field: string,
     actual: unknown,
     reason?: string
 ): never {
 
     throwScratchDiagnostic({
-        code: 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
+        code: 'SCRATCH_PROGRAM_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'program',
-        subject: program.subject,
-        related: [ program.runtime.subject ],
-        message: 'Program requiredLanguageFeatures must be a stable iterable of non-empty strings.',
-        expected: { requiredLanguageFeatures: 'Iterable<non-empty string>' },
+        subject,
+        message: 'Program descriptor is invalid.',
+        expected: { field: 'valid Program descriptor value' },
         actual: {
-            requiredLanguageFeatures: describeValue(actual),
-            wgslLanguageFeatures: program.runtime.wgslLanguageFeatures,
+            field,
+            value: describeValue(actual),
             ...(reason !== undefined ? { reason } : {}),
         },
     })
 }
 
-function throwEntryPointDiagnostic(program: Program, stage: string, actual: unknown): never {
-
-    throwScratchDiagnostic({
-        code: 'SCRATCH_PROGRAM_ENTRY_POINT_MISSING',
-        severity: 'error',
-        phase: 'program',
-        subject: {
-            kind: 'ShaderEntryPoint',
-            programId: program.id,
-            name: String(actual),
-            stage,
-        },
-        related: [ program.subject ],
-        message: 'Program entry point must be a string.',
-        expected: { entryPoint: 'string' },
-        actual: { entryPoint: actual },
-    })
-}
-
 function throwLayoutRequirementDiagnostic(
-    program: Program,
-    requirement: { group: unknown, binding: unknown, name?: unknown },
+    programSubject: DiagnosticSubject,
+    requirement: Record<string, unknown>,
     details: { expected: unknown, actual: unknown }
 ): never {
 
@@ -784,11 +853,21 @@ function throwLayoutRequirementDiagnostic(
             ...(typeof requirement.name === 'string' ? { name: requirement.name } : {}),
             stage: 'buffer',
         },
-        related: [ program.subject ],
+        related: [ programSubject ],
         message: 'Program buffer layout requirement is invalid.',
         expected: details.expected,
         actual: details.actual,
     })
+}
+
+function immutableEnumerableProperty<T>(value: T): PropertyDescriptor {
+
+    return {
+        value,
+        enumerable: true,
+        configurable: false,
+        writable: false,
+    }
 }
 
 Object.freeze(Program.prototype)

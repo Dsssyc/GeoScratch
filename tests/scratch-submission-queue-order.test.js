@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import { ScratchDiagnosticError, ScratchRuntime } from 'geoscratch'
 import {
@@ -97,11 +98,11 @@ async function createComputeWork(runtime) {
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
     })
-    const program = runtime.createProgram({
-        modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
-        entryPoints: { compute: 'csMain' },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+        compute: 'csMain',
     })
-    const pipeline = await runtime.createComputePipeline({ program, bindLayouts: [] })
+    const pipeline = await runtime.createComputePipeline({ program, layout: { mode: 'explicit', bindLayouts: [] } })
     const command = runtime.createDispatchCommand({
         pipeline,
         count: { workgroups: [ 1 ] },
@@ -146,19 +147,19 @@ async function createSkippedCompute(runtime, whenMissing) {
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
     })
-    const program = runtime.createProgram({
-        modules: [
-            `
-                @compute @workgroup_size(1)
-                fn csMain() {
-                }
-            `,
+    const program = await createTestProgram(runtime, {
+        sourceParts: [
+        `
+        @compute @workgroup_size(1)
+        fn csMain() {
+        }
+        `,
         ],
-        entryPoints: { compute: 'csMain' },
+        compute: 'csMain',
     })
     const pipeline = await runtime.createComputePipeline({
         program,
-        bindLayouts: [],
+        layout: { mode: 'explicit', bindLayouts: [] },
     })
     const command = runtime.createDispatchCommand({
         label: `${whenMissing} dispatch`,
@@ -195,17 +196,17 @@ async function createFallbackCompute(runtime) {
         usage: GPU_BUFFER_USAGE_STORAGE,
     })
     advanceResourceContentEpochForTest(ready)
-    const program = runtime.createProgram({
-        modules: [
-            `
-                @compute @workgroup_size(1)
-                fn csMain() {
-                }
-            `,
+    const program = await createTestProgram(runtime, {
+        sourceParts: [
+        `
+        @compute @workgroup_size(1)
+        fn csMain() {
+        }
+        `,
         ],
-        entryPoints: { compute: 'csMain' },
+        compute: 'csMain',
     })
-    const pipeline = await runtime.createComputePipeline({ program, bindLayouts: [] })
+    const pipeline = await runtime.createComputePipeline({ program, layout: { mode: 'explicit', bindLayouts: [] } })
     const fallback = runtime.createDispatchCommand({
         label: 'selected fallback dispatch',
         pipeline,

@@ -142,16 +142,16 @@ describe('Scratch persistent binding final parity', () => {
             'rejects prototype-derived Program identities before native pipeline creation',
             'keeps Program identity and runtime ownership authoritative after public mutation attempts',
             'keeps Program disposal authoritative after public mutation attempts',
-            'revalidates caller-owned Program required features before future native pipeline work',
-            'rejects render Program disposal during caller-owned fact snapshot before native work',
-            'rejects compute Program disposal during caller-owned fact snapshot before native work',
+            'freezes Program required features before future native pipeline work',
+            'keeps render Program facts immutable before native work',
+            'keeps compute Program facts immutable before native work',
             'rejects render Program disposal during pipeline descriptor snapshot before native work',
             'rejects compute Program disposal during pipeline descriptor snapshot before native work',
             'keeps disposed lifecycle authority after public assertActive shadowing',
             'keeps device-loss lifecycle authority after public assertActive shadowing',
             'keeps downstream runtime authority after public assertActive shadowing',
-            'keeps render Pipeline Program lifecycle authoritative after public assertion shadowing',
-            'keeps compute Pipeline Program lifecycle authoritative after public assertion shadowing',
+            'keeps render Pipeline Program lifecycle authoritative',
+            'keeps compute Pipeline Program lifecycle authoritative',
             'Runtime lifecycle authority is package-internal',
             'Program lifecycle authority stamps are package-internal',
             'rejects prototype-derived Pipeline and BindSet identities before command creation',
@@ -305,7 +305,7 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.historicalTypeInventory.every(entry => entry.status === 'passed')).to.equal(true)
         expect(result.publicSurface.publicMemberParity).to.deep.include({
             goalStartCount: 357,
-            finalCount: 431,
+            finalCount: 439,
             status: 'passed',
         })
         expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(22)
@@ -323,11 +323,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.programPipelineFactSnapshot.mutablePlannerReads).to.deep.equal([])
         expect(result.publicSurface.productionEmitParity).to.deep.include({
             status: 'passed',
-            emittedJavaScriptCount: 99,
-            emittedDeclarationCount: 99,
-            declarationSignatureCount: 3898,
+            emittedJavaScriptCount: 101,
+            emittedDeclarationCount: 101,
+            declarationSignatureCount: 4077,
         })
-        expect(result.publicSurface.productionEmitParity.files).to.have.length(198)
+        expect(result.publicSurface.productionEmitParity.files).to.have.length(202)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
         expect(result.diagnostics).to.deep.include({ schemaVersion: 5 })
         expect(result.diagnostics.unexpectedMissing).to.deep.equal([])

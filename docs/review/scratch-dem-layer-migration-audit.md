@@ -9,6 +9,11 @@ core dynamic-count capability proof is commit `5515b31`. Integration also made p
 builds remove stale `dist` output before TypeScript emission, so deleted `LocalTerrain`
 JavaScript and declarations cannot survive from an earlier build.
 
+ADR-050 update, 2026-07-24: Shader compilation now belongs to first-class
+`ShaderModule` acknowledgement. The terrain failure probe starts its one-operation
+capture immediately before terrain ShaderModule creation. The previous headed result
+below remains historical; Phase 6 reruns the migrated probe before final acceptance.
+
 ## Scope And Method
 
 The fixed source is the complete `26ed35f` state of:
@@ -145,7 +150,7 @@ Exactly two proof faults exist:
 | Scenario | Required acquisition boundary | Expected evidence and cleanup |
 | --- | --- | --- |
 | `after-map-acquisition` | Map count 1, runtime/image count 0 | Injected structured page failure; listeners/map released; no fabricated GPU evidence |
-| `invalid-terrain-pipeline-wgsl` | Map, runtime, and image count 1 | Bounded pipeline diagnostic/capture; source text absent; image, map, runtime released; primary pipeline failure retained |
+| `invalid-terrain-shader-wgsl` | Map, runtime, and image count 1 | Bounded ShaderModule diagnostic/capture; source text absent; image, map, runtime released; primary ShaderModule compilation failure retained |
 
 ## Managed Browser Evidence
 
@@ -179,17 +184,13 @@ zero diagnostic incidents, uncaptured errors, device losses, console errors, con
 warnings, page errors, request failures, and HTTP failures. Double disposal returned
 equivalent reports with one cleanup invocation and no retained owner or cleanup error.
 
-Both deterministic failures passed. `after-map-acquisition` acquired exactly one map,
-no runtime, and no image; it retained `DEM_LAYER_INJECTED_FAILURE` and released the
-pagehide listener then map. `invalid-terrain-pipeline-wgsl` acquired one map, runtime,
-and image; it retained `SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES`, localized one
-render pipeline and Program, and recorded support-object, shader-compilation, and
-pipeline-validation outcomes. Each failure drained one tracked initialization task to
-zero before releasing owners. The shader failure's one-operation capture retained
-4,532 bytes in 8.9 ms under the 65,536-byte/2,000-ms bound; exported runtime evidence
-was 60,355 bytes
-under 524,288 bytes and retained no WGSL source. Image, map, and runtime cleanup was
-ordered and complete.
+Both deterministic failures passed under the pre-ADR-050 pipeline-owned compilation
+model. `after-map-acquisition` remains unchanged. The migrated
+`invalid-terrain-shader-wgsl` path now localizes the terrain ShaderModule, source hash,
+source-part location, and `SCRATCH_SHADER_MODULE_COMPILATION_FAILED` directly. Its
+one-operation/65,536-byte/2,000-ms bounds and ordered image, map, and runtime cleanup
+remain executable assertions; current numeric browser evidence is deferred to the
+Phase 6 rerun rather than copied from the superseded pipeline path.
 
 The script closed headed Chrome, Vite, and its selected port. Screenshots are managed
 ephemeral proof artifacts under `/tmp/geoscratch-dem-layer-browser`; they are not

@@ -494,6 +494,8 @@ describe('Scratch acknowledged supporting objects', () => {
                 label: 'complete ABI',
                 group: 1,
                 entries: layout.entries,
+                origin: 'explicit',
+                validationConfidence: 'scratch-verified',
                 acknowledgementState: 'acknowledged',
                 lastAllocationOperationId: `${fixture.runtime.id}/gpu-operation-1`,
             } ])

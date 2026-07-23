@@ -170,23 +170,30 @@ async function verifyPipelineTransactions(browser) {
             @compute @workgroup_size(1)
             fn csMain() {}
         `
+        const renderModule = await runtime.createShaderModule({
+            label: 'browser render module',
+            sourceParts: [ { code: renderSource } ],
+        })
+        const computeModule = await runtime.createShaderModule({
+            label: 'browser compute module',
+            sourceParts: [ { code: computeSource } ],
+        })
         const renderProgram = runtime.createProgram({
             label: 'browser render program',
-            modules: [ renderSource ],
-            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+            vertex: { module: renderModule, entryPoint: 'vsMain' },
+            fragment: { module: renderModule, entryPoint: 'fsMain' },
         })
         const computeProgram = runtime.createProgram({
             label: 'browser compute program',
-            modules: [ computeSource ],
-            entryPoints: { compute: 'csMain' },
+            compute: { module: computeModule, entryPoint: 'csMain' },
         })
 
         const samples = []
         for (const sample of [
-            { name: 'render-cold', kind: 'render', program: renderProgram, cacheDependent: true },
-            { name: 'render-warm', kind: 'render', program: renderProgram, cacheDependent: true },
-            { name: 'compute-cold', kind: 'compute', program: computeProgram, cacheDependent: true },
-            { name: 'compute-warm', kind: 'compute', program: computeProgram, cacheDependent: true },
+            { name: 'render-cold', kind: 'render', program: renderProgram, module: renderModule, cacheDependent: true },
+            { name: 'render-warm', kind: 'render', program: renderProgram, module: renderModule, cacheDependent: true },
+            { name: 'compute-cold', kind: 'compute', program: computeProgram, module: computeModule, cacheDependent: true },
+            { name: 'compute-warm', kind: 'compute', program: computeProgram, module: computeModule, cacheDependent: true },
         ]) {
             const startedAt = performance.now()
             const pending = sample.kind === 'render'
@@ -202,6 +209,7 @@ async function verifyPipelineTransactions(browser) {
             const issuedAt = performance.now()
             const pipeline = await pending
             const settledAt = performance.now()
+            const compilationReport = sample.module.compilationReport
             samples.push({
                 name: sample.name,
                 pipelineKind: sample.kind,
@@ -210,12 +218,16 @@ async function verifyPipelineTransactions(browser) {
                 asyncSettlementMs: settledAt - issuedAt,
                 totalMs: settledAt - startedAt,
                 compilation: {
-                    nativeMessageCount: pipeline.compilationReport.nativeMessageCount,
-                    errorCount: pipeline.compilationReport.errorCount,
-                    warningCount: pipeline.compilationReport.warningCount,
-                    infoCount: pipeline.compilationReport.infoCount,
-                    retainedEvidenceBytes: pipeline.compilationReport.retainedEvidenceBytes,
-                    frozen: Object.isFrozen(pipeline.compilationReport),
+                    nativeMessageCount: compilationReport.nativeMessageCount,
+                    errorCount: compilationReport.errorCount,
+                    warningCount: compilationReport.warningCount,
+                    infoCount: compilationReport.infoCount,
+                    retainedEvidenceBytes: compilationReport.retainedEvidenceBytes,
+                    frozen: Object.isFrozen(compilationReport),
+                },
+                creation: {
+                    stageCount: pipeline.creationReport.stages.length,
+                    frozen: Object.isFrozen(pipeline.creationReport),
                 },
             })
             pipeline.dispose()
@@ -226,16 +238,10 @@ async function verifyPipelineTransactions(browser) {
             @vertex
             fn invalidVertex(
         `
-        const invalidProgram = runtime.createProgram({
-            label: 'browser invalid WGSL program',
-            modules: [ invalidSource ],
-            entryPoints: { vertex: 'invalidVertex', fragment: 'missingFragment' },
-        })
         const invalidWgsl = await captureFailure(
-            runtime.createRenderPipeline({
-                label: 'browser invalid WGSL pipeline',
-                program: invalidProgram,
-                targets: [ { format: 'bgra8unorm' } ],
+            runtime.createShaderModule({
+                label: 'browser invalid WGSL module',
+                sourceParts: [ { code: invalidSource } ],
             }),
             ScratchDiagnosticError
         )
@@ -305,14 +311,15 @@ async function verifyPipelineTransactions(browser) {
     if (pageErrors.length > 0) failures.push(`${pageErrors.length} page errors`)
     if (requestFailures.length > 0) failures.push(`${requestFailures.length} request failures`)
     if (probe.samples.length !== 4) failures.push('valid render/compute cold/warm sample count drifted')
-    if (probe.samples.some(sample => !sample.compilation.frozen)) failures.push('a valid compilation report is mutable')
+    if (probe.samples.some(sample => !sample.compilation.frozen)) failures.push('a valid ShaderModule compilation report is mutable')
+    if (probe.samples.some(sample => !sample.creation.frozen)) failures.push('a valid pipeline creation report is mutable')
     if (probe.samples.some(sample => sample.compilation.errorCount !== 0)) failures.push('a valid pipeline retained compilation errors')
     if (probe.samples.some(sample => sample.cacheDependent !== true)) failures.push('cold/warm sample lacks cache-dependent label')
     if (!isStructuredFailure(probe.invalidWgsl)) failures.push('invalid WGSL was not a ScratchDiagnosticError')
-    if (!outcomeCodes(probe.invalidWgsl).includes('SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED')) {
+    if (!outcomeCodes(probe.invalidWgsl).includes('SCRATCH_SHADER_MODULE_COMPILATION_FAILED')) {
         failures.push('invalid WGSL lacks structured compilation failure')
     }
-    if ((probe.invalidWgsl.incident?.compilationReport?.errorCount ?? 0) < 1) {
+    if ((probe.invalidWgsl.incident?.shaderModuleCompilationReport?.errorCount ?? 0) < 1) {
         failures.push('invalid WGSL lacks a populated compilation report')
     }
     if (!isStructuredFailure(probe.invalidDescriptor)) {
@@ -329,9 +336,9 @@ async function verifyPipelineTransactions(browser) {
     if (probe.diagnostics.livePipelineCount !== 0) failures.push('retained current pipeline facts')
     if (probe.diagnostics.runtimePipelineCount !== 0) failures.push('retained runtime pipeline wrappers')
     if (probe.diagnostics.lifecycleSubscriberCount !== 0) failures.push('retained lifecycle subscribers')
-    if (probe.diagnostics.pipelineCreationAttempts !== 6) failures.push('pipeline-attempt aggregate drifted')
+    if (probe.diagnostics.pipelineCreationAttempts !== 5) failures.push('pipeline-attempt aggregate drifted')
     if (probe.diagnostics.successfulPipelineCreations !== 4) failures.push('successful-pipeline aggregate drifted')
-    if (probe.diagnostics.failedPipelineCreations !== 2) failures.push('failed-pipeline aggregate drifted')
+    if (probe.diagnostics.failedPipelineCreations !== 1) failures.push('failed-pipeline aggregate drifted')
     if (probe.diagnostics.pipelineDisposals !== 4) failures.push('pipeline-disposal aggregate drifted')
     if (!probe.diagnostics.sourceFree) failures.push('exported evidence retained complete WGSL source')
     if (!probe.diagnostics.jsonRoundTrip) failures.push('exported evidence failed JSON round trip')

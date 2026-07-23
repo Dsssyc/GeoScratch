@@ -148,21 +148,23 @@ async function main() {
     }, {
         label: 'render to texture sample set',
     })
+    const offscreenShader = await runtime.createShaderModule({
+        label: 'render to texture offscreen shader',
+        sourceParts: [ { code: offscreenWgsl } ],
+    })
+    const sampleShader = await runtime.createShaderModule({
+        label: 'render to texture sample shader',
+        sourceParts: [ { code: sampleWgsl } ],
+    })
     const offscreenProgram = runtime.createProgram({
         label: 'render to texture offscreen program',
-        modules: [ offscreenWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: offscreenShader, entryPoint: 'vsMain' },
+        fragment: { module: offscreenShader, entryPoint: 'fsMain' },
     })
     const sampleProgram = runtime.createProgram({
         label: 'render to texture sample program',
-        modules: [ sampleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: sampleShader, entryPoint: 'vsMain' },
+        fragment: { module: sampleShader, entryPoint: 'fsMain' },
     })
     const offscreenPipeline = await runtime.createRenderPipeline({
         label: 'render to texture offscreen pipeline',
@@ -172,7 +174,7 @@ async function main() {
     const samplePipeline = await runtime.createRenderPipeline({
         label: 'render to texture sample pipeline',
         program: sampleProgram,
-        bindLayouts: [ sampleBindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ sampleBindLayout ] },
         targets: [ { format: surface.format } ],
     })
     const offscreenPass = runtime.createRenderPass({

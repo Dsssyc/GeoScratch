@@ -8,6 +8,11 @@ Accepted
 
 2026-07-11
 
+ADR-050 supersedes this ADR's pipeline-owned ShaderModule, source-composition,
+compilation-report, entry-point, and override descriptor details. The Promise-only
+pipeline acknowledgement boundary, bounded diagnostics, and no-submission-wait
+decision remain accepted.
+
 ## Context
 
 Scratch render and compute pipelines previously created one shader module, one

@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
@@ -59,25 +60,23 @@ async function createImmediateRuntime(options = {}) {
     return { ...fixture, runtime }
 }
 
-function createRenderProgram(runtime, requiredLanguageFeatures = [ 'immediate_address_space' ]) {
+async function createRenderProgram(runtime, requiredLanguageFeatures = [ 'immediate_address_space' ]) {
 
-    return runtime.createProgram({
+    return await createTestProgram(runtime, {
         label: 'immediate render program',
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
         requiredLanguageFeatures,
     })
 }
 
-function createComputeProgram(runtime, requiredLanguageFeatures = [ 'immediate_address_space' ]) {
+async function createComputeProgram(runtime, requiredLanguageFeatures = [ 'immediate_address_space' ]) {
 
-    return runtime.createProgram({
+    return await createTestProgram(runtime, {
         label: 'immediate compute program',
-        modules: [ computeWgsl ],
-        entryPoints: { compute: 'csMain' },
+        sourceParts: [ computeWgsl ],
+        compute: 'csMain',
         requiredLanguageFeatures,
     })
 }
@@ -92,7 +91,7 @@ async function createImmediateRenderFixture(immediateSize = 16) {
     })
     const pipeline = await fixture.runtime.createRenderPipeline({
         label: 'immediate render pipeline',
-        program: createRenderProgram(fixture.runtime),
+        program: await createRenderProgram(fixture.runtime),
         targets: [ { format: 'rgba8unorm' } ],
         immediateSize,
     })
@@ -112,7 +111,7 @@ async function createImmediateComputeFixture(immediateSize = 16) {
     const fixture = await createImmediateRuntime()
     const pipeline = await fixture.runtime.createComputePipeline({
         label: 'immediate compute pipeline',
-        program: createComputeProgram(fixture.runtime),
+        program: await createComputeProgram(fixture.runtime),
         immediateSize,
     })
     const pass = fixture.runtime.createComputePass({
@@ -202,7 +201,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
         const { runtime } = await createImmediateRuntime({
             languageFeatures: [ 'subgroups', 'immediate_address_space' ],
         })
-        const program = createRenderProgram(runtime, new Set([
+        const program = await createRenderProgram(runtime, new Set([
             'immediate_address_space',
             'subgroups',
         ]))
@@ -213,7 +212,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
         ])
 
         const diagnostic = await expectDiagnostic(
-            () => Promise.resolve(createRenderProgram(runtime, [ 'f16' ])),
+            async () => Promise.resolve(await createRenderProgram(runtime, [ 'f16' ])),
             'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
             'program'
         )
@@ -246,23 +245,23 @@ describe('scratch immediate data runtime and pipeline contract', () => {
 
         for (const requiredLanguageFeatures of cases) {
             const diagnostic = await expectDiagnostic(
-                () => Promise.resolve(runtime.createProgram({
-                    modules: [ triangleWgsl ],
+                async () => Promise.resolve(await createTestProgram(runtime, {
+                    sourceParts: [ triangleWgsl ],
+                    vertex: 'vsMain',
+                    fragment: 'fsMain',
                     requiredLanguageFeatures,
                 })),
-                'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
+                'SCRATCH_PROGRAM_DESCRIPTOR_INVALID',
                 'program'
             )
-            expect(diagnostic.related).to.deep.include(runtime.subject)
-            expect(diagnostic.actual.wgslLanguageFeatures)
-                .to.deep.equal(runtime.wgslLanguageFeatures)
+            expect(diagnostic.actual.field).to.equal('requiredLanguageFeatures')
         }
     })
 
-    it('revalidates mutable Program language requirements for each future pipeline', async() => {
+    it('freezes Program language requirements for every future pipeline', async() => {
 
         const { runtime, calls } = await createImmediateRuntime()
-        const program = createRenderProgram(runtime)
+        const program = await createRenderProgram(runtime)
         const first = await runtime.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
@@ -270,33 +269,31 @@ describe('scratch immediate data runtime and pipeline contract', () => {
         })
 
         expect(first.immediateSize).to.equal(16)
-        program.requiredLanguageFeatures = []
+        expect(Reflect.set(program, 'requiredLanguageFeatures', [])).to.equal(false)
+        expect(() => {
+            program.requiredLanguageFeatures.length = 0
+        }).to.throw(TypeError)
 
-        await expectDiagnostic(
-            async() => await runtime.createRenderPipeline({
-                program,
-                targets: [ { format: 'bgra8unorm' } ],
-                immediateSize: 16,
-            }),
-            'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID',
-            'pipeline'
-        )
-        expect(calls.pipelineLayouts).to.have.length(1)
-        expect(calls.renderPipelines).to.have.length(1)
+        const second = await runtime.createRenderPipeline({
+            program,
+            targets: [ { format: 'bgra8unorm' } ],
+            immediateSize: 16,
+        })
+        expect(second.immediateSize).to.equal(16)
+        expect(calls.pipelineLayouts).to.have.length(2)
+        expect(calls.renderPipelines).to.have.length(2)
     })
 
     it('keeps an in-flight pipeline immune to later Program mutation', async() => {
 
         const { runtime, calls } = await createImmediateRuntime()
-        const program = createRenderProgram(runtime)
-        queueMicrotask(() => {
-            program.requiredLanguageFeatures.length = 0
-        })
+        const program = await createRenderProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
             targets: [ { format: 'bgra8unorm' } ],
             immediateSize: 16,
         })
+        expect(Reflect.set(program, 'requiredLanguageFeatures', [])).to.equal(false)
 
         expect(pipeline.immediateSize).to.equal(16)
         expect(calls.pipelineLayouts[0].descriptor.immediateSize).to.equal(16)
@@ -305,8 +302,8 @@ describe('scratch immediate data runtime and pipeline contract', () => {
     it('lowers render and compute immediate sizes into immutable pipeline layouts', async() => {
 
         const { runtime, calls } = await createImmediateRuntime()
-        const renderProgram = createRenderProgram(runtime)
-        const computeProgram = createComputeProgram(runtime)
+        const renderProgram = await createRenderProgram(runtime)
+        const computeProgram = await createComputeProgram(runtime)
         const capture = runtime.diagnostics.capture({
             maxOperations: 4,
             maxDurationMs: 1_000,
@@ -358,7 +355,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
 
         const { runtime, calls } = await createImmediateRuntime()
         const pipeline = await runtime.createRenderPipeline({
-            program: createRenderProgram(runtime),
+            program: await createRenderProgram(runtime),
             targets: [ { format: 'bgra8unorm' } ],
         })
 
@@ -387,7 +384,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
             })
             const diagnostic = await expectDiagnostic(
                 async() => await runtime.createRenderPipeline({
-                    program: createRenderProgram(runtime),
+                    program: await createRenderProgram(runtime),
                     targets: [ { format: 'bgra8unorm' } ],
                     immediateSize: scenario.immediateSize,
                 }),
@@ -413,7 +410,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
                 })
                 expect(diagnostic.related).to.deep.include(runtime.subject)
             }
-            expect(calls.shaderModules).to.have.length(0)
+            expect(calls.shaderModules).to.have.length(1)
             expect(calls.pipelineLayouts).to.have.length(0)
             expect(calls.renderPipelines).to.have.length(0)
         }
@@ -425,7 +422,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
             maxImmediateSize: 64,
         })
         const pipeline = await runtime.createComputePipeline({
-            program: createComputeProgram(runtime),
+            program: await createComputeProgram(runtime),
             immediateSize: 64,
         })
 
@@ -436,10 +433,10 @@ describe('scratch immediate data runtime and pipeline contract', () => {
     it('attributes a shader-required range larger than immediateSize to native pipeline creation', async() => {
 
         const fixture = await createImmediateRuntime()
-        const program = fixture.runtime.createProgram({
+        const program = await createTestProgram(fixture.runtime, {
             label: 'too-small immediate range program',
-            modules: [ immediateComputeWgsl ],
-            entryPoints: { compute: 'csMain' },
+            sourceParts: [ immediateComputeWgsl ],
+            compute: 'csMain',
             requiredLanguageFeatures: [ 'immediate_address_space' ],
         })
         const nativeError = createFakePipelineError(
@@ -480,7 +477,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
     it('requires an explicit Program immediate language feature for nonzero sizes', async() => {
 
         const { runtime, calls } = await createImmediateRuntime()
-        const program = createComputeProgram(runtime, [])
+        const program = await createComputeProgram(runtime, [])
 
         const diagnostic = await expectDiagnostic(
             async() => await runtime.createComputePipeline({
@@ -498,7 +495,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
             immediateSize: 4,
             requiredLanguageFeatures: [],
         })
-        expect(calls.shaderModules).to.have.length(0)
+        expect(calls.shaderModules).to.have.length(1)
         expect(calls.pipelineLayouts).to.have.length(0)
         expect(calls.computePipelines).to.have.length(0)
     })
@@ -704,7 +701,7 @@ describe('scratch immediate data command and submission contract', () => {
 
         const fixture = await createImmediateRenderFixture()
         const zeroPipeline = await fixture.runtime.createRenderPipeline({
-            program: createRenderProgram(fixture.runtime),
+            program: await createRenderProgram(fixture.runtime),
             targets: [ { format: 'rgba8unorm' } ],
         })
         const cases = [

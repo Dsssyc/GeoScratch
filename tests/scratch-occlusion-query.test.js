@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import { readFileSync } from 'node:fs'
 import {
@@ -58,12 +59,10 @@ async function createOcclusionFixture() {
         } ],
         occlusionQuerySet: querySet,
     })
-    const program = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await runtime.createRenderPipeline({
         program,

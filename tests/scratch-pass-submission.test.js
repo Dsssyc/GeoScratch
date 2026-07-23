@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     BindSet,
@@ -28,12 +29,10 @@ async function createTriangleScene(format = 'bgra8unorm') {
         format,
         size: { width: 64, height: 64 },
     })
-    const program = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await runtime.createRenderPipeline({
         program,
@@ -105,12 +104,10 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
         label: 'sample offscreen set',
     })
     fake.calls.textureViews.length = 0
-    const program = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await runtime.createRenderPipeline({
         program,

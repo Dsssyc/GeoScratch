@@ -5,6 +5,7 @@ import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/runtime.j
 import {
     advanceResourceContentEpochForTest,
     createFakeGpu,
+    createTestProgram,
 } from '../scratch-test-utils.js'
 
 const iterations = positiveInteger(
@@ -85,9 +86,9 @@ async function stressPersistentBindings(cycleCount) {
     }, {
         label: 'binding stress set',
     })
-    const program = runtime.createProgram({
+    const program = await createTestProgram(runtime, {
         label: 'binding stress program',
-        modules: [ `
+        sourceParts: [ `
             @group(0) @binding(0) var<storage, read> values: array<u32>;
             @group(0) @binding(1) var image: texture_2d<f32>;
             @group(0) @binding(2) var imageSampler: sampler;
@@ -103,12 +104,12 @@ async function stressPersistentBindings(cycleCount) {
                 _ = retained;
             }
         ` ],
-        entryPoints: { compute: 'main' },
+        compute: 'main',
     })
     const pipeline = await runtime.createComputePipeline({
         label: 'binding stress pipeline',
         program,
-        bindLayouts: [ layout ],
+        layout: { mode: 'explicit', bindLayouts: [ layout ] },
     })
     const pass = runtime.createComputePass({ label: 'binding stress pass' })
     const commands = [ 0, 256 ].map(offset => runtime.createDispatchCommand({

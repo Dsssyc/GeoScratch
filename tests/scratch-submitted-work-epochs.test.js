@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
@@ -141,21 +142,21 @@ async function createCompute(runtime, input, output, readContentEpoch = input.co
         inputValues: input.region(),
         outputValues: output.region(),
     })
-    const program = runtime.createProgram({
-        modules: [
-            `
-                @group(0) @binding(0) var<storage, read> inputValues: array<f32>;
-                @group(0) @binding(1) var<storage, read_write> outputValues: array<f32>;
-                @compute @workgroup_size(1)
-                fn csMain() {
-                }
-            `,
+    const program = await createTestProgram(runtime, {
+        sourceParts: [
+        `
+        @group(0) @binding(0) var<storage, read> inputValues: array<f32>;
+        @group(0) @binding(1) var<storage, read_write> outputValues: array<f32>;
+        @compute @workgroup_size(1)
+        fn csMain() {
+        }
+        `,
         ],
-        entryPoints: { compute: 'csMain' },
+        compute: 'csMain',
     })
     const pipeline = await runtime.createComputePipeline({
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
     })
     const dispatch = runtime.createDispatchCommand({
         label: 'dispatch values',
@@ -180,16 +181,14 @@ async function createCompute(runtime, input, output, readContentEpoch = input.co
 
 async function createRender(runtime, target, resources = { read: [], write: [] }) {
 
-    const program = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await runtime.createRenderPipeline({
         program,
-        bindLayouts: [],
+        layout: { mode: 'explicit', bindLayouts: [] },
         targets: [ { format: target.format } ],
     })
     const draw = runtime.createDrawCommand({

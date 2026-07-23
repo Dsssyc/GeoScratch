@@ -122,18 +122,19 @@ async function main() {
     }, {
         label: 'texture resize sample set',
     })
+    const shaderModule = await runtime.createShaderModule({
+        label: 'texture resize sample shader',
+        sourceParts: [ { code: sampleWgsl } ],
+    })
     const program = runtime.createProgram({
         label: 'texture resize sample program',
-        modules: [ sampleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: shaderModule, entryPoint: 'vsMain' },
+        fragment: { module: shaderModule, entryPoint: 'fsMain' },
     })
     const pipeline = await runtime.createRenderPipeline({
         label: 'texture resize sample pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         targets: [ { format: surface.format } ],
     })
     const texturePass = runtime.createRenderPass({

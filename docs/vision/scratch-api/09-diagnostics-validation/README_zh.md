@@ -294,21 +294,38 @@ type LayoutCodecDiagnosticCode =
 
 ### Program
 
-Program diagnostics 覆盖 WGSL modules、generated accessors、entry points、required features、reflection cross-check 与 shader/layout contracts。
+ShaderModule diagnostics 覆盖 source composition、原生 acknowledgement、
+compilation information 与 module lifecycle。Program diagnostics 覆盖不可变
+stage、entry point、required capability、reflection cross-check 与 shader/layout
+contract。
 
 候选 codes:
 
 ```ts
 type ProgramDiagnosticCode =
-    | 'SCRATCH_PROGRAM_ENTRY_POINT_MISSING'
+    | 'SCRATCH_PROGRAM_DESCRIPTOR_INVALID'
+    | 'SCRATCH_PROGRAM_ENTRY_POINT_INVALID'
     | 'SCRATCH_PROGRAM_FEATURE_UNAVAILABLE'
     | 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE'
+    | 'SCRATCH_PROGRAM_LIMIT_UNAVAILABLE'
     | 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH'
-    | 'SCRATCH_PROGRAM_MODULES_INVALID'
+    | 'SCRATCH_PROGRAM_STAGE_INVALID'
+    | 'SCRATCH_PROGRAM_STAGE_MISSING'
     | 'SCRATCH_PROGRAM_WRONG_RUNTIME'
     | 'SCRATCH_PROGRAM_DISPOSED'
     | 'SCRATCH_PROGRAM_LIFECYCLE_CHANGED'
     | 'SCRATCH_PROGRAM_SHADER_REFLECTION_INCONCLUSIVE'
+    | 'SCRATCH_SHADER_INSPECTION_INPUT_INVALID'
+    | 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED'
+    | 'SCRATCH_SHADER_MODULE_COMPILATION_INFO_FAILED'
+    | 'SCRATCH_SHADER_MODULE_CONSTRUCTOR_PRIVATE'
+    | 'SCRATCH_SHADER_MODULE_CREATION_INTERNAL_FAILED'
+    | 'SCRATCH_SHADER_MODULE_CREATION_NATIVE_FAILED'
+    | 'SCRATCH_SHADER_MODULE_CREATION_OUT_OF_MEMORY'
+    | 'SCRATCH_SHADER_MODULE_CREATION_VALIDATION_FAILED'
+    | 'SCRATCH_SHADER_MODULE_DESCRIPTOR_INVALID'
+    | 'SCRATCH_SHADER_MODULE_DISPOSED'
+    | 'SCRATCH_SHADER_MODULE_WRONG_RUNTIME'
 ```
 
 Reflection 仍然是 guard，不是 source of truth。一个无法理解新版 WGSL 的 reflection parser 通常应产出 warn-level inconclusive diagnostic，而不是阻断合法的显式 layout。
@@ -397,16 +414,24 @@ type PipelineDiagnosticCode =
     | 'SCRATCH_PIPELINE_CREATION_PROGRAM_LIFECYCLE_CHANGED'
     | 'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED'
     | 'SCRATCH_PIPELINE_CREATION_RUNTIME_LIFECYCLE_CHANGED'
+    | 'SCRATCH_PIPELINE_CREATION_SHADER_MODULE_DISPOSED'
+    | 'SCRATCH_PIPELINE_COMPUTE_STAGE_MISSING'
     | 'SCRATCH_PIPELINE_DISPOSED'
     | 'SCRATCH_PIPELINE_CONSTANTS_INVALID'
+    | 'SCRATCH_PIPELINE_FRAGMENT_FIELDS_FORBIDDEN'
     | 'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID'
+    | 'SCRATCH_PIPELINE_LAYOUT_DERIVATION_DESCRIPTOR_MISMATCH'
+    | 'SCRATCH_PIPELINE_LAYOUT_DERIVATION_FORBIDDEN'
+    | 'SCRATCH_PIPELINE_LAYOUT_MODE_INVALID'
     | 'SCRATCH_PIPELINE_PROGRAM_INVALID'
     | 'SCRATCH_PIPELINE_WRONG_RUNTIME'
+    | 'SCRATCH_PIPELINE_TARGETS_INVALID'
     | 'SCRATCH_PIPELINE_TARGET_STATE_INVALID'
     | 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH'
     | 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH'
     | 'SCRATCH_PIPELINE_SAMPLE_COUNT_MISMATCH'
     | 'SCRATCH_PIPELINE_VERTEX_LAYOUT_MISMATCH'
+    | 'SCRATCH_PIPELINE_VERTEX_STAGE_MISSING'
     | 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE'
 ```
 
@@ -707,7 +732,8 @@ type ScratchGpuOperationTarget =
     | ScratchGpuResourceOperationTarget
     | { kind: 'bind-layout'; bindLayoutId: string; group: number; entries: readonly unknown[]; acknowledgementState: 'pending' }
     | { kind: 'bind-set'; bindSetId: string; bindLayoutId: string; preparationState: string; generation: number; snapshotHash: string; preparationStage: string }
-    | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programSourceHash: string }
+    | { kind: 'shader-module'; shaderModuleId: string; sourceHash: string; sourcePartCount: number; compilationHintCount: number }
+    | { kind: 'pipeline'; pipelineId: string; pipelineKind: 'render' | 'compute'; programId: string; programContractHash: string }
     | { kind: 'command'; commandId: string; commandKind: 'readback' }
     | {
         kind: 'readback'
@@ -725,7 +751,8 @@ type ScratchGpuOperationTarget =
 ```
 
 Schema v5 新增 `sampler-allocation`、`query-set-allocation`、
-`bind-layout-allocation` 与 `bind-set-preparation`。Sampler target 绝不获得
+`bind-layout-allocation`、`bind-set-preparation` 与
+`shader-module-creation`。Sampler target 绝不获得
 content/readiness/footprint field。QuerySet target 报告有界 indexed slot fact，
 没有 scalar epoch。BindLayout 报告 ABI shape 与 acknowledgement；BindSet 报告
 preparation state、generation、snapshot 与 stage，不伪装成 Resource。
@@ -851,27 +878,42 @@ command payload、mutable operation 或 SubmittedWork。`operationCapacity: 0`
 可以省略 operation history，但不能关闭 current facts、incidents、budgets 或
 cleanup。
 
-每个成功 pipeline 都暴露不可变、source-free 的 compilation report。它最多
-保留 64 条 native message，每条最多 4096 个 UTF-16 code unit，全部 serialized
-compilation evidence 最多 64 KiB。即使 evidence 被截断，计数与 omission field
-仍然存在。Native order 保持不变；不解析 native prose；值为零的未知位置与
-separator location 不会被赋予虚构的 module coordinate。保留前会替换至少
-三个 UTF-16 code unit 的精确 Program identifier/numeric literal，以及至少
-八个 UTF-16 code unit 的连续 Program source span。Tokenization 对齐 WGSL
-Unicode-XID identifier 以及完整 decimal/hexadecimal integer/float lexical
-forms，包括 leading-dot float。`sourceExcerptRedacted`
-用于区分这种清洗与 `messageTruncated`。保留的 pipeline、supporting-scope、
-structural 与 lifecycle native-error string 使用相同 source sanitizer；原始
-native object 只允许作为瞬时 diagnostic cause。每个 report 或 native-error
-settlement 只惰性建立一个不超过 32 KiB 的 Bloom workspace；collision 只能
-导致保守地多清洗。全局 device-loss 没有唯一 Program context，因此 Scratch
-永久省略其 native message：`runtime.deviceLostInfo` 与 runtime incident 只保留
-structural reason、固定 omission marker 和 `nativeMessageOmitted: true`。
-in-flight pipeline 只能通过临时 lifecycle subscription 与 diagnostic cause
-使用原始 info。
+每个已确认的 ShaderModule 都暴露不可变、source-free 的 compilation report。
+它最多保留 64 条 native message，每条最多 4096 个 UTF-16 code unit，全部
+serialized compilation evidence 最多 64 KiB。即使 evidence 被截断，计数与
+omission field 仍然存在。Native order 保持不变；不解析 native prose；值为零
+的未知位置与 separator location 不会被赋予虚构的 source-part coordinate。
+保留前会替换至少三个 UTF-16 code unit 的精确 ShaderModule
+identifier/numeric literal，以及至少八个 UTF-16 code unit 的连续 source
+span。Tokenization 对齐 WGSL Unicode-XID identifier 以及完整
+decimal/hexadecimal integer/float lexical forms，包括 leading-dot float。
+`sourceExcerptRedacted` 用于区分这种清洗与 `messageTruncated`。保留的
+ShaderModule、pipeline supporting-scope、structural 与 lifecycle native-error
+string 使用相同 source sanitizer；原始 native object 只允许作为瞬时
+diagnostic cause。每个 report 或 native-error settlement 只惰性建立一个不超过
+32 KiB 的 Bloom workspace；collision 只能导致保守地多清洗。全局 device-loss
+没有唯一 ShaderModule context，因此 Scratch 永久省略其 native message：
+`runtime.deviceLostInfo` 与 runtime incident 只保留 structural reason、固定
+omission marker 和 `nativeMessageOmitted: true`。in-flight ShaderModule 或
+pipeline 只能通过临时 lifecycle subscription 与 diagnostic cause 使用原始
+native info。
 
-稳定 pipeline creation failure code 为
-`SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`、
+Pipeline creation 另行暴露不可变、source-free 的 creation report。它标识
+Program contract、选中的 stage、ShaderModule ID、entry point、override value
+以及 explicit 或 auto layout mode；它不复制 ShaderModule compilation message，
+也不保留 WGSL source。
+当 ShaderModule acknowledgement 因 compilation error message 而拒绝时，同一份
+有界 report 会作为该 exact supporting-object incident 的
+`shaderModuleCompilationReport` 保留，不会复制进无关 operation history。
+
+稳定 ShaderModule acknowledgement failure code 为
+`SCRATCH_SHADER_MODULE_CREATION_VALIDATION_FAILED`、
+`SCRATCH_SHADER_MODULE_CREATION_INTERNAL_FAILED`、
+`SCRATCH_SHADER_MODULE_CREATION_OUT_OF_MEMORY`、
+`SCRATCH_SHADER_MODULE_CREATION_NATIVE_FAILED`、
+`SCRATCH_SHADER_MODULE_COMPILATION_INFO_FAILED` 与
+`SCRATCH_SHADER_MODULE_COMPILATION_FAILED`。稳定 pipeline creation failure
+code 为
 `SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED`、
 `SCRATCH_PIPELINE_CREATION_INTERNAL_FAILED`、
 `SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED`、

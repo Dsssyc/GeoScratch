@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import { ScratchDiagnosticError, ScratchRuntime } from 'geoscratch'
 import { setResourceContentState } from '../packages/geoscratch/dist/scratch/resource.js'
@@ -50,9 +51,9 @@ function createUpload(runtime, target, value) {
 
 async function createComputePipeline(runtime) {
 
-    const program = runtime.createProgram({
-        modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
-        entryPoints: { compute: 'csMain' },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+        compute: 'csMain',
     })
     return await runtime.createComputePipeline({ program, compute: 'csMain' })
 }

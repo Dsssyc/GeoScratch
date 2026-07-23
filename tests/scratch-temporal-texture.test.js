@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ExternalTextureBinding,
@@ -63,16 +64,14 @@ fn main() {
 
 async function createRenderPipeline(runtime, format, bindLayouts = [], source = triangleWgsl) {
 
-    const program = runtime.createProgram({
-        modules: [ source ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ source ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     return await runtime.createRenderPipeline({
         program,
-        bindLayouts,
+        layout: { mode: 'explicit', bindLayouts },
         targets: [ { format } ],
     })
 }
@@ -576,13 +575,13 @@ describe('Scratch attempt-local texture authority', () => {
             } ],
         })
         const bindSet = await runtime.createBindSet(layout, { current: view })
-        const program = runtime.createProgram({
-            modules: [ sampledTextureComputeWgsl ],
-            entryPoints: { compute: 'main' },
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ sampledTextureComputeWgsl ],
+            compute: 'main',
         })
         const pipeline = await runtime.createComputePipeline({
             program,
-            bindLayouts: [ layout ],
+            layout: { mode: 'explicit', bindLayouts: [ layout ] },
         })
         const dispatch = runtime.createDispatchCommand({
             pipeline,
@@ -626,13 +625,13 @@ describe('Scratch attempt-local texture authority', () => {
             } ],
         })
         const bindSet = await runtime.createBindSet(layout, { current })
-        const program = runtime.createProgram({
-            modules: [ sampledTextureComputeWgsl ],
-            entryPoints: { compute: 'main' },
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ sampledTextureComputeWgsl ],
+            compute: 'main',
         })
         const pipeline = await runtime.createComputePipeline({
             program,
-            bindLayouts: [ layout ],
+            layout: { mode: 'explicit', bindLayouts: [ layout ] },
         })
         const dispatch = runtime.createDispatchCommand({
             pipeline,
@@ -672,13 +671,13 @@ describe('Scratch attempt-local texture authority', () => {
             } ],
         })
         const bindSet = await runtime.createBindSet(layout, { current })
-        const program = runtime.createProgram({
-            modules: [ sampledTextureComputeWgsl ],
-            entryPoints: { compute: 'main' },
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ sampledTextureComputeWgsl ],
+            compute: 'main',
         })
         const pipeline = await runtime.createComputePipeline({
             program,
-            bindLayouts: [ layout ],
+            layout: { mode: 'explicit', bindLayouts: [ layout ] },
         })
         const dispatch = runtime.createDispatchCommand({
             pipeline,
@@ -739,13 +738,13 @@ describe('Scratch attempt-local texture authority', () => {
             } ],
         })
         const bindSet = await runtime.createBindSet(layout, { current })
-        const program = runtime.createProgram({
-            modules: [ storageTextureComputeWgsl ],
-            entryPoints: { compute: 'main' },
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ storageTextureComputeWgsl ],
+            compute: 'main',
         })
         const pipeline = await runtime.createComputePipeline({
             program,
-            bindLayouts: [ layout ],
+            layout: { mode: 'explicit', bindLayouts: [ layout ] },
         })
         const dispatch = runtime.createDispatchCommand({
             pipeline,

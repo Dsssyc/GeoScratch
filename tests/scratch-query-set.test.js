@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     BindSet,
@@ -123,16 +124,14 @@ async function createRenderTimestampFixture() {
 
 async function createRenderCommandFixture(runtime, pass) {
 
-    const program = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await runtime.createRenderPipeline({
         program,
-        bindLayouts: [],
+        layout: { mode: 'explicit', bindLayouts: [] },
         targets: [ { format: pass.color[0].format } ],
     })
 

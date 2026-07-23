@@ -5,31 +5,37 @@ Date: 2026-07-23
 
 ## Decision
 
-`Program` describes shader source contracts. `Pipeline` describes stable WebGPU executable state for one `Program` entry point. `Command` describes one executable GPU action.
+`ShaderModule` owns acknowledged WGSL source and native compilation evidence.
+`Program` describes immutable stage contracts that reference those modules.
+`Pipeline` describes stable WebGPU executable state for one `Program`.
+`Command` describes one executable GPU action.
 
 This replaces the older pattern where shader code, binding, range, executable flags, pipeline, and pass membership were coupled.
 
-See `08-programs-codecs` for the source-level `Program`, layout codec, and shader-composition model. This module starts at the executable pipeline and command layer.
+See `08-programs-codecs` for `ShaderModule`, `Program`, layout codecs, and
+source composition. This module starts at the executable pipeline and command
+layer.
 
 ## Pipelines
 
 Render pipelines own stable state:
 
-- program or shader modules, shader stages, and entry points
-- bind layouts
+- one immutable Program stage snapshot and reusable native ShaderModules
+- explicit BindLayouts or explicit native `layout: "auto"`
 - vertex buffer layouts, including index-preserving explicit `null` slots
-- independent vertex and fragment override-constant snapshots
+- stage-owned vertex and optional fragment override-constant snapshots
 - primitive state
 - depth and stencil state
-- color target compatibility, including index-preserving explicit `null` slots
+- optional fragment state and exact color target compatibility, including
+  index-preserving explicit `null` slots
 - multisample state
 - pipeline cache key
 
 Compute pipelines own:
 
-- program or shader module, shader stage, and entry point
-- bind layouts
-- constants
+- one immutable Program compute-stage snapshot and reusable native ShaderModule
+- explicit BindLayouts or explicit native `layout: "auto"`
+- stage-owned constants
 - pipeline cache key
 
 Pipelines do not own:
@@ -41,20 +47,48 @@ Pipelines do not own:
 - material or style parameters
 - scene-object assignment
 
-Pipelines are allowed to cache compiled GPU state. They are not allowed to become the place where concrete resources, visual semantics, and shader code are bundled into a material-like object.
+Pipelines retain the acknowledged native pipeline and a source-free creation
+report. Shader source and compilation messages remain on `ShaderModule`;
+pipelines never recreate a module. They are not allowed to become the place
+where concrete resources, visual semantics, and shader code are bundled into
+a material-like object.
 
-Render-stage constants are explicit and independent:
+Stage constants are explicit and independent:
 
 ```ts
-vertexConstants?: Readonly<Record<string, number>>
-fragmentConstants?: Readonly<Record<string, number>>
+const program = runtime.createProgram({
+    vertex: { module: vertexModule, entryPoint: 'vsMain', constants: vertexConstants },
+    fragment: { module: fragmentModule, entryPoint: 'fsMain', constants: fragmentConstants },
+})
 ```
 
-Scratch snapshots finite numeric values before the asynchronous native pipeline issue
-and lowers them to `GPUVertexState.constants` and `GPUFragmentState.constants`.
-Caller mutation after factory invocation cannot change the pending pipeline. A single
-ambiguous render `constants` alias is not accepted. Compute retains its separate
-`constants` contract.
+Program construction snapshots the native `GPUPipelineConstantValue` domain.
+Pipeline descriptors have no stage, entry-point, or constants aliases.
+
+Omitted `layout` means explicit mode with zero BindLayouts. Auto mode is an
+explicit opt-in:
+
+```ts
+const pipeline = await runtime.createComputePipeline({
+    program,
+    layout: { mode: 'auto' },
+})
+const group0 = await pipeline.getBindLayout({
+    group: 0,
+    entries: declaredBindingSchema,
+})
+```
+
+The derived wrapper records `origin: "native-derived"` and
+`validationConfidence: "native-authoritative"`. Repeated requests for one
+group must use the same normalized schema. Explicit-layout pipelines cannot
+derive layouts.
+
+A render Program may omit `fragment`. Scratch then omits the native fragment
+descriptor and forbids `targets`; this directly expresses depth-only or
+otherwise no-color-output work. A Program with a fragment stage must provide
+an explicit targets sequence, including an explicit empty sequence when that
+native shape is intended.
 
 `vertexBuffers` and `targets` preserve native slot indices. An explicit `null` is a
 real empty slot; an array hole or `undefined` is invalid. Scratch neither compresses

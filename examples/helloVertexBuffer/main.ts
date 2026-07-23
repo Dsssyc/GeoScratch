@@ -67,13 +67,14 @@ async function main() {
     })
     const vertexRegion = vertexBuffer.region()
     const instanceSizeRegion = instanceSizeBuffer.region()
+    const shaderModule = await runtime.createShaderModule({
+        label: 'hello vertex buffer shader',
+        sourceParts: [ { code: vertexBufferWgsl } ],
+    })
     const program = runtime.createProgram({
         label: 'hello vertex buffer program',
-        modules: [ vertexBufferWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: shaderModule, entryPoint: 'vsMain' },
+        fragment: { module: shaderModule, entryPoint: 'fsMain' },
     })
     const pipeline = await runtime.createRenderPipeline({
         label: 'hello vertex buffer pipeline',

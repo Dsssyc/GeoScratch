@@ -27,7 +27,7 @@ describe('Scratch persistent binding browser gate', () => {
         expect(source).to.include("access: 'read-write'")
         expect(source).to.include("type: 'occlusion'")
         expect(source).to.include("type: 'timestamp'")
-        expect(source).to.include('SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED')
+        expect(source).to.include('SCRATCH_SHADER_MODULE_COMPILATION_FAILED')
         expect(source).to.include('probe.diagnostics.version !== 5')
         expect(source).to.include('consoleFailures.length > 0')
         expect(source).to.include('probe.uncaptured.length > 0')

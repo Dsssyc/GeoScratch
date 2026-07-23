@@ -108,18 +108,19 @@ async function main() {
     }, {
         label: 'texture sampling bind set',
     })
+    const shaderModule = await runtime.createShaderModule({
+        label: 'texture sampling shader',
+        sourceParts: [ { code: textureSamplingWgsl } ],
+    })
     const program = runtime.createProgram({
         label: 'texture sampling program',
-        modules: [ textureSamplingWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: shaderModule, entryPoint: 'vsMain' },
+        fragment: { module: shaderModule, entryPoint: 'fsMain' },
     })
     const pipeline = await runtime.createRenderPipeline({
         label: 'texture sampling pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         targets: [ { format: surface.format } ],
     })
     const pass = runtime.createRenderPass({

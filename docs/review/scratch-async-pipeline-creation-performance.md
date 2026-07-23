@@ -4,6 +4,13 @@ Status: Complete
 Date: 2026-07-12
 Decision: ADR-033
 
+ADR-050 supersession, 2026-07-24: ShaderModule acknowledgement is now measured
+separately from pipeline creation. The benchmark reuses acknowledged modules and reads
+compilation evidence from those modules; pipeline timings cover only pipeline
+candidate issue, scope settlement, lifecycle fences, and publication. The numerical
+results below describe the former pipeline-owned compilation implementation and are
+historical until the Phase 6 benchmark/browser rerun records replacement values.
+
 ## Result
 
 Pipeline creation is initialization work with an explicit asynchronous native

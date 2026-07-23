@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
@@ -33,7 +34,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
         const pipeline = await runtime.createComputePipeline({
-            program: createComputeProgram(runtime),
+            program: await createComputeProgram(runtime),
         })
 
         expect(runtime).not.to.have.property('_pipelines')
@@ -59,8 +60,8 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
             },
         })
         const controller = diagnosticsControllerFor(runtime)
-        const renderProgram = createRenderProgram(runtime)
-        const computeProgram = createComputeProgram(runtime)
+        const renderProgram = await createRenderProgram(runtime)
+        const computeProgram = await createComputeProgram(runtime)
 
         for (let index = 0; index < 64; index++) {
             const pipeline = index % 2 === 0
@@ -113,7 +114,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         const label = `successful-pipeline-${'p'.repeat(100_000)}`
         const pipeline = await runtime.createComputePipeline({
             label,
-            program: createComputeProgram(runtime),
+            program: await createComputeProgram(runtime),
         })
         const suffix = ` [scratch:${pipeline.id}]`
         const operation = runtime.diagnostics.operations({ pipelineId: pipeline.id })[0]
@@ -141,7 +142,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         const label = `invalid-local-pipeline-${'l'.repeat(100_000)}`
         const error = await rejectedDiagnostic(runtime.createRenderPipeline({
             label,
-            program: createRenderProgram(runtime),
+            program: await createRenderProgram(runtime),
             targets: [],
         }))
         const diagnosticJson = JSON.stringify(error.diagnostic)
@@ -149,7 +150,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         expect(error.diagnostic.code).to.equal('SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH')
         expect(error.diagnostic.subject.label.length).to.be.at.most(256)
         expect(diagnosticJson).not.to.include(label)
-        expect(calls.shaderModules).to.have.length(0)
+        expect(calls.shaderModules).to.have.length(1)
         expect(calls.pipelineLayouts).to.have.length(0)
         expect(calls.asyncPipelineRequests).to.have.length(0)
     })
@@ -159,7 +160,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         const fake = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
         const pipeline = await runtime.createRenderPipeline({
-            program: createRenderProgram(runtime),
+            program: await createRenderProgram(runtime),
             targets: [],
             depthStencil: {
                 format: 'depth24plus',
@@ -186,7 +187,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         const nativeMessage = `native-message-${'m'.repeat(100_000)}`
         const fake = createFakeGpu({
             compilationMessages: [ {
-                type: 'error',
+                type: 'warning',
                 message: nativeMessage,
                 offset: 0,
                 length: 0,
@@ -202,10 +203,11 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
                 evidenceByteCapacity: 32_768,
             },
         })
-        const program = runtime.createProgram({
+        const program = await createTestProgram(runtime, {
             label: programLabel,
-            modules: [ `${sourceSentinel}\n${triangleWgsl}` ],
-            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+            sourceParts: [ `${sourceSentinel}\n${triangleWgsl}` ],
+            vertex: 'vsMain',
+            fragment: 'fsMain',
         })
         const bindLayout = await runtime.createBindLayout({
             label: layoutLabel,
@@ -217,11 +219,15 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
                 visibility: [ 'vertex' ],
             } ],
         })
+        fake.pipelines.rejectNextPipeline(
+            'render',
+            createFakePipelineError('validation', nativeMessage)
+        )
 
         const error = await rejectedDiagnostic(runtime.createRenderPipeline({
             label: pipelineLabel,
             program,
-            bindLayouts: [ bindLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
             targets: [ { format: 'bgra8unorm' } ],
         }))
         const suffix = ` [scratch:${error.incident.target.pipelineId}]`
@@ -230,7 +236,10 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
 
         expect(fake.calls.asyncPipelineRequests[0].descriptor.label)
             .to.equal(`${pipelineLabel}${suffix}`)
-        expect(error.incident.compilationReport.messages[0].message.length).to.be.at.most(4_096)
+        expect(program.vertex.module.compilationReport.messages[0].message.length)
+            .to.be.at.most(4_096)
+        expect(error.incident.pipelineCreationReport.stages)
+            .to.deep.equal(error.incident.triggerOperation.pipelineCreationReport.stages)
         expect(error.incident.triggerOperation.nativeLabel.length).to.be.at.most(256)
         expect(error.incident.triggerOperation.nativeLabel.endsWith(suffix)).to.equal(true)
         expect(error.incident.related.every(subject =>
@@ -254,12 +263,10 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
 
     it('bounds related subjects and independent lifecycle outcomes with explicit omissions', async() => {
 
-        const fake = createFakeGpu({
-            deferCompilationInfo: true,
-            deferAsyncPipelines: true,
-        })
+        const controls = { deferAsyncPipelines: false }
+        const fake = createFakeGpu(controls)
         const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-        const program = createRenderProgram(runtime)
+        const program = await createRenderProgram(runtime)
         fake.device.limits.maxBindGroups = 80
         fake.device.limits.maxUniformBuffersPerShaderStage = 80
         const bindLayouts = await Promise.all(Array.from({ length: 80 }, (_, group) =>
@@ -273,14 +280,15 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
                 } ],
             })
         ))
+        fake.errors.resetHistory()
+        controls.deferAsyncPipelines = true
         const promise = runtime.createRenderPipeline({
             program,
-            bindLayouts,
+            layout: { mode: 'explicit', bindLayouts },
             targets: [ { format: 'bgra8unorm' } ],
         })
 
         for (const layout of bindLayouts) layout.dispose()
-        fake.pipelines.resolveCompilation(0, { messages: [] })
         fake.pipelines.resolvePipeline(0)
         const error = await rejectedDiagnostic(promise)
 
@@ -310,8 +318,8 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
-        const renderProgram = createRenderProgram(runtime)
-        const computeProgram = createComputeProgram(runtime)
+        const renderProgram = await createRenderProgram(runtime)
+        const computeProgram = await createComputeProgram(runtime, { scale: 7 })
         const capture = runtime.diagnostics.capture({
             maxOperations: 2,
             maxDurationMs: 1_000,
@@ -333,7 +341,6 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         const compute = await runtime.createComputePipeline({
             label: 'captured compute',
             program: computeProgram,
-            constants: { scale: 7 },
         })
         const report = capture.stop()
         const reportJson = JSON.stringify(report)
@@ -350,7 +357,9 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
             writeMask: 0xF,
         } ])
         expect(report.operations[1].descriptor.full.constants).to.deep.equal({ scale: 7 })
-        expect(report.operations.every(operation => operation.compilationReport !== undefined)).to.equal(true)
+        expect(report.operations.every(
+            operation => operation.pipelineCreationReport !== undefined
+        )).to.equal(true)
         expect(report.retainedEvidenceBytes).to.be.at.most(65_536)
         expect(reportJson).not.to.include(triangleWgsl)
         expect(reportJson).not.to.include(computeWgsl)
@@ -373,12 +382,12 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
                 incidentCapacity: 0,
             },
         })
+        const program = await createComputeProgram(runtime)
         const capture = runtime.diagnostics.capture({
             maxOperations: 1,
             maxDurationMs: 1_000,
             maxEvidenceBytes: 32_768,
         })
-        const program = createComputeProgram(runtime)
         fake.pipelines.rejectNextPipeline(
             'compute',
             createFakePipelineError('validation', 'captured compute validation')
@@ -400,19 +409,21 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
     })
 })
 
-function createRenderProgram(runtime) {
+async function createRenderProgram(runtime) {
 
-    return runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+    return await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
 }
 
-function createComputeProgram(runtime) {
+async function createComputeProgram(runtime, constants) {
 
-    return runtime.createProgram({
-        modules: [ computeWgsl ],
-        entryPoints: { compute: 'csMain' },
+    return await createTestProgram(runtime, {
+        sourceParts: [ computeWgsl ],
+        compute: 'csMain',
+        ...(constants !== undefined ? { computeConstants: constants } : {}),
     })
 }
 

@@ -10,13 +10,13 @@ declare const typedVideoElement: HTMLVideoElement
 declare const typedVideoFrame: VideoFrame
 declare const typedCanvasElement: HTMLCanvasElement
 declare const typedOffscreenCanvas: OffscreenCanvas
-declare const typedPipelineCompilationReport: scr.PipelineCompilationReport
+declare const typedPipelineCreationReport: scr.PipelineCreationReport
 declare const typedBufferResourceDescriptor: scr.BufferResourceDescriptor
 declare const typedMappedBufferResourceDescriptor: scr.MappedBufferResourceDescriptor
 declare const typedBufferMappingDescriptor: scr.BufferMappingDescriptor
 declare const typedDiagnosticInput: scr.ScratchDiagnosticInput
 declare const typedProgramDescriptor: scr.ProgramDescriptor
-declare const typedProgramEntryPoints: scr.ProgramEntryPoints
+declare const typedProgramStage: scr.ProgramStage
 declare const typedRenderPipelineDescriptor: scr.ScratchRenderPipelineDescriptor
 declare const typedComputePipelineDescriptor: scr.ScratchComputePipelineDescriptor
 declare const typedCommandImmediateData: scr.CommandImmediateData
@@ -29,7 +29,7 @@ declare const typedTextureUploadSize: scr.TextureUploadSize
 const compatBufferResourceDescriptor: scratchCompat.BufferResourceDescriptor = typedBufferResourceDescriptor
 const compatDiagnosticInput: scratchCompat.ScratchDiagnosticInput = typedDiagnosticInput
 const compatProgramDescriptor: scratchCompat.ProgramDescriptor = typedProgramDescriptor
-const compatProgramEntryPoints: scratchCompat.ProgramEntryPoints = typedProgramEntryPoints
+const compatProgramStage: scratchCompat.ProgramStage = typedProgramStage
 const compatRenderPipelineDescriptor: scratchCompat.ScratchRenderPipelineDescriptor = typedRenderPipelineDescriptor
 const compatComputePipelineDescriptor: scratchCompat.ScratchComputePipelineDescriptor = typedComputePipelineDescriptor
 const compatCommandImmediateData: scratchCompat.CommandImmediateData = typedCommandImmediateData
@@ -206,9 +206,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         diagnosticsSnapshot.submissionNative.submissionScopes
     const pendingNativeObservationBudget: number =
         diagnosticsSnapshot.submissionNative.maxPendingNativeObservations
-    const compatPipelineCompilationReport: scratchCompat.PipelineCompilationReport = typedPipelineCompilationReport
-    const compilationMessageSourceRedacted: boolean | undefined =
-        typedPipelineCompilationReport.messages[0]?.sourceExcerptRedacted
+    const compatPipelineCreationReport: scratchCompat.PipelineCreationReport =
+        typedPipelineCreationReport
+    const pipelineStageModuleId: string | undefined =
+        typedPipelineCreationReport.stages[0]?.shaderModuleId
     const nativeErrorSourceRedacted: boolean | undefined =
         incidentRecords[0]?.nativeError?.sourceExcerptRedacted
     const deviceLostInfo: scr.ScratchDeviceLostInfo | undefined = runtime.deviceLostInfo
@@ -723,16 +724,56 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
 
     buffer.assertRuntime(runtime)
 
+    const renderShaderSource =
+        '@vertex fn vsMain() -> @builtin(position) vec4f { return vec4f(); } @fragment fn fsMain() -> @location(0) vec4f { return vec4f(); }'
+    const shaderModulePromise: Promise<scr.ShaderModule> = runtime.createShaderModule({
+        label: 'typed render shader module',
+        sourceParts: [
+            { label: 'render source', code: renderShaderSource },
+        ],
+        compilationHints: [
+            { entryPoint: 'vsMain', layout: 'auto' },
+        ],
+    })
+    const shaderModule: scr.ShaderModule = await shaderModulePromise
+    const shaderModuleAlias: scr.ShaderModule = await runtime.shaderModule({
+        sourceParts: [ { code: renderShaderSource } ],
+    })
+    const shaderModuleCompilation: scr.ShaderModuleCompilationReport =
+        shaderModule.compilationReport
+    const supportingIncident = {} as scr.ScratchGpuSupportingObjectIncidentReport
+    const failedShaderModuleCompilation: scr.ShaderModuleCompilationReport | undefined =
+        supportingIncident.shaderModuleCompilationReport
+    const shaderSourcePart: scr.NormalizedShaderModuleSourcePart =
+        shaderModule.sourceParts[0]
+    const shaderHintFact: scr.ShaderModuleCompilationHintFact =
+        shaderModule.compilationHints[0]
+    // @ts-expect-error ShaderModule construction is runtime-owned and Promise-only
+    new scr.ShaderModule()
+    // @ts-expect-error ShaderModule source-part facts are immutable
+    shaderModule.sourceParts = []
+
     const program: scr.Program = runtime.createProgram({
         label: 'typed program',
-        modules: [
-            '@vertex fn vsMain() -> @builtin(position) vec4f { return vec4f(); } @fragment fn fsMain() -> @location(0) vec4f { return vec4f(); }',
-        ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
+        vertex: {
+            module: shaderModule,
+            entryPoint: 'vsMain',
+            constants: { vertexScale: 1 },
+        },
+        fragment: {
+            module: shaderModule,
+            entryPoint: 'fsMain',
+            constants: { colorMode: 2 },
         },
         layoutRequirements: [ programBufferRequirement ],
+    })
+    runtime.createProgram({
+        // @ts-expect-error Program no longer accepts WGSL source modules
+        modules: [ renderShaderSource ],
+    })
+    runtime.createProgram({
+        // @ts-expect-error Program no longer accepts an entryPoints map
+        entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
     })
     const normalizedRequirement: scr.ProgramBufferLayoutRequirement = program.layoutRequirements[0]
     // @ts-expect-error Program runtime ownership is readonly
@@ -1114,8 +1155,6 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             null,
             { format: surface.format },
         ],
-        vertexConstants: { vertexScale: 1 },
-        fragmentConstants: { colorMode: 2 },
         multisample: { count: 4 },
         immediateSize: 16,
     }
@@ -1124,7 +1163,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const scratchPipelinePromise: Promise<scr.ScratchRenderPipeline> = runtime.createRenderPipeline({
         label: 'typed scratch pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         vertexBuffers: [
             {
                 arrayStride: 8,
@@ -1136,8 +1175,36 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         targets: [ { format: surface.format } ],
     })
     const scratchPipeline: scr.ScratchRenderPipeline = await scratchPipelinePromise
+    const renderStage: scr.ProgramStage = scratchPipeline.vertex
+    const optionalFragmentStage: scr.ProgramStage | undefined = scratchPipeline.fragment
+    const renderCreationReport: scr.PipelineCreationReport = scratchPipeline.creationReport
+    const renderLayoutMode: 'explicit' | 'auto' = scratchPipeline.layoutMode
     const scratchPipelineAlias: scr.ScratchRenderPipeline = await runtime.renderPipeline({
         program,
+        targets: [ { format: surface.format } ],
+    })
+    const autoRenderPipeline: scr.ScratchRenderPipeline = await runtime.createRenderPipeline({
+        program,
+        layout: { mode: 'auto' },
+        targets: [ { format: surface.format } ],
+    })
+    const nativeDerivedLayout: scr.BindLayout = await autoRenderPipeline.getBindLayout({
+        group: 0,
+        entries: [],
+    })
+    const derivedOrigin: 'explicit' | 'native-derived' = nativeDerivedLayout.origin
+    const derivedConfidence: 'scratch-verified' | 'native-authoritative' =
+        nativeDerivedLayout.validationConfidence
+    runtime.createRenderPipeline({
+        program,
+        // @ts-expect-error Pipeline layouts use an explicit discriminated descriptor
+        bindLayouts: [ bindLayout ],
+        targets: [ { format: surface.format } ],
+    })
+    runtime.createRenderPipeline({
+        program,
+        // @ts-expect-error Stage constants belong to Program stages
+        vertexConstants: { vertexScale: 1 },
         targets: [ { format: surface.format } ],
     })
     const compatRenderPipeline: scratchCompat.ScratchRenderPipeline = scratchPipelineAlias
@@ -1378,12 +1445,15 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     depthPass.depth!.depthStore = 'discard'
     const compatDepthPassTarget: scratchCompat.TextureViewSpec | undefined = compatDepthPass.depth?.target
     const compatDepthLoad: GPULoadOp | undefined = compatDepthAttachment.depthLoad
+    const computeShaderModule: scr.ShaderModule = await runtime.createShaderModule({
+        sourceParts: [ {
+            code: '@group(1) @binding(0) var<storage, read> inputValues: array<f32>; @group(1) @binding(1) var<storage, read_write> outputValues: array<f32>; @compute @workgroup_size(4) fn csMain(@builtin(global_invocation_id) id: vec3u) { outputValues[id.x] = inputValues[id.x]; }',
+        } ],
+    })
     const computeProgram: scr.Program = runtime.createProgram({
-        modules: [
-            '@group(1) @binding(0) var<storage, read> inputValues: array<f32>; @group(1) @binding(1) var<storage, read_write> outputValues: array<f32>; @compute @workgroup_size(4) fn csMain(@builtin(global_invocation_id) id: vec3u) { outputValues[id.x] = inputValues[id.x]; }',
-        ],
-        entryPoints: {
-            compute: 'csMain',
+        compute: {
+            module: computeShaderModule,
+            entryPoint: 'csMain',
         },
     })
     const shaderInspectionInput: scr.ShaderInspectionInput = computeProgram
@@ -1420,13 +1490,13 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     ]).compareBindLayouts([], compatShaderComparisonOptions)
     const computePipelinePromise: Promise<scr.ScratchComputePipeline> = runtime.createComputePipeline({
         program: computeProgram,
-        bindLayouts: [ storageLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ storageLayout ] },
         immediateSize: 16,
     })
     const computePipeline: scr.ScratchComputePipeline = await computePipelinePromise
     const computePipelineAlias: scr.ScratchComputePipeline = await runtime.computePipeline({
         program: computeProgram,
-        bindLayouts: [ storageLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ storageLayout ] },
     })
     const compatComputePipeline: scratchCompat.ScratchComputePipeline = computePipelineAlias
     // @ts-expect-error Pipeline construction is runtime-owned and asynchronous
@@ -1440,7 +1510,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const dynamicComputePipeline: scr.ScratchComputePipeline = await runtime.createComputePipeline({
         program: computeProgram,
-        bindLayouts: [ dynamicStorageLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ dynamicStorageLayout ] },
     })
     const dispatch: scr.DispatchCommand = runtime.createDispatchCommand({
         pipeline: computePipeline,

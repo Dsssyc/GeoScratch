@@ -156,18 +156,19 @@ async function main() {
     }, {
         label: 'external image sample set',
     })
+    const shaderModule = await runtime.createShaderModule({
+        label: 'external image sample shader',
+        sourceParts: [ { code: sampleWgsl } ],
+    })
     const program = runtime.createProgram({
         label: 'external image sample program',
-        modules: [ sampleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: shaderModule, entryPoint: 'vsMain' },
+        fragment: { module: shaderModule, entryPoint: 'fsMain' },
     })
     const pipeline = await runtime.createRenderPipeline({
         label: 'external image sample pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         targets: [ { format: surface.format } ],
     })
     const surfacePass = runtime.createRenderPass({

@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchComputePipeline,
@@ -8,21 +9,21 @@ import {
 import {
     createGpuIncidentReport,
     createGpuOperationRecord,
-    serializedEvidenceBytes,
 } from '../packages/geoscratch/dist/scratch/gpu-operation.js'
+import {
+    createPipelineCreationReport,
+} from '../packages/geoscratch/dist/scratch/pipeline-compilation.js'
 import { diagnosticsControllerFor } from '../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
 import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
-function createProgram(runtime) {
+async function createProgram(runtime) {
 
-    return runtime.createProgram({
+    return await createTestProgram(runtime, {
         label: 'async pipeline contract program',
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-            compute: 'csMain',
-        },
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
+        compute: 'csMain',
     })
 }
 
@@ -32,7 +33,7 @@ describe('scratch async pipeline public contract', () => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
-        const program = createProgram(runtime)
+        const program = await createProgram(runtime)
 
         const primary = runtime.createRenderPipeline({
             program,
@@ -53,7 +54,7 @@ describe('scratch async pipeline public contract', () => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
-        const program = createProgram(runtime)
+        const program = await createProgram(runtime)
 
         const primary = runtime.createComputePipeline({ program })
         const alias = runtime.computePipeline({ program })
@@ -68,7 +69,7 @@ describe('scratch async pipeline public contract', () => {
 
         const { gpu } = createFakeGpu()
         const runtime = await ScratchRuntime.create({ gpu })
-        const program = createProgram(runtime)
+        const program = await createProgram(runtime)
 
         const cases = [
             {
@@ -149,7 +150,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
                 pipelineId: 'pipeline-1',
                 pipelineKind: 'render',
                 programId: 'program-1',
-                programSourceHash: 'source-1',
+                programContractHash: 'source-1',
             },
             descriptor: {
                 hash: 'descriptor-2',
@@ -181,7 +182,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
                 pipelineId: 'pipeline-2',
                 pipelineKind: 'compute',
                 programId: 'program-2',
-                programSourceHash: 'source-2',
+                programContractHash: 'source-2',
             },
             descriptor: {
                 hash: 'descriptor-2',
@@ -251,7 +252,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
             pipelineId: 'render-pipeline-1',
             pipelineKind: 'render',
             programId: 'program-1',
-            programSourceHash: 'source-1',
+            programContractHash: 'source-1',
         }
         const computeTarget = {
             ...renderTarget,
@@ -368,7 +369,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
                 pipelineId: 'invalid-pending-pipeline',
                 pipelineKind: 'render',
                 programId: 'invalid-pending-program',
-                programSourceHash: 'invalid-pending-source',
+                programContractHash: 'invalid-pending-source',
             },
             descriptorSummary: { size: 16, usage: 1 },
             fullDescriptor: { size: 16, usage: 1 },
@@ -393,7 +394,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
         expect(snapshot.aggregates.pipelineCreationAttempts).to.equal(0)
     })
 
-    it('bounds pipeline labels and compilation evidence without retaining source fields', () => {
+    it('bounds pipeline labels and keeps stage evidence source-free', () => {
 
         const sourceSentinel = 'SOURCE_SENTINEL_MUST_NOT_SURVIVE'
         const target = {
@@ -401,36 +402,15 @@ describe('scratch GPU provenance schema v5 contract', () => {
             pipelineId: 'pipeline-bounds-1',
             pipelineKind: 'render',
             programId: 'program-bounds-1',
-            programSourceHash: 'source-bounds-1',
+            programContractHash: pipelineContractHash('render'),
         }
-        const modules = Array.from({ length: 300 }, (_, index) => ({
-            index,
-            hash: `module-hash-${index}`,
-            startOffset: index * 10,
-            endOffset: index * 10 + 9,
-            startLine: index + 1,
-            endLine: index + 1,
-            lineCount: 1,
-            source: sourceSentinel,
-        })).reverse()
-        const messages = Array.from({ length: 80 }, (_, index) => ({
-            nativeIndex: index,
-            type: index % 2 === 0 ? 'error' : 'warning',
-            message: `message-${index}-${'x'.repeat(5_000)}`,
-            messageTruncated: false,
-            locationKind: 'module',
-            nativeLocation: { offset: index, length: 1, lineNum: 1, linePos: 1 },
-            moduleLocation: { moduleIndex: 0, offset: index, length: 1, lineNum: 1, linePos: 1 },
-            excerpt: sourceSentinel,
-        }))
-        const compilationReport = {
-            ...emptyCompilationReport(target),
-            moduleCount: modules.length,
-            modules,
-            errorCount: 40,
-            warningCount: 40,
-            nativeMessageCount: messages.length,
-            messages,
+        const pipelineCreationReport = {
+            ...emptyPipelineCreationReport(target),
+            stages: emptyPipelineCreationReport(target).stages.map(stage => ({
+                ...stage,
+                source: sourceSentinel,
+                message: sourceSentinel,
+            })),
             source: sourceSentinel,
         }
         const nativeLabel = 'native-label-'.repeat(100)
@@ -444,38 +424,19 @@ describe('scratch GPU provenance schema v5 contract', () => {
             descriptor: { hash: 'descriptor-1', summary: {} },
             nativeLabels: {
                 pipeline: { value: nativeLabel, truncated: false },
-                shaderModule: { value: nativeLabel, truncated: false },
                 pipelineLayout: { value: nativeLabel, truncated: false },
             },
-            compilationReport,
+            pipelineCreationReport,
         })
 
         expect(record.nativeLabels.pipeline.value.length).to.be.at.most(256)
-        expect(record.nativeLabels.shaderModule.value.length).to.be.at.most(256)
         expect(record.nativeLabels.pipelineLayout.value.length).to.be.at.most(256)
         expect(record.nativeLabels.pipeline.truncated).to.equal(true)
-        expect(record.compilationReport.retainedModuleCount).to.be.at.most(256)
-        expect(record.compilationReport.retainedMessageCount).to.be.at.most(64)
-        expect(record.compilationReport.modules.map(module => module.index)).to.deep.equal(
-            Array.from(
-                { length: record.compilationReport.retainedModuleCount },
-                (_, index) => index
-            )
+        expect(record.pipelineCreationReport.stages).to.deep.equal(
+            pipelineCreationStages('render')
         )
-        expect(record.compilationReport.omittedModuleCount).to.equal(
-            modules.length - record.compilationReport.retainedModuleCount
-        )
-        expect(record.compilationReport.omittedMessageCount).to.equal(
-            messages.length - record.compilationReport.retainedMessageCount
-        )
-        expect(record.compilationReport.messages[0].message.length).to.equal(4_096)
-        expect(record.compilationReport.messages[0].messageTruncated).to.equal(true)
-        expect(serializedEvidenceBytes(record.compilationReport)).to.be.at.most(64 * 1024)
-        expect(record.compilationReport.retainedEvidenceBytes).to.equal(
-            serializedEvidenceBytes(record.compilationReport)
-        )
-        expect(Object.isFrozen(record.compilationReport.modules)).to.equal(true)
-        expect(Object.isFrozen(record.compilationReport.messages[0])).to.equal(true)
+        expect(Object.isFrozen(record.pipelineCreationReport.stages)).to.equal(true)
+        expect(Object.isFrozen(record.pipelineCreationReport.stages[0])).to.equal(true)
         expect(JSON.stringify(record)).not.to.include(sourceSentinel)
 
         const incident = createGpuIncidentReport({
@@ -489,7 +450,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
             target,
             recentOperations: [],
             failureStage: 'pipeline-creation',
-            compilationReport,
+            pipelineCreationReport,
             evidence: {
                 complete: true,
                 overwrittenOperations: 0,
@@ -497,24 +458,24 @@ describe('scratch GPU provenance schema v5 contract', () => {
                 omittedRecords: 0,
             },
         })
-        expect(serializedEvidenceBytes(incident.compilationReport)).to.be.at.most(64 * 1024)
+        expect(incident.pipelineCreationReport).to.deep.equal(record.pipelineCreationReport)
         expect(JSON.stringify(incident)).not.to.include(sourceSentinel)
     })
 
-    it('rejects compilation evidence whose identity differs from its pipeline target', () => {
+    it('rejects pipeline creation evidence whose identity differs from its target', () => {
 
         const target = {
             kind: 'pipeline',
             pipelineId: 'pipeline-identity-1',
             pipelineKind: 'compute',
             programId: 'program-identity-1',
-            programSourceHash: 'source-identity-1',
+            programContractHash: pipelineContractHash('compute'),
         }
         const mismatches = [
             { pipelineId: 'other-pipeline' },
             { pipelineKind: 'render' },
             { programId: 'other-program' },
-            { combinedSourceHash: 'other-source' },
+            { contractHash: 'other-contract' },
         ]
         for (const mismatch of mismatches) {
             expect(() => createGpuOperationRecord({
@@ -525,8 +486,8 @@ describe('scratch GPU provenance schema v5 contract', () => {
                 runtimeId: 'runtime-1',
                 target,
                 descriptor: { hash: 'descriptor-1', summary: {} },
-                compilationReport: {
-                    ...emptyCompilationReport(target),
+                pipelineCreationReport: {
+                    ...emptyPipelineCreationReport(target),
                     ...mismatch,
                 },
             })).to.throw(TypeError, 'identity does not match')
@@ -543,7 +504,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
             pipelineId: 'pipeline-atomic-completion-1',
             pipelineKind: 'compute',
             programId: 'program-atomic-completion-1',
-            programSourceHash: 'source-atomic-completion-1',
+            programContractHash: pipelineContractHash('compute'),
         }
         const pending = controller.beginOperation({
             kind: 'compute-pipeline-creation',
@@ -554,8 +515,8 @@ describe('scratch GPU provenance schema v5 contract', () => {
 
         expect(() => controller.completeOperation(pending, {
             status: 'failed',
-            compilationReport: {
-                ...emptyCompilationReport(target),
+            pipelineCreationReport: {
+                ...emptyPipelineCreationReport(target),
                 pipelineId: 'wrong-pipeline-id',
             },
         })).to.throw(TypeError, 'identity does not match')
@@ -563,7 +524,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
 
         const record = controller.completeOperation(pending, {
             status: 'failed',
-            compilationReport: emptyCompilationReport(target),
+            pipelineCreationReport: emptyPipelineCreationReport(target),
         })
         expect(record.status).to.equal('failed')
         expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
@@ -586,9 +547,9 @@ describe('scratch GPU provenance schema v5 contract', () => {
             pipelineId: 'pipeline-current-1',
             pipelineKind: 'render',
             programId: 'program-current-1',
-            programSourceHash: 'source-current-1',
+            programContractHash: pipelineContractHash('render'),
         }
-        const compilationReport = emptyCompilationReport(target)
+        const pipelineCreationReport = emptyPipelineCreationReport(target)
         const pending = controller.beginOperation({
             kind: 'render-pipeline-creation',
             target,
@@ -603,7 +564,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
 
         const record = controller.completeOperation(pending, {
             status: 'succeeded',
-            compilationReport,
+            pipelineCreationReport,
         })
         controller.registerPipeline({
             label: 'current pipeline',
@@ -619,11 +580,11 @@ describe('scratch GPU provenance schema v5 contract', () => {
             label: 'current pipeline',
             pipelineKind: 'render',
             programId: target.programId,
-            programSourceHash: target.programSourceHash,
+            programContractHash: target.programContractHash,
             descriptorHash: record.descriptor.hash,
             state: 'ready',
             lastCreationOperationId: record.id,
-            compilation: { errorCount: 0, warningCount: 0, infoCount: 0 },
+            stages: pipelineCreationReport.stages,
         } ])
         expect(evidence.version).to.equal(5)
         expect(captureReport.version).to.equal(5)
@@ -653,7 +614,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
             operationId: record.id,
             triggerOperation: record,
             failureStage: 'pipeline-creation',
-            compilationReport,
+            pipelineCreationReport,
         })
         expect(runtime.diagnostics.incidents({
             targetKind: 'pipeline',
@@ -682,7 +643,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
                 runtimeId: runtime.id,
                 target: forgedTarget,
                 descriptor: { hash: 'forged-descriptor', summary: {} },
-                compilationReport: emptyCompilationReport(forgedTarget),
+                pipelineCreationReport: emptyPipelineCreationReport(forgedTarget),
             }),
         })).to.throw(TypeError, 'matching successful creation operation')
         expect(runtime.diagnostics.snapshot().pipelines).to.have.length(0)
@@ -713,7 +674,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
             pipelineId: 'pipeline-no-pressure-1',
             pipelineKind: 'compute',
             programId: 'program-no-pressure-1',
-            programSourceHash: 'source-no-pressure-1',
+            programContractHash: pipelineContractHash('compute'),
         }
         const pipelinePending = controller.beginOperation({
             kind: 'compute-pipeline-creation',
@@ -723,7 +684,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
         })
         controller.completeOperation(pipelinePending, {
             status: 'failed',
-            compilationReport: emptyCompilationReport(pipelineTarget),
+            pipelineCreationReport: emptyPipelineCreationReport(pipelineTarget),
         })
 
         const incident = controller.recordIncident({
@@ -743,25 +704,52 @@ describe('scratch GPU provenance schema v5 contract', () => {
     })
 })
 
-function emptyCompilationReport(target) {
+function emptyPipelineCreationReport(target) {
 
-    return Object.freeze({
-        version: 1,
+    return createPipelineCreationReport({
         pipelineId: target.pipelineId,
         pipelineKind: target.pipelineKind,
         programId: target.programId,
-        combinedSourceHash: target.programSourceHash,
-        moduleCount: 0,
-        retainedModuleCount: 0,
-        omittedModuleCount: 0,
-        modules: Object.freeze([]),
-        errorCount: 0,
-        warningCount: 0,
-        infoCount: 0,
-        nativeMessageCount: 0,
-        retainedMessageCount: 0,
-        omittedMessageCount: 0,
-        retainedEvidenceBytes: 0,
-        messages: Object.freeze([]),
+        stages: pipelineCreationStages(target.pipelineKind),
     })
+}
+
+function pipelineContractHash(pipelineKind) {
+
+    return createPipelineCreationReport({
+        pipelineId: 'contract-hash-pipeline',
+        pipelineKind,
+        programId: 'contract-hash-program',
+        stages: pipelineCreationStages(pipelineKind),
+    }).contractHash
+}
+
+function pipelineCreationStages(pipelineKind) {
+
+    return pipelineKind === 'render'
+        ? [
+            {
+                stage: 'vertex',
+                shaderModuleId: 'shader-module-render',
+                sourceHash: 'source-hash-render',
+                entryPoint: 'vsMain',
+                constantKeys: [ 'scale' ],
+            },
+            {
+                stage: 'fragment',
+                shaderModuleId: 'shader-module-render',
+                sourceHash: 'source-hash-render',
+                entryPoint: 'fsMain',
+                constantKeys: [],
+            },
+        ]
+        : [
+            {
+                stage: 'compute',
+                shaderModuleId: 'shader-module-compute',
+                sourceHash: 'source-hash-compute',
+                entryPoint: 'csMain',
+                constantKeys: [ 'scale' ],
+            },
+        ]
 }

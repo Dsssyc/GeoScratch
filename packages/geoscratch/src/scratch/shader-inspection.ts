@@ -133,10 +133,19 @@ class ShaderInspectionResult implements ShaderInspection {
 
 function normalizeModules(input: ShaderInspectionInput): string[] {
 
-    if (isProgram(input)) return [ ...input.modules ]
+    if (isProgram(input)) {
+        const modules: string[] = []
+        const seen = new Set<string>()
+        for (const stage of [ input.vertex, input.fragment, input.compute ]) {
+            if (stage === undefined || seen.has(stage.module.id)) continue
+            seen.add(stage.module.id)
+            modules.push(...stage.module.sourceParts.map(part => part.code))
+        }
+        return modules
+    }
     if (typeof input === 'string') return [ input ]
     if (!Array.isArray(input) || input.some(moduleSource => typeof moduleSource !== 'string')) {
-        return throwShaderInspectionProgramInvalid(input)
+        return throwShaderInspectionInputInvalid(input)
     }
 
     return [ ...input ]
@@ -145,7 +154,7 @@ function normalizeModules(input: ShaderInspectionInput): string[] {
 function resolveProgram(input: ShaderInspectionInput, program: Program | undefined): Program | undefined {
 
     if (program !== undefined) {
-        if (!isProgram(program)) return throwShaderInspectionProgramInvalid(program)
+        if (!isProgram(program)) return throwShaderInspectionInputInvalid(program)
         return program
     }
     if (isProgram(input)) return input
@@ -345,16 +354,16 @@ function collectBindLayoutEntries(bindLayouts: ReadonlyArray<BindLayout>): BindL
     })
 }
 
-function throwShaderInspectionProgramInvalid(program: unknown): never {
+function throwShaderInspectionInputInvalid(input: unknown): never {
 
     throwScratchDiagnostic({
-        code: 'SCRATCH_PROGRAM_MODULES_INVALID',
+        code: 'SCRATCH_SHADER_INSPECTION_INPUT_INVALID',
         severity: 'error',
         phase: 'program',
         subject: { kind: 'Program' },
-        message: 'Shader inspection requires a constructed Program or explicit WGSL modules.',
+        message: 'Shader inspection requires a constructed Program or explicit WGSL sources.',
         expected: { input: 'Program, string, or string[]' },
-        actual: { input: describeValue(program) },
+        actual: { input: describeValue(input) },
     })
 }
 

@@ -46,10 +46,10 @@ a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 
 | ID | Source call site | Native call | Declared owner or deferred path | Classification |
 | --- | --- | --- | --- | --- |
-| N1 | `packages/geoscratch/src/scratch/binding.ts:1026` | attempt-local binding `GPUTexture.createView()` | Realized only while encoding the selected draw or dispatch command. | Observed command |
-| N2 | `packages/geoscratch/src/scratch/binding.ts:1049` | attempt-local `GPUDevice.createBindGroup()` | Same selected command owner; retained only by its attempt authority. | Observed command |
-| N3 | `packages/geoscratch/src/scratch/binding.ts:1187` | persistent binding `GPUTexture.createView()` | `bind-set-preparation` candidate transaction; committed atomically with its bind group. | Independently acknowledged before submission |
-| N4 | `packages/geoscratch/src/scratch/binding.ts:1224` | persistent `GPUDevice.createBindGroup()` | `bind-set-preparation` transaction; committed before submission. | Independently acknowledged before submission |
+| N1 | `packages/geoscratch/src/scratch/binding.ts:1149` | attempt-local binding `GPUTexture.createView()` | Realized only while encoding the selected draw or dispatch command. | Observed command |
+| N2 | `packages/geoscratch/src/scratch/binding.ts:1172` | attempt-local `GPUDevice.createBindGroup()` | Same selected command owner; retained only by its attempt authority. | Observed command |
+| N3 | `packages/geoscratch/src/scratch/binding.ts:1310` | persistent binding `GPUTexture.createView()` | `bind-set-preparation` candidate transaction; committed atomically with its bind group. | Independently acknowledged before submission |
+| N4 | `packages/geoscratch/src/scratch/binding.ts:1347` | persistent `GPUDevice.createBindGroup()` | `bind-set-preparation` transaction; committed before submission. | Independently acknowledged before submission |
 | N5 | `packages/geoscratch/src/scratch/command.ts:887` | render `setPipeline()` | `issuePassCommandEncoding()` on submission path; manual encode remains raw. | Observed command; manual encode deferred |
 | N6 | `packages/geoscratch/src/scratch/command.ts:889` | `setViewport()` | Same pass-command owner. | Observed command; manual encode deferred |
 | N7 | `packages/geoscratch/src/scratch/command.ts:897` | `setScissorRect()` | Same pass-command owner. | Observed command; manual encode deferred |

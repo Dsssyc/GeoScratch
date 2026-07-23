@@ -405,7 +405,7 @@ describe('examples structure', () => {
         expect(source).to.include('resolveTarget: surface')
         expect(source).to.include("store: 'discard'")
         expect(source).to.include('maxDrawCount: 3')
-        expect(source).to.include('fragmentConstants: { colorMode }')
+        expect(source).to.include('constants: { colorMode }')
         expect(source).to.include('renderState: {')
         expect(source).to.include('viewport: panels.left')
         expect(source).to.include('scissor: panels.left')

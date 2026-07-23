@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     DispatchCommand,
@@ -37,13 +38,13 @@ function expectDiagnostic(fn, include) {
 
 async function createPipeline(runtime, bindLayout) {
 
-    const program = runtime.createProgram({
-        modules: [ computeWgsl ],
-        entryPoints: { compute: 'csMain' },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ computeWgsl ],
+        compute: 'csMain',
     })
     return await runtime.createComputePipeline({
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
     })
 }
 

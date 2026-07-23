@@ -233,13 +233,13 @@ respective acquisition points, initial `SubmittedWork` is registered before awai
 and teardown runs stop, settle, then release. The five-scenario headed-Chrome matrix
 proves exact acquisition/cleanup counts and public runtime/Surface disposal facts.
 
-The invalid Bloom-combine WGSL scenario also demonstrates the diagnostic model in the
-real migrated workload. Chrome reports supporting-object, shader-compilation, and
-pipeline-validation outcomes together; the retained outcomes include
-`SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`, and the one-operation deep capture links
-the failed compute pipeline, Program, module, and compilation location without WGSL
-source. See `scratch-hello-gaw-failure-evidence-audit.md` for the bounded evidence and
-claim boundary.
+The `invalid-bloom-shader-wgsl` scenario now follows ADR-050 ownership. Its
+one-operation deep capture starts immediately before Bloom-combine ShaderModule
+acknowledgement and links `SCRATCH_SHADER_MODULE_COMPILATION_FAILED` to the
+ShaderModule ID, source hash, source-part hash, and compilation location without WGSL
+source. Pipeline creation is not started for that unacknowledged module. See
+`scratch-hello-gaw-failure-evidence-audit.md` for the bounded evidence and Phase 6
+headed-rerun boundary.
 
 This successor does not alter any resource, binding, pipeline, command, stage, resize,
 asset, or visible-effect parity row in this audit.

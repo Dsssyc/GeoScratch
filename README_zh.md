@@ -230,8 +230,8 @@ main().catch(console.error)
 async function main() {
     const runtime = await ScratchRuntime.create({ label: 'triangle runtime' })
     const surface = runtime.createSurface(canvas, { format: 'preferred' })
-    const program = runtime.createProgram({
-        modules: [ `
+    const shaderModule = await runtime.createShaderModule({
+        sourceParts: [ { code: `
             @vertex
             fn vsMain(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
                 let positions = array(
@@ -246,8 +246,11 @@ async function main() {
             fn fsMain() -> @location(0) vec4f {
                 return vec4f(0.12, 0.72, 0.58, 1.0);
             }
-        ` ],
-        entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        ` } ],
+    })
+    const program = runtime.createProgram({
+        vertex: { module: shaderModule, entryPoint: 'vsMain' },
+        fragment: { module: shaderModule, entryPoint: 'fsMain' },
     })
     const pipeline = await runtime.createRenderPipeline({
         program,

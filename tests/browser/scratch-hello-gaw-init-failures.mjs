@@ -31,14 +31,14 @@ const baseUrl = `http://127.0.0.1:${port}`
 const scenarios = Object.freeze([
     'after-runtime-created',
     'after-first-image-decoded',
-    'invalid-bloom-pipeline-wgsl',
+    'invalid-bloom-shader-wgsl',
     'after-graph-created',
     'after-initial-submit-issued',
 ])
 const expectedBitmapCounts = Object.freeze({
     'after-runtime-created': 0,
     'after-first-image-decoded': 1,
-    'invalid-bloom-pipeline-wgsl': 8,
+    'invalid-bloom-shader-wgsl': 8,
     'after-graph-created': 8,
     'after-initial-submit-issued': 8,
 })
@@ -289,8 +289,8 @@ function validateScenario(result, failures) {
     if (result.consoleWarnings.length > 0) fail('browser emitted console warnings')
     if (result.unhandledRejections.length > 0) fail('browser emitted unhandled promise rejections')
 
-    if (label === 'invalid-bloom-pipeline-wgsl') {
-        validateInvalidPipelineProof(proof, fail)
+    if (label === 'invalid-bloom-shader-wgsl') {
+        validateInvalidShaderProof(proof, fail)
     } else {
         if (proof.primaryFailure?.name !== 'HelloGawInjectedFailure') {
             fail(`primary failure was ${proof.primaryFailure?.name}`)
@@ -411,18 +411,20 @@ function validateCleanup(cleanup, scenario, fail) {
     }
 }
 
-function validateInvalidPipelineProof(proof, fail) {
+function validateInvalidShaderProof(proof, fail) {
 
     if (proof.primaryFailure?.name !== 'ScratchDiagnosticError') {
         fail(`primary failure was ${proof.primaryFailure?.name}`)
     }
-    if (proof.incident?.kind !== 'pipeline-failure') fail('pipeline incident was missing')
+    if (proof.incident?.kind !== 'supporting-object-failure') {
+        fail('ShaderModule incident was missing')
+    }
     const compilationOutcome = proof.incident?.outcomes?.find(outcome => (
-        outcome.diagnosticCode === 'SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED' &&
+        outcome.diagnosticCode === 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED' &&
         outcome.stage === 'shader-compilation'
     ))
     if (compilationOutcome === undefined) {
-        fail('pipeline incident did not retain SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED')
+        fail('ShaderModule incident did not retain SCRATCH_SHADER_MODULE_COMPILATION_FAILED')
     }
 
     const capture = proof.captureReport
@@ -451,40 +453,41 @@ function validateInvalidPipelineProof(proof, fail) {
     }
 
     const operation = capture.operations[0]
-    const compilation = operation.compilationReport
-    if (operation.kind !== 'compute-pipeline-creation') {
+    const compilation = proof.incident?.shaderModuleCompilationReport
+    if (operation.kind !== 'shader-module-creation') {
         fail(`captured operation kind was ${operation.kind}`)
     }
     if (operation.status !== 'failed') fail(`captured operation status was ${operation.status}`)
-    if (typeof operation.target?.pipelineId !== 'string') fail('pipeline identity was missing')
-    if (typeof operation.target?.programId !== 'string') fail('program identity was missing')
-    if (operation.target?.pipelineKind !== 'compute') fail('pipeline kind was not compute')
-    if (compilation?.pipelineId !== operation.target?.pipelineId) {
-        fail('compilation report pipeline identity did not match')
+    if (typeof operation.target?.shaderModuleId !== 'string') {
+        fail('ShaderModule identity was missing')
     }
-    if (compilation?.programId !== operation.target?.programId) {
-        fail('compilation report program identity did not match')
+    if (compilation?.shaderModuleId !== operation.target?.shaderModuleId) {
+        fail('compilation report ShaderModule identity did not match')
+    }
+    if (compilation?.sourceHash !== operation.target?.sourceHash) {
+        fail('compilation report source hash did not match')
     }
     if (!(compilation?.errorCount > 0)) fail('compilation report had no error')
     if (!Number.isSafeInteger(compilation?.retainedEvidenceBytes) ||
         compilation.retainedEvidenceBytes > expectedCompilationEvidenceMaxBytes) {
         fail(`compilation retained ${compilation?.retainedEvidenceBytes} evidence bytes`)
     }
-    if (compilation?.omittedModuleCount !== 0 || compilation?.omittedMessageCount !== 0) {
-        fail('compilation evidence omitted module or message facts')
+    if (compilation?.omittedSourcePartCount !== 0 || compilation?.omittedMessageCount !== 0) {
+        fail('compilation evidence omitted source-part or message facts')
     }
-    if (compilation?.moduleCount !== 1 || compilation?.modules?.length !== 1) {
-        fail('compilation report did not identify the failing module')
+    if (compilation?.sourcePartCount !== 1 || compilation?.sourceParts?.length !== 1) {
+        fail('compilation report did not identify the failing source part')
     }
-    if (typeof compilation?.modules?.[0]?.hash !== 'string') fail('module hash was missing')
-    if (!compilation?.messages?.some(message => message.moduleLocation?.moduleIndex === 0)) {
-        fail('compilation message was not mapped to module zero')
+    if (typeof compilation?.sourceParts?.[0]?.hash !== 'string') {
+        fail('source-part hash was missing')
     }
-    if (proof.incident?.target?.pipelineId !== operation.target?.pipelineId) {
-        fail('incident pipeline identity did not match the capture')
+    if (!compilation?.messages?.some(message => (
+        message.sourcePartLocation?.sourcePartIndex === 0
+    ))) {
+        fail('compilation message was not mapped to source part zero')
     }
-    if (proof.incident?.target?.programId !== operation.target?.programId) {
-        fail('incident program identity did not match the capture')
+    if (proof.incident?.target?.shaderModuleId !== operation.target?.shaderModuleId) {
+        fail('incident ShaderModule identity did not match the capture')
     }
     const evidenceJson = JSON.stringify({
         diagnostic: proof.diagnostic,
@@ -517,6 +520,19 @@ function summarizeScenarioResult(result) {
                 diagnosticCode: outcome.diagnosticCode,
                 nativeErrorCategory: outcome.nativeErrorCategory,
             })),
+            compilation: proof.incident.shaderModuleCompilationReport === undefined
+                ? undefined
+                : {
+                    sourcePartCount:
+                        proof.incident.shaderModuleCompilationReport.sourcePartCount,
+                    retainedSourcePartCount:
+                        proof.incident.shaderModuleCompilationReport.retainedSourcePartCount,
+                    errorCount: proof.incident.shaderModuleCompilationReport.errorCount,
+                    retainedMessageCount:
+                        proof.incident.shaderModuleCompilationReport.retainedMessageCount,
+                    retainedEvidenceBytes:
+                        proof.incident.shaderModuleCompilationReport.retainedEvidenceBytes,
+                },
         },
         runtimeEvidence: {
             version: proof?.runtimeEvidence?.version,
@@ -538,13 +554,6 @@ function summarizeScenarioResult(result) {
                 kind: operation.kind,
                 status: operation.status,
                 target: operation.target,
-                compilation: operation.compilationReport === undefined ? undefined : {
-                    moduleCount: operation.compilationReport.moduleCount,
-                    retainedModuleCount: operation.compilationReport.retainedModuleCount,
-                    errorCount: operation.compilationReport.errorCount,
-                    retainedMessageCount: operation.compilationReport.retainedMessageCount,
-                    retainedEvidenceBytes: operation.compilationReport.retainedEvidenceBytes,
-                },
             })),
         },
         cleanup: proof?.cleanup,

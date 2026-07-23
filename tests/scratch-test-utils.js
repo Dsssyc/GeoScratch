@@ -25,6 +25,53 @@ export function createFakePipelineError(reason = 'validation', message = 'fake p
     return error
 }
 
+export async function createTestProgram(runtime, descriptor) {
+
+    const sourceParts = descriptor.sourceParts.map(sourcePart =>
+        typeof sourcePart === 'string'
+            ? { code: sourcePart }
+            : sourcePart
+    )
+    const shaderModule = await runtime.createShaderModule({
+        ...(descriptor.moduleLabel !== undefined
+            ? { label: descriptor.moduleLabel }
+            : {}),
+        sourceParts,
+        ...(descriptor.compilationHints !== undefined
+            ? { compilationHints: descriptor.compilationHints }
+            : {}),
+    })
+    const stage = (entryPoint, constants) => ({
+        module: shaderModule,
+        ...(typeof entryPoint === 'string' ? { entryPoint } : {}),
+        ...(constants !== undefined ? { constants } : {}),
+    })
+    return runtime.createProgram({
+        ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
+        ...(descriptor.vertex !== undefined
+            ? { vertex: stage(descriptor.vertex, descriptor.vertexConstants) }
+            : {}),
+        ...(descriptor.fragment !== undefined
+            ? { fragment: stage(descriptor.fragment, descriptor.fragmentConstants) }
+            : {}),
+        ...(descriptor.compute !== undefined
+            ? { compute: stage(descriptor.compute, descriptor.computeConstants) }
+            : {}),
+        ...(descriptor.requiredFeatures !== undefined
+            ? { requiredFeatures: descriptor.requiredFeatures }
+            : {}),
+        ...(descriptor.requiredLimits !== undefined
+            ? { requiredLimits: descriptor.requiredLimits }
+            : {}),
+        ...(descriptor.requiredLanguageFeatures !== undefined
+            ? { requiredLanguageFeatures: descriptor.requiredLanguageFeatures }
+            : {}),
+        ...(descriptor.layoutRequirements !== undefined
+            ? { layoutRequirements: descriptor.layoutRequirements }
+            : {}),
+    })
+}
+
 export function replaceResourceAllocationForTest(resource, descriptor = resource.descriptor) {
 
     if (resource.resourceKind === 'BufferResource') {
@@ -161,6 +208,7 @@ export function createFakeGpu(options = {}) {
         externalTextures: [],
         samplers: [],
         pipelineLayouts: [],
+        autoDerivedBindGroupLayouts: [],
         renderPipelines: [],
         computePipelines: [],
         querySets: [],
@@ -480,8 +528,9 @@ export function createFakeGpu(options = {}) {
         const pipeline = {
             type: `${kind}Pipeline`,
             descriptor,
+            autoLayouts: new Map(),
             getBindGroupLayout(index) {
-                return descriptor.layout?.descriptor?.bindGroupLayouts?.[index]
+                return getFakePipelineBindGroupLayout(this, index)
             },
         }
         const targetCalls = kind === 'render' ? calls.renderPipelines : calls.computePipelines
@@ -515,6 +564,28 @@ export function createFakeGpu(options = {}) {
                 install,
             })
         })
+    }
+
+    function getFakePipelineBindGroupLayout(pipeline, index) {
+
+        if (pipeline.descriptor.layout !== 'auto') {
+            return pipeline.descriptor.layout?.descriptor?.bindGroupLayouts?.[index]
+        }
+        let layout = pipeline.autoLayouts.get(index)
+        if (layout === undefined) {
+            layout = {
+                type: 'bindGroupLayout',
+                derivedFrom: pipeline,
+                group: index,
+            }
+            pipeline.autoLayouts.set(index, layout)
+            calls.autoDerivedBindGroupLayouts.push({
+                pipeline,
+                group: index,
+                layout,
+            })
+        }
+        return layout
     }
 
     function captureOrDispatchError(filter, error) {
@@ -864,8 +935,9 @@ export function createFakeGpu(options = {}) {
             const pipeline = {
                 type: 'renderPipeline',
                 descriptor,
+                autoLayouts: new Map(),
                 getBindGroupLayout(index) {
-                    return descriptor.layout?.descriptor?.bindGroupLayouts?.[index]
+                    return getFakePipelineBindGroupLayout(this, index)
                 },
             }
             calls.renderPipelines.push(pipeline)
@@ -875,8 +947,9 @@ export function createFakeGpu(options = {}) {
             const pipeline = {
                 type: 'computePipeline',
                 descriptor,
+                autoLayouts: new Map(),
                 getBindGroupLayout(index) {
-                    return descriptor.layout?.descriptor?.bindGroupLayouts?.[index]
+                    return getFakePipelineBindGroupLayout(this, index)
                 },
             }
             calls.computePipelines.push(pipeline)

@@ -1,7 +1,7 @@
 # Programs, Layout Codecs, And Shader Composition
 
 Status: Vision draft
-Date: 2026-07-06
+Date: 2026-07-24
 
 ## Decision
 
@@ -10,8 +10,13 @@ Shader-facing APIs should be split into explicit artifacts:
 - `LayoutSpec` describes logical data shape.
 - `LayoutArtifact` records computed offsets, stride, padding, alignment mode, usage lowering, separate `abiHash` / `schemaHash` identifiers, and immutable canonical signatures.
 - `LayoutCodec` is the preparation artifact built from a layout: CPU writers, readback views, and WGSL accessor modules.
-- `Program` describes shader source, generated modules, entry points, required bind layouts, required features, and diagnostic metadata.
-- `Pipeline` is stable WebGPU executable state for one `Program` entry point plus render or compute pipeline state.
+- `ShaderModule` owns composed WGSL source parts, LayoutArtifact dependencies,
+  compilation hints, one acknowledged native `GPUShaderModule`, and bounded
+  compilation evidence.
+- `Program` is an immutable, resource-free stage and requirement contract that
+  references acknowledged ShaderModules.
+- `Pipeline` is stable WebGPU executable state for one Program plus render or
+  compute pipeline state.
 - `BindSet` supplies concrete resources.
 - `Command` invokes a pipeline with bind sets, resource access declarations, readiness policy, and draw/dispatch/copy parameters.
 
@@ -27,8 +32,9 @@ LayoutSpec
         -> readback views
         -> WGSL accessor module
 
-user WGSL + generated accessor modules + bind-layout contract
-    -> Program
+user WGSL + generated accessor modules
+    -> ShaderModule
+    -> Program stage contract + bind-layout requirements
     -> Pipeline
     -> Command
     -> Submission
@@ -40,7 +46,7 @@ This keeps code generation and runtime execution connected without hiding behavi
 - Submission-time execution consumes explicit artifacts. It must not depend on ad-hoc string generation or hidden shader mutation.
 - Generated artifacts must be inspectable, cacheable by canonical ABI/schema signatures, and diagnosable through the shared `ScratchDiagnostic` envelope in `09-diagnostics-validation`. Short hashes alone are not compatibility proof.
 
-`Program` discrimination is closed with its exact built-in prototype and a
+`ShaderModule` and `Program` discrimination are closed with their exact built-in prototypes and
 module-private `WeakMap` state record. That record is authoritative for runtime
 ownership and disposal. Public `Program.runtime`, `Program.id`, and
 `Program.isDisposed` are immutable observations rather than writable authority.
@@ -50,32 +56,26 @@ lifecycle epoch directly, so own-property method shadowing cannot suppress owner
 or disposal checks.
 `LayoutCodec` separately keeps its exact prototype plus module-private `WeakSet` brand.
 Every Pipeline creation path and every explicit Shader inspection input or option calls
-`isProgram()` before invoking internal ownership validation or reading modules and
-layout requirements. Render
+`isProgram()` before invoking internal ownership validation or reading stages and
+layout requirements. Every selected stage then proves the exact ShaderModule brand,
+Runtime ownership, and lifecycle. Render
 and compute Pipeline objects are likewise recognized only by their exact prototype and
 module-private state-map record before Command construction. Public `instanceof`,
 similarly shaped methods, replacement of `Symbol.hasInstance`, subclassing, and
 `Object.create(Program.prototype)` / `Object.create(LayoutCodec.prototype)` cannot
 inject caller-authored facts into those paths.
 
-The ownership and lifecycle boundary does not freeze the caller-owned shader contract.
-`Program.modules`, `entryPoints`, `requiredFeatures`, and `layoutRequirements` may still
-be changed for a future Pipeline. Each render or compute Pipeline creation first proves
-exact Program identity and runtime ownership without reading those facts and captures
-one internal Program/Runtime lifecycle stamp, then materializes all four groups into one
-candidate-local immutable snapshot. Caller getters and iterators may run while that
-internal snapshot and the pipeline descriptor are sampled, so the same stamp is
-authoritatively revalidated after each Program-fact phase, after complete descriptor
-normalization, immediately before native issue, and before asynchronous result commit.
-Disposal before native issue reports
-`SCRATCH_PROGRAM_DISPOSED` before `requiredFeatures` availability and before any native work,
-including shader-module, pipeline-layout, or Pipeline creation. Both planners consume only the stable
-snapshot and do not reread the mutable Program properties; an existing Pipeline retains
-its immutable snapshot. Fact mutation does not advance the lifecycle epoch and affects
-only later candidates. Automatic retry is not performed because replaying caller getters
-or iterators is not semantically safe. This is an internal preparation transaction, not
-a public `prepare()` method, mandatory state machine, lock held across caller code, or
-caller-visible preparation state.
+Program remains a caller-owned shader contract. Program construction takes an
+immutable snapshot of every stage, constant map, requirement iterable, and
+LayoutArtifact witness, so later caller mutation cannot alter any future Pipeline.
+Each render or compute Pipeline creation captures one Program/Runtime lifecycle stamp
+and forms a candidate-local immutable snapshot before native work. It validates
+every referenced ShaderModule and requirement, normalizes its own descriptor, and
+rechecks the stamp before native issue and before asynchronous commit. Disposal before
+native issue reports `SCRATCH_PROGRAM_DISPOSED` without recreating or recompiling a
+ShaderModule. Automatic retry is not performed. This is an internal acknowledgement
+transaction, not a public `prepare()` method, mandatory state machine, lock held across
+caller code, or caller-visible preparation state.
 
 ## LayoutCodec
 
@@ -110,20 +110,27 @@ packed scalar and `vec2` arrays instead of claiming that 4-byte or 8-byte stride
 bound as core uniform layout. It does not silently select a second ABI. A future
 extension-aware layout must name that capability explicitly.
 
-## Program
+## ShaderModule And Program
 
-`Program` is a shader contract. It owns code and code-adjacent metadata, but it does not own concrete resources or scene meaning.
+`ShaderModule` owns code and code-adjacent compilation facts. `Program` owns
+only immutable stage references and requirements. Neither owns concrete
+resources or scene meaning.
 
-It should declare:
+A ShaderModule declares:
 
-- label
-- source modules: user WGSL plus generated WGSL accessor modules
-- entry points and stages
-- required `BindLayout` objects
-- required layout codecs or accessor modules
-- override constants or specialization keys
-- required features and limits
-- shader inspection and cross-check diagnostics
+- ordered WGSL source parts, each with an optional label
+- LayoutArtifact dependencies for generated accessor provenance
+- optional entry-specific compilation hints using `"auto"` or an explicit
+  native pipeline layout
+
+A Program declares:
+
+- optional `vertex`, `fragment`, and `compute` stages, with at least one stage
+- one acknowledged ShaderModule per selected stage
+- optional entry point and stage-specific override constants
+- required device features and limits
+- required WGSL language features
+- buffer layout requirements and LayoutArtifact witnesses
 
 Example shape:
 
@@ -142,11 +149,17 @@ const points = pointBuffer.region({
     layout: pointCodec.artifact,
 })
 
-const simulateProgram = scratch.program({
-    label: 'simulate points',
-    modules: [
-        pointCodec.wgslAccessors({ namespace: 'Point' }),
-        scratch.wgsl`
+const simulateModule = await scratch.createShaderModule({
+    label: 'simulate points module',
+    sourceParts: [
+        {
+            label: 'Point accessors',
+            code: pointCodec.wgslAccessors({ namespace: 'Point' }),
+            layoutDependencies: [pointCodec.artifact],
+        },
+        {
+            label: 'simulation',
+            code: scratch.wgsl`
             @group(0) @binding(0)
             var<storage, read_write> points: array<PointStorage>;
 
@@ -157,21 +170,36 @@ const simulateProgram = scratch.program({
                 Point_writePosition(points, i, p);
             }
         `,
+        },
     ],
-    entryPoints: { compute: 'main' },
-    bindLayouts: [simulationLayout],
+})
+
+const simulateProgram = scratch.createProgram({
+    label: 'simulate points',
+    compute: { module: simulateModule, entryPoint: 'main' },
+    layoutRequirements: [{
+        group: 0,
+        binding: 0,
+        type: 'storage',
+        hasDynamicOffset: false,
+        layout: pointCodec.artifact,
+    }],
 })
 ```
 
-The exact call shapes may evolve. The invariant is stable: generated accessors and user WGSL compose into a `Program`; concrete resources enter through `BindSet`; execution enters through `Command`.
+Generated accessors and user WGSL compose into one native ShaderModule when
+they must share declarations. Separate Scratch ShaderModules remain separate
+native modules and can be reused across stages and pipelines. Concrete
+resources enter through BindSet; execution enters through Command.
 
 ## Program, Pipeline, BindSet, Command
 
 Keep these responsibilities separate:
 
 ```text
-Program  = shader code contract + generated modules + entry points
-Pipeline = Program entry point + WebGPU pipeline static state
+ShaderModule = source parts + compilation acknowledgement + native module
+Program  = immutable stage references + requirements
+Pipeline = Program + WebGPU pipeline static state
 BindSet  = concrete resources bound to an explicit BindLayout
 Command  = one executable GPU action using Pipeline + BindSet + counts/policy
 ```

@@ -39,13 +39,14 @@ async function main() {
         format: 'preferred',
         alphaMode: 'opaque',
     })
+    const shaderModule = await runtime.createShaderModule({
+        label: 'scratch hello triangle shader',
+        sourceParts: [ { code: triangleWgsl } ],
+    })
     const program = runtime.createProgram({
         label: 'scratch hello triangle program',
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: shaderModule, entryPoint: 'vsMain' },
+        fragment: { module: shaderModule, entryPoint: 'fsMain' },
     })
     const pipeline = await runtime.createRenderPipeline({
         label: 'scratch hello triangle pipeline',

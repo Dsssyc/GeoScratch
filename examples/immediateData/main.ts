@@ -174,31 +174,35 @@ async function main() {
         label: 'immediate render bindings',
     })
 
+    const computeShader = await runtime.createShaderModule({
+        label: 'immediate compute shader',
+        sourceParts: [ { code: computeWgsl } ],
+    })
+    const renderShader = await runtime.createShaderModule({
+        label: 'immediate render shader',
+        sourceParts: [ { code: renderWgsl } ],
+    })
     const computeProgram = runtime.createProgram({
         label: 'immediate compute program',
-        modules: [ computeWgsl ],
-        entryPoints: { compute: 'csMain' },
+        compute: { module: computeShader, entryPoint: 'csMain' },
         requiredLanguageFeatures: [ languageFeature ],
     })
     const renderProgram = runtime.createProgram({
         label: 'immediate render program',
-        modules: [ renderWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: renderShader, entryPoint: 'vsMain' },
+        fragment: { module: renderShader, entryPoint: 'fsMain' },
         requiredLanguageFeatures: [ languageFeature ],
     })
     const computePipeline = await runtime.createComputePipeline({
         label: 'immediate compute pipeline',
         program: computeProgram,
-        bindLayouts: [ computeLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ computeLayout ] },
         immediateSize: computeCodec.artifact.byteLength,
     })
     const renderPipeline = await runtime.createRenderPipeline({
         label: 'immediate render pipeline',
         program: renderProgram,
-        bindLayouts: [ renderLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ renderLayout ] },
         targets: [ { format: surface.format } ],
         immediateSize: renderCodec.artifact.byteLength,
     })

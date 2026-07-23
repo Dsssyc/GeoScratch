@@ -82,18 +82,19 @@ async function main() {
     }, {
         label: 'scratch uniform triangle bindings',
     })
+    const shaderModule = await runtime.createShaderModule({
+        label: 'scratch uniform triangle shader',
+        sourceParts: [ { code: uniformTriangleWgsl } ],
+    })
     const program = runtime.createProgram({
         label: 'scratch uniform triangle program',
-        modules: [ uniformTriangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: shaderModule, entryPoint: 'vsMain' },
+        fragment: { module: shaderModule, entryPoint: 'fsMain' },
     })
     const pipeline = await runtime.createRenderPipeline({
         label: 'scratch uniform triangle pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
         targets: [ { format: surface.format } ],
     })
     const pass = runtime.createRenderPass({

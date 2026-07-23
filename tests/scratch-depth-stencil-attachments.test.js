@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     BindSet,
@@ -48,12 +49,10 @@ async function createDepthFixture(depthFormat = 'depth24plus') {
     })
     const colorView = colorTarget.view()
     const depthView = depthTarget.view()
-    const program = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const depthPipeline = await runtime.createRenderPipeline({
         program,
@@ -363,9 +362,10 @@ describe('scratch depth/stencil render attachments', () => {
             format: 'depth24plus',
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
         })
-        const program = runtime.createProgram({
-            modules: [ depthOnlyWgsl ],
-            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ depthOnlyWgsl ],
+            vertex: 'vsMain',
+            fragment: 'fsMain',
         })
         const pipeline = await runtime.createRenderPipeline({
             program,

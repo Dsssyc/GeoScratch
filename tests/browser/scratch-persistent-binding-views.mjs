@@ -313,10 +313,13 @@ async function verifyPersistentBindings(browser) {
                     );
                 }
             `
+            const shaderModule = await runtime.createShaderModule({
+                label: 'browser persistent binding matrix module',
+                sourceParts: [ { code: source } ],
+            })
             const program = runtime.createProgram({
                 label: 'browser persistent binding matrix program',
-                modules: [ source ],
-                entryPoints: { compute: 'main' },
+                compute: { module: shaderModule, entryPoint: 'main' },
                 layoutRequirements: [
                     {
                         group: 0,
@@ -341,7 +344,7 @@ async function verifyPersistentBindings(browser) {
             const pipeline = await runtime.createComputePipeline({
                 label: 'browser persistent binding matrix pipeline',
                 program,
-                bindLayouts: [ layout ],
+                layout: { mode: 'explicit', bindLayouts: [ layout ] },
             })
             const pass = runtime.createComputePass({
                 label: 'browser persistent binding matrix pass',
@@ -534,9 +537,9 @@ async function verifyPersistentBindings(browser) {
             const bindSet = await runtime.createBindSet(groupTwo, {
                 outputValue: output.region(),
             })
-            const program = runtime.createProgram({
-                label: 'browser sparse pipeline program',
-                modules: [ `
+            const shaderModule = await runtime.createShaderModule({
+                label: 'browser sparse pipeline module',
+                sourceParts: [ { code: `
                     @group(2) @binding(0)
                     var<storage, read_write> outputValue: array<u32>;
 
@@ -544,13 +547,16 @@ async function verifyPersistentBindings(browser) {
                     fn main() {
                         outputValue[0] = 73u;
                     }
-                ` ],
-                entryPoints: { compute: 'main' },
+                ` } ],
+            })
+            const program = runtime.createProgram({
+                label: 'browser sparse pipeline program',
+                compute: { module: shaderModule, entryPoint: 'main' },
             })
             const pipeline = await runtime.createComputePipeline({
                 label: 'browser sparse pipeline',
                 program,
-                bindLayouts: [ groupTwo, groupZero ],
+                layout: { mode: 'explicit', bindLayouts: [ groupTwo, groupZero ] },
             })
             const initialize = runtime.createUploadCommand({
                 label: 'browser sparse pipeline initialize output',
@@ -619,8 +625,8 @@ async function verifyPersistentBindings(browser) {
                 sourceImage: sourceTexture.view(),
                 outputValue: output.region(),
             })
-            const program = runtime.createProgram({
-                modules: [ `
+            const shaderModule = await runtime.createShaderModule({
+                sourceParts: [ { code: `
                     @group(0) @binding(0)
                     var sourceImage: texture_storage_2d<r32uint, read>;
                     @group(0) @binding(1)
@@ -630,10 +636,15 @@ async function verifyPersistentBindings(browser) {
                     fn main() {
                         outputValue[0] = textureLoad(sourceImage, vec2i(0, 0)).r;
                     }
-                ` ],
-                entryPoints: { compute: 'main' },
+                ` } ],
             })
-            const pipeline = await runtime.createComputePipeline({ program, bindLayouts: [ layout ] })
+            const program = runtime.createProgram({
+                compute: { module: shaderModule, entryPoint: 'main' },
+            })
+            const pipeline = await runtime.createComputePipeline({
+                program,
+                layout: { mode: 'explicit', bindLayouts: [ layout ] },
+            })
             const pass = runtime.createComputePass()
             const initializer = await createUintStorageTextureInitializer(
                 runtime,
@@ -711,8 +722,8 @@ async function verifyPersistentBindings(browser) {
                 image: texture.view(),
                 outputValue: output.region(),
             })
-            const program = runtime.createProgram({
-                modules: [ `
+            const shaderModule = await runtime.createShaderModule({
+                sourceParts: [ { code: `
                     @group(0) @binding(0)
                     var image: texture_storage_2d<r32uint, read_write>;
                     @group(0) @binding(1)
@@ -725,10 +736,15 @@ async function verifyPersistentBindings(browser) {
                         textureStore(image, vec2i(0, 0), vec4u(nextValue, 0u, 0u, 0u));
                         outputValue[0] = nextValue;
                     }
-                ` ],
-                entryPoints: { compute: 'main' },
+                ` } ],
             })
-            const pipeline = await runtime.createComputePipeline({ program, bindLayouts: [ layout ] })
+            const program = runtime.createProgram({
+                compute: { module: shaderModule, entryPoint: 'main' },
+            })
+            const pipeline = await runtime.createComputePipeline({
+                program,
+                layout: { mode: 'explicit', bindLayouts: [ layout ] },
+            })
             const pass = runtime.createComputePass()
             const initializer = await createUintStorageTextureInitializer(
                 runtime,
@@ -784,8 +800,8 @@ async function verifyPersistentBindings(browser) {
             const bindSet = await runtime.createBindSet(layout, {
                 targetImage: texture.view(),
             })
-            const program = runtime.createProgram({
-                modules: [ `
+            const shaderModule = await runtime.createShaderModule({
+                sourceParts: [ { code: `
                     @group(0) @binding(0)
                     var targetImage: texture_storage_2d<r32uint, write>;
 
@@ -793,12 +809,14 @@ async function verifyPersistentBindings(browser) {
                     fn main() {
                         textureStore(targetImage, vec2i(0, 0), vec4u(${value}u, 0u, 0u, 0u));
                     }
-                ` ],
-                entryPoints: { compute: 'main' },
+                ` } ],
+            })
+            const program = runtime.createProgram({
+                compute: { module: shaderModule, entryPoint: 'main' },
             })
             const pipeline = await runtime.createComputePipeline({
                 program,
-                bindLayouts: [ layout ],
+                layout: { mode: 'explicit', bindLayouts: [ layout ] },
             })
             return {
                 pass: runtime.createComputePass(),
@@ -838,8 +856,8 @@ async function verifyPersistentBindings(browser) {
                 } ],
                 occlusionQuerySet: querySet,
             })
-            const program = runtime.createProgram({
-                modules: [ `
+            const shaderModule = await runtime.createShaderModule({
+                sourceParts: [ { code: `
                     @vertex
                     fn vsMain(@builtin(vertex_index) index: u32) -> @builtin(position) vec4f {
                         let positions = array(
@@ -854,8 +872,11 @@ async function verifyPersistentBindings(browser) {
                     fn fsMain() -> @location(0) vec4f {
                         return vec4f(1.0);
                     }
-                ` ],
-                entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+                ` } ],
+            })
+            const program = runtime.createProgram({
+                vertex: { module: shaderModule, entryPoint: 'vsMain' },
+                fragment: { module: shaderModule, entryPoint: 'fsMain' },
             })
             const pipeline = await runtime.createRenderPipeline({
                 program,
@@ -933,19 +954,14 @@ async function verifyPersistentBindings(browser) {
         }
 
         async function controlledNativeFailureProbe(runtime, ErrorType) {
-            const program = runtime.createProgram({
-                label: 'browser controlled invalid WGSL program',
-                modules: [ `
-                    @compute @workgroup_size(1)
-                    fn broken(
-                ` ],
-                entryPoints: { compute: 'broken' },
-            })
             let failure = { rejected: false }
             try {
-                await runtime.createComputePipeline({
-                    label: 'browser controlled invalid WGSL pipeline',
-                    program,
+                await runtime.createShaderModule({
+                    label: 'browser controlled invalid WGSL module',
+                    sourceParts: [ { code: `
+                    @compute @workgroup_size(1)
+                    fn broken(
+                    ` } ],
                 })
             } catch (error) {
                 failure = {
@@ -955,12 +971,12 @@ async function verifyPersistentBindings(browser) {
                     incident: error?.incident,
                 }
             }
-            const pipelineId = failure?.incident?.target?.pipelineId
-            const operation = pipelineId === undefined
+            const shaderModuleId = failure?.incident?.target?.shaderModuleId
+            const operation = shaderModuleId === undefined
                 ? undefined
                 : runtime.diagnostics.operations({
-                    targetKind: 'pipeline',
-                    pipelineId,
+                    kind: 'shader-module-creation',
+                    shaderModuleId,
                 })[0]
             return {
                 ...serializeFailure(failure),
@@ -1127,16 +1143,16 @@ function validateResult(adapter, probe, probeError) {
         ...(nativeFailure.diagnostic?.actual?.diagnosticCodes ?? []),
         ...(nativeFailure.incident?.outcomes ?? []).map(outcome => outcome.diagnosticCode),
     ])
-    if (!nativeFailureCodes.has('SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED')) {
+    if (!nativeFailureCodes.has('SCRATCH_SHADER_MODULE_COMPILATION_FAILED')) {
         failures.push('controlled native failure lacks shader compilation diagnosis')
     }
-    if (nativeFailure.incident?.kind !== 'pipeline-failure') {
+    if (nativeFailure.incident?.kind !== 'supporting-object-failure') {
         failures.push('controlled native failure incident kind drifted')
     }
     if (
-        nativeFailure.operation?.kind !== 'compute-pipeline-creation' ||
+        nativeFailure.operation?.kind !== 'shader-module-creation' ||
         nativeFailure.operation?.status !== 'failed' ||
-        nativeFailure.operation?.target?.kind !== 'pipeline'
+        nativeFailure.operation?.target?.kind !== 'shader-module'
     ) failures.push('controlled native failure operation/subject attribution drifted')
     if (nativeFailure.operation?.incidentId !== nativeFailure.incident?.id) {
         failures.push('controlled native failure operation is not linked to its incident')

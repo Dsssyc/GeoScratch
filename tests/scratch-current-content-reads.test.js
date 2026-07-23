@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
@@ -100,13 +101,13 @@ async function createReadOnlyFixture() {
             visibility: [ 'compute' ],
         } ],
     })
-    const program = fixture.runtime.createProgram({
-        modules: [ readOnlyComputeWgsl ],
-        entryPoints: { compute: 'csMain' },
+    const program = await createTestProgram(fixture.runtime, {
+        sourceParts: [ readOnlyComputeWgsl ],
+        compute: 'csMain',
     })
     const pipeline = await fixture.runtime.createComputePipeline({
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
     })
     const pass = fixture.runtime.createComputePass({ label: 'current content pass' })
 
@@ -371,11 +372,11 @@ describe('scratch current-at-step resource reads', () => {
             } ],
         })
         const bindSet = await fixture.runtime.createBindSet(bindLayout, { values: values.region() })
-        const program = fixture.runtime.createProgram({
-            modules: [ readWriteComputeWgsl ],
-            entryPoints: { compute: 'csMain' },
+        const program = await createTestProgram(fixture.runtime, {
+            sourceParts: [ readWriteComputeWgsl ],
+            compute: 'csMain',
         })
-        const pipeline = await fixture.runtime.createComputePipeline({ program, bindLayouts: [ bindLayout ] })
+        const pipeline = await fixture.runtime.createComputePipeline({ program, layout: { mode: 'explicit', bindLayouts: [ bindLayout ] } })
         const pass = fixture.runtime.createComputePass()
         const dispatch = fixture.runtime.createDispatchCommand({
             pipeline,
@@ -469,9 +470,10 @@ describe('scratch current-at-step resource reads', () => {
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
         })
         advanceResourceContentEpochForTest(target)
-        const program = fixture.runtime.createProgram({
-            modules: [ passConflictWgsl ],
-            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        const program = await createTestProgram(fixture.runtime, {
+            sourceParts: [ passConflictWgsl ],
+            vertex: 'vsMain',
+            fragment: 'fsMain',
         })
         const pipeline = await fixture.runtime.createRenderPipeline({
             program,
@@ -554,9 +556,10 @@ describe('scratch current-at-step resource reads', () => {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
         })
-        const program = fixture.runtime.createProgram({
-            modules: [ fixedFunctionWgsl ],
-            entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        const program = await createTestProgram(fixture.runtime, {
+            sourceParts: [ fixedFunctionWgsl ],
+            vertex: 'vsMain',
+            fragment: 'fsMain',
         })
         const pipeline = await fixture.runtime.createRenderPipeline({
             program,

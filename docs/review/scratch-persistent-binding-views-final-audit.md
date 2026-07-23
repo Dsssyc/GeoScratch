@@ -243,9 +243,10 @@ tiers, and the other feature list retained in the JSON runner output.
 - Occlusion slot 0 resolved to `1`; both timestamp slots became ready and their
   resolved values were monotonic. This adapter returned `0, 0`, so no non-zero timing
   magnitude is claimed.
-- Controlled invalid WGSL produced aggregate
-  `SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES`, including
-  `SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED`, with schema-v5 incident evidence.
+- The ADR-050 controlled invalid WGSL path now rejects ShaderModule
+  acknowledgement with `SCRATCH_SHADER_MODULE_COMPILATION_FAILED`, one exact
+  `shader-module-creation` operation, and schema-v5 source-free incident evidence.
+  Its migrated headed result is deferred to the Phase 6 browser gate.
 - Evidence survived JSON round trip; pending operations, console errors, page errors,
   request failures, and uncaptured errors ended at zero.
 - The existing headed browser matrix passed all 11 ordinary examples with nonblank

@@ -5,6 +5,15 @@ Date: 2026-07-12
 Decision: ADR-033
 Comparison baseline: `0de026b` (last synchronous Scratch pipeline implementation)
 
+ADR-050 supersession, 2026-07-24: the Promise-only pipeline timing decision remains
+active, but shader-module creation, source composition, compilation information, and
+compilation reports now belong to `ScratchRuntime.createShaderModule()`. Program is an
+immutable stage contract, pipeline creation reuses acknowledged native modules, and
+pipeline evidence is a source-free creation report. Browser and benchmark consumers
+have been statically migrated; their new measurements are deferred to Phase 6. The
+ADR-033 inventories and measurements below are retained as historical evidence, not
+as a current native call-site inventory.
+
 ## Result
 
 The implementation, automated tests, TypeScript declarations, benchmark, and

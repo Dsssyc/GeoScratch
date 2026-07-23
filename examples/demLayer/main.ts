@@ -61,7 +61,7 @@ const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const demImageUrl = new URL('./assets/dem.png', import.meta.url).href
 const FAILURE_RUNTIME_EVIDENCE_MAX_BYTES = 512 * 1024
 const FAILURE_CAPTURE_BOUNDS = Object.freeze({
-    maxOperations: 2,
+    maxOperations: 1,
     maxDurationMs: 2_000,
     maxEvidenceBytes: 64 * 1024,
     includeStacks: true,
@@ -69,7 +69,7 @@ const FAILURE_CAPTURE_BOUNDS = Object.freeze({
 })
 const FAILURE_SCENARIOS = Object.freeze([
     'after-map-acquisition',
-    'invalid-terrain-pipeline-wgsl',
+    'invalid-terrain-shader-wgsl',
 ])
 const parameters = new URLSearchParams(window.location.search)
 const proofMode = parameters.get('proof') === '1'
@@ -418,7 +418,7 @@ function createFailureProofController(configuration: FailureConfiguration) {
         return `${source}\n@vertex fn demInjectedFailure( {`
     }
 
-    function beforeTerrainPipeline(value: ScratchRuntime) {
+    function beforeTerrainShaderModule(value: ScratchRuntime) {
 
         if (configuration.scenario !== FAILURE_SCENARIOS[1]) return
         reachedCount++
@@ -486,7 +486,7 @@ function createFailureProofController(configuration: FailureConfiguration) {
         assertConfiguration,
         reach,
         terrainShader: terrainShaderForProof,
-        beforeTerrainPipeline,
+        beforeTerrainShaderModule,
         captureBeforeDisposal,
         finalize,
         observeRuntime: (value: ScratchRuntime) => { runtime = value },

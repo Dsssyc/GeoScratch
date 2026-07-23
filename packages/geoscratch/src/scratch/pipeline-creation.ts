@@ -1,20 +1,14 @@
 import { createPipelineNativeErrorSerializer } from './pipeline-native-error.js'
-import { createPipelineCompilationReport } from './pipeline-compilation.js'
 import type {
     GpuNativeErrorCategory,
     ScratchGpuPipelineFailureStage,
     ScratchGpuIncidentOutcome,
 } from './gpu-operation.js'
-import type {
-    PipelineCompilationReport,
-    PipelineKind,
-    PipelineSourceSnapshot,
-} from './pipeline-compilation.js'
+import type { PipelineKind, PipelineSourceSnapshot } from './pipeline-compilation.js'
 import type { ScratchRuntime } from './runtime.js'
 
 export type PipelineNativeLabels = Readonly<{
     pipeline: string
-    shaderModule: string
     pipelineLayout: string
 }>
 
@@ -24,11 +18,14 @@ export type PipelineCreationIssueInput = Readonly<{
     pipelineKind: PipelineKind
     sourceSnapshot: PipelineSourceSnapshot
     nativeLabels: PipelineNativeLabels
-    bindGroupLayouts: readonly (GPUBindGroupLayout | null)[]
-    immediateSize: number
+    layout:
+        | 'auto'
+        | Readonly<{
+            bindGroupLayouts: readonly (GPUBindGroupLayout | null)[]
+            immediateSize: number
+        }>
     lowerPipelineDescriptor: (
-        shaderModule: GPUShaderModule,
-        pipelineLayout: GPUPipelineLayout
+        pipelineLayout: GPUPipelineLayout | 'auto'
     ) => GPURenderPipelineDescriptor | GPUComputePipelineDescriptor
 }>
 
@@ -40,10 +37,8 @@ export type PipelineCreationObservedFailure = Readonly<{
 }>
 
 export type PipelineCreationIssueResult = Readonly<{
-    shaderModule?: GPUShaderModule
     pipelineLayout?: GPUPipelineLayout
     nativePipeline?: GPURenderPipeline | GPUComputePipeline
-    compilationReport?: PipelineCompilationReport
     failures: readonly PipelineCreationObservedFailure[]
 }>
 
@@ -83,13 +78,11 @@ export function issuePipelineCreation(
     let outOfMemoryPushed = false
     let internalPushed = false
     let validationPushed = false
-    let shaderModule: GPUShaderModule | undefined
     let pipelineLayout: GPUPipelineLayout | undefined
     let synchronousFailure: Readonly<{
         stage: ScratchGpuPipelineFailureStage
         cause: unknown
     }> | undefined
-    let compilation = notIssued<GPUCompilationInfo>()
     let pipeline = notIssued<GPURenderPipeline | GPUComputePipeline>()
 
     if (
@@ -126,36 +119,26 @@ export function issuePipelineCreation(
     if (outOfMemoryPushed && internalPushed && validationPushed) {
         let stage: ScratchGpuPipelineFailureStage = 'supporting-object-creation'
         try {
-            shaderModule = device.createShaderModule({
-                label: input.nativeLabels.shaderModule,
-                code: input.sourceSnapshot.combinedSource,
-            })
-            if (!isObjectLike(shaderModule)) {
-                throw new TypeError('GPUDevice.createShaderModule() returned an invalid object.')
+            let nativeLayout: GPUPipelineLayout | 'auto'
+            if (input.layout === 'auto') {
+                nativeLayout = 'auto'
+            } else {
+                const pipelineLayoutDescriptor: GPUPipelineLayoutDescriptor & {
+                    immediateSize: number
+                } = {
+                    label: input.nativeLabels.pipelineLayout,
+                    bindGroupLayouts: [ ...input.layout.bindGroupLayouts ],
+                    immediateSize: input.layout.immediateSize,
+                }
+                pipelineLayout = device.createPipelineLayout(pipelineLayoutDescriptor)
+                if (!isObjectLike(pipelineLayout)) {
+                    throw new TypeError('GPUDevice.createPipelineLayout() returned an invalid object.')
+                }
+                nativeLayout = pipelineLayout
             }
-            const pipelineLayoutDescriptor: GPUPipelineLayoutDescriptor & {
-                immediateSize: number
-            } = {
-                label: input.nativeLabels.pipelineLayout,
-                bindGroupLayouts: [ ...input.bindGroupLayouts ],
-                immediateSize: input.immediateSize,
-            }
-            pipelineLayout = device.createPipelineLayout(pipelineLayoutDescriptor)
-            if (!isObjectLike(pipelineLayout)) {
-                throw new TypeError('GPUDevice.createPipelineLayout() returned an invalid object.')
-            }
-
-            stage = 'compilation-info'
-            if (typeof shaderModule.getCompilationInfo !== 'function') {
-                throw new TypeError('GPUShaderModule.getCompilationInfo() is unavailable.')
-            }
-            compilation = observePromise(
-                shaderModule.getCompilationInfo(),
-                'GPUShaderModule.getCompilationInfo()'
-            )
 
             stage = 'pipeline-creation'
-            const descriptor = input.lowerPipelineDescriptor(shaderModule, pipelineLayout)
+            const descriptor = input.lowerPipelineDescriptor(nativeLayout)
             const promise = input.pipelineKind === 'render'
                 ? device.createRenderPipelineAsync(descriptor as GPURenderPipelineDescriptor)
                 : device.createComputePipelineAsync(descriptor as GPUComputePipelineDescriptor)
@@ -170,19 +153,16 @@ export function issuePipelineCreation(
     const outOfMemory = popScope(device, outOfMemoryPushed, 'out-of-memory')
 
     return Promise.all([
-        compilation,
         pipeline,
         validation.observation,
         internal.observation,
         outOfMemory.observation,
-    ]).then(([ compilationResult, pipelineResult, validationResult, internalResult, oomResult ]) => {
+    ]).then(([ pipelineResult, validationResult, internalResult, oomResult ]) => {
         return settlePipelineCreationIssue({
             input,
-            ...(shaderModule !== undefined ? { shaderModule } : {}),
             ...(pipelineLayout !== undefined ? { pipelineLayout } : {}),
             ...(synchronousFailure !== undefined ? { synchronousFailure } : {}),
             boundaryFailures,
-            compilation: compilationResult,
             pipeline: pipelineResult,
             scopes: [
                 { filter: 'validation', observation: validationResult },
@@ -195,21 +175,18 @@ export function issuePipelineCreation(
 
 function settlePipelineCreationIssue(input: {
     input: PipelineCreationIssueInput
-    shaderModule?: GPUShaderModule
     pipelineLayout?: GPUPipelineLayout
     synchronousFailure?: Readonly<{
         stage: ScratchGpuPipelineFailureStage
         cause: unknown
     }>
     boundaryFailures: readonly unknown[]
-    compilation: PromiseObservation<GPUCompilationInfo>
     pipeline: PromiseObservation<GPURenderPipeline | GPUComputePipeline>
     scopes: readonly ScopeObservation[]
 }): PipelineCreationIssueResult {
 
     const failures: PipelineCreationObservedFailure[] = []
     const serializeNativeError = createPipelineNativeErrorSerializer(input.input.sourceSnapshot)
-    let compilationReport: PipelineCompilationReport | undefined
     let nativePipeline: GPURenderPipeline | GPUComputePipeline | undefined
 
     if (input.synchronousFailure !== undefined) {
@@ -226,38 +203,6 @@ function settlePipelineCreationIssue(input: {
             'SCRATCH_PIPELINE_CREATION_SCOPE_FAILED',
             'scope-failure',
             cause
-        ))
-    }
-
-    if (input.compilation.status === 'fulfilled') {
-        try {
-            compilationReport = createPipelineCompilationReport({
-                pipelineId: input.input.pipelineId,
-                pipelineKind: input.input.pipelineKind,
-                sourceSnapshot: input.input.sourceSnapshot,
-                compilationInfo: input.compilation.value,
-            })
-            if (compilationReport.errorCount > 0) {
-                failures.push(observedFailure(serializeNativeError,
-                    'shader-compilation',
-                    'SCRATCH_PIPELINE_SHADER_COMPILATION_FAILED',
-                    'none'
-                ))
-            }
-        } catch (cause) {
-            failures.push(observedFailure(serializeNativeError,
-                'compilation-info',
-                'SCRATCH_PIPELINE_CREATION_SCOPE_FAILED',
-                'scope-failure',
-                cause
-            ))
-        }
-    } else if (input.compilation.status === 'rejected' || input.compilation.status === 'invalid') {
-        failures.push(observedFailure(serializeNativeError,
-            'compilation-info',
-            'SCRATCH_PIPELINE_CREATION_SCOPE_FAILED',
-            'scope-failure',
-            input.compilation.reason
         ))
     }
 
@@ -326,10 +271,8 @@ function settlePipelineCreationIssue(input: {
         stageOrder[left.outcome.stage] - stageOrder[right.outcome.stage]
     )
     return Object.freeze({
-        ...(input.shaderModule !== undefined ? { shaderModule: input.shaderModule } : {}),
         ...(input.pipelineLayout !== undefined ? { pipelineLayout: input.pipelineLayout } : {}),
         ...(nativePipeline !== undefined ? { nativePipeline } : {}),
-        ...(compilationReport !== undefined ? { compilationReport } : {}),
         failures: Object.freeze(failures),
     })
 }

@@ -65,17 +65,18 @@ async function main() {
     }, {
         label: 'scratch compute readback bindings',
     })
+    const shaderModule = await runtime.createShaderModule({
+        label: 'scratch compute readback shader',
+        sourceParts: [ { code: computeWgsl } ],
+    })
     const program = runtime.createProgram({
         label: 'scratch compute readback program',
-        modules: [ computeWgsl ],
-        entryPoints: {
-            compute: 'csMain',
-        },
+        compute: { module: shaderModule, entryPoint: 'csMain' },
     })
     const pipeline = await runtime.createComputePipeline({
         label: 'scratch compute readback pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
     })
     const pass = runtime.createComputePass({
         label: 'scratch compute readback pass',

@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     BeginOcclusionQueryCommand,
@@ -217,17 +218,18 @@ async function createDrawDispatchCommands() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const renderProgram = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+    const renderProgram = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const renderPipeline = await runtime.createRenderPipeline({
         program: renderProgram,
         targets: [ { format: 'rgba8unorm' } ],
     })
-    const computeProgram = runtime.createProgram({
-        modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
-        entryPoints: { compute: 'csMain' },
+    const computeProgram = await createTestProgram(runtime, {
+        sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+        compute: 'csMain',
     })
     const computePipeline = await runtime.createComputePipeline({
         program: computeProgram,

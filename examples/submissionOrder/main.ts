@@ -51,15 +51,18 @@ async function main() {
     const bindSet = await runtime.createBindSet(bindLayout, { value: valueRegion }, {
         label: 'submission order bind set',
     })
+    const shaderModule = await runtime.createShaderModule({
+        label: 'submission order increment shader',
+        sourceParts: [ { code: incrementWgsl } ],
+    })
     const program = runtime.createProgram({
         label: 'submission order increment program',
-        modules: [ incrementWgsl ],
-        entryPoints: { compute: 'csMain' },
+        compute: { module: shaderModule, entryPoint: 'csMain' },
     })
     const pipeline = await runtime.createComputePipeline({
         label: 'submission order increment pipeline',
         program,
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
     })
     const pass = runtime.createComputePass({
         label: 'submission order compute pass',

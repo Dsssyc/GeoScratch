@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ComputePassSpec,
@@ -74,18 +75,15 @@ async function createComputeFixture() {
     }, {
         label: 'compute storage set',
     })
-    const program = runtime.createProgram({
+    const program = await createTestProgram(runtime, {
         label: 'double compute program',
-        modules: [ doubleWgsl ],
-        entryPoints: {
-            compute: 'csMain',
-        },
+        sourceParts: [ doubleWgsl ],
+        compute: 'csMain',
     })
     const pipeline = await runtime.createComputePipeline({
         label: 'double compute pipeline',
         program,
-        compute: 'csMain',
-        bindLayouts: [ bindLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
     })
     const dispatch = runtime.createDispatchCommand({
         label: 'dispatch double compute',
@@ -192,13 +190,13 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
 
         expect(fixture.pipeline).to.be.instanceOf(ScratchComputePipeline)
         expect(fixture.pipeline.pipelineKind).to.equal('compute')
-        expect(fixture.pipeline.computeEntryPoint).to.equal('csMain')
+        expect(fixture.pipeline.compute.entryPoint).to.equal('csMain')
         expect(fixture.calls.computePipelines[0].descriptor).to.deep.include({
             label: `double compute pipeline [scratch:${fixture.pipeline.id}]`,
             layout: fixture.pipeline.pipelineLayout,
         })
         expect(fixture.calls.computePipelines[0].descriptor.compute).to.deep.equal({
-            module: fixture.pipeline.shaderModule,
+            module: fixture.pipeline.compute.module.gpuShaderModule,
             entryPoint: 'csMain',
         })
     })

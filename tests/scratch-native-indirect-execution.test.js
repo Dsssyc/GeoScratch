@@ -1,3 +1,4 @@
+import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     DispatchCommand,
@@ -28,12 +29,10 @@ async function createRenderFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const program = runtime.createProgram({
-        modules: [ triangleWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ triangleWgsl ],
+        vertex: 'vsMain',
+        fragment: 'fsMain',
     })
     const pipeline = await runtime.createRenderPipeline({
         program,
@@ -60,9 +59,9 @@ async function createComputeFixture() {
 
     const fake = createFakeGpu()
     const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
-    const program = runtime.createProgram({
-        modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
-        entryPoints: { compute: 'csMain' },
+    const program = await createTestProgram(runtime, {
+        sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+        compute: 'csMain',
     })
     const pipeline = await runtime.createComputePipeline({
         program,
@@ -573,9 +572,9 @@ describe('scratch native indexed and indirect execution', () => {
     it('rejects compute pipelines through the structured draw diagnostic path', async() => {
 
         const fixture = await createRenderFixture()
-        const computeProgram = fixture.runtime.createProgram({
-            modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
-            entryPoints: { compute: 'csMain' },
+        const computeProgram = await createTestProgram(fixture.runtime, {
+            sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+            compute: 'csMain',
         })
         const computePipeline = await fixture.runtime.createComputePipeline({
             program: computeProgram,
@@ -611,7 +610,7 @@ describe('scratch native indexed and indirect execution', () => {
         })
         const boundPipeline = await fixture.runtime.createRenderPipeline({
             program: fixture.program,
-            bindLayouts: [ bindLayout ],
+            layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
             targets: [ { format: 'rgba8unorm' } ],
         })
         const draw = fixture.runtime.createDrawCommand({
@@ -1112,9 +1111,9 @@ describe('scratch native indexed and indirect execution', () => {
     it('uses same-submission GPU-produced indirect epochs and records read-only ledger facts', async() => {
 
         const fixture = await createRenderFixture()
-        const computeProgram = fixture.runtime.createProgram({
-            modules: [ '@compute @workgroup_size(1) fn csMain() {}' ],
-            entryPoints: { compute: 'csMain' },
+        const computeProgram = await createTestProgram(fixture.runtime, {
+            sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
+            compute: 'csMain',
         })
         const computePipeline = await fixture.runtime.createComputePipeline({
             program: computeProgram,

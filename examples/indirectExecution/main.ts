@@ -117,24 +117,27 @@ async function main() {
         drawArgs: drawArguments.region(),
         indexedArgs: indexedArguments.region(),
     })
+    const argumentShader = await runtime.createShaderModule({
+        label: 'argument writer shader',
+        sourceParts: [ { code: argumentProgramWgsl } ],
+    })
     const argumentProgram = runtime.createProgram({
         label: 'argument writer program',
-        modules: [ argumentProgramWgsl ],
-        entryPoints: { compute: 'makeArguments' },
+        compute: { module: argumentShader, entryPoint: 'makeArguments' },
     })
     const argumentPipeline = await runtime.createComputePipeline({
         label: 'argument writer pipeline',
         program: argumentProgram,
-        compute: 'makeArguments',
-        bindLayouts: [ argumentLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ argumentLayout ] },
+    })
+    const renderShader = await runtime.createShaderModule({
+        label: 'indirect render shader',
+        sourceParts: [ { code: renderProgramWgsl } ],
     })
     const renderProgram = runtime.createProgram({
         label: 'indirect render program',
-        modules: [ renderProgramWgsl ],
-        entryPoints: {
-            vertex: 'vsMain',
-            fragment: 'fsMain',
-        },
+        vertex: { module: renderShader, entryPoint: 'vsMain' },
+        fragment: { module: renderShader, entryPoint: 'fsMain' },
     })
     const renderPipeline = await runtime.createRenderPipeline({
         label: 'indirect render pipeline',

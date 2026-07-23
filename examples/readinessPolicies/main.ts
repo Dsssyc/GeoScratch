@@ -159,35 +159,43 @@ async function main() {
         preservedSampler: sampler,
     })
 
+    const seedShader = await runtime.createShaderModule({
+        label: 'preserved checker shader',
+        sourceParts: [ { code: patternWgsl } ],
+    })
     const seedProgram = runtime.createProgram({
         label: 'preserved checker program',
-        modules: [ patternWgsl ],
-        entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        vertex: { module: seedShader, entryPoint: 'vsMain' },
+        fragment: { module: seedShader, entryPoint: 'fsMain' },
     })
-    const fallbackProgram = createSolidProgram(runtime, {
+    const fallbackProgram = await createSolidProgram(runtime, {
         label: 'fallback green program',
         bounds: [ -0.92, -0.28, -0.72, 0.72 ],
         color: [ 0.16, 0.82, 0.52, 1 ],
     })
-    const primaryProgram = createSolidProgram(runtime, {
+    const primaryProgram = await createSolidProgram(runtime, {
         label: 'primary red program',
         bounds: [ -0.92, -0.28, -0.72, 0.72 ],
         color: [ 0.92, 0.16, 0.20, 1 ],
     })
-    const optionalProgram = createSolidProgram(runtime, {
+    const optionalProgram = await createSolidProgram(runtime, {
         label: 'optional magenta program',
         bounds: [ -0.16, 0.16, -0.72, 0.72 ],
         color: [ 0.84, 0.20, 0.72, 1 ],
     })
-    const destructiveProgram = createSolidProgram(runtime, {
+    const destructiveProgram = await createSolidProgram(runtime, {
         label: 'destructive offscreen program',
         bounds: [ -1, 1, -1, 1 ],
         color: [ 0.90, 0.08, 0.10, 1 ],
     })
+    const sampleShader = await runtime.createShaderModule({
+        label: 'preserved texture sample shader',
+        sourceParts: [ { code: sampleWgsl } ],
+    })
     const sampleProgram = runtime.createProgram({
         label: 'preserved texture sample program',
-        modules: [ sampleWgsl ],
-        entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        vertex: { module: sampleShader, entryPoint: 'vsMain' },
+        fragment: { module: sampleShader, entryPoint: 'fsMain' },
     })
 
     const seedPipeline = await runtime.createRenderPipeline({
@@ -218,7 +226,7 @@ async function main() {
     const samplePipeline = await runtime.createRenderPipeline({
         label: 'preserved texture sample pipeline',
         program: sampleProgram,
-        bindLayouts: [ sampleLayout ],
+        layout: { mode: 'explicit', bindLayouts: [ sampleLayout ] },
         targets: [ { format: surface.format } ],
     })
 
@@ -329,7 +337,7 @@ async function main() {
     canvas.dataset.status = 'ready'
 }
 
-function createSolidProgram(
+async function createSolidProgram(
     runtime: ScratchRuntime,
     { label, bounds, color }: {
         label: string
@@ -360,10 +368,14 @@ function createSolidProgram(
         }
     `
 
+    const shaderModule = await runtime.createShaderModule({
+        label: `${label} shader`,
+        sourceParts: [ { code: source } ],
+    })
     return runtime.createProgram({
         label,
-        modules: [ source ],
-        entryPoints: { vertex: 'vsMain', fragment: 'fsMain' },
+        vertex: { module: shaderModule, entryPoint: 'vsMain' },
+        fragment: { module: shaderModule, entryPoint: 'fsMain' },
     })
 }
 
