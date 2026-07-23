@@ -54,6 +54,8 @@ export type {
     BufferMappingMode,
     BufferResourceDescriptor,
     BufferSubregionDescriptor,
+    MappedBufferCreation,
+    MappedBufferResourceDescriptor,
     MappedBufferLeaseState,
     BufferCopyCommandSourceDescriptor,
     BufferToBufferCopyCommandDescriptor,

@@ -24,6 +24,18 @@ async function rejectedDiagnostic(promise, code) {
     throw new Error(`Expected ${code ?? 'ScratchDiagnosticError'} rejection.`)
 }
 
+function thrownDiagnostic(action, code) {
+
+    try {
+        action()
+    } catch (error) {
+        expect(error).to.be.instanceOf(scr.ScratchDiagnosticError)
+        expect(error.diagnostic.code).to.equal(code)
+        return error
+    }
+    throw new Error(`Expected ${code} to be thrown.`)
+}
+
 async function createMappedFixture(mode, fakeOptions = {}) {
 
     const fake = createFakeGpu(fakeOptions)
@@ -39,6 +51,181 @@ async function createMappedFixture(mode, fakeOptions = {}) {
 }
 
 describe('Scratch buffer host mapping', () => {
+
+    it('creates mapped-at-creation buffers for arbitrary usage under an explicit WRITE lease', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const { buffer, lease } = await runtime.createMappedBuffer({
+            label: 'initial uniforms',
+            size: 16,
+            usage: 0x40,
+        })
+        const view = lease.view
+        new Uint8Array(view).set([ 4, 3, 2, 1 ])
+
+        expect(buffer.usage).to.equal(0x40)
+        expect(buffer.gpuBuffer.descriptor.mappedAtCreation).to.equal(true)
+        expect(fake.calls.maps).to.have.length(0)
+        expect(lease.mode).to.equal('write')
+        expect(lease.region.buffer).to.equal(buffer)
+        expect(lease.region).to.include({ offset: 0, size: 16 })
+        expect(runtime.diagnostics.snapshot().bufferMappings.find(
+            fact => fact.id === lease.id
+        )).to.deep.include({
+            resourceId: buffer.id,
+            state: 'mapped',
+            mode: 'write',
+        })
+
+        lease.dispose()
+
+        expect(view.byteLength).to.equal(0)
+        expect(buffer.contentEpoch).to.equal(1)
+        expect(buffer.state).to.equal('ready')
+        expect([ ...buffer.gpuBuffer.data.slice(0, 4) ]).to.deep.equal([ 4, 3, 2, 1 ])
+        expect(fake.calls.unmaps).to.have.length(1)
+    })
+
+    it('validates dedicated mapped creation before native allocation', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+
+        await rejectedDiagnostic(runtime.createMappedBuffer({
+            size: 6,
+            usage: 0x40,
+        }), 'SCRATCH_BUFFER_MAPPING_RANGE_INVALID')
+        await rejectedDiagnostic(runtime.createMappedBuffer({
+            size: 16,
+            usage: 0x40,
+            mappedAtCreation: false,
+        }), 'SCRATCH_BUFFER_MAPPING_USE_EXPLICIT_FACTORY')
+
+        expect(fake.calls.buffers).to.have.length(0)
+    })
+
+    it('keeps BufferRegion and BindSet preparation legal while mapped', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const { buffer, lease } = await runtime.createMappedBuffer({
+            size: 256,
+            usage: 0x40,
+        })
+        const interpretedLater = buffer.region({ offset: 0, size: 64 })
+        const bindLayout = await runtime.createBindLayout({
+            group: 0,
+            entries: [ {
+                binding: 0,
+                name: 'uniforms',
+                type: 'uniform',
+                visibility: [ 'vertex' ],
+            } ],
+        })
+        const bindSet = await runtime.createBindSet(bindLayout, {
+            uniforms: interpretedLater,
+        })
+
+        expect(bindSet.preparationState).to.equal('prepared')
+        expect(fake.calls.bindGroups).to.have.length(1)
+        lease.dispose()
+    })
+
+    it('blocks direct queue writes and direct readback before native side effects', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const uploadTarget = await runtime.createBuffer({
+            size: 16,
+            usage: MAP_READ | COPY_DST,
+        })
+        const upload = runtime.createUploadCommand({
+            target: uploadTarget.region(),
+            data: new Uint8Array(16),
+        })
+        const uploadLease = await runtime.mapBuffer({
+            region: uploadTarget.region(),
+            mode: 'read',
+        })
+        thrownDiagnostic(
+            () => upload.execute(runtime.queue),
+            'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT'
+        )
+        expect(fake.calls.queueWrites).to.have.length(0)
+        uploadLease.dispose()
+
+        const readbackSource = await runtime.createBuffer({
+            size: 16,
+            usage: MAP_WRITE | COPY_SRC,
+        })
+        const readback = runtime.createReadback({ source: readbackSource.region() })
+        const readbackLease = await runtime.mapBuffer({
+            region: readbackSource.region(),
+            mode: 'write',
+        })
+        const beforeBuffers = fake.calls.buffers.length
+        await rejectedDiagnostic(
+            readback.toBytes(),
+            'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT'
+        )
+        expect(fake.calls.buffers).to.have.length(beforeBuffers)
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        readbackLease.dispose()
+    })
+
+    it('preflights resolved submissions before command encoder creation', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const source = await runtime.createBuffer({
+            size: 16,
+            usage: MAP_WRITE | COPY_SRC,
+        })
+        const target = await runtime.createBuffer({ size: 16, usage: COPY_DST })
+        const initial = await runtime.mapBuffer({
+            region: source.region(),
+            mode: 'write',
+        })
+        initial.dispose()
+        const copy = runtime.createCopyCommand({
+            source: { region: source.region(), contentEpoch: 1 },
+            target: target.region(),
+            whenMissing: 'throw',
+        })
+        const lease = await runtime.mapBuffer({
+            region: source.region(),
+            mode: 'write',
+        })
+
+        thrownDiagnostic(
+            () => runtime.submission().copy(copy).submit(),
+            'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT'
+        )
+
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        expect(fake.calls.queueSubmissions).to.have.length(0)
+        lease.dispose()
+    })
+
+    it('blocks GPU use of arbitrary-usage mapped-at-creation buffers', async () => {
+
+        const fake = createFakeGpu()
+        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const { buffer, lease } = await runtime.createMappedBuffer({
+            size: 16,
+            usage: COPY_DST,
+        })
+        const clear = runtime.createClearBufferCommand({ target: buffer.region() })
+
+        thrownDiagnostic(
+            () => runtime.submission().clear(clear).submit(),
+            'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT'
+        )
+
+        expect(fake.calls.commandEncoders).to.have.length(0)
+        lease.dispose()
+    })
 
     it('publishes a closed READ lease, bounded active facts, and no content production', async () => {
 
@@ -211,6 +398,65 @@ describe('Scratch buffer host mapping', () => {
 
         expect(fake.errors.scopeDepth).to.equal(0)
         expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
+    })
+
+    for (const scenario of [
+        {
+            filter: 'validation',
+            code: 'SCRATCH_BUFFER_MAPPING_VALIDATION_FAILED',
+            name: 'GPUValidationError',
+        },
+        {
+            filter: 'internal',
+            code: 'SCRATCH_BUFFER_MAPPING_INTERNAL_FAILED',
+            name: 'GPUInternalError',
+        },
+        {
+            filter: 'out-of-memory',
+            code: 'SCRATCH_BUFFER_MAPPING_OUT_OF_MEMORY',
+            name: 'GPUOutOfMemoryError',
+        },
+    ]) {
+        it(`classifies captured ${scenario.filter} mapping failures`, async () => {
+
+            const { fake, runtime, buffer } = await createMappedFixture('read')
+            const nativeError = Object.assign(new Error(`opaque ${scenario.filter}`), {
+                name: scenario.name,
+            })
+            const beforeAggregates = runtime.diagnostics.snapshot().aggregates
+            fake.errors.failNext('mapAsync', scenario.filter, nativeError)
+
+            const failure = await rejectedDiagnostic(
+                runtime.mapBuffer({ region: buffer.region(), mode: 'read' }),
+                scenario.code
+            )
+
+            expect(failure.incident).to.deep.include({
+                kind: 'buffer-mapping-failure',
+                failureStage: 'mapping',
+                nativeErrorCategory: scenario.filter,
+            })
+            expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
+            expect(runtime.diagnostics.snapshot().aggregates.allocationAttempts)
+                .to.equal(beforeAggregates.allocationAttempts)
+            expect(runtime.diagnostics.snapshot().readbackMemory.activeMappings).to.equal(0)
+        })
+    }
+
+    it('records map Promise rejection and releases authority for a later mapping', async () => {
+
+        const { fake, runtime, buffer } = await createMappedFixture('read')
+        fake.readbacks.rejectNextMap(new DOMException('opaque rejection', 'OperationError'))
+
+        await rejectedDiagnostic(
+            runtime.mapBuffer({ region: buffer.region(), mode: 'read' }),
+            'SCRATCH_BUFFER_MAPPING_REJECTED'
+        )
+        expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
+
+        const lease = await runtime.mapBuffer({ region: buffer.region(), mode: 'read' })
+        lease.dispose()
+        expect(fake.calls.maps).to.have.length(2)
     })
 
     it('cleans an active lease once when its resource is disposed', async () => {

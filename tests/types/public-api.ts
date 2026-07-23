@@ -271,11 +271,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         size: 16,
         usage: 1,
     })
-    // @ts-expect-error Ordinary Scratch buffer creation cannot hide a mapped state
     await runtime.createBuffer({
         label: 'invalid hidden mapped state',
         size: 16,
         usage: 1,
+        // @ts-expect-error Ordinary Scratch buffer creation cannot hide a mapped state
         mappedAtCreation: false,
     })
     const mappedCreation: scr.MappedBufferCreation =

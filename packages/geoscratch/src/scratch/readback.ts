@@ -1,5 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
 import { BufferRegion, isBufferRegion } from './buffer.js'
+import { assertBufferAvailableForGpuUse } from './buffer-mapping-authority.js'
 import { isScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createLayoutReadbackView } from './layout-codec.js'
@@ -721,6 +722,7 @@ export class ReadbackOperation {
         this._assertReadableLifecycle()
         if (scheduledReadbackOperations.has(this)) return
         this.source.assertUsable()
+        assertBufferAvailableForGpuUse(this.source.buffer, this.subject)
         assertReadbackSourceCurrent(this)
     }
 

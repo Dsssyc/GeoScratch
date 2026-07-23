@@ -1,5 +1,6 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
+    assertBufferAvailableForGpuUse,
     disposeBufferMappingAuthority,
     initializeBufferMappingAuthority,
 } from './buffer-mapping-authority.js'
@@ -33,7 +34,9 @@ import type { LayoutArtifact } from './layout-codec.js'
 import type { ResourceState, ScratchResourceIdentity } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 
-export type BufferResourceDescriptor = GPUBufferDescriptor
+export type BufferResourceDescriptor = Omit<GPUBufferDescriptor, 'mappedAtCreation'>
+
+export type MappedBufferResourceDescriptor = BufferResourceDescriptor
 
 export type BufferRegionDescriptor = Readonly<{
     offset?: number
@@ -51,7 +54,6 @@ type NormalizedBufferResourceDescriptor = Readonly<{
     label?: string
     size: number
     usage: GPUBufferUsageFlags
-    mappedAtCreation?: boolean
 }>
 
 type BufferAllocationInstaller = (
@@ -341,6 +343,12 @@ export function commitBufferResourceAllocation(
     if (gpuBuffer === resource.gpuBuffer) {
         throw new TypeError('Buffer allocation commit requires a distinct GPUBuffer candidate.')
     }
+    try {
+        assertBufferAvailableForGpuUse(resource)
+    } catch (cause) {
+        destroyNativeCandidate(gpuBuffer)
+        throw cause
+    }
 
     let normalizedDescriptor: NormalizedBufferResourceDescriptor
     try {
@@ -519,11 +527,43 @@ export async function createBufferResource(
     descriptor: BufferResourceDescriptor
 ): Promise<BufferResource> {
 
+    return createBufferResourceAllocation(runtime, descriptor, false)
+}
+
+export async function createMappedBufferResourceAllocation(
+    runtime: ScratchRuntime,
+    descriptor: MappedBufferResourceDescriptor
+): Promise<BufferResource> {
+
+    return createBufferResourceAllocation(runtime, descriptor, true)
+}
+
+async function createBufferResourceAllocation(
+    runtime: ScratchRuntime,
+    descriptor: BufferResourceDescriptor,
+    mappedAtCreation: boolean
+): Promise<BufferResource> {
+
     assertScratchRuntimeActive(runtime)
     const normalizedDescriptor = normalizeBufferDescriptor(runtime, descriptor)
+    if (mappedAtCreation && normalizedDescriptor.size % 4 !== 0) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BUFFER_MAPPING_RANGE_INVALID',
+            severity: 'error',
+            phase: 'buffer-mapping',
+            subject: runtime.subject,
+            message: 'Mapped buffer creation requires a size that is a multiple of 4 bytes.',
+            expected: { sizeMultiple: 4 },
+            actual: { size: normalizedDescriptor.size },
+        })
+    }
     const identity = createScratchResourceIdentity()
     const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, identity.id)
-    const nativeDescriptor = createGpuBufferDescriptor(normalizedDescriptor, nativeLabel)
+    const nativeDescriptor = createGpuBufferDescriptor(
+        normalizedDescriptor,
+        nativeLabel,
+        mappedAtCreation
+    )
     const controller = diagnosticsControllerFor(runtime)
     const operation = controller.beginOperation({
         kind: 'buffer-allocation',
@@ -538,11 +578,12 @@ export async function createBufferResource(
         descriptorSummary: {
             size: normalizedDescriptor.size,
             usage: normalizedDescriptor.usage,
-            ...(normalizedDescriptor.mappedAtCreation !== undefined
-                ? { mappedAtCreation: normalizedDescriptor.mappedAtCreation }
-                : {}),
+            ...(mappedAtCreation ? { mappedAtCreation: true } : {}),
         },
-        fullDescriptor: { ...normalizedDescriptor },
+        fullDescriptor: {
+            ...normalizedDescriptor,
+            ...(mappedAtCreation ? { mappedAtCreation: true } : {}),
+        },
         nativeLabel,
     })
     let outcome = await issueScopedNativeAllocation(
@@ -641,6 +682,23 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
             hints: [ 'Move layout interpretation onto an explicit BufferRegion.' ],
         })
     }
+    if (Object.prototype.hasOwnProperty.call(descriptor, 'mappedAtCreation')) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_BUFFER_MAPPING_USE_EXPLICIT_FACTORY',
+            severity: 'error',
+            phase: 'buffer-mapping',
+            subject,
+            message: 'Ordinary buffer descriptors cannot expose unmanaged mapped-at-creation state.',
+            expected: {
+                creation: 'ScratchRuntime.createMappedBuffer(descriptor)',
+                descriptor: 'without mappedAtCreation',
+            },
+            actual: {
+                mappedAtCreation: descriptor.mappedAtCreation,
+            },
+            hints: [ 'Use createMappedBuffer() and release its MappedBufferLease explicitly.' ],
+        })
+    }
 
     if (
         typeof descriptor.size !== 'number' ||
@@ -698,34 +756,17 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
             actual: { label: descriptor.label },
         })
     }
-    if (
-        descriptor.mappedAtCreation !== undefined &&
-        typeof descriptor.mappedAtCreation !== 'boolean'
-    ) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
-            severity: 'error',
-            phase: 'resource',
-            subject,
-            message: 'BufferResource mappedAtCreation must be boolean when provided.',
-            expected: { mappedAtCreation: 'boolean or undefined' },
-            actual: { mappedAtCreation: descriptor.mappedAtCreation },
-        })
-    }
-
     return Object.freeze({
         size: descriptor.size,
         usage: descriptor.usage,
         ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
-        ...(descriptor.mappedAtCreation !== undefined
-            ? { mappedAtCreation: descriptor.mappedAtCreation }
-            : {}),
     })
 }
 
 function createGpuBufferDescriptor(
     descriptor: NormalizedBufferResourceDescriptor,
-    nativeLabel = descriptor.label
+    nativeLabel = descriptor.label,
+    mappedAtCreation = false
 ): GPUBufferDescriptor {
 
     const gpuDescriptor: GPUBufferDescriptor = {
@@ -734,7 +775,7 @@ function createGpuBufferDescriptor(
     }
 
     if (nativeLabel !== undefined) gpuDescriptor.label = nativeLabel
-    if (descriptor.mappedAtCreation !== undefined) gpuDescriptor.mappedAtCreation = descriptor.mappedAtCreation
+    if (mappedAtCreation) gpuDescriptor.mappedAtCreation = true
 
     return gpuDescriptor
 }

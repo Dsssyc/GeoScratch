@@ -5,6 +5,7 @@ import {
 } from './buffer-mapping-authority.js'
 import type { BufferMappingLifecycleReason } from './buffer-mapping-authority.js'
 import {
+    createMappedBufferResourceAllocation,
     isBufferRegion,
 } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
@@ -16,7 +17,11 @@ import {
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { isRecord } from './type-utils.js'
-import type { BufferRegion, BufferResource } from './buffer.js'
+import type {
+    BufferRegion,
+    BufferResource,
+    MappedBufferResourceDescriptor,
+} from './buffer.js'
 import type {
     GpuNativeErrorCategory,
     ScratchBufferMappingFailureStage,
@@ -35,6 +40,11 @@ export type BufferMappingDescriptor = Readonly<{
     region: BufferRegion
     mode: BufferMappingMode
     signal?: AbortSignal
+}>
+
+export type MappedBufferCreation = Readonly<{
+    buffer: BufferResource
+    lease: MappedBufferLease
 }>
 
 export type MappedBufferLeaseState =
@@ -160,6 +170,99 @@ export class MappedBufferLease {
     dispose(): void {
 
         releaseMappedBufferLease(this)
+    }
+}
+
+export async function createMappedBufferResource(
+    runtime: ScratchRuntime,
+    descriptor: MappedBufferResourceDescriptor
+): Promise<MappedBufferCreation> {
+
+    assertScratchRuntimeActive(runtime)
+    const buffer = await createMappedBufferResourceAllocation(runtime, descriptor)
+    try {
+        assertScratchRuntimeActive(runtime)
+        const region = buffer.region()
+        const id = `${buffer.id}/buffer-mapping-${++mappingSequence}`
+        const controller = diagnosticsControllerFor(runtime)
+        const operation = controller.beginOperation({
+            kind: 'buffer-mapping',
+            target: bufferOperationTarget(buffer),
+            descriptorSummary: {
+                offset: 0,
+                size: buffer.size,
+                mode: 'write',
+                mappedAtCreation: true,
+            },
+            fullDescriptor: {
+                offset: 0,
+                size: buffer.size,
+                mode: 'write',
+                mappedAtCreation: true,
+            },
+            ...(buffer.label !== undefined ? { nativeLabel: buffer.label } : {}),
+        })
+        const context: MappingContext = {
+            id,
+            runtime,
+            buffer,
+            region,
+            mode: 'write',
+            allocationVersion: buffer.allocationVersion,
+            contentEpoch: buffer.contentEpoch,
+            controller,
+            operation,
+            phase: 'pending',
+            nativeMapIssued: true,
+            unmapIssued: false,
+            factRegistered: false,
+            unsubscribeRuntime: () => {},
+            removeAbortListener: () => {},
+        }
+        claimBufferMappingAuthority(buffer, {
+            id,
+            mode: 'write',
+            region,
+            onLifecycle: reason => requestMappingCancellation(context, reason),
+        })
+        registerMappingFact(context, 'pending')
+        context.unsubscribeRuntime = controller.subscribeLifecycle(change => {
+            requestMappingCancellation(
+                context,
+                change.kind === 'device-lost' ? 'device-lost' : 'runtime-disposed'
+            )
+        })
+        if (context.cancellation !== undefined) return throwCancelledMapping(context)
+
+        let view: ArrayBuffer
+        try {
+            view = buffer.gpuBuffer.getMappedRange(0, buffer.size)
+        } catch (cause) {
+            unmapContextOnce(context)
+            return throwMappingFailures(context, [ mappingStageFailure({
+                stage: 'mapped-range',
+                code: 'SCRATCH_BUFFER_MAPPING_MAPPED_RANGE_FAILED',
+                cause,
+            }) ], 'mapped-range')
+        }
+        if (!(view instanceof ArrayBuffer)) {
+            unmapContextOnce(context)
+            return throwMappingFailures(context, [ mappingStageFailure({
+                stage: 'mapped-range',
+                code: 'SCRATCH_BUFFER_MAPPING_MAPPED_RANGE_FAILED',
+                cause: new TypeError('GPUBuffer.getMappedRange() did not return an ArrayBuffer.'),
+            }) ], 'mapped-range')
+        }
+
+        activateBufferMappingAuthority(buffer, id)
+        context.phase = 'mapped'
+        controller.updateBufferMapping(id, 'mapped')
+        const lease = constructMappedBufferLease(context, view)
+        context.lease = lease
+        return Object.freeze({ buffer, lease })
+    } catch (cause) {
+        buffer.dispose()
+        throw cause
     }
 }
 

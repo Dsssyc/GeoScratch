@@ -116,11 +116,13 @@ export type {
     BufferRegionDescriptor,
     BufferResourceDescriptor,
     BufferSubregionDescriptor,
+    MappedBufferResourceDescriptor,
 } from './buffer.js'
 export { MappedBufferLease } from './buffer-mapping.js'
 export type {
     BufferMappingDescriptor,
     BufferMappingMode,
+    MappedBufferCreation,
     MappedBufferLeaseState,
 } from './buffer-mapping.js'
 export { TextureResource, TextureViewSpec } from './texture.js'

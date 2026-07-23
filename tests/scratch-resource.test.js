@@ -154,7 +154,6 @@ describe('scratch resources', () => {
             label: 'positions',
             size: 64,
             usage: 1,
-            mappedAtCreation: false,
         })
 
         expect(buffer).to.be.instanceOf(BufferResource)
@@ -166,7 +165,6 @@ describe('scratch resources', () => {
             label: 'positions',
             size: 64,
             usage: 1,
-            mappedAtCreation: false,
         })
         expect(buffer.allocationVersion).to.equal(1)
         expect(buffer.contentEpoch).to.equal(0)

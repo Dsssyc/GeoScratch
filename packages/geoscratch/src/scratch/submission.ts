@@ -1,6 +1,7 @@
 import { UUID } from '../core/utils/uuid.js'
 import {
     claimReadbackCommand,
+    assertCommandBufferGpuUseAvailable,
     commitUploadCommandLogicalWrite,
     encodeReadbackCommandClaim,
     markReadbackCommandClaimAdopted,
@@ -602,6 +603,7 @@ export class SubmissionBuilder {
                 validateUploadCommandQueueAction(step.command, this.runtime.queue)
             }
         }
+        assertResolvedSubmissionBufferGpuUseAvailable(resolvedPlan.steps)
         const commandImmediateSnapshots = snapshotResolvedCommandImmediates(
             resolvedPlan.steps
         )
@@ -1144,6 +1146,25 @@ export class SubmissionBuilder {
             kind: 'Submission',
             id: this.id,
         }
+    }
+}
+
+function assertResolvedSubmissionBufferGpuUseAvailable(
+    steps: readonly ResolvedSubmissionStep[]
+): void {
+
+    for (const step of steps) {
+        if (step.kind === 'render' || step.kind === 'compute') {
+            if (step.disposition === 'skip-pass') continue
+            for (const command of step.commands) {
+                if (isDrawCommand(command) || isDispatchCommand(command)) {
+                    assertCommandBufferGpuUseAvailable(command)
+                }
+            }
+            continue
+        }
+        if (step.kind === 'clear' && !step.command.hasContentEffect) continue
+        assertCommandBufferGpuUseAvailable(step.command)
     }
 }
 

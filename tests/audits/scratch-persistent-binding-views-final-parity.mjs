@@ -508,7 +508,7 @@ const capabilityRows = [
         historical: historical.buffer.includes('export class BufferResource'),
         target: 'Raw BufferResource plus immutable normalized BufferRegion as the sole public byte-range unit',
         final: hasAll(current.buffer, [
-            'export type BufferResourceDescriptor = GPUBufferDescriptor',
+            "export type BufferResourceDescriptor = Omit<GPUBufferDescriptor, 'mappedAtCreation'>",
             'export class BufferRegion',
             'region(descriptor:',
             'subregion(',
@@ -517,7 +517,7 @@ const capabilityRows = [
         implementation: 'scratch/buffer.ts and every range-consuming command descriptor',
         tests: 'scratch-resource-views.test.js, scratch-buffer-layout-artifact.test.js',
         docs: 'scratch-api/02-resources and ADR-036',
-        replacement: 'resource-global layout and ad hoc range descriptors -> BufferRegion',
+        replacement: 'resource-global layout and ad hoc range descriptors -> BufferRegion; mapped creation -> explicit lease factory',
     }),
     capability({
         id: 'texture-views',

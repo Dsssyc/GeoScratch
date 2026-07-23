@@ -1,5 +1,6 @@
 import { UUID } from '../core/utils/uuid.js'
-import { BufferRegion, BufferResource, isBufferRegion } from './buffer.js'
+import { BufferRegion, BufferResource, isBufferRegion, isBufferResource } from './buffer.js'
+import { assertBufferAvailableForGpuUse } from './buffer-mapping-authority.js'
 import { isBindSet, preparedBindGroupFor } from './binding.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
@@ -851,6 +852,7 @@ export class DrawCommand {
     ) {
 
         this.assertUsable()
+        assertCommandBufferGpuUseAvailable(this)
         const renderState = resolveDrawRenderState(this, attachmentExtent)
         const immediateBytes = resolvedImmediateBytesForEncoding(this, resolvedImmediateData)
 
@@ -1368,6 +1370,7 @@ export class DispatchCommand {
     ) {
 
         this.assertUsable()
+        assertCommandBufferGpuUseAvailable(this)
         const immediateBytes = resolvedImmediateBytesForEncoding(this, resolvedImmediateData)
 
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
@@ -2597,6 +2600,7 @@ export class ClearBufferCommand {
     encode(commandEncoder: GPUCommandEncoder): void {
 
         this.validateCurrentRange()
+        assertCommandBufferGpuUseAvailable(this)
         if (!this.hasContentEffect) return
 
         if (!commandEncoder || typeof commandEncoder.clearBuffer !== 'function') {
@@ -2843,6 +2847,7 @@ export class CopyCommand {
     encode(commandEncoder: GPUCommandEncoder) {
 
         this.validateCurrentRange()
+        assertCommandBufferGpuUseAvailable(this)
 
         if (this.copyKind === 'buffer-to-buffer') {
             if (!commandEncoder || typeof commandEncoder.copyBufferToBuffer !== 'function') {
@@ -3253,6 +3258,7 @@ export function encodeReadbackCommandClaim(
 
     const state = assertActiveReadbackCommandClaim(claim)
     const command = state.command
+    assertCommandBufferGpuUseAvailable(command)
     commandEncoder.copyBufferToBuffer(
         command.source.region.buffer.gpuBuffer,
         command.source.region.offset,
@@ -3798,6 +3804,7 @@ export class ResolveQuerySetCommand {
     encode(commandEncoder: GPUCommandEncoder) {
 
         this.assertUsable()
+        assertCommandBufferGpuUseAvailable(this)
 
         if (!commandEncoder || typeof commandEncoder.resolveQuerySet !== 'function') {
             throwScratchDiagnostic({
@@ -4110,6 +4117,7 @@ export function validateUploadCommandQueueAction(
 ): void {
 
     command.assertUsable()
+    assertCommandBufferGpuUseAvailable(command)
 
     switch (command.uploadKind) {
         case 'buffer':
@@ -4153,6 +4161,53 @@ export function validateUploadCommandQueueAction(
     }
 }
 
+export type BufferGpuUseCommand =
+    | DrawCommand
+    | DispatchCommand
+    | UploadCommand
+    | TextureUploadCommand
+    | ExternalImageUploadCommand
+    | ClearBufferCommand
+    | CopyCommand
+    | ReadbackCommand
+    | ResolveQuerySetCommand
+
+export function assertCommandBufferGpuUseAvailable(command: BufferGpuUseCommand): void {
+
+    const buffers = new Set<BufferResource>()
+    switch (command.commandKind) {
+        case 'draw':
+        case 'dispatch':
+            for (const read of command.resources.read) {
+                if (isBufferResource(read.resource)) buffers.add(read.resource)
+            }
+            for (const resource of command.resources.write) {
+                if (isBufferResource(resource)) buffers.add(resource)
+            }
+            break
+        case 'upload':
+            if (command.uploadKind === 'buffer') buffers.add(command.target.buffer)
+            break
+        case 'clear':
+            buffers.add(command.target.buffer)
+            break
+        case 'copy':
+            if ('region' in command.source) buffers.add(command.source.region.buffer)
+            if (isBufferRegion(command.target)) buffers.add(command.target.buffer)
+            break
+        case 'readback':
+            buffers.add(command.source.region.buffer)
+            break
+        case 'resolve-query-set':
+            buffers.add(command.destination.buffer)
+            break
+    }
+
+    for (const buffer of buffers) {
+        assertBufferAvailableForGpuUse(buffer, command.subject)
+    }
+}
+
 function validateUploadCommandQueueOwner(
     command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand,
     queue: GPUQueue
@@ -4182,6 +4237,7 @@ export function writeUploadCommandQueueAction(
     queue: GPUQueue
 ): void {
 
+    assertCommandBufferGpuUseAvailable(command)
     switch (command.uploadKind) {
         case 'buffer':
             queue.writeBuffer(
