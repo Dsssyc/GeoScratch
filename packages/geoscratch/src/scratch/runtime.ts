@@ -113,6 +113,7 @@ export interface ScratchRuntime {
     readonly adapterLimits: GPUSupportedLimits
     readonly deviceFeatures: GPUSupportedFeatures
     readonly deviceLimits: GPUSupportedLimits
+    readonly wgslLanguageFeatures: readonly string[]
     readonly diagnostics: ScratchRuntimeDiagnostics
     readonly readbackPolicy: ScratchReadbackPolicy
     _resources: Set<Resource>
@@ -148,6 +149,9 @@ export class ScratchRuntime {
             adapterLimits: immutableRuntimeProperty(options.adapter.limits),
             deviceFeatures: immutableRuntimeProperty(options.device.features),
             deviceLimits: immutableRuntimeProperty(options.device.limits),
+            wgslLanguageFeatures: immutableRuntimeProperty(
+                snapshotWgslLanguageFeatures(options.gpu)
+            ),
             readbackPolicy: immutableRuntimeProperty(options.readbackPolicy),
             isDisposed: immutableRuntimeGetter(() => scratchRuntimeIsDisposed(this)),
             isDeviceLost: immutableRuntimeGetter(() => scratchRuntimeIsDeviceLost(this)),
@@ -665,4 +669,16 @@ function createDeviceDescriptor(options: ScratchRuntimeCreateOptions): GPUDevice
     if (options.requiredLimits !== undefined) descriptor.requiredLimits = options.requiredLimits
 
     return descriptor
+}
+
+function snapshotWgslLanguageFeatures(gpu: GPU): readonly string[] {
+
+    const features = gpu.wgslLanguageFeatures
+    if (features === undefined) return Object.freeze([])
+
+    const names = new Set<string>()
+    for (const feature of features) {
+        if (typeof feature === 'string') names.add(feature)
+    }
+    return Object.freeze([ ...names ].sort())
 }

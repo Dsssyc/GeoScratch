@@ -229,6 +229,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
         expect(fixture.calls.pipelineLayouts[0].descriptor).to.deep.equal({
             label: `uniform triangle pipeline layout [scratch:${fixture.pipeline.id}]`,
             bindGroupLayouts: [ fixture.bindLayout.gpuBindGroupLayout ],
+            immediateSize: 0,
         })
         expect(fixture.calls.renderPasses[0].actions).to.deep.equal([
             { type: 'setPipeline', pipeline: fixture.pipeline.gpuPipeline },

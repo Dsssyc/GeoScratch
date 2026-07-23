@@ -60,6 +60,7 @@ export type RenderPipelineLayoutSnapshot = Readonly<{
     colorFormats: readonly (GPUTextureFormat | null)[]
     depthStencilFormat?: GPUTextureFormat
     sampleCount: number
+    immediateSize: number
 }>
 
 export type RenderPipelineDescriptor = {
@@ -75,6 +76,7 @@ export type RenderPipelineDescriptor = {
     primitive?: GPUPrimitiveState
     depthStencil?: GPUDepthStencilState
     multisample?: GPUMultisampleState
+    immediateSize?: number
 }
 
 export type ComputePipelineDescriptor = {
@@ -83,6 +85,7 @@ export type ComputePipelineDescriptor = {
     compute?: string
     bindLayouts?: BindLayout[]
     constants?: Record<string, GPUPipelineConstantValue>
+    immediateSize?: number
 }
 
 export interface RenderPipeline {
@@ -103,6 +106,7 @@ export interface RenderPipeline {
     readonly primitive: Readonly<GPUPrimitiveState>
     readonly depthStencil?: Readonly<GPUDepthStencilState>
     readonly depthStencilFormat?: GPUTextureFormat
+    readonly immediateSize: number
     readonly shaderModule: GPUShaderModule
     readonly pipelineLayout: GPUPipelineLayout
     readonly gpuPipeline: GPURenderPipeline
@@ -131,6 +135,7 @@ export class RenderPipeline {
                 ? { depthStencilFormat: state.depthStencilFormat }
                 : {}),
             sampleCount: state.multisample?.count ?? 1,
+            immediateSize: state.immediateSize,
         }))
         defineImmutableRenderProperties(this, state)
         Object.preventExtensions(this)
@@ -223,11 +228,13 @@ type PipelineValidationContext = {
 }
 
 type PipelineCreationPlan = PipelineValidationContext & Readonly<{
+    immediateSize: number
     sourceSnapshot: PipelineSourceSnapshot
 }>
 
 type RenderPipelinePlan = PipelineValidationContext & Readonly<{
     pipelineKind: 'render'
+    immediateSize: number
     vertexEntryPoint: string
     fragmentEntryPoint: string
     vertexBuffers: readonly (GPUVertexBufferLayout | null)[]
@@ -280,6 +287,7 @@ export async function createRenderPipeline(
         sourceSnapshot: plan.sourceSnapshot,
         nativeLabels,
         bindGroupLayouts: nativeBindGroupLayouts(plan.bindLayouts),
+        immediateSize: plan.immediateSize,
         lowerPipelineDescriptor: (shaderModule, pipelineLayout) => {
             const nativeDescriptor: GPURenderPipelineDescriptor = {
                 label: nativeLabels.pipeline,
@@ -403,6 +411,11 @@ function prepareRenderPipeline(
     const bindLayoutsByGroup = readonlyMapSnapshot(
         new Map(bindLayouts.map(layout => [ layout.group, layout ]))
     )
+    const immediateSize = normalizePipelineImmediateSize(
+        context,
+        input.immediateSize,
+        programFacts.requiredLanguageFeatures
+    )
     const vertexBuffers = freezeVertexBuffers(normalizeVertexBuffers(context, input.vertexBuffers))
     const targets = freezeColorTargets(normalizeTargets(context, input.targets))
     const vertexConstants = normalizeRenderConstants(context, input.vertexConstants, 'vertex')
@@ -422,6 +435,7 @@ function prepareRenderPipeline(
         ...context,
         bindLayouts,
         bindLayoutsByGroup,
+        immediateSize,
         vertexEntryPoint: (input.vertex ?? programFacts.entryPoints.vertex) as string,
         fragmentEntryPoint: (input.fragment ?? programFacts.entryPoints.fragment) as string,
         vertexBuffers,
@@ -484,6 +498,7 @@ function renderPipelineDescriptorEvidence(plan: RenderPipelinePlan): {
             vertex: plan.vertexEntryPoint,
             fragment: plan.fragmentEntryPoint,
         },
+        immediateSize: plan.immediateSize,
         bindLayouts: plan.bindLayouts.map(layout => ({ id: layout.id, group: layout.group })),
     }
     return {
@@ -820,6 +835,7 @@ function defineImmutableRenderProperties(
             ? { fragmentConstants: state.fragmentConstants }
             : {}),
         primitive: state.primitive,
+        immediateSize: state.immediateSize,
         shaderModule: state.shaderModule,
         pipelineLayout: state.pipelineLayout,
         gpuPipeline: state.gpuPipeline,
@@ -857,6 +873,7 @@ export interface ComputePipeline {
     readonly bindLayouts: readonly BindLayout[]
     readonly bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
     readonly constants?: Readonly<Record<string, GPUPipelineConstantValue>>
+    readonly immediateSize: number
     readonly shaderModule: GPUShaderModule
     readonly pipelineLayout: GPUPipelineLayout
     readonly gpuPipeline: GPUComputePipeline
@@ -1000,6 +1017,7 @@ export async function createComputePipeline(
         sourceSnapshot: plan.sourceSnapshot,
         nativeLabels,
         bindGroupLayouts: nativeBindGroupLayouts(plan.bindLayouts),
+        immediateSize: plan.immediateSize,
         lowerPipelineDescriptor: (shaderModule, pipelineLayout) => {
             const compute: GPUProgrammableStage = {
                 module: shaderModule,
@@ -1109,6 +1127,11 @@ function prepareComputePipeline(
     const bindLayoutsByGroup = readonlyMapSnapshot(
         new Map(bindLayouts.map(layout => [ layout.group, layout ]))
     )
+    const immediateSize = normalizePipelineImmediateSize(
+        context,
+        input.immediateSize,
+        programFacts.requiredLanguageFeatures
+    )
     const constants = input.constants === undefined
         ? undefined
         : Object.freeze({ ...input.constants })
@@ -1116,6 +1139,7 @@ function prepareComputePipeline(
         ...context,
         bindLayouts,
         bindLayoutsByGroup,
+        immediateSize,
         computeEntryPoint: (input.compute ?? programFacts.entryPoints.compute) as string,
         ...(constants !== undefined ? { constants } : {}),
     }
@@ -1140,6 +1164,7 @@ function computePipelineDescriptorEvidence(plan: ComputePipelinePlan): {
         programId: plan.program.id,
         programSourceHash: plan.sourceSnapshot.combinedSourceHash,
         entryPoints: { compute: plan.computeEntryPoint },
+        immediateSize: plan.immediateSize,
         bindLayouts: plan.bindLayouts.map(layout => ({ id: layout.id, group: layout.group })),
     }
     return {
@@ -1168,6 +1193,7 @@ function defineImmutableComputeProperties(
         computeEntryPoint: state.computeEntryPoint,
         bindLayouts: state.bindLayouts,
         bindLayoutsByGroup: state.bindLayoutsByGroup,
+        immediateSize: state.immediateSize,
         shaderModule: state.shaderModule,
         pipelineLayout: state.pipelineLayout,
         gpuPipeline: state.gpuPipeline,
@@ -1190,6 +1216,70 @@ function computePipelineStateFor(pipeline: ComputePipeline): { isDisposed: boole
     const state = computePipelineStates.get(pipeline)
     if (state === undefined) throw new TypeError('ComputePipeline state is unavailable.')
     return state
+}
+
+function normalizePipelineImmediateSize(
+    pipeline: PipelineValidationContext,
+    immediateSize: unknown,
+    requiredLanguageFeatures: readonly string[]
+): number {
+
+    const normalized = immediateSize === undefined ? 0 : immediateSize
+    const maxImmediateSize = (
+        pipeline.runtime.deviceLimits as GPUSupportedLimits & {
+            readonly maxImmediateSize?: number
+        }
+    ).maxImmediateSize
+    if (
+        typeof normalized !== 'number' ||
+        !Number.isSafeInteger(normalized) ||
+        normalized < 0 ||
+        normalized > 0xffff_ffff ||
+        normalized % 4 !== 0 ||
+        (
+            normalized > 0 &&
+            (
+                typeof maxImmediateSize !== 'number' ||
+                !Number.isFinite(maxImmediateSize) ||
+                normalized > maxImmediateSize
+            )
+        )
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: pipeline.subject,
+            related: [ pipeline.program.subject ],
+            message: 'Pipeline immediateSize is outside the supported WebGPU immediate range.',
+            expected: {
+                immediateSize: 'non-negative safe GPUSize32 integer aligned to 4 bytes',
+                maxImmediateSize,
+            },
+            actual: { immediateSize: normalized },
+        })
+    }
+
+    if (
+        normalized > 0 &&
+        !requiredLanguageFeatures.includes('immediate_address_space')
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: pipeline.subject,
+            related: [ pipeline.program.subject ],
+            message: 'A nonzero immediateSize requires an explicit Program language-feature contract.',
+            expected: { requiredLanguageFeature: 'immediate_address_space' },
+            actual: {
+                immediateSize: normalized,
+                requiredLanguageFeatures,
+            },
+        })
+    }
+
+    return normalized
 }
 
 function normalizeVertexBuffers(

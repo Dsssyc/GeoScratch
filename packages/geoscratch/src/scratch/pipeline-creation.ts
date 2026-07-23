@@ -25,6 +25,7 @@ export type PipelineCreationIssueInput = Readonly<{
     sourceSnapshot: PipelineSourceSnapshot
     nativeLabels: PipelineNativeLabels
     bindGroupLayouts: readonly (GPUBindGroupLayout | null)[]
+    immediateSize: number
     lowerPipelineDescriptor: (
         shaderModule: GPUShaderModule,
         pipelineLayout: GPUPipelineLayout
@@ -132,10 +133,14 @@ export function issuePipelineCreation(
             if (!isObjectLike(shaderModule)) {
                 throw new TypeError('GPUDevice.createShaderModule() returned an invalid object.')
             }
-            pipelineLayout = device.createPipelineLayout({
+            const pipelineLayoutDescriptor: GPUPipelineLayoutDescriptor & {
+                immediateSize: number
+            } = {
                 label: input.nativeLabels.pipelineLayout,
                 bindGroupLayouts: [ ...input.bindGroupLayouts ],
-            })
+                immediateSize: input.immediateSize,
+            }
+            pipelineLayout = device.createPipelineLayout(pipelineLayoutDescriptor)
             if (!isObjectLike(pipelineLayout)) {
                 throw new TypeError('GPUDevice.createPipelineLayout() returned an invalid object.')
             }

@@ -52,6 +52,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
         expect(calls.pipelineLayouts[0].descriptor).to.deep.equal({
             label: `hello triangle pipeline layout [scratch:${pipeline.id}]`,
             bindGroupLayouts: [],
+            immediateSize: 0,
         })
         expect(calls.renderPipelines).to.have.length(1)
         expect(calls.renderPipelines[0].descriptor.layout).to.equal(calls.pipelineLayouts[0])

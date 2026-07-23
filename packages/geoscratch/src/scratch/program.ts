@@ -39,6 +39,7 @@ export type ProgramDescriptor = {
     modules: string[]
     entryPoints?: ProgramEntryPoints
     requiredFeatures?: Iterable<GPUFeatureName>
+    requiredLanguageFeatures?: Iterable<string>
     layoutRequirements?: readonly ProgramBufferLayoutRequirement[]
 }
 
@@ -52,6 +53,7 @@ type ProgramPipelineFacts = Readonly<{
     modules: readonly string[]
     entryPoints: Readonly<ProgramEntryPoints>
     requiredFeatures: readonly GPUFeatureName[]
+    requiredLanguageFeatures: readonly string[]
     layoutRequirements: readonly ProgramBufferLayoutRequirement[]
 }>
 
@@ -77,6 +79,7 @@ type SampledProgramPipelineFacts = Readonly<{
     modules: unknown
     entryPoints: unknown
     requiredFeatures: unknown
+    requiredLanguageFeatures: unknown
     layoutRequirements: unknown
 }>
 
@@ -89,6 +92,7 @@ export interface Program {
     modules: string[]
     entryPoints: ProgramEntryPoints
     requiredFeatures: GPUFeatureName[]
+    requiredLanguageFeatures: string[]
     layoutRequirements: readonly ProgramBufferLayoutRequirement[]
     readonly isDisposed: boolean
 }
@@ -123,9 +127,14 @@ export class Program {
         this.modules = normalizeModules(this, descriptor.modules)
         this.entryPoints = normalizeEntryPoints(this, descriptor.entryPoints)
         this.requiredFeatures = normalizeRequiredFeatures(descriptor.requiredFeatures)
+        this.requiredLanguageFeatures = normalizeRequiredLanguageFeatures(
+            this,
+            descriptor.requiredLanguageFeatures
+        )
         this.layoutRequirements = normalizeLayoutRequirements(this, descriptor.layoutRequirements)
 
         validateRequiredFeatures(this, runtime, this.requiredFeatures)
+        validateRequiredLanguageFeatures(this, runtime, this.requiredLanguageFeatures)
         assertScratchRuntimeAuthority(runtimeAuthority)
     }
 
@@ -174,11 +183,20 @@ export function snapshotProgramPipelineFacts(
         requiredFeatures: Object.freeze(normalizeRequiredFeatures(
             sampled.requiredFeatures as Iterable<GPUFeatureName> | undefined
         )),
+        requiredLanguageFeatures: Object.freeze(normalizeRequiredLanguageFeatures(
+            program,
+            sampled.requiredLanguageFeatures
+        )),
         layoutRequirements: normalizeLayoutRequirements(program, sampled.layoutRequirements),
     }))
 
     runProgramFactPhase(authority, () => {
         validateRequiredFeatures(program, state.runtime, normalized.requiredFeatures)
+        validateRequiredLanguageFeatures(
+            program,
+            state.runtime,
+            normalized.requiredLanguageFeatures
+        )
     })
 
     return Object.freeze({ facts: normalized, authority })
@@ -326,12 +344,14 @@ function materializeProgramPipelineFacts(program: Program): SampledProgramPipeli
     const modules = program.modules as unknown
     const entryPoints = program.entryPoints as unknown
     const requiredFeatures = program.requiredFeatures as unknown
+    const requiredLanguageFeatures = program.requiredLanguageFeatures as unknown
     const layoutRequirements = program.layoutRequirements as unknown
 
     return Object.freeze({
         modules: materializeProgramModules(modules),
         entryPoints: materializeProgramEntryPoints(entryPoints),
         requiredFeatures: materializeProgramRequiredFeatures(requiredFeatures),
+        requiredLanguageFeatures,
         layoutRequirements: materializeProgramLayoutRequirements(layoutRequirements),
     })
 }
@@ -462,6 +482,51 @@ function normalizeRequiredFeatures(requiredFeatures: Iterable<GPUFeatureName> | 
 
     if (requiredFeatures === undefined) return []
     return [ ...requiredFeatures ]
+}
+
+function normalizeRequiredLanguageFeatures(
+    program: Program,
+    requiredLanguageFeatures: unknown
+): string[] {
+
+    if (requiredLanguageFeatures === undefined) return []
+    if (
+        requiredLanguageFeatures === null ||
+        typeof requiredLanguageFeatures === 'string' ||
+        (
+            typeof requiredLanguageFeatures !== 'object' &&
+            typeof requiredLanguageFeatures !== 'function'
+        )
+    ) {
+        throwRequiredLanguageFeatureDiagnostic(program, requiredLanguageFeatures)
+    }
+
+    let iterator: unknown
+    try {
+        iterator = (requiredLanguageFeatures as { [Symbol.iterator]?: unknown })[Symbol.iterator]
+    } catch {
+        throwRequiredLanguageFeatureDiagnostic(
+            program,
+            requiredLanguageFeatures,
+            'iterator property threw'
+        )
+    }
+    if (typeof iterator !== 'function') {
+        throwRequiredLanguageFeatureDiagnostic(program, requiredLanguageFeatures)
+    }
+
+    let features: unknown[]
+    try {
+        features = [ ...(requiredLanguageFeatures as Iterable<unknown>) ]
+    } catch {
+        throwRequiredLanguageFeatureDiagnostic(program, requiredLanguageFeatures, 'iterator threw')
+    }
+
+    if (!features.every(feature => typeof feature === 'string' && feature.length > 0)) {
+        throwRequiredLanguageFeatureDiagnostic(program, features)
+    }
+
+    return features as string[]
 }
 
 function normalizeLayoutRequirements(program: Program, layoutRequirements: unknown): readonly ProgramBufferLayoutRequirement[] {
@@ -638,6 +703,46 @@ function validateRequiredFeatures(
             })
         }
     }
+}
+
+function validateRequiredLanguageFeatures(
+    program: Program,
+    runtime: ScratchRuntime,
+    requiredLanguageFeatures: readonly string[]
+): void {
+
+    for (const languageFeature of requiredLanguageFeatures) {
+        if (runtime.wgslLanguageFeatures.includes(languageFeature)) continue
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
+            severity: 'error',
+            phase: 'program',
+            subject: program.subject,
+            message: 'Program requires a WGSL language feature that is unavailable on this runtime.',
+            expected: { languageFeature },
+            actual: { wgslLanguageFeatures: runtime.wgslLanguageFeatures },
+        })
+    }
+}
+
+function throwRequiredLanguageFeatureDiagnostic(
+    program: Program,
+    actual: unknown,
+    reason?: string
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
+        severity: 'error',
+        phase: 'program',
+        subject: program.subject,
+        message: 'Program requiredLanguageFeatures must be a stable iterable of non-empty strings.',
+        expected: { requiredLanguageFeatures: 'Iterable<non-empty string>' },
+        actual: {
+            requiredLanguageFeatures: describeValue(actual),
+            ...(reason !== undefined ? { reason } : {}),
+        },
+    })
 }
 
 function throwEntryPointDiagnostic(program: Program, stage: string, actual: unknown): never {
