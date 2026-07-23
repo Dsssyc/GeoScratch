@@ -131,6 +131,11 @@ description 与 BindSet preparation 仍然合法，因为它们没有把 ownersh
 GPU。动态检查发生在被选中的 command、copy、readback、resolve、clear 或 upload
 真正使用 buffer 时。
 
+原生 `unmap()` failure 不会让这份 authority 重新可用。Lease 会进入 failed，
+但有界 current mapping fact 与 GPU-use exclusion 会持续存在，直到 Buffer、
+Runtime 或 device termination 销毁或使原生 allocation 失效。Scratch 不会猜测
+一个抛出异常的 `unmap()` 其实已经成功。
+
 `buffer.gpuBuffer` 仍是显式 raw escape hatch。通过它直接执行原生 map/unmap
 对 Scratch 不可见，因此没有 Scratch authority、epoch、readiness 或 diagnostic
 保证。

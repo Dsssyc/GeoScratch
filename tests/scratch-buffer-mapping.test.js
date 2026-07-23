@@ -314,7 +314,23 @@ describe('Scratch buffer host mapping', () => {
         expect(fake.calls.maps).to.have.length(1)
 
         controller.abort()
-        await rejectedDiagnostic(first, 'SCRATCH_BUFFER_MAPPING_ABORTED')
+        const cancellation = await rejectedDiagnostic(
+            first,
+            'SCRATCH_BUFFER_MAPPING_ABORTED'
+        )
+        expect(cancellation.incident).to.deep.include({
+            kind: 'buffer-mapping-failure',
+            diagnosticCode: 'SCRATCH_BUFFER_MAPPING_ABORTED',
+            failureStage: 'lifecycle-recheck',
+        })
+        expect(cancellation.incident.related).to.deep.include.members([
+            buffer.subject,
+            region.subject,
+        ])
+        const lifecycleOutcome = cancellation.incident.outcomes.find(
+            outcome => outcome.diagnosticCode === 'SCRATCH_BUFFER_MAPPING_ABORTED'
+        )
+        expect(lifecycleOutcome).to.not.have.property('nativeError')
         expect(fake.calls.unmaps).to.have.length(1)
         expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
 
@@ -357,6 +373,13 @@ describe('Scratch buffer host mapping', () => {
         const otherRuntime = await scr.ScratchRuntime.create({ gpu: otherFake.gpu })
         const other = await otherRuntime.createBuffer({ size: 32, usage: MAP_READ | COPY_DST })
         const before = fake.calls.maps.length
+        const hostileSignal = {}
+        Object.defineProperty(hostileSignal, 'aborted', {
+            get() {
+
+                throw new Error('hostile structural signal')
+            },
+        })
 
         const cases = [
             [ { region: read.region(), mode: 'invalid' }, 'SCRATCH_BUFFER_MAPPING_MODE_INVALID' ],
@@ -365,12 +388,42 @@ describe('Scratch buffer host mapping', () => {
             [ { region: write.region(), mode: 'read' }, 'SCRATCH_BUFFER_MAPPING_USAGE_INVALID' ],
             [ { region: other.region(), mode: 'read' }, 'SCRATCH_BUFFER_MAPPING_RUNTIME_MISMATCH' ],
             [ { region: read.region(), mode: 'read', signal: {} }, 'SCRATCH_BUFFER_MAPPING_SIGNAL_INVALID' ],
+            [ { region: read.region(), mode: 'read', signal: hostileSignal }, 'SCRATCH_BUFFER_MAPPING_SIGNAL_INVALID' ],
         ]
         for (const [ descriptor, code ] of cases) {
             await rejectedDiagnostic(runtime.mapBuffer(descriptor), code)
         }
 
         expect(fake.calls.maps).to.have.length(before)
+    })
+
+    it('uses branded AbortSignal hooks instead of shadowable instance methods', async () => {
+
+        const { runtime, buffer } = await createMappedFixture('read')
+        const controller = new AbortController()
+        Object.defineProperties(controller.signal, {
+            addEventListener: {
+                value() {
+
+                    throw new Error('shadowed addEventListener')
+                },
+            },
+            removeEventListener: {
+                value() {
+
+                    throw new Error('shadowed removeEventListener')
+                },
+            },
+        })
+
+        const lease = await runtime.mapBuffer({
+            region: buffer.region(),
+            mode: 'read',
+            signal: controller.signal,
+        })
+        lease.dispose()
+
+        expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
     })
 
     it('joins map and error-scope settlement in arbitrary order without leaking authority', async () => {
@@ -443,6 +496,39 @@ describe('Scratch buffer host mapping', () => {
         })
     }
 
+    it('retains concurrent scope evidence when AbortSignal cancels mapping', async () => {
+
+        const { fake, runtime, buffer } = await createMappedFixture('read', {
+            deferMaps: true,
+        })
+        const controller = new AbortController()
+        fake.errors.failNext(
+            'mapAsync',
+            'validation',
+            Object.assign(new Error('opaque validation'), { name: 'GPUValidationError' })
+        )
+        const mapping = runtime.mapBuffer({
+            region: buffer.region({ size: 16 }),
+            mode: 'read',
+            signal: controller.signal,
+        })
+        await settleMicrotasks()
+
+        controller.abort()
+        const failure = await rejectedDiagnostic(
+            mapping,
+            'SCRATCH_BUFFER_MAPPING_ABORTED'
+        )
+
+        expect(failure.incident.outcomes.map(outcome => outcome.diagnosticCode))
+            .to.include.members([
+                'SCRATCH_BUFFER_MAPPING_ABORTED',
+                'SCRATCH_BUFFER_MAPPING_VALIDATION_FAILED',
+            ])
+        expect(failure.incident.nativeErrorCategory).to.equal('validation')
+        expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
+    })
+
     it('records map Promise rejection and releases authority for a later mapping', async () => {
 
         const { fake, runtime, buffer } = await createMappedFixture('read')
@@ -457,6 +543,28 @@ describe('Scratch buffer host mapping', () => {
         const lease = await runtime.mapBuffer({ region: buffer.region(), mode: 'read' })
         lease.dispose()
         expect(fake.calls.maps).to.have.length(2)
+    })
+
+    it('attributes an otherwise unexplained map AbortError to device loss', async () => {
+
+        const { fake, runtime, buffer } = await createMappedFixture('read')
+        fake.readbacks.rejectNextMap(
+            new DOMException('mapping ended with the device', 'AbortError')
+        )
+
+        const failure = await rejectedDiagnostic(
+            runtime.mapBuffer({ region: buffer.region(), mode: 'read' }),
+            'SCRATCH_BUFFER_MAPPING_DEVICE_LOST'
+        )
+
+        expect(failure.incident).to.deep.include({
+            diagnosticCode: 'SCRATCH_BUFFER_MAPPING_DEVICE_LOST',
+            nativeErrorCategory: 'device-lost',
+            failureStage: 'lifecycle-recheck',
+        })
+        expect(failure.incident.outcomes).to.have.length(1)
+        expect(failure.incident.outcomes[0]).to.not.have.property('nativeError')
+        expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
     })
 
     it('cleans an active lease once when its resource is disposed', async () => {
@@ -476,36 +584,114 @@ describe('Scratch buffer host mapping', () => {
         expect(() => lease.view).to.throw(scr.ScratchDiagnosticError)
     })
 
-    it('marks possible WRITE content indeterminate when native release fails', async () => {
+    for (const scenario of [
+        { name: 'READ', mode: 'read', mappedCreation: false },
+        { name: 'WRITE', mode: 'write', mappedCreation: false },
+        { name: 'mapped creation', mode: 'write', mappedCreation: true },
+    ]) {
+        it(`quarantines ${scenario.name} authority after native release fails`, async () => {
 
-        const { fake, runtime, buffer } = await createMappedFixture('write')
-        const startingEpoch = buffer.contentEpoch
-        const lease = await runtime.mapBuffer({ region: buffer.region(), mode: 'write' })
-        new Uint8Array(lease.view)[0] = 42
-        fake.errors.throwNext('unmap', new Error('opaque unmap failure'))
+            let fake
+            let runtime
+            let buffer
+            let lease
+            let assertGpuUseBlocked
+            if (scenario.mappedCreation) {
+                fake = createFakeGpu()
+                runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+                const creation = await runtime.createMappedBuffer({
+                    size: 32,
+                    usage: COPY_DST,
+                })
+                buffer = creation.buffer
+                lease = creation.lease
+                const clear = runtime.createClearBufferCommand({ target: buffer.region() })
+                assertGpuUseBlocked = async () => {
+                    thrownDiagnostic(
+                        () => runtime.submission().clear(clear).submit(),
+                        'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT'
+                    )
+                }
+            } else {
+                const fixture = await createMappedFixture(scenario.mode)
+                fake = fixture.fake
+                runtime = fixture.runtime
+                buffer = fixture.buffer
+                if (scenario.mode === 'write') {
+                    const initial = await runtime.mapBuffer({
+                        region: buffer.region(),
+                        mode: 'write',
+                    })
+                    new Uint8Array(initial.view)[0] = 7
+                    initial.dispose()
+                    const readback = runtime.createReadback({ source: buffer.region() })
+                    assertGpuUseBlocked = async () => {
+                        await rejectedDiagnostic(
+                            readback.toBytes(),
+                            'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT'
+                        )
+                    }
+                } else {
+                    const upload = runtime.createUploadCommand({
+                        target: buffer.region(),
+                        data: new Uint8Array(buffer.size),
+                    })
+                    assertGpuUseBlocked = async () => {
+                        thrownDiagnostic(
+                            () => upload.execute(runtime.queue),
+                            'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT'
+                        )
+                    }
+                }
+                lease = await runtime.mapBuffer({
+                    region: buffer.region(),
+                    mode: scenario.mode,
+                })
+            }
+            const startingEpoch = buffer.contentEpoch
+            const view = lease.view
+            if (scenario.mode === 'write') new Uint8Array(view)[0] = 42
+            fake.errors.throwNext('unmap', new Error('opaque unmap failure'))
 
-        let failure
-        try {
-            lease.dispose()
-        } catch (error) {
-            failure = error
-        }
+            const failure = thrownDiagnostic(
+                () => lease.dispose(),
+                'SCRATCH_BUFFER_MAPPING_RELEASE_FAILED'
+            )
 
-        expect(failure).to.be.instanceOf(scr.ScratchDiagnosticError)
-        expect(failure.diagnostic.code).to.equal('SCRATCH_BUFFER_MAPPING_RELEASE_FAILED')
-        expect(lease.state).to.equal('failed')
-        expect(buffer.state).to.equal('indeterminate')
-        expect(buffer.contentEpoch).to.equal(startingEpoch + 1)
-        expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
-        expect(runtime.diagnostics.operations({
-            kind: 'buffer-mapping',
-            resourceId: buffer.id,
-        }).at(-1)).to.deep.include({ status: 'failed' })
-        expect(runtime.diagnostics.incidents({
-            kind: 'buffer-mapping-failure',
-            resourceId: buffer.id,
-        }).at(-1)).to.deep.include({ failureStage: 'release' })
-    })
+            expect(lease.state).to.equal('failed')
+            expect(view.byteLength).to.equal(32)
+            if (scenario.mode === 'write') {
+                expect(buffer.state).to.equal('indeterminate')
+                expect(buffer.contentEpoch).to.equal(startingEpoch + 1)
+            } else {
+                expect(buffer.contentEpoch).to.equal(startingEpoch)
+            }
+            expect(runtime.diagnostics.snapshot().bufferMappings).to.have.length(1)
+            expect(runtime.diagnostics.snapshot().bufferMappings[0]).to.deep.include({
+                id: lease.id,
+                state: 'mapped',
+            })
+            if (!scenario.mappedCreation) {
+                await rejectedDiagnostic(
+                    runtime.mapBuffer({ region: buffer.region(), mode: scenario.mode }),
+                    'SCRATCH_BUFFER_MAPPING_CONFLICT'
+                )
+            }
+
+            const beforeQueueWrites = fake.calls.queueWrites.length
+            const beforeEncoders = fake.calls.commandEncoders.length
+            await assertGpuUseBlocked()
+            expect(fake.calls.queueWrites).to.have.length(beforeQueueWrites)
+            expect(fake.calls.commandEncoders).to.have.length(beforeEncoders)
+            expect(failure.incident).to.deep.include({ failureStage: 'release' })
+
+            buffer.dispose()
+
+            expect(view.byteLength).to.equal(0)
+            expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
+            expect(fake.calls.bufferDestroys).to.have.length(1)
+        })
+    }
 
     it('cancels an active WRITE lease on device loss and preserves uncertainty', async () => {
 
@@ -528,6 +714,62 @@ describe('Scratch buffer host mapping', () => {
         }).at(-1)).to.deep.include({
             status: 'cancelled',
             nativeErrorCategory: 'device-lost',
+        })
+    })
+
+    it('reclassifies a just-released host WRITE when device loss settles later', async () => {
+
+        const { fake, runtime, buffer } = await createMappedFixture('write')
+        const startingEpoch = buffer.contentEpoch
+        const lease = await runtime.mapBuffer({ region: buffer.region(), mode: 'write' })
+        new Uint8Array(lease.view)[0] = 42
+
+        fake.errors.loseDevice({ reason: 'unknown', message: 'opaque device loss' })
+        lease.dispose()
+
+        expect(lease.state).to.equal('released')
+        expect(buffer.state).to.equal('ready')
+        expect(buffer.contentEpoch).to.equal(startingEpoch + 1)
+
+        await settleMicrotasks()
+
+        expect(buffer.state).to.equal('indeterminate')
+        expect(buffer.contentEpoch).to.equal(startingEpoch + 2)
+    })
+
+    it('attributes pending and active mapping shutdown to runtime disposal', async () => {
+
+        const pendingFixture = await createMappedFixture('read', { deferMaps: true })
+        const pending = pendingFixture.runtime.mapBuffer({
+            region: pendingFixture.buffer.region(),
+            mode: 'read',
+        })
+        await settleMicrotasks()
+        pendingFixture.runtime.dispose()
+        const pendingFailure = await rejectedDiagnostic(
+            pending,
+            'SCRATCH_BUFFER_MAPPING_RUNTIME_DISPOSED'
+        )
+
+        expect(pendingFailure.incident).to.deep.include({
+            diagnosticCode: 'SCRATCH_BUFFER_MAPPING_RUNTIME_DISPOSED',
+            failureStage: 'lifecycle-recheck',
+        })
+
+        const activeFixture = await createMappedFixture('read')
+        const activeLease = await activeFixture.runtime.mapBuffer({
+            region: activeFixture.buffer.region(),
+            mode: 'read',
+        })
+        activeFixture.runtime.dispose()
+
+        expect(activeLease.state).to.equal('disposed')
+        expect(activeFixture.runtime.diagnostics.incidents({
+            kind: 'buffer-mapping-failure',
+            resourceId: activeFixture.buffer.id,
+        }).at(-1)).to.deep.include({
+            diagnosticCode: 'SCRATCH_BUFFER_MAPPING_RUNTIME_DISPOSED',
+            failureStage: 'lifecycle-recheck',
         })
     })
 

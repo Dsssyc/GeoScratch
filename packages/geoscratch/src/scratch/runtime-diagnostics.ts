@@ -870,6 +870,12 @@ export class ScratchRuntimeDiagnosticsController {
         return () => this.#lifecycleSubscribers.delete(subscriber)
     }
 
+    publishRuntimeDisposal(): void {
+
+        if (this.#isDisposed) return
+        this.#publishLifecycleChange(Object.freeze({ kind: 'runtime-disposed' }))
+    }
+
     snapshot(): ScratchRuntimeDiagnosticsSnapshot {
 
         const resources = [ ...this.#resourceFacts.values() ]
@@ -1632,8 +1638,8 @@ export class ScratchRuntimeDiagnosticsController {
     dispose(): void {
 
         if (this.#isDisposed) return
+        this.publishRuntimeDisposal()
         this.#isDisposed = true
-        this.#publishLifecycleChange(Object.freeze({ kind: 'runtime-disposed' }))
         if (this.#uncapturedErrorListener !== undefined && typeof this.#device.removeEventListener === 'function') {
             this.#device.removeEventListener('uncapturederror', this.#uncapturedErrorListener)
         }

@@ -795,13 +795,26 @@ native map Promise, validation, internal, OOM, and scope outcomes settle before
 causal selection; abort and lifecycle cancellation remain distinct structural
 facts rather than being classified from native prose.
 
+Every cancellation emits a lifecycle outcome without inventing a native
+exception. Concurrent scope or map failures remain ordered outcomes in the
+same incident; only the standardized `AbortError` caused by Scratch's own
+`unmap()` is duplicate evidence and is suppressed. The incident always relates
+both the BufferResource and selected BufferRegion. Runtime disposal is
+published before resource destruction, preserving its causal terminal code.
+
 The always-current graph contains only pending or active `bufferMappings`.
 Each fact is bounded to mapping id, resource id, selected offset/size, mode,
 state, allocation version, establishment content epoch, and operation id.
 The separate `bufferMapping` summary reports current/peak mapping count and
-selected bytes. Terminal mappings are removed; bounded operation/incident
-history records their outcome. No mapped bytes, native handle, complete
-descriptor, or unbounded call stack is retained by default.
+selected bytes. Mappings with confirmed terminal native ownership are removed;
+bounded operation/incident history records their outcome. No mapped bytes,
+native handle, complete descriptor, or unbounded call stack is retained by
+default.
+
+A throwing native `unmap()` is not terminal ownership evidence. Its failed
+lease retains one current mapped fact and the per-buffer authority as a
+quarantine until Buffer, Runtime, or device termination; this bounded fact
+prevents diagnostics from claiming that GPU use is available.
 
 This is an additive schema-v5 extension: the existing target is still a
 Resource target, and the new operation/incident discriminators and snapshot

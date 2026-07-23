@@ -6,6 +6,7 @@ import {
 import type { BufferMappingLifecycleReason } from './buffer-mapping-authority.js'
 import {
     createMappedBufferResourceAllocation,
+    isBufferResource,
     isBufferRegion,
 } from './buffer.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
@@ -83,7 +84,7 @@ type MappingContext = {
     contentEpoch: number
     controller: ScratchRuntimeDiagnosticsController
     operation: ScratchPendingGpuOperation
-    phase: 'pending' | 'mapped' | 'terminal'
+    phase: 'pending' | 'mapped' | 'poisoned' | 'terminal'
     nativeMapIssued: boolean
     unmapIssued: boolean
     unmapFailure?: unknown
@@ -102,6 +103,19 @@ type MappedBufferLeaseFacts = {
 
 const mappedBufferLeaseToken = Symbol('MappedBufferLease')
 const mappedBufferLeaseFacts = new WeakMap<MappedBufferLease, MappedBufferLeaseFacts>()
+const latestSuccessfulHostWrite = new WeakMap<
+    BufferResource,
+    Readonly<{ allocationVersion: number, contentEpoch: number }>
+>()
+const abortSignalAbortedGetter = typeof globalThis.AbortSignal === 'function'
+    ? Object.getOwnPropertyDescriptor(globalThis.AbortSignal.prototype, 'aborted')?.get
+    : undefined
+const eventTargetAddEventListener = typeof globalThis.EventTarget === 'function'
+    ? globalThis.EventTarget.prototype.addEventListener
+    : undefined
+const eventTargetRemoveEventListener = typeof globalThis.EventTarget === 'function'
+    ? globalThis.EventTarget.prototype.removeEventListener
+    : undefined
 let mappingSequence = 0
 
 export class MappedBufferLease {
@@ -170,6 +184,27 @@ export class MappedBufferLease {
     dispose(): void {
 
         releaseMappedBufferLease(this)
+    }
+}
+
+export function markHostWrittenBuffersIndeterminateOnDeviceLoss(
+    runtime: ScratchRuntime
+): void {
+
+    for (const resource of runtime._resources) {
+        if (!isBufferResource(resource)) continue
+        const provenance = latestSuccessfulHostWrite.get(resource)
+        if (provenance === undefined) continue
+        latestSuccessfulHostWrite.delete(resource)
+        if (
+            resource.isDisposed ||
+            resource.allocationVersion !== provenance.allocationVersion ||
+            resource.contentEpoch !== provenance.contentEpoch ||
+            resource.state !== 'ready'
+        ) {
+            continue
+        }
+        setResourceContentState(resource, 'indeterminate', resource.contentEpoch + 1)
     }
 }
 
@@ -332,11 +367,21 @@ export async function mapBufferResource(
             change.kind === 'device-lost' ? 'device-lost' : 'runtime-disposed'
         )
     })
-    context.removeAbortListener = subscribeAbort(normalized.signal, () => {
-        requestMappingCancellation(context, 'abort')
-    })
+    let signalAborted = false
+    try {
+        context.removeAbortListener = subscribeAbort(normalized.signal, () => {
+            requestMappingCancellation(context, 'abort')
+        })
+        signalAborted = normalized.signal !== undefined &&
+            readAbortSignalAborted(normalized.signal)
+    } catch (cause) {
+        return throwInvalidMappingSignal(context, cause)
+    }
 
-    if (normalized.signal?.aborted === true) {
+    if (context.cancellation !== undefined) {
+        return throwCancelledMapping(context)
+    }
+    if (signalAborted) {
         requestMappingCancellation(context, 'abort')
         return throwCancelledMapping(context)
     }
@@ -356,11 +401,7 @@ export async function mapBufferResource(
         issued.outOfMemory,
     ])
 
-    if (context.cancellation !== undefined) {
-        return throwCancelledMapping(context)
-    }
-
-    const failures = mappingFailures({
+    const observedFailures = mappingFailures({
         boundaryFailures: issued.boundaryFailures,
         synchronousMapFailure: issued.synchronousMapFailure,
         map,
@@ -370,6 +411,18 @@ export async function mapBufferResource(
             { filter: 'out-of-memory', observation: outOfMemory },
         ],
     })
+    if (context.cancellation === undefined && mapObservationIsAbort(map)) {
+        context.cancellation = Object.freeze({
+            reason: 'device-lost',
+            code: cancellationCode('device-lost'),
+        })
+    }
+    const failures = context.cancellation === undefined
+        ? observedFailures
+        : observedFailures.filter(failure => !mappingFailureIsMapAbort(failure))
+    if (context.cancellation !== undefined) {
+        return throwCancelledMapping(context, failures)
+    }
     if (failures.length > 0) {
         if (map.status === 'fulfilled') unmapContextOnce(context)
         return throwMappingFailures(context, failures, 'mapping')
@@ -433,14 +486,14 @@ function releaseMappedBufferLease(lease: MappedBufferLease): void {
             )
         }
         facts.state = 'failed'
-        context.phase = 'terminal'
+        context.phase = 'poisoned'
         const failure = mappingStageFailure({
             stage: 'release',
             code: 'SCRATCH_BUFFER_MAPPING_RELEASE_FAILED',
             cause: unmap.cause,
         })
         const incident = completeMappingFailure(context, [ failure ], 'release')
-        cleanupMappingContext(context)
+        detachAbortObserver(context)
         throwScratchDiagnostic({
             code: failure.code,
             severity: 'error',
@@ -455,7 +508,13 @@ function releaseMappedBufferLease(lease: MappedBufferLease): void {
         }, { cause: unmap.cause, incident })
     }
 
-    if (context.mode === 'write') advanceResourceContentEpoch(context.buffer)
+    if (context.mode === 'write') {
+        advanceResourceContentEpoch(context.buffer)
+        latestSuccessfulHostWrite.set(context.buffer, Object.freeze({
+            allocationVersion: context.buffer.allocationVersion,
+            contentEpoch: context.buffer.contentEpoch,
+        }))
+    }
     facts.state = 'released'
     context.phase = 'terminal'
     context.controller.completeOperation(context.operation, { status: 'succeeded' })
@@ -468,6 +527,12 @@ function requestMappingCancellation(
 ): void {
 
     if (context === undefined || context.phase === 'terminal') return
+    if (context.phase === 'poisoned') {
+        if (reason === 'abort') return
+        context.phase = 'terminal'
+        cleanupMappingContext(context)
+        return
+    }
     if (context.cancellation === undefined) {
         context.cancellation = Object.freeze({
             reason,
@@ -502,30 +567,44 @@ function finalizeMappedLifecycle(
     }
     facts.state = 'disposed'
     context.phase = 'terminal'
-    const failure = lifecycleFailure(reason, unmap.ok ? undefined : unmap.cause)
-    const incident = completeMappingCancellation(context, failure, reason)
+    const failures = [
+        lifecycleFailure(reason),
+        ...(!unmap.ok ? [ mappingStageFailure({
+            stage: 'release' as const,
+            code: 'SCRATCH_BUFFER_MAPPING_RELEASE_FAILED',
+            cause: unmap.cause,
+        }) ] : []),
+    ]
+    completeMappingCancellation(context, failures, reason)
     cleanupMappingContext(context)
-    if (incident !== undefined && unmap.ok) {
-        context.controller.linkOperationIncident(context.operation.id, incident.id)
-    }
 }
 
-function throwCancelledMapping(context: MappingContext): never {
+function throwCancelledMapping(
+    context: MappingContext,
+    observedFailures: readonly MappingFailure[] = []
+): never {
 
     const cancellation = context.cancellation
     if (cancellation === undefined) throw new TypeError('Buffer mapping cancellation is unavailable.')
-    context.phase = 'terminal'
-    const failure = lifecycleFailure(
-        cancellation.reason,
-        context.unmapFailure
+    const failures = [
+        lifecycleFailure(cancellation.reason),
+        ...observedFailures,
+        ...(context.unmapFailure !== undefined ? [ mappingStageFailure({
+            stage: 'release' as const,
+            code: 'SCRATCH_BUFFER_MAPPING_RELEASE_FAILED',
+            cause: context.unmapFailure,
+        }) ] : []),
+    ]
+    const shouldQuarantine = cancellation.reason === 'abort' &&
+        context.unmapFailure !== undefined
+    context.phase = shouldQuarantine ? 'poisoned' : 'terminal'
+    const incident = completeMappingCancellation(
+        context,
+        failures,
+        cancellation.reason
     )
-    const incident = cancellation.reason === 'abort' && context.unmapFailure === undefined
-        ? undefined
-        : completeMappingCancellation(context, failure, cancellation.reason)
-    if (incident === undefined) {
-        context.controller.completeOperation(context.operation, { status: 'cancelled' })
-    }
-    cleanupMappingContext(context)
+    if (shouldQuarantine) detachAbortObserver(context)
+    else cleanupMappingContext(context)
     throwScratchDiagnostic({
         code: cancellation.code,
         severity: 'error',
@@ -534,7 +613,7 @@ function throwCancelledMapping(context: MappingContext): never {
         related: [
             context.buffer.subject,
             context.region.subject,
-            ...(incident !== undefined ? [ incident.subject ] : []),
+            incident.subject,
         ],
         message: cancellationMessage(cancellation.reason),
         actual: {
@@ -546,36 +625,38 @@ function throwCancelledMapping(context: MappingContext): never {
         },
     }, {
         ...(context.unmapFailure !== undefined ? { cause: context.unmapFailure } : {}),
-        ...(incident !== undefined ? { incident } : {}),
+        incident,
     })
 }
 
 function completeMappingCancellation(
     context: MappingContext,
-    failure: MappingFailure,
+    failures: readonly MappingFailure[],
     reason: 'abort' | BufferMappingLifecycleReason
 ) {
 
+    const nativeFailure = failures.find(failure => failure.category !== 'none')
     const nativeErrorCategory = reason === 'device-lost'
         ? 'device-lost'
-        : failure.category
+        : nativeFailure?.category ?? 'none'
     const record = context.controller.completeOperation(context.operation, {
         status: 'cancelled',
         ...(nativeErrorCategory !== 'none' ? { nativeErrorCategory } : {}),
     })
     return context.controller.recordIncident({
         kind: 'buffer-mapping-failure',
-        diagnosticCode: failure.code,
+        diagnosticCode: cancellationCode(reason),
         nativeErrorCategory,
         attribution: reason === 'device-lost' ? 'temporal-correlation' : 'exact-operation',
         target: context.operation.target,
         operationId: context.operation.id,
         triggerOperation: record,
+        related: [ context.buffer.subject, context.region.subject ],
         failureStage: 'lifecycle-recheck',
-        ...(failure.outcome.nativeError !== undefined
-            ? { nativeError: failure.outcome.nativeError }
+        ...(nativeFailure?.outcome.nativeError !== undefined
+            ? { nativeError: nativeFailure.outcome.nativeError }
             : {}),
-        outcomes: [ failure.outcome ],
+        outcomes: failures.map(failure => failure.outcome),
     })
 }
 
@@ -585,7 +666,6 @@ function throwMappingFailures(
     stage: ScratchBufferMappingFailureStage
 ): never {
 
-    context.phase = 'terminal'
     const allFailures = context.unmapFailure === undefined
         ? failures
         : [
@@ -596,8 +676,11 @@ function throwMappingFailures(
                 cause: context.unmapFailure,
             }),
         ]
+    const shouldQuarantine = context.unmapFailure !== undefined
+    context.phase = shouldQuarantine ? 'poisoned' : 'terminal'
     const incident = completeMappingFailure(context, allFailures, stage)
-    cleanupMappingContext(context)
+    if (shouldQuarantine) detachAbortObserver(context)
+    else cleanupMappingContext(context)
     const primary = allFailures[0]
     throwScratchDiagnostic({
         code: primary.code,
@@ -635,6 +718,7 @@ function completeMappingFailure(
         target: context.operation.target,
         operationId: context.operation.id,
         triggerOperation: record,
+        related: [ context.buffer.subject, context.region.subject ],
         failureStage: stage,
         ...(primary.outcome.nativeError !== undefined
             ? { nativeError: primary.outcome.nativeError }
@@ -645,13 +729,38 @@ function completeMappingFailure(
 
 function cleanupMappingContext(context: MappingContext): void {
 
-    context.removeAbortListener()
-    context.unsubscribeRuntime()
-    if (context.factRegistered) {
-        context.controller.unregisterBufferMapping(context.id)
-        context.factRegistered = false
+    detachAbortObserver(context)
+    detachRuntimeObserver(context)
+    try {
+        if (context.factRegistered) {
+            context.controller.unregisterBufferMapping(context.id)
+            context.factRegistered = false
+        }
+    } finally {
+        releaseBufferMappingAuthority(context.buffer, context.id)
     }
-    releaseBufferMappingAuthority(context.buffer, context.id)
+}
+
+function detachAbortObserver(context: MappingContext): void {
+
+    const remove = context.removeAbortListener
+    context.removeAbortListener = () => {}
+    try {
+        remove()
+    } catch {
+        // AbortSignal hooks are advisory; mapping authority cleanup must still finish.
+    }
+}
+
+function detachRuntimeObserver(context: MappingContext): void {
+
+    const unsubscribe = context.unsubscribeRuntime
+    context.unsubscribeRuntime = () => {}
+    try {
+        unsubscribe()
+    } catch {
+        // Runtime lifecycle cleanup must not strand native mapping authority.
+    }
 }
 
 function unmapContextOnce(
@@ -690,6 +799,23 @@ function registerMappingFact(
         operationId: context.operation.id,
     }))
     context.factRegistered = true
+}
+
+function throwInvalidMappingSignal(context: MappingContext, cause: unknown): never {
+
+    context.phase = 'terminal'
+    context.controller.completeOperation(context.operation, { status: 'failed' })
+    cleanupMappingContext(context)
+    throwScratchDiagnostic({
+        code: 'SCRATCH_BUFFER_MAPPING_SIGNAL_INVALID',
+        severity: 'error',
+        phase: 'buffer-mapping',
+        subject: context.region.subject,
+        related: [ context.buffer.subject ],
+        message: 'Buffer mapping signal could not be observed as a native AbortSignal.',
+        expected: { signal: 'operational AbortSignal' },
+        actual: { signal: 'invalid or hostile AbortSignal boundary' },
+    }, { cause })
 }
 
 function normalizeBufferMappingDescriptor(
@@ -914,6 +1040,31 @@ function mappingFailures(input: {
     return failures
 }
 
+function mapObservationIsAbort(observation: PromiseObservation<undefined>): boolean {
+
+    return (observation.status === 'rejected' || observation.status === 'invalid') &&
+        nativeErrorName(observation.reason) === 'AbortError'
+}
+
+function mappingFailureIsMapAbort(failure: MappingFailure): boolean {
+
+    return failure.code === 'SCRATCH_BUFFER_MAPPING_REJECTED' &&
+        nativeErrorName(failure.cause) === 'AbortError'
+}
+
+function nativeErrorName(value: unknown): string | undefined {
+
+    if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
+        return undefined
+    }
+    try {
+        const name = (value as { name?: unknown }).name
+        return typeof name === 'string' ? name : undefined
+    } catch {
+        return undefined
+    }
+}
+
 function capturedScopeFailure(filter: ScopeFilter, cause: unknown): MappingFailure {
 
     const code = filter === 'validation'
@@ -930,21 +1081,33 @@ function capturedScopeFailure(filter: ScopeFilter, cause: unknown): MappingFailu
 }
 
 function lifecycleFailure(
-    reason: 'abort' | BufferMappingLifecycleReason,
-    cleanupCause: unknown
+    reason: 'abort' | BufferMappingLifecycleReason
 ): MappingFailure {
 
-    const code = cleanupCause === undefined
-        ? cancellationCode(reason)
-        : 'SCRATCH_BUFFER_MAPPING_RELEASE_FAILED'
     const category: GpuNativeErrorCategory = reason === 'device-lost'
         ? 'device-lost'
-        : cleanupCause === undefined ? 'none' : 'native-exception'
-    return mappingStageFailure({
+        : 'none'
+    return structuralMappingFailure({
         stage: 'lifecycle-recheck',
-        code,
+        code: cancellationCode(reason),
         category,
-        cause: cleanupCause ?? new Error(reason),
+    })
+}
+
+function structuralMappingFailure(input: Readonly<{
+    stage: ScratchBufferMappingFailureStage
+    code: string
+    category: GpuNativeErrorCategory
+}>): MappingFailure {
+
+    return Object.freeze({
+        code: input.code,
+        category: input.category,
+        outcome: Object.freeze({
+            stage: input.stage,
+            diagnosticCode: input.code,
+            nativeErrorCategory: input.category,
+        }),
     })
 }
 
@@ -1018,17 +1181,32 @@ function bufferOperationTarget(buffer: BufferResource) {
 function subscribeAbort(signal: AbortSignal | undefined, listener: () => void): () => void {
 
     if (signal === undefined) return () => {}
-    signal.addEventListener('abort', listener, { once: true })
-    return () => signal.removeEventListener('abort', listener)
+    if (
+        typeof eventTargetAddEventListener !== 'function' ||
+        typeof eventTargetRemoveEventListener !== 'function'
+    ) {
+        throw new TypeError('AbortSignal event observation is unavailable.')
+    }
+    eventTargetAddEventListener.call(signal, 'abort', listener, { once: true })
+    return () => eventTargetRemoveEventListener.call(signal, 'abort', listener)
 }
 
 function isAbortSignal(value: unknown): value is AbortSignal {
 
-    return typeof value === 'object' &&
-        value !== null &&
-        typeof (value as AbortSignal).aborted === 'boolean' &&
-        typeof (value as AbortSignal).addEventListener === 'function' &&
-        typeof (value as AbortSignal).removeEventListener === 'function'
+    if (typeof value !== 'object' || value === null) return false
+    try {
+        return typeof readAbortSignalAborted(value as AbortSignal) === 'boolean'
+    } catch {
+        return false
+    }
+}
+
+function readAbortSignalAborted(signal: AbortSignal): boolean {
+
+    if (typeof abortSignalAbortedGetter !== 'function') {
+        throw new TypeError('AbortSignal brand inspection is unavailable.')
+    }
+    return abortSignalAbortedGetter.call(signal) as boolean
 }
 
 function popMapScope(

@@ -788,12 +788,24 @@ validation、internal、OOM 与 scope outcome 会先全部 settle，再选择 ca
 primary；abort 与 lifecycle cancellation 保持为不同的结构化事实，不从 native
 prose 推断。
 
+每次 cancellation 都会产生不虚构 native exception 的 lifecycle outcome。并发
+scope 或 map failure 仍作为有序 outcome 保留在同一 incident 中；只有由 Scratch
+自身 `unmap()` 导致的标准 `AbortError` 属于重复证据并被抑制。Incident 始终同时
+关联 BufferResource 与选中的 BufferRegion。Runtime disposal 会先于 resource
+destruction 发布，从而保留其因果 terminal code。
+
 Always-current graph 只包含 pending 或 active `bufferMappings`。每个 fact 只保留
 mapping id、resource id、所选 offset/size、mode、state、allocation version、
 mapping 建立时的 content epoch 与 operation id。独立 `bufferMapping` summary
 报告 current/peak mapping count 与 selected bytes。Terminal mapping 会从 current
-facts 移除，由有界 operation/incident history 保存 outcome。默认不保留 mapped
-bytes、native handle、完整 descriptor 或无界调用栈。
+facts 移除的前提是原生 ownership 已确认终止；有界 operation/incident history
+保存其 outcome。默认不保留 mapped bytes、native handle、完整 descriptor 或
+无界调用栈。
+
+抛出异常的原生 `unmap()` 不是 terminal ownership evidence。其 failed lease
+会保留一个 current mapped fact 和 per-buffer authority 作为 quarantine，直到
+Buffer、Runtime 或 device termination；这份有界 fact 防止 diagnostics 错误声称
+GPU use 已可用。
 
 这是 schema v5 的 additive extension：现有 target 仍是 Resource target，新增
 operation/incident discriminator 与 snapshot field 不重新解释任何旧字段。一般

@@ -5,8 +5,9 @@
 Implementation baseline was frozen on 2026-07-23 from
 `a2597ae150c794eac591aa2f754d15719300ac96`. Buffer host mapping V1 is now
 implemented on `socu/scratch-buffer-mapping-v1`; this document is the
-source-faithful final capability audit. Independent review and the complete
-post-review acceptance rerun remain separate termination gates.
+source-faithful final capability audit. Exactly one independent review is
+complete and its five findings received one concentrated correction pass. The
+complete post-review acceptance rerun is also complete.
 
 ## Normative Matrix
 
@@ -20,10 +21,13 @@ post-review acceptance rerun remain separate termination gates.
 | GPU exclusion | Pending/mapped buffer is unavailable to queue work | Direct and resolved-submission paths fail before effects | Complete |
 | Buffer barrier | `mapAsync()` waits for earlier use of that buffer | No broad `SubmittedWork.done` wait | Complete |
 | Cancellation | `unmap()` rejects a pending map | AbortSignal and lifecycle cancellation clean up once | Complete |
+| Cancellation evidence | Map and scopes settle independently | Structural lifecycle outcome plus retained concurrent native outcomes | Complete |
 | View lifetime | `unmap()`/destroy/device destroy detaches views | Closed zero-copy `MappedBufferLease` | Complete |
 | READ release | Host mutations are discarded | No content epoch change | Complete |
 | WRITE release | Host mutations become buffer content | Exactly one ready content epoch | Complete |
 | Uncertain WRITE | Native completion may become unknowable | One indeterminate epoch, no rollback | Complete |
+| Failed release | Throwing `unmap()` does not prove ownership returned | Authority/fact quarantine until lifecycle termination | Complete |
+| Late device loss | Device loss is asynchronous relative to host release | Latest matching host-WRITE provenance becomes indeterminate | Complete |
 | WGSL relation | Mapping does not alter shader memory layout | LayoutCodec/Program contracts unchanged | Preserved |
 | Evidence | Native failures may settle asynchronously | Stable operations/incidents plus bounded current facts | Complete |
 
@@ -43,10 +47,10 @@ The checked Editor's Draft revision is
 
 | Native operation | Current call site | Ownership classification | Result |
 | --- | --- | --- | --- |
-| General `mapAsync` | `packages/geoscratch/src/scratch/buffer-mapping.ts:849` | Mapping transaction boundary | Approved |
-| Mapped-creation `getMappedRange` | `packages/geoscratch/src/scratch/buffer-mapping.ts:239` | Whole-buffer WRITE lease | Approved |
-| Ordinary `getMappedRange` | `packages/geoscratch/src/scratch/buffer-mapping.ts:387` | Selected-region lease | Approved |
-| General `unmap` | `packages/geoscratch/src/scratch/buffer-mapping.ts:668` | Single cleanup owner | Approved |
+| General `mapAsync` | `packages/geoscratch/src/scratch/buffer-mapping.ts:975` | Mapping transaction boundary | Approved |
+| Mapped-creation `getMappedRange` | `packages/geoscratch/src/scratch/buffer-mapping.ts:274` | Whole-buffer WRITE lease | Approved |
+| Ordinary `getMappedRange` | `packages/geoscratch/src/scratch/buffer-mapping.ts:440` | Selected-region lease | Approved |
+| General `unmap` | `packages/geoscratch/src/scratch/buffer-mapping.ts:777` | Single cleanup owner | Approved |
 | Readback `mapAsync` | `packages/geoscratch/src/scratch/readback-mapping.ts:255` | Readback-private mapped staging | Retained |
 | Readback `getMappedRange` | `packages/geoscratch/src/scratch/readback.ts:542` | Readback-private owned-copy materialization | Retained |
 | Readback `unmap` | `packages/geoscratch/src/scratch/readback-staging.ts:199`, `:237` | Readback-private cleanup | Retained |
@@ -76,10 +80,11 @@ BindSet preparation are deliberately not GPU-use boundaries.
 
 ## Recorded Evidence
 
-- 22 focused fake-GPU tests cover mapped creation, ordinary READ/WRITE,
+- 27 focused mapping tests plus 5 native-fake mapping tests cover mapped
+  creation, ordinary READ/WRITE,
   preflight timing, authority conflict, AbortSignal, arbitrary map/scope
   settlement order, validation/internal/OOM/native failure, lifecycle races,
-  cleanup uncertainty, epoch behavior, and anti-forgery.
+  cleanup quarantine, late device loss, epoch behavior, and anti-forgery.
 - Public TypeScript checks prove the new exports and reject ordinary
   `mappedAtCreation`.
 - Static parity audit passes every public/export/preflight/native-call/bounded
@@ -93,9 +98,30 @@ BindSet preparation are deliberately not GPU-use boundaries.
   views detached; READ epoch stayed 0; WRITE epoch became 1; conflict,
   GPU-use exclusion, and abort returned their stable diagnostic codes; console,
   page, request, and uncaptured-GPU-error lists were empty.
-- The final complete `npm test`, `npm run typecheck`, and `npm run build`
-  rerun occurs after the single independent review; the evidence above does
-  not substitute for that gate.
+- The final post-review rerun passed `npm test` with 1,033 passing and 2
+  pending, `npm run typecheck`, `npm run build`, the 25,000-lease stress gate,
+  and the static parity audit. The already-passed headed browser gate was not
+  repeated because no external interruption invalidated it.
+
+## Independent Review
+
+Exactly one fresh-context, source-faithful review examined the implementation,
+tests, docs, inventories, and official mapping contract without editing the
+branch or rerunning the headed browser gate. It found five issues:
+
+1. native `unmap()` failure released authority despite uncertain mapped state;
+2. map `AbortError` and just-released WRITE/device-loss ordering could lose
+   device-loss attribution;
+3. structural AbortSignal hooks could strand an already-claimed authority;
+4. Runtime disposal published resource disposal first; and
+5. cancellation short-circuited settled native evidence, omitted the selected
+   BufferRegion, and fabricated a lifecycle native error.
+
+The single permitted correction pass resolves all five. Focused tests prove
+READ, WRITE, and mapped-creation quarantine; branded signal observation;
+pending and active Runtime-disposal attribution; unexplained `AbortError`;
+late device-loss WRITE reclassification; and cancellation incidents retaining
+concurrent validation evidence. No independent-review finding remains open.
 
 ## Schema V5 Audit
 

@@ -134,7 +134,9 @@ and the single-map authority before native issue. It invokes native
 `mapAsync()` directly: that operation waits for earlier GPU use of this
 buffer, so Scratch does not add a broad `SubmittedWork.done` or queue-wide
 wait. `AbortSignal` cancels only a pending map and does not destroy a reusable
-buffer.
+buffer. Scratch validates the native AbortSignal brand and observes it through
+captured EventTarget methods, so duck-typed or shadowed hooks cannot strand
+mapping authority.
 
 READ and WRITE have deliberately different epoch effects:
 
@@ -147,6 +149,12 @@ READ and WRITE have deliberately different epoch effects:
   uncertain, Scratch advances to an `indeterminate` epoch rather than
   pretending the prior ready content survived.
 
+Scratch retains only the latest successful host-WRITE provenance per buffer.
+When device loss settles, a still-current matching allocation/epoch advances
+once to `indeterminate`; a later producer or allocation replacement makes that
+provenance stale. This covers the ordering window in which native `unmap()`
+returns before the asynchronous device-loss notification reaches the Runtime.
+
 Pending and active host authority blocks every Scratch queue write, encoding,
 submission, direct readback, and other GPU buffer use before native effects.
 Earlier already-submitted use remains valid and is ordered by `mapAsync()`.
@@ -157,6 +165,11 @@ BufferRegion/LayoutCodec contract.
 General mapping records a `buffer-mapping` operation and current bounded
 mapping facts. It does not increment `readbackMemory.activeMappings`, retain
 mapped bytes, or grow history with runtime duration.
+
+If native `unmap()` throws, the lease fails but the authority and current fact
+remain quarantined until Buffer, Runtime, or device termination. Scratch does
+not permit a second map or GPU use on native state whose ownership transfer
+was not confirmed.
 
 ## Upload
 

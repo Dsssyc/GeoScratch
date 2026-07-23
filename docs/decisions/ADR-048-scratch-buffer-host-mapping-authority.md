@@ -115,7 +115,11 @@ native `unmap()` or destruction detaches it according to WebGPU.
 
 Normal `dispose()` is idempotent and calls native `unmap()` at most once. A
 synchronous unmap failure records `failed`, marks possible WRITE content
-indeterminate, and is never retried implicitly.
+indeterminate, and is never retried implicitly. Because native mapped state
+may still exist, that failure quarantines the per-buffer authority and its
+bounded current mapping fact until Buffer, Runtime, or device lifecycle
+termination. Another map and every Scratch GPU use continue to fail locally;
+resource destruction is the only remaining native cleanup boundary.
 
 ### Module-private per-buffer authority
 
@@ -125,8 +129,9 @@ states are not exposed as a mandatory public preparation machine.
 
 Mapping claims authority before native `mapAsync()`. A second mapping fails
 locally with `SCRATCH_BUFFER_MAPPING_CONFLICT` before any native call.
-Authority is released exactly once after failure, cancellation, or lease
-termination.
+Authority is released exactly once after clean failure, cancellation, or
+lease termination. A failed native `unmap()` retains authority as the
+explicit quarantined exception described above.
 
 The authority uses snapshot-and-recheck lifecycle epochs and callbacks. It
 does not hold a lock across caller code or a Promise, does not serialize
@@ -136,12 +141,16 @@ unrelated buffers, and never retries automatically.
 map. Aborting calls native `unmap()` once so the buffer can remain usable,
 waits for the issued mapping and error scopes to settle, releases authority,
 and rejects with `SCRATCH_BUFFER_MAPPING_ABORTED`. Scratch does not expose a
-second operation-handle cancellation API.
+second operation-handle cancellation API. Signal recognition uses the native
+AbortSignal brand and captured EventTarget methods rather than caller-shadowable
+duck-typed hooks.
 
 Buffer, Runtime, and device lifecycle transitions use the same authority.
 They cancel pending mapping or retire an active lease exactly once and remove
 all listeners. Resource or Runtime disposal may then destroy the buffer; no
 mapping path destroys a still-owned reusable buffer merely to cancel a map.
+Runtime disposal publishes its lifecycle cancellation before per-resource
+destruction, so the terminal reason remains `runtime-disposed`.
 
 ### Native acknowledgement
 
@@ -199,6 +208,10 @@ queue serial, command producer, or SubmittedWork fact.
 If WRITE ownership may have exposed bytes but unmap or lifecycle completion is
 uncertain, Scratch advances to a new indeterminate epoch. It never rolls back
 to a previously ready epoch. A later confirmed producer may recover readiness.
+The latest successful host-WRITE provenance is retained once per buffer. If
+device loss settles after release, and no later producer or allocation
+replacement superseded that fact, Scratch advances once more to an
+indeterminate epoch instead of preserving a falsely certain ready state.
 
 ### Structured bounded evidence
 
@@ -208,6 +221,14 @@ subject. Stable codes use the `SCRATCH_BUFFER_MAPPING_*` family and distinguish
 local validation, native validation, internal error, out-of-memory, scope
 settlement, Promise rejection, abort, mapped-range access, lifecycle change,
 and release failure.
+
+Cancellation always records a structural lifecycle outcome without a
+fabricated native error. Issued map and validation/internal/OOM scope outcomes
+still settle and remain in the same bounded incident; only the `AbortError`
+caused by Scratch's own `unmap()` is suppressed as duplicate evidence. An
+otherwise unexplained standardized map `AbortError` is attributed to device
+loss while the Runtime's authoritative `device.lost` handling remains the
+runtime-wide loss source.
 
 Schema v5 is retained. The change is additive:
 

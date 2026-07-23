@@ -109,6 +109,7 @@ export function assertBufferAvailableForGpuUse(
 export function disposeBufferMappingAuthority(buffer: BufferResource): void {
 
     notifyBufferMappingLifecycle(buffer, 'resource-disposed')
+    authorityByBuffer.set(buffer, undefined)
 }
 
 function notifyBufferMappingLifecycle(

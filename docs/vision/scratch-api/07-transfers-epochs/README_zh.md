@@ -128,7 +128,9 @@ release 会恰好推进一次 parent `contentEpoch`，并让内容 ready。
 4-byte size、bounds、runtime ownership、lifecycle 与 single-map authority。它直接
 调用原生 `mapAsync()`：该操作本身会等待这个 buffer 更早的 GPU use，因此 Scratch
 不会再增加广义 `SubmittedWork.done` 或 queue-wide wait。`AbortSignal` 只取消
-pending map，不销毁仍可复用的 buffer。
+pending map，不销毁仍可复用的 buffer。Scratch 校验原生 AbortSignal brand，并
+通过捕获的 EventTarget method 观察它，因此 duck-typed 或被 shadow 的 hook
+不能遗留 mapping authority。
 
 READ 与 WRITE 有意采用不同 epoch effect：
 
@@ -140,6 +142,12 @@ READ 与 WRITE 有意采用不同 epoch effect：
 - 如果 WRITE bytes 可能已经暴露，但 cleanup 或 lifecycle completion 结果不确定，
   Scratch 会推进到 `indeterminate` epoch，而不是假称先前 ready content 仍有效。
 
+Scratch 对每个 buffer 只保留最近一次成功 host-WRITE provenance。Device loss
+settle 时，仍匹配 current allocation/epoch 的事实会再推进一次到
+`indeterminate`；后续 producer 或 allocation replacement 会使该 provenance
+失效。这覆盖原生 `unmap()` 已返回、但异步 device-loss notification 尚未到达
+Runtime 的时序窗口。
+
 Pending 与 active host authority 会让所有 Scratch queue write、encoding、
 submission、direct readback 与其他 GPU buffer use 在原生 effect 前失败。已经更早
 提交的 use 仍有效，并由 `mapAsync()` 排序。Layout interpretation 保持独立：同一个
@@ -149,6 +157,10 @@ BufferRegion/LayoutCodec contract 解释。
 一般 mapping 记录 `buffer-mapping` operation 与有界 current mapping facts。它不
 增加 `readbackMemory.activeMappings`，不保留 mapped bytes，也不会让历史随 runtime
 存活时间增长。
+
+如果原生 `unmap()` 抛出异常，lease 会失败，但 authority 与 current fact 会保持
+quarantine，直到 Buffer、Runtime 或 device termination。对于 ownership transfer
+尚未得到确认的原生状态，Scratch 不允许第二次 mapping 或 GPU use。
 
 ## Upload
 

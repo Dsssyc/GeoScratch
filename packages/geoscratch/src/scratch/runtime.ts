@@ -8,6 +8,7 @@ import { BufferResource, createBufferResource } from './buffer.js'
 import {
     createMappedBufferResource,
     mapBufferResource,
+    markHostWrittenBuffersIndeterminateOnDeviceLoss,
     MappedBufferLease,
 } from './buffer-mapping.js'
 import {
@@ -188,6 +189,7 @@ export class ScratchRuntime {
         if (options.device.lost && typeof options.device.lost.then === 'function') {
             options.device.lost.then((info) => {
                 loseScratchRuntimeAuthority(this, retainDeviceLostInfo(info))
+                markHostWrittenBuffersIndeterminateOnDeviceLoss(this)
                 this.#diagnosticsController.recordDeviceLoss(info)
                 for (const readback of runtimeReadbackOperationSnapshot(this)) {
                     readback.cancel('device-lost')
@@ -596,6 +598,8 @@ export class ScratchRuntime {
                 failures.push(error)
             }
         }
+
+        dispose(() => this.#diagnosticsController.publishRuntimeDisposal())
 
         for (const surface of [ ...this._surfaces ]) {
             dispose(() => surface.dispose())

@@ -385,7 +385,7 @@ export function createFakeGpu(options = {}) {
         request.settled = true
         request.buffer.mapped = false
         request.buffer.mapState = 'unmapped'
-        request.reject(new DOMException('The mapping was cancelled.', 'OperationError'))
+        request.reject(new DOMException('The mapping was cancelled.', 'AbortError'))
     }
 
     function createFakeBufferMapping(mode, offset, size) {

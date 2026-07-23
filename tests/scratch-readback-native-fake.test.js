@@ -66,7 +66,7 @@ describe('fake WebGPU readback outcomes', () => {
             await firstMap
             throw new Error('expected cancelled map rejection')
         } catch (error) {
-            expect(error.name).to.equal('OperationError')
+            expect(error.name).to.equal('AbortError')
         }
         await secondMap
         expect(first.mapState).to.equal('unmapped')

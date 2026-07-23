@@ -136,6 +136,12 @@ BindSet description, and BindSet preparation remain legal because they do not
 give the GPU ownership. The dynamic check occurs when a selected command,
 copy, readback, resolve, clear, or upload would actually use the buffer.
 
+A native `unmap()` failure does not make that authority available. The lease
+becomes failed while the bounded current mapping fact and GPU-use exclusion
+remain in force until Buffer, Runtime, or device termination destroys or
+invalidates the native allocation. Scratch never guesses that a throwing
+`unmap()` nevertheless succeeded.
+
 `buffer.gpuBuffer` remains an explicit raw escape hatch. Direct native
 map/unmap through it is not visible to Scratch and receives no Scratch
 authority, epoch, readiness, or diagnostic guarantees.
