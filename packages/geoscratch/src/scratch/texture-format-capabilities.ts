@@ -132,6 +132,19 @@ const TIER_2_READ_WRITE_STORAGE_TEXTURE_FORMATS = [
     'rgba32float',
 ] as const satisfies readonly GPUTextureFormat[]
 
+const RESOLVE_CAPABLE_COLOR_FORMATS = new Set<GPUTextureFormat>([
+    'r8unorm',
+    'rg8unorm',
+    'rgba8unorm',
+    'rgba8unorm-srgb',
+    'bgra8unorm',
+    'bgra8unorm-srgb',
+    'r16float',
+    'rg16float',
+    'rgba16float',
+    'rgb10a2unorm',
+])
+
 const RENDERABLE_FORMAT_REQUIREMENTS = createRenderableFormatRequirements()
 const STORAGE_TEXTURE_FORMAT_CAPABILITIES = createStorageTextureFormatCapabilities()
 
@@ -151,6 +164,15 @@ export function textureFormatIsColorRenderable(
 ): boolean {
 
     return !DEPTH_STENCIL_FORMAT_SET.has(format) && textureFormatIsRenderable(runtime, format)
+}
+
+export function textureFormatSupportsResolve(
+    runtime: ScratchRuntime,
+    format: GPUTextureFormat
+): boolean {
+
+    return RESOLVE_CAPABLE_COLOR_FORMATS.has(format) &&
+        textureFormatIsColorRenderable(runtime, format)
 }
 
 export function textureFormatSupportsStorageBinding(

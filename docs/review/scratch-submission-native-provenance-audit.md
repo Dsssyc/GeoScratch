@@ -75,15 +75,15 @@ a later clean-cut API decision rather than mislabeled as ADR-035 coverage.
 | N27 | `packages/geoscratch/src/scratch/readback.ts:484` | `copyBufferToBuffer()` | Direct-readback native observation, `command-encode`. | Observed direct readback |
 | N28 | `packages/geoscratch/src/scratch/readback.ts:493` | `finish()` | Direct-readback native observation, `encoder-finish`. | Observed direct readback |
 | N29 | `packages/geoscratch/src/scratch/readback.ts:497` | `queue.submit()` | Direct-readback native observation, `queue-submit`. | Observed direct readback |
-| N30 | `packages/geoscratch/src/scratch/submission.ts:637` | `createCommandEncoder()` | Submission encoder-segment location, `encoder-create`. | Observed submission |
-| N31 | `packages/geoscratch/src/scratch/submission.ts:660` | `finish()` | Submission encoder-segment location, `encoder-finish`. | Observed submission |
-| N32 | `packages/geoscratch/src/scratch/submission.ts:790` | `beginComputePass()` | Compute pass location, `pass-begin`. | Observed submission |
-| N33 | `packages/geoscratch/src/scratch/submission.ts:816` | compute pass `end()` | Compute pass location, `pass-end`. | Observed submission |
-| N34 | `packages/geoscratch/src/scratch/submission.ts:842` | `beginRenderPass()` | Render pass location, `pass-begin`. | Observed submission |
-| N35 | `packages/geoscratch/src/scratch/submission.ts:893` | render pass `end()` | Render pass location, `pass-end`. | Observed submission |
-| N36 | `packages/geoscratch/src/scratch/submission.ts:921` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
-| N37 | `packages/geoscratch/src/scratch/submission.ts:1287` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
-| N38 | `packages/geoscratch/src/scratch/submission.ts:1292` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
+| N30 | `packages/geoscratch/src/scratch/submission.ts:665` | `createCommandEncoder()` | Submission encoder-segment location, `encoder-create`. | Observed submission |
+| N31 | `packages/geoscratch/src/scratch/submission.ts:688` | `finish()` | Submission encoder-segment location, `encoder-finish`. | Observed submission |
+| N32 | `packages/geoscratch/src/scratch/submission.ts:818` | `beginComputePass()` | Compute pass location, `pass-begin`. | Observed submission |
+| N33 | `packages/geoscratch/src/scratch/submission.ts:844` | compute pass `end()` | Compute pass location, `pass-end`. | Observed submission |
+| N34 | `packages/geoscratch/src/scratch/submission.ts:873` | `beginRenderPass()` | Render pass location, `pass-begin`. | Observed submission |
+| N35 | `packages/geoscratch/src/scratch/submission.ts:924` | render pass `end()` | Render pass location, `pass-end`. | Observed submission |
+| N36 | `packages/geoscratch/src/scratch/submission.ts:954` | `queue.submit()` | Queue-action location with `command-buffer`, `queue-submit`. | Observed submission |
+| N37 | `packages/geoscratch/src/scratch/submission.ts:1379` | `pushDebugGroup()` | Only inside finite detailed command observation. | Detailed observation only |
+| N38 | `packages/geoscratch/src/scratch/submission.ts:1384` | `popDebugGroup()` | Balanced in `finally` inside the same detailed command observation. | Detailed observation only |
 | N39 | `packages/geoscratch/src/scratch/surface.ts:256` | public `GPUCanvasContext.getCurrentTexture()` | Direct public Surface borrowing validates private ownership/configuration first but has no submission observation owner. | Direct call deferred |
 | N40 | `packages/geoscratch/src/scratch/surface.ts:353` | submission Surface `GPUTexture.createView()` | A prepared Surface lease is consumed only inside the owning submission `attachment-view` issue. | Observed submission attachment |
 | N41 | `packages/geoscratch/src/scratch/surface.ts:353` | submission Surface `GPUCanvasContext.getCurrentTexture()` | Same prepared Surface attachment issue and configuration-version lease as N40. | Observed submission attachment |

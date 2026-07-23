@@ -4,7 +4,10 @@ import { advanceQuerySlotContentEpoch, isQuerySetResource, QuerySetResource } fr
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { isSurfaceReceiver, surfaceFactsFor } from './surface.js'
 import { TextureResource, TextureViewSpec, isTextureViewSpec, prepareTextureViewSpecDescriptor } from './texture.js'
-import { textureFormatIsColorRenderable } from './texture-format-capabilities.js'
+import {
+    textureFormatIsColorRenderable,
+    textureFormatSupportsResolve,
+} from './texture-format-capabilities.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
@@ -38,12 +41,14 @@ export type TimestampWritesSpec = Readonly<{
 
 export type RenderPassColorAttachmentSpec = Readonly<{
     target: Surface | TextureViewSpec
+    resolveTarget?: Surface | TextureViewSpec
     format?: GPUTextureFormat
     load?: GPULoadOp
     store?: GPUStoreOp
     clear?: Readonly<GPUColor>
     depthSlice?: number
     viewDescriptor?: Readonly<GPUTextureViewDescriptor>
+    resolveViewDescriptor?: Readonly<GPUTextureViewDescriptor>
 }>
 
 export type RenderPassDepthStencilAttachmentSpec = Readonly<{
@@ -54,12 +59,15 @@ export type RenderPassDepthStencilAttachmentSpec = Readonly<{
     stencilLoad?: GPULoadOp
     stencilStore?: GPUStoreOp
     stencilClear?: number
+    depthReadOnly?: boolean
+    stencilReadOnly?: boolean
 }>
 
 export type RenderPassSpecDescriptor = {
     label?: string
-    color: readonly RenderPassColorAttachmentSpec[]
+    color: readonly (RenderPassColorAttachmentSpec | null)[]
     depth?: RenderPassDepthStencilAttachmentSpec
+    maxDrawCount?: number
     timestampWrites?: TimestampWritesSpec
     occlusionQuerySet?: QuerySetResource
 }
@@ -82,7 +90,10 @@ type MutableRenderPassDepthStencilAttachmentSpec = {
 }
 
 export type RenderPassNativeAttachments = Readonly<{
-    color: readonly GPUTextureView[]
+    color: readonly (Readonly<{
+        view: GPUTextureView
+        resolveTarget?: GPUTextureView
+    }> | null)[]
     depth?: GPUTextureView
 }>
 
@@ -93,8 +104,18 @@ type RenderAttachmentExtent = {
     sampleCount: number
 }
 
+type ColorAttachmentFacts = {
+    extent: RenderAttachmentExtent
+    region: RenderAttachmentRegion
+    format: GPUTextureFormat
+    textureFormat: GPUTextureFormat
+    effectiveUsage: GPUTextureUsageFlags
+    transient: boolean
+}
+
 type RenderAttachmentRegion = {
     index: number
+    role: 'color' | 'resolve'
     subject: DiagnosticSubject
     target: GPUCanvasContext | TextureResource
     dimension: 'surface' | GPUTextureViewDimension
@@ -113,8 +134,9 @@ export interface RenderPassSpec {
     readonly id: string
     readonly label?: string
     readonly passKind: 'render'
-    readonly color: readonly RenderPassColorAttachmentSpec[]
+    readonly color: readonly (RenderPassColorAttachmentSpec | null)[]
     readonly depth?: RenderPassDepthStencilAttachmentSpec
+    readonly maxDrawCount?: number
     readonly timestampWrites?: TimestampWritesSpec
     readonly occlusionQuerySet?: QuerySetResource
     readonly isDisposed: boolean
@@ -137,12 +159,14 @@ export class RenderPassSpec {
         installPassSpecLifecycleObservation(this, state)
         const color = normalizeColorAttachments(this, descriptor.color)
         const depth = normalizeDepthStencilAttachment(this, descriptor.depth)
+        const maxDrawCount = normalizeMaxDrawCount(this, descriptor.maxDrawCount)
         validateRenderPassHasAttachment(this, color, depth)
         const timestampWrites = normalizeTimestampWrites(this, descriptor.timestampWrites)
         const occlusionQuerySet = normalizeOcclusionQuerySet(this, descriptor.occlusionQuerySet)
         lockRenderPassSpecContract(this, {
             color,
             ...(depth !== undefined ? { depth } : {}),
+            ...(maxDrawCount !== undefined ? { maxDrawCount } : {}),
             ...(timestampWrites !== undefined ? { timestampWrites } : {}),
             ...(occlusionQuerySet !== undefined ? { occlusionQuerySet } : {}),
         })
@@ -200,7 +224,9 @@ export class RenderPassSpec {
 
     hasEncoderSideEffects(): boolean {
 
-        return this.color.length > 0 || this.depth !== undefined || this.timestampWrites !== undefined
+        return this.color.some(attachment => attachment !== null) ||
+            this.depth !== undefined ||
+            this.timestampWrites !== undefined
     }
 
     advanceTimestampWriteEpochs(): void {
@@ -227,10 +253,18 @@ export function createRenderPassDescriptor(
 
     const descriptor: GPURenderPassDescriptor = {
         colorAttachments: pass.color.map((attachment, index) => {
+            if (attachment === null) return null
+            const nativeAttachment = nativeAttachments.color[index]
+            if (nativeAttachment === null) {
+                throw new TypeError('Non-null RenderPass color attachment has no submission-scoped native view.')
+            }
             const colorAttachment: GPURenderPassColorAttachment = {
-                view: nativeAttachments.color[index],
+                view: nativeAttachment.view,
                 loadOp: attachment.load ?? 'clear',
                 storeOp: attachment.store ?? 'store',
+            }
+            if (nativeAttachment.resolveTarget !== undefined) {
+                colorAttachment.resolveTarget = nativeAttachment.resolveTarget
             }
             if (attachment.clear !== undefined) colorAttachment.clearValue = attachment.clear as GPUColor
             if (attachment.depthSlice !== undefined) colorAttachment.depthSlice = attachment.depthSlice
@@ -247,6 +281,7 @@ export function createRenderPassDescriptor(
     }
     if (pass.timestampWrites !== undefined) descriptor.timestampWrites = createTimestampWritesDescriptor(pass.timestampWrites)
     if (pass.occlusionQuerySet !== undefined) descriptor.occlusionQuerySet = pass.occlusionQuerySet.gpuQuerySet
+    if (pass.maxDrawCount !== undefined) descriptor.maxDrawCount = pass.maxDrawCount
 
     return descriptor
 }
@@ -510,22 +545,28 @@ function throwOcclusionQuerySetDiagnostic(pass: RenderPassSpec, querySet: unknow
 
 function normalizeColorAttachments(
     pass: RenderPassSpec,
-    color: readonly RenderPassColorAttachmentSpec[]
-): RenderPassColorAttachmentSpec[] {
+    color: readonly (RenderPassColorAttachmentSpec | null)[]
+): (RenderPassColorAttachmentSpec | null)[] {
 
     if (!Array.isArray(color)) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
-            severity: 'error',
-            phase: 'submission',
-            subject: pass.subject,
-            message: 'RenderPassSpec color attachments must be an array.',
-            expected: { color: 'RenderPassColorAttachmentSpec[]' },
-            actual: { color },
-        })
+        throwColorAttachmentDiagnostic(pass, color, undefined, 'array')
     }
 
-    return color.map((attachment, index) => normalizeColorAttachment(pass, attachment, index))
+    const normalized: (RenderPassColorAttachmentSpec | null)[] = []
+    for (let index = 0; index < color.length; index++) {
+        if (!(index in color)) {
+            throwColorAttachmentDiagnostic(pass, undefined, index, 'hole')
+        }
+        const attachment = color[index]
+        if (attachment === undefined) {
+            throwColorAttachmentDiagnostic(pass, attachment, index, 'undefined')
+        }
+        normalized.push(attachment === null
+            ? null
+            : normalizeColorAttachment(pass, attachment, index))
+    }
+
+    return normalized
 }
 
 function normalizeColorAttachment(
@@ -533,6 +574,10 @@ function normalizeColorAttachment(
     attachment: RenderPassColorAttachmentSpec,
     index: number
 ): RenderPassColorAttachmentSpec {
+
+    if (!isRecord(attachment)) {
+        throwColorAttachmentDiagnostic(pass, attachment, index, 'attachment')
+    }
 
     const target = attachment?.target
     if (isTextureViewSpec(target)) {
@@ -573,19 +618,12 @@ function normalizeColorAttachment(
         }
         const depthSlice = normalizeColorAttachmentDepthSlice(pass, target, attachment.depthSlice)
         if (depthSlice !== undefined) normalized.depthSlice = depthSlice
+        normalizeResolveAttachment(pass, normalized, attachment, index)
         return normalized
     }
 
     if (!isSurfaceReceiver(target)) {
-        throwScratchDiagnostic({
-            code: 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE',
-            severity: 'error',
-            phase: 'submission',
-            subject: pass.subject,
-            message: 'RenderPassSpec color attachment target must be a Surface or TextureViewSpec.',
-            expected: { target: 'Surface or TextureViewSpec' },
-            actual: { index, target: target === undefined || target === null ? String(target) : typeof target },
-        })
+        throwColorAttachmentDiagnostic(pass, attachment, index, 'target')
     }
 
     const surface = surfaceFactsFor(target)
@@ -637,17 +675,85 @@ function normalizeColorAttachment(
         })
     }
     if (viewDescriptor !== undefined) normalized.viewDescriptor = viewDescriptor
+    normalizeResolveAttachment(pass, normalized, attachment, index)
 
     return normalized
 }
 
+function normalizeResolveAttachment(
+    pass: RenderPassSpec,
+    normalized: MutableRenderPassColorAttachmentSpec,
+    attachment: RenderPassColorAttachmentSpec,
+    index: number
+): void {
+
+    const resolveTarget = attachment.resolveTarget
+    if (resolveTarget === undefined) {
+        if (attachment.resolveViewDescriptor !== undefined) {
+            throwResolveAttachmentDiagnostic(pass, attachment, index, 'descriptorWithoutTarget')
+        }
+        return
+    }
+
+    if (isTextureViewSpec(resolveTarget)) {
+        resolveTarget.texture.assertRuntime(pass.runtime)
+        resolveTarget.assertUsable()
+        if (attachment.resolveViewDescriptor !== undefined) {
+            throwResolveAttachmentDiagnostic(pass, attachment, index, 'textureViewDescriptor')
+        }
+        validateResolveTextureView(pass, resolveTarget, attachment, index)
+        normalized.resolveTarget = resolveTarget
+    } else {
+        if (!isSurfaceReceiver(resolveTarget)) {
+            throwResolveAttachmentDiagnostic(pass, attachment, index, 'target')
+        }
+        const surface = surfaceFactsFor(resolveTarget)
+        if (surface.runtime !== pass.runtime) {
+            throwResolveAttachmentDiagnostic(pass, attachment, index, 'runtime')
+        }
+        const resolveViewDescriptor = snapshotSurfaceAttachmentViewDescriptor(
+            attachment.resolveViewDescriptor
+        )
+        validateSurfaceAttachmentViewDescriptor(pass, surface, resolveViewDescriptor)
+        normalized.resolveTarget = resolveTarget
+        if (resolveViewDescriptor !== undefined) {
+            normalized.resolveViewDescriptor = resolveViewDescriptor
+        }
+    }
+
+    validateResolveAttachment(pass, normalized, index)
+}
+
+function validateResolveTextureView(
+    pass: RenderPassSpec,
+    view: TextureViewSpec,
+    attachment: RenderPassColorAttachmentSpec,
+    index: number
+): void {
+
+    const prepared = prepareTextureViewSpecDescriptor(view)
+    const valid = (prepared.usage & TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0 &&
+        (prepared.usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) === 0 &&
+        (prepared.dimension === '2d' || prepared.dimension === '2d-array') &&
+        prepared.mipLevelCount === 1 &&
+        prepared.arrayLayerCount === 1 &&
+        prepared.aspect === 'all' &&
+        prepared.swizzle === 'rgba' &&
+        textureFormatIsColorRenderable(pass.runtime, prepared.format)
+    if (valid) return
+
+    throwResolveAttachmentDiagnostic(pass, attachment, index, 'targetView', {
+        viewDescriptor: prepared,
+    })
+}
+
 function validateRenderPassHasAttachment(
     pass: RenderPassSpec,
-    color: readonly RenderPassColorAttachmentSpec[],
+    color: readonly (RenderPassColorAttachmentSpec | null)[],
     depth: RenderPassDepthStencilAttachmentSpec | undefined
 ): void {
 
-    if (color.length > 0 || depth !== undefined) return
+    if (color.some(attachment => attachment !== null) || depth !== undefined) return
 
     throwScratchDiagnostic({
         code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
@@ -659,7 +765,27 @@ function validateRenderPassHasAttachment(
             color: 'at least one color attachment when depth is absent',
             depth: 'depth/stencil attachment when color is empty',
         },
-        actual: { colorAttachmentCount: color.length, depth: undefined },
+        actual: {
+            colorAttachmentCount: color.length,
+            nonNullColorAttachmentCount: color.filter(attachment => attachment !== null).length,
+            depth: undefined,
+        },
+    })
+}
+
+function normalizeMaxDrawCount(pass: RenderPassSpec, value: unknown): number | undefined {
+
+    if (value === undefined) return undefined
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PASS_MAX_DRAW_COUNT_INVALID',
+        severity: 'error',
+        phase: 'submission',
+        subject: pass.subject,
+        message: 'RenderPassSpec maxDrawCount must be a non-negative JavaScript safe integer.',
+        expected: { maxDrawCount: 'non-negative safe integer' },
+        actual: { maxDrawCount: describeValue(value) },
     })
 }
 
@@ -781,12 +907,14 @@ function normalizeDepthStencilAttachment(
     const hasDepthFields = (
         attachment.depthLoad !== undefined ||
         attachment.depthStore !== undefined ||
-        attachment.depthClear !== undefined
+        attachment.depthClear !== undefined ||
+        attachment.depthReadOnly !== undefined
     )
     const hasStencilFields = (
         attachment.stencilLoad !== undefined ||
         attachment.stencilStore !== undefined ||
-        attachment.stencilClear !== undefined
+        attachment.stencilClear !== undefined ||
+        attachment.stencilReadOnly !== undefined
     )
 
     if (hasDepthFields && !hasDepth) {
@@ -796,42 +924,91 @@ function normalizeDepthStencilAttachment(
         throwDepthStencilAttachmentDiagnostic(pass, attachment, 'stencilFieldsForDepthOnlyFormat')
     }
 
-    const usesDepth = hasDepth && (hasDepthFields || !hasStencilFields)
-    const usesStencil = hasStencil && (hasStencilFields || !hasDepth)
     const normalized: MutableRenderPassDepthStencilAttachmentSpec = { target }
     const transient = (target.descriptor.usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0
+    const depthReadOnly = normalizeDepthStencilReadOnly(
+        pass,
+        attachment.depthReadOnly,
+        attachment,
+        'depthReadOnly'
+    )
+    const stencilReadOnly = normalizeDepthStencilReadOnly(
+        pass,
+        attachment.stencilReadOnly,
+        attachment,
+        'stencilReadOnly'
+    )
 
-    if (usesDepth) {
-        normalized.depthLoad = normalizeDepthStencilLoadOp(pass, attachment.depthLoad ?? 'clear', attachment, 'depthLoad')
-        normalized.depthStore = normalizeDepthStencilStoreOp(
-            pass,
-            attachment.depthStore ?? (transient ? 'discard' : 'store'),
-            attachment,
-            'depthStore'
-        )
-        const depthClear = attachment.depthClear ?? (normalized.depthLoad === 'clear' ? 1 : undefined)
+    if (hasDepth) {
+        if (depthReadOnly) {
+            if (attachment.depthLoad !== undefined || attachment.depthStore !== undefined) {
+                throwDepthStencilAttachmentDiagnostic(pass, attachment, 'depthReadOnlyOperations')
+            }
+            normalized.depthReadOnly = true
+        } else {
+            normalized.depthLoad = normalizeDepthStencilLoadOp(
+                pass,
+                attachment.depthLoad ?? 'clear',
+                attachment,
+                'depthLoad'
+            )
+            normalized.depthStore = normalizeDepthStencilStoreOp(
+                pass,
+                attachment.depthStore ?? (transient ? 'discard' : 'store'),
+                attachment,
+                'depthStore'
+            )
+        }
+        const depthClear = attachment.depthClear ??
+            (normalized.depthLoad === 'clear' ? 1 : undefined)
         if (depthClear !== undefined) {
             normalized.depthClear = normalizeDepthClearValue(pass, depthClear, attachment)
         }
     }
-    if (usesStencil) {
-        normalized.stencilLoad = normalizeDepthStencilLoadOp(pass, attachment.stencilLoad ?? 'clear', attachment, 'stencilLoad')
-        normalized.stencilStore = normalizeDepthStencilStoreOp(
-            pass,
-            attachment.stencilStore ?? (transient ? 'discard' : 'store'),
-            attachment,
-            'stencilStore'
-        )
+    if (hasStencil) {
+        if (stencilReadOnly) {
+            if (attachment.stencilLoad !== undefined || attachment.stencilStore !== undefined) {
+                throwDepthStencilAttachmentDiagnostic(pass, attachment, 'stencilReadOnlyOperations')
+            }
+            normalized.stencilReadOnly = true
+        } else {
+            normalized.stencilLoad = normalizeDepthStencilLoadOp(
+                pass,
+                attachment.stencilLoad ?? 'clear',
+                attachment,
+                'stencilLoad'
+            )
+            normalized.stencilStore = normalizeDepthStencilStoreOp(
+                pass,
+                attachment.stencilStore ?? (transient ? 'discard' : 'store'),
+                attachment,
+                'stencilStore'
+            )
+        }
         if (attachment.stencilClear !== undefined) normalized.stencilClear = normalizeStencilClearValue(pass, attachment.stencilClear, attachment)
     }
     if (transient && (
-        (usesDepth && (normalized.depthLoad !== 'clear' || normalized.depthStore !== 'discard')) ||
-        (usesStencil && (normalized.stencilLoad !== 'clear' || normalized.stencilStore !== 'discard'))
+        depthReadOnly ||
+        stencilReadOnly ||
+        (hasDepth && (normalized.depthLoad !== 'clear' || normalized.depthStore !== 'discard')) ||
+        (hasStencil && (normalized.stencilLoad !== 'clear' || normalized.stencilStore !== 'discard'))
     )) {
         throwDepthStencilAttachmentDiagnostic(pass, attachment, 'transientLoadStore')
     }
 
     return normalized
+}
+
+function normalizeDepthStencilReadOnly(
+    pass: RenderPassSpec,
+    value: unknown,
+    attachment: RenderPassDepthStencilAttachmentSpec,
+    key: 'depthReadOnly' | 'stencilReadOnly'
+): boolean {
+
+    if (value === undefined) return false
+    if (typeof value === 'boolean') return value
+    throwDepthStencilAttachmentDiagnostic(pass, { ...attachment, [key]: value }, key)
 }
 
 function normalizeDepthStencilLoadOp(
@@ -899,9 +1076,11 @@ function createDepthStencilAttachmentDescriptor(
     if (attachment.depthLoad !== undefined) descriptor.depthLoadOp = attachment.depthLoad
     if (attachment.depthStore !== undefined) descriptor.depthStoreOp = attachment.depthStore
     if (attachment.depthClear !== undefined) descriptor.depthClearValue = attachment.depthClear
+    if (attachment.depthReadOnly !== undefined) descriptor.depthReadOnly = attachment.depthReadOnly
     if (attachment.stencilLoad !== undefined) descriptor.stencilLoadOp = attachment.stencilLoad
     if (attachment.stencilStore !== undefined) descriptor.stencilStoreOp = attachment.stencilStore
     if (attachment.stencilClear !== undefined) descriptor.stencilClearValue = attachment.stencilClear
+    if (attachment.stencilReadOnly !== undefined) descriptor.stencilReadOnly = attachment.stencilReadOnly
 
     return descriptor
 }
@@ -912,50 +1091,40 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
     const extents: RenderAttachmentExtent[] = []
     const regions: RenderAttachmentRegion[] = []
     for (const [ index, attachment ] of pass.color.entries()) {
-        if (isTextureViewSpec(attachment.target)) {
-            validateRenderAttachmentView(pass, attachment.target)
-            validateColorRenderableAttachmentFormat(
-                pass,
-                attachment.target.subject,
-                attachment.target.descriptor.format,
-                [ attachment.target.texture.subject ]
-            )
-            const depthSlice = normalizeColorAttachmentDepthSlice(
-                pass,
-                attachment.target,
-                attachment.depthSlice
-            )
-            extents.push(textureRenderAttachmentExtent(attachment.target))
-            regions.push(textureRenderAttachmentRegion(index, attachment.target, depthSlice))
-            continue
-        }
-
-        const surface = surfaceFactsFor(attachment.target)
-        const view = validateSurfaceAttachmentViewDescriptor(
+        if (attachment === null) continue
+        const sourceFacts = colorAttachmentFacts(
             pass,
-            surface,
-            attachment.viewDescriptor
+            attachment.target,
+            attachment.viewDescriptor,
+            index,
+            'color',
+            attachment.depthSlice
         )
-        validateColorRenderableAttachmentFormat(pass, surface.subject, view.format)
         validateColorAttachmentFormat(
             pass,
-            surface.subject,
+            sourceFacts.extent.subject,
             attachment.format,
-            view.format
+            sourceFacts.format
         )
-        normalizeColorAttachmentOperations(pass, surface.subject, attachment, false)
-        extents.push({
-            subject: surface.subject,
-            width: surface.size.width,
-            height: surface.size.height,
-            sampleCount: 1,
-        })
-        regions.push({
-            index,
-            subject: surface.subject,
-            target: surface.context,
-            dimension: 'surface',
-        })
+        normalizeColorAttachmentOperations(
+            pass,
+            sourceFacts.extent.subject,
+            attachment,
+            sourceFacts.transient
+        )
+        extents.push(sourceFacts.extent)
+        regions.push(sourceFacts.region)
+        if (attachment.resolveTarget !== undefined) {
+            validateResolveAttachment(pass, attachment, index)
+            const resolveFacts = colorAttachmentFacts(
+                pass,
+                attachment.resolveTarget,
+                attachment.resolveViewDescriptor,
+                index,
+                'resolve'
+            )
+            regions.push(resolveFacts.region)
+        }
     }
     if (pass.depth !== undefined) {
         validateRenderAttachmentView(pass, pass.depth.target)
@@ -964,6 +1133,135 @@ export function validateRenderPassAttachments(pass: RenderPassSpec): void {
 
     validateDisjointColorAttachmentRegions(pass, regions)
     validateMatchingRenderAttachmentExtents(pass, extents)
+}
+
+function validateResolveAttachment(
+    pass: RenderPassSpec,
+    attachment: RenderPassColorAttachmentSpec,
+    index: number
+): void {
+
+    if (attachment.resolveTarget === undefined) return
+    const source = colorAttachmentFacts(
+        pass,
+        attachment.target,
+        attachment.viewDescriptor,
+        index,
+        'color',
+        attachment.depthSlice
+    )
+    const resolve = colorAttachmentFacts(
+        pass,
+        attachment.resolveTarget,
+        attachment.resolveViewDescriptor,
+        index,
+        'resolve'
+    )
+    const valid = source.extent.sampleCount > 1 &&
+        resolve.extent.sampleCount === 1 &&
+        resolve.region.dimension !== '3d' &&
+        source.extent.width === resolve.extent.width &&
+        source.extent.height === resolve.extent.height &&
+        source.format === resolve.format &&
+        source.textureFormat === resolve.textureFormat &&
+        textureFormatSupportsResolve(pass.runtime, resolve.format) &&
+        !resolve.transient &&
+        !renderAttachmentRegionsOverlap(source.region, resolve.region)
+    if (valid) return
+
+    throwResolveAttachmentDiagnostic(pass, attachment, index, 'incompatible', {
+        source: describeColorAttachmentFacts(source),
+        resolve: describeColorAttachmentFacts(resolve),
+        overlap: renderAttachmentRegionsOverlap(source.region, resolve.region),
+    })
+}
+
+function colorAttachmentFacts(
+    pass: RenderPassSpec,
+    target: Surface | TextureViewSpec,
+    viewDescriptor: GPUTextureViewDescriptor | undefined,
+    index: number,
+    role: 'color' | 'resolve',
+    depthSlice?: number
+): ColorAttachmentFacts {
+
+    if (isTextureViewSpec(target)) {
+        target.texture.assertRuntime(pass.runtime)
+        target.assertUsable()
+        if (role === 'resolve') {
+            validateResolveTextureView(pass, target, {
+                target: target,
+                resolveTarget: target,
+            }, index)
+        } else {
+            validateRenderAttachmentView(pass, target)
+            validateColorRenderableAttachmentFormat(
+                pass,
+                target.subject,
+                target.descriptor.format,
+                [ target.texture.subject ]
+            )
+        }
+        const normalizedDepthSlice = role === 'color'
+            ? normalizeColorAttachmentDepthSlice(pass, target, depthSlice)
+            : undefined
+        return {
+            extent: textureRenderAttachmentExtent(target),
+            region: textureRenderAttachmentRegion(
+                index,
+                role,
+                target,
+                normalizedDepthSlice
+            ),
+            format: target.descriptor.format,
+            textureFormat: target.texture.format,
+            effectiveUsage: target.descriptor.usage,
+            transient: (target.descriptor.usage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0,
+        }
+    }
+
+    const surface = surfaceFactsFor(target)
+    if (surface.runtime !== pass.runtime) {
+        if (role === 'resolve') {
+            throwResolveAttachmentDiagnostic(pass, { target, resolveTarget: target }, index, 'runtime')
+        }
+        throwColorAttachmentDiagnostic(pass, { target }, index, 'runtime')
+    }
+    const view = validateSurfaceAttachmentViewDescriptor(pass, surface, viewDescriptor)
+    validateColorRenderableAttachmentFormat(pass, surface.subject, view.format)
+    return {
+        extent: {
+            subject: surface.subject,
+            width: surface.size.width,
+            height: surface.size.height,
+            sampleCount: 1,
+        },
+        region: {
+            index,
+            role,
+            subject: surface.subject,
+            target: surface.context,
+            dimension: 'surface',
+        },
+        format: view.format,
+        textureFormat: surface.format,
+        effectiveUsage: view.effectiveUsage,
+        transient: (view.effectiveUsage & TEXTURE_USAGE_TRANSIENT_ATTACHMENT) !== 0,
+    }
+}
+
+function describeColorAttachmentFacts(facts: ColorAttachmentFacts): Record<string, unknown> {
+
+    return {
+        format: facts.format,
+        textureFormat: facts.textureFormat,
+        width: facts.extent.width,
+        height: facts.extent.height,
+        sampleCount: facts.extent.sampleCount,
+        usage: facts.effectiveUsage,
+        transient: facts.transient,
+        region: describeRenderAttachmentRegion(facts.region),
+    }
 }
 
 function validateRenderAttachmentView(
@@ -1171,14 +1469,17 @@ function normalizeColorAttachmentOperations(
 function lockRenderPassSpecContract(
     pass: RenderPassSpec,
     normalized: Readonly<{
-        color: RenderPassColorAttachmentSpec[]
+        color: (RenderPassColorAttachmentSpec | null)[]
         depth?: RenderPassDepthStencilAttachmentSpec
+        maxDrawCount?: number
         timestampWrites?: TimestampWritesSpec
         occlusionQuerySet?: QuerySetResource
     }>
 ): void {
 
-    for (const attachment of normalized.color) Object.freeze(attachment)
+    for (const attachment of normalized.color) {
+        if (attachment !== null) Object.freeze(attachment)
+    }
     Object.freeze(normalized.color)
     if (normalized.depth !== undefined) Object.freeze(normalized.depth)
     if (normalized.timestampWrites !== undefined) Object.freeze(normalized.timestampWrites)
@@ -1254,6 +1555,7 @@ function textureRenderAttachmentExtent(
 
 function textureRenderAttachmentRegion(
     index: number,
+    role: 'color' | 'resolve',
     view: TextureViewSpec,
     depthSlice: number | undefined
 ): RenderAttachmentRegion {
@@ -1261,6 +1563,7 @@ function textureRenderAttachmentRegion(
     const descriptor = view.descriptor
     const region = {
         index,
+        role,
         subject: view.subject,
         target: view.texture,
         dimension: descriptor.dimension,
@@ -1330,6 +1633,7 @@ function describeRenderAttachmentRegion(region: RenderAttachmentRegion): Readonl
 
     return Object.freeze({
         index: region.index,
+        role: region.role,
         dimension: region.dimension,
         ...(region.baseMipLevel !== undefined ? { baseMipLevel: region.baseMipLevel } : {}),
         ...(region.baseArrayLayer !== undefined ? { baseArrayLayer: region.baseArrayLayer } : {}),
@@ -1414,6 +1718,8 @@ function throwDepthStencilAttachmentDiagnostic(
             depthStore: [ 'store', 'discard' ],
             stencilLoad: [ 'clear', 'load' ],
             stencilStore: [ 'store', 'discard' ],
+            depthReadOnly: 'boolean',
+            stencilReadOnly: 'boolean',
         },
         actual: {
             reason,
@@ -1425,6 +1731,72 @@ function throwDepthStencilAttachmentDiagnostic(
             stencilLoad: isRecord(attachment) ? attachment.stencilLoad : undefined,
             stencilStore: isRecord(attachment) ? attachment.stencilStore : undefined,
             stencilClear: isRecord(attachment) ? attachment.stencilClear : undefined,
+            depthReadOnly: isRecord(attachment) ? attachment.depthReadOnly : undefined,
+            stencilReadOnly: isRecord(attachment) ? attachment.stencilReadOnly : undefined,
+        },
+    })
+}
+
+function throwColorAttachmentDiagnostic(
+    pass: RenderPassSpec,
+    attachment: unknown,
+    index: number | undefined,
+    reason: string
+): never {
+
+    const target = isRecord(attachment) ? attachment.target : undefined
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PASS_COLOR_ATTACHMENT_INVALID',
+        severity: 'error',
+        phase: 'submission',
+        subject: pass.subject,
+        related: [ diagnosticSubjectOf(target) ].filter(isDefined),
+        message: 'RenderPassSpec color requires dense explicit null or valid color attachment slots.',
+        expected: {
+            color: 'dense array of RenderPassColorAttachmentSpec | null',
+            target: 'Surface or TextureViewSpec for each non-null slot',
+        },
+        actual: {
+            reason,
+            index,
+            attachment: describeValue(attachment),
+            target: describeValue(target),
+        },
+    })
+}
+
+function throwResolveAttachmentDiagnostic(
+    pass: RenderPassSpec,
+    attachment: unknown,
+    index: number,
+    reason: string,
+    details: Record<string, unknown> = {}
+): never {
+
+    const record = isRecord(attachment) ? attachment : {}
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PASS_RESOLVE_ATTACHMENT_INVALID',
+        severity: 'error',
+        phase: 'submission',
+        subject: pass.subject,
+        related: [
+            diagnosticSubjectOf(record.target),
+            diagnosticSubjectOf(record.resolveTarget),
+        ].filter(isDefined),
+        message: 'RenderPassSpec resolve source and target must satisfy the current WebGPU resolve contract.',
+        expected: {
+            sourceSampleCount: '> 1',
+            resolveSampleCount: 1,
+            extent: 'matching current render extents',
+            format: 'matching view and texture formats with resolve support',
+            resolveTarget: 'non-3d, renderable, non-transient, disjoint view',
+        },
+        actual: {
+            reason,
+            index,
+            target: describeValue(record.target),
+            resolveTarget: describeValue(record.resolveTarget),
+            ...details,
         },
     })
 }

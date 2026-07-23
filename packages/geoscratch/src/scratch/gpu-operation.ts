@@ -224,7 +224,7 @@ export type ScratchSubmissionNativeLocation =
         submissionId: string
         stepIndex: number
         passId: string
-        attachmentKind: 'color' | 'depth-stencil'
+        attachmentKind: 'color' | 'resolve' | 'depth-stencil'
         attachmentIndex: number
         viewSpecHash: string
         resourceId: string
@@ -235,7 +235,7 @@ export type ScratchSubmissionNativeLocation =
         submissionId: string
         stepIndex: number
         passId: string
-        attachmentKind: 'color'
+        attachmentKind: 'color' | 'resolve'
         attachmentIndex: number
         surfaceId: string
         surfaceFormat: GPUTextureFormat
@@ -1344,13 +1344,20 @@ function assertSubmissionNativeLocation(
         case 'render-attachment':
             assertNonNegativeInteger(location.stepIndex, 'stepIndex')
             assertNonEmptyString(location.passId, 'passId')
-            if (location.attachmentKind !== 'color' && location.attachmentKind !== 'depth-stencil') {
+            if (
+                location.attachmentKind !== 'color' &&
+                location.attachmentKind !== 'resolve' &&
+                location.attachmentKind !== 'depth-stencil'
+            ) {
                 throw new TypeError(`Unsupported render attachment kind: ${String(location.attachmentKind)}`)
             }
             assertNonNegativeInteger(location.attachmentIndex, 'attachmentIndex')
             if ('surfaceId' in location) {
-                if (location.attachmentKind !== 'color') {
-                    throw new TypeError('Surface render attachments must be color attachments.')
+                if (
+                    location.attachmentKind !== 'color' &&
+                    location.attachmentKind !== 'resolve'
+                ) {
+                    throw new TypeError('Surface render attachments must be color or resolve attachments.')
                 }
                 assertNonEmptyString(location.surfaceId, 'surfaceId')
                 assertNonEmptyString(location.surfaceFormat, 'surfaceFormat')

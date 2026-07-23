@@ -82,6 +82,19 @@ import type {
     ScratchRuntimeLifecycleChange,
 } from './runtime-diagnostics.js'
 
+const DEPTH_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'depth16unorm',
+    'depth24plus',
+    'depth24plus-stencil8',
+    'depth32float',
+    'depth32float-stencil8',
+])
+const STENCIL_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
+    'stencil8',
+    'depth24plus-stencil8',
+    'depth32float-stencil8',
+])
+
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 
 export type SubmissionStepKind = 'upload' | 'copy' | 'readback' | 'resolve' | 'compute' | 'render'
@@ -443,7 +456,22 @@ type CommandExecutionDiagnosticContext = {
     attempts: readonly SubmissionCommandReadinessAttempt[]
 }
 
-type RenderAttachmentKind = 'color' | 'depth-stencil'
+type RenderAttachmentKind = 'color' | 'resolve' | 'depth-stencil'
+type TextureFootprintAspect = 'color' | 'depth' | 'stencil'
+type TextureSubresourceFootprint = {
+    texture: TextureResource
+    aspect: TextureFootprintAspect
+    baseMipLevel: number
+    mipLevelCount: number
+    layerKind: 'array' | '3d-all' | '3d-slice'
+    baseLayer: number
+    layerCount: number
+}
+type RenderAttachmentFootprint = TextureSubresourceFootprint & {
+    attachmentKind: RenderAttachmentKind
+    attachmentIndex: number
+    attachmentAccess: SubmissionResourceAccessKind
+}
 
 export interface SubmissionBuilder {
     runtime: ScratchRuntime
@@ -822,7 +850,10 @@ export class SubmissionBuilder {
                 if (step.disposition === 'skip-pass') continue
                 if (step.commands.length === 0 && !step.passSpec.hasEncoderSideEffects()) continue
 
-                const colorWrites = captureRenderAttachmentWrites(stepIndex, step.passSpec)
+                const attachmentAccesses = captureRenderAttachmentAccesses(
+                    stepIndex,
+                    step.passSpec
+                )
                 const passLocation = submissionPassLocation(
                     submittedId,
                     stepIndex,
@@ -893,9 +924,11 @@ export class SubmissionBuilder {
                 nativeObservation.issue('pass-end', passLocation, () => passEncoder.end())
                 trackTimestampWrites(step.passSpec)
                 step.passSpec.advanceTimestampWriteEpochs()
-                for (const write of colorWrites) trackSegmentResourceWrite(write.resource)
-                advanceRenderAttachmentEpochs(step.passSpec)
-                completeResourceAccesses(resourceAccesses, colorWrites)
+                for (const access of attachmentAccesses) {
+                    if (access.access === 'write') trackSegmentResourceWrite(access.resource)
+                }
+                advanceRenderAttachmentContent(step.passSpec)
+                completeResourceAccesses(resourceAccesses, attachmentAccesses)
             }
 
             finishEncoderSegment()
@@ -1092,6 +1125,7 @@ function createSubmissionNativeIssuePlan(
         const passLocation = submissionPassLocation(submissionId, stepIndex, step.passSpec)
         if (step.kind === 'render') {
             for (const [ attachmentIndex, attachment ] of step.passSpec.color.entries()) {
+                if (attachment === null) continue
                 const target = isTextureViewSpec(attachment.target)
                     ? attachment.target
                     : preparedSurfaceAttachmentFor(surfaceAttachments, attachment.target)
@@ -1106,6 +1140,25 @@ function createSubmissionNativeIssuePlan(
                         target
                     ),
                 })
+                if (attachment.resolveTarget !== undefined) {
+                    const resolveTarget = isTextureViewSpec(attachment.resolveTarget)
+                        ? attachment.resolveTarget
+                        : preparedSurfaceAttachmentFor(
+                            surfaceAttachments,
+                            attachment.resolveTarget
+                        )
+                    encoding.push({
+                        stage: 'attachment-view',
+                        location: renderAttachmentLocation(
+                            submissionId,
+                            stepIndex,
+                            step.passSpec,
+                            'resolve',
+                            attachmentIndex,
+                            resolveTarget
+                        ),
+                    })
+                }
             }
             if (step.passSpec.depth !== undefined) {
                 encoding.push({
@@ -1164,8 +1217,15 @@ function prepareSubmissionSurfaceAttachments(
         ) continue
 
         for (const attachment of step.passSpec.color) {
-            if (isTextureViewSpec(attachment.target) || prepared.has(attachment.target)) continue
-            prepared.set(attachment.target, prepareSurfaceAttachment(attachment.target))
+            if (attachment === null) continue
+            for (const target of [ attachment.target, attachment.resolveTarget ]) {
+                if (
+                    target === undefined ||
+                    isTextureViewSpec(target) ||
+                    prepared.has(target)
+                ) continue
+                prepared.set(target, prepareSurfaceAttachment(target))
+            }
         }
     }
     return prepared
@@ -1190,10 +1250,11 @@ function issueRenderAttachmentViews(
 ): RenderPassNativeAttachments {
 
     const color = passSpec.color.map((attachment, attachmentIndex) => {
+        if (attachment === null) return null
         const target = isTextureViewSpec(attachment.target)
             ? attachment.target
             : preparedSurfaceAttachmentFor(surfaceAttachments, attachment.target)
-        return observation.issue(
+        const view = observation.issue(
             'attachment-view',
             renderAttachmentLocation(
                 submissionId,
@@ -1207,6 +1268,37 @@ function issueRenderAttachmentViews(
                 ? createNativeTextureView(attachment.target as TextureViewSpec)
                 : createPreparedSurfaceAttachmentView(target as PreparedSurfaceAttachment, attachment.viewDescriptor)
         )
+        const resolveTarget = attachment.resolveTarget === undefined
+            ? undefined
+            : (() => {
+                const preparedTarget = isTextureViewSpec(attachment.resolveTarget)
+                    ? attachment.resolveTarget
+                    : preparedSurfaceAttachmentFor(
+                        surfaceAttachments,
+                        attachment.resolveTarget
+                    )
+                return observation.issue(
+                    'attachment-view',
+                    renderAttachmentLocation(
+                        submissionId,
+                        stepIndex,
+                        passSpec,
+                        'resolve',
+                        attachmentIndex,
+                        preparedTarget
+                    ),
+                    () => isTextureViewSpec(attachment.resolveTarget)
+                        ? createNativeTextureView(attachment.resolveTarget as TextureViewSpec)
+                        : createPreparedSurfaceAttachmentView(
+                            preparedTarget as PreparedSurfaceAttachment,
+                            attachment.resolveViewDescriptor
+                        )
+                )
+            })()
+        return Object.freeze({
+            view,
+            ...(resolveTarget !== undefined ? { resolveTarget } : {}),
+        })
     })
     Object.freeze(color)
 
@@ -1325,14 +1417,14 @@ function renderAttachmentLocation(
     submissionId: string,
     stepIndex: number,
     passSpec: RenderPassSpec,
-    attachmentKind: 'color' | 'depth-stencil',
+    attachmentKind: 'color' | 'resolve' | 'depth-stencil',
     attachmentIndex: number,
     target: TextureViewSpec | PreparedSurfaceAttachment
 ): ScratchSubmissionNativeLocation {
 
     if (!isTextureViewSpec(target)) {
-        if (attachmentKind !== 'color') {
-            throw new TypeError('Surface render attachments must be color attachments.')
+        if (attachmentKind !== 'color' && attachmentKind !== 'resolve') {
+            throw new TypeError('Surface render attachments must be color or resolve attachments.')
         }
         const facts = preparedSurfaceAttachmentFacts(target)
         return {
@@ -1802,7 +1894,7 @@ function resolveRenderReadiness(
     diagnostics: ScratchDiagnostic[]
 ): ResolvedPassCommands<RenderCommand> {
 
-    assertNoIndeterminateRenderAttachmentLoads(builder, step, stepIndex, readiness)
+    assertRenderAttachmentReadiness(builder, step, stepIndex, readiness)
     const commands: RenderCommand[] = []
     const commandOutcomes: SubmissionCommandExecutionOutcome[] = []
     for (const [commandIndex, command] of step.commands.entries()) {
@@ -1844,19 +1936,14 @@ function resolveRenderReadiness(
     }
 
     for (const attachment of step.passSpec.color) {
-        if (isTextureViewSpec(attachment.target)) {
-            markSimulatedReady(readiness, attachment.target.texture)
-        }
+        if (attachment === null) continue
     }
-
-    if (step.passSpec.depth !== undefined) {
-        markSimulatedReady(readiness, step.passSpec.depth.target.texture)
-    }
+    markSimulatedRenderAttachmentContent(readiness, step.passSpec)
 
     return { disposition: 'execute', commands, commandOutcomes }
 }
 
-function assertNoIndeterminateRenderAttachmentLoads(
+function assertRenderAttachmentReadiness(
     builder: SubmissionBuilder,
     step: RenderStep,
     stepIndex: number,
@@ -1864,6 +1951,7 @@ function assertNoIndeterminateRenderAttachmentLoads(
 ): void {
 
     for (const [ attachmentIndex, attachment ] of step.passSpec.color.entries()) {
+        if (attachment === null) continue
         if (attachment.load !== 'load' || !isTextureViewSpec(attachment.target)) continue
         const texture = attachment.target.texture
         const simulated = simulatedResourceState(readiness, texture)
@@ -1882,6 +1970,32 @@ function assertNoIndeterminateRenderAttachmentLoads(
     const depth = step.passSpec.depth
     if (depth === undefined) return
     const simulated = simulatedResourceState(readiness, depth.target.texture)
+    if (
+        depth.depthReadOnly === true &&
+        simulated.state !== 'ready'
+    ) {
+        throwUnreadableAttachmentDiagnostic(
+            builder,
+            step,
+            stepIndex,
+            depth.target.texture,
+            simulated,
+            'depth'
+        )
+    }
+    if (
+        depth.stencilReadOnly === true &&
+        simulated.state !== 'ready'
+    ) {
+        throwUnreadableAttachmentDiagnostic(
+            builder,
+            step,
+            stepIndex,
+            depth.target.texture,
+            simulated,
+            'stencil'
+        )
+    }
     if (simulated.state !== 'indeterminate') return
     if (depth.depthLoad === 'load') {
         throwIndeterminateAttachmentLoadDiagnostic(
@@ -1903,6 +2017,50 @@ function assertNoIndeterminateRenderAttachmentLoads(
             'stencil'
         )
     }
+}
+
+function throwUnreadableAttachmentDiagnostic(
+    builder: SubmissionBuilder,
+    step: RenderStep,
+    stepIndex: number,
+    resource: TextureResource,
+    simulated: ResourceSimulationState,
+    role: 'depth' | 'stencil'
+): never {
+
+    if (simulated.state === 'indeterminate') {
+        throwIndeterminateAttachmentLoadDiagnostic(
+            builder,
+            step,
+            stepIndex,
+            resource,
+            simulated,
+            role
+        )
+    }
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
+        severity: 'error',
+        phase: 'submission',
+        subject: step.passSpec.subject,
+        related: [ resource.subject, builder.subject ],
+        message: 'Read-only render attachment content must be initialized before the pass.',
+        expected: {
+            state: 'ready',
+            role,
+        },
+        actual: {
+            stepIndex,
+            passId: step.passSpec.id,
+            resourceId: resource.id,
+            resourceKind: resource.resourceKind,
+            role,
+            simulatedState: simulated.state,
+            simulatedContentEpoch: simulated.contentEpoch,
+            allocationVersion: resource.allocationVersion,
+        },
+    })
 }
 
 function appendPassExecutionOutcomes(
@@ -3119,26 +3277,56 @@ function createResourceAccess(pendingAccess: PendingSubmissionResourceAccess): S
     return access
 }
 
-function captureRenderAttachmentWrites(stepIndex: number, passSpec: RenderPassSpec): PendingSubmissionResourceAccess[] {
+function captureRenderAttachmentAccesses(
+    stepIndex: number,
+    passSpec: RenderPassSpec
+): PendingSubmissionResourceAccess[] {
 
     const origin = passAccessOrigin(stepIndex, 'render', passSpec)
-    const writes: PendingSubmissionResourceAccess[] = []
+    const accesses: PendingSubmissionResourceAccess[] = []
+    const readTargets = new Set<TextureResource>()
     const writtenTargets = new Set<TextureResource>()
 
     for (const attachment of passSpec.color) {
-        const target = attachment.target
-        if (!isTextureViewSpec(target) || writtenTargets.has(target.texture)) continue
-
-        writes.push(captureResourceAccess(target.texture, 'write', origin))
-        writtenTargets.add(target.texture)
+        if (attachment === null) continue
+        for (const target of [ attachment.target, attachment.resolveTarget ]) {
+            if (
+                !isTextureViewSpec(target) ||
+                writtenTargets.has(target.texture)
+            ) continue
+            accesses.push(captureResourceAccess(target.texture, 'write', origin))
+            writtenTargets.add(target.texture)
+        }
     }
 
-    if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target.texture)) {
-        writes.push(captureResourceAccess(passSpec.depth.target.texture, 'write', origin))
-        writtenTargets.add(passSpec.depth.target.texture)
+    if (passSpec.depth !== undefined) {
+        const target = passSpec.depth.target.texture
+        const format = passSpec.depth.target.descriptor.format
+        const hasRead = (
+            textureFormatHasDepth(format) &&
+            passSpec.depth.depthReadOnly === true
+        ) || (
+            textureFormatHasStencil(format) &&
+            passSpec.depth.stencilReadOnly === true
+        )
+        const hasWrite = (
+            textureFormatHasDepth(format) &&
+            passSpec.depth.depthReadOnly !== true
+        ) || (
+            textureFormatHasStencil(format) &&
+            passSpec.depth.stencilReadOnly !== true
+        )
+        if (hasRead && !readTargets.has(target)) {
+            accesses.push(captureResourceAccess(target, 'read', origin))
+            readTargets.add(target)
+        }
+        if (hasWrite && !writtenTargets.has(target)) {
+            accesses.push(captureResourceAccess(target, 'write', origin))
+            writtenTargets.add(target)
+        }
     }
 
-    return writes
+    return accesses
 }
 
 function createProducerEpochs(resourceAccesses: readonly SubmissionResourceAccess[]): SubmittedResourceEpoch[] {
@@ -3461,8 +3649,8 @@ function collectRenderPassResourceConflictDiagnostics(
 ): ScratchDiagnostic[] {
 
     const diagnostics: ScratchDiagnostic[] = []
-    const attachmentTargets = collectRenderAttachmentTargets(resolvedStep.passSpec)
-    if (attachmentTargets.size === 0) return diagnostics
+    const attachmentFootprints = collectRenderAttachmentFootprints(resolvedStep.passSpec)
+    if (attachmentFootprints.length === 0) return diagnostics
 
     const requestedCommands = new Map<string, DrawCommand>()
     for (const command of requestedStep.commands) {
@@ -3485,7 +3673,7 @@ function collectRenderPassResourceConflictDiagnostics(
             resolvedStep,
             stepIndex,
             command,
-            attachmentTargets,
+            attachmentFootprints,
             'read',
             diagnostics,
             outcome,
@@ -3496,7 +3684,7 @@ function collectRenderPassResourceConflictDiagnostics(
             resolvedStep,
             stepIndex,
             command,
-            attachmentTargets,
+            attachmentFootprints,
             'write',
             diagnostics,
             outcome,
@@ -3512,7 +3700,7 @@ function collectRenderCommandResourceConflictDiagnostics(
     step: RenderStep,
     stepIndex: number,
     command: DrawCommand,
-    attachmentTargets: Map<TextureResource, RenderAttachmentKind>,
+    attachmentFootprints: readonly RenderAttachmentFootprint[],
     access: SubmissionResourceAccessKind,
     diagnostics: ScratchDiagnostic[],
     outcome?: SubmissionCommandExecutionOutcome,
@@ -3526,15 +3714,29 @@ function collectRenderCommandResourceConflictDiagnostics(
     for (const resource of resources) {
         if (!isTextureResource(resource)) continue
 
-        const attachmentKind = attachmentTargets.get(resource)
-        if (attachmentKind === undefined) continue
+        const commandFootprints = commandTextureAccessFootprints(command, resource, access)
+        const conflict = commandFootprints.flatMap(commandFootprint =>
+            attachmentFootprints
+                .filter(attachment => (
+                    textureSubresourceFootprintsOverlap(commandFootprint, attachment) &&
+                    !(access === 'read' && attachment.attachmentAccess === 'read')
+                ))
+                .map(attachment => ({ command: commandFootprint, attachment }))
+        )[0]
+        if (conflict === undefined) continue
+        const attachmentKind = conflict.attachment.attachmentKind
 
         const actual = {
             stepIndex,
             passId: step.passSpec.id,
-            ...(attachmentKind === 'depth-stencil' ? {
+            ...(attachmentKind !== 'color' ? {
                 commandKind: command.commandKind,
                 attachmentKind,
+                attachmentAspect: conflict.attachment.aspect,
+                attachmentAccess: conflict.attachment.attachmentAccess,
+                attachmentIndex: conflict.attachment.attachmentIndex,
+                commandFootprint: describeTextureSubresourceFootprint(conflict.command),
+                attachmentFootprint: describeTextureSubresourceFootprint(conflict.attachment),
             } : {}),
             commandId: command.id,
             access,
@@ -3565,36 +3767,280 @@ function collectRenderCommandResourceConflictDiagnostics(
                 resource.subject,
                 builder.subject,
             ],
-            message: attachmentKind === 'depth-stencil'
-                ? 'DrawCommand resources must not include the current render pass depth/stencil attachment target.'
-                : 'DrawCommand resources must not include the current render pass color attachment target.',
-            expected: attachmentKind === 'depth-stencil'
+            message: 'DrawCommand texture access conflicts with an overlapping render attachment subresource aspect.',
+            expected: attachmentKind === 'color' || attachmentKind === 'resolve'
                 ? {
                     attachment: 'pass-level write only',
-                    drawResources: 'must exclude current render pass depth/stencil attachment target',
+                    drawResources: attachmentKind === 'resolve'
+                        ? 'must exclude current render pass resolve attachment targets'
+                        : 'must exclude current render pass color attachment targets',
                 }
-                : {
-                    attachment: 'pass-level write only',
-                    drawResources: 'must exclude current render pass color attachment targets',
-                },
+                : attachmentKind === 'depth-stencil' &&
+                    conflict.attachment.attachmentAccess === 'write'
+                    ? {
+                        attachment: 'pass-level write only',
+                        drawResources: 'must exclude current render pass depth/stencil attachment target',
+                    }
+                    : {
+                        overlap: 'read/read against a read-only depth/stencil aspect, or disjoint subresources',
+                        attachment: 'no overlapping command access when either side writes',
+                    },
             actual,
         }))
     }
 }
 
-function collectRenderAttachmentTargets(passSpec: RenderPassSpec): Map<TextureResource, RenderAttachmentKind> {
+function collectRenderAttachmentFootprints(
+    passSpec: RenderPassSpec
+): RenderAttachmentFootprint[] {
 
-    const attachmentTargets = new Map<TextureResource, RenderAttachmentKind>()
-    for (const attachment of passSpec.color) {
-        const target = attachment.target
-        if (isTextureViewSpec(target)) attachmentTargets.set(target.texture, 'color')
+    const footprints: RenderAttachmentFootprint[] = []
+    for (const [ attachmentIndex, attachment ] of passSpec.color.entries()) {
+        if (attachment === null) continue
+        if (isTextureViewSpec(attachment.target)) {
+            footprints.push(renderColorAttachmentFootprint(
+                attachment.target,
+                attachmentIndex,
+                'color',
+                attachment.depthSlice
+            ))
+        }
+        if (isTextureViewSpec(attachment.resolveTarget)) {
+            footprints.push(renderColorAttachmentFootprint(
+                attachment.resolveTarget,
+                attachmentIndex,
+                'resolve'
+            ))
+        }
     }
 
-    if (passSpec.depth !== undefined && !attachmentTargets.has(passSpec.depth.target.texture)) {
-        attachmentTargets.set(passSpec.depth.target.texture, 'depth-stencil')
+    const depth = passSpec.depth
+    if (depth !== undefined) {
+        const format = depth.target.descriptor.format
+        if (textureFormatHasDepth(format)) {
+            footprints.push(renderDepthStencilAttachmentFootprint(
+                depth.target,
+                'depth',
+                depth.depthReadOnly === true ? 'read' : 'write'
+            ))
+        }
+        if (textureFormatHasStencil(format)) {
+            footprints.push(renderDepthStencilAttachmentFootprint(
+                depth.target,
+                'stencil',
+                depth.stencilReadOnly === true ? 'read' : 'write'
+            ))
+        }
     }
 
-    return attachmentTargets
+    return footprints
+}
+
+function renderColorAttachmentFootprint(
+    view: TextureViewSpec,
+    attachmentIndex: number,
+    attachmentKind: 'color' | 'resolve',
+    depthSlice?: number
+): RenderAttachmentFootprint {
+
+    const descriptor = view.descriptor
+    const base = {
+        texture: view.texture,
+        aspect: 'color' as const,
+        baseMipLevel: descriptor.baseMipLevel,
+        mipLevelCount: 1,
+        attachmentKind,
+        attachmentIndex,
+        attachmentAccess: 'write' as const,
+    }
+    if (descriptor.dimension === '3d') {
+        if (depthSlice === undefined) {
+            throw new TypeError('Validated 3D color attachment footprint requires depthSlice.')
+        }
+        return {
+            ...base,
+            layerKind: '3d-slice',
+            baseLayer: depthSlice,
+            layerCount: 1,
+        }
+    }
+    return {
+        ...base,
+        layerKind: 'array',
+        baseLayer: descriptor.baseArrayLayer,
+        layerCount: 1,
+    }
+}
+
+function renderDepthStencilAttachmentFootprint(
+    view: TextureViewSpec,
+    aspect: 'depth' | 'stencil',
+    attachmentAccess: SubmissionResourceAccessKind
+): RenderAttachmentFootprint {
+
+    return {
+        texture: view.texture,
+        aspect,
+        baseMipLevel: view.descriptor.baseMipLevel,
+        mipLevelCount: 1,
+        layerKind: 'array',
+        baseLayer: view.descriptor.baseArrayLayer,
+        layerCount: 1,
+        attachmentKind: 'depth-stencil',
+        attachmentIndex: 0,
+        attachmentAccess,
+    }
+}
+
+function commandTextureAccessFootprints(
+    command: DrawCommand,
+    texture: TextureResource,
+    access: SubmissionResourceAccessKind
+): TextureSubresourceFootprint[] {
+
+    const footprints: TextureSubresourceFootprint[] = []
+    for (const invocation of command.bindSets) {
+        for (const binding of invocation.set.bindings.values()) {
+            if (
+                !isTextureViewSpec(binding.resource) ||
+                binding.resource.texture !== texture
+            ) continue
+            const bindingAccess = textureBindingAccess(binding.entry)
+            if (!bindingAccess[access]) continue
+            footprints.push(...textureViewSubresourceFootprints(binding.resource))
+        }
+    }
+    return footprints.length > 0
+        ? footprints
+        : wholeTextureSubresourceFootprints(texture)
+}
+
+function textureBindingAccess(
+    entry: { type: string, access?: GPUStorageTextureAccess }
+): Readonly<{ read: boolean, write: boolean }> {
+
+    if (entry.type === 'texture') return { read: true, write: false }
+    if (entry.type === 'storage-texture') {
+        return {
+            read: entry.access === 'read-only' || entry.access === 'read-write',
+            write: entry.access === 'write-only' || entry.access === 'read-write',
+        }
+    }
+    return { read: false, write: false }
+}
+
+function textureViewSubresourceFootprints(
+    view: TextureViewSpec
+): TextureSubresourceFootprint[] {
+
+    const descriptor = view.descriptor
+    return textureViewAspects(view).map(aspect => ({
+        texture: view.texture,
+        aspect,
+        baseMipLevel: descriptor.baseMipLevel,
+        mipLevelCount: descriptor.mipLevelCount,
+        layerKind: descriptor.dimension === '3d' ? '3d-all' : 'array',
+        baseLayer: descriptor.dimension === '3d' ? 0 : descriptor.baseArrayLayer,
+        layerCount: descriptor.dimension === '3d' ? 0 : descriptor.arrayLayerCount,
+    }))
+}
+
+function wholeTextureSubresourceFootprints(
+    texture: TextureResource
+): TextureSubresourceFootprint[] {
+
+    return textureFormatAspects(texture.format).map(aspect => ({
+        texture,
+        aspect,
+        baseMipLevel: 0,
+        mipLevelCount: texture.mipLevelCount,
+        layerKind: texture.dimension === '3d' ? '3d-all' : 'array',
+        baseLayer: 0,
+        layerCount: texture.dimension === '3d' ? 0 : texture.depthOrArrayLayers,
+    }))
+}
+
+function textureViewAspects(view: TextureViewSpec): TextureFootprintAspect[] {
+
+    if (view.descriptor.aspect === 'depth-only') return [ 'depth' ]
+    if (view.descriptor.aspect === 'stencil-only') return [ 'stencil' ]
+    return textureFormatAspects(view.descriptor.format)
+}
+
+function textureFormatAspects(format: GPUTextureFormat): TextureFootprintAspect[] {
+
+    const aspects: TextureFootprintAspect[] = []
+    if (textureFormatHasDepth(format)) aspects.push('depth')
+    if (textureFormatHasStencil(format)) aspects.push('stencil')
+    if (aspects.length === 0) aspects.push('color')
+    return aspects
+}
+
+function textureFormatHasDepth(format: GPUTextureFormat): boolean {
+
+    return DEPTH_TEXTURE_FORMATS.has(format)
+}
+
+function textureFormatHasStencil(format: GPUTextureFormat): boolean {
+
+    return STENCIL_TEXTURE_FORMATS.has(format)
+}
+
+function textureSubresourceFootprintsOverlap(
+    left: TextureSubresourceFootprint,
+    right: TextureSubresourceFootprint
+): boolean {
+
+    if (left.texture !== right.texture || left.aspect !== right.aspect) return false
+    const firstMip = Math.max(left.baseMipLevel, right.baseMipLevel)
+    const lastMip = Math.min(
+        left.baseMipLevel + left.mipLevelCount,
+        right.baseMipLevel + right.mipLevelCount
+    )
+    for (let mip = firstMip; mip < lastMip; mip++) {
+        const leftLayers = textureFootprintLayersAtMip(left, mip)
+        const rightLayers = textureFootprintLayersAtMip(right, mip)
+        if (
+            leftLayers.start < rightLayers.end &&
+            rightLayers.start < leftLayers.end
+        ) return true
+    }
+    return false
+}
+
+function textureFootprintLayersAtMip(
+    footprint: TextureSubresourceFootprint,
+    mip: number
+): Readonly<{ start: number, end: number }> {
+
+    if (footprint.layerKind === '3d-all') {
+        return {
+            start: 0,
+            end: Math.max(
+                1,
+                Math.floor(footprint.texture.depthOrArrayLayers / (2 ** mip))
+            ),
+        }
+    }
+    return {
+        start: footprint.baseLayer,
+        end: footprint.baseLayer + footprint.layerCount,
+    }
+}
+
+function describeTextureSubresourceFootprint(
+    footprint: TextureSubresourceFootprint
+): Readonly<Record<string, unknown>> {
+
+    return Object.freeze({
+        resourceId: footprint.texture.id,
+        aspect: footprint.aspect,
+        baseMipLevel: footprint.baseMipLevel,
+        mipLevelCount: footprint.mipLevelCount,
+        layerKind: footprint.layerKind,
+        baseLayer: footprint.baseLayer,
+        layerCount: footprint.layerCount,
+    })
 }
 
 function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec) {
@@ -3617,7 +4063,7 @@ function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec)
     }
 
     for (let index = 0; index < passSpec.color.length; index++) {
-        const expected = passSpec.color[index]?.format
+        const expected = passSpec.color[index]?.format ?? null
         const actual = targetFormats[index]
 
         if (expected !== actual) {
@@ -3683,6 +4129,50 @@ function validatePipelineDepthStencil(command: DrawCommand, passSpec: RenderPass
             actual: { format: pipelineFormat },
         })
     }
+
+    const passDepth = passSpec.depth
+    if (passDepth === undefined) return
+    const writesDepth = pipelineDepthStencil.depthWriteEnabled === true
+    const writesStencil = pipelineWritesStencil(pipelineDepthStencil)
+    if (
+        (passDepth.depthReadOnly === true && writesDepth) ||
+        (passDepth.stencilReadOnly === true && writesStencil)
+    ) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH',
+            severity: 'error',
+            phase: 'pipeline',
+            subject: command.pipeline.subject,
+            related: [
+                command.subject,
+                passSpec.subject,
+                passDepth.target.subject,
+            ],
+            message: 'RenderPipeline writes an aspect declared read-only by the RenderPassSpec.',
+            expected: {
+                depthWrites: passDepth.depthReadOnly === true ? false : 'allowed',
+                stencilWrites: passDepth.stencilReadOnly === true ? false : 'allowed',
+            },
+            actual: {
+                depthReadOnly: passDepth.depthReadOnly === true,
+                stencilReadOnly: passDepth.stencilReadOnly === true,
+                depthWrites: writesDepth,
+                stencilWrites: writesStencil,
+            },
+        })
+    }
+}
+
+function pipelineWritesStencil(depthStencil: Readonly<GPUDepthStencilState>): boolean {
+
+    if ((depthStencil.stencilWriteMask ?? 0xffff_ffff) === 0) return false
+    return [ depthStencil.stencilFront, depthStencil.stencilBack ].some(face => (
+        face !== undefined && (
+            (face.failOp ?? 'keep') !== 'keep' ||
+            (face.depthFailOp ?? 'keep') !== 'keep' ||
+            (face.passOp ?? 'keep') !== 'keep'
+        )
+    ))
 }
 
 function validateRenderOcclusionQueryOrder(builder: SubmissionBuilder, step: RenderStep) {
@@ -3768,21 +4258,85 @@ function throwOcclusionQueryStateDiagnostic(
     })
 }
 
-function advanceRenderAttachmentEpochs(passSpec: RenderPassSpec) {
+function advanceRenderAttachmentContent(passSpec: RenderPassSpec) {
 
-    const writtenTargets = new Set<TextureResource>()
+    for (const [ target, state ] of renderAttachmentWriteOutcomes(passSpec)) {
+        advanceResourceContentEpoch(target)
+        if (state === 'indeterminate') {
+            setResourceContentState(target, state, target.contentEpoch)
+        }
+    }
+}
 
-    for (const attachment of passSpec.color) {
-        const target = attachment.target
-        if (!isTextureViewSpec(target) || writtenTargets.has(target.texture)) continue
+function renderAttachmentWriteOutcomes(
+    passSpec: RenderPassSpec
+): Map<TextureResource, Extract<ResourceState, 'ready' | 'indeterminate'>> {
 
-        advanceResourceContentEpoch(target.texture)
-        writtenTargets.add(target.texture)
+    const outcomes = new Map<
+        TextureResource,
+        Extract<ResourceState, 'ready' | 'indeterminate'>
+    >()
+    const add = (
+        target: TextureResource,
+        state: Extract<ResourceState, 'ready' | 'indeterminate'>
+    ) => {
+
+        const current = outcomes.get(target)
+        outcomes.set(
+            target,
+            current === 'indeterminate' || state === 'indeterminate'
+                ? 'indeterminate'
+                : 'ready'
+        )
     }
 
-    if (passSpec.depth !== undefined && !writtenTargets.has(passSpec.depth.target.texture)) {
-        advanceResourceContentEpoch(passSpec.depth.target.texture)
-        writtenTargets.add(passSpec.depth.target.texture)
+    for (const attachment of passSpec.color) {
+        if (attachment === null) continue
+        if (isTextureViewSpec(attachment.target)) {
+            add(
+                attachment.target.texture,
+                attachment.store === 'store' ? 'ready' : 'indeterminate'
+            )
+        }
+        if (isTextureViewSpec(attachment.resolveTarget)) {
+            add(attachment.resolveTarget.texture, 'ready')
+        }
+    }
+
+    const depth = passSpec.depth
+    if (depth !== undefined) {
+        const writableStores = [
+            ...(depth.depthReadOnly === true || depth.depthStore === undefined
+                ? []
+                : [ depth.depthStore ]),
+            ...(depth.stencilReadOnly === true || depth.stencilStore === undefined
+                ? []
+                : [ depth.stencilStore ]),
+        ]
+        if (writableStores.length > 0) {
+            add(
+                depth.target.texture,
+                writableStores.every(store => store === 'store')
+                    ? 'ready'
+                    : 'indeterminate'
+            )
+        }
+    }
+
+    return outcomes
+}
+
+function markSimulatedRenderAttachmentContent(
+    readiness: ReadinessSimulation,
+    passSpec: RenderPassSpec
+): void {
+
+    for (const [ resource, state ] of renderAttachmentWriteOutcomes(passSpec)) {
+        const simulated = simulatedResourceState(readiness, resource)
+        readiness.set(resource.id, {
+            state,
+            contentEpoch: simulated.contentEpoch + 1,
+        })
     }
 }
 

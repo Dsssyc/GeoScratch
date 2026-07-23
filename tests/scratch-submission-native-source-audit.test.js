@@ -99,7 +99,7 @@ describe('scratch submission native source audit', () => {
         expect(submission).to.match(
             /observation\.issue\('command-encode', location, \(\) => \{[\s\S]{0,500}issue\(\)/
         )
-        expect(submission.match(/observation\.issue\(\s*'attachment-view'/g)).to.have.length(2)
+        expect(submission.match(/observation\.issue\(\s*'attachment-view'/g)).to.have.length(3)
         expect(submission).to.match(
             /observation\.issue\(\s*'attachment-view',[\s\S]{0,650}createNativeTextureView[\s\S]{0,250}createPreparedSurfaceAttachmentView/
         )

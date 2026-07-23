@@ -1713,8 +1713,10 @@ function graphContractSnapshot(graph: FlowGraph) {
         maskFormat: graph.textures.mask.format,
         resourceExtent: graph.resourceExtent,
         displayExtent: FLOW_DISPLAY_EXTENT,
-        voronoiTargetFormats: Object.freeze(graph.passes.voronoi.color.map(
-            attachment => (attachment.target as TextureViewSpec).texture.format
+        voronoiTargetFormats: Object.freeze(graph.passes.voronoi.color.flatMap(
+            attachment => attachment === null
+                ? []
+                : [ (attachment.target as TextureViewSpec).texture.format ]
         )),
     })
 }

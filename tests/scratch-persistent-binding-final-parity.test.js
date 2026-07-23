@@ -325,7 +325,7 @@ describe('Scratch persistent binding final parity', () => {
             status: 'passed',
             emittedJavaScriptCount: 96,
             emittedDeclarationCount: 96,
-            declarationSignatureCount: 3610,
+            declarationSignatureCount: 3619,
         })
         expect(result.publicSurface.productionEmitParity.files).to.have.length(192)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
