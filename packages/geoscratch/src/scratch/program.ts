@@ -718,6 +718,7 @@ function validateRequiredLanguageFeatures(
             severity: 'error',
             phase: 'program',
             subject: program.subject,
+            related: [ runtime.subject ],
             message: 'Program requires a WGSL language feature that is unavailable on this runtime.',
             expected: { languageFeature },
             actual: { wgslLanguageFeatures: runtime.wgslLanguageFeatures },
@@ -736,10 +737,12 @@ function throwRequiredLanguageFeatureDiagnostic(
         severity: 'error',
         phase: 'program',
         subject: program.subject,
+        related: [ program.runtime.subject ],
         message: 'Program requiredLanguageFeatures must be a stable iterable of non-empty strings.',
         expected: { requiredLanguageFeatures: 'Iterable<non-empty string>' },
         actual: {
             requiredLanguageFeatures: describeValue(actual),
+            wgslLanguageFeatures: program.runtime.wgslLanguageFeatures,
             ...(reason !== undefined ? { reason } : {}),
         },
     })

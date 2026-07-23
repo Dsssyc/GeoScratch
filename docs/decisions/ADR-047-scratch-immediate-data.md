@@ -120,9 +120,12 @@ exactly. Scratch never truncates, pads, clamps, performs typed-element conversio
 accepts a callback, getter, resolver closure, or partial range.
 
 ArrayBuffer uses its complete visible bytes. An ArrayBufferView uses only the view's
-visible byte range. LayoutUploadView uses its explicit byte offset and length. This
-byte-oriented contract deliberately avoids native `dataOffset` and `dataSize`
-element-unit differences for TypedArrays.
+visible byte range. LayoutUploadView uses its explicit byte offset and length inside
+`bytes.buffer`; the explicit range may differ from the `bytes` view's own visible
+subrange, matching the existing upload contract. Its four public fields are
+materialized once during Command construction so accessor failures cannot escape the
+structured diagnostic envelope. This byte-oriented contract deliberately avoids
+native `dataOffset` and `dataSize` element-unit differences for TypedArrays.
 
 The Command freezes source identity and expected byte length, not source contents.
 Application code may update those contents between submissions while reusing the same

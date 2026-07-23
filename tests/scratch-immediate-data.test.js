@@ -4,7 +4,11 @@ import {
     ScratchRuntime,
     layoutCodec,
 } from 'geoscratch'
-import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
+import {
+    createFakeGpu,
+    createFakePipelineError,
+    triangleWgsl,
+} from './scratch-test-utils.js'
 
 const computeWgsl = `
 @compute @workgroup_size(1)
@@ -12,18 +16,39 @@ fn csMain() {
 }
 `
 
+const immediateComputeWgsl = `
+requires immediate_address_space;
+
+struct ImmediateValues {
+    color: vec4f,
+}
+
+var<immediate> immediateValues: ImmediateValues;
+
+@compute @workgroup_size(1)
+fn csMain() {
+    let color = immediateValues.color;
+}
+`
+
 const GPU_BUFFER_USAGE_COPY_DST = 0x08
 const GPU_BUFFER_USAGE_INDIRECT = 0x100
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 
-function configureImmediateSupport(fixture, {
-    languageFeatures = [ 'immediate_address_space' ],
-    maxImmediateSize = 64,
-} = {}) {
+function configureImmediateSupport(fixture, options = {}) {
 
+    const languageFeatures = options.languageFeatures ?? [ 'immediate_address_space' ]
+    const maxImmediateSize = Object.hasOwn(options, 'maxImmediateSize')
+        ? options.maxImmediateSize
+        : 64
     fixture.gpu.wgslLanguageFeatures = new Set(languageFeatures)
-    fixture.device.limits.maxImmediateSize = maxImmediateSize
-    fixture.adapter.limits.maxImmediateSize = maxImmediateSize
+    if (maxImmediateSize === undefined) {
+        delete fixture.device.limits.maxImmediateSize
+        delete fixture.adapter.limits.maxImmediateSize
+    } else {
+        fixture.device.limits.maxImmediateSize = maxImmediateSize
+        fixture.adapter.limits.maxImmediateSize = maxImmediateSize
+    }
     return fixture
 }
 
@@ -196,6 +221,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
         expect(diagnostic.actual).to.deep.equal({
             wgslLanguageFeatures: [ 'immediate_address_space', 'subgroups' ],
         })
+        expect(diagnostic.related).to.deep.include(runtime.subject)
     })
 
     it('rejects malformed Program language feature descriptors structurally', async() => {
@@ -219,7 +245,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
         ]
 
         for (const requiredLanguageFeatures of cases) {
-            await expectDiagnostic(
+            const diagnostic = await expectDiagnostic(
                 () => Promise.resolve(runtime.createProgram({
                     modules: [ triangleWgsl ],
                     requiredLanguageFeatures,
@@ -227,6 +253,9 @@ describe('scratch immediate data runtime and pipeline contract', () => {
                 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
                 'program'
             )
+            expect(diagnostic.related).to.deep.include(runtime.subject)
+            expect(diagnostic.actual.wgslLanguageFeatures)
+                .to.deep.equal(runtime.wgslLanguageFeatures)
         }
     })
 
@@ -347,13 +376,16 @@ describe('scratch immediate data runtime and pipeline contract', () => {
             { immediateSize: Number.POSITIVE_INFINITY, maxImmediateSize: 64 },
             { immediateSize: 0x1_0000_0000, maxImmediateSize: 0x1_0000_0000 },
             { immediateSize: 68, maxImmediateSize: 64 },
+            { immediateSize: 4, maxImmediateSize: undefined },
+            { immediateSize: 4, maxImmediateSize: Number.NaN },
+            { immediateSize: 4, maxImmediateSize: Number.POSITIVE_INFINITY },
         ]
 
         for (const scenario of cases) {
             const { runtime, calls } = await createImmediateRuntime({
                 maxImmediateSize: scenario.maxImmediateSize,
             })
-            await expectDiagnostic(
+            const diagnostic = await expectDiagnostic(
                 async() => await runtime.createRenderPipeline({
                     program: createRenderProgram(runtime),
                     targets: [ { format: 'bgra8unorm' } ],
@@ -362,10 +394,87 @@ describe('scratch immediate data runtime and pipeline contract', () => {
                 'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID',
                 'pipeline'
             )
+            if (scenario.immediateSize === 2) {
+                expect(diagnostic.expected).to.deep.equal({
+                    alignmentBytes: 4,
+                    gpuSize32Minimum: 0,
+                    gpuSize32Maximum: 0xffff_ffff,
+                    maxImmediateSize: 64,
+                })
+                expect(diagnostic.actual).to.deep.equal({
+                    authoredImmediateSize: 2,
+                    normalizedImmediateSize: 2,
+                    finiteNumber: true,
+                    safeInteger: true,
+                    nonNegative: true,
+                    alignedTo4Bytes: false,
+                    withinGpuSize32: true,
+                    withinDeviceLimit: true,
+                })
+                expect(diagnostic.related).to.deep.include(runtime.subject)
+            }
             expect(calls.shaderModules).to.have.length(0)
             expect(calls.pipelineLayouts).to.have.length(0)
             expect(calls.renderPipelines).to.have.length(0)
         }
+    })
+
+    it('accepts the exact device maximum immediate size', async() => {
+
+        const { runtime, calls } = await createImmediateRuntime({
+            maxImmediateSize: 64,
+        })
+        const pipeline = await runtime.createComputePipeline({
+            program: createComputeProgram(runtime),
+            immediateSize: 64,
+        })
+
+        expect(pipeline.immediateSize).to.equal(64)
+        expect(calls.pipelineLayouts[0].descriptor.immediateSize).to.equal(64)
+    })
+
+    it('attributes a shader-required range larger than immediateSize to native pipeline creation', async() => {
+
+        const fixture = await createImmediateRuntime()
+        const program = fixture.runtime.createProgram({
+            label: 'too-small immediate range program',
+            modules: [ immediateComputeWgsl ],
+            entryPoints: { compute: 'csMain' },
+            requiredLanguageFeatures: [ 'immediate_address_space' ],
+        })
+        const nativeError = createFakePipelineError(
+            'validation',
+            'shader immediate range exceeds pipeline layout range'
+        )
+        fixture.pipelines.rejectNextPipeline('compute', nativeError)
+
+        let failure
+        try {
+            await fixture.runtime.createComputePipeline({
+                label: 'too-small immediate range pipeline',
+                program,
+                immediateSize: 4,
+            })
+        } catch (error) {
+            failure = error
+        }
+
+        expect(failure).to.be.instanceOf(ScratchDiagnosticError)
+        expect(failure.diagnostic).to.deep.include({
+            code: 'SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED',
+            phase: 'pipeline',
+        })
+        expect(failure.cause).to.equal(nativeError)
+        expect(failure.incident).to.deep.include({
+            nativeErrorCategory: 'validation',
+            failureStage: 'pipeline-creation',
+        })
+        expect(failure.incident.target).to.deep.include({
+            pipelineKind: 'compute',
+            programId: program.id,
+        })
+        expect(fixture.calls.pipelineLayouts[0].descriptor.immediateSize).to.equal(4)
+        expect(fixture.calls.shaderModules[0].descriptor.code).to.equal(immediateComputeWgsl)
     })
 
     it('requires an explicit Program immediate language feature for nonzero sizes', async() => {
@@ -503,6 +612,88 @@ describe('scratch immediate data command and submission contract', () => {
                         usageCompatibility: { immediate: true },
                     },
                 }
+            )),
+            'SCRATCH_COMMAND_IMMEDIATE_DATA_INVALID',
+            'command'
+        )
+    })
+
+    it('uses a LayoutUploadView explicit range within its backing storage', async() => {
+
+        const fixture = await createImmediateRenderFixture()
+        const codec = layoutCodec({
+            name: 'ImmediateBackingRange',
+            fields: [
+                { name: 'color', type: 'vec4f' },
+            ],
+        }, {
+            usage: [ 'immediate' ],
+        })
+        const storage = new ArrayBuffer(32)
+        const expected = new Uint8Array(storage, 8, 16)
+        expected.set([ 11, 22, 33, 44 ])
+        const uploadView = {
+            bytes: new Uint8Array(storage, 0, 4),
+            byteOffset: 8,
+            byteLength: 16,
+            artifact: codec.artifact,
+        }
+        const command = createDraw(fixture.runtime, fixture.pipeline, uploadView)
+
+        fixture.runtime.submission().render(fixture.pass, [ command ]).submit()
+
+        expect([ ...fixture.calls.immediateWrites[0].bytes ])
+            .to.deep.equal([ ...expected ])
+    })
+
+    it('materializes LayoutUploadView fields once without leaking accessor failures', async() => {
+
+        const fixture = await createImmediateRenderFixture()
+        const codec = layoutCodec({
+            name: 'ImmediateSingleRead',
+            fields: [
+                { name: 'color', type: 'vec4f' },
+            ],
+        }, {
+            usage: [ 'immediate' ],
+        })
+        const stable = codec.uploadView({
+            color: [ 0.125, 0.25, 0.5, 1 ],
+        })
+        const reads = new Map()
+        const singleRead = new Proxy(stable, {
+            get(target, property, receiver) {
+                if ([ 'bytes', 'byteOffset', 'byteLength', 'artifact' ].includes(property)) {
+                    const count = (reads.get(property) ?? 0) + 1
+                    reads.set(property, count)
+                    if (count > 1) throw new Error(`unstable ${String(property)}`)
+                }
+                return Reflect.get(target, property, receiver)
+            },
+        })
+        const command = createDraw(fixture.runtime, fixture.pipeline, singleRead)
+
+        fixture.runtime.submission().render(fixture.pass, [ command ]).submit()
+
+        expect(Object.fromEntries(reads)).to.deep.equal({
+            bytes: 1,
+            byteOffset: 1,
+            byteLength: 1,
+            artifact: 1,
+        })
+        expect(fixture.calls.immediateWrites).to.have.length(1)
+
+        const throwing = new Proxy(stable, {
+            get(target, property, receiver) {
+                if (property === 'byteOffset') throw new Error('unreadable byteOffset')
+                return Reflect.get(target, property, receiver)
+            },
+        })
+        await expectDiagnostic(
+            () => Promise.resolve(createDraw(
+                fixture.runtime,
+                fixture.pipeline,
+                throwing
             )),
             'SCRATCH_COMMAND_IMMEDIATE_DATA_INVALID',
             'command'

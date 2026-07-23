@@ -643,6 +643,14 @@ type CommandImmediateDataState =
         layoutArtifact?: LayoutArtifact
     }>
 
+type MaterializedCommandLayoutUploadView = Readonly<{
+    source: LayoutUploadView
+    bytes: Uint8Array
+    byteOffset: number
+    byteLength: number
+    artifact: LayoutArtifact
+}>
+
 export type ResolvedCommandImmediateData = Readonly<{
     sourceKind: 'none' | CommandImmediateSourceKind
     expectedByteLength: number
@@ -1419,20 +1427,13 @@ function normalizeCommandImmediateData(
         })
     }
 
-    let isUploadView = false
-    try {
-        isUploadView = isLayoutUploadView(immediateData)
-    } catch {
-        throwCommandImmediateDataDiagnostic(command, {
-            expectedByteLength,
-            immediateData,
-            reason: 'unstable-source-shape',
-        })
-    }
-
     let state: CommandImmediateDataState
-    if (isUploadView) {
-        const uploadView = immediateData as LayoutUploadView
+    const uploadView = materializeCommandLayoutUploadView(
+        command,
+        expectedByteLength,
+        immediateData
+    )
+    if (uploadView !== undefined) {
         const immediateCompatible = (
             uploadView.artifact.usageCompatibility as Record<string, boolean>
         ).immediate === true
@@ -1451,7 +1452,7 @@ function normalizeCommandImmediateData(
         state = Object.freeze({
             sourceKind: 'layout-upload-view',
             expectedByteLength,
-            source: uploadView,
+            source: uploadView.source,
             byteStorage: range.byteStorage,
             byteOffset: range.byteOffset,
             visibleByteLength: range.visibleByteLength,
@@ -1519,6 +1520,59 @@ function normalizeCommandImmediateData(
     return immediateData as CommandImmediateData
 }
 
+function materializeCommandLayoutUploadView(
+    command: DrawCommand | DispatchCommand,
+    expectedByteLength: number,
+    immediateData: unknown
+): MaterializedCommandLayoutUploadView | undefined {
+
+    if (!isRecord(immediateData)) return undefined
+
+    let bytes: unknown
+    let byteOffset: unknown
+    let byteLength: unknown
+    let artifact: unknown
+    try {
+        bytes = immediateData.bytes
+        byteOffset = immediateData.byteOffset
+        byteLength = immediateData.byteLength
+        artifact = immediateData.artifact
+    } catch {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength,
+            immediateData,
+            reason: 'unstable-source-shape',
+        })
+    }
+
+    let artifactIsValid = false
+    try {
+        artifactIsValid = isLayoutArtifact(artifact)
+    } catch {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength,
+            immediateData,
+            reason: 'unstable-source-shape',
+        })
+    }
+    if (
+        !(bytes instanceof Uint8Array) ||
+        typeof byteOffset !== 'number' ||
+        typeof byteLength !== 'number' ||
+        !artifactIsValid
+    ) {
+        return undefined
+    }
+
+    return Object.freeze({
+        source: immediateData as LayoutUploadView,
+        bytes,
+        byteOffset,
+        byteLength,
+        artifact: artifact as LayoutArtifact,
+    })
+}
+
 export function snapshotCommandImmediateData(
     command: DrawCommand | DispatchCommand
 ): ResolvedCommandImmediateData {
@@ -1584,7 +1638,7 @@ export function snapshotCommandImmediateData(
 
 function readLayoutImmediateRange(
     command: DrawCommand | DispatchCommand,
-    uploadView: LayoutUploadView,
+    uploadView: MaterializedCommandLayoutUploadView,
     expectedByteLength: number
 ): Readonly<{
     byteStorage: ArrayBufferLike
@@ -1593,16 +1647,14 @@ function readLayoutImmediateRange(
 }> {
 
     let byteStorage: ArrayBufferLike
-    let bytesOffset: number
-    let bytesLength: number
+    let storageByteLength: number
     try {
         byteStorage = uploadView.bytes.buffer
-        bytesOffset = uploadView.bytes.byteOffset
-        bytesLength = uploadView.bytes.byteLength
+        storageByteLength = byteStorage.byteLength
     } catch {
         throwCommandImmediateDataDiagnostic(command, {
             expectedByteLength,
-            immediateData: uploadView,
+            immediateData: uploadView.source,
             sourceKind: 'layout-upload-view',
             reason: 'unreadable-source',
             layoutArtifact: uploadView.artifact,
@@ -1614,13 +1666,14 @@ function readLayoutImmediateRange(
     if (
         !Number.isSafeInteger(byteOffset) ||
         !Number.isSafeInteger(visibleByteLength) ||
-        byteOffset < bytesOffset ||
+        !Number.isSafeInteger(byteOffset + visibleByteLength) ||
+        byteOffset < 0 ||
         visibleByteLength < 0 ||
-        byteOffset + visibleByteLength > bytesOffset + bytesLength
+        byteOffset + visibleByteLength > storageByteLength
     ) {
         throwCommandImmediateDataDiagnostic(command, {
             expectedByteLength,
-            immediateData: uploadView,
+            immediateData: uploadView.source,
             sourceKind: 'layout-upload-view',
             visibleByteLength,
             reason: 'invalid-visible-range',
@@ -1629,7 +1682,7 @@ function readLayoutImmediateRange(
     }
     validateImmediateVisibleByteLength(
         command,
-        uploadView,
+        uploadView.source,
         'layout-upload-view',
         visibleByteLength,
         expectedByteLength,
@@ -1670,10 +1723,12 @@ function readCurrentImmediateRange(
     let byteStorage: ArrayBufferLike
     let viewByteOffset: number
     let viewByteLength: number
+    let storageByteLength: number
     try {
         byteStorage = byteView.buffer
         viewByteOffset = byteView.byteOffset
         viewByteLength = byteView.byteLength
+        storageByteLength = byteStorage.byteLength
     } catch {
         throwCommandImmediateDataDiagnostic(command, {
             expectedByteLength: state.expectedByteLength,
@@ -1688,8 +1743,7 @@ function readCurrentImmediateRange(
         state.sourceKind === 'array-buffer-view'
             ? viewByteOffset === state.byteOffset &&
                 viewByteLength === state.visibleByteLength
-            : state.byteOffset >= viewByteOffset &&
-                state.byteOffset + state.visibleByteLength <= viewByteOffset + viewByteLength
+            : state.byteOffset + state.visibleByteLength <= storageByteLength
     )
     if (!rangeIsCurrent) {
         throwCommandImmediateDataDiagnostic(command, {

@@ -260,7 +260,10 @@ source of truth.
 `LayoutArtifact.usageCompatibility.immediate` is true for the current scalar, vector,
 and `mat4x4f` field vocabulary and false for any array member. Explicitly requesting
 an incompatible immediate usage fails with a structured LayoutCodec diagnostic.
-Only a compatible LayoutUploadView can be command immediate data.
+Only a compatible LayoutUploadView can be command immediate data. Its explicit
+`byteOffset` and `byteLength` select bytes from `bytes.buffer`, consistent with the
+existing upload path; they are not constrained to the `bytes` view's visible
+subrange.
 
 Generated accessors continue to emit structs, constants, and field readers only. They
 never inject `requires immediate_address_space;` or `var<immediate>`. Raw ArrayBuffer

@@ -250,7 +250,9 @@ directive；调用方 WGSL source 仍是事实来源。
 `LayoutArtifact.usageCompatibility.immediate` 对当前 scalar、vector 与 `mat4x4f`
 field vocabulary 为 true，对任何 array member 为 false。显式请求不兼容的
 immediate usage 会产生结构化 LayoutCodec diagnostic。只有 compatible
-LayoutUploadView 才能作为 command immediate data。
+LayoutUploadView 才能作为 command immediate data。其显式 `byteOffset` 与
+`byteLength` 从 `bytes.buffer` 中选择字节，与既有 upload path 保持一致；
+该范围不要求落在 `bytes` view 自身的 visible subrange 内。
 
 生成 accessor 仍只输出 struct、constant 与 field reader，绝不注入
 `requires immediate_address_space;` 或 `var<immediate>`。Raw ArrayBuffer 与

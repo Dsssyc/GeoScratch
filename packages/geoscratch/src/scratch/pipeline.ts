@@ -1230,33 +1230,52 @@ function normalizePipelineImmediateSize(
             readonly maxImmediateSize?: number
         }
     ).maxImmediateSize
+    const finiteNumber = typeof normalized === 'number' && Number.isFinite(normalized)
+    const safeInteger = typeof normalized === 'number' && Number.isSafeInteger(normalized)
+    const nonNegative = typeof normalized === 'number' && safeInteger && normalized >= 0
+    const alignedTo4Bytes = typeof normalized === 'number' && safeInteger && normalized % 4 === 0
+    const withinGpuSize32 = typeof normalized === 'number' &&
+        nonNegative &&
+        normalized <= 0xffff_ffff
+    const validDeviceLimit = typeof maxImmediateSize === 'number' &&
+        Number.isFinite(maxImmediateSize)
+    const withinDeviceLimit = typeof normalized === 'number' &&
+        nonNegative &&
+        validDeviceLimit &&
+        typeof maxImmediateSize === 'number' &&
+        normalized <= maxImmediateSize
+    const positive = typeof normalized === 'number' && nonNegative && normalized > 0
     if (
-        typeof normalized !== 'number' ||
-        !Number.isSafeInteger(normalized) ||
-        normalized < 0 ||
-        normalized > 0xffff_ffff ||
-        normalized % 4 !== 0 ||
-        (
-            normalized > 0 &&
-            (
-                typeof maxImmediateSize !== 'number' ||
-                !Number.isFinite(maxImmediateSize) ||
-                normalized > maxImmediateSize
-            )
-        )
+        !finiteNumber ||
+        !safeInteger ||
+        !nonNegative ||
+        !withinGpuSize32 ||
+        !alignedTo4Bytes ||
+        (positive && !withinDeviceLimit)
     ) {
         throwScratchDiagnostic({
             code: 'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID',
             severity: 'error',
             phase: 'pipeline',
             subject: pipeline.subject,
-            related: [ pipeline.program.subject ],
+            related: [ pipeline.program.subject, pipeline.runtime.subject ],
             message: 'Pipeline immediateSize is outside the supported WebGPU immediate range.',
             expected: {
-                immediateSize: 'non-negative safe GPUSize32 integer aligned to 4 bytes',
+                alignmentBytes: 4,
+                gpuSize32Minimum: 0,
+                gpuSize32Maximum: 0xffff_ffff,
                 maxImmediateSize,
             },
-            actual: { immediateSize: normalized },
+            actual: {
+                authoredImmediateSize: immediateSize === undefined ? 'omitted' : immediateSize,
+                normalizedImmediateSize: normalized,
+                finiteNumber,
+                safeInteger,
+                nonNegative,
+                alignedTo4Bytes,
+                withinGpuSize32,
+                withinDeviceLimit,
+            },
         })
     }
 
