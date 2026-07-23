@@ -17,6 +17,7 @@ import {
     isRenderCommand,
     isResolveQuerySetCommand,
     isUploadCommand,
+    snapshotCommandImmediateData,
     updateReadbackCommandClaimProvenance,
     uploadCommandHasContentEffect,
     validateUploadCommandQueueAction,
@@ -59,7 +60,7 @@ import {
 } from './surface.js'
 import { TextureResource, createNativeTextureView, isTextureResource, isTextureViewSpec } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
-import type { BeginOcclusionQueryCommand, ClearBufferCommand, CommandResourceReadDescriptor, CommandResourceReadEpoch, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
+import type { BeginOcclusionQueryCommand, ClearBufferCommand, CommandResourceReadDescriptor, CommandResourceReadEpoch, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResolvedCommandImmediateData, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassNativeAttachments, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
@@ -306,6 +307,11 @@ type ResolvedSubmissionPlan = {
     querySlots: QuerySlotSimulation
     executionOutcomes: SubmissionExecutionOutcome[]
 }
+
+type ResolvedCommandImmediateSnapshots = ReadonlyMap<
+    number,
+    readonly (ResolvedCommandImmediateData | undefined)[]
+>
 
 type ReadCommand = CopyCommand | DispatchCommand | DrawCommand | ReadbackCommand
 
@@ -596,6 +602,9 @@ export class SubmissionBuilder {
                 validateUploadCommandQueueAction(step.command, this.runtime.queue)
             }
         }
+        const commandImmediateSnapshots = snapshotResolvedCommandImmediates(
+            resolvedPlan.steps
+        )
         const surfaceAttachments = prepareSubmissionSurfaceAttachments(resolvedPlan.steps)
 
         const submittedId = `scratch-submitted-${UUID()}`
@@ -860,7 +869,7 @@ export class SubmissionBuilder {
                         passLocation,
                         () => encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
                     )
-                    for (const command of step.commands) {
+                    for (const [ commandIndex, command ] of step.commands.entries()) {
                         const origin = commandAccessOrigin(stepIndex, 'compute', command, step.passSpec)
                         const declaredWrites = command._producesDeclaredWrites ? command.resources.write : []
                         for (const resource of declaredWrites) trackSegmentResourceWrite(resource)
@@ -877,10 +886,19 @@ export class SubmissionBuilder {
                             nativeObservation,
                             submittedId,
                             stepIndex,
+                            commandIndex,
                             step.passSpec,
                             command,
                             passEncoder,
-                            () => command.encode(passEncoder)
+                            () => command.encode(
+                                passEncoder,
+                                resolvedCommandImmediateSnapshot(
+                                    commandImmediateSnapshots,
+                                    stepIndex,
+                                    commandIndex,
+                                    command
+                                )
+                            )
                         )
                         completeResourceAccesses(resourceAccesses, accesses)
                     }
@@ -925,7 +943,7 @@ export class SubmissionBuilder {
                     ))
                 )
                 let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
-                for (const command of step.commands) {
+                for (const [ commandIndex, command ] of step.commands.entries()) {
                     const origin = commandAccessOrigin(stepIndex, 'render', command, step.passSpec)
                     const declaredWrites = command.commandKind === 'draw' && command._producesDeclaredWrites
                         ? command.resources.write
@@ -946,11 +964,21 @@ export class SubmissionBuilder {
                         nativeObservation,
                         submittedId,
                         stepIndex,
+                        commandIndex,
                         step.passSpec,
                         command,
                         passEncoder,
                         () => command.commandKind === 'draw'
-                            ? command.encode(passEncoder, attachmentExtent)
+                            ? command.encode(
+                                passEncoder,
+                                attachmentExtent,
+                                resolvedCommandImmediateSnapshot(
+                                    commandImmediateSnapshots,
+                                    stepIndex,
+                                    commandIndex,
+                                    command
+                                )
+                            )
                             : command.encode(passEncoder)
                     )
                     if (command.commandKind === 'begin-occlusion-query') {
@@ -1233,12 +1261,13 @@ function createSubmissionNativeIssuePlan(
         }
         ensureEncoder()
         encoding.push({ stage: 'pass-begin', location: passLocation })
-        for (const command of step.commands) {
+        for (const [ commandIndex, command ] of step.commands.entries()) {
             encoding.push({
                 stage: 'command-encode',
                 location: passCommandLocation(
                     submissionId,
                     stepIndex,
+                    commandIndex,
                     step.passSpec,
                     command
                 ),
@@ -1402,6 +1431,7 @@ function issuePassCommandEncoding(
     observation: SubmissionNativeObservation,
     submissionId: string,
     stepIndex: number,
+    commandIndex: number,
     passSpec: RenderPassSpec | ComputePassSpec,
     command: { id: string, label?: string | undefined, commandKind: string },
     encoder: GPURenderPassEncoder | GPUComputePassEncoder,
@@ -1410,7 +1440,7 @@ function issuePassCommandEncoding(
 
     issueCommandEncoding(
         observation,
-        passCommandLocation(submissionId, stepIndex, passSpec, command),
+        passCommandLocation(submissionId, stepIndex, commandIndex, passSpec, command),
         encoder,
         command,
         issue
@@ -1528,6 +1558,7 @@ function standaloneCommandLocation(
 function passCommandLocation(
     submissionId: string,
     stepIndex: number,
+    commandIndex: number,
     passSpec: RenderPassSpec | ComputePassSpec,
     command: { id: string, commandKind: string }
 ): ScratchSubmissionNativeLocation {
@@ -1536,6 +1567,7 @@ function passCommandLocation(
         kind: 'pass-command',
         submissionId,
         stepIndex,
+        commandIndex,
         passId: passSpec.id,
         passKind: passSpec.passKind,
         commandId: command.id,
@@ -1713,6 +1745,47 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
         querySlots,
         executionOutcomes,
     }
+}
+
+function snapshotResolvedCommandImmediates(
+    steps: readonly ResolvedSubmissionStep[]
+): ResolvedCommandImmediateSnapshots {
+
+    const snapshots = new Map<
+        number,
+        readonly (ResolvedCommandImmediateData | undefined)[]
+    >()
+    for (const [ stepIndex, step ] of steps.entries()) {
+        if (
+            (step.kind !== 'render' && step.kind !== 'compute') ||
+            step.disposition === 'skip-pass'
+        ) {
+            continue
+        }
+
+        const commandSnapshots = step.commands.map(command => (
+            isDrawCommand(command) || isDispatchCommand(command)
+                ? snapshotCommandImmediateData(command)
+                : undefined
+        ))
+        snapshots.set(stepIndex, Object.freeze(commandSnapshots))
+    }
+    return snapshots
+}
+
+function resolvedCommandImmediateSnapshot(
+    snapshots: ResolvedCommandImmediateSnapshots,
+    stepIndex: number,
+    commandIndex: number,
+    command: DrawCommand | DispatchCommand
+): ResolvedCommandImmediateData {
+
+    const snapshot = snapshots.get(stepIndex)?.[commandIndex]
+    if (snapshot !== undefined) return snapshot
+    throw new TypeError(
+        `Resolved immediate-data snapshot is unavailable for ${command.commandKind} command ` +
+        `${command.id} at step ${stepIndex}, command ${commandIndex}.`
+    )
 }
 
 function applySubmissionValidationDisposition(builder: SubmissionBuilder, report: ScratchDiagnosticReport): void {

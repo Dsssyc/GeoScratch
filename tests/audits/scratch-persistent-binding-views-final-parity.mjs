@@ -757,7 +757,8 @@ const goalStartPublicMemberReplacements = Object.freeze({
 })
 const goalStartChangedPublicMemberReplacements = Object.freeze({
     'BindLayout.entrySubject:method': 'accept unknown input so invalid descriptors still receive structured diagnostics',
-    'DrawCommand.encode:method': 'submission-resolved attachment extent for declarative per-draw render state',
+    'DispatchCommand.encode:method': 'submission-resolved immediate snapshot for complete per-dispatch state',
+    'DrawCommand.encode:method': 'submission-resolved attachment extent and immediate snapshot for complete per-draw state',
     'ReadbackOperation.source:get': 'whole BufferResource source -> explicit BufferRegion source',
     'ScratchRuntime.bindLayout:method': 'Promise-only acknowledged BindLayout factory',
     'ScratchRuntime.bindSet:method': 'Promise-only initially prepared BindSet factory',

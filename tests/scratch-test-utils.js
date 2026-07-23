@@ -175,6 +175,7 @@ export function createFakeGpu(options = {}) {
         computePasses: [],
         drawCalls: [],
         dispatchCalls: [],
+        immediateWrites: [],
         occlusionQueries: [],
         copies: [],
         textureCopies: [],
@@ -1186,6 +1187,13 @@ function createFakeRenderPassEncoder(
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'renderSetPipeline')) return
             this.actions.push({ type: 'setPipeline', pipeline })
         },
+        setImmediates(offset, data, dataOffset, size) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'renderSetImmediates')) return
+            const bytes = Uint8Array.from(bytesFrom(data, dataOffset ?? 0, size))
+            const action = { type: 'setImmediates', offset, bytes }
+            this.actions.push(action)
+            calls.immediateWrites.push({ passKind: 'render', ...action })
+        },
         setBindGroup(group, bindGroup, dynamicOffsets) {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'renderSetBindGroup')) return
             const action = { type: 'setBindGroup', group, bindGroup }
@@ -1303,6 +1311,13 @@ function createFakeComputePassEncoder(
         setPipeline(pipeline) {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'computeSetPipeline')) return
             this.actions.push({ type: 'setPipeline', pipeline })
+        },
+        setImmediates(offset, data, dataOffset, size) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'computeSetImmediates')) return
+            const bytes = Uint8Array.from(bytesFrom(data, dataOffset ?? 0, size))
+            const action = { type: 'setImmediates', offset, bytes }
+            this.actions.push(action)
+            calls.immediateWrites.push({ passKind: 'compute', ...action })
         },
         setBindGroup(group, bindGroup, dynamicOffsets) {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'computeSetBindGroup')) return

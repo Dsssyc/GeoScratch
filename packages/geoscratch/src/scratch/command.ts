@@ -266,9 +266,12 @@ export type CommandResourceAccessDescriptor = {
     readonly write: readonly (BufferResource | TextureResource)[]
 }
 
+export type CommandImmediateData = ArrayBuffer | ArrayBufferView | LayoutUploadView
+
 type DrawCommandDescriptorBase = {
     label?: string
     pipeline: RenderPipeline
+    immediateData?: CommandImmediateData
     bindSets?: CommandBindSetInvocation[]
     vertexBuffers?: DrawVertexBufferBinding[]
     renderState?: DrawRenderState
@@ -466,6 +469,7 @@ type StrictIndirectDispatchCount = IndirectCommandCount & {
 type DispatchCommandDescriptorBase = {
     label?: string
     pipeline: ComputePipeline
+    immediateData?: CommandImmediateData
     bindSets?: CommandBindSetInvocation[]
     count: StrictStaticDispatchCount | StrictIndirectDispatchCount
     resources: CommandResourceAccessDescriptor
@@ -618,12 +622,43 @@ type CommandBrand =
 
 const commandBrands = new WeakMap<object, CommandBrand>()
 
+type CommandImmediateSourceKind =
+    | 'array-buffer'
+    | 'array-buffer-view'
+    | 'layout-upload-view'
+
+type CommandImmediateDataState =
+    | Readonly<{
+        sourceKind: 'none'
+        expectedByteLength: 0
+    }>
+    | Readonly<{
+        sourceKind: CommandImmediateSourceKind
+        expectedByteLength: number
+        source: CommandImmediateData
+        byteStorage: ArrayBufferLike
+        byteOffset: number
+        visibleByteLength: number
+        byteView?: ArrayBufferView
+        layoutArtifact?: LayoutArtifact
+    }>
+
+export type ResolvedCommandImmediateData = Readonly<{
+    sourceKind: 'none' | CommandImmediateSourceKind
+    expectedByteLength: number
+    visibleByteLength: number
+    bytes?: Uint8Array
+}>
+
+const commandImmediateDataStates = new WeakMap<object, CommandImmediateDataState>()
+
 export interface DrawCommand {
     readonly runtime: ScratchRuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'draw'
     readonly pipeline: RenderPipeline
+    readonly immediateData?: CommandImmediateData
     readonly bindSets: readonly CommandBindSetInvocation[]
     readonly vertexBuffers: readonly Readonly<NormalizedDrawVertexBufferBinding>[]
     readonly indexBuffer?: Readonly<NormalizedDrawIndexBufferBinding>
@@ -667,6 +702,12 @@ export class DrawCommand {
         if (descriptor.label !== undefined) mutable.label = descriptor.label
         mutable.commandKind = 'draw'
         mutable.pipeline = pipeline
+        const immediateData = normalizeCommandImmediateData(
+            this,
+            pipeline.immediateSize,
+            descriptor.immediateData
+        )
+        if (immediateData !== undefined) mutable.immediateData = immediateData
         rejectRemovedCommandDynamicOffsets(this, descriptor)
         mutable.bindSets = normalizeBindSetInvocations(this, descriptor.bindSets)
         mutable.vertexBuffers = normalizeVertexBuffers(this, descriptor.vertexBuffers)
@@ -797,13 +838,16 @@ export class DrawCommand {
 
     encode(
         passEncoder: GPURenderPassEncoder,
-        attachmentExtent: DrawRenderAttachmentExtent
+        attachmentExtent: DrawRenderAttachmentExtent,
+        resolvedImmediateData?: ResolvedCommandImmediateData
     ) {
 
         this.assertUsable()
         const renderState = resolveDrawRenderState(this, attachmentExtent)
+        const immediateBytes = resolvedImmediateBytesForEncoding(this, resolvedImmediateData)
 
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
+        setPassEncoderImmediates(passEncoder, immediateBytes)
         passEncoder.setViewport(
             renderState.viewport.x,
             renderState.viewport.y,
@@ -820,9 +864,6 @@ export class DrawCommand {
         )
         passEncoder.setBlendConstant(renderState.blendConstant)
         passEncoder.setStencilReference(renderState.stencilReference)
-        for (const invocation of this.bindSets) {
-            setBindGroupWithDynamicOffsets(this, passEncoder, invocation)
-        }
         for (const binding of this.vertexBuffers) {
             passEncoder.setVertexBuffer(
                 binding.slot,
@@ -838,6 +879,9 @@ export class DrawCommand {
                 this.indexBuffer.region.offset,
                 this.indexBuffer.region.size
             )
+        }
+        for (const invocation of this.bindSets) {
+            setBindGroupWithDynamicOffsets(this, passEncoder, invocation)
         }
         if ('indexCount' in this.count) {
             passEncoder.drawIndexed(
@@ -1153,6 +1197,7 @@ export interface DispatchCommand {
     readonly label?: string
     readonly commandKind: 'dispatch'
     readonly pipeline: ComputePipeline
+    readonly immediateData?: CommandImmediateData
     readonly bindSets: readonly CommandBindSetInvocation[]
     readonly count: Readonly<{ workgroups: readonly [number, number, number] }> | Readonly<NormalizedIndirectCommandCount>
     readonly resources: CommandResourceAccessDescriptor
@@ -1190,6 +1235,12 @@ export class DispatchCommand {
         if (descriptor.label !== undefined) mutable.label = descriptor.label
         mutable.commandKind = 'dispatch'
         mutable.pipeline = pipeline
+        const immediateData = normalizeCommandImmediateData(
+            this,
+            pipeline.immediateSize,
+            descriptor.immediateData
+        )
+        if (immediateData !== undefined) mutable.immediateData = immediateData
         rejectRemovedCommandDynamicOffsets(this, descriptor)
         mutable.bindSets = normalizeBindSetInvocations(this, descriptor.bindSets)
         mutable.count = normalizeDispatchCount(this, descriptor.count)
@@ -1303,11 +1354,16 @@ export class DispatchCommand {
         }
     }
 
-    encode(passEncoder: GPUComputePassEncoder) {
+    encode(
+        passEncoder: GPUComputePassEncoder,
+        resolvedImmediateData?: ResolvedCommandImmediateData
+    ) {
 
         this.assertUsable()
+        const immediateBytes = resolvedImmediateBytesForEncoding(this, resolvedImmediateData)
 
         passEncoder.setPipeline(this.pipeline.gpuPipeline)
+        setPassEncoderImmediates(passEncoder, immediateBytes)
         for (const invocation of this.bindSets) {
             setBindGroupWithDynamicOffsets(this, passEncoder, invocation)
         }
@@ -1334,6 +1390,456 @@ export class DispatchCommand {
 
         this.#isDisposed = true
     }
+}
+
+function normalizeCommandImmediateData(
+    command: DrawCommand | DispatchCommand,
+    expectedByteLength: number,
+    immediateData: unknown
+): CommandImmediateData | undefined {
+
+    if (expectedByteLength === 0) {
+        commandImmediateDataStates.set(command, Object.freeze({
+            sourceKind: 'none',
+            expectedByteLength: 0,
+        }))
+        if (immediateData === undefined) return undefined
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength,
+            immediateData,
+            reason: 'forbidden-for-zero-sized-pipeline',
+        })
+    }
+
+    if (immediateData === undefined) {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength,
+            immediateData,
+            reason: 'required',
+        })
+    }
+
+    let isUploadView = false
+    try {
+        isUploadView = isLayoutUploadView(immediateData)
+    } catch {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength,
+            immediateData,
+            reason: 'unstable-source-shape',
+        })
+    }
+
+    let state: CommandImmediateDataState
+    if (isUploadView) {
+        const uploadView = immediateData as LayoutUploadView
+        const immediateCompatible = (
+            uploadView.artifact.usageCompatibility as Record<string, boolean>
+        ).immediate === true
+        if (!immediateCompatible) {
+            throwCommandImmediateDataDiagnostic(command, {
+                expectedByteLength,
+                immediateData: uploadView,
+                sourceKind: 'layout-upload-view',
+                visibleByteLength: uploadView.byteLength,
+                reason: 'layout-incompatible',
+                layoutArtifact: uploadView.artifact,
+            })
+        }
+
+        const range = readLayoutImmediateRange(command, uploadView, expectedByteLength)
+        state = Object.freeze({
+            sourceKind: 'layout-upload-view',
+            expectedByteLength,
+            source: uploadView,
+            byteStorage: range.byteStorage,
+            byteOffset: range.byteOffset,
+            visibleByteLength: range.visibleByteLength,
+            byteView: uploadView.bytes,
+            layoutArtifact: uploadView.artifact,
+        })
+    } else if (immediateData instanceof ArrayBuffer) {
+        const visibleByteLength = immediateData.byteLength
+        validateImmediateVisibleByteLength(
+            command,
+            immediateData,
+            'array-buffer',
+            visibleByteLength,
+            expectedByteLength
+        )
+        state = Object.freeze({
+            sourceKind: 'array-buffer',
+            expectedByteLength,
+            source: immediateData,
+            byteStorage: immediateData,
+            byteOffset: 0,
+            visibleByteLength,
+        })
+    } else if (ArrayBuffer.isView(immediateData)) {
+        let byteStorage: ArrayBufferLike
+        let byteOffset: number
+        let visibleByteLength: number
+        try {
+            byteStorage = immediateData.buffer
+            byteOffset = immediateData.byteOffset
+            visibleByteLength = immediateData.byteLength
+        } catch {
+            throwCommandImmediateDataDiagnostic(command, {
+                expectedByteLength,
+                immediateData,
+                sourceKind: 'array-buffer-view',
+                reason: 'unreadable-source',
+            })
+        }
+        validateImmediateVisibleByteLength(
+            command,
+            immediateData,
+            'array-buffer-view',
+            visibleByteLength,
+            expectedByteLength
+        )
+        state = Object.freeze({
+            sourceKind: 'array-buffer-view',
+            expectedByteLength,
+            source: immediateData,
+            byteStorage,
+            byteOffset,
+            visibleByteLength,
+            byteView: immediateData,
+        })
+    } else {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength,
+            immediateData,
+            reason: 'unsupported-source',
+        })
+    }
+
+    commandImmediateDataStates.set(command, state)
+    return immediateData as CommandImmediateData
+}
+
+export function snapshotCommandImmediateData(
+    command: DrawCommand | DispatchCommand
+): ResolvedCommandImmediateData {
+
+    const state = commandImmediateDataStates.get(command)
+    if (state === undefined) {
+        throw new TypeError('Command immediate-data state is unavailable.')
+    }
+    if (state.sourceKind === 'none') {
+        return Object.freeze({
+            sourceKind: 'none',
+            expectedByteLength: 0,
+            visibleByteLength: 0,
+        })
+    }
+
+    const current = readCurrentImmediateRange(command, state)
+    validateImmediateVisibleByteLength(
+        command,
+        state.source,
+        state.sourceKind,
+        current.visibleByteLength,
+        state.expectedByteLength,
+        state.layoutArtifact
+    )
+
+    let bytes: Uint8Array
+    try {
+        bytes = Uint8Array.from(new Uint8Array(
+            current.byteStorage,
+            current.byteOffset,
+            current.visibleByteLength
+        ))
+    } catch {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength: state.expectedByteLength,
+            immediateData: state.source,
+            sourceKind: state.sourceKind,
+            visibleByteLength: current.visibleByteLength,
+            reason: 'snapshot-failed',
+            layoutArtifact: state.layoutArtifact,
+        })
+    }
+
+    if (bytes.byteLength !== state.expectedByteLength) {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength: state.expectedByteLength,
+            immediateData: state.source,
+            sourceKind: state.sourceKind,
+            visibleByteLength: bytes.byteLength,
+            reason: 'snapshot-length-changed',
+            layoutArtifact: state.layoutArtifact,
+        })
+    }
+
+    return Object.freeze({
+        sourceKind: state.sourceKind,
+        expectedByteLength: state.expectedByteLength,
+        visibleByteLength: bytes.byteLength,
+        bytes,
+    })
+}
+
+function readLayoutImmediateRange(
+    command: DrawCommand | DispatchCommand,
+    uploadView: LayoutUploadView,
+    expectedByteLength: number
+): Readonly<{
+    byteStorage: ArrayBufferLike
+    byteOffset: number
+    visibleByteLength: number
+}> {
+
+    let byteStorage: ArrayBufferLike
+    let bytesOffset: number
+    let bytesLength: number
+    try {
+        byteStorage = uploadView.bytes.buffer
+        bytesOffset = uploadView.bytes.byteOffset
+        bytesLength = uploadView.bytes.byteLength
+    } catch {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength,
+            immediateData: uploadView,
+            sourceKind: 'layout-upload-view',
+            reason: 'unreadable-source',
+            layoutArtifact: uploadView.artifact,
+        })
+    }
+
+    const byteOffset = uploadView.byteOffset
+    const visibleByteLength = uploadView.byteLength
+    if (
+        !Number.isSafeInteger(byteOffset) ||
+        !Number.isSafeInteger(visibleByteLength) ||
+        byteOffset < bytesOffset ||
+        visibleByteLength < 0 ||
+        byteOffset + visibleByteLength > bytesOffset + bytesLength
+    ) {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength,
+            immediateData: uploadView,
+            sourceKind: 'layout-upload-view',
+            visibleByteLength,
+            reason: 'invalid-visible-range',
+            layoutArtifact: uploadView.artifact,
+        })
+    }
+    validateImmediateVisibleByteLength(
+        command,
+        uploadView,
+        'layout-upload-view',
+        visibleByteLength,
+        expectedByteLength,
+        uploadView.artifact
+    )
+    return Object.freeze({ byteStorage, byteOffset, visibleByteLength })
+}
+
+function readCurrentImmediateRange(
+    command: DrawCommand | DispatchCommand,
+    state: Exclude<CommandImmediateDataState, { sourceKind: 'none' }>
+): Readonly<{
+    byteStorage: ArrayBufferLike
+    byteOffset: number
+    visibleByteLength: number
+}> {
+
+    if (state.sourceKind === 'array-buffer') {
+        let visibleByteLength: number
+        try {
+            visibleByteLength = (state.source as ArrayBuffer).byteLength
+        } catch {
+            throwCommandImmediateDataDiagnostic(command, {
+                expectedByteLength: state.expectedByteLength,
+                immediateData: state.source,
+                sourceKind: state.sourceKind,
+                reason: 'unreadable-source',
+            })
+        }
+        return Object.freeze({
+            byteStorage: state.byteStorage,
+            byteOffset: 0,
+            visibleByteLength,
+        })
+    }
+
+    const byteView = state.byteView!
+    let byteStorage: ArrayBufferLike
+    let viewByteOffset: number
+    let viewByteLength: number
+    try {
+        byteStorage = byteView.buffer
+        viewByteOffset = byteView.byteOffset
+        viewByteLength = byteView.byteLength
+    } catch {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength: state.expectedByteLength,
+            immediateData: state.source,
+            sourceKind: state.sourceKind,
+            reason: 'unreadable-source',
+            layoutArtifact: state.layoutArtifact,
+        })
+    }
+
+    const rangeIsCurrent = byteStorage === state.byteStorage && (
+        state.sourceKind === 'array-buffer-view'
+            ? viewByteOffset === state.byteOffset &&
+                viewByteLength === state.visibleByteLength
+            : state.byteOffset >= viewByteOffset &&
+                state.byteOffset + state.visibleByteLength <= viewByteOffset + viewByteLength
+    )
+    if (!rangeIsCurrent) {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength: state.expectedByteLength,
+            immediateData: state.source,
+            sourceKind: state.sourceKind,
+            visibleByteLength: viewByteLength,
+            reason: 'source-range-changed',
+            layoutArtifact: state.layoutArtifact,
+        })
+    }
+
+    return Object.freeze({
+        byteStorage,
+        byteOffset: state.byteOffset,
+        visibleByteLength: state.visibleByteLength,
+    })
+}
+
+function validateImmediateVisibleByteLength(
+    command: DrawCommand | DispatchCommand,
+    immediateData: unknown,
+    sourceKind: CommandImmediateSourceKind,
+    visibleByteLength: number,
+    expectedByteLength: number,
+    layoutArtifact?: LayoutArtifact
+): void {
+
+    if (visibleByteLength === expectedByteLength) return
+    throwCommandImmediateDataDiagnostic(command, {
+        expectedByteLength,
+        immediateData,
+        sourceKind,
+        visibleByteLength,
+        reason: 'byte-length-mismatch',
+        layoutArtifact,
+    })
+}
+
+function throwCommandImmediateDataDiagnostic(
+    command: DrawCommand | DispatchCommand,
+    details: {
+        expectedByteLength: number
+        immediateData: unknown
+        sourceKind?: CommandImmediateSourceKind | undefined
+        visibleByteLength?: number | undefined
+        reason: string
+        layoutArtifact?: LayoutArtifact | undefined
+    }
+): never {
+
+    throwScratchDiagnostic({
+        code: 'SCRATCH_COMMAND_IMMEDIATE_DATA_INVALID',
+        severity: 'error',
+        phase: 'command',
+        subject: command.subject,
+        related: [
+            command.pipeline.subject,
+            ...(details.layoutArtifact !== undefined
+                ? [ layoutArtifactSubject(details.layoutArtifact) ]
+                : []),
+        ],
+        message: 'Command immediateData does not match its Pipeline immediate range.',
+        expected: {
+            immediateByteLength: details.expectedByteLength,
+            source: details.expectedByteLength === 0
+                ? 'omitted'
+                : 'ArrayBuffer, ArrayBufferView, or compatible LayoutUploadView',
+        },
+        actual: {
+            sourceKind: details.sourceKind ?? describeImmediateSourceKind(details.immediateData),
+            ...(details.visibleByteLength !== undefined
+                ? { visibleByteLength: details.visibleByteLength }
+                : {}),
+            reason: details.reason,
+        },
+    })
+}
+
+function describeImmediateSourceKind(value: unknown): string {
+
+    if (value === undefined) return 'undefined'
+    if (value === null) return 'null'
+    if (value instanceof ArrayBuffer) return 'array-buffer'
+    if (ArrayBuffer.isView(value)) return 'array-buffer-view'
+    return typeof value
+}
+
+function resolvedImmediateBytesForEncoding(
+    command: DrawCommand | DispatchCommand,
+    resolved: ResolvedCommandImmediateData | undefined
+): Uint8Array | undefined {
+
+    const state = commandImmediateDataStates.get(command)
+    if (state === undefined) {
+        throw new TypeError('Command immediate-data state is unavailable.')
+    }
+    if (state.sourceKind === 'none') {
+        if (
+            resolved === undefined ||
+            (
+                resolved.sourceKind === 'none' &&
+                resolved.expectedByteLength === 0 &&
+                resolved.visibleByteLength === 0 &&
+                resolved.bytes === undefined
+            )
+        ) {
+            return undefined
+        }
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength: 0,
+            immediateData: command.immediateData,
+            visibleByteLength: resolved.visibleByteLength,
+            reason: 'unexpected-resolved-snapshot',
+        })
+    }
+
+    if (
+        resolved === undefined ||
+        resolved.sourceKind !== state.sourceKind ||
+        resolved.expectedByteLength !== state.expectedByteLength ||
+        resolved.visibleByteLength !== state.expectedByteLength ||
+        !(resolved.bytes instanceof Uint8Array) ||
+        resolved.bytes.byteLength !== state.expectedByteLength
+    ) {
+        throwCommandImmediateDataDiagnostic(command, {
+            expectedByteLength: state.expectedByteLength,
+            immediateData: state.source,
+            sourceKind: state.sourceKind,
+            visibleByteLength: resolved?.visibleByteLength,
+            reason: 'resolved-snapshot-missing-or-incompatible',
+            layoutArtifact: state.layoutArtifact,
+        })
+    }
+
+    return resolved.bytes
+}
+
+function setPassEncoderImmediates(
+    passEncoder: GPURenderPassEncoder | GPUComputePassEncoder,
+    bytes: Uint8Array | undefined
+): void {
+
+    if (bytes === undefined) return
+    const encoder = passEncoder as (
+        GPURenderPassEncoder | GPUComputePassEncoder
+    ) & {
+        setImmediates(offset: number, data: ArrayBufferView): void
+    }
+    encoder.setImmediates(0, bytes)
 }
 
 function drawCountProducesDeclaredWrites(count: DrawCommand['count']): boolean {
@@ -1713,6 +2219,7 @@ function lockDrawCommandContract(command: DrawCommand): void {
         'label',
         'commandKind',
         'pipeline',
+        'immediateData',
         'bindSets',
         'vertexBuffers',
         'indexBuffer',
@@ -1738,6 +2245,7 @@ function lockDispatchCommandContract(command: DispatchCommand): void {
         'label',
         'commandKind',
         'pipeline',
+        'immediateData',
         'bindSets',
         'count',
         'resources',

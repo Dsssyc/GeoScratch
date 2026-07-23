@@ -252,6 +252,7 @@ export type ScratchSubmissionNativeLocation =
         kind: 'pass-command'
         submissionId: string
         stepIndex: number
+        commandIndex: number
         passId: string
         passKind: 'render' | 'compute'
         commandId: string
@@ -1375,6 +1376,7 @@ function assertSubmissionNativeLocation(
             return
         case 'pass-command':
             assertNonNegativeInteger(location.stepIndex, 'stepIndex')
+            assertNonNegativeInteger(location.commandIndex, 'commandIndex')
             assertNonEmptyString(location.passId, 'passId')
             assertPassKind(location.passKind)
             assertNonEmptyString(location.commandId, 'commandId')

@@ -309,7 +309,7 @@ describe('Scratch persistent binding final parity', () => {
             status: 'passed',
         })
         expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(21)
-        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(11)
+        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(12)
         expect(result.publicSurface.programReadonlyPublicContracts.map(
             contract => contract.id
         )).to.deep.equal([ 'Program.runtime', 'Program.id', 'Program.isDisposed' ])
@@ -325,7 +325,7 @@ describe('Scratch persistent binding final parity', () => {
             status: 'passed',
             emittedJavaScriptCount: 96,
             emittedDeclarationCount: 96,
-            declarationSignatureCount: 3689,
+            declarationSignatureCount: 3702,
         })
         expect(result.publicSurface.productionEmitParity.files).to.have.length(192)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
