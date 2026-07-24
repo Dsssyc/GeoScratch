@@ -1,7 +1,7 @@
 # Pipelines And Commands
 
 Status: Vision draft
-Date: 2026-07-23
+Date: 2026-07-24
 
 ## Decision
 
@@ -109,12 +109,100 @@ Target command families:
 - `ResolveQuerySetCommand`
 - `ReadbackCommand` as an explicit ordered-staging escape hatch that produces a `ReadbackOperation`
 - `BeginOcclusionQueryCommand` / `EndOcclusionQueryCommand` as render-pass-only query brackets
+- `BundleDrawCommand` / `ExecuteRenderBundlesCommand` for native render-bundle
+  recording and execution
+- `DebugCommand` for native encoder debug groups and markers
 
 `CopyCommand` covers WebGPU-native GPU-side copy directions: buffer-to-buffer, texture-to-texture, buffer-to-texture, and texture-to-buffer. CPU upload and CPU readback remain explicit transfer/readback operations rather than substitutes for these command encoder copies.
 
 `ClearBufferCommand` covers the native `GPUCommandEncoder.clearBuffer()` operation.
 Attachment resolve remains part of a render-pass color attachment; it is not a
 standalone resolve command.
+
+### RenderBundle And DebugCommand
+
+`RenderBundle` is a restricted, natively encoded render command sequence, not
+a cached ordinary render pass:
+
+```ts
+const bundleDraw = runtime.createBundleDrawCommand({
+    pipeline,
+    bindSets: [ { set: staticSet } ],
+    vertexBuffers: [ { slot: 0, region: vertices.region() } ],
+    count: { vertexCount: 3 },
+    resources: {
+        read: [
+            { resource: vertices, contentEpoch: vertices.contentEpoch },
+        ],
+        write: [],
+    },
+    whenMissing: 'throw',
+})
+
+const bundle = await runtime.createRenderBundle({
+    realization: 'persistent',
+    colorFormats: [ 'rgba8unorm' ],
+    commands: [ bundleDraw ],
+})
+```
+
+The realization mode is mandatory. A persistent bundle acknowledges one
+native `GPURenderBundle` and snapshots allocation versions, BindSet preparation
+facts, and complete immediate bytes. A changed allocation or explicit BindSet
+re-preparation makes it stale; submission fails instead of rebuilding it.
+Temporal Surface or external-texture dependencies require
+`realization: 'attempt-local'`. Submission then creates at most one native
+bundle for that authored bundle in the selected attempt and never turns the
+temporal handle into a persistent Resource.
+
+Bundle layout explicitly contains color formats, optional depth/stencil format,
+sample count, and depth/stencil read-only declarations. It must contain at
+least one color or depth/stencil attachment. Pipeline compatibility is checked
+when the bundle is created, including the cull-aware native stencil-write rule;
+pass compatibility is checked before submission effects. Trailing null color
+slots are ignored only for native layout equality.
+
+`BundleDrawCommand` excludes viewport, scissor, blend constant, stencil
+reference, fallback readiness, query brackets, and attachment operations.
+These are pass-owned concepts. Native bundle encoding does not advance content
+epochs. Successful `executeBundles()` advances each nested declared write once
+per executed occurrence and records those occurrences in `SubmittedWork`.
+Scratch calls `executeBundles()` even for an empty bundle list. Because the
+native call clears pipeline, bind-group, vertex-buffer, and index-buffer state,
+every following ordinary Draw re-emits its complete state.
+
+`DebugCommand` has exactly three actions: `push-group`, `pop-group`, and
+`insert-marker`. The same branded command lowers to command, render-pass,
+compute-pass, and render-bundle encoders. Groups balance inside their exact
+native encoder scope; a command-encoder group cannot cross a queue-side upload
+boundary. Debug commands create no Resource access, readiness dependency,
+content epoch, or retained logging stream. Unbalanced diagnostics retain a
+bounded prefix of command IDs plus an omitted count.
+
+Current RenderBundle and DebugCommand diagnostic codes using the shared
+envelope from `09-diagnostics-validation`:
+
+- `SCRATCH_DEBUG_COMMAND_DESCRIPTOR_INVALID`
+- `SCRATCH_DEBUG_COMMAND_NATIVE_FAILED`
+- `SCRATCH_DEBUG_COMMAND_UNSUPPORTED`
+- `SCRATCH_DEBUG_GROUP_UNBALANCED`
+- `SCRATCH_RENDER_BUNDLE_ATTEMPT_REALIZATION_FAILED`
+- `SCRATCH_RENDER_BUNDLE_COMMAND_INVALID`
+- `SCRATCH_RENDER_BUNDLE_DESCRIPTOR_INVALID`
+- `SCRATCH_RENDER_BUNDLE_DISPOSED`
+- `SCRATCH_RENDER_BUNDLE_EXECUTION_DESCRIPTOR_INVALID`
+- `SCRATCH_RENDER_BUNDLE_EXECUTION_FAILED`
+- `SCRATCH_RENDER_BUNDLE_EXECUTION_UNSUPPORTED`
+- `SCRATCH_RENDER_BUNDLE_NATIVE_CREATION_FAILED`
+- `SCRATCH_RENDER_BUNDLE_NATIVE_INTERNAL_FAILED`
+- `SCRATCH_RENDER_BUNDLE_NATIVE_OUT_OF_MEMORY`
+- `SCRATCH_RENDER_BUNDLE_NATIVE_VALIDATION_FAILED`
+- `SCRATCH_RENDER_BUNDLE_PASS_INCOMPATIBLE`
+- `SCRATCH_RENDER_BUNDLE_PIPELINE_LAYOUT_MISMATCH`
+- `SCRATCH_RENDER_BUNDLE_READ_ONLY_MISMATCH`
+- `SCRATCH_RENDER_BUNDLE_STALE`
+- `SCRATCH_RENDER_BUNDLE_TEMPORAL_REALIZATION_REQUIRED`
+- `SCRATCH_RENDER_BUNDLE_WRONG_RUNTIME`
 
 Every executable command exposes a one-way lifecycle.
 All normalized command construction facts and payload/resource references are locked:

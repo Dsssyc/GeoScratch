@@ -64,6 +64,28 @@ const checks = Object.freeze({
         webGpuManifest.summary.entryCount === 591,
     completeScopedWgslSurface:
         wgslManifest.summary.entryCount === 65,
+    renderBundleAndDebugNativeCoverage:
+        [
+            'createRenderBundleEncoder',
+            'executeBundles',
+            'pushDebugGroup',
+            'popDebugGroup',
+            'insertDebugMarker',
+        ].every(operation => nativeCalls.some(call => call.operation === operation)),
+    renderBundleAndDebugPublicExports:
+        [ publicExports.scratch, publicExports.package ].every(exports =>
+            [
+                'BundleDrawCommand',
+                'BundleDrawCommandDescriptor',
+                'DebugCommand',
+                'DebugCommandDescriptor',
+                'ExecuteRenderBundlesCommand',
+                'ExecuteRenderBundlesCommandDescriptor',
+                'RenderBundle',
+                'RenderBundleDescriptor',
+                'SubmittedRenderBundleFact',
+            ].every(name => exports.some(entry => entry.name === name))
+        ),
 })
 
 const failures = Object.entries(checks)

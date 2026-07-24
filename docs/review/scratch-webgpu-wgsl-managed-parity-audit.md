@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 1 runtime and attempt-local texture parity is complete on
+Phase 3 render-bundle and public debug-command parity is complete through
 `socu/scratch-webgpu-wgsl-parity-v1`, based on
 `e905b33e7bd8fdc68e9400ffe103a52e89c21488`. This living audit records the
 fixed specification surface and will be finalized only after all seven
@@ -53,9 +53,9 @@ surface inventories.
 | Capability family | Frozen baseline | Current status |
 | --- | --- | --- |
 | GPUExternalTexture | Native import, external bind slots, temporal expiry | Phase 1 implemented; ADR-049 Accepted |
-| RenderBundle/debug commands | Native bundle encode/execute and encoder debug mixin | Known target gap; ADR-051 Proposed |
-| ShaderModule/Program decomposition | Reusable modules, separate stages, auto-derived layouts | Known target gap; ADR-050 Proposed |
-| Optional fragment | Native fragment omission and no-color-output depth/stencil | Known target gap; ADR-050 Proposed |
+| RenderBundle/debug commands | Native bundle encode/execute and encoder debug mixin | Phase 3 implemented; ADR-051 Accepted |
+| ShaderModule/Program decomposition | Reusable modules, separate stages, auto-derived layouts | Phase 2 implemented; ADR-050 Accepted |
+| Optional fragment | Native fragment omission and no-color-output depth/stencil | Phase 2 implemented; ADR-050 Accepted |
 | SurfaceTextureLease | Managed current-texture attachment/copy/binding use | Phase 1 implemented; ADR-049 Accepted |
 | Runtime adapter/device parity | feature level, XR request, default queue, immutable adapter facts | Phase 1 implemented |
 | Texture transfer completeness | upload aspect, direct texture readback, mapped lease | Known target gap; ADR-052 Proposed |
@@ -102,6 +102,64 @@ Checkpoint evidence:
 The frozen manifests retain their baseline classifications. Their target-gap
 labels describe the goal-start snapshot and are not rewritten phase by phase;
 the living matrix above records current implementation status.
+
+## Phase 2 Checkpoint
+
+Phase 2 clean-cut the old joined `Program.modules` model. `ShaderModule` now
+owns acknowledged native compilation, ordered source-part hashes and mapping,
+compilation hints, and bounded source-free reports. Program stages reference
+one acknowledged module each, so render pipelines can use distinct vertex and
+fragment modules and multiple pipelines can reuse one native module.
+
+Pipeline layout mode is explicitly `explicit` or `auto`. Auto-layout pipelines
+can acknowledge native-derived BindLayouts through `getBindLayout()`, while
+explicit layouts remain the omission default. Fragment is optional; omitting
+it also omits the native fragment descriptor and supports no-color-output
+depth/stencil work. The removed modules, pipeline-owned source, entry-point
+aliases, and top-level bind-layout aliases have no compatibility overload.
+
+Checkpoint commit: `6aa8790` (`Decompose Scratch shader modules and
+pipelines`). ADR-050 is Accepted.
+
+## Phase 3 Checkpoint
+
+Phase 3 adds closed `BundleDrawCommand`, `RenderBundle`,
+`ExecuteRenderBundlesCommand`, and `DebugCommand` public contracts. Persistent
+bundles acknowledge one native creation operation and retain allocation,
+BindSet preparation, and immediate-data snapshots. Attempt-local bundles use
+the submission-owned temporal authority and realize at most once per authored
+bundle per attempt. Stale persistent dependencies fail without hidden repair.
+
+Bundle/pass compatibility covers color formats with trailing-null equality,
+depth/stencil format, sample count, read-only constraints, fragmentless
+depth-only work, and the cull-aware native stencil-write rule. Native
+`executeBundles()` is issued even for an empty sequence; following Draws
+re-emit complete state. Nested resource writes advance once per successful
+bundle occurrence and appear in immutable SubmittedWork access and bundle
+facts.
+
+One DebugCommand family lowers to command, render-pass, compute-pass, and
+render-bundle encoders. Groups balance inside their exact encoder scope and
+cannot cross an upload-created command-encoder boundary. Diagnostic labels,
+open-stack evidence, operation history, and stress reuse remain bounded.
+Synchronous failures and delayed native outcomes remain attributed to the
+owning command, submission, or persistent bundle operation.
+
+Checkpoint evidence:
+
+- `tests/scratch-render-bundle-debug.test.js`: 27/27 passing;
+- `npm test`: 1087 passing and 2 expected pending;
+- `npm run typecheck`: passed for package, public API, examples, and canonical
+  WebGPU declarations;
+- `npm run build`: passed for the package and all 17 examples;
+- `git diff --check`: passed;
+- structured parity audit: passed with 79 selected native calls, 311 Scratch exports, and
+  402 package exports, with the RenderBundle/debug checks passed; and
+- submission native provenance inventory: 58/58 current source call sites
+  classified.
+
+ADR-051 is Accepted. Consolidated headed browser execution remains a Phase 6
+gate and is not claimed by this checkpoint.
 
 ## Required Final Matrices
 

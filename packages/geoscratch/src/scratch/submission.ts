@@ -29,6 +29,10 @@ import {
     writeUploadCommandQueueAction,
 } from './command.js'
 import {
+    isDebugCommand,
+    validateBalancedDebugCommands,
+} from './debug-command.js'
+import {
     ScratchDiagnosticError,
     createScratchDiagnostic,
     createScratchDiagnosticReport,
@@ -46,6 +50,16 @@ import {
 } from './pass.js'
 import { renderPipelineLayoutFor } from './pipeline.js'
 import { createScheduledReadbackOperation } from './readback.js'
+import {
+    assertRenderBundleBufferGpuUseAvailable,
+    assertRenderBundleTemporalDependencies,
+    isExecuteRenderBundlesCommand,
+    realizeRenderBundleForAttempt,
+    renderBundleDrawCommands,
+    renderBundleDrawProducesDeclaredWrites,
+    renderBundleDrawSource,
+    snapshotAttemptRenderBundleImmediates,
+} from './render-bundle.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
@@ -74,9 +88,15 @@ import {
 import { TextureResource, createNativeTextureView, isTextureResource, isTextureViewSpec } from './texture.js'
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, ClearBufferCommand, CommandResourceReadDescriptor, CommandResourceReadEpoch, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResolvedCommandImmediateData, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
+import type { DebugCommand } from './debug-command.js'
 import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassNativeAttachments, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
+import type {
+    BundleDrawCommand,
+    ExecuteRenderBundlesCommand,
+    RenderBundle,
+} from './render-bundle.js'
 import type { ContentResource, ResourceState } from './resource.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { PreparedSurfaceAttachment, Surface } from './surface.js'
@@ -114,7 +134,7 @@ const STENCIL_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
 
 export type SubmissionValidationMode = 'off' | 'warn' | 'throw'
 
-export type SubmissionStepKind = 'upload' | 'clear' | 'copy' | 'readback' | 'resolve' | 'compute' | 'render'
+export type SubmissionStepKind = 'upload' | 'clear' | 'copy' | 'readback' | 'resolve' | 'debug' | 'compute' | 'render'
 
 export type SubmissionResourceAccessKind = 'read' | 'write'
 
@@ -156,6 +176,13 @@ export type SubmittedReadbackLink = Readonly<{
     allocationVersion: number
     contentEpoch: number
     stagingAllocationOperationId: string
+}>
+
+export type SubmittedRenderBundleFact = Readonly<{
+    executeCommandId: string
+    bundleId: string
+    realization: RenderBundle['realization']
+    commandIds: readonly string[]
 }>
 
 export type SubmittedPotentialWrite =
@@ -253,7 +280,14 @@ export type SubmissionBuilderOptions = {
     validation?: SubmissionValidationMode
 }
 
-export type RenderCommand = DrawCommand | BeginOcclusionQueryCommand | EndOcclusionQueryCommand
+export type RenderCommand =
+    | DrawCommand
+    | BeginOcclusionQueryCommand
+    | EndOcclusionQueryCommand
+    | ExecuteRenderBundlesCommand
+    | DebugCommand
+
+export type ComputeCommand = DispatchCommand | DebugCommand
 
 type RenderStep = {
     kind: 'render'
@@ -266,7 +300,12 @@ type PreparedSurfaceAttachments = ReadonlyMap<Surface, PreparedSurfaceAttachment
 type ComputeStep = {
     kind: 'compute'
     passSpec: ComputePassSpec
-    commands: DispatchCommand[]
+    commands: ComputeCommand[]
+}
+
+type DebugStep = {
+    kind: 'debug'
+    command: DebugCommand
 }
 
 type UploadStep = {
@@ -294,7 +333,15 @@ type ResolveStep = {
     command: ResolveQuerySetCommand
 }
 
-type SubmissionStep = RenderStep | ComputeStep | UploadStep | ClearStep | CopyStep | ReadbackStep | ResolveStep
+type SubmissionStep =
+    | RenderStep
+    | ComputeStep
+    | UploadStep
+    | ClearStep
+    | CopyStep
+    | ReadbackStep
+    | ResolveStep
+    | DebugStep
 
 type ResolvedPassDisposition =
     | { disposition: 'execute', triggerCommandId?: never }
@@ -312,6 +359,7 @@ type ResolvedSubmissionStep =
     | CopyStep
     | ReadbackStep
     | ResolveStep
+    | DebugStep
 
 type ResolvedSubmissionPlan = {
     report: ScratchDiagnosticReport
@@ -326,7 +374,17 @@ type ResolvedCommandImmediateSnapshots = ReadonlyMap<
     readonly (ResolvedCommandImmediateData | undefined)[]
 >
 
-type ReadCommand = CopyCommand | DispatchCommand | DrawCommand | ReadbackCommand
+type ResolvedRenderBundleImmediateSnapshots = ReadonlyMap<
+    RenderBundle,
+    ReadonlyMap<BundleDrawCommand, ResolvedCommandImmediateData>
+>
+
+type ReadCommand =
+    | CopyCommand
+    | DispatchCommand
+    | DrawCommand
+    | ReadbackCommand
+    | BundleDrawCommand
 
 type ExecutableCommand = DrawCommand | DispatchCommand
 
@@ -533,12 +591,22 @@ export class SubmissionBuilder {
         return this
     }
 
-    compute(passSpec: ComputePassSpec, commands: DispatchCommand[] = []) {
+    compute(passSpec: ComputePassSpec, commands: ComputeCommand[] = []) {
 
         this.steps.push({
             kind: 'compute',
             passSpec,
             commands: [ ...commands ],
+        })
+
+        return this
+    }
+
+    debug(command: DebugCommand) {
+
+        this.steps.push({
+            kind: 'debug',
+            command,
         })
 
         return this
@@ -625,6 +693,9 @@ export class SubmissionBuilder {
         const commandImmediateSnapshots = snapshotResolvedCommandImmediates(
             resolvedPlan.steps
         )
+        const renderBundleImmediateSnapshots = snapshotResolvedRenderBundleImmediates(
+            resolvedPlan.steps
+        )
         const surfaceAttachments = prepareSubmissionSurfaceAttachments(resolvedPlan.steps)
         const attemptTextureAuthority = new AttemptTextureAuthority(this)
 
@@ -637,6 +708,7 @@ export class SubmissionBuilder {
         const commandBuffers: GPUCommandBuffer[] = []
         const queueTimeline: PreparedQueueAction[] = []
         const resourceAccesses: SubmissionResourceAccess[] = []
+        const submittedRenderBundles: SubmittedRenderBundleFact[] = []
         const pendingReadbacks: PendingReadback[] = []
         const submittedReadbacks = new Set<PendingReadback>()
         const readbackClaims = new Map<number, ReadbackCommandClaim>()
@@ -649,6 +721,7 @@ export class SubmissionBuilder {
         let segmentResources = new Set<ContentResource>()
         let segmentQuerySlots = new Map<QuerySetResource, Set<number>>()
         let segmentReadbacks: PendingReadback[] = []
+        const nativeRenderBundles = new Map<RenderBundle, GPURenderBundle>()
         let replayedQueueActionCount = 0
 
         try {
@@ -723,6 +796,19 @@ export class SubmissionBuilder {
             return encoder
         }
 
+        const getNativeRenderBundle = (bundle: RenderBundle): GPURenderBundle => {
+
+            const existing = nativeRenderBundles.get(bundle)
+            if (existing !== undefined) return existing
+            const realized = realizeRenderBundleForAttempt(
+                bundle,
+                attemptTextureAuthority,
+                renderBundleImmediateSnapshots.get(bundle)
+            )
+            nativeRenderBundles.set(bundle, realized)
+            return realized
+        }
+
         const finishEncoderSegment = () => {
 
             if (encoder === undefined) return
@@ -752,6 +838,19 @@ export class SubmissionBuilder {
 
         try {
             for (const [stepIndex, step] of resolvedPlan.steps.entries()) {
+                if (step.kind === 'debug') {
+                    const encoder = getEncoder()
+                    issueStandaloneCommandEncoding(
+                        nativeObservation,
+                        submittedId,
+                        stepIndex,
+                        step.command,
+                        encoder,
+                        () => step.command.encode(encoder)
+                    )
+                    continue
+                }
+
                 if (step.kind === 'upload') {
                     finishEncoderSegment()
                     const effects: PreparedQueueEffect[] = []
@@ -894,6 +993,19 @@ export class SubmissionBuilder {
                         () => encoder.beginComputePass(step.passSpec.createComputePassDescriptor())
                     )
                     for (const [ commandIndex, command ] of step.commands.entries()) {
+                        if (isDebugCommand(command)) {
+                            issuePassCommandEncoding(
+                                nativeObservation,
+                                submittedId,
+                                stepIndex,
+                                commandIndex,
+                                step.passSpec,
+                                command,
+                                passEncoder,
+                                () => command.encode(passEncoder)
+                            )
+                            continue
+                        }
                         const origin = commandAccessOrigin(stepIndex, 'compute', command, step.passSpec)
                         const declaredWrites = command._producesDeclaredWrites ? command.resources.write : []
                         for (const resource of declaredWrites) trackSegmentResourceWrite(resource)
@@ -970,6 +1082,90 @@ export class SubmissionBuilder {
                 )
                 let activeOcclusionQueryCommand: BeginOcclusionQueryCommand | undefined
                 for (const [ commandIndex, command ] of step.commands.entries()) {
+                    if (isDebugCommand(command)) {
+                        issuePassCommandEncoding(
+                            nativeObservation,
+                            submittedId,
+                            stepIndex,
+                            commandIndex,
+                            step.passSpec,
+                            command,
+                            passEncoder,
+                            () => command.encode(passEncoder)
+                        )
+                        continue
+                    }
+
+                    if (isExecuteRenderBundlesCommand(command)) {
+                        const bundleDraws = command.bundles.flatMap(bundle =>
+                            renderBundleDrawCommands(bundle)
+                        )
+                        for (const bundleDraw of bundleDraws) {
+                            if (!renderBundleDrawProducesDeclaredWrites(bundleDraw)) continue
+                            for (const resource of bundleDraw.resources.write) {
+                                trackSegmentResourceWrite(resource)
+                            }
+                        }
+                        const nestedAccesses: SubmissionResourceAccess[] = []
+                        issuePassCommandEncoding(
+                            nativeObservation,
+                            submittedId,
+                            stepIndex,
+                            commandIndex,
+                            step.passSpec,
+                            command,
+                            passEncoder,
+                            () => {
+                                command.encode(
+                                    passEncoder,
+                                    command.bundles.map(getNativeRenderBundle)
+                                )
+                                for (const bundleDraw of bundleDraws) {
+                                    const origin = commandAccessOrigin(
+                                        stepIndex,
+                                        'render',
+                                        bundleDraw,
+                                        step.passSpec
+                                    )
+                                    const declaredWrites = renderBundleDrawProducesDeclaredWrites(
+                                        bundleDraw
+                                    )
+                                        ? bundleDraw.resources.write
+                                        : []
+                                    const accesses = [
+                                        ...bundleDraw.resources.read.map(read =>
+                                            captureResourceAccess(
+                                                read.resource,
+                                                'read',
+                                                origin,
+                                                read.contentEpoch
+                                            )
+                                        ),
+                                        ...declaredWrites.map(resource =>
+                                            captureResourceAccess(resource, 'write', origin)
+                                        ),
+                                    ]
+                                    for (const resource of declaredWrites) {
+                                        advanceResourceContentEpoch(resource)
+                                    }
+                                    completeResourceAccesses(nestedAccesses, accesses)
+                                }
+                            }
+                        )
+                        resourceAccesses.push(...nestedAccesses)
+                        for (const bundle of command.bundles) {
+                            submittedRenderBundles.push(Object.freeze({
+                                executeCommandId: command.id,
+                                bundleId: bundle.id,
+                                realization: bundle.realization,
+                                commandIds: Object.freeze(
+                                    bundle.commands.map(bundleCommand => bundleCommand.id)
+                                ),
+                            }))
+                        }
+                        continue
+                    }
+
                     const origin = commandAccessOrigin(stepIndex, 'render', command, step.passSpec)
                     const declaredWrites = command.commandKind === 'draw' && command._producesDeclaredWrites
                         ? command.resources.write
@@ -1135,6 +1331,7 @@ export class SubmissionBuilder {
             report: resolvedPlan.report,
             resourceAccesses,
             executionOutcomes: resolvedPlan.executionOutcomes,
+            renderBundles: submittedRenderBundles,
             readbacks: readbackLinks,
             potentialWrites: potentialWriteFacts,
             nativeOutcome,
@@ -1189,7 +1386,9 @@ function assertResolvedSubmissionTemporalDependencies(
         if (step.kind === 'compute') {
             if (step.disposition === 'skip-pass') continue
             for (const command of step.commands) {
-                assertCommandTemporalDependencies(command, builder)
+                if (isDispatchCommand(command)) {
+                    assertCommandTemporalDependencies(command, builder)
+                }
             }
             continue
         }
@@ -1198,6 +1397,12 @@ function assertResolvedSubmissionTemporalDependencies(
         for (const command of step.commands) {
             if (isDrawCommand(command)) {
                 assertCommandTemporalDependencies(command, builder)
+                continue
+            }
+            if (isExecuteRenderBundlesCommand(command)) {
+                for (const bundle of command.bundles) {
+                    assertRenderBundleTemporalDependencies(bundle, builder)
+                }
             }
         }
     }
@@ -1213,10 +1418,17 @@ function assertResolvedSubmissionBufferGpuUseAvailable(
             for (const command of step.commands) {
                 if (isDrawCommand(command) || isDispatchCommand(command)) {
                     assertCommandBufferGpuUseAvailable(command)
+                    continue
+                }
+                if (isExecuteRenderBundlesCommand(command)) {
+                    for (const bundle of command.bundles) {
+                        assertRenderBundleBufferGpuUseAvailable(bundle)
+                    }
                 }
             }
             continue
         }
+        if (step.kind === 'debug') continue
         if (step.kind === 'clear' && !step.command.hasContentEffect) continue
         assertCommandBufferGpuUseAvailable(step.command)
     }
@@ -1254,6 +1466,18 @@ function createSubmissionNativeIssuePlan(
     }
 
     for (const [ stepIndex, step ] of steps.entries()) {
+        if (step.kind === 'debug') {
+            ensureEncoder()
+            encoding.push({
+                stage: 'command-encode',
+                location: standaloneCommandLocation(
+                    submissionId,
+                    stepIndex,
+                    step.command
+                ),
+            })
+            continue
+        }
         if (step.kind === 'upload') {
             finishEncoder()
             queueActions.push(uploadQueueActionKind(step.command))
@@ -1557,7 +1781,8 @@ function issueCommandEncoding(
 ): void {
 
     observation.issue('command-encode', location, () => {
-        const detailedDebugGroup = observation.mode === 'detailed' &&
+        const detailedDebugGroup = command.commandKind !== 'debug' &&
+            observation.mode === 'detailed' &&
             typeof encoder.pushDebugGroup === 'function' &&
             typeof encoder.popDebugGroup === 'function'
         if (detailedDebugGroup) {
@@ -1726,6 +1951,7 @@ function submissionDebugLabel(
 
 function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSubmissionPlan {
 
+    validateSubmissionDebugGroups(builder)
     const diagnostics: ScratchDiagnostic[] = []
     const steps: ResolvedSubmissionStep[] = []
     const executionOutcomes: SubmissionExecutionOutcome[] = []
@@ -1734,6 +1960,12 @@ function resolveSubmissionBeforeEncoding(builder: SubmissionBuilder): ResolvedSu
     const readbackSteps = new Map<ReadbackCommand, number>()
 
     for (const [stepIndex, step] of builder.steps.entries()) {
+        if (step.kind === 'debug') {
+            validateDebugStep(builder, step)
+            steps.push(step)
+            continue
+        }
+
         if (step.kind === 'upload') {
             validateUploadStep(builder, step)
             if (uploadCommandHasContentEffect(step.command)) {
@@ -1887,6 +2119,32 @@ function snapshotResolvedCommandImmediates(
     return snapshots
 }
 
+function snapshotResolvedRenderBundleImmediates(
+    steps: readonly ResolvedSubmissionStep[]
+): ResolvedRenderBundleImmediateSnapshots {
+
+    const snapshots = new Map<
+        RenderBundle,
+        ReadonlyMap<BundleDrawCommand, ResolvedCommandImmediateData>
+    >()
+    for (const step of steps) {
+        if (
+            step.kind !== 'render' ||
+            step.disposition === 'skip-pass'
+        ) {
+            continue
+        }
+        for (const command of step.commands) {
+            if (!isExecuteRenderBundlesCommand(command)) continue
+            for (const bundle of command.bundles) {
+                if (bundle.realization !== 'attempt-local' || snapshots.has(bundle)) continue
+                snapshots.set(bundle, snapshotAttemptRenderBundleImmediates(bundle))
+            }
+        }
+    }
+    return snapshots
+}
+
 function resolvedCommandImmediateSnapshot(
     snapshots: ResolvedCommandImmediateSnapshots,
     stepIndex: number,
@@ -1908,6 +2166,51 @@ function applySubmissionValidationDisposition(builder: SubmissionBuilder, report
 
     const diagnostic = report.diagnostics.find(candidate => candidate.severity === 'error')
     if (diagnostic !== undefined) throw new ScratchDiagnosticError(diagnostic, report)
+}
+
+function validateSubmissionDebugGroups(builder: SubmissionBuilder): void {
+
+    let encoderSegmentCommands: DebugCommand[] = []
+    const validateSegment = () => {
+        validateBalancedDebugCommands(
+            encoderSegmentCommands,
+            builder.subject,
+            'command-encoder'
+        )
+        encoderSegmentCommands = []
+    }
+
+    for (const step of builder.steps) {
+        if (step.kind === 'upload') {
+            validateSegment()
+            continue
+        }
+        if (step.kind === 'debug' && isDebugCommand(step.command)) {
+            encoderSegmentCommands.push(step.command)
+        }
+    }
+    validateSegment()
+}
+
+function validateDebugStep(builder: SubmissionBuilder, step: DebugStep): void {
+
+    const command: unknown = step.command
+    if (!isDebugCommand(command)) {
+        throwScratchDiagnostic({
+            code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
+            severity: 'error',
+            phase: 'submission',
+            subject: builder.subject,
+            message: 'Submission debug step requires a DebugCommand.',
+            expected: { command: 'DebugCommand' },
+            actual: {
+                command: command === undefined || command === null
+                    ? String(command)
+                    : typeof command,
+            },
+        })
+    }
+    command.assertRuntime(builder.runtime)
 }
 
 function validateUploadStep(builder: SubmissionBuilder, step: UploadStep) {
@@ -2130,11 +2433,15 @@ function resolveComputeReadiness(
     stepIndex: number,
     readiness: ReadinessSimulation,
     diagnostics: ScratchDiagnostic[]
-): ResolvedPassCommands<DispatchCommand> {
+): ResolvedPassCommands<ComputeCommand> {
 
-    const commands: DispatchCommand[] = []
+    const commands: ComputeCommand[] = []
     const commandOutcomes: SubmissionCommandExecutionOutcome[] = []
     for (const [commandIndex, command] of step.commands.entries()) {
+        if (isDebugCommand(command)) {
+            commands.push(command)
+            continue
+        }
         const resolution = resolveExecutableCommand(
             builder,
             stepIndex,
@@ -2148,6 +2455,7 @@ function resolveComputeReadiness(
         if (resolution.disposition === 'skip-pass') {
             markCommandOutcomesSkippedPass(commandOutcomes)
             for (const remaining of step.commands.slice(commandIndex + 1)) {
+                if (!isDispatchCommand(remaining)) continue
                 commandOutcomes.push(createUnattemptedSkippedPassOutcome(stepIndex, step.passSpec, remaining))
             }
             return {
@@ -2181,6 +2489,18 @@ function resolveRenderReadiness(
     const commands: RenderCommand[] = []
     const commandOutcomes: SubmissionCommandExecutionOutcome[] = []
     for (const [commandIndex, command] of step.commands.entries()) {
+        if (isExecuteRenderBundlesCommand(command)) {
+            validateExecuteRenderBundlesReadiness(
+                builder,
+                stepIndex,
+                step.passSpec,
+                command,
+                readiness,
+                diagnostics
+            )
+            commands.push(command)
+            continue
+        }
         if (command.commandKind !== 'draw') {
             commands.push(command)
             continue
@@ -2224,6 +2544,59 @@ function resolveRenderReadiness(
     markSimulatedRenderAttachmentContent(readiness, step.passSpec)
 
     return { disposition: 'execute', commands, commandOutcomes }
+}
+
+function validateExecuteRenderBundlesReadiness(
+    builder: SubmissionBuilder,
+    stepIndex: number,
+    passSpec: RenderPassSpec,
+    execute: ExecuteRenderBundlesCommand,
+    readiness: ReadinessSimulation,
+    diagnostics: ScratchDiagnostic[]
+): void {
+
+    for (const bundle of execute.bundles) {
+        for (const command of renderBundleDrawCommands(bundle)) {
+            const reads = command.resources.read
+            assertNoIndeterminateResourceReads(
+                builder,
+                stepIndex,
+                command,
+                reads,
+                readiness,
+                passSpec,
+                undefined,
+                'render-bundle'
+            )
+            const missing = collectMissingReadRequirements(reads, readiness)
+            if (missing.length > 0) {
+                const first = missing[0]!
+                throwCommandResourceNotReadyDiagnostic(
+                    builder,
+                    stepIndex,
+                    command,
+                    first.readRequirement,
+                    first.simulated,
+                    passSpec,
+                    'render-bundle'
+                )
+            }
+            validateCommandReadEpochs(
+                builder,
+                stepIndex,
+                command,
+                reads,
+                readiness,
+                diagnostics,
+                passSpec,
+                'render-bundle'
+            )
+            if (!renderBundleDrawProducesDeclaredWrites(command)) continue
+            for (const resource of command.resources.write) {
+                markSimulatedReady(readiness, resource)
+            }
+        }
+    }
 }
 
 function assertRenderAttachmentReadiness(
@@ -2350,7 +2723,7 @@ function appendPassExecutionOutcomes(
     outcomes: SubmissionExecutionOutcome[],
     stepIndex: number,
     step: RenderStep | ComputeStep,
-    resolution: ResolvedPassCommands<RenderCommand> | ResolvedPassCommands<DispatchCommand>
+    resolution: ResolvedPassCommands<RenderCommand> | ResolvedPassCommands<ComputeCommand>
 ): void {
 
     outcomes.push(
@@ -2362,7 +2735,7 @@ function appendPassExecutionOutcomes(
 function createPassExecutionOutcome(
     stepIndex: number,
     step: RenderStep | ComputeStep,
-    resolution: ResolvedPassCommands<RenderCommand> | ResolvedPassCommands<DispatchCommand>
+    resolution: ResolvedPassCommands<RenderCommand> | ResolvedPassCommands<ComputeCommand>
 ): SubmissionPassExecutionOutcome {
 
     const stepKind = step.kind
@@ -3384,6 +3757,7 @@ export class SubmittedWork {
     #resourceAccesses: readonly SubmissionResourceAccess[]
     #producerEpochs: readonly SubmittedResourceEpoch[]
     #executionOutcomes: readonly SubmissionExecutionOutcome[]
+    #renderBundles: readonly SubmittedRenderBundleFact[]
     #readbacks: readonly SubmittedReadbackLink[]
     #potentialWrites: readonly SubmittedPotentialWrite[]
     #nativeOutcome: Promise<ScratchSubmissionNativeOutcome>
@@ -3414,6 +3788,7 @@ export class SubmittedWork {
         this.#resourceAccesses = freezeResourceAccesses(options.resourceAccesses)
         this.#producerEpochs = freezeProducerEpochs(createProducerEpochs(this.#resourceAccesses))
         this.#executionOutcomes = freezeExecutionOutcomes(options.executionOutcomes)
+        this.#renderBundles = freezeSubmittedRenderBundleFacts(options.renderBundles)
         this.#readbacks = freezeSubmittedReadbackLinks(options.readbacks)
         this.#potentialWrites = freezeSubmittedPotentialWriteFacts(options.potentialWrites)
         this.#nativeOutcome = options.nativeOutcome
@@ -3438,6 +3813,10 @@ export class SubmittedWork {
 
         return this.#executionOutcomes
     }
+    get renderBundles(): readonly ReadonlySubmittedFact<SubmittedRenderBundleFact>[] {
+
+        return this.#renderBundles
+    }
     get readbacks(): readonly ReadonlySubmittedFact<SubmittedReadbackLink>[] { return this.#readbacks }
     get potentialWrites(): readonly ReadonlySubmittedFact<SubmittedPotentialWrite>[] {
 
@@ -3461,6 +3840,7 @@ type SubmittedWorkOptions = Readonly<{
     report: ScratchDiagnosticReport
     resourceAccesses: SubmissionResourceAccess[]
     executionOutcomes: SubmissionExecutionOutcome[]
+    renderBundles: readonly SubmittedRenderBundleFact[]
     readbacks: readonly SubmittedReadbackLink[]
     potentialWrites: readonly SubmittedPotentialWrite[]
     nativeOutcome: Promise<ScratchSubmissionNativeOutcome>
@@ -3697,6 +4077,16 @@ function freezeSubmittedReadbackLinks(
     return Object.freeze(readbacks.map(link => Object.freeze({ ...link })))
 }
 
+function freezeSubmittedRenderBundleFacts(
+    facts: readonly SubmittedRenderBundleFact[]
+): readonly SubmittedRenderBundleFact[] {
+
+    return Object.freeze(facts.map(fact => Object.freeze({
+        ...fact,
+        commandIds: Object.freeze([ ...fact.commandIds ]),
+    })))
+}
+
 function freezeSubmittedPotentialWriteFacts(
     writes: readonly (SubmissionPotentialWrite | SubmittedPotentialWrite)[]
 ): readonly SubmittedPotentialWrite[] {
@@ -3847,25 +4237,33 @@ function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
     validateRenderPassAttachments(passSpec)
 
     for (const command of step.commands) {
-        if (!isRenderCommand(command)) {
+        if (
+            !isRenderCommand(command) &&
+            !isExecuteRenderBundlesCommand(command) &&
+            !isDebugCommand(command)
+        ) {
             throwScratchDiagnostic({
                 code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'submission',
                 subject: builder.subject,
                 message: 'Submission render step requires render commands.',
-                expected: { command: 'DrawCommand, BeginOcclusionQueryCommand, or EndOcclusionQueryCommand' },
+                expected: {
+                    command: 'DrawCommand, ExecuteRenderBundlesCommand, DebugCommand, BeginOcclusionQueryCommand, or EndOcclusionQueryCommand',
+                },
                 actual: { command: command === undefined || command === null ? String(command) : typeof command },
             })
         }
 
         command.assertRuntime(builder.runtime)
+        if (isDebugCommand(command)) continue
         command.validateForPass(passSpec)
         if (command.commandKind === 'draw') {
             validatePipelineTargets(command, passSpec)
         }
     }
 
+    validateBalancedDebugCommands(step.commands, passSpec.subject, 'render-pass')
     validateRenderOcclusionQueryOrder(builder, step)
 }
 
@@ -3902,11 +4300,13 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
 
     for (const commandValue of step.commands) {
         const command: unknown = commandValue
-        if (!isDispatchCommand(command)) {
-            if (isRenderCommand(command)) {
+        if (!isDispatchCommand(command) && !isDebugCommand(command)) {
+            if (isRenderCommand(command) || isExecuteRenderBundlesCommand(command)) {
                 command.assertRuntime(builder.runtime)
                 // JavaScript can supply a genuine render command despite the typed compute-step contract.
-                command.validateForPass(passSpec as unknown as RenderPassSpec)
+                if (!isDebugCommand(command)) {
+                    command.validateForPass(passSpec as unknown as RenderPassSpec)
+                }
             }
             throwScratchDiagnostic({
                 code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
@@ -3914,13 +4314,14 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
                 phase: 'submission',
                 subject: builder.subject,
                 message: 'Submission compute step requires dispatch commands.',
-                expected: { command: 'DispatchCommand' },
+                expected: { command: 'DispatchCommand or DebugCommand' },
                 actual: { command: command === undefined || command === null ? String(command) : typeof command },
             })
         }
         command.assertRuntime(builder.runtime)
-        command.validateForPass(passSpec)
+        if (isDispatchCommand(command)) command.validateForPass(passSpec)
     }
+    validateBalancedDebugCommands(step.commands, passSpec.subject, 'compute-pass')
 }
 
 function collectRenderPassResourceConflictDiagnostics(

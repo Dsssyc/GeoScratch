@@ -1,7 +1,7 @@
 # Passes, Submissions, And Scheduler
 
 Status: Vision draft
-Date: 2026-07-23
+Date: 2026-07-24
 
 ## Decision
 
@@ -212,6 +212,41 @@ Submission responsibilities:
 - observe Scratch-owned native issue boundaries under runtime policy
 - submit command buffers
 - return `SubmittedWork`
+
+### Bundle Execution And Debug Scope
+
+A render step may contain ordinary Draws, query brackets, DebugCommands, and
+`ExecuteRenderBundlesCommand`. A compute step may contain Dispatches and
+DebugCommands. `SubmissionBuilder.debug(command)` records a debug command on
+the current command-encoder segment itself.
+
+Submission preflight validates every selected bundle before command-encoder
+creation:
+
+- exact Runtime ownership and closed object identity;
+- persistent dependency snapshots or attempt-local temporal dependencies;
+- bundle/pass color, depth/stencil, sample, and read-only compatibility;
+- complete per-command immediate snapshots; and
+- balanced debug groups in each command, render-pass, compute-pass, and bundle
+  encoder scope.
+
+Queue-side upload steps finish the current command encoder. A command-level
+debug group therefore cannot cross an upload boundary, although it may enclose
+multiple passes in one encoder segment. Pass and bundle groups are always
+local to their own encoder.
+
+Attempt-local bundles are realized only after the final selected plan is fixed
+and are cached only inside that submission attempt. The same authored bundle
+executed more than once in one attempt reuses that one native realization.
+Persistent bundles reuse their acknowledged native object and fail if stale;
+submission does not prepare or rebuild them.
+
+Each `ExecuteRenderBundlesCommand` emits native `executeBundles()` even when
+its bundle sequence is empty. Native state clearing is therefore preserved.
+Subsequent Draws remain self-contained. A successful call applies nested
+declared writes once per bundle occurrence. `SubmittedWork.renderBundles`
+records immutable execute-command, bundle, realization, and command identity
+facts without retaining native objects or command payloads.
 
 ### Ordered Readback Preparation And Links
 

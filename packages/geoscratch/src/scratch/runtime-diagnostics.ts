@@ -336,6 +336,7 @@ export type ScratchGpuOperationQuery = Readonly<{
     bindLayoutId?: string
     bindSetId?: string
     shaderModuleId?: string
+    renderBundleId?: string
     preparationStage?: import('./gpu-operation.js').ScratchGpuBindSetPreparationStage
     pipelineId?: string
     commandId?: string
@@ -359,6 +360,7 @@ export type ScratchGpuIncidentQuery = Readonly<{
     bindLayoutId?: string
     bindSetId?: string
     shaderModuleId?: string
+    renderBundleId?: string
     preparationStage?: import('./gpu-operation.js').ScratchGpuBindSetPreparationStage
     pipelineId?: string
     commandId?: string
@@ -2476,6 +2478,7 @@ function assertPendingGpuOperationKind(
         kind === 'bind-layout-allocation' ||
         kind === 'bind-set-preparation' ||
         kind === 'shader-module-creation' ||
+        kind === 'render-bundle-creation' ||
         kind === 'render-pipeline-creation' ||
         kind === 'compute-pipeline-creation' ||
         kind === 'readback-staging-allocation' ||
@@ -2760,6 +2763,10 @@ function matchesOperationQuery(
             record.target.kind === 'shader-module' &&
             record.target.shaderModuleId === query.shaderModuleId
         )) &&
+        (query.renderBundleId === undefined || (
+            record.target.kind === 'render-bundle' &&
+            record.target.renderBundleId === query.renderBundleId
+        )) &&
         (query.preparationStage === undefined || (
             record.target.kind === 'bind-set' &&
             record.target.preparationStage === query.preparationStage
@@ -2828,6 +2835,10 @@ function matchesIncidentQuery(
             report.target.kind === 'shader-module' &&
             report.target.shaderModuleId === query.shaderModuleId
         )) &&
+        (query.renderBundleId === undefined || (
+            report.target.kind === 'render-bundle' &&
+            report.target.renderBundleId === query.renderBundleId
+        )) &&
         (query.preparationStage === undefined || (
             report.target.kind === 'bind-set' &&
             report.target.preparationStage === query.preparationStage
@@ -2884,6 +2895,7 @@ function operationTargetId(target: ScratchGpuOperationTarget): string {
     switch (target.kind) {
         case 'resource': return target.resourceId
         case 'shader-module': return target.shaderModuleId
+        case 'render-bundle': return target.renderBundleId
         case 'pipeline': return target.pipelineId
         case 'bind-layout': return target.bindLayoutId
         case 'bind-set': return target.bindSetId

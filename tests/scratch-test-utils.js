@@ -222,6 +222,9 @@ export function createFakeGpu(options = {}) {
         submittedWorkDoneRegistrations: [],
         renderPasses: [],
         computePasses: [],
+        renderBundleEncoders: [],
+        renderBundles: [],
+        renderBundleExecutions: [],
         drawCalls: [],
         dispatchCalls: [],
         immediateWrites: [],
@@ -238,6 +241,7 @@ export function createFakeGpu(options = {}) {
         bufferDestroys: [],
         errorScopes: [],
         debugGroups: [],
+        debugMarkers: [],
         nativeTimeline: [],
         compilationInfoRequests: [],
         asyncPipelineRequests: [],
@@ -988,6 +992,17 @@ export function createFakeGpu(options = {}) {
             calls.commandEncoders.push(encoder)
             return encoder
         },
+        createRenderBundleEncoder(descriptor) {
+            const invalid = issueNativeMethod('createRenderBundleEncoder')
+            const encoder = createFakeRenderBundleEncoder(
+                calls,
+                descriptor,
+                issueNativeMethod,
+                invalid
+            )
+            calls.renderBundleEncoders.push(encoder)
+            return encoder
+        },
         destroy() {
             errors.loseDevice({ reason: 'destroyed', message: 'Fake GPUDevice was destroyed.' })
         },
@@ -1146,12 +1161,19 @@ function createFakeCommandEncoder(calls, descriptor, issueNativeMethod, initiall
         descriptor,
         invalid: initiallyInvalid,
         pushDebugGroup(label) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'commandPushDebugGroup')) return
             calls.debugGroups.push({ action: 'push', encoder: 'command', label })
             calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'command', label })
         },
         popDebugGroup() {
+            if (issueEncoderMethod(this, issueNativeMethod, 'commandPopDebugGroup')) return
             calls.debugGroups.push({ action: 'pop', encoder: 'command' })
             calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'command' })
+        },
+        insertDebugMarker(label) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'commandInsertDebugMarker')) return
+            calls.debugMarkers.push({ encoder: 'command', label })
+            calls.nativeTimeline.push({ type: 'insert-debug-marker', encoder: 'command', label })
         },
         beginRenderPass(renderPassDescriptor) {
             const failed = issueEncoderMethod(this, issueNativeMethod, 'beginRenderPass')
@@ -1300,12 +1322,40 @@ function createFakeRenderPassEncoder(
         actions: [],
         invalid: initiallyInvalid,
         pushDebugGroup(label) {
+            if (
+                issuePassMethod(
+                    this,
+                    issueNativeMethod,
+                    invalidateParent,
+                    'renderPushDebugGroup'
+                )
+            ) return
             calls.debugGroups.push({ action: 'push', encoder: 'render-pass', label })
             calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'render-pass', label })
         },
         popDebugGroup() {
+            if (
+                issuePassMethod(
+                    this,
+                    issueNativeMethod,
+                    invalidateParent,
+                    'renderPopDebugGroup'
+                )
+            ) return
             calls.debugGroups.push({ action: 'pop', encoder: 'render-pass' })
             calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'render-pass' })
+        },
+        insertDebugMarker(label) {
+            if (
+                issuePassMethod(
+                    this,
+                    issueNativeMethod,
+                    invalidateParent,
+                    'renderInsertDebugMarker'
+                )
+            ) return
+            calls.debugMarkers.push({ encoder: 'render-pass', label })
+            calls.nativeTimeline.push({ type: 'insert-debug-marker', encoder: 'render-pass', label })
         },
         setPipeline(pipeline) {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'renderSetPipeline')) return
@@ -1403,6 +1453,12 @@ function createFakeRenderPassEncoder(
             this.actions.push({ type: 'endOcclusionQuery' })
             calls.occlusionQueries.push(call)
         },
+        executeBundles(bundles) {
+            if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'executeBundles')) return
+            const snapshot = [ ...bundles ]
+            this.actions.push({ type: 'executeBundles', bundles: snapshot })
+            calls.renderBundleExecutions.push({ pass: this, bundles: snapshot })
+        },
         end() {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'renderPassEnd')) return
             this.actions.push({ type: 'end' })
@@ -1425,12 +1481,40 @@ function createFakeComputePassEncoder(
         actions: [],
         invalid: initiallyInvalid,
         pushDebugGroup(label) {
+            if (
+                issuePassMethod(
+                    this,
+                    issueNativeMethod,
+                    invalidateParent,
+                    'computePushDebugGroup'
+                )
+            ) return
             calls.debugGroups.push({ action: 'push', encoder: 'compute-pass', label })
             calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'compute-pass', label })
         },
         popDebugGroup() {
+            if (
+                issuePassMethod(
+                    this,
+                    issueNativeMethod,
+                    invalidateParent,
+                    'computePopDebugGroup'
+                )
+            ) return
             calls.debugGroups.push({ action: 'pop', encoder: 'compute-pass' })
             calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'compute-pass' })
+        },
+        insertDebugMarker(label) {
+            if (
+                issuePassMethod(
+                    this,
+                    issueNativeMethod,
+                    invalidateParent,
+                    'computeInsertDebugMarker'
+                )
+            ) return
+            calls.debugMarkers.push({ encoder: 'compute-pass', label })
+            calls.nativeTimeline.push({ type: 'insert-debug-marker', encoder: 'compute-pass', label })
         },
         setPipeline(pipeline) {
             if (issuePassMethod(this, issueNativeMethod, invalidateParent, 'computeSetPipeline')) return
@@ -1468,6 +1552,117 @@ function createFakeComputePassEncoder(
     }
 
     return pass
+}
+
+function createFakeRenderBundleEncoder(
+    calls,
+    descriptor,
+    issueNativeMethod,
+    initiallyInvalid = false
+) {
+
+    const encoder = {
+        descriptor,
+        actions: [],
+        invalid: initiallyInvalid,
+        pushDebugGroup(label) {
+            if (
+                issueEncoderMethod(
+                    this,
+                    issueNativeMethod,
+                    'renderBundlePushDebugGroup'
+                )
+            ) return
+            calls.debugGroups.push({ action: 'push', encoder: 'render-bundle', label })
+            calls.nativeTimeline.push({ type: 'push-debug-group', encoder: 'render-bundle', label })
+            this.actions.push({ type: 'pushDebugGroup', label })
+        },
+        popDebugGroup() {
+            if (
+                issueEncoderMethod(
+                    this,
+                    issueNativeMethod,
+                    'renderBundlePopDebugGroup'
+                )
+            ) return
+            calls.debugGroups.push({ action: 'pop', encoder: 'render-bundle' })
+            calls.nativeTimeline.push({ type: 'pop-debug-group', encoder: 'render-bundle' })
+            this.actions.push({ type: 'popDebugGroup' })
+        },
+        insertDebugMarker(label) {
+            if (
+                issueEncoderMethod(
+                    this,
+                    issueNativeMethod,
+                    'renderBundleInsertDebugMarker'
+                )
+            ) return
+            calls.debugMarkers.push({ encoder: 'render-bundle', label })
+            calls.nativeTimeline.push({ type: 'insert-debug-marker', encoder: 'render-bundle', label })
+            this.actions.push({ type: 'insertDebugMarker', label })
+        },
+        setPipeline(pipeline) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'renderBundleSetPipeline')) return
+            this.actions.push({ type: 'setPipeline', pipeline })
+        },
+        setImmediates(offset, data, dataOffset, size) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'renderBundleSetImmediates')) return
+            const bytes = Uint8Array.from(bytesFrom(data, dataOffset ?? 0, size))
+            const action = { type: 'setImmediates', offset, bytes }
+            this.actions.push(action)
+            calls.immediateWrites.push({ passKind: 'render-bundle', ...action })
+        },
+        setBindGroup(group, bindGroup, dynamicOffsets) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'renderBundleSetBindGroup')) return
+            const action = { type: 'setBindGroup', group, bindGroup }
+            if (dynamicOffsets !== undefined) action.dynamicOffsets = [ ...dynamicOffsets ]
+            this.actions.push(action)
+        },
+        setVertexBuffer(slot, buffer, offset, size) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'renderBundleSetVertexBuffer')) return
+            this.actions.push({ type: 'setVertexBuffer', slot, buffer, offset, size })
+        },
+        setIndexBuffer(buffer, indexFormat, offset, size) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'renderBundleSetIndexBuffer')) return
+            this.actions.push({ type: 'setIndexBuffer', buffer, indexFormat, offset, size })
+        },
+        draw(vertexCount, instanceCount, firstVertex, firstInstance) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'renderBundleDraw')) return
+            this.actions.push({
+                type: 'draw',
+                call: { vertexCount, instanceCount, firstVertex, firstInstance },
+            })
+        },
+        drawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'renderBundleDrawIndexed')) return
+            this.actions.push({
+                type: 'drawIndexed',
+                call: { indexCount, instanceCount, firstIndex, baseVertex, firstInstance },
+            })
+        },
+        drawIndirect(buffer, offset) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'renderBundleDrawIndirect')) return
+            this.actions.push({ type: 'drawIndirect', buffer, offset })
+        },
+        drawIndexedIndirect(buffer, offset) {
+            if (issueEncoderMethod(this, issueNativeMethod, 'renderBundleDrawIndexedIndirect')) return
+            this.actions.push({ type: 'drawIndexedIndirect', buffer, offset })
+        },
+        finish(bundleDescriptor) {
+            const failed = issueEncoderMethod(this, issueNativeMethod, 'renderBundleFinish')
+            const bundle = {
+                type: 'renderBundle',
+                descriptor: bundleDescriptor,
+                encoderDescriptor: descriptor,
+                actions: [ ...this.actions ],
+                invalid: failed || this.invalid,
+            }
+            calls.renderBundles.push(bundle)
+            return bundle
+        },
+    }
+
+    return encoder
 }
 
 function issuePassMethod(pass, issueNativeMethod, invalidateParent, method) {

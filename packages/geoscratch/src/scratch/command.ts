@@ -902,50 +902,7 @@ export class DrawCommand {
         )
         passEncoder.setBlendConstant(renderState.blendConstant)
         passEncoder.setStencilReference(renderState.stencilReference)
-        for (const binding of this.vertexBuffers) {
-            passEncoder.setVertexBuffer(
-                binding.slot,
-                binding.region.buffer.gpuBuffer,
-                binding.region.offset,
-                binding.region.size
-            )
-        }
-        if (this.indexBuffer !== undefined) {
-            passEncoder.setIndexBuffer(
-                this.indexBuffer.region.buffer.gpuBuffer,
-                this.indexBuffer.format,
-                this.indexBuffer.region.offset,
-                this.indexBuffer.region.size
-            )
-        }
-        for (const invocation of this.bindSets) {
-            setBindGroupWithDynamicOffsets(
-                this,
-                passEncoder,
-                invocation,
-                attemptTextureAuthority
-            )
-        }
-        if ('indexCount' in this.count) {
-            passEncoder.drawIndexed(
-                this.count.indexCount,
-                this.count.instanceCount ?? 1,
-                this.count.firstIndex ?? 0,
-                this.count.baseVertex ?? 0,
-                this.count.firstInstance ?? 0
-            )
-        } else if ('vertexCount' in this.count) {
-            passEncoder.draw(
-                this.count.vertexCount,
-                this.count.instanceCount ?? 1,
-                this.count.firstVertex ?? 0,
-                this.count.firstInstance ?? 0
-            )
-        } else if (this.indexBuffer === undefined) {
-            passEncoder.drawIndirect(this.count.indirect.buffer.gpuBuffer, this.count.indirect.offset)
-        } else {
-            passEncoder.drawIndexedIndirect(this.count.indirect.buffer.gpuBuffer, this.count.indirect.offset)
-        }
+        encodeDrawBuffersBindingsAndCall(this, passEncoder, attemptTextureAuthority)
         if (this._producesDeclaredWrites) {
             for (const resource of this.resources.write) {
                 advanceResourceContentEpoch(resource)
@@ -956,6 +913,76 @@ export class DrawCommand {
     dispose(): void {
 
         this.#isDisposed = true
+    }
+}
+
+export function encodeDrawCommandInRenderBundle(
+    command: DrawCommand,
+    bundleEncoder: GPURenderBundleEncoder,
+    resolvedImmediateData?: ResolvedCommandImmediateData,
+    attemptTextureAuthority?: AttemptTextureAuthority
+): void {
+
+    if (!isDrawCommand(command)) {
+        throw new TypeError('Render bundle encoding requires a genuine DrawCommand contract.')
+    }
+    command.assertUsable()
+    assertCommandBufferGpuUseAvailable(command)
+    const immediateBytes = resolvedImmediateBytesForEncoding(command, resolvedImmediateData)
+    bundleEncoder.setPipeline(command.pipeline.gpuPipeline)
+    setPassEncoderImmediates(bundleEncoder, immediateBytes)
+    encodeDrawBuffersBindingsAndCall(command, bundleEncoder, attemptTextureAuthority)
+}
+
+function encodeDrawBuffersBindingsAndCall(
+    command: DrawCommand,
+    encoder: GPURenderPassEncoder | GPURenderBundleEncoder,
+    attemptTextureAuthority?: AttemptTextureAuthority
+): void {
+
+    for (const binding of command.vertexBuffers) {
+        encoder.setVertexBuffer(
+            binding.slot,
+            binding.region.buffer.gpuBuffer,
+            binding.region.offset,
+            binding.region.size
+        )
+    }
+    if (command.indexBuffer !== undefined) {
+        encoder.setIndexBuffer(
+            command.indexBuffer.region.buffer.gpuBuffer,
+            command.indexBuffer.format,
+            command.indexBuffer.region.offset,
+            command.indexBuffer.region.size
+        )
+    }
+    for (const invocation of command.bindSets) {
+        setBindGroupWithDynamicOffsets(
+            command,
+            encoder,
+            invocation,
+            attemptTextureAuthority
+        )
+    }
+    if ('indexCount' in command.count) {
+        encoder.drawIndexed(
+            command.count.indexCount,
+            command.count.instanceCount ?? 1,
+            command.count.firstIndex ?? 0,
+            command.count.baseVertex ?? 0,
+            command.count.firstInstance ?? 0
+        )
+    } else if ('vertexCount' in command.count) {
+        encoder.draw(
+            command.count.vertexCount,
+            command.count.instanceCount ?? 1,
+            command.count.firstVertex ?? 0,
+            command.count.firstInstance ?? 0
+        )
+    } else if (command.indexBuffer === undefined) {
+        encoder.drawIndirect(command.count.indirect.buffer.gpuBuffer, command.count.indirect.offset)
+    } else {
+        encoder.drawIndexedIndirect(command.count.indirect.buffer.gpuBuffer, command.count.indirect.offset)
     }
 }
 
@@ -1925,13 +1952,13 @@ function resolvedImmediateBytesForEncoding(
 }
 
 function setPassEncoderImmediates(
-    passEncoder: GPURenderPassEncoder | GPUComputePassEncoder,
+    passEncoder: GPURenderPassEncoder | GPUComputePassEncoder | GPURenderBundleEncoder,
     bytes: Uint8Array | undefined
 ): void {
 
     if (bytes === undefined) return
     const encoder = passEncoder as (
-        GPURenderPassEncoder | GPUComputePassEncoder
+        GPURenderPassEncoder | GPUComputePassEncoder | GPURenderBundleEncoder
     ) & {
         setImmediates(offset: number, data: ArrayBufferView): void
     }
@@ -4761,7 +4788,7 @@ function dynamicOffsetRelatedSubjects(
 
 function setBindGroupWithDynamicOffsets(
     command: DynamicOffsetCommand,
-    passEncoder: GPURenderPassEncoder | GPUComputePassEncoder,
+    passEncoder: GPURenderPassEncoder | GPUComputePassEncoder | GPURenderBundleEncoder,
     invocation: CommandBindSetInvocation,
     attemptTextureAuthority?: AttemptTextureAuthority
 ): void {

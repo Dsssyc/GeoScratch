@@ -153,6 +153,12 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         bindSetId: 'bind-set-id',
         preparationStage: 'bind-group-acknowledgement',
     })
+    const renderBundleOperationRecords: readonly scr.ScratchGpuOperationRecord[] =
+        diagnostics.operations({
+            kind: 'render-bundle-creation',
+            targetKind: 'render-bundle',
+            renderBundleId: 'render-bundle-id',
+        })
     const querySetOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
         resourceKind: 'QuerySetResource',
     })
@@ -1367,6 +1373,102 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatDrawReadResource: scratchCompat.Resource = compatDrawResources.read[0].resource
     const compatDrawReadContentEpoch: scratchCompat.CommandResourceReadEpoch =
         compatDrawResources.read[0].contentEpoch
+    const bundleDrawDescriptor: scr.BundleDrawCommandDescriptor = {
+        pipeline: scratchPipeline,
+        bindSets: [ { set: bindSet } ],
+        vertexBuffers: [ { slot: 0, region: vertexRegion } ],
+        count: { vertexCount: 3 },
+        resources: {
+            read: [ uniformRead, vertexRead ],
+            write: [],
+        },
+        whenMissing: 'throw',
+    }
+    const compatBundleDrawDescriptor: scratchCompat.BundleDrawCommandDescriptor =
+        bundleDrawDescriptor
+    const bundleDraw: scr.BundleDrawCommand =
+        runtime.createBundleDrawCommand(bundleDrawDescriptor)
+    const bundleDrawAlias: scr.BundleDrawCommand =
+        runtime.bundleDrawCommand(compatBundleDrawDescriptor)
+    runtime.createBundleDrawCommand({
+        pipeline: scratchPipeline,
+        count: { vertexCount: 3 },
+        resources: { read: [], write: [] },
+        whenMissing: 'throw',
+        // @ts-expect-error BundleDrawCommand cannot contain pass-only render state
+        renderState: { viewport: 'full-attachment' },
+    })
+    runtime.createBundleDrawCommand({
+        pipeline: scratchPipeline,
+        count: { vertexCount: 3 },
+        resources: { read: [], write: [] },
+        whenMissing: 'throw',
+        // @ts-expect-error BundleDrawCommand cannot contain fallback replay
+        fallback: draw,
+    })
+    const renderBundleDescriptor: scr.RenderBundleDescriptor = {
+        label: 'typed render bundle',
+        realization: 'persistent',
+        colorFormats: [ surface.format ],
+        commands: [ bundleDraw ],
+    }
+    const compatRenderBundleDescriptor: scratchCompat.RenderBundleDescriptor =
+        renderBundleDescriptor
+    const renderBundlePromise: Promise<scr.RenderBundle> =
+        runtime.createRenderBundle(renderBundleDescriptor)
+    const renderBundle: scr.RenderBundle = await renderBundlePromise
+    const renderBundleAlias: scr.RenderBundle =
+        await runtime.renderBundle(compatRenderBundleDescriptor)
+    const bundleRealization: scr.RenderBundleRealization = renderBundle.realization
+    const bundleRealizationState: scr.RenderBundleRealizationState =
+        renderBundle.realizationState
+    const bundleLayout: scr.RenderBundleLayout = renderBundle.layout
+    // @ts-expect-error RenderBundle realization must be an explicit authored choice
+    runtime.createRenderBundle({
+        colorFormats: [ surface.format ],
+        commands: [ bundleDraw ],
+    })
+    // @ts-expect-error RenderBundle construction is Runtime-owned
+    new scr.RenderBundle()
+    // @ts-expect-error BundleDrawCommand construction is Runtime-owned
+    new scr.BundleDrawCommand()
+    // @ts-expect-error RenderBundle command snapshots are immutable
+    renderBundle.commands.push(bundleDraw)
+    // @ts-expect-error RenderBundle realization is immutable
+    renderBundle.realization = 'attempt-local'
+    const executeBundleDescriptor: scr.ExecuteRenderBundlesCommandDescriptor = {
+        label: 'typed execute bundles',
+        bundles: [ renderBundle ],
+    }
+    const compatExecuteBundleDescriptor:
+        scratchCompat.ExecuteRenderBundlesCommandDescriptor = executeBundleDescriptor
+    const executeBundles: scr.ExecuteRenderBundlesCommand =
+        runtime.createExecuteRenderBundlesCommand(executeBundleDescriptor)
+    const executeBundlesAlias: scr.ExecuteRenderBundlesCommand =
+        runtime.executeRenderBundlesCommand(compatExecuteBundleDescriptor)
+    // @ts-expect-error ExecuteRenderBundlesCommand construction is Runtime-owned
+    new scr.ExecuteRenderBundlesCommand()
+    // @ts-expect-error ExecuteRenderBundlesCommand bundle snapshots are immutable
+    executeBundles.bundles = []
+    const debugPushDescriptor: scr.DebugCommandDescriptor = {
+        action: 'push-group',
+        label: 'typed debug group',
+    }
+    const compatDebugPushDescriptor: scratchCompat.DebugCommandDescriptor =
+        debugPushDescriptor
+    const debugPush: scr.DebugCommand = runtime.createDebugCommand(debugPushDescriptor)
+    const debugPop: scr.DebugCommand = runtime.debugCommand({ action: 'pop-group' })
+    const compatDebugCommand: scratchCompat.DebugCommand =
+        runtime.debugCommand(compatDebugPushDescriptor)
+    // @ts-expect-error pop-group cannot carry a native label
+    runtime.createDebugCommand({
+        action: 'pop-group',
+        label: 'invalid pop label',
+    })
+    // @ts-expect-error DebugCommand construction is Runtime-owned
+    new scr.DebugCommand()
+    // @ts-expect-error DebugCommand action is immutable
+    debugPush.action = 'insert-marker'
     const compatQuerySlotState: scratchCompat.QuerySetSlotState = querySet.slot(0).state
     const compatQueryResolveSource: scratchCompat.ResolveQuerySetSourceDescriptor = resolveQueries.source
     const passSpec: scr.RenderPassSpec = runtime.createRenderPass({
@@ -1617,7 +1719,14 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     computePass.timestampWrites!.begin = 1
     // @ts-expect-error compute pass disposal state is read-only
     computePass.isDisposed = false
-    const renderCommands: scr.RenderCommand[] = [ beginOcclusion, draw, endOcclusion ]
+    const renderCommands: scr.RenderCommand[] = [
+        beginOcclusion,
+        debugPush,
+        executeBundles,
+        draw,
+        endOcclusion,
+    ]
+    const computeCommands: scr.ComputeCommand[] = [ debugPush, dispatch ]
     const validationMode: scr.SubmissionValidationMode = 'warn'
     const compatValidationMode: scratchCompat.SubmissionValidationMode = 'off'
     const submissionOptions: scr.SubmissionBuilderOptions = { validation: validationMode }
@@ -1631,7 +1740,21 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     // @ts-expect-error texture logical commitment is package-internal submission lowering
     textureUpload._commitLogicalWrite()
     const builder: scr.SubmissionBuilder = runtime.createSubmission(submissionOptions)
-    const submitted: scr.SubmittedWork = builder.upload(upload).upload(textureUpload).upload(externalImageUpload).clear(clear).clear(clearAlias).compute(computePass, [ dispatch ]).copy(copy).copy(copyAlias).resolve(resolveQueries).resolve(resolveAlias).render(passSpec, renderCommands).submit()
+    const submitted: scr.SubmittedWork = builder
+        .debug(debugPush)
+        .debug(debugPop)
+        .upload(upload)
+        .upload(textureUpload)
+        .upload(externalImageUpload)
+        .clear(clear)
+        .clear(clearAlias)
+        .compute(computePass, computeCommands)
+        .copy(copy)
+        .copy(copyAlias)
+        .resolve(resolveQueries)
+        .resolve(resolveAlias)
+        .render(passSpec, renderCommands)
+        .submit()
     const nativeOutcome: Promise<scr.ScratchSubmissionNativeOutcome> = submitted.nativeOutcome
     const compatNativeOutcome: Promise<scratchCompat.ScratchSubmissionNativeOutcome> = nativeOutcome
     const readbackNativeOutcome: scr.ScratchReadbackNativeOutcome = {
@@ -1650,6 +1773,10 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const indeterminateResourceState: scr.ResourceState = 'indeterminate'
     const indeterminateQuerySlotState: scr.QuerySetSlotState = 'indeterminate'
     const potentialWrites: readonly scr.SubmittedPotentialWrite[] = submitted.potentialWrites
+    const submittedRenderBundles: readonly scr.SubmittedRenderBundleFact[] =
+        submitted.renderBundles
+    const compatSubmittedRenderBundles:
+        readonly scratchCompat.SubmittedRenderBundleFact[] = submittedRenderBundles
     // @ts-expect-error SubmittedWork construction is package-private
     new scr.SubmittedWork(runtime)
     // @ts-expect-error SubmittedWork reports expose readonly diagnostic arrays
@@ -1666,6 +1793,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     submitted.readbacks[0]!.operationId = 'forged'
     // @ts-expect-error SubmittedWork potential-write facts are deeply readonly
     submitted.potentialWrites[0]!.contentEpoch = 999
+    // @ts-expect-error SubmittedWork RenderBundle facts are deeply readonly
+    submitted.renderBundles[0]!.bundleId = 'forged'
     const resourceAccesses: readonly scr.SubmissionResourceAccess[] = submitted.resourceAccesses
     const producerEpochs: readonly scr.SubmittedResourceEpoch[] = submitted.producerEpochs
     const diagnosticSubject: scr.DiagnosticSubject = storageInput.subject

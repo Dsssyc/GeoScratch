@@ -25,6 +25,7 @@ import {
     TextureUploadCommand,
     UploadCommand,
 } from './command.js'
+import { createDebugCommand as createScratchDebugCommand } from './debug-command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import {
@@ -35,6 +36,12 @@ import { runtimePipelineSnapshot } from './pipeline-ownership.js'
 import { Program } from './program.js'
 import { createQuerySetResource, QuerySetResource } from './query-set.js'
 import { createReadbackOperation, ReadbackOperation } from './readback.js'
+import {
+    createBundleDrawCommand as createScratchBundleDrawCommand,
+    createExecuteRenderBundlesCommand as createScratchExecuteRenderBundlesCommand,
+    createRenderBundle as createScratchRenderBundle,
+} from './render-bundle.js'
+import { runtimeRenderBundleSnapshot } from './render-bundle-ownership.js'
 import {
     normalizeScratchReadbackPolicy,
     runtimeReadbackCommandSnapshot,
@@ -74,6 +81,7 @@ import type {
 } from './buffer-mapping.js'
 import type { BeginOcclusionQueryCommandDescriptor, ClearBufferCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
 import type { DiagnosticSubject } from './diagnostics.js'
+import type { DebugCommandDescriptor } from './debug-command.js'
 import type { ComputePassSpecDescriptor, RenderPassSpecDescriptor } from './pass.js'
 import type {
     ComputePipeline,
@@ -84,6 +92,11 @@ import type {
 import type { ProgramDescriptor } from './program.js'
 import type { QuerySetResourceDescriptor } from './query-set.js'
 import type { ReadbackOperationDescriptor } from './readback.js'
+import type {
+    BundleDrawCommandDescriptor,
+    ExecuteRenderBundlesCommandDescriptor,
+    RenderBundleDescriptor,
+} from './render-bundle.js'
 import type { ScratchReadbackOptions, ScratchReadbackPolicy } from './readback-ownership.js'
 import type { Resource } from './resource.js'
 import type {
@@ -509,6 +522,50 @@ export class ScratchRuntime {
         return this.createDrawCommand(descriptor)
     }
 
+    createBundleDrawCommand(descriptor: BundleDrawCommandDescriptor) {
+
+        assertScratchRuntimeActive(this)
+        return createScratchBundleDrawCommand(this, descriptor)
+    }
+
+    bundleDrawCommand(descriptor: BundleDrawCommandDescriptor) {
+
+        return this.createBundleDrawCommand(descriptor)
+    }
+
+    async createRenderBundle(descriptor: RenderBundleDescriptor) {
+
+        assertScratchRuntimeActive(this)
+        return createScratchRenderBundle(this, descriptor)
+    }
+
+    renderBundle(descriptor: RenderBundleDescriptor) {
+
+        return this.createRenderBundle(descriptor)
+    }
+
+    createExecuteRenderBundlesCommand(descriptor: ExecuteRenderBundlesCommandDescriptor) {
+
+        assertScratchRuntimeActive(this)
+        return createScratchExecuteRenderBundlesCommand(this, descriptor)
+    }
+
+    executeRenderBundlesCommand(descriptor: ExecuteRenderBundlesCommandDescriptor) {
+
+        return this.createExecuteRenderBundlesCommand(descriptor)
+    }
+
+    createDebugCommand(descriptor: DebugCommandDescriptor) {
+
+        assertScratchRuntimeActive(this)
+        return createScratchDebugCommand(this, descriptor)
+    }
+
+    debugCommand(descriptor: DebugCommandDescriptor) {
+
+        return this.createDebugCommand(descriptor)
+    }
+
     createBeginOcclusionQueryCommand(descriptor: BeginOcclusionQueryCommandDescriptor) {
 
         assertScratchRuntimeActive(this)
@@ -680,6 +737,10 @@ export class ScratchRuntime {
 
         for (const surface of [ ...this._surfaces ]) {
             dispose(() => surface.dispose())
+        }
+
+        for (const bundle of runtimeRenderBundleSnapshot(this)) {
+            dispose(() => bundle.dispose())
         }
 
         for (const pipeline of runtimePipelineSnapshot(this)) {

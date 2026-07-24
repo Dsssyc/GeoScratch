@@ -66,6 +66,8 @@ const currentPaths = Object.freeze({
     program: 'packages/geoscratch/src/scratch/program.ts',
     pipeline: 'packages/geoscratch/src/scratch/pipeline.ts',
     command: 'packages/geoscratch/src/scratch/command.ts',
+    debugCommand: 'packages/geoscratch/src/scratch/debug-command.ts',
+    renderBundle: 'packages/geoscratch/src/scratch/render-bundle.ts',
     pass: 'packages/geoscratch/src/scratch/pass.ts',
     shaderInspection: 'packages/geoscratch/src/scratch/shader-inspection.ts',
     readback: 'packages/geoscratch/src/scratch/readback.ts',
@@ -80,6 +82,8 @@ const baselinePaths = Object.freeze(Object.fromEntries(
         name !== 'scratchShim' &&
         name !== 'runtimeAuthority' &&
         name !== 'textureFormatCapabilities' &&
+        name !== 'debugCommand' &&
+        name !== 'renderBundle' &&
         name !== 'supportingObjectCreation' &&
         name !== 'supportingObjectFailure'
     )
@@ -216,6 +220,14 @@ const openScratchOwnedDuckAuthoritySites = Object.freeze(Object.entries(currentS
 const closedBrandGuards = Object.freeze({
     BeginOcclusionQueryCommand: current.command.includes("commandBrands.set(this, 'begin-occlusion-query')") &&
         current.submission.includes('isRenderCommand(command)'),
+    BundleDrawCommand:
+        current.renderBundle.includes(
+            'Object.getPrototypeOf(value) === BundleDrawCommand.prototype'
+        ) &&
+        current.renderBundle.includes(
+            'bundleDrawCommandStates.has(value as BundleDrawCommand)'
+        ) &&
+        current.submission.includes('renderBundleDrawCommands(bundle)'),
     BindLayout: current.binding.includes('if (!isBindLayout(layout))') &&
         current.pipeline.includes('if (!isBindLayout(layout))') &&
         current.shaderInspection.includes('if (!isBindLayout(layout))'),
@@ -229,13 +241,29 @@ const closedBrandGuards = Object.freeze({
     CopyCommand: current.command.includes("commandBrands.set(this, 'copy')") &&
         current.submission.includes('if (!isCopyCommand(command))'),
     DispatchCommand: current.command.includes("commandBrands.set(this, 'dispatch')") &&
-        current.submission.includes('if (!isDispatchCommand(command))'),
+        current.submission.includes(
+            'if (!isDispatchCommand(command) && !isDebugCommand(command))'
+        ),
+    DebugCommand:
+        current.debugCommand.includes(
+            'Object.getPrototypeOf(value) === DebugCommand.prototype'
+        ) &&
+        current.debugCommand.includes('debugCommandStates.has(value as DebugCommand)') &&
+        current.submission.includes('isDebugCommand(command)'),
     DrawCommand: current.command.includes("commandBrands.set(this, 'draw')") &&
         current.submission.includes('isRenderCommand(command)'),
     EndOcclusionQueryCommand: current.command.includes("commandBrands.set(this, 'end-occlusion-query')") &&
         current.submission.includes('isRenderCommand(command)'),
     ExternalImageUploadCommand: current.command.includes("commandBrands.set(this, 'external-image-upload')") &&
         current.submission.includes('if (!isUploadCommand(command))'),
+    ExecuteRenderBundlesCommand:
+        current.renderBundle.includes(
+            'Object.getPrototypeOf(value) === ExecuteRenderBundlesCommand.prototype'
+        ) &&
+        current.renderBundle.includes(
+            'executeRenderBundlesCommandStates.has(value as ExecuteRenderBundlesCommand)'
+        ) &&
+        current.submission.includes('isExecuteRenderBundlesCommand(command)'),
     LayoutCodec: current.layoutCodec.includes('isLayoutCodec('),
     Program: current.program.includes('const programStates = new WeakMap<Program, ProgramState>()') &&
         current.program.includes('readonly runtime: ScratchRuntime') &&
@@ -258,6 +286,12 @@ const closedBrandGuards = Object.freeze({
         current.submission.includes('if (!isReadbackCommand(command))'),
     RenderPassSpec: current.pass.includes('isRenderPassSpec(') &&
         current.submission.includes('!isRenderPassSpec(passSpec) && !isComputePassSpec(passSpec)'),
+    RenderBundle:
+        current.renderBundle.includes(
+            'Object.getPrototypeOf(value) === RenderBundle.prototype'
+        ) &&
+        current.renderBundle.includes('renderBundleStates.has(value as RenderBundle)') &&
+        current.renderBundle.includes('if (!isRenderBundle(bundle))'),
     RenderPipeline: current.pipeline.includes('isRenderPipeline(') &&
         current.command.includes('if (!isRenderPipeline(pipeline))'),
     ResolveQuerySetCommand: current.command.includes("commandBrands.set(this, 'resolve-query-set')") &&
@@ -780,6 +814,7 @@ const goalStartChangedPublicMemberReplacements = Object.freeze({
     'ScratchRuntime.createSampler:method': 'Promise-only acknowledged SamplerResource factory',
     'ScratchRuntime.querySet:method': 'Promise-only acknowledged QuerySetResource factory',
     'ScratchRuntime.sampler:method': 'Promise-only acknowledged SamplerResource factory',
+    'SubmissionBuilder.compute:method': 'compute passes accept DispatchCommand and native DebugCommand entries',
 })
 const historicalPublicMethodReplacements = Object.freeze({
     'BindSet.getBindGroup:method': 'explicit prepare() plus private preparedBindGroupFor()',

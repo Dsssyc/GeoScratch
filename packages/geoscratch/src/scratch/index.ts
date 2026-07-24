@@ -49,6 +49,8 @@ export type {
     ScratchGpuReadbackIncidentReport,
     ScratchGpuReadbackOperationRecord,
     ScratchGpuReadbackOperationTarget,
+    ScratchGpuRenderBundleOperationRecord,
+    ScratchGpuRenderBundleOperationTarget,
     ScratchGpuRuntimeIncidentTarget,
     ScratchGpuSubmissionIncidentReport,
     ScratchGpuSubmissionOperationRecord,
@@ -281,6 +283,25 @@ export type {
     TextureUploadSize,
     UploadCommandDescriptor,
 } from './command.js'
+export { DebugCommand } from './debug-command.js'
+export type {
+    DebugCommandAction,
+    DebugCommandDescriptor,
+} from './debug-command.js'
+export {
+    BundleDrawCommand,
+    ExecuteRenderBundlesCommand,
+    RenderBundle,
+} from './render-bundle.js'
+export type {
+    BundleDrawCommandDescriptor,
+    ExecuteRenderBundlesCommandDescriptor,
+    RenderBundleCommand,
+    RenderBundleDescriptor,
+    RenderBundleLayout,
+    RenderBundleRealization,
+    RenderBundleRealizationState,
+} from './render-bundle.js'
 export { ComputePassSpec, RenderPassSpec } from './pass.js'
 export type {
     ComputePassSpecDescriptor,
@@ -297,6 +318,7 @@ export type {
 } from './readback.js'
 export { SubmissionBuilder, SubmittedWork } from './submission.js'
 export type {
+    ComputeCommand,
     RenderCommand,
     SubmittedPotentialWrite,
     SubmittedResourceEpoch,
@@ -307,6 +329,7 @@ export type {
     SubmissionMissingResource,
     SubmissionPassExecutionOutcome,
     SubmittedReadbackLink,
+    SubmittedRenderBundleFact,
     SubmissionResourceAccess,
     SubmissionResourceAccessKind,
     SubmissionStepKind,

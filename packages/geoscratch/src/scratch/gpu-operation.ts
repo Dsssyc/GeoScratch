@@ -26,6 +26,7 @@ export type GpuOperationKind =
     | 'bind-layout-allocation'
     | 'bind-set-preparation'
     | 'shader-module-creation'
+    | 'render-bundle-creation'
     | 'resource-disposal'
     | 'render-pipeline-creation'
     | 'compute-pipeline-creation'
@@ -148,6 +149,18 @@ export type ScratchGpuShaderModuleOperationTarget = Readonly<{
     compilationHintCount: number
 }>
 
+export type ScratchGpuRenderBundleOperationTarget = Readonly<{
+    kind: 'render-bundle'
+    renderBundleId: string
+    realization: 'persistent'
+    colorFormats: readonly (GPUTextureFormat | null)[]
+    depthStencilFormat?: GPUTextureFormat
+    sampleCount: number
+    depthReadOnly: boolean
+    stencilReadOnly: boolean
+    commandCount: number
+}>
+
 export type ScratchGpuCommandOperationTarget = Readonly<{
     kind: 'command'
     commandId: string
@@ -175,6 +188,7 @@ export type ScratchGpuSubmissionOperationTarget = Readonly<{
 export type ScratchGpuOperationTarget =
     | ScratchGpuResourceOperationTarget
     | ScratchGpuShaderModuleOperationTarget
+    | ScratchGpuRenderBundleOperationTarget
     | ScratchGpuPipelineOperationTarget
     | ScratchGpuBindLayoutOperationTarget
     | ScratchGpuBindSetOperationTarget
@@ -423,6 +437,14 @@ export type ScratchGpuShaderModuleOperationRecord = ScratchGpuOperationRecordBas
     nativeOutcome?: never
 }>
 
+export type ScratchGpuRenderBundleOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
+    target: ScratchGpuRenderBundleOperationTarget
+    kind: 'render-bundle-creation'
+    nativeLabels?: never
+    pipelineCreationReport?: never
+    nativeOutcome?: never
+}>
+
 export type ScratchGpuCommandOperationRecord = ScratchGpuOperationRecordBase & Readonly<{
     target: ScratchGpuCommandOperationTarget
     kind: 'readback-staging-allocation' | 'readback-staging-release'
@@ -458,6 +480,7 @@ export type ScratchGpuSubmissionOperationRecord = ScratchGpuOperationRecordBase 
 export type ScratchGpuOperationRecord =
     | ScratchGpuResourceOperationRecord
     | ScratchGpuShaderModuleOperationRecord
+    | ScratchGpuRenderBundleOperationRecord
     | ScratchGpuPipelineOperationRecord
     | ScratchGpuBindLayoutOperationRecord
     | ScratchGpuBindSetOperationRecord
@@ -667,6 +690,7 @@ export type ScratchGpuSupportingObjectIncidentReport = ScratchGpuIncidentReportB
         | ScratchGpuBindLayoutOperationTarget
         | ScratchGpuBindSetOperationTarget
         | ScratchGpuShaderModuleOperationTarget
+        | ScratchGpuRenderBundleOperationTarget
     kind: 'supporting-object-failure'
     failureStage: ScratchSupportingObjectFailureStage
     outcomes?: readonly ScratchGpuIncidentOutcome[]
@@ -1160,6 +1184,9 @@ function createIncidentRelatedSubjects(input: ScratchGpuIncidentReportInput): Di
     if (input.target.kind === 'shader-module') {
         related.push({ kind: 'ShaderModule', id: input.target.shaderModuleId })
     }
+    if (input.target.kind === 'render-bundle') {
+        related.push({ kind: 'RenderBundle', id: input.target.renderBundleId })
+    }
     if (input.target.kind === 'command') {
         related.push({
             kind: 'Command',
@@ -1197,6 +1224,9 @@ function createIncidentSubject(input: ScratchGpuIncidentReportInput): Diagnostic
     }
     if (input.target.kind === 'shader-module') {
         return { kind: 'ShaderModule', id: input.target.shaderModuleId }
+    }
+    if (input.target.kind === 'render-bundle') {
+        return { kind: 'RenderBundle', id: input.target.renderBundleId }
     }
     if (input.target.kind === 'command') {
         return {
@@ -1253,6 +1283,9 @@ export function assertGpuOperationTarget(
         case 'shader-module-creation':
             if (target.kind === 'shader-module') return
             throw new TypeError(`GPU operation ${kind} requires a ShaderModule target.`)
+        case 'render-bundle-creation':
+            if (target.kind === 'render-bundle') return
+            throw new TypeError(`GPU operation ${kind} requires a RenderBundle target.`)
         case 'resource-disposal':
             if (target.kind === 'resource') return
             break
@@ -1300,6 +1333,7 @@ function assertIncidentTarget(input: ScratchGpuIncidentReportInput): void {
                 input.target.kind === 'bind-layout' ||
                 input.target.kind === 'bind-set' ||
                 input.target.kind === 'shader-module' ||
+                input.target.kind === 'render-bundle' ||
                 input.target.kind === 'resource' && (
                     input.target.resourceKind === 'SamplerResource' ||
                     input.target.resourceKind === 'QuerySetResource'
@@ -1351,6 +1385,7 @@ function operationTargetId(target: ScratchGpuOperationTarget): string {
     switch (target.kind) {
         case 'resource': return target.resourceId
         case 'shader-module': return target.shaderModuleId
+        case 'render-bundle': return target.renderBundleId
         case 'pipeline': return target.pipelineId
         case 'bind-layout': return target.bindLayoutId
         case 'bind-set': return target.bindSetId

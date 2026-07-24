@@ -8,12 +8,14 @@ const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch')
 
 const nativeCalls = Object.freeze([
     [ 'GPUDevice.createCommandEncoder', /\b(?:device|this\.runtime\.device)\.createCommandEncoder\(/ ],
+    [ 'GPUDevice.createRenderBundleEncoder', /\bruntime\.device\.createRenderBundleEncoder\(/ ],
     [ 'GPUDevice.createBindGroup', /\b(?:this|bindSet)\.runtime\.device\.createBindGroup\(/ ],
     [ 'GPUTexture.createView', /(?:\.gpuTexture|\btexture)\.createView\(/ ],
     [ 'GPUCanvasContext.getConfiguration', /\b(?:context|state\.context)\.getConfiguration\(/ ],
     [ 'GPUCanvasContext.getCurrentTexture', /\b(?:this|identity|state|facts)\.context\.getCurrentTexture\(/ ],
     [ 'GPUDevice.importExternalTexture', /\bthis\.#runtime\.device\.importExternalTexture\(/ ],
     [ 'GPUCommandEncoder.finish', /\bencoder!?\.finish\(/ ],
+    [ 'GPURenderBundleEncoder.finish', /\bbundleEncoder\.finish\(/ ],
     [ 'GPUCommandEncoder.clearBuffer', /\bcommandEncoder\.clearBuffer\(/ ],
     [ 'GPUCommandEncoder.copyBufferToBuffer', /\b(?:commandEncoder|encoder)\.copyBufferToBuffer\(/ ],
     [ 'GPUCommandEncoder.copyTextureToTexture', /\bcommandEncoder\.copyTextureToTexture\(/ ],
@@ -23,19 +25,20 @@ const nativeCalls = Object.freeze([
     [ 'GPUCommandEncoder.beginComputePass', /\bencoder\.beginComputePass\(/ ],
     [ 'GPUCommandEncoder.beginRenderPass', /\bencoder\.beginRenderPass\(/ ],
     [ 'GPUPassEncoder.end', /\bpassEncoder\.end\(/ ],
-    [ 'GPUPassEncoder.setPipeline', /\bpassEncoder\.setPipeline\(/ ],
+    [ 'GPUPassEncoder.setPipeline', /\b(?:passEncoder|bundleEncoder)\.setPipeline\(/ ],
     [ 'GPUBindingCommandsMixin.setImmediates', /\bencoder\.setImmediates\(/ ],
     [ 'GPUPassEncoder.setBindGroup', /\bpassEncoder\.setBindGroup\(/ ],
     [ 'GPURenderPassEncoder.setViewport', /\bpassEncoder\.setViewport\(/ ],
     [ 'GPURenderPassEncoder.setScissorRect', /\bpassEncoder\.setScissorRect\(/ ],
     [ 'GPURenderPassEncoder.setBlendConstant', /\bpassEncoder\.setBlendConstant\(/ ],
     [ 'GPURenderPassEncoder.setStencilReference', /\bpassEncoder\.setStencilReference\(/ ],
-    [ 'GPURenderPassEncoder.setVertexBuffer', /\bpassEncoder\.setVertexBuffer\(/ ],
-    [ 'GPURenderPassEncoder.setIndexBuffer', /\bpassEncoder\.setIndexBuffer\(/ ],
-    [ 'GPURenderPassEncoder.draw', /\bpassEncoder\.draw\(/ ],
-    [ 'GPURenderPassEncoder.drawIndexed', /\bpassEncoder\.drawIndexed\(/ ],
-    [ 'GPURenderPassEncoder.drawIndirect', /\bpassEncoder\.drawIndirect\(/ ],
-    [ 'GPURenderPassEncoder.drawIndexedIndirect', /\bpassEncoder\.drawIndexedIndirect\(/ ],
+    [ 'GPURenderCommandsMixin.setVertexBuffer', /\b(?:passEncoder|encoder)\.setVertexBuffer\(/ ],
+    [ 'GPURenderCommandsMixin.setIndexBuffer', /\b(?:passEncoder|encoder)\.setIndexBuffer\(/ ],
+    [ 'GPURenderCommandsMixin.draw', /\b(?:passEncoder|encoder)\.draw\(/ ],
+    [ 'GPURenderCommandsMixin.drawIndexed', /\b(?:passEncoder|encoder)\.drawIndexed\(/ ],
+    [ 'GPURenderCommandsMixin.drawIndirect', /\b(?:passEncoder|encoder)\.drawIndirect\(/ ],
+    [ 'GPURenderCommandsMixin.drawIndexedIndirect', /\b(?:passEncoder|encoder)\.drawIndexedIndirect\(/ ],
+    [ 'GPURenderPassEncoder.executeBundles', /\bencoder\.executeBundles\(/ ],
     [ 'GPURenderPassEncoder.beginOcclusionQuery', /\bpassEncoder\.beginOcclusionQuery\(/ ],
     [ 'GPURenderPassEncoder.endOcclusionQuery', /\bpassEncoder\.endOcclusionQuery\(/ ],
     [ 'GPUComputePassEncoder.dispatchWorkgroups', /\bpassEncoder\.dispatchWorkgroups\(/ ],
@@ -44,8 +47,9 @@ const nativeCalls = Object.freeze([
     [ 'GPUQueue.writeTexture', /\bqueue\.writeTexture\(/ ],
     [ 'GPUQueue.copyExternalImageToTexture', /\bqueue\.copyExternalImageToTexture\(/ ],
     [ 'GPUQueue.submit', /\b(?:queue|this\.runtime\.queue)\.submit\(/ ],
-    [ 'GPUDebugCommandsMixin.pushDebugGroup', /\bencoder\.pushDebugGroup!\(/ ],
-    [ 'GPUDebugCommandsMixin.popDebugGroup', /\bencoder\.popDebugGroup!\(/ ],
+    [ 'GPUDebugCommandsMixin.pushDebugGroup', /\bencoder\.pushDebugGroup!?\(/ ],
+    [ 'GPUDebugCommandsMixin.popDebugGroup', /\bencoder\.popDebugGroup!?\(/ ],
+    [ 'GPUDebugCommandsMixin.insertDebugMarker', /\bencoder\.insertDebugMarker\(/ ],
 ])
 
 function read(...parts) {
@@ -65,11 +69,13 @@ describe('scratch submission native source audit', () => {
         const callSites = scanNativeCallSites(scratchRoot)
         const inventoryRows = audit.match(/^\| N\d+ \|.*\|$/gm) ?? []
 
-        expect(callSites).to.have.length(51)
+        expect(callSites).to.have.length(58)
         expect(countByFile(callSites)).to.deep.equal({
             'packages/geoscratch/src/scratch/binding.ts': 4,
-            'packages/geoscratch/src/scratch/command.ts': 29,
+            'packages/geoscratch/src/scratch/command.ts': 30,
+            'packages/geoscratch/src/scratch/debug-command.ts': 3,
             'packages/geoscratch/src/scratch/readback.ts': 4,
+            'packages/geoscratch/src/scratch/render-bundle.ts': 3,
             'packages/geoscratch/src/scratch/submission.ts': 9,
             'packages/geoscratch/src/scratch/surface.ts': 1,
             'packages/geoscratch/src/scratch/temporal-texture.ts': 3,

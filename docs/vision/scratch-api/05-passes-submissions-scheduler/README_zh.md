@@ -1,7 +1,7 @@
 # Passes, Submissions 与 Scheduler
 
 状态: Vision draft
-日期: 2026-07-23
+日期: 2026-07-24
 
 ## 决策
 
@@ -205,6 +205,37 @@ Submission 职责:
 - 按 runtime policy 观察 Scratch-owned native issue boundaries
 - 提交 command buffers
 - 返回 `SubmittedWork`
+
+### Bundle 执行与 Debug Scope
+
+Render step 可以包含普通 Draw、query bracket、DebugCommand 与
+`ExecuteRenderBundlesCommand`。Compute step 可以包含 Dispatch 与
+DebugCommand。`SubmissionBuilder.debug(command)` 会把 debug command 记录到当前
+command-encoder segment 本身。
+
+Submission preflight 会在创建 command encoder 前校验每个最终选中的 bundle:
+
+- 准确 Runtime ownership 与封闭 object identity；
+- persistent dependency snapshot 或 attempt-local temporal dependency；
+- bundle/pass 的 color、depth/stencil、sample 与 read-only compatibility；
+- 完整 per-command immediate snapshot；以及
+- command、render-pass、compute-pass 与 bundle encoder scope 内各自平衡的
+  debug group。
+
+Queue-side upload step 会结束当前 command encoder。因此 command-level debug
+group 不能跨 upload boundary，但可以包围同一 encoder segment 内的多个 pass。
+Pass 与 bundle group 始终只属于自己的 encoder。
+
+Attempt-local bundle 只在最终 selected plan 固定后实现，并且只缓存在该次
+submission attempt 内。同一个 authored bundle 在一次 attempt 中执行多次时复用
+同一个原生 realization。Persistent bundle 复用已确认的原生对象，并在 stale 时
+失败；submission 不会 prepare 或重建它。
+
+每个 `ExecuteRenderBundlesCommand` 都会发出原生 `executeBundles()`，即使 bundle
+sequence 为空，因此原生 state clearing 得以保留。后续 Draw 仍然自包含。调用成功
+后，嵌套 declared write 按每个 bundle occurrence 分别生效。
+`SubmittedWork.renderBundles` 记录不可变的 execute-command、bundle、realization
+与 command identity facts，不保留原生对象或 command payload。
 
 ### Ordered Readback Preparation 与 Links
 

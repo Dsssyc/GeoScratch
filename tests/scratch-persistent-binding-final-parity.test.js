@@ -305,11 +305,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.historicalTypeInventory.every(entry => entry.status === 'passed')).to.equal(true)
         expect(result.publicSurface.publicMemberParity).to.deep.include({
             goalStartCount: 357,
-            finalCount: 439,
+            finalCount: 468,
             status: 'passed',
         })
         expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(22)
-        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(13)
+        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(14)
         expect(result.publicSurface.programReadonlyPublicContracts.map(
             contract => contract.id
         )).to.deep.equal([ 'Program.runtime', 'Program.id', 'Program.isDisposed' ])
@@ -323,11 +323,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.programPipelineFactSnapshot.mutablePlannerReads).to.deep.equal([])
         expect(result.publicSurface.productionEmitParity).to.deep.include({
             status: 'passed',
-            emittedJavaScriptCount: 101,
-            emittedDeclarationCount: 101,
-            declarationSignatureCount: 4077,
+            emittedJavaScriptCount: 104,
+            emittedDeclarationCount: 104,
+            declarationSignatureCount: 4234,
         })
-        expect(result.publicSurface.productionEmitParity.files).to.have.length(202)
+        expect(result.publicSurface.productionEmitParity.files).to.have.length(208)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
         expect(result.diagnostics).to.deep.include({ schemaVersion: 5 })
         expect(result.diagnostics.unexpectedMissing).to.deep.equal([])

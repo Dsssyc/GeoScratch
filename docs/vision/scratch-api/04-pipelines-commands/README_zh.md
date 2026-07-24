@@ -1,7 +1,7 @@
 # Pipelines 与 Commands
 
 状态: Vision draft
-日期: 2026-07-23
+日期: 2026-07-24
 
 ## 决策
 
@@ -101,12 +101,96 @@ array hole 或 `undefined` 非法。Scratch 不压缩也不重新编号这些 se
 - `ResolveQuerySetCommand`
 - `ReadbackCommand` 作为显式 ordered-staging 逃生口，并产生 `ReadbackOperation`
 - `BeginOcclusionQueryCommand` / `EndOcclusionQueryCommand` 作为 render-pass-only query bracket
+- `BundleDrawCommand` / `ExecuteRenderBundlesCommand` 用于原生 render-bundle
+  记录与执行
+- `DebugCommand` 用于原生 encoder debug group 与 marker
 
 `CopyCommand` 覆盖 WebGPU 原生 GPU-side copy 方向: buffer-to-buffer、texture-to-texture、buffer-to-texture 与 texture-to-buffer。CPU upload 与 CPU readback 仍然是显式 transfer/readback operation，不能替代这些 command encoder copy。
 
 `ClearBufferCommand` 覆盖原生 `GPUCommandEncoder.clearBuffer()` operation。
 Attachment resolve 是 render-pass color attachment 的组成部分，而不是独立的
 resolve command。
+
+### RenderBundle 与 DebugCommand
+
+`RenderBundle` 是受限且使用原生编码的 render command sequence，不是缓存后的
+普通 render pass:
+
+```ts
+const bundleDraw = runtime.createBundleDrawCommand({
+    pipeline,
+    bindSets: [ { set: staticSet } ],
+    vertexBuffers: [ { slot: 0, region: vertices.region() } ],
+    count: { vertexCount: 3 },
+    resources: {
+        read: [
+            { resource: vertices, contentEpoch: vertices.contentEpoch },
+        ],
+        write: [],
+    },
+    whenMissing: 'throw',
+})
+
+const bundle = await runtime.createRenderBundle({
+    realization: 'persistent',
+    colorFormats: [ 'rgba8unorm' ],
+    commands: [ bundleDraw ],
+})
+```
+
+realization mode 必须显式提供。Persistent bundle 会确认唯一一个原生
+`GPURenderBundle`，并快照 allocation version、BindSet preparation facts 与完整
+immediate bytes。Allocation 改变或显式重新 prepare BindSet 后，它会变成 stale；
+submission 必须失败，不能静默重建。依赖临时 Surface 或 external texture 时必须
+使用 `realization: 'attempt-local'`。Submission 在该次选中 attempt 中至多为同一个
+authored bundle 创建一个原生 bundle，且绝不把 temporal handle 变成 persistent
+Resource。
+
+Bundle layout 显式包含 color formats、可选 depth/stencil format、sample count
+以及 depth/stencil read-only declaration，并且至少要有一个 color 或
+depth/stencil attachment。Bundle 创建时校验 pipeline compatibility，包括考虑
+cull mode 的原生 stencil-write 规则；submission effect 前校验 pass
+compatibility。只有原生 layout equality 会忽略尾部 null color slots。
+
+`BundleDrawCommand` 禁止 viewport、scissor、blend constant、stencil reference、
+fallback readiness、query bracket 与 attachment operation；这些概念属于 pass。
+原生 bundle encoding 不推进 content epoch。只有成功调用 `executeBundles()` 后，
+每个嵌套 declared write 才会按实际执行 occurrence 推进一步，并记录进
+`SubmittedWork`。即使 bundle list 为空，Scratch 也会调用 `executeBundles()`。
+由于原生调用会清除 pipeline、bind-group、vertex-buffer 与 index-buffer state，
+后续普通 Draw 必须重新发出自己的完整 state。
+
+`DebugCommand` 只有 `push-group`、`pop-group` 与 `insert-marker` 三种 action。
+同一个带私有品牌的 command 可降低到 command、render-pass、compute-pass 和
+render-bundle encoder。Group 必须在准确的原生 encoder scope 内闭合；
+command-encoder group 不能跨越 queue-side upload boundary。Debug command 不产生
+Resource access、readiness dependency、content epoch 或持久 log stream。
+不平衡 diagnostic 只保留有界 command ID 前缀以及 omitted count。
+
+当前 RenderBundle 与 DebugCommand 使用
+`09-diagnostics-validation` 共享 envelope 的 diagnostic codes:
+
+- `SCRATCH_DEBUG_COMMAND_DESCRIPTOR_INVALID`
+- `SCRATCH_DEBUG_COMMAND_NATIVE_FAILED`
+- `SCRATCH_DEBUG_COMMAND_UNSUPPORTED`
+- `SCRATCH_DEBUG_GROUP_UNBALANCED`
+- `SCRATCH_RENDER_BUNDLE_ATTEMPT_REALIZATION_FAILED`
+- `SCRATCH_RENDER_BUNDLE_COMMAND_INVALID`
+- `SCRATCH_RENDER_BUNDLE_DESCRIPTOR_INVALID`
+- `SCRATCH_RENDER_BUNDLE_DISPOSED`
+- `SCRATCH_RENDER_BUNDLE_EXECUTION_DESCRIPTOR_INVALID`
+- `SCRATCH_RENDER_BUNDLE_EXECUTION_FAILED`
+- `SCRATCH_RENDER_BUNDLE_EXECUTION_UNSUPPORTED`
+- `SCRATCH_RENDER_BUNDLE_NATIVE_CREATION_FAILED`
+- `SCRATCH_RENDER_BUNDLE_NATIVE_INTERNAL_FAILED`
+- `SCRATCH_RENDER_BUNDLE_NATIVE_OUT_OF_MEMORY`
+- `SCRATCH_RENDER_BUNDLE_NATIVE_VALIDATION_FAILED`
+- `SCRATCH_RENDER_BUNDLE_PASS_INCOMPATIBLE`
+- `SCRATCH_RENDER_BUNDLE_PIPELINE_LAYOUT_MISMATCH`
+- `SCRATCH_RENDER_BUNDLE_READ_ONLY_MISMATCH`
+- `SCRATCH_RENDER_BUNDLE_STALE`
+- `SCRATCH_RENDER_BUNDLE_TEMPORAL_REALIZATION_REQUIRED`
+- `SCRATCH_RENDER_BUNDLE_WRONG_RUNTIME`
 
 每个 executable command 都暴露单向 lifecycle。
 所有 normalized command construction facts 与 payload/resource reference 都会被锁定：
