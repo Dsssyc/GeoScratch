@@ -15,6 +15,44 @@ import {
     wgslManifestPath,
 } from '../../scripts/scratch-webgpu-wgsl-parity-manifest.mjs'
 
+const pointerProofCaseNames = [
+    'unrestricted-pointer',
+    'pointer-composite',
+]
+
+const unrestrictedPointerProofSource = `
+requires unrestricted_pointer_parameters;
+
+@group(0) @binding(0)
+var<storage, read_write> outputValues: u32;
+
+fn writeThroughStoragePointer(
+    destination: ptr<storage, u32, read_write>,
+    value: u32
+) {
+    *destination = value;
+}
+
+@compute @workgroup_size(1)
+fn csMain() {
+    writeThroughStoragePointer(&outputValues, 103u);
+}
+`
+
+const pointerCompositeProofSource = `
+requires pointer_composite_access;
+
+@group(0) @binding(0)
+var<storage, read_write> outputValues: array<u32>;
+
+@compute @workgroup_size(1)
+fn csMain() {
+    var localValues = array<u32, 4>(101u, 102u, 104u, 105u);
+    let valuesPointer = &localValues;
+    outputValues[0] = valuesPointer[2u];
+}
+`
+
 const root = process.cwd()
 const current = readJson(currentCoverageManifestPath)
 const enableExtensions = readJson(wgslEnableExtensionManifestPath)
@@ -63,7 +101,7 @@ const packageSourceExportNames = collectNamedExports(
 )
 const pointerProofCases = tryExtractSemanticCases(
     'tests/browser/scratch-wgsl-capability-matrix.mjs',
-    [ 'unrestricted-pointer', 'pointer-composite' ]
+    pointerProofCaseNames
 )
 
 const checks = {
@@ -538,12 +576,8 @@ function unrestrictedPointerProofSourceIsConformant(proof) {
     const source = proof?.source ?? ''
     return (
         proof?.expected === 103 &&
-        source.includes('requires unrestricted_pointer_parameters;') &&
-        /destination\s*:\s*ptr<storage,\s*u32,\s*read_write>/.test(source) &&
-        /\*destination\s*=\s*value\s*;/.test(source) &&
-        /writeThroughStoragePointer\s*\(\s*&outputValues\s*,\s*103u\s*\)/
-            .test(source) &&
-        !/\btarget\s*:/.test(source)
+        normalizeWgslSource(source) ===
+            normalizeWgslSource(unrestrictedPointerProofSource)
     )
 }
 
@@ -552,13 +586,8 @@ function pointerCompositeProofSourceIsConformant(proof) {
     const source = proof?.source ?? ''
     return (
         proof?.expected === 104 &&
-        source.includes('requires pointer_composite_access;') &&
-        /var\s+localValues\s*=\s*array<u32,\s*4>\s*\(/.test(source) &&
-        /let\s+valuesPointer\s*=\s*&localValues\s*;/.test(source) &&
-        /outputValues\s*\[\s*0u?\s*\]\s*=\s*valuesPointer\s*\[\s*2u\s*\]\s*;/
-            .test(source) &&
-        !/\*\s*valuesPointer\b/.test(source) &&
-        !/&\s*[A-Za-z_]\w*\s*\.\s*[xyzwrgba]{1,4}\b/.test(source)
+        normalizeWgslSource(source) ===
+            normalizeWgslSource(pointerCompositeProofSource)
     )
 }
 
@@ -587,6 +616,11 @@ function extractSemanticCases(relativePath, requiredNames) {
         true,
         ts.ScriptKind.JS
     )
+    if (file.parseDiagnostics.length > 0) {
+        throw new Error(
+            `${relativePath} has ${file.parseDiagnostics.length} parse diagnostics`
+        )
+    }
     const declarations = []
     visit(file)
 
@@ -615,14 +649,45 @@ function extractSemanticCases(relativePath, requiredNames) {
     const required = new Set(requiredNames)
     const cases = new Map()
     for (const property of initializer.properties) {
-        if (!ts.isPropertyAssignment(property)) continue
+        if (!ts.isPropertyAssignment(property)) {
+            throw new Error(
+                'semanticCases must contain only static property assignments'
+            )
+        }
         const caseName = staticPropertyName(property.name)
+        if (caseName === undefined) {
+            throw new Error(
+                'semanticCases must contain only static property assignments'
+            )
+        }
         if (!required.has(caseName)) continue
         if (cases.has(caseName)) {
             throw new Error(`Duplicate semantic case ${caseName}`)
         }
         if (!ts.isObjectLiteralExpression(property.initializer)) {
             throw new Error(`Semantic case ${caseName} must be an object literal`)
+        }
+        const propertyNames = property.initializer.properties.map(
+            selectedProperty => {
+                if (!ts.isPropertyAssignment(selectedProperty)) {
+                    throw new Error(
+                        `Semantic case ${caseName} must have exactly static ` +
+                        'source and expected properties'
+                    )
+                }
+                return staticPropertyName(selectedProperty.name)
+            }
+        )
+        if (
+            propertyNames.length !== 2 ||
+            !propertyNames.includes('source') ||
+            !propertyNames.includes('expected') ||
+            propertyNames.some(name => name === undefined)
+        ) {
+            throw new Error(
+                `Semantic case ${caseName} must have exactly static ` +
+                'source and expected properties'
+            )
         }
         const sourceProperty = findProperty(property.initializer, 'source')
         const expectedProperty = findProperty(property.initializer, 'expected')
@@ -653,6 +718,11 @@ function extractSemanticCases(relativePath, requiredNames) {
         }
     }
     return cases
+}
+
+function normalizeWgslSource(source) {
+
+    return source.replace(/\r\n?/g, '\n').trim()
 }
 
 function findProperty(object, name) {
