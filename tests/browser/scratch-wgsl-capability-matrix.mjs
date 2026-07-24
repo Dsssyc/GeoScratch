@@ -9,6 +9,40 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
 const packageEntry = resolve(repositoryRoot, 'packages/geoscratch/dist/index.js')
+const adapterPowerPreference = 'high-performance'
+const expectedEnableProofNames = [
+    'clip_distances',
+    'dual_source_blending',
+    'f16',
+    'primitive_index',
+    'subgroup_size_control',
+    'subgroups',
+]
+const expectedLanguageProofNames = [
+    'readonly_and_readwrite_storage_textures',
+    'packed_4x8_integer_dot_product',
+    'unrestricted_pointer_parameters',
+    'pointer_composite_access',
+    'uniform_buffer_standard_layout',
+    'subgroup_id',
+    'subgroup_uniformity',
+    'texture_and_sampler_let',
+    'texture_formats_tier1',
+    'linear_indexing',
+    'immediate_address_space',
+    'buffer_view',
+]
+const expectedDeviceFeaturesByProof = Object.freeze({
+    clip_distances: [ 'clip-distances' ],
+    dual_source_blending: [ 'dual-source-blending' ],
+    f16: [ 'shader-f16' ],
+    primitive_index: [ 'primitive-index' ],
+    subgroup_size_control: [ 'subgroup-size-control', 'subgroups' ],
+    subgroups: [ 'subgroups' ],
+    subgroup_id: [ 'subgroups' ],
+    subgroup_uniformity: [ 'subgroups' ],
+    texture_formats_tier1: [ 'texture-formats-tier1' ],
+})
 const timeout = positiveInteger(
     process.env.SCRATCH_WGSL_BROWSER_TIMEOUT_MS,
     120_000
@@ -49,7 +83,12 @@ try {
         timeout,
     })
     const moduleUrl = `${baseUrl}/@fs${packageEntry}`
-    probe = await page.evaluate(runCapabilityMatrix, { moduleUrl })
+    probe = await page.evaluate(runCapabilityMatrix, {
+        moduleUrl,
+        adapterPowerPreference,
+        expectedEnableProofNames,
+        expectedLanguageProofNames,
+    })
     await context.close()
 } catch (error) {
     fatalError = serializeError(error)
@@ -109,7 +148,12 @@ const result = {
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 if (failures.length > 0) process.exitCode = 1
 
-async function runCapabilityMatrix({ moduleUrl }) {
+async function runCapabilityMatrix({
+    moduleUrl,
+    adapterPowerPreference,
+    expectedEnableProofNames,
+    expectedLanguageProofNames,
+}) {
 
     const scratch = await import(moduleUrl)
     const enableContracts = [
@@ -144,20 +188,76 @@ async function runCapabilityMatrix({ moduleUrl }) {
             kind: 'subgroup',
         },
     ]
-    const languageExtensions = [
-        'readonly_and_readwrite_storage_textures',
-        'packed_4x8_integer_dot_product',
-        'unrestricted_pointer_parameters',
-        'pointer_composite_access',
-        'uniform_buffer_standard_layout',
-        'subgroup_id',
-        'subgroup_uniformity',
-        'texture_and_sampler_let',
-        'texture_formats_tier1',
-        'linear_indexing',
-        'immediate_address_space',
-        'buffer_view',
+    const languageContracts = [
+        {
+            name: 'readonly_and_readwrite_storage_textures',
+            kind: 'read-write-storage-texture',
+            requiredFeatures: [],
+        },
+        {
+            name: 'packed_4x8_integer_dot_product',
+            kind: 'packed-dot-product',
+            requiredFeatures: [],
+        },
+        {
+            name: 'unrestricted_pointer_parameters',
+            kind: 'unrestricted-pointer',
+            requiredFeatures: [],
+        },
+        {
+            name: 'pointer_composite_access',
+            kind: 'pointer-composite',
+            requiredFeatures: [],
+        },
+        {
+            name: 'uniform_buffer_standard_layout',
+            kind: 'uniform-layout',
+            requiredFeatures: [],
+        },
+        {
+            name: 'subgroup_id',
+            kind: 'subgroup-id',
+            requiredFeatures: [ 'subgroups' ],
+        },
+        {
+            name: 'subgroup_uniformity',
+            kind: 'subgroup-uniformity',
+            requiredFeatures: [ 'subgroups' ],
+        },
+        {
+            name: 'texture_and_sampler_let',
+            kind: 'texture-sampler-let',
+            requiredFeatures: [],
+        },
+        {
+            name: 'texture_formats_tier1',
+            kind: 'tier1-storage-texture',
+            requiredFeatures: [ 'texture-formats-tier1' ],
+        },
+        {
+            name: 'linear_indexing',
+            kind: 'linear-index',
+            requiredFeatures: [],
+        },
+        {
+            name: 'immediate_address_space',
+            kind: 'immediate-data',
+            requiredFeatures: [],
+        },
+        {
+            name: 'buffer_view',
+            kind: 'buffer-view',
+            requiredFeatures: [],
+        },
     ]
+    if (
+        JSON.stringify(enableContracts.map(contract => contract.extension)) !==
+            JSON.stringify(expectedEnableProofNames) ||
+        JSON.stringify(languageContracts.map(contract => contract.name)) !==
+            JSON.stringify(expectedLanguageProofNames)
+    ) {
+        throw new Error('Capability matrix contract names drifted.')
+    }
 
     if (navigator.gpu === undefined) {
         return {
@@ -174,18 +274,26 @@ async function runCapabilityMatrix({ moduleUrl }) {
         }
     }
 
-    const adapter = await navigator.gpu.requestAdapter({
-        powerPreference: 'high-performance',
-    })
-    if (adapter === null) {
+    let discoveryRuntime
+    try {
+        discoveryRuntime = await scratch.ScratchRuntime.create({
+            label: 'WGSL matrix capability discovery',
+            powerPreference: adapterPowerPreference,
+            diagnostics: {
+                stackCapture: 'errors',
+            },
+        })
+    } catch (error) {
         return {
             capabilities: {
                 navigatorGpu: true,
                 adapterAvailable: false,
                 adapterFeatures: [],
-                wgslLanguageFeatures: [
-                    ...(navigator.gpu.wgslLanguageFeatures ?? []),
-                ].sort(),
+                wgslLanguageFeatures: [],
+                adapterSelection: {
+                    powerPreference: adapterPowerPreference,
+                },
+                discoveryFailure: serializeFailure(error),
             },
             enableExtensions: [],
             languageExtensions: [],
@@ -194,14 +302,26 @@ async function runCapabilityMatrix({ moduleUrl }) {
         }
     }
 
-    const adapterFeatures = [ ...adapter.features ].sort()
+    const adapterFeatures = [ ...discoveryRuntime.adapterFeatures ].sort()
     const languageFeatureFacts = [
-        ...(navigator.gpu.wgslLanguageFeatures ?? []),
+        ...discoveryRuntime.wgslLanguageFeatures,
     ].sort()
-    const adapterInfo = adapter.info ?? {}
+    const adapterInfo = discoveryRuntime.adapterInfo
+    const adapterLimits = discoveryRuntime.adapterLimits
+    const discoveryRequestFacts = discoveryRuntime.requestFacts
+    discoveryRuntime.dispose()
+    await Promise.resolve()
+    const discoveryTerminal = terminalFacts(
+        discoveryRuntime.diagnostics.exportEvidence().snapshot
+    )
     const capabilities = {
         navigatorGpu: true,
         adapterAvailable: true,
+        adapterSelection: {
+            powerPreference: adapterPowerPreference,
+        },
+        discoveryRequestFacts,
+        discoveryTerminal,
         adapterInfo: {
             vendor: adapterInfo.vendor ?? '',
             architecture: adapterInfo.architecture ?? '',
@@ -214,13 +334,13 @@ async function runCapabilityMatrix({ moduleUrl }) {
         adapterFeatures,
         wgslLanguageFeatures: languageFeatureFacts,
         limits: {
-            maxBufferSize: adapter.limits.maxBufferSize,
+            maxBufferSize: adapterLimits.maxBufferSize,
             maxStorageBufferBindingSize:
-                adapter.limits.maxStorageBufferBindingSize,
+                adapterLimits.maxStorageBufferBindingSize,
             maxComputeInvocationsPerWorkgroup:
-                adapter.limits.maxComputeInvocationsPerWorkgroup,
+                adapterLimits.maxComputeInvocationsPerWorkgroup,
             maxImmediateSize: numberOrUndefined(
-                adapter.limits.maxImmediateSize
+                adapterLimits.maxImmediateSize
             ),
         },
     }
@@ -229,7 +349,7 @@ async function runCapabilityMatrix({ moduleUrl }) {
     let f16Proof
     for (const contract of enableContracts) {
         const missingAdapterFeatures = contract.requiredFeatures.filter(
-            feature => !adapter.features.has(feature)
+            feature => !adapterFeatures.includes(feature)
         )
         if (missingAdapterFeatures.length > 0) {
             const skipped = skippedResult(contract.extension, {
@@ -265,15 +385,31 @@ async function runCapabilityMatrix({ moduleUrl }) {
 
     const languageResults = []
     let bufferViewProof
-    for (let index = 0; index < languageExtensions.length; index++) {
-        const languageFeature = languageExtensions[index]
+    for (const contract of languageContracts) {
+        const languageFeature = contract.name
+        const missingAdapterFeatures = contract.requiredFeatures.filter(
+            feature => !adapterFeatures.includes(feature)
+        )
+        if (missingAdapterFeatures.length > 0) {
+            const skipped = skippedResult(languageFeature, {
+                kind: 'adapter-feature-missing',
+                adapterFeatures,
+                missingAdapterFeatures,
+            }, {
+                requestedDeviceFeatures: contract.requiredFeatures,
+                requiredLanguageFeatures: [ languageFeature ],
+            })
+            languageResults.push(skipped)
+            if (languageFeature === 'buffer_view') bufferViewProof = skipped
+            continue
+        }
         if (!languageFeatureFacts.includes(languageFeature)) {
             const skipped = skippedResult(languageFeature, {
                 kind: 'wgsl-language-feature-missing',
                 wgslLanguageFeatures: languageFeatureFacts,
                 missingLanguageFeature: languageFeature,
             }, {
-                requestedDeviceFeatures: [],
+                requestedDeviceFeatures: contract.requiredFeatures,
                 requiredLanguageFeatures: [ languageFeature ],
             })
             languageResults.push(skipped)
@@ -282,10 +418,7 @@ async function runCapabilityMatrix({ moduleUrl }) {
         }
 
         let proof
-        if (languageFeature === 'buffer_view') {
-            proof = await runBufferViewProof(scratch, languageFeature)
-            bufferViewProof = proof
-        } else if (languageFeature === 'immediate_address_space') {
+        if (contract.kind === 'immediate-data') {
             const maxImmediateSize = capabilities.limits.maxImmediateSize
             if (typeof maxImmediateSize !== 'number' || maxImmediateSize < 4) {
                 proof = skippedResult(languageFeature, {
@@ -294,22 +427,17 @@ async function runCapabilityMatrix({ moduleUrl }) {
                     required: 4,
                     actual: maxImmediateSize,
                 }, {
-                    requestedDeviceFeatures: [],
+                    requestedDeviceFeatures: contract.requiredFeatures,
                     requiredLanguageFeatures: [ languageFeature ],
                 })
             } else {
-                proof = await runImmediateProof(scratch, languageFeature)
+                proof = await runImmediateProof(scratch, contract)
             }
-        } else if (languageFeature === 'uniform_buffer_standard_layout') {
-            proof = await runUniformLayoutProof(scratch, languageFeature)
         } else {
-            proof = await runLanguageDirectiveProof(
-                scratch,
-                languageFeature,
-                index + 101
-            )
+            proof = await runLanguageSemanticProof(scratch, contract)
         }
         languageResults.push(proof)
+        if (languageFeature === 'buffer_view') bufferViewProof = proof
     }
 
     const nestedMatrix = await runNestedMatrixProof(scratch)
@@ -506,33 +634,149 @@ fn csMain(
         })
     }
 
-    async function runLanguageDirectiveProof(
-        activeScratch,
-        languageFeature,
-        expected
-    ) {
+    async function runLanguageSemanticProof(activeScratch, contract) {
 
-        const source = `
-requires ${languageFeature};
+        if (contract.kind === 'read-write-storage-texture') {
+            return await runReadWriteStorageTextureProof(activeScratch, contract)
+        }
+        if (contract.kind === 'texture-sampler-let') {
+            return await runTextureSamplerLetProof(activeScratch, contract)
+        }
+        if (contract.kind === 'tier1-storage-texture') {
+            return await runTier1StorageTextureProof(activeScratch, contract)
+        }
+        if (contract.kind === 'uniform-layout') {
+            return await runUniformLayoutProof(activeScratch, contract)
+        }
+        if (contract.kind === 'buffer-view') {
+            return await runBufferViewProof(activeScratch, contract)
+        }
+
+        const semanticCases = {
+            'packed-dot-product': {
+                source: `
+requires packed_4x8_integer_dot_product;
 
 @group(0) @binding(0)
 var<storage, read_write> outputValues: array<u32>;
 
 @compute @workgroup_size(1)
 fn csMain() {
-    outputValues[0] = ${expected}u;
+    outputValues[0] = dot4U8Packed(0x04030201u, 0x01010101u);
 }
-`
+`,
+                expected: 10,
+            },
+            'unrestricted-pointer': {
+                source: `
+requires unrestricted_pointer_parameters;
+
+@group(0) @binding(0)
+var<storage, read_write> outputValues: u32;
+
+fn writeThroughStoragePointer(
+    target: ptr<storage, u32, read_write>,
+    value: u32
+) {
+    *target = value;
+}
+
+@compute @workgroup_size(1)
+fn csMain() {
+    writeThroughStoragePointer(&outputValues, 103u);
+}
+`,
+                expected: 103,
+            },
+            'pointer-composite': {
+                source: `
+requires pointer_composite_access;
+
+@group(0) @binding(0)
+var<storage, read_write> outputValues: array<u32>;
+
+@compute @workgroup_size(1)
+fn csMain() {
+    var localValue = vec4u(101u, 102u, 104u, 105u);
+    let selected = &localValue.z;
+    outputValues[0] = *selected;
+}
+`,
+                expected: 104,
+            },
+            'subgroup-id': {
+                source: `
+requires subgroup_id;
+enable subgroups;
+
+@group(0) @binding(0)
+var<storage, read_write> outputValues: array<u32>;
+
+@compute @workgroup_size(64)
+fn csMain(
+    @builtin(local_invocation_index) localIndex: u32,
+    @builtin(subgroup_id) subgroupId: u32,
+    @builtin(num_subgroups) subgroupCount: u32
+) {
+    if (localIndex == 0u) {
+        outputValues[0] = subgroupCount * 100u + subgroupId;
+    }
+}
+`,
+                expectedPredicate: value => value >= 100,
+            },
+            'subgroup-uniformity': {
+                source: `
+requires subgroup_uniformity;
+enable subgroups;
+diagnostic(error, subgroup_uniformity);
+
+@group(0) @binding(0)
+var<storage, read_write> outputValues: array<u32>;
+
+@compute @workgroup_size(1)
+fn csMain(@builtin(subgroup_invocation_id) lane: u32) {
+    let sum = subgroupAdd(7u);
+    if (lane == 0u) {
+        outputValues[0] = sum;
+    }
+}
+`,
+                expected: 7,
+            },
+            'linear-index': {
+                source: `
+requires linear_indexing;
+
+@group(0) @binding(0)
+var<storage, read_write> outputValues: array<u32>;
+
+@compute @workgroup_size(2)
+fn csMain(@builtin(global_invocation_index) linearIndex: u32) {
+    if (linearIndex == 1u) {
+        outputValues[0] = linearIndex + 1u;
+    }
+}
+`,
+                expected: 2,
+            },
+        }
+        const semantic = semanticCases[contract.kind]
+        if (semantic === undefined) {
+            throw new Error(`Unknown language proof kind: ${contract.kind}`)
+        }
         return await runComputeProbe(activeScratch, {
-            name: languageFeature,
-            source,
-            expected,
-            requiredLanguageFeatures: [ languageFeature ],
-            proofKind: 'requires-directive-execution',
+            name: contract.name,
+            source: semantic.source,
+            expected: semantic.expected,
+            expectedPredicate: semantic.expectedPredicate,
+            requiredFeatures: contract.requiredFeatures,
+            requiredLanguageFeatures: [ contract.name ],
+            proofKind: 'language-semantic-execution',
         })
     }
 
-    async function runImmediateProof(activeScratch, languageFeature) {
+    async function runImmediateProof(activeScratch, contract) {
 
         const expected = 211
         const source = `
@@ -549,17 +793,18 @@ fn csMain() {
 }
 `
         return await runComputeProbe(activeScratch, {
-            name: languageFeature,
+            name: contract.name,
             source,
             expected,
-            requiredLanguageFeatures: [ languageFeature ],
+            requiredFeatures: contract.requiredFeatures,
+            requiredLanguageFeatures: [ contract.name ],
             immediateData: new Uint32Array([ expected ]),
             immediateSize: 4,
             proofKind: 'immediate-data-execution',
         })
     }
 
-    async function runUniformLayoutProof(activeScratch, languageFeature) {
+    async function runUniformLayoutProof(activeScratch, contract) {
 
         const codec = activeScratch.layoutCodec({
             name: 'StandardUniformProbe',
@@ -595,10 +840,11 @@ fn csMain() {
 }
 `
         return await runComputeProbe(activeScratch, {
-            name: languageFeature,
+            name: contract.name,
             source,
             expected: 4,
-            requiredLanguageFeatures: [ languageFeature ],
+            requiredFeatures: contract.requiredFeatures,
+            requiredLanguageFeatures: [ contract.name ],
             input: {
                 codec,
                 value: { values: [ 1, 2, 3, 4 ] },
@@ -609,7 +855,7 @@ fn csMain() {
         })
     }
 
-    async function runBufferViewProof(activeScratch, languageFeature) {
+    async function runBufferViewProof(activeScratch, contract) {
 
         const raw = activeScratch.layoutCodec({
             name: 'RawBufferViewProbe',
@@ -649,10 +895,11 @@ fn csMain() {
 }
 `
         return await runComputeProbe(activeScratch, {
-            name: languageFeature,
+            name: contract.name,
             source,
             expected: 6,
-            requiredLanguageFeatures: [ languageFeature ],
+            requiredFeatures: contract.requiredFeatures,
+            requiredLanguageFeatures: [ contract.name ],
             input: {
                 codec: raw,
                 bytes: inputBytes,
@@ -661,6 +908,415 @@ fn csMain() {
                 bufferViews: [ view ],
             },
             proofKind: 'buffer-view-execution',
+        })
+    }
+
+    async function runReadWriteStorageTextureProof(activeScratch, contract) {
+
+        const source = `
+requires readonly_and_readwrite_storage_textures;
+
+@group(0) @binding(0)
+var image: texture_storage_2d<r32uint, read_write>;
+
+@group(0) @binding(1)
+var<storage, read_write> outputValues: array<u32>;
+
+@compute @workgroup_size(1)
+fn csMain() {
+    let nextValue = textureLoad(image, vec2i(0, 0)).r + 1u;
+    textureStore(image, vec2i(0, 0), vec4u(nextValue, 0u, 0u, 0u));
+    outputValues[0] = nextValue;
+}
+`
+        return await withRuntime(activeScratch, {
+            name: contract.name,
+            requiredFeatures: contract.requiredFeatures,
+            requiredLanguageFeatures: [ contract.name ],
+            proofKind: 'read-write-storage-texture-execution',
+        }, async runtime => {
+            const image = await runtime.createTexture({
+                label: `${contract.name} image`,
+                size: [ 1, 1 ],
+                format: 'r32uint',
+                usage:
+                    GPUTextureUsage.COPY_DST |
+                    GPUTextureUsage.STORAGE_BINDING,
+            })
+            const output = await runtime.createBuffer({
+                label: `${contract.name} output`,
+                size: 4,
+                usage:
+                    GPUBufferUsage.COPY_DST |
+                    GPUBufferUsage.COPY_SRC |
+                    GPUBufferUsage.STORAGE,
+            })
+            const bindLayout = await runtime.createBindLayout({
+                label: `${contract.name} layout`,
+                group: 0,
+                entries: [
+                    {
+                        binding: 0,
+                        name: 'image',
+                        type: 'storage-texture',
+                        visibility: [ 'compute' ],
+                        access: 'read-write',
+                        format: 'r32uint',
+                        viewDimension: '2d',
+                    },
+                    {
+                        binding: 1,
+                        name: 'outputValues',
+                        type: 'storage',
+                        visibility: [ 'compute' ],
+                        minBindingSize: 4,
+                    },
+                ],
+            })
+            const bindSet = await runtime.createBindSet(bindLayout, {
+                image: image.view(),
+                outputValues: output.region(),
+            })
+            const module = await runtime.createShaderModule({
+                label: `${contract.name} shader`,
+                sourceParts: [ { code: source } ],
+            })
+            const program = runtime.createProgram({
+                label: `${contract.name} program`,
+                compute: { module, entryPoint: 'csMain' },
+                requiredFeatures: contract.requiredFeatures,
+                requiredLanguageFeatures: [ contract.name ],
+            })
+            const pipeline = await runtime.createComputePipeline({
+                label: `${contract.name} pipeline`,
+                program,
+                layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
+            })
+            const pass = runtime.createComputePass({
+                label: `${contract.name} pass`,
+            })
+            const initializeImage = runtime.createTextureUploadCommand({
+                label: `${contract.name} image initialization`,
+                target: image,
+                data: new Uint32Array([ 5 ]),
+                layout: { bytesPerRow: 4, rowsPerImage: 1 },
+                size: { width: 1, height: 1 },
+            })
+            const initializeOutput = runtime.createUploadCommand({
+                label: `${contract.name} output initialization`,
+                target: output.region(),
+                data: new Uint32Array([ 0 ]),
+            })
+            const dispatch = runtime.createDispatchCommand({
+                label: `${contract.name} dispatch`,
+                pipeline,
+                bindSets: [ { set: bindSet } ],
+                count: { workgroups: [ 1 ] },
+                resources: {
+                    read: [
+                        { resource: image, contentEpoch: 1 },
+                        { resource: output, contentEpoch: 1 },
+                    ],
+                    write: [ image, output ],
+                },
+                whenMissing: 'throw',
+            })
+            const submitted = runtime.submission()
+                .upload(initializeImage)
+                .upload(initializeOutput)
+                .compute(pass, [ dispatch ])
+                .submit()
+            const nativeOutcome = await observedSubmission(submitted)
+            const readback = runtime.createReadback({
+                label: `${contract.name} readback`,
+                source: output.region(),
+                after: submitted,
+            })
+            const values = await readback.toArray(Uint32Array)
+            if (values[0] !== 6) {
+                throw new Error(
+                    `${contract.name} readback was ${values[0]}, expected 6.`
+                )
+            }
+            readback.dispose()
+            return computeExecutionFacts({
+                module,
+                pipeline,
+                nativeOutcome,
+                readback: { type: 'u32', values: [ ...values ] },
+                program,
+            })
+        })
+    }
+
+    async function runTextureSamplerLetProof(activeScratch, contract) {
+
+        const source = `
+requires texture_and_sampler_let;
+
+@group(0) @binding(0)
+var<storage, read_write> outputValues: array<u32>;
+
+@group(0) @binding(1)
+var sourceTexture: texture_2d<f32>;
+
+@group(0) @binding(2)
+var sourceSampler: sampler;
+
+@compute @workgroup_size(1)
+fn csMain() {
+    let localTexture = sourceTexture;
+    let localSampler = sourceSampler;
+    let sampled = textureSampleLevel(
+        localTexture,
+        localSampler,
+        vec2f(0.5, 0.5),
+        0.0
+    );
+    outputValues[0] = u32(round(sampled.r * 255.0));
+}
+`
+        return await withRuntime(activeScratch, {
+            name: contract.name,
+            requiredFeatures: contract.requiredFeatures,
+            requiredLanguageFeatures: [ contract.name ],
+            proofKind: 'texture-sampler-let-execution',
+        }, async runtime => {
+            const texture = await runtime.createTexture({
+                label: `${contract.name} texture`,
+                size: [ 1, 1 ],
+                format: 'rgba8unorm',
+                usage:
+                    GPUTextureUsage.COPY_DST |
+                    GPUTextureUsage.TEXTURE_BINDING,
+            })
+            const sampler = await runtime.createSampler({
+                label: `${contract.name} sampler`,
+                minFilter: 'nearest',
+                magFilter: 'nearest',
+            })
+            const output = await runtime.createBuffer({
+                label: `${contract.name} output`,
+                size: 4,
+                usage:
+                    GPUBufferUsage.COPY_DST |
+                    GPUBufferUsage.COPY_SRC |
+                    GPUBufferUsage.STORAGE,
+            })
+            const bindLayout = await runtime.createBindLayout({
+                label: `${contract.name} layout`,
+                group: 0,
+                entries: [
+                    {
+                        binding: 0,
+                        name: 'outputValues',
+                        type: 'storage',
+                        visibility: [ 'compute' ],
+                        minBindingSize: 4,
+                    },
+                    {
+                        binding: 1,
+                        name: 'sourceTexture',
+                        type: 'texture',
+                        visibility: [ 'compute' ],
+                        sampleType: 'float',
+                        viewDimension: '2d',
+                    },
+                    {
+                        binding: 2,
+                        name: 'sourceSampler',
+                        type: 'sampler',
+                        visibility: [ 'compute' ],
+                        samplerType: 'filtering',
+                    },
+                ],
+            })
+            const bindSet = await runtime.createBindSet(bindLayout, {
+                outputValues: output.region(),
+                sourceTexture: texture.view(),
+                sourceSampler: sampler,
+            })
+            const module = await runtime.createShaderModule({
+                label: `${contract.name} shader`,
+                sourceParts: [ { code: source } ],
+            })
+            const program = runtime.createProgram({
+                label: `${contract.name} program`,
+                compute: { module, entryPoint: 'csMain' },
+                requiredFeatures: contract.requiredFeatures,
+                requiredLanguageFeatures: [ contract.name ],
+            })
+            const pipeline = await runtime.createComputePipeline({
+                label: `${contract.name} pipeline`,
+                program,
+                layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
+            })
+            const pass = runtime.createComputePass({
+                label: `${contract.name} pass`,
+            })
+            const initializeTexture = runtime.createTextureUploadCommand({
+                label: `${contract.name} texture initialization`,
+                target: texture,
+                data: new Uint8Array([ 64, 0, 0, 255 ]),
+                layout: { bytesPerRow: 4, rowsPerImage: 1 },
+                size: { width: 1, height: 1 },
+            })
+            const initializeOutput = runtime.createUploadCommand({
+                label: `${contract.name} output initialization`,
+                target: output.region(),
+                data: new Uint32Array([ 0 ]),
+            })
+            const dispatch = runtime.createDispatchCommand({
+                label: `${contract.name} dispatch`,
+                pipeline,
+                bindSets: [ { set: bindSet } ],
+                count: { workgroups: [ 1 ] },
+                resources: {
+                    read: [
+                        { resource: texture, contentEpoch: 1 },
+                        { resource: output, contentEpoch: 1 },
+                    ],
+                    write: [ output ],
+                },
+                whenMissing: 'throw',
+            })
+            const submitted = runtime.submission()
+                .upload(initializeTexture)
+                .upload(initializeOutput)
+                .compute(pass, [ dispatch ])
+                .submit()
+            const nativeOutcome = await observedSubmission(submitted)
+            const readback = runtime.createReadback({
+                label: `${contract.name} readback`,
+                source: output.region(),
+                after: submitted,
+            })
+            const values = await readback.toArray(Uint32Array)
+            if (values[0] !== 64) {
+                throw new Error(
+                    `${contract.name} readback was ${values[0]}, expected 64.`
+                )
+            }
+            readback.dispose()
+            return computeExecutionFacts({
+                module,
+                pipeline,
+                nativeOutcome,
+                readback: { type: 'u32', values: [ ...values ] },
+                program,
+            })
+        })
+    }
+
+    async function runTier1StorageTextureProof(activeScratch, contract) {
+
+        const source = `
+requires texture_formats_tier1;
+
+@group(0) @binding(0)
+var outputImage: texture_storage_2d<r16unorm, write>;
+
+@compute @workgroup_size(1)
+fn csMain() {
+    textureStore(outputImage, vec2i(0, 0), vec4f(0.5, 0.0, 0.0, 1.0));
+}
+`
+        return await withRuntime(activeScratch, {
+            name: contract.name,
+            requiredFeatures: contract.requiredFeatures,
+            requiredLanguageFeatures: [ contract.name ],
+            proofKind: 'tier1-storage-texture-execution',
+        }, async runtime => {
+            const texture = await runtime.createTexture({
+                label: `${contract.name} texture`,
+                size: [ 1, 1 ],
+                format: 'r16unorm',
+                usage:
+                    GPUTextureUsage.COPY_SRC |
+                    GPUTextureUsage.STORAGE_BINDING,
+            })
+            const bindLayout = await runtime.createBindLayout({
+                label: `${contract.name} layout`,
+                group: 0,
+                entries: [
+                    {
+                        binding: 0,
+                        name: 'outputImage',
+                        type: 'storage-texture',
+                        visibility: [ 'compute' ],
+                        access: 'write-only',
+                        format: 'r16unorm',
+                        viewDimension: '2d',
+                    },
+                ],
+            })
+            const bindSet = await runtime.createBindSet(bindLayout, {
+                outputImage: texture.view(),
+            })
+            const module = await runtime.createShaderModule({
+                label: `${contract.name} shader`,
+                sourceParts: [ { code: source } ],
+            })
+            const program = runtime.createProgram({
+                label: `${contract.name} program`,
+                compute: { module, entryPoint: 'csMain' },
+                requiredFeatures: contract.requiredFeatures,
+                requiredLanguageFeatures: [ contract.name ],
+            })
+            const pipeline = await runtime.createComputePipeline({
+                label: `${contract.name} pipeline`,
+                program,
+                layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
+            })
+            const pass = runtime.createComputePass({
+                label: `${contract.name} pass`,
+            })
+            const dispatch = runtime.createDispatchCommand({
+                label: `${contract.name} dispatch`,
+                pipeline,
+                bindSets: [ { set: bindSet } ],
+                count: { workgroups: [ 1 ] },
+                resources: {
+                    read: [],
+                    write: [ texture ],
+                },
+                whenMissing: 'throw',
+            })
+            const submitted = runtime.submission()
+                .compute(pass, [ dispatch ])
+                .submit()
+            const nativeOutcome = await observedSubmission(submitted)
+            const readback = runtime.createReadback({
+                label: `${contract.name} readback`,
+                source: {
+                    resource: texture,
+                    size: [ 1, 1, 1 ],
+                },
+                after: submitted,
+            })
+            const bytes = await readback.toBytes()
+            const encoded = new DataView(
+                bytes.buffer,
+                bytes.byteOffset,
+                bytes.byteLength
+            ).getUint16(0, true)
+            if (encoded < 32767 || encoded > 32768) {
+                throw new Error(
+                    `${contract.name} encoded value was ${encoded}, expected 32767 or 32768.`
+                )
+            }
+            readback.dispose()
+            return computeExecutionFacts({
+                module,
+                pipeline,
+                nativeOutcome,
+                readback: {
+                    type: 'r16unorm',
+                    values: [ ...bytes ],
+                    encoded,
+                },
+                program,
+            })
         })
     }
 
@@ -839,6 +1495,13 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
                 readback: {
                     type: 'rgba8unorm',
                     values,
+                },
+                programContracts: {
+                    requiredFeatures: program.requiredFeatures,
+                    requiredLanguageFeatures:
+                        program.requiredLanguageFeatures,
+                    layoutRequirementCount:
+                        program.layoutRequirements.length,
                 },
             }
         })
@@ -1033,6 +1696,29 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
         })
     }
 
+    function computeExecutionFacts({
+        module,
+        pipeline,
+        nativeOutcome,
+        readback,
+        program,
+    }) {
+
+        return {
+            compilationInfo: module.compilationReport,
+            pipelineCreation: pipeline.creationReport,
+            submission: nativeOutcome,
+            readback,
+            programContracts: {
+                requiredFeatures: program.requiredFeatures,
+                requiredLanguageFeatures:
+                    program.requiredLanguageFeatures,
+                layoutRequirementCount:
+                    program.layoutRequirements.length,
+            },
+        }
+    }
+
     async function withRuntime(
         activeScratch,
         contract,
@@ -1048,6 +1734,7 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
         try {
             runtime = await activeScratch.ScratchRuntime.create({
                 label: `WGSL matrix ${contract.name}`,
+                powerPreference: adapterPowerPreference,
                 requiredFeatures: contract.requiredFeatures,
                 diagnostics: {
                     stackCapture: 'errors',
@@ -1097,6 +1784,20 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
             runtimeCapabilities: runtime === undefined
                 ? undefined
                 : {
+                    adapterFeatures:
+                        [ ...runtime.adapterFeatures ].sort(),
+                    adapterInfo: runtime.adapterInfo,
+                    adapterLimits: {
+                        maxBufferSize:
+                            runtime.adapterLimits.maxBufferSize,
+                        maxStorageBufferBindingSize:
+                            runtime.adapterLimits.maxStorageBufferBindingSize,
+                        maxComputeInvocationsPerWorkgroup:
+                            runtime.adapterLimits.maxComputeInvocationsPerWorkgroup,
+                        maxImmediateSize: numberOrUndefined(
+                            runtime.adapterLimits.maxImmediateSize
+                        ),
+                    },
                     deviceFeatures: [ ...runtime.deviceFeatures ].sort(),
                     wgslLanguageFeatures:
                         runtime.wgslLanguageFeatures,
@@ -1312,6 +2013,9 @@ function validateResult({
     if (events.pageErrors.length > 0) {
         failures.push(`${events.pageErrors.length} page errors`)
     }
+    if (events.consoleErrors.length > 0) {
+        failures.push(`${events.consoleErrors.length} console errors`)
+    }
     if (events.requestFailures.length > 0) {
         failures.push(`${events.requestFailures.length} request failures`)
     }
@@ -1324,11 +2028,68 @@ function validateResult({
         return failures
     }
 
-    for (const proof of [
-        ...current.enableExtensions,
-        ...current.languageExtensions,
-        current.layoutProofs.nestedMatrix,
-    ]) {
+    if (
+        current.capabilities.adapterSelection?.powerPreference !==
+            adapterPowerPreference ||
+        current.capabilities.discoveryRequestFacts?.adapter?.powerPreference !==
+            adapterPowerPreference
+    ) {
+        failures.push('capability discovery did not use the fixed adapter selection')
+    }
+    if (current.capabilities.discoveryTerminal?.isClean !== true) {
+        failures.push('capability discovery runtime retained live state')
+    }
+
+    const enableProofs = Array.isArray(current.enableExtensions)
+        ? current.enableExtensions
+        : []
+    const languageProofs = Array.isArray(current.languageExtensions)
+        ? current.languageExtensions
+        : []
+    if (!sameStrings(
+        enableProofs.map(proof => proof.name),
+        expectedEnableProofNames
+    )) {
+        failures.push('enable-extension proof set is incomplete or reordered')
+    }
+    if (!sameStrings(
+        languageProofs.map(proof => proof.name),
+        expectedLanguageProofNames
+    )) {
+        failures.push('language-extension proof set is incomplete or reordered')
+    }
+    const nestedMatrix = current.layoutProofs?.nestedMatrix
+    const proofs = [
+        ...enableProofs,
+        ...languageProofs,
+        nestedMatrix,
+    ].filter(proof => proof !== undefined)
+    if (
+        proofs.length !== 19 ||
+        new Set(proofs.map(proof => proof.name)).size !== 19
+    ) {
+        failures.push('capability proof matrix must contain 19 unique proofs')
+    }
+
+    for (const proof of proofs) {
+        const expectedDeviceFeatures =
+            expectedDeviceFeaturesByProof[proof.name] ?? []
+        const expectedLanguageFeatures =
+            expectedLanguageProofNames.includes(proof.name)
+                ? [ proof.name ]
+                : []
+        if (!sameStrings(
+            proof.requestedDeviceFeatures ?? [],
+            expectedDeviceFeatures
+        )) {
+            failures.push(`${proof.name}: requested device features drifted`)
+        }
+        if (!sameStrings(
+            proof.requiredLanguageFeatures ?? [],
+            expectedLanguageFeatures
+        )) {
+            failures.push(`${proof.name}: required language features drifted`)
+        }
         if (proof.status === 'failed') {
             failures.push(`${proof.name}: ${proof.failure?.message ?? 'failed'}`)
         }
@@ -1341,9 +2102,48 @@ function validateResult({
         ) {
             failures.push(`${proof.name}: skip lacks capability fact`)
         }
+        if (proof.status === 'skipped') {
+            validateSkipFact(
+                proof,
+                expectedDeviceFeatures,
+                expectedLanguageFeatures,
+                failures
+            )
+            continue
+        }
+        if (proof.status !== 'passed') {
+            failures.push(`${proof.name}: unexpected status ${proof.status}`)
+            continue
+        }
+        validatePassedProof(
+            proof,
+            current.capabilities,
+            expectedDeviceFeatures,
+            expectedLanguageFeatures,
+            failures
+        )
     }
-    if (current.layoutProofs.nestedMatrix.status !== 'passed') {
+    if (nestedMatrix?.status !== 'passed') {
         failures.push('nested matrix proof did not pass')
+    }
+    const f16 = enableProofs.find(proof => proof.name === 'f16')
+    const bufferView = languageProofs.find(
+        proof => proof.name === 'buffer_view'
+    )
+    if (
+        current.layoutProofs?.f16?.name !== f16?.name ||
+        current.layoutProofs?.f16?.status !== f16?.status
+    ) {
+        failures.push('f16 layout proof alias does not match the matrix row')
+    }
+    if (
+        current.layoutProofs?.bufferView?.name !== bufferView?.name ||
+        current.layoutProofs?.bufferView?.status !== bufferView?.status
+    ) {
+        failures.push('buffer_view layout proof alias does not match the matrix row')
+    }
+    if (current.aggregateObservations.proofCount !== 19) {
+        failures.push('aggregate proof count is not 19')
     }
     if (current.aggregateObservations.failedCount !== 0) {
         failures.push(
@@ -1359,6 +2159,150 @@ function validateResult({
         failures.push('one or more capability proof terminals retained live state')
     }
     return failures
+}
+
+function validateSkipFact(
+    proof,
+    expectedDeviceFeatures,
+    expectedLanguageFeatures,
+    failures
+) {
+
+    const fact = proof.capabilityFact
+    if (fact?.kind === 'adapter-feature-missing') {
+        if (
+            !Array.isArray(fact.missingAdapterFeatures) ||
+            fact.missingAdapterFeatures.length === 0 ||
+            fact.missingAdapterFeatures.some(feature =>
+                !expectedDeviceFeatures.includes(feature)
+            )
+        ) {
+            failures.push(`${proof.name}: adapter skip fact is not capability-specific`)
+        }
+        return
+    }
+    if (fact?.kind === 'wgsl-language-feature-missing') {
+        if (
+            expectedLanguageFeatures.length !== 1 ||
+            fact.missingLanguageFeature !== expectedLanguageFeatures[0]
+        ) {
+            failures.push(`${proof.name}: WGSL skip fact names the wrong feature`)
+        }
+        return
+    }
+    if (
+        fact?.kind === 'limit-missing' &&
+        proof.name === 'immediate_address_space' &&
+        fact.limit === 'maxImmediateSize'
+    ) {
+        return
+    }
+    failures.push(`${proof.name}: unsupported skip fact ${fact?.kind}`)
+}
+
+function validatePassedProof(
+    proof,
+    capabilities,
+    expectedDeviceFeatures,
+    expectedLanguageFeatures,
+    failures
+) {
+
+    const execution = proof.execution
+    if (
+        typeof execution?.compilationInfo !== 'object' ||
+        typeof execution?.pipelineCreation !== 'object' ||
+        execution?.submission?.status !== 'observed-succeeded' ||
+        !Array.isArray(execution?.readback?.values) ||
+        execution.readback.values.length === 0
+    ) {
+        failures.push(
+            `${proof.name}: pass lacks compilation, pipeline, submission, or readback evidence`
+        )
+    }
+    if (
+        !sameStrings(
+            execution?.programContracts?.requiredFeatures ?? [],
+            expectedDeviceFeatures
+        ) ||
+        !sameStrings(
+            execution?.programContracts?.requiredLanguageFeatures ?? [],
+            expectedLanguageFeatures
+        )
+    ) {
+        failures.push(`${proof.name}: Program contracts do not match the proof`)
+    }
+    if (
+        proof.runtimeRequestFacts?.adapter?.powerPreference !==
+            adapterPowerPreference ||
+        !sameStrings(
+            proof.runtimeRequestFacts?.device?.requiredFeatures ?? [],
+            expectedDeviceFeatures
+        )
+    ) {
+        failures.push(`${proof.name}: Runtime request facts do not match the proof`)
+    }
+    if (
+        !sameAdapterInfo(
+            proof.runtimeCapabilities?.adapterInfo,
+            capabilities.adapterInfo
+        ) ||
+        !sameStrings(
+            proof.runtimeCapabilities?.adapterFeatures ?? [],
+            capabilities.adapterFeatures
+        )
+    ) {
+        failures.push(`${proof.name}: execution adapter differs from discovery`)
+    }
+    if (expectedDeviceFeatures.some(feature =>
+        !proof.runtimeCapabilities?.deviceFeatures?.includes(feature)
+    )) {
+        failures.push(`${proof.name}: device omitted a requested feature`)
+    }
+    if (expectedLanguageFeatures.some(feature =>
+        !proof.runtimeCapabilities?.wgslLanguageFeatures?.includes(feature)
+    )) {
+        failures.push(`${proof.name}: Runtime omitted a required WGSL feature`)
+    }
+    if (
+        proof.observations?.capturedValidationErrors !== 0 ||
+        proof.observations?.capturedOutOfMemoryErrors !== 0 ||
+        proof.observations?.capturedNativeFailures !== 0 ||
+        proof.observations?.uncapturedErrors !== 0 ||
+        proof.observations?.deviceLosses !== 0 ||
+        proof.uncaptured?.length !== 0 ||
+        proof.terminal?.isClean !== true
+    ) {
+        failures.push(`${proof.name}: execution retained errors or live state`)
+    }
+}
+
+function sameStrings(left, right) {
+
+    return (
+        Array.isArray(left) &&
+        Array.isArray(right) &&
+        left.length === right.length &&
+        left.every((value, index) => value === right[index])
+    )
+}
+
+function sameAdapterInfo(left, right) {
+
+    const fields = [
+        'vendor',
+        'architecture',
+        'device',
+        'description',
+        'subgroupMinSize',
+        'subgroupMaxSize',
+        'isFallbackAdapter',
+    ]
+    return (
+        left !== undefined &&
+        right !== undefined &&
+        fields.every(field => left[field] === right[field])
+    )
 }
 
 function observePage(page, events) {

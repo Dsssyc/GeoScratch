@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import ts from 'typescript'
 import {
     createCurrentCoverageManifest,
     createWgslEnableExtensionManifest,
@@ -55,6 +56,11 @@ const [ packageEntrypoint, scratchEntrypoint ] = await Promise.all([
     import('geoscratch'),
     import('geoscratch/scratch'),
 ])
+const packageRuntimeExportNames = Object.keys(packageEntrypoint).sort()
+const scratchRuntimeExportNames = Object.keys(scratchEntrypoint).sort()
+const packageSourceExportNames = collectNamedExports(
+    'packages/geoscratch/src/index.ts'
+)
 
 const checks = {
     currentManifestReproducible: deepEqual(current, generatedCurrent),
@@ -91,8 +97,25 @@ const checks = {
         current.evidence.every(record =>
             (evidenceUseCounts.get(record.id) ?? 0) > 0
         ),
+    allCoverageRulesAreExplicit:
+        current.entries.every(entry =>
+            typeof entry.coverageRule === 'string' &&
+            entry.coverageRule.length > 0 &&
+            !/fallback|catch[- ]?all/i.test(entry.coverageRule)
+        ) &&
+        !current.evidence.some(record =>
+            record.id === 'webgpu-descriptor-values'
+        ),
     evidenceIsLocatedAndBounded:
         current.evidence.every(evidenceIsLocatedAndBounded),
+    evidenceNativeOperationsResolve:
+        current.evidence.every(evidenceNativeOperationsResolve),
+    evidencePublicSymbolsAreExported:
+        current.evidence.every(record =>
+            record.publicSymbols.every(symbol =>
+                packageSourceExportNames.has(symbol)
+            )
+        ),
     managedEntriesHavePublicExpression:
         current.entries
             .filter(entry => entry.current.status === 'managed')
@@ -115,6 +138,9 @@ const checks = {
                 entry.expression.mode === 'not-applicable' &&
                 entry.nativeLowering.kind === 'none'
             ),
+    capabilityRequirementsAreComplete:
+        current.entries.every(requirementContractIsComplete) &&
+        sensitiveCapabilityRequirementsArePresent(),
     exactEnableExtensionContracts:
         deepEqual(
             enableExtensions.entries.map(enableContractFact),
@@ -172,10 +198,14 @@ const checks = {
         dependencyDiagnosticIsDocumented(),
     browserMatrixIsManagedAndSelfContained:
         browserMatrixIsManagedAndSelfContained(),
-    publicEntrypointParity:
+    requiredPublicExportsPresent:
         [ packageEntrypoint, scratchEntrypoint ].every(entrypoint =>
             requiredRuntimeExports.every(name => name in entrypoint)
         ),
+    exactRuntimeEntrypointParity:
+        deepEqual(packageRuntimeExportNames, scratchRuntimeExportNames),
+    exactDeclarationEntrypointParity:
+        declarationEntrypointParityIsExact(),
 }
 
 const failures = Object.entries(checks)
@@ -212,12 +242,22 @@ const result = {
         )
     ),
     publicEntrypoints: {
-        package: requiredRuntimeExports.filter(
+        requiredPackage: requiredRuntimeExports.filter(
             name => name in packageEntrypoint
         ),
-        scratch: requiredRuntimeExports.filter(
+        requiredScratch: requiredRuntimeExports.filter(
             name => name in scratchEntrypoint
         ),
+        packageRuntimeValueCount: packageRuntimeExportNames.length,
+        scratchRuntimeValueCount: scratchRuntimeExportNames.length,
+        missingFromPackage: scratchRuntimeExportNames.filter(
+            name => !packageRuntimeExportNames.includes(name)
+        ),
+        missingFromScratch: packageRuntimeExportNames.filter(
+            name => !scratchRuntimeExportNames.includes(name)
+        ),
+        sourceDeclarationExportCount: packageSourceExportNames.size,
+        compatibilityShim: 'export-all',
     },
 }
 
@@ -240,6 +280,8 @@ function entryShapeIsComplete(entry) {
         typeof entry.goalStart.status === 'string' &&
         typeof entry.goalStart.rationale === 'string' &&
         entry.goalStart.rationale.length > 0 &&
+        typeof entry.coverageRule === 'string' &&
+        entry.coverageRule.length > 0 &&
         [ 'managed', 'not-applicable', 'unresolved' ]
             .includes(entry.current.status) &&
         typeof entry.current.rationale === 'string' &&
@@ -254,6 +296,7 @@ function entryShapeIsComplete(entry) {
         Array.isArray(entry.requirements.languageFeatures) &&
         Array.isArray(entry.requirements.limits) &&
         Array.isArray(entry.requirements.dependencies) &&
+        Array.isArray(entry.requirements.conditions) &&
         typeof entry.requirements.policy === 'string' &&
         entry.requirements.policy.length > 0 &&
         Array.isArray(entry.evidenceIds)
@@ -282,6 +325,97 @@ function evidenceIsLocatedAndBounded(record) {
         ) &&
         used > 0 &&
         used <= 100
+    )
+}
+
+function evidenceNativeOperationsResolve(record) {
+
+    const source = record.sourcePaths.map(readText).join('\n')
+    return record.nativeOperations.every((operation) => {
+        const token = operation.split('.').at(-1)
+        return typeof token === 'string' && source.includes(token)
+    })
+}
+
+function requirementContractIsComplete(entry) {
+
+    return entry.requirements.conditions.every(condition => (
+        typeof condition.when === 'string' &&
+        condition.when.length > 0 &&
+        Array.isArray(condition.deviceFeatures) &&
+        Array.isArray(condition.languageFeatures) &&
+        Array.isArray(condition.limits) &&
+        Array.isArray(condition.dependencies) &&
+        (
+            condition.deviceFeatureAlternatives === undefined ||
+            (
+                Array.isArray(condition.deviceFeatureAlternatives) &&
+                condition.deviceFeatureAlternatives.length > 0 &&
+                condition.deviceFeatureAlternatives.every(alternative =>
+                    Array.isArray(alternative) &&
+                    alternative.length > 0
+                )
+            )
+        ) &&
+        (
+            condition.deviceFeatures.length > 0 ||
+            condition.languageFeatures.length > 0 ||
+            condition.limits.length > 0 ||
+            condition.dependencies.length > 0 ||
+            (condition.deviceFeatureAlternatives?.length ?? 0) > 0
+        )
+    ))
+}
+
+function sensitiveCapabilityRequirementsArePresent() {
+
+    const entries = new Map(current.entries.map(entry => [ entry.id, entry ]))
+    const hasCondition = (id, expected) =>
+        entries.get(id)?.requirements.conditions.some(condition =>
+            deepEqual(condition, expected)
+        ) === true
+    const textureFormatConditions =
+        entries.get('type.GPUTextureFormat')?.requirements.conditions ?? []
+    const textureFeatureText = JSON.stringify(textureFormatConditions)
+    return (
+        entries.get('GPU.requestAdapter')?.evidenceIds[0] ===
+            'webgpu-runtime-capabilities' &&
+        entries.get('GPU.getPreferredCanvasFormat')?.evidenceIds[0] ===
+            'webgpu-surface-presentation' &&
+        entries.get('GPU.wgslLanguageFeatures')?.evidenceIds[0] ===
+            'webgpu-runtime-capabilities' &&
+        entries.get('GPUBindingCommandsMixin.setImmediates')?.evidenceIds[0] ===
+            'wgsl-immediate-data' &&
+        hasCondition('GPUPrimitiveState.unclippedDepth', {
+            when: 'unclippedDepth is true',
+            deviceFeatures: [ 'depth-clip-control' ],
+            languageFeatures: [],
+            limits: [],
+            dependencies: [],
+        }) &&
+        hasCondition('GPUComputePassDescriptor.timestampWrites', {
+            when: 'timestampWrites is provided',
+            deviceFeatures: [ 'timestamp-query' ],
+            languageFeatures: [],
+            limits: [],
+            dependencies: [],
+        }) &&
+        hasCondition('GPUTextureViewDescriptor.swizzle', {
+            when: 'swizzle is not the identity "rgba"',
+            deviceFeatures: [ 'texture-component-swizzle' ],
+            languageFeatures: [],
+            limits: [],
+            dependencies: [],
+        }) &&
+        textureFeatureText.includes('texture-compression-bc') &&
+        textureFeatureText.includes('texture-compression-etc2') &&
+        textureFeatureText.includes('texture-compression-astc') &&
+        textureFeatureText.includes('depth32float-stencil8') &&
+        textureFeatureText.includes('bgra8unorm-storage') &&
+        textureFeatureText.includes('float32-filterable') &&
+        textureFeatureText.includes('float32-blendable') &&
+        textureFeatureText.includes('texture-formats-tier1') &&
+        textureFeatureText.includes('texture-formats-tier2')
     )
 }
 
@@ -365,9 +499,58 @@ function browserMatrixIsManagedAndSelfContained() {
         source.includes('runtime.createReadback') &&
         source.includes('startVite') &&
         source.includes('stopVite') &&
+        source.includes('expectedEnableProofNames') &&
+        source.includes('expectedLanguageProofNames') &&
+        source.includes('dot4U8Packed') &&
+        source.includes('ptr<storage') &&
+        source.includes('@builtin(subgroup_id)') &&
+        source.includes('diagnostic(error, subgroup_uniformity)') &&
+        source.includes('texture_storage_2d<r32uint, read_write>') &&
+        source.includes('texture_storage_2d<r16unorm, write>') &&
+        source.includes('@builtin(global_invocation_index)') &&
+        source.includes('let localTexture') &&
+        source.includes('powerPreference: adapterPowerPreference') &&
+        source.includes('events.consoleErrors.length') &&
+        !source.includes('runLanguageDirectiveProof') &&
         !source.includes('runtime.device.create') &&
         !source.includes('runtime.queue.')
     )
+}
+
+function declarationEntrypointParityIsExact() {
+
+    const sourceShim = readText('packages/geoscratch/src/scratch.ts').trim()
+    const emittedShim = readText('packages/geoscratch/dist/scratch.d.ts').trim()
+    return (
+        sourceShim === "export * from './index.js'" &&
+        emittedShim === "export * from './index.js';"
+    )
+}
+
+function collectNamedExports(relativePath) {
+
+    const source = readText(relativePath)
+    const file = ts.createSourceFile(
+        relativePath,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS
+    )
+    const names = new Set()
+    for (const statement of file.statements) {
+        if (
+            !ts.isExportDeclaration(statement) ||
+            statement.exportClause === undefined ||
+            !ts.isNamedExports(statement.exportClause)
+        ) {
+            continue
+        }
+        for (const element of statement.exportClause.elements) {
+            names.add(element.name.text)
+        }
+    }
+    return names
 }
 
 function readJson(absolute) {

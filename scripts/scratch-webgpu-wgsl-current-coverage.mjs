@@ -36,6 +36,11 @@ export const currentSpecRefresh = Object.freeze({
     gpuwebEditor: Object.freeze({
         frozenBaselineCommit: '99d2ded3335433260fd756abacc2d2b280999b8d',
         refreshedCommit: 'b33e6efb182d11156851271586563cc77575059c',
+        url:
+            'https://github.com/gpuweb/gpuweb/commit/b33e6efb182d11156851271586563cc77575059c',
+        sourceUrl:
+            'https://raw.githubusercontent.com/gpuweb/gpuweb/b33e6efb182d11156851271586563cc77575059c/spec/index.bs',
+        observedOn: '2026-07-24',
         normativeDelta: false,
         delta: Object.freeze([
             Object.freeze({
@@ -47,12 +52,21 @@ export const currentSpecRefresh = Object.freeze({
     }),
     gpuwebTypes: Object.freeze({
         repositoryCommit: '9ba8a0618e1efad8e1ee444ef6ecfae761b2bc30',
+        url:
+            'https://github.com/gpuweb/types/commit/9ba8a0618e1efad8e1ee444ef6ecfae761b2bc30',
+        sourceUrl:
+            'https://raw.githubusercontent.com/gpuweb/types/9ba8a0618e1efad8e1ee444ef6ecfae761b2bc30/dist/index.d.ts',
+        observedOn: '2026-07-24',
         packageVersion: '0.1.71',
         declarationSha256:
             'd2e5cfb2397ec8cacfd30de0e6f7992eb7db7b02cc83b7c43ef58bcd5aa88bc3',
     }),
     proposalIndex: Object.freeze({
-        url: 'https://github.com/gpuweb/gpuweb/tree/main/proposals',
+        url:
+            'https://github.com/gpuweb/gpuweb/tree/b33e6efb182d11156851271586563cc77575059c/proposals',
+        sourceUrl:
+            'https://raw.githubusercontent.com/gpuweb/gpuweb/b33e6efb182d11156851271586563cc77575059c/proposals/README.md',
+        observedOn: '2026-07-24',
         readmeSha256:
             '25d168b6796672bb1037933cddc31468fd10f7b7aa2f2196b7681d9f20213018',
         draftProposalsInScope: false,
@@ -66,7 +80,7 @@ const evidence = Object.freeze([
         [ 'packages/geoscratch/src/scratch/runtime.ts', 'packages/geoscratch/src/scratch/runtime-authority.ts' ],
         [ 'tests/scratch-runtime.test.js', 'tests/scratch-closed-brand-authority.test.js' ],
         [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions', 'ScratchRuntimeRequestFacts' ],
-        [ 'requestAdapter', 'requestDevice', 'device.lost', 'queue.submit' ]
+        [ 'requestAdapter', 'requestDevice', 'device.lost' ]
     ),
     evidenceRecord(
         'webgpu-surface-presentation',
@@ -119,7 +133,11 @@ const evidence = Object.freeze([
     evidenceRecord(
         'webgpu-bindings',
         'Explicit BindLayout and BindSet contracts retain native binding types, dynamic offsets, and preparation authority.',
-        [ 'packages/geoscratch/src/scratch/binding.ts', 'packages/geoscratch/src/scratch/binding-ownership.ts' ],
+        [
+            'packages/geoscratch/src/scratch/binding.ts',
+            'packages/geoscratch/src/scratch/binding-ownership.ts',
+            'packages/geoscratch/src/scratch/command.ts',
+        ],
         [
             'tests/scratch-bind-dynamic-offsets.test.js',
             'tests/scratch-bind-set-preparation.test.js',
@@ -157,7 +175,7 @@ const evidence = Object.freeze([
             'tests/scratch-render-pipeline-async.test.js',
             'tests/scratch-compute-pipeline-async.test.js',
         ],
-        [ 'RenderPipeline', 'ComputePipeline', 'RenderPipelineDescriptor', 'ComputePipelineDescriptor' ],
+        [ 'ScratchRenderPipeline', 'ScratchComputePipeline', 'ScratchRenderPipelineDescriptor', 'ScratchComputePipelineDescriptor' ],
         [
             'createRenderPipeline',
             'createRenderPipelineAsync',
@@ -169,7 +187,11 @@ const evidence = Object.freeze([
     evidenceRecord(
         'webgpu-pass-state',
         'Persistent render/compute pass specs and command state retain native attachment, timestamp, viewport, scissor, stencil, blend, and draw semantics.',
-        [ 'packages/geoscratch/src/scratch/pass.ts', 'packages/geoscratch/src/scratch/command.ts' ],
+        [
+            'packages/geoscratch/src/scratch/pass.ts',
+            'packages/geoscratch/src/scratch/command.ts',
+            'packages/geoscratch/src/scratch/submission.ts',
+        ],
         [
             'tests/scratch-render-pass-native-parity.test.js',
             'tests/scratch-depth-stencil-attachments.test.js',
@@ -177,6 +199,14 @@ const evidence = Object.freeze([
         ],
         [ 'RenderPassSpec', 'ComputePassSpec', 'DrawCommand', 'DispatchCommand' ],
         [ 'beginRenderPass', 'beginComputePass', 'draw', 'drawIndexed', 'dispatchWorkgroups' ]
+    ),
+    evidenceRecord(
+        'webgpu-command-encoding',
+        'Standalone command-encoder operations are explicit immutable Commands selected by SubmissionBuilder.',
+        [ 'packages/geoscratch/src/scratch/command.ts', 'packages/geoscratch/src/scratch/submission.ts' ],
+        [ 'tests/scratch-render-state-clear.test.js', 'tests/scratch-pass-submission.test.js' ],
+        [ 'ClearBufferCommand', 'SubmissionBuilder' ],
+        [ 'clearBuffer', 'createCommandEncoder', 'finish' ]
     ),
     evidenceRecord(
         'webgpu-copy-upload',
@@ -227,6 +257,7 @@ const evidence = Object.freeze([
             'packages/geoscratch/src/scratch/readback.ts',
             'packages/geoscratch/src/scratch/texture-readback.ts',
             'packages/geoscratch/src/scratch/readback-lease.ts',
+            'packages/geoscratch/src/scratch/readback-mapping.ts',
         ],
         [
             'tests/scratch-readback-command.test.js',
@@ -277,6 +308,7 @@ const evidence = Object.freeze([
             'packages/geoscratch/src/scratch/diagnostics.ts',
             'packages/geoscratch/src/scratch/runtime-diagnostics.ts',
             'packages/geoscratch/src/scratch/gpu-operation.ts',
+            'packages/geoscratch/src/scratch/supporting-object-creation.ts',
         ],
         [
             'tests/scratch-diagnostics.test.js',
@@ -287,19 +319,20 @@ const evidence = Object.freeze([
         [ 'pushErrorScope', 'popErrorScope', 'uncapturederror', 'device.lost' ]
     ),
     evidenceRecord(
-        'webgpu-descriptor-values',
-        'WebGPU scalar aliases, dictionaries, enums, labels, flags, colors, origins, extents, and indirect values are retained in explicit Scratch descriptors.',
+        'webgpu-numeric-domains',
+        'WebIDL numeric aliases without standalone GPU behavior are range-checked where they enter explicit Scratch descriptors.',
         [
             'packages/geoscratch/src/scratch/runtime.ts',
             'packages/geoscratch/src/scratch/command.ts',
             'packages/geoscratch/src/scratch/pipeline.ts',
+            'packages/geoscratch/src/scratch/submission.ts',
         ],
         [
             'tests/types/public-api.ts',
             'tests/scratch-pipeline-command.test.js',
             'tests/scratch-render-pass-native-parity.test.js',
         ],
-        [ 'ProgramDescriptor', 'RenderPipelineDescriptor', 'CopyCommandDescriptor', 'RenderPassSpecDescriptor' ],
+        [ 'BufferRegionDescriptor', 'CopyCommandDescriptor', 'DrawCommandDescriptor', 'TextureResourceDescriptor' ],
         [ 'createRenderPipeline', 'beginRenderPass', 'copyBufferToTexture', 'copyTextureToBuffer' ]
     ),
     evidenceRecord(
@@ -317,6 +350,8 @@ const evidence = Object.freeze([
             'packages/geoscratch/src/scratch/layout-codec.ts',
             'packages/geoscratch/src/scratch/layout-artifact.ts',
             'packages/geoscratch/src/scratch/program.ts',
+            'packages/geoscratch/src/scratch/shader-module.ts',
+            'packages/geoscratch/src/scratch/pipeline-creation.ts',
         ],
         [
             'tests/scratch-recursive-layout-codec.test.js',
@@ -332,6 +367,7 @@ const evidence = Object.freeze([
         [
             'packages/geoscratch/src/scratch/shader-module.ts',
             'packages/geoscratch/src/scratch/program.ts',
+            'packages/geoscratch/src/scratch/pipeline-creation.ts',
         ],
         [ 'tests/scratch-shader-module.test.js', 'tests/scratch-program.test.js' ],
         [ 'ShaderModule', 'ShaderModuleSourcePart', 'Program', 'ProgramDescriptor' ],
@@ -342,7 +378,7 @@ const evidence = Object.freeze([
         'WGSL language extensions are declared separately through Program.requiredLanguageFeatures and checked against an immutable Runtime language-feature snapshot.',
         [ 'packages/geoscratch/src/scratch/runtime.ts', 'packages/geoscratch/src/scratch/program.ts' ],
         [ 'tests/scratch-program-layout-requirements.test.js', 'tests/scratch-immediate-data.test.js' ],
-        [ 'ScratchRuntime.wgslLanguageFeatures', 'Program.requiredLanguageFeatures' ],
+        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts', 'Program', 'ProgramDescriptor' ],
         [ 'createShaderModule', 'createRenderPipeline', 'createComputePipeline' ]
     ),
     evidenceRecord(
@@ -358,7 +394,7 @@ const evidence = Object.freeze([
             'tests/scratch-program.test.js',
             'tests/scratch-webgpu-wgsl-current-coverage.test.js',
         ],
-        [ 'ScratchRuntime.requiredFeatures', 'Program.requiredFeatures', 'ShaderModuleSourcePart' ],
+        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts', 'Program', 'ShaderModuleSourcePart' ],
         [ 'requestDevice', 'createShaderModule', 'createRenderPipeline', 'createComputePipeline' ],
         [ 'tests/browser/scratch-wgsl-capability-matrix.mjs' ]
     ),
@@ -367,7 +403,7 @@ const evidence = Object.freeze([
         'The immediate_address_space language contract is coupled to explicit pipeline byte size and per-command submission snapshots.',
         [ 'packages/geoscratch/src/scratch/pipeline.ts', 'packages/geoscratch/src/scratch/command.ts' ],
         [ 'tests/scratch-immediate-data.test.js' ],
-        [ 'Program.requiredLanguageFeatures', 'CommandImmediateData', 'RenderPipelineDescriptor' ],
+        [ 'Program', 'CommandImmediateData', 'ScratchRenderPipelineDescriptor' ],
         [ 'setImmediates' ]
     ),
 ])
@@ -487,25 +523,19 @@ export function createCurrentCoverageManifest() {
 
 function currentWebGpuEntry(manifest, entry) {
 
-    const evidenceId = webGpuEvidenceId(entry)
+    const coverage = webGpuCoverage(entry)
     return currentEntry({
         domain: 'webgpu',
         manifest,
         entry,
-        evidenceId,
+        coverage,
         source: {
             publication: manifest.baseline.publication,
             url: manifest.baseline.url,
             anchor: entry.id,
             declarationSignatureHashes: entry.signatureHashes,
         },
-        requirements: {
-            deviceFeatures: [],
-            languageFeatures: [],
-            limits: entry.owner === 'GPUSupportedLimits' ? [ entry.member ] : [],
-            dependencies: [],
-            policy: 'Required features and limits remain explicit at Runtime, Program, and descriptor boundaries.',
-        },
+        requirements: webGpuRequirements(entry),
     })
 }
 
@@ -520,7 +550,10 @@ function currentWgslEntry(manifest, entry) {
         domain: 'wgsl',
         manifest,
         entry,
-        evidenceId,
+        coverage: {
+            ruleId: `wgsl:${entry.kind}`,
+            evidenceIds: [ evidenceId ],
+        },
         source: {
             publication: manifest.baseline.publication,
             url: wgslSourceUrl(entry),
@@ -531,6 +564,7 @@ function currentWgslEntry(manifest, entry) {
             languageFeatures: languageFeature === undefined ? [] : [ languageFeature ],
             limits: [],
             dependencies: [],
+            conditions: [],
             policy:
                 languageFeature === undefined
                     ? 'Layout-derived requirements are explicit Program facts.'
@@ -553,11 +587,13 @@ function currentEnableExtensionEntry(entry) {
         current: entry.current,
         expression: entry.expression,
         nativeLowering: entry.nativeLowering,
+        coverageRule: 'wgsl:enable-extension',
         requirements: {
             deviceFeatures: entry.requiredFeatures,
             languageFeatures: entry.requiredLanguageFeatures,
             limits: [],
             dependencies: entry.dependencies,
+            conditions: [],
             policy: 'Scratch never parses WGSL or injects required device features.',
         },
         evidenceIds: entry.evidenceIds,
@@ -568,14 +604,20 @@ function currentEntry({
     domain,
     manifest,
     entry,
-    evidenceId,
+    coverage,
     source,
     requirements,
 }) {
 
-    const evidenceRecordValue = evidenceById.get(evidenceId)
-    if (evidenceRecordValue === undefined) {
-        throw new Error(`Unknown evidence id: ${evidenceId}`)
+    const evidenceRecords = coverage.evidenceIds.map((evidenceId) => {
+        const record = evidenceById.get(evidenceId)
+        if (record === undefined) {
+            throw new Error(`Unknown evidence id: ${evidenceId}`)
+        }
+        return record
+    })
+    if (evidenceRecords.length === 0) {
+        throw new Error(`Coverage rule ${coverage.ruleId} has no evidence`)
     }
     const goalStart = entry.classification
     const notApplicable = goalStart.status === 'not-applicable'
@@ -590,8 +632,19 @@ function currentEntry({
         entry.kind === 'shader-semantic-domain'
     )
     const rationale = goalStart.status === 'known-target-gap'
-        ? `Resolved after the frozen baseline: ${evidenceRecordValue.claim}`
+        ? `Resolved after the frozen baseline: ${evidenceRecords
+            .map(record => record.claim)
+            .join(' ')}`
         : goalStart.rationale
+    const publicSymbols = uniqueSorted(
+        evidenceRecords.flatMap(record => record.publicSymbols)
+    )
+    const sourcePaths = uniqueSorted(
+        evidenceRecords.flatMap(record => record.sourcePaths)
+    )
+    const nativeOperations = uniqueSorted(
+        evidenceRecords.flatMap(record => record.nativeOperations)
+    )
 
     return {
         id: entry.id,
@@ -599,6 +652,7 @@ function currentEntry({
         kind: entry.kind,
         source,
         goalStart,
+        coverageRule: coverage.ruleId,
         current: {
             status,
             classification,
@@ -610,8 +664,10 @@ function currentEntry({
                 : callerWgsl
                     ? 'caller-authored-wgsl'
                     : 'scratch-api',
-            publicSymbols: notApplicable ? [] : evidenceRecordValue.publicSymbols,
-            contract: notApplicable ? rationale : evidenceRecordValue.claim,
+            publicSymbols: notApplicable ? [] : publicSymbols,
+            contract: notApplicable
+                ? rationale
+                : evidenceRecords.map(record => record.claim).join(' '),
         },
         nativeLowering: {
             kind: notApplicable
@@ -619,17 +675,19 @@ function currentEntry({
                 : callerWgsl
                     ? 'wgsl-compilation'
                     : 'native-call-or-descriptor',
-            sourcePaths: notApplicable ? [] : evidenceRecordValue.sourcePaths,
-            operations: notApplicable ? [] : evidenceRecordValue.nativeOperations,
+            sourcePaths: notApplicable ? [] : sourcePaths,
+            operations: notApplicable ? [] : nativeOperations,
         },
         requirements,
-        evidenceIds: [ evidenceId ],
+        evidenceIds: coverage.evidenceIds,
     }
 }
 
-function webGpuEvidenceId(entry) {
+function webGpuCoverage(entry) {
 
-    if (entry.classification.status === 'not-applicable') return 'webidl-non-capability'
+    if (entry.classification.status === 'not-applicable') {
+        return coverageRule('webgpu:not-applicable', 'webidl-non-capability')
+    }
     const familyEvidence = {
         'external-texture': 'webgpu-external-texture',
         'render-bundle-debug': 'webgpu-render-bundle-debug',
@@ -639,51 +697,108 @@ function webGpuEvidenceId(entry) {
         'runtime-capabilities': 'webgpu-runtime-capabilities',
         'texture-transfer': 'webgpu-copy-upload',
     }[entry.classification.family]
-    if (familyEvidence !== undefined) return familyEvidence
+    if (familyEvidence !== undefined) {
+        return coverageRule(
+            `webgpu:frozen-family:${entry.classification.family}`,
+            familyEvidence
+        )
+    }
 
     const id = entry.id
     const owner = entry.owner
     const member = entry.member
+    const exactRules = {
+        'interface.GPU': [ 'webgpu:gpu-interface', 'webgpu-runtime-capabilities' ],
+        'GPU.requestAdapter': [ 'webgpu:gpu-request-adapter', 'webgpu-runtime-capabilities' ],
+        'GPU.getPreferredCanvasFormat': [ 'webgpu:preferred-canvas-format', 'webgpu-surface-presentation' ],
+        'GPU.wgslLanguageFeatures': [ 'webgpu:wgsl-language-features', 'webgpu-runtime-capabilities' ],
+        'GPUBindingCommandsMixin.setBindGroup': [ 'webgpu:set-bind-group', 'webgpu-bindings' ],
+        'GPUBindingCommandsMixin.setImmediates': [ 'webgpu:set-immediates', 'wgsl-immediate-data' ],
+        'interface.GPUBindingCommandsMixin': [
+            'webgpu:binding-command-interface',
+            [ 'webgpu-bindings', 'wgsl-immediate-data' ],
+        ],
+        'interface.GPUCommandsMixin': [ 'webgpu:debug-command-interface', 'webgpu-render-bundle-debug' ],
+        'interface.GPURenderCommandsMixin': [
+            'webgpu:render-command-interface',
+            [ 'webgpu-pass-state', 'webgpu-pipelines' ],
+        ],
+        'GPURenderCommandsMixin.setPipeline': [ 'webgpu:render-set-pipeline', 'webgpu-pipelines' ],
+        'GPUCommandEncoder.beginComputePass': [ 'webgpu:begin-compute-pass', 'webgpu-pass-state' ],
+        'GPUCommandEncoder.beginRenderPass': [ 'webgpu:begin-render-pass', 'webgpu-pass-state' ],
+        'GPUCommandEncoder.clearBuffer': [ 'webgpu:clear-buffer', 'webgpu-command-encoding' ],
+        'GPUCommandEncoder.finish': [ 'webgpu:finish-command-encoder', 'webgpu-submission' ],
+        'GPUCommandEncoder.resolveQuerySet': [ 'webgpu:resolve-query-set', 'webgpu-query' ],
+        'GPUCommandEncoder.copyTextureToBuffer': [
+            'webgpu:texture-readback-copy',
+            [ 'webgpu-copy-upload', 'webgpu-readback' ],
+        ],
+        'GPUComputePassDescriptor.timestampWrites': [ 'webgpu:compute-timestamp-writes', 'webgpu-query' ],
+        'GPURenderPassDescriptor.timestampWrites': [ 'webgpu:render-timestamp-writes', 'webgpu-query' ],
+    }[id]
+    if (exactRules !== undefined) {
+        return coverageRule(exactRules[0], exactRules[1])
+    }
+    if (owner === 'GPURenderCommandsMixin') {
+        return coverageRule('webgpu:render-command-method', 'webgpu-pass-state')
+    }
     if (/GPU(Validation|Internal|OutOfMemory)Error|GPUUncapturedErrorEvent/.test(owner)) {
-        return 'webgpu-diagnostics'
+        return coverageRule('webgpu:error-diagnostics', 'webgpu-diagnostics')
     }
     if (owner === 'GPUDevice' && [ 'pushErrorScope', 'popErrorScope', 'onuncapturederror' ].includes(member)) {
-        return 'webgpu-diagnostics'
+        return coverageRule('webgpu:device-error-diagnostics', 'webgpu-diagnostics')
     }
     if (/ExternalTexture/.test(owner) || member === 'importExternalTexture') {
-        return 'webgpu-external-texture'
+        return coverageRule('webgpu:external-texture', 'webgpu-external-texture')
     }
-    if (/RenderBundle|DebugCommands/.test(owner)) return 'webgpu-render-bundle-debug'
-    if (/ShaderModule|Compilation/.test(owner)) return 'webgpu-shader-program'
-    if (/QuerySet|QueryType|TimestampWrites/.test(owner)) return 'webgpu-query'
-    if (/Canvas/.test(owner)) return 'webgpu-surface-presentation'
-    if (/BindGroup|BindingCommands|BindingResource|BindingLayout|ShaderStage/.test(owner)) {
-        return 'webgpu-bindings'
+    if (/RenderBundle|DebugCommands/.test(owner)) {
+        return coverageRule('webgpu:render-bundle-debug', 'webgpu-render-bundle-debug')
     }
-    if (/Sampler/.test(owner)) return 'webgpu-sampler'
+    if (/ShaderModule|Compilation/.test(owner)) {
+        return coverageRule('webgpu:shader-module', 'webgpu-shader-program')
+    }
+    if (/QuerySet|QueryType|TimestampWrites/.test(owner)) {
+        return coverageRule('webgpu:query', 'webgpu-query')
+    }
+    if (/Canvas/.test(owner)) {
+        return coverageRule('webgpu:canvas', 'webgpu-surface-presentation')
+    }
+    if (/BindGroup|BindingResource|BindingLayout|ShaderStage/.test(owner)) {
+        return coverageRule('webgpu:binding', 'webgpu-bindings')
+    }
+    if (/Sampler/.test(owner)) {
+        return coverageRule('webgpu:sampler', 'webgpu-sampler')
+    }
     if (/Buffer/.test(owner) && !/TexelCopyBuffer|ImageCopyBuffer/.test(owner)) {
-        return 'webgpu-buffer-mapping'
+        return coverageRule('webgpu:buffer', 'webgpu-buffer-mapping')
     }
     if (/Texture/.test(owner) && !/ExternalTexture|StorageTextureBinding|TextureBindingLayout/.test(owner)) {
-        return 'webgpu-texture-resource'
+        return coverageRule('webgpu:texture', 'webgpu-texture-resource')
     }
-    if (/RenderPass|ComputePass|RenderCommands/.test(owner)) return 'webgpu-pass-state'
+    if (/RenderPass|ComputePass/.test(owner)) {
+        return coverageRule('webgpu:pass-state', 'webgpu-pass-state')
+    }
     if (
         /Pipeline|ProgrammableStage|Primitive|Blend|ColorTarget|ColorWrite|Depth|Stencil|Multisample|Vertex|CullMode|FrontFace|CompareFunction/.test(owner)
-    ) return 'webgpu-pipelines'
-    if (/CopyExternalImage/.test(owner) || /GPUImageCopyExternalImage/.test(owner)) {
-        return 'webgpu-external-image-upload'
+    ) {
+        return coverageRule('webgpu:pipeline-state', 'webgpu-pipelines')
     }
-    if (id === 'GPUCommandEncoder.copyTextureToBuffer') {
-        return 'webgpu-readback'
+    if (/CopyExternalImage/.test(owner) || /GPUImageCopyExternalImage/.test(owner)) {
+        return coverageRule('webgpu:external-image-copy', 'webgpu-external-image-upload')
     }
     if (
         /CommandEncoder|CommandBuffer|CommandsMixin|TexelCopy|ImageCopy|Origin|Extent/.test(owner)
-    ) return 'webgpu-copy-upload'
+    ) {
+        return coverageRule('webgpu:copy-command', 'webgpu-copy-upload')
+    }
     if (owner === 'GPUQueue') {
-        if (member === 'copyExternalImageToTexture') return 'webgpu-external-image-upload'
-        if (member === 'writeBuffer' || member === 'writeTexture') return 'webgpu-copy-upload'
-        return 'webgpu-submission'
+        if (member === 'copyExternalImageToTexture') {
+            return coverageRule('webgpu:queue-external-image', 'webgpu-external-image-upload')
+        }
+        if (member === 'writeBuffer' || member === 'writeTexture') {
+            return coverageRule('webgpu:queue-write', 'webgpu-copy-upload')
+        }
+        return coverageRule('webgpu:queue-submission', 'webgpu-submission')
     }
     if (owner === 'GPUDevice') {
         const allocationEvidence = {
@@ -701,15 +816,280 @@ function webGpuEvidenceId(entry) {
             createCommandEncoder: 'webgpu-submission',
             createQuerySet: 'webgpu-query',
         }[member]
-        return allocationEvidence ?? 'webgpu-runtime-capabilities'
+        return coverageRule(
+            allocationEvidence === undefined
+                ? 'webgpu:device-runtime'
+                : `webgpu:device:${member}`,
+            allocationEvidence ?? 'webgpu-runtime-capabilities'
+        )
     }
     if (/GPU(Adapter|AdapterInfo|DeviceDescriptor|DeviceLost|FeatureName|Supported|RequestAdapter|PowerPreference)|Navigator|WGSLLanguageFeatures/.test(owner)) {
-        return 'webgpu-runtime-capabilities'
+        return coverageRule('webgpu:runtime-capability', 'webgpu-runtime-capabilities')
     }
-    if (/GPUObject/.test(owner)) return 'webgpu-resource-lifetime'
-    if (/GPUMapMode/.test(owner)) return 'webgpu-buffer-mapping'
-    if (id.startsWith('GPUExternal')) return 'webgpu-external-texture'
-    return 'webgpu-descriptor-values'
+    if (/GPUObject/.test(owner)) {
+        return coverageRule('webgpu:object-lifecycle', 'webgpu-resource-lifetime')
+    }
+    if (/GPUMapMode/.test(owner)) {
+        return coverageRule('webgpu:map-mode', 'webgpu-buffer-mapping')
+    }
+    if (id.startsWith('GPUExternal')) {
+        return coverageRule('webgpu:external-value', 'webgpu-external-texture')
+    }
+
+    const exactValueEvidence = {
+        'interface.GPUColorDict': 'webgpu-pass-state',
+        'GPUColorDict.r': 'webgpu-pass-state',
+        'GPUColorDict.g': 'webgpu-pass-state',
+        'GPUColorDict.b': 'webgpu-pass-state',
+        'GPUColorDict.a': 'webgpu-pass-state',
+        'interface.GPUError': 'webgpu-diagnostics',
+        'GPUError.message': 'webgpu-diagnostics',
+        'interface.GPUFragmentState': 'webgpu-pipelines',
+        'GPUFragmentState.targets': 'webgpu-pipelines',
+        'type.GPUAddressMode': 'webgpu-sampler',
+        'type.GPUColor': 'webgpu-pass-state',
+        'type.GPUErrorFilter': 'webgpu-diagnostics',
+        'type.GPUFilterMode': 'webgpu-sampler',
+        'type.GPUFlagsConstant': 'webgpu-numeric-domains',
+        'type.GPUIndex32': 'webgpu-pass-state',
+        'type.GPUIndexFormat': 'webgpu-pass-state',
+        'type.GPUIntegerCoordinate': 'webgpu-numeric-domains',
+        'type.GPUIntegerCoordinateOut': 'webgpu-numeric-domains',
+        'type.GPULoadOp': 'webgpu-pass-state',
+        'type.GPUMipmapFilterMode': 'webgpu-sampler',
+        'type.GPUQueueDescriptor': 'webgpu-runtime-capabilities',
+        'type.GPUSampleMask': 'webgpu-pipelines',
+        'type.GPUSignedOffset32': 'webgpu-numeric-domains',
+        'type.GPUSize32': 'webgpu-numeric-domains',
+        'type.GPUSize32Out': 'webgpu-numeric-domains',
+        'type.GPUSize64': 'webgpu-numeric-domains',
+        'type.GPUSize64Out': 'webgpu-numeric-domains',
+        'type.GPUStoreOp': 'webgpu-pass-state',
+    }[id]
+    if (exactValueEvidence !== undefined) {
+        return coverageRule('webgpu:explicit-value-domain', exactValueEvidence)
+    }
+    throw new Error(`Unresolved WebGPU coverage rule for ${entry.id}`)
+}
+
+function webGpuRequirements(entry) {
+
+    const deviceFeatures = []
+    const languageFeatures = []
+    const limits = entry.owner === 'GPUSupportedLimits'
+        ? [ entry.member ]
+        : []
+    const dependencies = []
+    const conditions = []
+    const id = entry.id
+
+    if (id === 'GPUPrimitiveState.unclippedDepth') {
+        conditions.push(requirementCondition(
+            'unclippedDepth is true',
+            [ 'depth-clip-control' ]
+        ))
+    }
+    if (
+        id === 'GPUComputePassDescriptor.timestampWrites' ||
+        id === 'GPURenderPassDescriptor.timestampWrites'
+    ) {
+        conditions.push(requirementCondition(
+            'timestampWrites is provided',
+            [ 'timestamp-query' ]
+        ))
+    }
+    if (
+        entry.owner === 'GPUComputePassTimestampWrites' ||
+        entry.owner === 'GPURenderPassTimestampWrites'
+    ) {
+        deviceFeatures.push('timestamp-query')
+    }
+    if (
+        id === 'GPUQuerySetDescriptor.type' ||
+        id === 'type.GPUQueryType'
+    ) {
+        conditions.push(requirementCondition(
+            'the selected query type is "timestamp"',
+            [ 'timestamp-query' ]
+        ))
+    }
+    if (id === 'GPUTextureViewDescriptor.swizzle') {
+        conditions.push(requirementCondition(
+            'swizzle is not the identity "rgba"',
+            [ 'texture-component-swizzle' ]
+        ))
+    }
+    if (id === 'GPUPipelineLayoutDescriptor.immediateSize') {
+        conditions.push(requirementCondition(
+            'immediateSize is greater than zero',
+            [],
+            [ 'immediate_address_space' ],
+            [ 'maxImmediateSize' ]
+        ))
+    }
+    if (id === 'GPUBindingCommandsMixin.setImmediates') {
+        languageFeatures.push('immediate_address_space')
+        limits.push('maxImmediateSize')
+    }
+    if (
+        id === 'type.GPUBlendFactor' ||
+        id === 'GPUBlendComponent.srcFactor' ||
+        id === 'GPUBlendComponent.dstFactor'
+    ) {
+        conditions.push(requirementCondition(
+            'a src1, one-minus-src1, src1-alpha, or one-minus-src1-alpha factor is selected',
+            [ 'dual-source-blending' ]
+        ))
+    }
+    if (
+        id === 'GPURenderCommandsMixin.drawIndirect' ||
+        id === 'GPURenderCommandsMixin.drawIndexedIndirect'
+    ) {
+        conditions.push(requirementCondition(
+            'the indirect argument firstInstance value is non-zero',
+            [ 'indirect-first-instance' ]
+        ))
+    }
+    if (entryCarriesTextureFormat(entry)) {
+        conditions.push(...textureFormatRequirementConditions())
+    }
+
+    return {
+        deviceFeatures: uniqueSorted(deviceFeatures),
+        languageFeatures: uniqueSorted(languageFeatures),
+        limits: uniqueSorted(limits),
+        dependencies,
+        conditions,
+        policy:
+            conditions.length === 0
+                ? 'Required features and limits remain explicit at Runtime, Program, and descriptor boundaries.'
+                : 'Unconditional requirements are listed directly; value-dependent native requirements are preserved as explicit conditions.',
+    }
+}
+
+function entryCarriesTextureFormat(entry) {
+
+    return (
+        entry.id === 'type.GPUTextureFormat' ||
+        entry.id === 'GPUTextureDescriptor.format' ||
+        entry.id === 'GPUTextureDescriptor.viewFormats' ||
+        entry.id === 'GPUTextureViewDescriptor.format' ||
+        entry.id === 'GPUStorageTextureBindingLayout.format' ||
+        entry.id === 'GPUColorTargetState.format'
+    )
+}
+
+function textureFormatRequirementConditions() {
+
+    return [
+        requirementCondition(
+            'the selected format is BC-compressed',
+            [ 'texture-compression-bc' ]
+        ),
+        requirementCondition(
+            'the selected format is ETC2/EAC-compressed',
+            [ 'texture-compression-etc2' ]
+        ),
+        requirementCondition(
+            'the selected format is ASTC-compressed',
+            [ 'texture-compression-astc' ]
+        ),
+        requirementCondition(
+            'a BC-compressed format is used by a sliced 3D texture',
+            [ 'texture-compression-bc', 'texture-compression-bc-sliced-3d' ]
+        ),
+        requirementCondition(
+            'an ASTC-compressed format is used by a sliced 3D texture',
+            [ 'texture-compression-astc', 'texture-compression-astc-sliced-3d' ]
+        ),
+        requirementCondition(
+            'the selected format is depth32float-stencil8',
+            [ 'depth32float-stencil8' ]
+        ),
+        requirementCondition(
+            'bgra8unorm is used with STORAGE_BINDING',
+            [ 'bgra8unorm-storage' ]
+        ),
+        requirementCondition(
+            'an r32float, rg32float, or rgba32float texture is filterable',
+            [ 'float32-filterable' ]
+        ),
+        requirementCondition(
+            'an r32float, rg32float, or rgba32float color target is blended',
+            [ 'float32-blendable' ]
+        ),
+        requirementCondition(
+            'rg11b10ufloat is used as a render attachment',
+            [],
+            [],
+            [],
+            [],
+            [
+                [ 'rg11b10ufloat-renderable' ],
+                [ 'texture-formats-tier1' ],
+                [ 'texture-formats-tier2' ],
+            ]
+        ),
+        requirementCondition(
+            'a texture-formats-tier1 storage/render format is selected',
+            [],
+            [],
+            [],
+            [],
+            [
+                [ 'texture-formats-tier1' ],
+                [ 'texture-formats-tier2' ],
+            ]
+        ),
+        requirementCondition(
+            'a texture-formats-tier2-only format or capability is selected',
+            [ 'texture-formats-tier2' ],
+            [],
+            [],
+            [
+                {
+                    feature: 'texture-formats-tier2',
+                    requiredFeature: 'texture-formats-tier1',
+                },
+            ]
+        ),
+    ]
+}
+
+function requirementCondition(
+    when,
+    deviceFeatures = [],
+    languageFeatures = [],
+    limits = [],
+    dependencies = [],
+    deviceFeatureAlternatives = []
+) {
+
+    return {
+        when,
+        deviceFeatures: uniqueSorted(deviceFeatures),
+        languageFeatures: uniqueSorted(languageFeatures),
+        limits: uniqueSorted(limits),
+        dependencies,
+        ...(deviceFeatureAlternatives.length > 0
+            ? { deviceFeatureAlternatives }
+            : {}),
+    }
+}
+
+function coverageRule(ruleId, evidenceIds) {
+
+    return {
+        ruleId,
+        evidenceIds: Array.isArray(evidenceIds)
+            ? evidenceIds
+            : [ evidenceIds ],
+    }
+}
+
+function uniqueSorted(values) {
+
+    return [ ...new Set(values) ].sort()
 }
 
 function wgslEvidenceId(entry) {

@@ -323,11 +323,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.programPipelineFactSnapshot.mutablePlannerReads).to.deep.equal([])
         expect(result.publicSurface.productionEmitParity).to.deep.include({
             status: 'passed',
-            emittedJavaScriptCount: 107,
-            emittedDeclarationCount: 107,
-            declarationSignatureCount: 4618,
+            emittedJavaScriptCount: 108,
+            emittedDeclarationCount: 108,
+            declarationSignatureCount: 4623,
         })
-        expect(result.publicSurface.productionEmitParity.files).to.have.length(214)
+        expect(result.publicSurface.productionEmitParity.files).to.have.length(216)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
         expect(result.diagnostics).to.deep.include({ schemaVersion: 5 })
         expect(result.diagnostics.unexpectedMissing).to.deep.equal([])

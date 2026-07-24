@@ -2,13 +2,18 @@
 
 ## Status
 
-Phase 5 recursive WGSL layout parity is complete through
-`socu/scratch-webgpu-wgsl-parity-v1`, based on
-`e905b33e7bd8fdc68e9400ffe103a52e89c21488`. This living audit records the
-fixed specification surface. All seven selected WebGPU families and the
-scoped WGSL layout family are now implemented. The audit will be finalized
-only after Phase 6 consumer/browser regression, final sequential gates, and
-the single Phase 7 independent review are complete.
+Phase 6/7 evidence closure is complete on
+`socu/scratch-webgpu-wgsl-evidence-closure-v1`, based on
+`f8d82ebfce1ab324d95d8d59acf654cda16ee28d`. The frozen Phase 0 manifests
+remain unchanged. A separate current-state manifest now closes all 662
+formal entries with explicit, fail-closed evidence rules: 591 WebGPU entries,
+65 previously scoped WGSL entries, and six formal WGSL `enable` extensions.
+
+The final acceptance gate is bound to the clean correction commit containing
+this audit. Its result is `clean` only when every command in the final gate
+table exits zero. A non-zero result changes the terminal Goal result to
+`issues-found`; it does not authorize another implementation, review, or
+browser-test cycle.
 
 ## Frozen Specification Baseline
 
@@ -16,9 +21,11 @@ the single Phase 7 independent review are complete.
 | --- | --- | --- |
 | WebGPU | W3C CRD, 14 July 2026 | SHA-256 `23b38cef5e23be710ef865b800f63e5874edd03bb08bbecfa8ac5b3020b47d30` |
 | WGSL | W3C CRD, 16 July 2026 | SHA-256 `2ae2de9464930086cb7c611951262bfd4c989a312802e30162cfd246567d66aa` |
-| GPUWeb editor source | `gpuweb/gpuweb` | `99d2ded3335433260fd756abacc2d2b280999b8d` |
+| GPUWeb editor source at frozen baseline | `gpuweb/gpuweb` | `99d2ded3335433260fd756abacc2d2b280999b8d` |
+| GPUWeb editor source at one-time refresh | `gpuweb/gpuweb` | `b33e6efb182d11156851271586563cc77575059c` |
 | Declaration repository | `gpuweb/types` | `9ba8a0618e1efad8e1ee444ef6ecfae761b2bc30` |
 | Installed declaration package | `@webgpu/types@0.1.71` | npm git head `acad56b8107ba88841b7753df5a8d7c27d33e916`; declaration SHA-256 `d2e5cfb2397ec8cacfd30de0e6f7992eb7db7b02cc83b7c43ef58bcd5aa88bc3` |
+| Proposal index at one-time refresh | `gpuweb/gpuweb` proposals | README SHA-256 `25d168b6796672bb1037933cddc31468fd10f7b7aa2f2196b7681d9f20213018` |
 
 The W3C snapshot bytes are not committed. Their URLs and hashes are fixed
 above. Normal tests use the installed declaration file and checked-in compact
@@ -29,7 +36,15 @@ Official sources:
 - https://www.w3.org/TR/2026/CRD-webgpu-20260714/
 - https://www.w3.org/TR/2026/CRD-WGSL-20260716/
 - https://github.com/gpuweb/gpuweb/commit/99d2ded3335433260fd756abacc2d2b280999b8d
+- https://github.com/gpuweb/gpuweb/commit/b33e6efb182d11156851271586563cc77575059c
 - https://github.com/gpuweb/types/commit/9ba8a0618e1efad8e1ee444ef6ecfae761b2bc30
+- https://github.com/gpuweb/gpuweb/tree/b33e6efb182d11156851271586563cc77575059c/proposals
+
+The one-time refresh was observed on 24 July 2026. The only editor delta from
+the frozen commit was `[bindless] Rename insert/removeBinding to
+insert/remove (#6341)`, scoped to a non-normative draft proposal. It created
+no formal WebGPU/WGSL delta and did not expand this Goal. Draft proposals
+remain watchlist-only.
 
 ## Capability Manifests
 
@@ -48,6 +63,38 @@ recursive/runtime/atomic/buffer layout families, and shader-only type domains.
 manifests, verifies every entry has one allowed classification, rejects
 unassigned/new gaps, and emits structured native-call, public-export, and old
 surface inventories.
+
+## Current Coverage Closure
+
+The historical manifests above remain frozen evidence of the goal-start
+state. The current-state manifests are:
+
+| Manifest | Entries | Current result |
+| --- | ---: | --- |
+| `docs/review/manifests/scratch-webgpu-wgsl-current-coverage.json` | 662 | 608 managed; 54 not applicable; 0 unresolved |
+| `docs/review/manifests/scratch-wgsl-enable-extensions-2026-07-16.json` | 6 | six contracts; one formal dependency |
+
+The 608 managed entries comprise 415 `managed-first-class` and 193
+`managed-semantic-equivalent` entries. The 54 `not-applicable` entries are
+WebIDL domains or declaration helpers with entry-specific reasons; none are
+used to hide a native capability. Every managed entry has an explicit
+coverage rule, public expression path or caller-authored WGSL contract,
+located native or compiler path, structured capability requirements, and one
+or more bounded evidence IDs. There is no catch-all fallback and no
+`runtime.device` or `runtime.queue` escape-hatch classification.
+
+`node tests/audits/scratch-webgpu-wgsl-current-coverage.mjs` regenerates both
+current manifests and rejects:
+
+- an unmatched entry or fallback coverage rule;
+- missing, unused, unresolved, or unlocatable evidence;
+- a native operation absent from the named source path;
+- a named public symbol absent from the TypeScript export graph;
+- raw-device or raw-queue laundering;
+- an unexplained `not-applicable` result;
+- a missing feature, language-feature, limit, or dependency condition;
+- a mixed WGSL `enable` and `requires` capability contract; and
+- an incomplete browser proof set or public-entrypoint mismatch.
 
 ## Target Status Matrix
 
@@ -253,26 +300,189 @@ erase the evidence of what this goal closed. Consolidated browser shader
 proofs for nested matrices, `f16` when supported, and `buffer_view` when
 supported remain a Phase 6 gate and are not claimed here.
 
-## Required Final Matrices
+## WGSL Capability Contracts
 
-Before completion, this document will contain:
+Caller-authored WGSL remains the language surface. Scratch does not parse
+shader text to infer capabilities and does not add an implicit
+`requiredEnableExtensions` API. Runtime and Program independently require the
+same explicit device features, while `requiredLanguageFeatures` represents
+WGSL `requires` extensions. The six formal `enable` contracts are:
 
-- final native call-site ownership and attribution;
-- final public API and both-entrypoint export parity;
-- diagnostics schema and bounded-retention results;
-- browser capability/support/skip/result facts;
-- every current example build and regression result;
-- Flow, DEM, and Hello GAW headed regression results;
-- stress end-state counters;
-- exactly one independent review and its findings;
-- at most one concentrated correction result; and
-- final sequential gate commands and results.
+| `enable` extension | Runtime/Program device features | Final Chrome result |
+| --- | --- | --- |
+| `clip_distances` | `clip-distances` | passed |
+| `dual_source_blending` | `dual-source-blending` | passed |
+| `f16` | `shader-f16` | passed with recursive `f16` matrix packing/readback |
+| `primitive_index` | `primitive-index` | passed |
+| `subgroup_size_control` | `subgroup-size-control`, `subgroups` | skipped: adapter omitted `subgroup-size-control` |
+| `subgroups` | `subgroups` | passed |
 
-## Review And Completion
+`subgroup-size-control` has one formal dependency on `subgroups`. Shared
+Runtime/Program preflight rejects the missing dependency before native device
+or pipeline creation, never auto-injects it, and reports
+`SCRATCH_RUNTIME_REQUEST_INVALID` or
+`SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING` through the structured
+diagnostic envelope.
 
-Independent review count: 0.
+The browser matrix performs semantic execution for every advertised language
+feature. A source containing only `requires` is not accepted as evidence.
 
-Correction count: 0.
+| WGSL language feature | Final Chrome result | Executed semantic |
+| --- | --- | --- |
+| `readonly_and_readwrite_storage_textures` | passed | read/write `r32uint` storage texture and buffer readback |
+| `packed_4x8_integer_dot_product` | passed | `dot4U8Packed` result readback |
+| `unrestricted_pointer_parameters` | passed | storage pointer function parameter writes output |
+| `pointer_composite_access` | passed | vector-component pointer dereference |
+| `uniform_buffer_standard_layout` | passed | tightly packed uniform array through LayoutCodec |
+| `subgroup_id` | passed | subgroup built-ins affect readback |
+| `subgroup_uniformity` | passed | subgroup diagnostic and operation affect readback |
+| `texture_and_sampler_let` | passed | local texture/sampler handles drive sampling |
+| `texture_formats_tier1` | skipped | browser omitted the WGSL language feature |
+| `linear_indexing` | passed | `global_invocation_index` affects readback |
+| `immediate_address_space` | passed | per-command immediate value readback |
+| `buffer_view` | skipped | browser omitted the WGSL language feature |
 
-Final result: not yet assessed. Rendering examples alone is not sufficient
-evidence for either `clean` or `issues-found`.
+The same matrix separately executes nested `mat3x2f` layout readback. The
+final matrix therefore contains 19 unique proofs: 16 passed, three skipped,
+and zero failed. Every executed proof creates a real Scratch Runtime,
+ShaderModule, Program, pipeline, submission, and GPU readback. All use the
+same `high-performance` adapter selection facts; all executed terminals have
+zero live resources, mappings, readbacks, pending native observations,
+uncaptured errors, device losses, validation errors, internal errors, and OOM
+errors.
+
+The headed environment is Chrome `150.0.7871.184`. The three skips are
+capability facts, not fallbacks: the adapter omitted
+`subgroup-size-control`, while
+`navigator.gpu.wgslLanguageFeatures` omitted `texture_formats_tier1` and
+`buffer_view`. In particular, advertising the device feature
+`texture-formats-tier1` does not substitute for the missing WGSL language
+feature.
+
+## Public And Native Parity
+
+The current coverage audit resolves 152 runtime values from both
+`geoscratch` and `geoscratch/scratch` with exact key parity. The package
+TypeScript entrypoint exposes 483 source declaration exports, and the
+compatibility shim is a pure `export * from './index.js'`. Required public
+symbols for Runtime, resources, bindings, ShaderModule/Program, pipelines,
+commands, submissions, readback, bundles, and LayoutCodec are present through
+both entrypoints.
+
+The frozen structured parity audit classifies 80 selected Scratch native call
+sites and reports 392 Scratch declarations plus 483 package declarations.
+The current audit additionally requires every evidence-native operation to
+occur in its named TypeScript source path. Native calls remain owned by
+Runtime/resource/supporting-object creation, command encoding, submission,
+readback, or temporal-attempt authorities. Removed joined Program modules and
+old texture/readback bypasses remain absent. No current managed entry cites
+raw `GPUDevice` or `GPUQueue` access as its expression path.
+
+## Diagnostics And Bounds
+
+All new failure paths use `ScratchDiagnostic`. Capability dependencies,
+adapter/device requests, Program contracts, shader compilation,
+pipeline creation, submissions, readback, uncaptured errors, OOM, and device
+loss retain stable attribution. Evidence storage remains bounded rather than
+acting as an unbounded frame log.
+
+| Stress proof | Work completed | Terminal/bound result |
+| --- | --- | --- |
+| Buffer mapping | 20,000 ordinary leases; 5,000 mapped creations | zero mappings, selected bytes, pending operations, resources, and lifecycle subscribers |
+| Current-content reads | 20,000 submissions | 64 retained operations, zero incidents/pending operations, bounded heap |
+| Recursive LayoutCodec | 20,000 cycles; 3,360,000 packed bytes | zero handles, mappings, staging bytes, pending operations, and retained native handles |
+| Persistent bindings | 20,000 + 20,000 steady-state cycles | zero identity changes; zero pending operations and command encoders |
+| Readback | 20,000 direct; 5,000 ordered; 5,000 texture leases | zero readbacks, mappings, staging/host bytes, pending operations, and lifecycle subscribers |
+| Submission provenance | 20,000 summary; 20,000 off | zero pending observations, effectful submitted work, lifecycle subscribers, and unhandled rejections |
+
+The inherited persistent-binding structural audit exits zero while retaining
+its deliberate `verification.status: incomplete`; this is historical
+structural-mode metadata and does not start another review cycle.
+
+## Consumer And Browser Regression
+
+`npm run build` builds the package and all 17 ordinary examples. The example
+inventory contains zero legacy examples. The headed Chrome regressions pass:
+
+| Regression | Result |
+| --- | --- |
+| Flow Layer | passed, including estuary display boundary and terminal disposal |
+| DEM Layer | passed |
+| Hello GAW | passed, including rendered output and provenance |
+| Hello GAW initialization failures | passed, including attributed injected/native failures and cleanup |
+
+No Flow, DEM, or Hello GAW visual parameters, resource extents, or business
+behavior were changed by this evidence-closure Goal.
+
+## Initial Gate
+
+The one complete initial gate ran all 18 required commands. Seventeen passed.
+`npm test` alone failed with 1126 passing and two expected pending tests
+because one structural snapshot still expected 107 emitted JavaScript and
+declaration files after the new source file raised both counts to 108. The
+failure was bookkeeping, not a runtime or API regression, and became part of
+the single correction batch.
+
+Two earlier shell-wrapper drafts failed before starting any gate command and
+left zero-byte command logs. They are launcher setup failures, not additional
+full gates or browser retries.
+
+## Independent Review
+
+Independent fresh-context review count: 1.
+
+The reviewer reported `issues-found` before correction:
+
+| Material finding | Single correction |
+| --- | --- |
+| Catch-all/self-certifying current-manifest mappings, including wrong mappings for discovery, immediate data, and public symbols | Replaced with explicit fail-closed coverage rules, exact exported symbols, located native operations, and no fallback |
+| Missing feature/language/limit conditions for conditional WebGPU domains | Added structured conditions for depth clipping, timestamps, swizzle, immediate data, dual-source blending, indirect first instance, compressed/storage/float texture formats, and tier dependencies |
+| Language proofs merely declared `requires` while executing unrelated constants | Replaced with feature-specific shaders whose semantics determine GPU readback |
+| Capability discovery and proof runtimes could select different adapters, and incomplete proof rows could pass validation | Discovery now uses ScratchRuntime with the same power preference; validator requires the exact 19-row set, adapter facts, contracts, execution evidence, and clean terminals |
+| Final provenance, gate, and audit record were incomplete | Pinned source URLs/commits/hashes and completed this living audit |
+
+The reviewer also identified the stale 107/107 emitted-file snapshot. It is
+updated to 108/108, 4,623 declaration signatures, and 216 emitted files.
+
+Correction count: 1. No second reviewer or second correction batch was used.
+After correction, focused manifest tests, the structural emitted-output test,
+package build, and the strengthened current-coverage audit passed before the
+single final full gate.
+
+## Final Gate
+
+The final gate targets the clean correction commit containing every reviewed
+byte. Commands run once, sequentially, in this exact order:
+
+| Command | Result |
+| --- | --- |
+| `git diff --check` | passed |
+| `npm test` | passed |
+| `npm run typecheck` | passed |
+| `npm run build` | passed |
+| `node tests/audits/scratch-webgpu-wgsl-managed-parity.mjs` | passed |
+| `node tests/audits/scratch-webgpu-wgsl-current-coverage.mjs` | passed |
+| `node tests/audits/scratch-persistent-binding-views-final-parity.mjs` | passed with expected structural `incomplete` metadata |
+| `node tests/stress/scratch-buffer-mapping.mjs` | passed |
+| `node tests/stress/scratch-current-content-reads.mjs` | passed |
+| `node tests/stress/scratch-layout-codec.mjs` | passed |
+| `node tests/stress/scratch-persistent-binding-views.mjs` | passed |
+| `node tests/stress/scratch-readback-staging-mapping.mjs` | passed |
+| `node tests/stress/scratch-submission-native-provenance.mjs` | passed |
+| `node tests/browser/scratch-wgsl-capability-matrix.mjs` | passed: 16 pass, 3 capability skips, 0 fail |
+| `node tests/browser/scratch-flow-layer.mjs` | passed |
+| `node tests/browser/scratch-dem-layer.mjs` | passed |
+| `node tests/browser/scratch-hello-gaw.mjs` | passed |
+| `node tests/browser/scratch-hello-gaw-init-failures.mjs` | passed |
+
+## Completion
+
+Final result: `clean`.
+
+The current formal baseline has no unclassified editor delta, all 662 entries
+have machine-resolvable evidence, `unresolved` is zero, all formal capabilities
+have a managed Scratch or explicit caller-WGSL path, and no capability depends
+on raw device/queue access. Supported browser paths execute successfully;
+unsupported paths carry exact capability facts. The only independent review's
+material findings are closed by the one allowed correction, all required
+gates pass, and the final worktree is clean.
