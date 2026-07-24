@@ -174,4 +174,70 @@ describe('scratch ShaderModule', () => {
         expect(operation.incidentId).to.be.a('string')
         expect(JSON.stringify(runtime.diagnostics.exportEvidence())).not.to.include(source)
     })
+
+    it('joins validation-scope and compilation failures without losing compilation evidence', async() => {
+
+        const source = '@compute @workgroup_size(1) fn invalidEntry( {}'
+        const validationError = Object.assign(
+            new Error(`native validation rejected ${source}`),
+            { name: 'GPUValidationError' }
+        )
+        const { gpu, errors } = createFakeGpu({
+            compilationMessages: [ {
+                type: 'error',
+                message: `parse failure near ${source}`,
+                offset: 36,
+                length: 1,
+                lineNum: 1,
+                linePos: 37,
+            } ],
+        })
+        errors.failNext('createShaderModule', 'validation', validationError)
+        const runtime = await ScratchRuntime.create({ gpu })
+
+        try {
+            await runtime.createShaderModule({
+                sourceParts: [ { label: 'invalid compute', code: source } ],
+            })
+            throw new Error('expected ShaderModule rejection')
+        } catch (error) {
+            expect(error.diagnostic.code).to.equal('SCRATCH_SHADER_MODULE_COMPILATION_FAILED')
+            expect(error.incident.failureStage).to.equal('shader-compilation')
+            expect(error.incident.shaderModuleCompilationReport).to.deep.include({
+                shaderModuleId: error.incident.target.shaderModuleId,
+                sourceHash: error.incident.target.sourceHash,
+                sourcePartCount: 1,
+                retainedSourcePartCount: 1,
+                errorCount: 1,
+            })
+            const creationOutcome = error.incident.outcomes.find(outcome =>
+                outcome.diagnosticCode === 'SCRATCH_SHADER_MODULE_CREATION_VALIDATION_FAILED'
+            )
+            expect(creationOutcome).to.deep.include({
+                stage: 'scope-settlement',
+                nativeErrorCategory: 'validation',
+                subject: {
+                    kind: 'ShaderModule',
+                    id: error.incident.target.shaderModuleId,
+                },
+            })
+            expect(creationOutcome.nativeError).to.deep.include({
+                name: 'GPUValidationError',
+                sourceExcerptRedacted: true,
+            })
+            expect(creationOutcome.nativeError.message).not.to.include(source)
+            expect(error.incident.outcomes).to.deep.include({
+                stage: 'shader-compilation',
+                diagnosticCode: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
+                nativeErrorCategory: 'validation',
+                subject: {
+                    kind: 'ShaderModule',
+                    id: error.incident.target.shaderModuleId,
+                },
+            })
+        }
+
+        const evidence = runtime.diagnostics.exportEvidence()
+        expect(JSON.stringify(evidence)).not.to.include(source)
+    })
 })

@@ -42,19 +42,49 @@ export function throwSupportingObjectCreationFailure<T>(
 ): never {
 
     destroySupportingObjectCandidate(outcome.candidate)
+    const hasShaderModuleCompilationFailure =
+        (input.shaderModuleCompilationReport?.errorCount ?? 0) > 0
     const failures = outcome.failures.length > 0
         ? outcome.failures
-        : Object.freeze([ Object.freeze({
-            kind: 'native-exception' as const,
-            cause: new TypeError('Supporting-object creation produced no acknowledged candidate.'),
-        }) ])
+        : hasShaderModuleCompilationFailure
+            ? Object.freeze([ Object.freeze({ kind: 'validation' as const }) ])
+            : Object.freeze([ Object.freeze({
+                kind: 'native-exception' as const,
+                cause: new TypeError(
+                    'Supporting-object creation produced no acknowledged candidate.'
+                ),
+            }) ])
     const primary = selectPrimaryFailure(failures)
     const controller = diagnosticsControllerFor(runtime)
-    const code = failureCode(primary.kind, codes)
+    const compilationIsPrimary = hasShaderModuleCompilationFailure &&
+        outcome.failures.every(failure => failure.kind === 'validation')
+    const code = compilationIsPrimary
+        ? 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED'
+        : failureCode(primary.kind, codes)
     const nativeErrorCategory = failureNativeCategory(primary.kind)
     const serializeError = input.serializeNativeError ?? serializeNativeGpuError
-    const incidentOutcomes = Object.freeze(failures
-        .map(failure => incidentOutcome(
+    const incidentOutcomes = hasShaderModuleCompilationFailure
+        ? Object.freeze([
+            ...outcome.failures.map(failure => incidentOutcome(
+                failure,
+                codes,
+                input.subject,
+                serializeError
+            )),
+            incidentOutcome(
+                { kind: 'validation' },
+                {
+                    validation: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
+                    internal: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
+                    outOfMemory: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
+                    nativeException: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
+                },
+                input.subject,
+                serializeError,
+                'shader-compilation'
+            ),
+        ])
+        : Object.freeze(failures.map(failure => incidentOutcome(
             failure,
             codes,
             input.subject,

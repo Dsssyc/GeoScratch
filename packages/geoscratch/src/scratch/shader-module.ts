@@ -46,12 +46,6 @@ const SHADER_MODULE_COMPILATION_INFO_CODES = Object.freeze({
     outOfMemory: 'SCRATCH_SHADER_MODULE_COMPILATION_INFO_FAILED',
     nativeException: 'SCRATCH_SHADER_MODULE_COMPILATION_INFO_FAILED',
 })
-const SHADER_MODULE_COMPILATION_CODES = Object.freeze({
-    validation: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
-    internal: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
-    outOfMemory: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
-    nativeException: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
-})
 const shaderModuleStates = new WeakMap<ShaderModule, {
     isDisposed: boolean
     sourceSnapshot: ShaderModuleSourceSnapshot
@@ -294,7 +288,7 @@ export async function createShaderModule(
     ])
     const outcome = recheckSupportingObjectLifecycle(runtime, settledCreation)
 
-    if (outcome.failures.length > 0 || outcome.candidate === undefined) {
+    if (outcome.candidate === undefined) {
         return throwSupportingObjectCreationFailure(
             runtime,
             operation,
@@ -309,6 +303,16 @@ export async function createShaderModule(
         )
     }
     if (compilationInfo === undefined) {
+        if (outcome.failures.length > 0) {
+            return throwShaderModuleCreationFailure(
+                runtime,
+                operation,
+                outcome,
+                id,
+                normalized.label,
+                serializeNativeError
+            )
+        }
         return throwSupportingObjectCreationFailure(
             runtime,
             operation,
@@ -332,6 +336,16 @@ export async function createShaderModule(
         )
     }
     if ('failure' in compilationInfo) {
+        if (outcome.failures.length > 0) {
+            return throwShaderModuleCreationFailure(
+                runtime,
+                operation,
+                outcome,
+                id,
+                normalized.label,
+                serializeNativeError
+            )
+        }
         return throwSupportingObjectCreationFailure(
             runtime,
             operation,
@@ -379,22 +393,45 @@ export async function createShaderModule(
         )
     }
     if (compilationReport.errorCount > 0) {
+        const subject = shaderModuleSubjectFrom(id, normalized.label)
+        if (outcome.failures.some(failure => failure.kind !== 'validation')) {
+            return throwSupportingObjectCreationFailure(
+                runtime,
+                operation,
+                outcome,
+                SHADER_MODULE_CREATION_CODES,
+                {
+                    operationName: 'ShaderModule creation',
+                    phase: 'program',
+                    subject,
+                    serializeNativeError,
+                    shaderModuleCompilationReport: compilationReport,
+                }
+            )
+        }
         return throwSupportingObjectCreationFailure(
             runtime,
             operation,
-            {
-                candidate: outcome.candidate,
-                failures: [ { kind: 'validation' } ],
-            },
-            SHADER_MODULE_COMPILATION_CODES,
+            outcome,
+            SHADER_MODULE_CREATION_CODES,
             {
                 operationName: 'ShaderModule compilation',
                 phase: 'program',
-                subject: shaderModuleSubjectFrom(id, normalized.label),
+                subject,
                 failureStage: 'shader-compilation',
                 serializeNativeError,
                 shaderModuleCompilationReport: compilationReport,
             }
+        )
+    }
+    if (outcome.failures.length > 0) {
+        return throwShaderModuleCreationFailure(
+            runtime,
+            operation,
+            outcome,
+            id,
+            normalized.label,
+            serializeNativeError
         )
     }
 
@@ -462,6 +499,29 @@ export async function createShaderModule(
     }
     controller.completeOperation(operation, { status: 'succeeded' })
     return shaderModule
+}
+
+function throwShaderModuleCreationFailure(
+    runtime: ScratchRuntime,
+    operation: Parameters<typeof throwSupportingObjectCreationFailure>[1],
+    outcome: Parameters<typeof throwSupportingObjectCreationFailure<GPUShaderModule>>[2],
+    id: string,
+    label: string | undefined,
+    serializeNativeError: ReturnType<typeof createPipelineNativeErrorSerializer>
+): never {
+
+    return throwSupportingObjectCreationFailure(
+        runtime,
+        operation,
+        outcome,
+        SHADER_MODULE_CREATION_CODES,
+        {
+            operationName: 'ShaderModule creation',
+            phase: 'program',
+            subject: shaderModuleSubjectFrom(id, label),
+            serializeNativeError,
+        }
+    )
 }
 
 function normalizeShaderModuleDescriptor(

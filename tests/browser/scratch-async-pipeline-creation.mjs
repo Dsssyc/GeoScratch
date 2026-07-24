@@ -315,15 +315,17 @@ async function verifyPipelineTransactions(browser) {
     if (probe.samples.some(sample => !sample.creation.frozen)) failures.push('a valid pipeline creation report is mutable')
     if (probe.samples.some(sample => sample.compilation.errorCount !== 0)) failures.push('a valid pipeline retained compilation errors')
     if (probe.samples.some(sample => sample.cacheDependent !== true)) failures.push('cold/warm sample lacks cache-dependent label')
-    if (!isStructuredFailure(probe.invalidWgsl)) failures.push('invalid WGSL was not a ScratchDiagnosticError')
+    if (!isStructuredFailure(probe.invalidWgsl, 'supporting-object-failure')) {
+        failures.push('invalid WGSL was not a structured supporting-object failure')
+    }
     if (!outcomeCodes(probe.invalidWgsl).includes('SCRATCH_SHADER_MODULE_COMPILATION_FAILED')) {
         failures.push('invalid WGSL lacks structured compilation failure')
     }
     if ((probe.invalidWgsl.incident?.shaderModuleCompilationReport?.errorCount ?? 0) < 1) {
         failures.push('invalid WGSL lacks a populated compilation report')
     }
-    if (!isStructuredFailure(probe.invalidDescriptor)) {
-        failures.push('invalid pipeline descriptor was not a ScratchDiagnosticError')
+    if (!isStructuredFailure(probe.invalidDescriptor, 'pipeline-failure')) {
+        failures.push('invalid pipeline descriptor was not a structured pipeline failure')
     }
     if (!outcomeCodes(probe.invalidDescriptor).includes('SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED')) {
         failures.push('invalid descriptor lacks structured pipeline validation failure')
@@ -355,12 +357,12 @@ async function verifyPipelineTransactions(browser) {
     }
 }
 
-function isStructuredFailure(value) {
+function isStructuredFailure(value, expectedIncidentKind) {
 
     return value?.rejected === true &&
         value.scratchDiagnostic === true &&
         value.diagnostic?.severity === 'error' &&
-        value.incident?.kind === 'pipeline-failure'
+        value.incident?.kind === expectedIncidentKind
 }
 
 function outcomeCodes(value) {
