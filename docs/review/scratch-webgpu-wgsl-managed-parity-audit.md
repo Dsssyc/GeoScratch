@@ -8,9 +8,12 @@ Phase 6/7 fixed-convergence work is complete on
 remain unchanged. A separate current-state manifest classifies all 662 formal
 entries with explicit, fail-closed evidence rules: 591 WebGPU entries, 65
 previously scoped WGSL entries, and six formal WGSL `enable` extensions.
-The final browser gate found two invalid language-feature proof shaders, so
-the Goal terminates `issues-found` rather than claiming complete evidence
-closure.
+The original Phase 6/7 browser gate found two invalid language-feature proof
+shaders, so that Goal terminated `issues-found` rather than claiming complete
+evidence closure. The bounded pointer-proof follow-up recorded at the end of
+this audit closes both defects on base
+`8d7923840dac33e6e9d372450d8f3c98ef10e50c` and terminates `clean`; the
+historical Phase 6/7 result remains unchanged below.
 
 The final acceptance gate is bound to the clean correction commit containing
 this audit. Its result is `clean` only when every command in the final gate
@@ -516,3 +519,116 @@ unit assertions, and run one focused capability matrix plus the four existing
 business regressions. It must not refresh the specification, alter Scratch
 runtime/API code, or reopen the 662-entry classification unless a corrected
 native-valid proof reveals an actual managed-path defect.
+
+## Pointer Proof Follow-Up Closure
+
+### Scope And Checkpoints
+
+This follow-up is independent of the historical Phase 6/7 convergence cycle
+above. It started from exact base
+`8d7923840dac33e6e9d372450d8f3c98ef10e50c` on
+`socu/scratch-wgsl-pointer-proof-closure-v1`. It made no Runtime, API,
+manifest, vision, example, package, or specification-baseline change.
+
+| Checkpoint | Commit |
+| --- | --- |
+| Goal base | `8d7923840dac33e6e9d372450d8f3c98ef10e50c` |
+| Pointer proof implementation | `7e14ddcb92dc6777b9d7a63f065d2e951682e0dc` |
+| Review correction and final-gate target | `ab3e0db23b058ba925629bfdbf3f13bb439ee0b6` |
+
+The single source-shape RED first failed with both target facts false:
+`unrestrictedPointer: false` and `pointerComposite: false`. The current
+coverage audit independently failed only
+`unrestrictedPointerProofSourceIsConformant` and
+`pointerCompositeProofSourceIsConformant`; all 662 classifications remained
+608 managed, 54 not applicable, and zero unresolved.
+
+The implementation uses two native-valid WGSL CRD shapes:
+
+- `unrestricted_pointer_parameters` passes a
+  `ptr<storage, u32, read_write>` named `destination` into a function,
+  dereferences it, and writes `103u` through `&outputValues`;
+- `pointer_composite_access` takes a pointer to a complete local
+  `array<u32, 4>`, indexes the array through that pointer, and writes the
+  selected value `104u` to storage.
+
+The focused source-shape test and current coverage audit then passed before
+review.
+
+### Independent Review And Correction
+
+Fresh-context reviewer count: 1. The reviewer returned `issues-found` with
+three material test-authority defects:
+
+| Finding | Single correction |
+| --- | --- |
+| AST extraction ignored outer spreads and non-property members, so later runtime members could override the audited cases | Reject non-static `semanticCases` members and require each selected case to contain exactly static `source` and `expected` properties |
+| TypeScript parse diagnostics were ignored, so a malformed source file could still yield a partial audit AST | Reject every parse diagnostic before extracting proof facts |
+| Token regular expressions could accept feature operations present only in comments | Compare normalized source against canonical complete WGSL programs and add commented-out-operation negative fixtures |
+
+The correction also rejects extra properties such as `expectedPredicate`,
+outer spreads, malformed JavaScript, and direct constant writes disguised by
+commented feature operations. Correction count: 1. No second reviewer or
+second correction was used.
+
+### Browser Proof Result
+
+The headed matrix ran in Chrome `150.0.7871.184` with one
+`high-performance` adapter selection. The adapter reported vendor `apple`,
+architecture `metal-3`, subgroup range 32 to 32, and
+`isFallbackAdapter: false`. It advertised both
+`unrestricted_pointer_parameters` and `pointer_composite_access`.
+
+Both target proofs produced zero compilation messages, created compute
+pipelines, submitted with `observed-succeeded`, and completed GPU readback:
+
+| Proof | Readback | Terminal |
+| --- | ---: | --- |
+| `unrestricted_pointer_parameters` | 103 | clean |
+| `pointer_composite_access` | 104 | clean |
+
+The complete matrix result is 19 proofs, 16 executed and passed, three
+capability skips, and zero failures. The skips remain exact hardware/browser
+facts: missing adapter feature `subgroup-size-control`, and missing WGSL
+language features `texture_formats_tier1` and `buffer_view`. All executed
+proofs terminated cleanly with zero captured validation, OOM, or native
+failures; zero uncaptured errors; zero device losses; and no live resources,
+mappings, readbacks, pending operations, or pending native observations.
+
+### Final Focused Gate
+
+The final gate targeted clean commit
+`ab3e0db23b058ba925629bfdbf3f13bb439ee0b6`. Commands ran once, sequentially,
+in the required order. No environment retry was used.
+
+| Command | Result |
+| --- | --- |
+| `git diff --check` | passed |
+| `npm test` | passed: 1131 passing, 2 expected pending |
+| `npm run typecheck` | passed |
+| `npm run build` | passed for the package and all 17 examples |
+| `node tests/audits/scratch-webgpu-wgsl-managed-parity.mjs` | passed; frozen WebGPU/WGSL baselines unchanged |
+| `node tests/audits/scratch-webgpu-wgsl-current-coverage.mjs` | passed: 662 entries, 608 managed, 54 not applicable, 0 unresolved |
+| `node tests/browser/scratch-wgsl-capability-matrix.mjs` | passed: 16 pass, 3 capability skips, 0 failures |
+| `node tests/browser/scratch-flow-layer.mjs` | passed: interaction, resize, estuary boundary, failure attribution, and terminal disposal |
+| `node tests/browser/scratch-dem-layer.mjs` | passed: LOD/terrain execution, resize, failure attribution, and terminal disposal |
+| `node tests/browser/scratch-hello-gaw.mjs` | passed: 240 frames, GPU-only indirect execution, provenance, resize, and bounded diagnostics |
+| `node tests/browser/scratch-hello-gaw-init-failures.mjs` | passed: five attributed failure points and complete cleanup |
+
+The stress results listed under `Diagnostics And Bounds` remain inherited
+evidence from commit
+`6c0b20c569f546e2fdb6dfcf01d2977bd53534a1`. This bounded follow-up did not
+rerun them and does not claim new stress evidence.
+
+### Follow-Up Completion
+
+Follow-up result: `clean`.
+
+Both previously invalid proof programs now exercise their advertised WGSL
+features through native-valid operations and complete real Scratch
+ShaderModule compilation, Program/pipeline creation, submission, GPU
+readback, and clean disposal. The strengthened audit cannot be satisfied by
+malformed JavaScript, property overrides, extra predicates, or commented-out
+feature operations. The current 662-entry coverage facts remain unchanged,
+all required final gates pass, and no corrected native proof exposed a
+Scratch managed-path defect.
