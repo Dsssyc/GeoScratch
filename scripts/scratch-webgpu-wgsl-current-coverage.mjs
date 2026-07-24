@@ -3,11 +3,12 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import {
-    createWebGpuManifest,
-    createWgslManifest,
     webGpuManifestPath,
     wgslManifestPath,
 } from './scratch-webgpu-wgsl-parity-manifest.mjs'
+import {
+    normativeArtifactPaths,
+} from './refresh-scratch-webgpu-wgsl-baseline.mjs'
 
 const root = process.cwd()
 const manifestRoot = path.join(root, 'docs', 'review', 'manifests')
@@ -410,61 +411,73 @@ const evidence = Object.freeze([
 
 const evidenceById = new Map(evidence.map(record => [ record.id, record ]))
 
-const enableExtensionContracts = Object.freeze([
-    enableExtension('clip_distances', 'clip-distances'),
-    enableExtension('dual_source_blending', 'dual-source-blending'),
-    enableExtension('f16', 'shader-f16'),
-    enableExtension('primitive_index', 'primitive-index'),
-    enableExtension(
-        'subgroup_size_control',
-        'subgroup-size-control',
-        [ 'subgroups' ],
-        [
-            Object.freeze({
-                feature: 'subgroup-size-control',
-                requiredFeature: 'subgroups',
-            }),
-        ]
-    ),
-    enableExtension('subgroups', 'subgroups'),
-])
-
 export function createWgslEnableExtensionManifest() {
 
-    const entries = enableExtensionContracts.map(contract => ({
-        ...contract,
-        source: {
-            publication: currentSpecRefresh.wgsl.publication,
-            url: `${currentSpecRefresh.wgsl.url}#extension-${contract.extension}`,
-            anchor: `extension-${contract.extension}`,
-            gpuFeatureUrls: contract.requiredFeatures.map(feature => (
-                `${currentSpecRefresh.webgpu.url}#dom-gpufeaturename-${feature}`
-            )),
-        },
-        requiredLanguageFeatures: [],
-        current: {
-            status: 'managed',
-            classification: 'managed-semantic-equivalent',
-            rationale:
-                'Caller-authored WGSL enable directive plus explicit Runtime and Program GPU feature contracts preserve native semantics.',
-        },
-        expression: {
-            mode: 'caller-authored-wgsl',
-            directive: `enable ${contract.extension};`,
-            publicSymbols: evidenceById.get('wgsl-enable-contract').publicSymbols,
-        },
-        nativeLowering: {
-            kind: 'wgsl-compilation',
-            sourcePaths: evidenceById.get('wgsl-enable-contract').sourcePaths,
-            operations: evidenceById.get('wgsl-enable-contract').nativeOperations,
-        },
-        evidenceIds: [ 'wgsl-enable-contract' ],
-    }))
+    const wgsl = readJson(normativeArtifactPaths.wgsl)
+    const dependencies = readJson(normativeArtifactPaths.dependencies)
+    const entries = wgsl.entries
+        .filter(entry => entry.kind === 'enable-extension')
+        .map((entry) => {
+            const requirements = currentWgslRequirements(
+                entry,
+                dependencies
+            )
+            return {
+                id: entry.id,
+                extension: entry.name,
+                requiredFeatures: requirements.deviceFeatures,
+                dependencies: requirements.dependencies.filter(
+                    dependency =>
+                        typeof dependency.feature === 'string' &&
+                        typeof dependency.requiredFeature === 'string'
+                ).map(dependency => ({
+                    feature: dependency.feature,
+                    requiredFeature: dependency.requiredFeature,
+                })),
+                source: {
+                    publication: currentSpecRefresh.wgsl.publication,
+                    url:
+                        `${wgsl.source.publicationUrl}#` +
+                        entry.sourceAnchor,
+                    anchor: entry.sourceAnchor,
+                    gpuFeatureUrls: requirements.deviceFeatures.map(
+                        feature => (
+                            `${currentSpecRefresh.webgpu.url}` +
+                            `#dom-gpufeaturename-${feature}`
+                        )
+                    ),
+                },
+                requiredLanguageFeatures: [],
+                current: {
+                    status: 'managed',
+                    classification: 'managed-semantic-equivalent',
+                    rationale:
+                        'Caller-authored WGSL enable directive plus explicit Runtime and Program GPU feature contracts preserve native semantics.',
+                },
+                expression: {
+                    mode: 'caller-authored-wgsl',
+                    directive: `enable ${entry.name};`,
+                    publicSymbols:
+                        evidenceById.get('wgsl-enable-contract').publicSymbols,
+                },
+                nativeLowering: {
+                    kind: 'wgsl-compilation',
+                    sourcePaths:
+                        evidenceById.get('wgsl-enable-contract').sourcePaths,
+                    operations:
+                        evidenceById.get('wgsl-enable-contract').nativeOperations,
+                },
+                evidenceIds: [ 'wgsl-enable-contract' ],
+            }
+        })
 
     return {
-        schemaVersion: 1,
-        purpose: 'Current formal WGSL enable-extension to WebGPU feature contracts',
+        schemaVersion: 2,
+        purpose:
+            'Current formal WGSL enable-extension to WebGPU feature contracts derived from the normative inventory',
         baseline: currentSpecRefresh,
+        normativeManifest: relative(normativeArtifactPaths.wgsl),
+        dependencyManifest: relative(normativeArtifactPaths.dependencies),
         entries,
         summary: {
             entryCount: entries.length,
@@ -478,13 +491,34 @@ export function createWgslEnableExtensionManifest() {
 
 export function createCurrentCoverageManifest() {
 
-    const webgpu = createWebGpuManifest()
-    const wgsl = createWgslManifest()
-    const enableExtensions = createWgslEnableExtensionManifest()
+    const webgpu = readJson(normativeArtifactPaths.webgpu)
+    const wgsl = readJson(normativeArtifactPaths.wgsl)
+    const dependencies = readJson(normativeArtifactPaths.dependencies)
+    const frozenWebgpu = readJson(webGpuManifestPath)
+    const frozenWgsl = readJson(wgslManifestPath)
+    const historicalWebgpu = historicalEntries(frozenWebgpu)
+    const historicalWgsl = historicalEntries(frozenWgsl)
     const entries = [
-        ...webgpu.entries.map(entry => currentWebGpuEntry(webgpu, entry)),
-        ...wgsl.entries.map(entry => currentWgslEntry(wgsl, entry)),
-        ...enableExtensions.entries.map(currentEnableExtensionEntry),
+        ...webgpu.entries.map(entry => currentWebGpuEntry({
+            manifest: webgpu,
+            entry,
+            dependencies,
+            goalStart: historicalGoalStart(
+                entry,
+                historicalWebgpu,
+                'WebGPU'
+            ),
+        })),
+        ...wgsl.entries.map(entry => currentWgslEntry({
+            manifest: wgsl,
+            entry,
+            dependencies,
+            goalStart: historicalGoalStart(
+                entry,
+                historicalWgsl,
+                'WGSL'
+            ),
+        })),
     ].sort((left, right) => left.id.localeCompare(right.id))
     const byClassification = countBy(
         entries,
@@ -493,12 +527,19 @@ export function createCurrentCoverageManifest() {
     const byStatus = countBy(entries, entry => entry.current.status)
 
     return {
-        schemaVersion: 1,
-        purpose: 'Current managed WebGPU and WGSL expression and evidence closure',
+        schemaVersion: 2,
+        purpose:
+            'Current managed WebGPU and WGSL expression and evidence closure sourced from fixed normative inventories',
         baseline: currentSpecRefresh,
+        normativeManifests: {
+            webgpu: relative(normativeArtifactPaths.webgpu),
+            wgsl: relative(normativeArtifactPaths.wgsl),
+            dependencies: relative(normativeArtifactPaths.dependencies),
+            proposals: relative(normativeArtifactPaths.proposals),
+        },
         frozenManifests: {
-            webgpu: relative(webGpuManifestPath),
-            wgsl: relative(wgslManifestPath),
+            webgpuHistoricalBaseline: relative(webGpuManifestPath),
+            wgslHistoricalBaseline: relative(wgslManifestPath),
         },
         currentClassificationValues: [
             'managed-first-class',
@@ -511,9 +552,11 @@ export function createCurrentCoverageManifest() {
         entries,
         summary: {
             entryCount: entries.length,
-            webgpuEntryCount: webgpu.entries.length,
-            wgslBaselineEntryCount: wgsl.entries.length,
-            wgslEnableExtensionEntryCount: enableExtensions.entries.length,
+            webgpuNormativeEntryCount: webgpu.entries.length,
+            wgslNormativeEntryCount: wgsl.entries.length,
+            frozenWebgpuHistoricalEntryCount:
+                frozenWebgpu.entries.length,
+            frozenWgslHistoricalEntryCount: frozenWgsl.entries.length,
             unresolvedCount: byStatus.unresolved ?? 0,
             byStatus,
             byClassification,
@@ -521,92 +564,78 @@ export function createCurrentCoverageManifest() {
     }
 }
 
-function currentWebGpuEntry(manifest, entry) {
+function currentWebGpuEntry({
+    manifest,
+    entry,
+    dependencies,
+    goalStart,
+}) {
 
     const coverage = webGpuCoverage(entry)
     return currentEntry({
         domain: 'webgpu',
-        manifest,
         entry,
+        goalStart,
         coverage,
         source: {
-            publication: manifest.baseline.publication,
-            url: manifest.baseline.url,
-            anchor: entry.id,
-            declarationSignatureHashes: entry.signatureHashes,
+            publication: currentSpecRefresh.webgpu.publication,
+            url:
+                `${manifest.source.publicationUrl}#` +
+                entry.sourceAnchor,
+            anchor: entry.sourceAnchor,
+            normativeManifest: relative(normativeArtifactPaths.webgpu),
         },
-        requirements: webGpuRequirements(entry),
+        requirements: webGpuRequirements(entry, dependencies),
+        expressionMode:
+            entry.kind === 'includes' || entry.kind === 'collection'
+                ? 'scratch-semantic-contract'
+                : 'scratch-api',
+        nativeLoweringKind:
+            entry.kind === 'includes' || entry.kind === 'collection'
+                ? 'native-semantic-equivalence'
+                : 'native-call-or-descriptor',
     })
 }
 
-function currentWgslEntry(manifest, entry) {
+function currentWgslEntry({
+    manifest,
+    entry,
+    dependencies,
+    goalStart,
+}) {
 
-    const evidenceId = wgslEvidenceId(entry)
-    const languageFeature = entry.kind === 'language-extension'
-        ? entry.id.slice('language-extension.'.length)
-        : undefined
-    const requiresF16 = entry.id.includes('<f16>') || entry.id === 'host-type.scalar.f16'
+    const coverage = wgslCoverage(entry)
     return currentEntry({
         domain: 'wgsl',
-        manifest,
         entry,
-        coverage: {
-            ruleId: `wgsl:${entry.kind}`,
-            evidenceIds: [ evidenceId ],
-        },
+        goalStart,
+        coverage,
         source: {
-            publication: manifest.baseline.publication,
-            url: wgslSourceUrl(entry),
-            anchor: entry.id,
+            publication: currentSpecRefresh.wgsl.publication,
+            url:
+                `${manifest.source.publicationUrl}#` +
+                entry.sourceAnchor,
+            anchor: entry.sourceAnchor,
+            normativeManifest: relative(normativeArtifactPaths.wgsl),
         },
-        requirements: {
-            deviceFeatures: requiresF16 ? [ 'shader-f16' ] : [],
-            languageFeatures: languageFeature === undefined ? [] : [ languageFeature ],
-            limits: [],
-            dependencies: [],
-            conditions: [],
-            policy:
-                languageFeature === undefined
-                    ? 'Layout-derived requirements are explicit Program facts.'
-                    : 'Language extensions are checked against Runtime.wgslLanguageFeatures.',
-        },
+        requirements: currentWgslRequirements(entry, dependencies),
+        expressionMode:
+            coverage.classification === 'managed-first-class'
+                ? 'scratch-api-and-caller-authored-wgsl'
+                : 'caller-authored-wgsl',
+        nativeLoweringKind: 'wgsl-compilation',
     })
-}
-
-function currentEnableExtensionEntry(entry) {
-
-    return {
-        id: entry.id,
-        domain: 'wgsl',
-        kind: 'enable-extension',
-        source: entry.source,
-        goalStart: {
-            status: 'omitted-from-frozen-baseline',
-            rationale: 'The formal enable-extension row was missing from the frozen 65-entry WGSL manifest.',
-        },
-        current: entry.current,
-        expression: entry.expression,
-        nativeLowering: entry.nativeLowering,
-        coverageRule: 'wgsl:enable-extension',
-        requirements: {
-            deviceFeatures: entry.requiredFeatures,
-            languageFeatures: entry.requiredLanguageFeatures,
-            limits: [],
-            dependencies: entry.dependencies,
-            conditions: [],
-            policy: 'Scratch never parses WGSL or injects required device features.',
-        },
-        evidenceIds: entry.evidenceIds,
-    }
 }
 
 function currentEntry({
     domain,
-    manifest,
     entry,
+    goalStart,
     coverage,
     source,
     requirements,
+    expressionMode,
+    nativeLoweringKind,
 }) {
 
     const evidenceRecords = coverage.evidenceIds.map((evidenceId) => {
@@ -619,23 +648,16 @@ function currentEntry({
     if (evidenceRecords.length === 0) {
         throw new Error(`Coverage rule ${coverage.ruleId} has no evidence`)
     }
-    const goalStart = entry.classification
-    const notApplicable = goalStart.status === 'not-applicable'
-    const classification = notApplicable
+    const classification = coverage.classification
+    const notApplicable = classification === 'not-applicable'
+    const unresolved = classification === 'unresolved'
+    const status = notApplicable
         ? 'not-applicable'
-        : goalStart.status === 'known-target-gap'
-            ? 'managed-first-class'
-            : goalStart.status
-    const status = notApplicable ? 'not-applicable' : 'managed'
-    const callerWgsl = domain === 'wgsl' && (
-        entry.kind === 'language-extension' ||
-        entry.kind === 'shader-semantic-domain'
-    )
-    const rationale = goalStart.status === 'known-target-gap'
-        ? `Resolved after the frozen baseline: ${evidenceRecords
-            .map(record => record.claim)
-            .join(' ')}`
-        : goalStart.rationale
+        : unresolved
+            ? 'unresolved'
+            : 'managed'
+    const rationale = coverage.rationale ??
+        evidenceRecords.map(record => record.claim).join(' ')
     const publicSymbols = uniqueSorted(
         evidenceRecords.flatMap(record => record.publicSymbols)
     )
@@ -659,22 +681,19 @@ function currentEntry({
             rationale,
         },
         expression: {
-            mode: notApplicable
-                ? 'not-applicable'
-                : callerWgsl
-                    ? 'caller-authored-wgsl'
-                    : 'scratch-api',
+            mode:
+                notApplicable || unresolved
+                    ? status
+                    : expressionMode,
             publicSymbols: notApplicable ? [] : publicSymbols,
             contract: notApplicable
                 ? rationale
                 : evidenceRecords.map(record => record.claim).join(' '),
         },
         nativeLowering: {
-            kind: notApplicable
+            kind: notApplicable || unresolved
                 ? 'none'
-                : callerWgsl
-                    ? 'wgsl-compilation'
-                    : 'native-call-or-descriptor',
+                : nativeLoweringKind,
             sourcePaths: notApplicable ? [] : sourcePaths,
             operations: notApplicable ? [] : nativeOperations,
         },
@@ -683,24 +702,88 @@ function currentEntry({
     }
 }
 
+function historicalEntries(manifest) {
+
+    return new Map(manifest.entries.map(entry => [ entry.id, entry ]))
+}
+
+function historicalGoalStart(entry, historical, domain) {
+
+    const exact = historical.get(entry.id)
+    if (exact !== undefined) return exact.classification
+
+    const declarationMatch = entry.id.match(/^interface\.([A-Za-z_]\w*)$/)
+    if (declarationMatch !== null) {
+        const alias = historical.get(`type.${declarationMatch[1]}`)
+        if (alias !== undefined) return alias.classification
+    }
+    return {
+        status: 'not-in-historical-baseline',
+        rationale:
+            `${domain} normative unit was not represented as an individual entry in the frozen historical manifest.`,
+    }
+}
+
 function webGpuCoverage(entry) {
 
-    if (entry.classification.status === 'not-applicable') {
-        return coverageRule('webgpu:not-applicable', 'webidl-non-capability')
+    if (entry.kind === 'includes') {
+        const includeRules = {
+            GPUObjectBase: [
+                'webgpu:include:object-lifecycle',
+                'webgpu-resource-lifetime',
+            ],
+            GPUCommandsMixin: [
+                'webgpu:include:debug-commands',
+                'webgpu-render-bundle-debug',
+            ],
+            GPUDebugCommandsMixin: [
+                'webgpu:include:debug-commands',
+                'webgpu-render-bundle-debug',
+            ],
+            GPUBindingCommandsMixin: [
+                'webgpu:include:binding-commands',
+                [ 'webgpu-bindings', 'wgsl-immediate-data' ],
+            ],
+            GPUPipelineBase: [
+                'webgpu:include:pipeline-base',
+                'webgpu-pipelines',
+            ],
+            GPURenderCommandsMixin: [
+                'webgpu:include:render-commands',
+                [ 'webgpu-pass-state', 'webgpu-pipelines' ],
+            ],
+        }[entry.member]
+        if (includeRules !== undefined) {
+            return coverageRule(
+                includeRules[0],
+                includeRules[1],
+                'managed-semantic-equivalent'
+            )
+        }
+        if (entry.member === 'NavigatorGPU') {
+            return coverageRule(
+                'webgpu:include:navigator-integration',
+                'webidl-non-capability',
+                'not-applicable',
+                'Navigator and WorkerNavigator mixin composition is host DOM integration; ScratchRuntime owns adapter acquisition without exposing DOM composition as a workload capability.'
+            )
+        }
+        throw new Error(`Unresolved WebGPU include rule for ${entry.id}`)
     }
-    const familyEvidence = {
-        'external-texture': 'webgpu-external-texture',
-        'render-bundle-debug': 'webgpu-render-bundle-debug',
-        'shader-module-pipeline': 'webgpu-shader-program',
-        'optional-fragment': 'webgpu-pipelines',
-        'surface-texture-lease': 'webgpu-surface-presentation',
-        'runtime-capabilities': 'webgpu-runtime-capabilities',
-        'texture-transfer': 'webgpu-copy-upload',
-    }[entry.classification.family]
-    if (familyEvidence !== undefined) {
+    if (entry.kind === 'collection') {
+        const collectionEvidence = {
+            GPUSupportedFeatures: 'webgpu-runtime-capabilities',
+            WGSLLanguageFeatures: 'webgpu-runtime-capabilities',
+        }[entry.owner]
+        if (collectionEvidence === undefined) {
+            throw new Error(
+                `Unresolved WebGPU collection rule for ${entry.id}`
+            )
+        }
         return coverageRule(
-            `webgpu:frozen-family:${entry.classification.family}`,
-            familyEvidence
+            'webgpu:capability-collection',
+            collectionEvidence,
+            'managed-semantic-equivalent'
         )
     }
 
@@ -741,6 +824,12 @@ function webGpuCoverage(entry) {
     }
     if (owner === 'GPURenderCommandsMixin') {
         return coverageRule('webgpu:render-command-method', 'webgpu-pass-state')
+    }
+    if (owner === 'GPUCommandsMixin' || owner === 'GPUDebugCommandsMixin') {
+        return coverageRule(
+            'webgpu:debug-command-method',
+            'webgpu-render-bundle-debug'
+        )
     }
     if (/GPU(Validation|Internal|OutOfMemory)Error|GPUUncapturedErrorEvent/.test(owner)) {
         return coverageRule('webgpu:error-diagnostics', 'webgpu-diagnostics')
@@ -846,7 +935,9 @@ function webGpuCoverage(entry) {
         'GPUError.message': 'webgpu-diagnostics',
         'interface.GPUFragmentState': 'webgpu-pipelines',
         'GPUFragmentState.targets': 'webgpu-pipelines',
+        'interface.GPUQueueDescriptor': 'webgpu-runtime-capabilities',
         'type.GPUAddressMode': 'webgpu-sampler',
+        'type.GPUAutoLayoutMode': 'webgpu-pipelines',
         'type.GPUColor': 'webgpu-pass-state',
         'type.GPUErrorFilter': 'webgpu-diagnostics',
         'type.GPUFilterMode': 'webgpu-sampler',
@@ -872,14 +963,333 @@ function webGpuCoverage(entry) {
     throw new Error(`Unresolved WebGPU coverage rule for ${entry.id}`)
 }
 
-function webGpuRequirements(entry) {
+function wgslCoverage(entry) {
+
+    if (entry.kind === 'enable-extension') {
+        return coverageRule(
+            'wgsl:enable-extension',
+            [
+                'wgsl-enable-contract',
+                'webgpu-runtime-capabilities',
+                'webgpu-shader-program',
+            ],
+            'managed-semantic-equivalent'
+        )
+    }
+    if (entry.kind === 'language-extension') {
+        if (entry.name === 'immediate_address_space') {
+            return coverageRule(
+                'wgsl:language-extension:immediate-data',
+                [
+                    'wgsl-language-contract',
+                    'wgsl-immediate-data',
+                    'webgpu-runtime-capabilities',
+                ],
+                'managed-first-class'
+            )
+        }
+        return coverageRule(
+            'wgsl:language-extension',
+            [
+                'wgsl-language-contract',
+                'webgpu-runtime-capabilities',
+                'webgpu-shader-program',
+            ],
+            'managed-semantic-equivalent'
+        )
+    }
+
+    const kindRules = {
+        'access-mode': [
+            'wgsl:access-mode',
+            [
+                'wgsl-caller-authored-source',
+                'wgsl-recursive-layout',
+                'webgpu-bindings',
+            ],
+            'managed-first-class',
+        ],
+        'address-space': [
+            entry.name === 'immediate'
+                ? 'wgsl:address-space:immediate'
+                : 'wgsl:address-space',
+            entry.name === 'immediate'
+                ? [
+                    'wgsl-caller-authored-source',
+                    'wgsl-recursive-layout',
+                    'wgsl-immediate-data',
+                ]
+                : [
+                    'wgsl-caller-authored-source',
+                    'wgsl-recursive-layout',
+                    'webgpu-bindings',
+                ],
+            'managed-first-class',
+        ],
+        attribute: [
+            'wgsl:attribute',
+            [
+                'wgsl-caller-authored-source',
+                'webgpu-shader-program',
+                'webgpu-bindings',
+                'webgpu-pipelines',
+                'wgsl-recursive-layout',
+            ],
+            'managed-semantic-equivalent',
+        ],
+        'built-in-function': [
+            'wgsl:built-in-function',
+            [
+                'wgsl-caller-authored-source',
+                'webgpu-shader-program',
+            ],
+            'managed-semantic-equivalent',
+        ],
+        'built-in-value': [
+            'wgsl:built-in-value',
+            [
+                'wgsl-caller-authored-source',
+                'webgpu-shader-program',
+                'webgpu-pipelines',
+            ],
+            'managed-semantic-equivalent',
+        ],
+        'diagnostic-rule': [
+            'wgsl:diagnostic-rule',
+            [
+                'wgsl-caller-authored-source',
+                'webgpu-shader-program',
+                'webgpu-diagnostics',
+            ],
+            'managed-first-class',
+        ],
+        'grammar-production': [
+            'wgsl:grammar-production',
+            [
+                'wgsl-caller-authored-source',
+                'webgpu-shader-program',
+            ],
+            'managed-semantic-equivalent',
+        ],
+        'interpolation-sampling': [
+            'wgsl:interpolation-sampling',
+            [
+                'wgsl-caller-authored-source',
+                'webgpu-shader-program',
+                'webgpu-pipelines',
+            ],
+            'managed-first-class',
+        ],
+        'interpolation-type': [
+            'wgsl:interpolation-type',
+            [
+                'wgsl-caller-authored-source',
+                'webgpu-shader-program',
+                'webgpu-pipelines',
+            ],
+            'managed-first-class',
+        ],
+        'texel-format': [
+            'wgsl:texel-format',
+            [
+                'wgsl-caller-authored-source',
+                'webgpu-shader-program',
+                'webgpu-bindings',
+                'webgpu-texture-resource',
+            ],
+            'managed-first-class',
+        ],
+        'wgsl-limit': [
+            'wgsl:limit',
+            [
+                'wgsl-caller-authored-source',
+                'webgpu-runtime-capabilities',
+                'webgpu-shader-program',
+            ],
+            'managed-first-class',
+        ],
+    }[entry.kind]
+    if (kindRules !== undefined) {
+        return coverageRule(
+            kindRules[0],
+            kindRules[1],
+            kindRules[2]
+        )
+    }
+    if (entry.kind !== 'semantic-section') {
+        throw new Error(`Unresolved WGSL kind for ${entry.id}`)
+    }
+
+    const familyRules = {
+        'access-modes': [
+            [ 'wgsl-caller-authored-source', 'wgsl-recursive-layout', 'webgpu-bindings' ],
+            'managed-first-class',
+        ],
+        'address-spaces': [
+            [ 'wgsl-caller-authored-source', 'wgsl-recursive-layout', 'webgpu-bindings' ],
+            'managed-first-class',
+        ],
+        attributes: [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program', 'webgpu-bindings', 'webgpu-pipelines' ],
+            'managed-semantic-equivalent',
+        ],
+        'built-in-functions': [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program' ],
+            'managed-semantic-equivalent',
+        ],
+        'built-in-values': [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program', 'webgpu-pipelines' ],
+            'managed-semantic-equivalent',
+        ],
+        'capability-rules': [
+            [ 'wgsl-caller-authored-source', 'webgpu-runtime-capabilities', 'webgpu-shader-program' ],
+            'managed-first-class',
+        ],
+        'control-flow': [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program' ],
+            'managed-semantic-equivalent',
+        ],
+        declarations: [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program' ],
+            'managed-semantic-equivalent',
+        ],
+        diagnostics: [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program', 'webgpu-diagnostics' ],
+            'managed-first-class',
+        ],
+        directives: [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program' ],
+            'managed-semantic-equivalent',
+        ],
+        'enable-extensions': [
+            [ 'wgsl-enable-contract', 'webgpu-runtime-capabilities', 'webgpu-shader-program' ],
+            'managed-semantic-equivalent',
+        ],
+        'entry-points': [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program', 'webgpu-pipelines', 'webgpu-bindings' ],
+            'managed-first-class',
+        ],
+        interpolation: [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program', 'webgpu-pipelines' ],
+            'managed-first-class',
+        ],
+        'language-extensions': [
+            [ 'wgsl-language-contract', 'webgpu-runtime-capabilities', 'webgpu-shader-program' ],
+            'managed-semantic-equivalent',
+        ],
+        'language-semantics': [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program' ],
+            'managed-semantic-equivalent',
+        ],
+        layouts: [
+            [ 'wgsl-caller-authored-source', 'wgsl-recursive-layout', 'webgpu-bindings' ],
+            'managed-first-class',
+        ],
+        limits: [
+            [ 'wgsl-caller-authored-source', 'webgpu-runtime-capabilities', 'webgpu-shader-program' ],
+            'managed-first-class',
+        ],
+        'shader-interface': [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program', 'webgpu-pipelines', 'webgpu-bindings' ],
+            'managed-first-class',
+        ],
+        'textures-formats': [
+            [ 'wgsl-caller-authored-source', 'webgpu-shader-program', 'webgpu-bindings', 'webgpu-texture-resource' ],
+            'managed-first-class',
+        ],
+        types: [
+            [ 'wgsl-caller-authored-source', 'wgsl-recursive-layout', 'webgpu-shader-program', 'webgpu-bindings' ],
+            'managed-first-class',
+        ],
+    }[entry.family]
+    if (familyRules === undefined) {
+        throw new Error(
+            `Unresolved WGSL semantic family ${entry.family} for ${entry.id}`
+        )
+    }
+    return coverageRule(
+        `wgsl:semantic-section:${entry.family}`,
+        familyRules[0],
+        familyRules[1]
+    )
+}
+
+function currentWgslRequirements(entry, dependencyManifest) {
+
+    const source = entry.requirements
+    if (source === null || typeof source !== 'object') {
+        throw new Error(`Missing WGSL requirements for ${entry.id}`)
+    }
+    const enableExtensions = [ ...(source.enableExtensions ?? []) ]
+    const deviceFeatures = [ ...(source.deviceFeatures ?? []) ]
+    const languageFeatures = [ ...(source.languageFeatures ?? []) ]
+    const limits = [ ...(source.limits ?? []) ]
+    const dependencyFacts = [ ...(source.dependencies ?? []) ]
+    const conditions = [ ...(source.conditions ?? []) ]
+
+    for (const dependency of dependencyManifest.entries) {
+        if (
+            dependency.kind === 'caller-declared-companion' &&
+            enableExtensions.includes(dependency.extension)
+        ) {
+            enableExtensions.push(dependency.requiredExtension)
+            deviceFeatures.push(
+                dependency.feature,
+                dependency.requiredFeature
+            )
+            dependencyFacts.push({
+                kind: dependency.kind,
+                feature: dependency.feature,
+                requiredFeature: dependency.requiredFeature,
+                extension: dependency.extension,
+                requiredExtension: dependency.requiredExtension,
+            })
+        } else if (
+            dependency.kind === 'language-to-device-prerequisite' &&
+            languageFeatures.includes(dependency.languageFeature)
+        ) {
+            deviceFeatures.push(dependency.requiredFeature)
+            dependencyFacts.push({
+                kind: dependency.kind,
+                languageFeature: dependency.languageFeature,
+                requiredFeature: dependency.requiredFeature,
+            })
+        } else if (
+            dependency.kind === 'language-to-enable-prerequisite' &&
+            languageFeatures.includes(dependency.languageFeature)
+        ) {
+            enableExtensions.push(
+                dependency.requiredEnableExtension
+            )
+            dependencyFacts.push({
+                kind: dependency.kind,
+                languageFeature: dependency.languageFeature,
+                requiredEnableExtension:
+                    dependency.requiredEnableExtension,
+            })
+        }
+    }
+
+    return {
+        enableExtensions: uniqueSorted(enableExtensions),
+        deviceFeatures: uniqueSorted(deviceFeatures),
+        languageFeatures: uniqueSorted(languageFeatures),
+        limits: uniqueSorted(limits),
+        dependencies: uniqueObjects(dependencyFacts),
+        conditions: uniqueObjects(conditions),
+        policy:
+            'Caller-authored WGSL is preserved verbatim; enable extensions, language features, device features, limits, and companion requirements remain explicit Program and Runtime facts.',
+    }
+}
+
+function webGpuRequirements(entry, dependencyManifest) {
 
     const deviceFeatures = []
     const languageFeatures = []
     const limits = entry.owner === 'GPUSupportedLimits'
         ? [ entry.member ]
         : []
-    const dependencies = []
+    const dependencyFacts = []
     const conditions = []
     const id = entry.id
 
@@ -951,14 +1361,16 @@ function webGpuRequirements(entry) {
         ))
     }
     if (entryCarriesTextureFormat(entry)) {
-        conditions.push(...textureFormatRequirementConditions())
+        conditions.push(
+            ...textureFormatRequirementConditions(dependencyManifest)
+        )
     }
 
     return {
         deviceFeatures: uniqueSorted(deviceFeatures),
         languageFeatures: uniqueSorted(languageFeatures),
         limits: uniqueSorted(limits),
-        dependencies,
+        dependencies: uniqueObjects(dependencyFacts),
         conditions,
         policy:
             conditions.length === 0
@@ -979,81 +1391,42 @@ function entryCarriesTextureFormat(entry) {
     )
 }
 
-function textureFormatRequirementConditions() {
+function textureFormatRequirementConditions(dependencyManifest) {
 
-    return [
-        requirementCondition(
-            'the selected format is BC-compressed',
-            [ 'texture-compression-bc' ]
-        ),
-        requirementCondition(
-            'the selected format is ETC2/EAC-compressed',
-            [ 'texture-compression-etc2' ]
-        ),
-        requirementCondition(
-            'the selected format is ASTC-compressed',
-            [ 'texture-compression-astc' ]
-        ),
-        requirementCondition(
-            'a BC-compressed format is used by a sliced 3D texture',
-            [ 'texture-compression-bc', 'texture-compression-bc-sliced-3d' ]
-        ),
-        requirementCondition(
-            'an ASTC-compressed format is used by a sliced 3D texture',
-            [ 'texture-compression-astc', 'texture-compression-astc-sliced-3d' ]
-        ),
-        requirementCondition(
-            'the selected format is depth32float-stencil8',
-            [ 'depth32float-stencil8' ]
-        ),
-        requirementCondition(
-            'bgra8unorm is used with STORAGE_BINDING',
-            [ 'bgra8unorm-storage' ]
-        ),
-        requirementCondition(
-            'an r32float, rg32float, or rgba32float texture is filterable',
-            [ 'float32-filterable' ]
-        ),
-        requirementCondition(
-            'an r32float, rg32float, or rgba32float color target is blended',
-            [ 'float32-blendable' ]
-        ),
-        requirementCondition(
-            'rg11b10ufloat is used as a render attachment',
-            [],
-            [],
-            [],
-            [],
-            [
-                [ 'rg11b10ufloat-renderable' ],
-                [ 'texture-formats-tier1' ],
-                [ 'texture-formats-tier2' ],
-            ]
-        ),
-        requirementCondition(
-            'a texture-formats-tier1 storage/render format is selected',
-            [],
-            [],
-            [],
-            [],
-            [
-                [ 'texture-formats-tier1' ],
-                [ 'texture-formats-tier2' ],
-            ]
-        ),
-        requirementCondition(
-            'a texture-formats-tier2-only format or capability is selected',
-            [ 'texture-formats-tier2' ],
-            [],
-            [],
-            [
-                {
-                    feature: 'texture-formats-tier2',
-                    requiredFeature: 'texture-formats-tier1',
-                },
-            ]
-        ),
-    ]
+    const supportPrerequisites = new Map(
+        dependencyManifest.entries
+            .filter(entry =>
+                entry.kind === 'adapter-support-prerequisite'
+            )
+            .map(entry => [
+                entry.feature,
+                entry.requiredSupportedFeature,
+            ])
+    )
+    return dependencyManifest.entries
+        .filter(entry => entry.kind === 'format-specific-condition')
+        .flatMap(entry => entry.requiredFeatures.map((feature) => {
+            const prerequisite = supportPrerequisites.get(feature)
+            const conditionDependencies = prerequisite === undefined
+                ? []
+                : [
+                    {
+                        feature,
+                        requiredSupportedFeature: prerequisite,
+                        kind: 'adapter-support-prerequisite',
+                    },
+                ]
+            return requirementCondition(
+                `the selected format is ${entry.format} and the capability gated by ${feature} is used`,
+                prerequisite === undefined
+                    ? [ feature ]
+                    : [ prerequisite, feature ],
+                [],
+                [],
+                conditionDependencies
+            )
+        }))
+        .sort((left, right) => left.when.localeCompare(right.when))
 }
 
 function requirementCondition(
@@ -1077,13 +1450,22 @@ function requirementCondition(
     }
 }
 
-function coverageRule(ruleId, evidenceIds) {
+function coverageRule(
+    ruleId,
+    evidenceIds,
+    classification = 'managed-first-class',
+    rationale
+) {
 
     return {
         ruleId,
-        evidenceIds: Array.isArray(evidenceIds)
-            ? evidenceIds
-            : [ evidenceIds ],
+        evidenceIds: uniqueSorted(
+            Array.isArray(evidenceIds)
+                ? evidenceIds
+                : [ evidenceIds ]
+        ),
+        classification,
+        ...(rationale === undefined ? {} : { rationale }),
     }
 }
 
@@ -1092,42 +1474,14 @@ function uniqueSorted(values) {
     return [ ...new Set(values) ].sort()
 }
 
-function wgslEvidenceId(entry) {
+function uniqueObjects(values) {
 
-    if (entry.classification.status === 'not-applicable') return 'webidl-non-capability'
-    if (entry.classification.family === 'wgsl-layout') return 'wgsl-recursive-layout'
-    if (entry.id === 'language-extension.immediate_address_space') {
-        return 'wgsl-immediate-data'
-    }
-    if (entry.kind === 'language-extension') return 'wgsl-language-contract'
-    if (entry.kind === 'shader-semantic-domain') {
-        if (entry.id === 'shader-domain.external-textures') return 'webgpu-external-texture'
-        if (entry.id === 'shader-domain.textures-samplers') return 'webgpu-bindings'
-        return 'wgsl-caller-authored-source'
-    }
-    return 'wgsl-recursive-layout'
-}
-
-function wgslSourceUrl(entry) {
-
-    if (entry.kind === 'language-extension') {
-        const name = entry.id.slice('language-extension.'.length)
-        return `${currentSpecRefresh.wgsl.url}#language_extension-${name}`
-    }
-    if (entry.kind === 'shader-semantic-domain') {
-        return `${currentSpecRefresh.wgsl.url}#language-concepts`
-    }
-    return `${currentSpecRefresh.wgsl.url}#memory-layouts`
-}
-
-function enableExtension(extension, feature, dependencies = [], dependencyFacts = []) {
-
-    return Object.freeze({
-        id: `enable-extension.${extension}`,
-        extension,
-        requiredFeatures: Object.freeze([ feature, ...dependencies ].sort()),
-        dependencies: Object.freeze(dependencyFacts),
-    })
+    const byJson = new Map(
+        values.map(value => [ JSON.stringify(value), value ])
+    )
+    return [ ...byJson ]
+        .sort(([ left ], [ right ]) => left.localeCompare(right))
+        .map(([, value ]) => value)
 }
 
 function evidenceRecord(
@@ -1164,6 +1518,11 @@ function countBy(values, select) {
 function relative(absolute) {
 
     return path.relative(root, absolute).split(path.sep).join('/')
+}
+
+function readJson(file) {
+
+    return JSON.parse(fs.readFileSync(file, 'utf8'))
 }
 
 function writeManifest(targetPath, manifest) {

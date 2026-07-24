@@ -449,9 +449,27 @@ export function extractWgslNormativeEntries(source) {
     const unresolved = []
     const headings = extractHeadings(source)
     const requirementReferences = []
+    const builtInFunctionHeadings = namedHeadingsWithinSection(
+        headings,
+        'builtin-functions'
+    )
+    const builtInFunctionAnchors = new Set(
+        builtInFunctionHeadings.map(heading => heading.anchor)
+    )
+    if (builtInFunctionHeadings.length === 0) {
+        unresolved.push({
+            reason: 'missing-built-in-function-headings',
+            sourceAnchor: 'builtin-functions',
+        })
+    }
 
     for (const heading of headings) {
-        if (isExplicitNamedUnitHeading(heading)) continue
+        if (
+            isExplicitNamedUnitHeading(heading) ||
+            builtInFunctionAnchors.has(heading.anchor)
+        ) {
+            continue
+        }
 
         addWgslEntry(entries, {
             id: `semantic-section.${heading.anchor}`,
@@ -702,15 +720,9 @@ export function extractWgslNormativeEntries(source) {
         ))
     }
 
-    for (const heading of headings) {
+    for (const heading of builtInFunctionHeadings) {
         const builtInName = backtickName(heading.title)
-        if (
-            builtInName === undefined ||
-            !heading.anchor.toLowerCase().includes('builtin') ||
-            heading.anchor.toLowerCase().includes('builtin-value')
-        ) {
-            continue
-        }
+        if (builtInName === undefined) continue
         addWgslEntry(entries, namedWgslEntry(
             'built-in-function',
             'built-in-function',
@@ -726,6 +738,7 @@ export function extractWgslNormativeEntries(source) {
         headings,
         requirementReferences
     )
+    applyBuiltInValueRequirements(entries, source, unresolved)
     applyImplicitNamedRequirements(entries)
 
     const result = {
@@ -979,28 +992,77 @@ export function extractCapabilityDependencyEntries({
         })
     }
 
-    for (const row of webGpuSource.split(/<tr\b[^>]*>/i).slice(1)) {
-        const format = row.match(
-            /GPUTextureFormat\/(?:"|')?([A-Za-z0-9_-]+)/
+    for (const table of webGpuSource.matchAll(
+        /<table\b[^>]*>[\s\S]*?<\/table>/gi
+    )) {
+        if (!table[0].includes('GPUTextureFormat/')) continue
+        for (const row of splitHtmlRows(table[0])) {
+            const format = row.match(
+                /GPUTextureFormat\/(?:"|')?([A-Za-z0-9_-]+)/
+            )
+            if (format === null) continue
+            const requiredFeatures = uniqueSorted(
+                [ ...row.matchAll(
+                    /GPUFeatureName\/"([^"]+)"/g
+                ) ].map(match => match[1])
+            )
+            if (requiredFeatures.length === 0) continue
+            addCapability(entries, {
+                id: `format-condition.${format[1]}`,
+                kind: 'format-specific-condition',
+                format: format[1],
+                requiredFeatures,
+                callerPreflight: false,
+                source: {
+                    domain: 'webgpu',
+                    anchor: 'texture-format-caps',
+                },
+            })
+        }
+    }
+
+    const featureSections = [
+        ...webGpuSource.matchAll(
+            /<h3\b[^>]*data-dfn-for=GPUFeatureName[^>]*>[\s\S]*?`"([^"]+)"`[\s\S]*?<\/h3>/gi
+        ),
+    ]
+    for (let index = 0; index < featureSections.length; index += 1) {
+        const heading = featureSections[index]
+        const feature = heading[1]
+        const headingAnchor = heading[0].match(
+            /<h3\b[^>]*\bid=(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i
         )
-        if (format === null) continue
-        const requiredFeatures = uniqueSorted(
-            [ ...row.matchAll(
-                /GPUFeatureName\/"([^"]+)"/g
+        const start = heading.index + heading[0].length
+        const followingSource = webGpuSource.slice(start)
+        const followingHeading = followingSource.match(
+            /(?:^|\n)(?:#{1,3}\s|<h[1-3]\b)/i
+        )
+        const end = followingHeading === null
+            ? webGpuSource.length
+            : start + followingHeading.index
+        const section = webGpuSource.slice(start, end)
+        const formats = uniqueSorted(
+            [ ...section.matchAll(
+                /GPUTextureFormat\/(?:"|')?([A-Za-z0-9_-]+)/g
             ) ].map(match => match[1])
         )
-        if (requiredFeatures.length === 0) continue
-        addCapability(entries, {
-            id: `format-condition.${format[1]}`,
-            kind: 'format-specific-condition',
-            format: format[1],
-            requiredFeatures,
-            callerPreflight: false,
-            source: {
-                domain: 'webgpu',
-                anchor: 'texture-format-caps',
-            },
-        })
+        for (const format of formats) {
+            addCapability(entries, {
+                id: `format-condition.${format}`,
+                kind: 'format-specific-condition',
+                format,
+                requiredFeatures: [ feature ],
+                callerPreflight: false,
+                source: {
+                    domain: 'webgpu',
+                    anchor:
+                        headingAnchor?.[1] ??
+                        headingAnchor?.[2] ??
+                        headingAnchor?.[3] ??
+                        feature,
+                },
+            })
+        }
     }
 
     return {
@@ -1311,9 +1373,18 @@ function namedWgslEntry(
 function applyReferencedRequirements(entries, headings, references) {
 
     for (const reference of references) {
-        const directAnchors = [
-            ...reference.row.matchAll(/\[\[#([^|\]]+)/g),
-        ].map(match => match[1])
+        const links = [
+            ...reference.row.matchAll(
+                /\[\[#([^|\]]+)\|([^\]]+)\]\]/g
+            ),
+        ].map(match => ({
+            anchor: match[1],
+            label: stripMarkup(match[2]),
+        }))
+        const directAnchors = links.map(link => link.anchor)
+        const expandableAnchors = links
+            .filter(link => /\bbuilt-in functions?\b/i.test(link.label))
+            .map(link => link.anchor)
         const namedIds = semanticReferenceIds(reference.row)
 
         for (const entry of entries.values()) {
@@ -1322,12 +1393,11 @@ function applyReferencedRequirements(entries, headings, references) {
                 entry.sourceAnchors !== undefined &&
                     directAnchors.some(anchor => entry.sourceAnchors.has(anchor)) ||
                 namedIds.has(entry.id) ||
-                directAnchors.some(anchor =>
+                expandableAnchors.some(anchor =>
                     sourceIndexIsWithinSection(
                         entry.sourceIndex,
                         anchor,
-                        headings,
-                        reference.row
+                        headings
                     )
                 )
             ) {
@@ -1336,6 +1406,82 @@ function applyReferencedRequirements(entries, headings, references) {
                     reference.requirements
                 )
             }
+        }
+    }
+}
+
+function applyBuiltInValueRequirements(entries, source, unresolved) {
+
+    const table = extractCaptionTable(
+        source,
+        'Built-in input and output values'
+    )
+    if (table === undefined) {
+        if (source.includes('{#builtin-inputs-outputs}')) {
+            unresolved.push({
+                reason: 'missing-built-in-value-capability-table',
+                sourceAnchor: 'builtin-inputs-outputs',
+            })
+        }
+        return
+    }
+
+    for (const row of splitHtmlRows(table.source)) {
+        const names = uniqueSorted(
+            [ ...row.matchAll(
+                /\[=built-in values\/([A-Za-z0-9_]+)=\]/g
+            ) ].map(match => match[1])
+        )
+        if (names.length === 0) continue
+
+        const enableExtensions = uniqueSorted(
+            [ ...row.matchAll(
+                /\[=extension\/([A-Za-z0-9_]+)=\]/g
+            ) ].map(match => match[1])
+        )
+        const languageFeatures = uniqueSorted(
+            [ ...row.matchAll(
+                /\[=language_extension\/([A-Za-z0-9_]+)=\]/g
+            ) ].map(match => match[1])
+        )
+        const requirements = emptyRequirements()
+        requirements.enableExtensions = enableExtensions
+        requirements.languageFeatures = languageFeatures
+
+        for (const extension of enableExtensions) {
+            const enableEntry = entries.get(
+                `enable-extension.${extension}`
+            )
+            if (enableEntry === undefined) {
+                unresolved.push({
+                    reason: 'missing-enable-extension-capability',
+                    extension,
+                    sourceAnchor: 'builtin-inputs-outputs',
+                })
+                continue
+            }
+            requirements.deviceFeatures.push(
+                ...enableEntry.requirements.deviceFeatures
+            )
+            requirements.dependencies.push(
+                ...enableEntry.requirements.dependencies
+            )
+        }
+
+        for (const name of names) {
+            const entry = entries.get(`built-in-value.${name}`)
+            if (entry === undefined) {
+                unresolved.push({
+                    reason: 'missing-built-in-value-entry',
+                    name,
+                    sourceAnchor: 'builtin-inputs-outputs',
+                })
+                continue
+            }
+            entry.requirements = mergeRequirements(
+                entry.requirements,
+                requirements
+            )
         }
     }
 }
@@ -1459,6 +1605,22 @@ function extractHeadings(source) {
         })
     }
     return headings
+}
+
+function namedHeadingsWithinSection(headings, sectionAnchor) {
+
+    const sectionIndex = headings.findIndex(
+        heading => heading.anchor === sectionAnchor
+    )
+    if (sectionIndex === -1) return []
+    const section = headings[sectionIndex]
+    const following = headings.slice(sectionIndex + 1)
+    const endIndex = following.findIndex(
+        heading => heading.level <= section.level
+    )
+    return following
+        .slice(0, endIndex === -1 ? undefined : endIndex)
+        .filter(heading => backtickName(heading.title) !== undefined)
 }
 
 function isExplicitNamedUnitHeading(heading) {

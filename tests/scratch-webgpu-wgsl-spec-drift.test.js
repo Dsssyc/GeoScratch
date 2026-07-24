@@ -151,6 +151,11 @@ Enabling {{GPUFeatureName/"feature-parent"}} at device creation will enable
     <td>{{GPUTextureFormat/fixture-format}}
     <td>If {{GPUFeatureName/"feature-base"}} is enabled
 </table>
+
+<h3 id=unrelated-feature data-dfn-type=enum-value data-dfn-for=GPUFeatureName>
+\`"unrelated-feature"\`
+</h3>
+{{GPUFeatureName/"unrelated-feature"}}
 `
 
 const capabilityWgslFixture = `
@@ -190,6 +195,31 @@ const proposalFixture = `
 ### Status: Obsolete
 <!-- SECTION status-obsolete -->
 * [retired](retired.md)
+`
+
+const wgslBuiltInRequirementFixture = `
+### Enable Extensions ### {#enable-extensions-sec}
+<table class='data'>
+  <caption>Enable-extensions</caption>
+  <tr><td><dfn noexport dfn-for="extension">\`fixture_group\`</dfn>
+      <td>[[WebGPU#fixture-group|"fixture-group"]]
+      <td>Enables [[#builtin-inputs-outputs|fixture built-in values]]
+          and [[#fixture-group-builtins|fixture built-in functions]].
+</table>
+
+#### Built-in Inputs and Outputs #### {#builtin-inputs-outputs}
+<dfn noexport dfn-for="built-in values">ordinary_value</dfn>
+<dfn noexport dfn-for="built-in values">group_value</dfn>
+<table class='data'>
+  <caption>Built-in input and output values</caption>
+  <tr><td>[=built-in values/ordinary_value=]<td>
+  <tr><td>[=built-in values/group_value=]
+      <td>[=extension/fixture_group=]
+</table>
+
+# Built-in Functions # {#builtin-functions}
+#### Fixture Group Built-ins #### {#fixture-group-builtins}
+##### \`fixtureGroup\` ##### {#fixtureGroup-builtin}
 `
 
 describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
@@ -359,6 +389,28 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
             entries: result.entries,
             unresolved: result.unresolved,
         })).to.throw(/address-space/)
+    })
+
+    it('attributes a built-in value feature from its normative row only', () => {
+
+        const result = extractWgslNormativeEntries(
+            wgslBuiltInRequirementFixture
+        )
+        const entries = new Map(
+            result.entries.map(entry => [ entry.id, entry ])
+        )
+
+        expect(entries.get('built-in-value.ordinary_value')
+            .requirements.deviceFeatures).to.deep.equal([])
+        expect(entries.get('built-in-value.group_value')
+            .requirements).to.deep.include({
+            enableExtensions: [ 'fixture_group' ],
+            deviceFeatures: [ 'fixture-group' ],
+        })
+        expect(entries.get('built-in-function.fixtureGroup')
+            .requirements.deviceFeatures).to.deep.equal([
+            'fixture-group',
+        ])
     })
 
     it('extracts proposal states without treating proposals as normative', () => {
@@ -608,19 +660,25 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
 
         expect(wgsl.status).to.equal('complete')
         expect(wgsl.summary).to.deep.include({
-            entryCount: 663,
+            entryCount: 662,
             enableExtensionCount: 6,
             languageExtensionCount: 12,
             unresolvedCount: 0,
         })
-        expect(wgsl.summary.byKind['built-in-function']).to.equal(141)
+        expect(wgsl.summary.byKind['built-in-function']).to.equal(167)
+        expect(wgsl.entries.some(
+            entry => entry.id === 'built-in-function.textureSample'
+        )).to.equal(true)
+        expect(wgsl.entries.some(
+            entry => entry.id === 'built-in-function.builtin'
+        )).to.equal(false)
         expect(wgsl.entries.some(
             entry => entry.id === 'shader-domain.functions-builtins'
         )).to.equal(false)
 
         expect(dependencies.status).to.equal('complete')
         expect(dependencies.summary).to.deep.include({
-            entryCount: 106,
+            entryCount: 155,
             callerCompanionPreflightCount: 1,
             unresolvedCount: 0,
         })

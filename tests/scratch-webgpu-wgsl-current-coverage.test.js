@@ -108,19 +108,19 @@ describe('Scratch current WebGPU and WGSL coverage manifests', () => {
         )).to.equal(true)
     })
 
-    it('closes all 662 current entries with resolvable bounded evidence', () => {
+    it('closes all 1,244 normative entries with resolvable bounded evidence', () => {
 
         const manifest = createCurrentCoverageManifest()
         const evidenceIds = new Set(manifest.evidence.map(evidence => evidence.id))
 
         expect(manifest.summary).to.deep.include({
-            entryCount: 662,
-            webgpuEntryCount: 591,
-            wgslBaselineEntryCount: 65,
-            wgslEnableExtensionEntryCount: 6,
+            entryCount: 1244,
+            webgpuNormativeEntryCount: 582,
+            wgslNormativeEntryCount: 662,
             unresolvedCount: 0,
         })
-        expect(new Set(manifest.entries.map(entry => entry.id)).size).to.equal(662)
+        expect(new Set(manifest.entries.map(entry => entry.id)).size)
+            .to.equal(1244)
         expect(manifest.entries.every(entry =>
             entry.evidenceIds.length > 0 &&
             entry.evidenceIds.every(id => evidenceIds.has(id))
@@ -139,6 +139,38 @@ describe('Scratch current WebGPU and WGSL coverage manifests', () => {
                 symbol === 'ScratchRuntime.device' ||
                 symbol === 'ScratchRuntime.queue'
             )
+        )).to.equal(false)
+    })
+
+    it('uses normative inventories rather than frozen WGSL domains as authority', () => {
+
+        const manifest = createCurrentCoverageManifest()
+        const source = fs.readFileSync(path.join(
+            process.cwd(),
+            'scripts',
+            'scratch-webgpu-wgsl-current-coverage.mjs'
+        ), 'utf8')
+
+        expect(manifest.normativeManifests).to.have.keys([
+            'webgpu',
+            'wgsl',
+            'dependencies',
+            'proposals',
+        ])
+        expect(manifest.frozenManifests).to.have.keys([
+            'webgpuHistoricalBaseline',
+            'wgslHistoricalBaseline',
+        ])
+        expect(source).not.to.match(/\bcreateWgslManifest\s*\(/)
+        expect(source).not.to.match(/\benableExtensionContracts\b/)
+        expect(source).not.to.include('shader-semantic-domain')
+        expect(manifest.entries.filter(entry => entry.domain === 'wgsl'))
+            .to.have.length(662)
+        expect(manifest.entries.some(
+            entry => entry.id === 'built-in-function.textureSample'
+        )).to.equal(true)
+        expect(manifest.entries.some(
+            entry => entry.id === 'shader-domain.functions-builtins'
         )).to.equal(false)
     })
 
