@@ -194,6 +194,28 @@ const direct = runtime.createReadback({ source: resultRegion })
 const directBytes = await direct.toBytes()
 ```
 
+The same operation accepts a texture subresource. `toBytes()` removes native
+row padding, while `map()` exposes padded staging without another host copy:
+
+```js
+const pixels = runtime.createReadback({
+    source: {
+        resource: colorTexture,
+        mipLevel: 0,
+        size: { width: 64, height: 64 },
+        aspect: 'all',
+    },
+})
+const lease = await pixels.map()
+try {
+    const mapped = new Uint8Array(lease.view)
+    const { stagingBytesPerRow } = lease.rowLayout
+    // Read mapped rows while the lease is active.
+} finally {
+    lease.dispose()
+}
+```
+
 An ordered readback command owns one acknowledged reusable staging slot, so its
 factory is Promise-only while `submit()` remains synchronous:
 
@@ -215,7 +237,8 @@ completion, and lifecycle until that completion settles; it does not cover
 mapping or host copy. Direct readback rejects current `indeterminate` source
 content before staging allocation.
 Runtime options `maxPendingOperations` and `maxStagingBytes` bound current
-readback ownership. Mapping validation is reported structurally as
+readback ownership, including padded texture staging and active mapped leases.
+Mapping validation is reported structurally as
 `SCRATCH_READBACK_MAPPING_VALIDATION_FAILED`; native message prose is evidence,
 not the classifier.
 

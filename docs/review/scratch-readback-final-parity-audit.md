@@ -75,7 +75,7 @@ ADR-034 明确替代的行为不伪装成“原样兼容”。
 | N4 | Mapping retains fixed-order scope, Promise, device-loss, lifecycle, mapped-range, host-copy, and cleanup outcomes; queue completion records enclosing-family incidents separately. | Complete | fake settlement and queue-completion tests |
 | N5 | Pending and staging budgets fail before their governed native side effects and emit budget provenance. | Complete | runtime facts and staging tests |
 | N6 | Current ownership facts and historical evidence have independent bounded memory models. | Complete | 20,000 direct / 5,000 ordered stress |
-| N7 | Texture readback, mapped leases, generic encoder/submit scopes, and raw-device tracking remain unimplemented. | Explicit non-goal | ADR-034 and main audit |
+| N7 | Texture readback and mapped leases were outside ADR-034; ADR-052 now implements them without changing the historical ADR-034 verdict. Generic raw-device tracking remains outside that scope. | Historical non-goal, later completed in part | ADR-034, ADR-052, and managed parity audit |
 
 ## Executable Audit / 可执行审计
 

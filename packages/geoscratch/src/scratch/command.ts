@@ -455,6 +455,7 @@ export type TextureUploadCommandDescriptor = {
     size: TextureUploadSize
     origin?: TextureUploadOrigin
     mipLevel?: number
+    aspect?: GPUTextureAspect
 }
 
 export type ExternalImageUploadSourceOrigin = {
@@ -587,6 +588,7 @@ type TextureUploadDiagnosticInput = {
     origin?: unknown
     size?: unknown
     mipLevel?: unknown
+    aspect?: unknown
     reason: string
 }
 
@@ -3553,10 +3555,12 @@ function recordReadbackCommandClaimRelease(
             kind: 'readback',
             readbackId: state.operationId,
             path: 'ordered',
+            sourceKind: 'buffer',
             sourceResourceId: state.sourceResourceId,
             allocationVersion: state.allocationVersion,
             contentEpoch: state.contentEpoch,
             byteLength: command.source.region.size,
+            stagingByteLength: command.source.region.size,
             commandId: command.id,
             submissionId: state.submissionId,
             stepIndex: state.stepIndex,
@@ -3594,10 +3598,12 @@ function readbackCommandClaimFact(claim: ReadbackCommandClaim) {
         path: 'ordered' as const,
         state: 'scheduled',
         retain: command.retain,
+        sourceKind: 'buffer' as const,
         sourceResourceId: state.sourceResourceId,
         allocationVersion: state.allocationVersion,
         contentEpoch: state.contentEpoch,
         byteLength: command.source.region.size,
+        stagingByteLength: command.source.region.size,
         stagingBytes: command.source.region.size,
         retainedHostBytes: 0,
         isMapping: false,
@@ -3943,6 +3949,7 @@ export interface TextureUploadCommand {
     readonly origin: Readonly<{ x: number, y: number, z: number }>
     readonly size: Readonly<{ width: number, height: number, depthOrArrayLayers: number }>
     readonly mipLevel: number
+    readonly aspect: GPUTextureAspect
 }
 
 export class TextureUploadCommand {
@@ -3990,8 +3997,21 @@ export class TextureUploadCommand {
         mutable.data = descriptor.data
         mutable.origin = normalizeTextureUploadOrigin(runtime, descriptor.origin)
         mutable.mipLevel = normalizeTextureUploadMipLevel(runtime, target, descriptor.mipLevel ?? 0)
-        mutable.size = normalizeTextureUploadSize(runtime, target, descriptor.size, this.origin)
-        mutable.layout = normalizeTextureUploadLayout(runtime, target, descriptor.layout, this.size)
+        mutable.size = normalizeTextureUploadSize(
+            runtime,
+            target,
+            descriptor.size,
+            this.origin,
+            this.mipLevel
+        )
+        mutable.aspect = normalizeTextureUploadAspect(runtime, target, descriptor.aspect ?? 'all')
+        mutable.layout = normalizeTextureUploadLayout(
+            runtime,
+            target,
+            descriptor.layout,
+            this.size,
+            this.aspect
+        )
 
         validateTextureUploadRange(this)
         Object.freeze(this.layout)
@@ -4000,7 +4020,7 @@ export class TextureUploadCommand {
         commandBrands.set(this, 'texture-upload')
         lockCommandProperties(this, [
             'runtime', 'id', 'label', 'commandKind', 'uploadKind', 'target', 'data',
-            'layout', 'origin', 'size', 'mipLevel',
+            'layout', 'origin', 'size', 'mipLevel', 'aspect',
         ])
         Object.preventExtensions(this)
     }
@@ -4348,6 +4368,7 @@ export function writeUploadCommandQueueAction(
                     texture: command.target.gpuTexture,
                     mipLevel: command.mipLevel,
                     origin: command.origin,
+                    aspect: command.aspect,
                 },
                 command.data,
                 command.layout,
@@ -7350,11 +7371,33 @@ function normalizeTextureUploadMipLevel(runtime: ScratchRuntime, target: Texture
     return mipLevel
 }
 
+function normalizeTextureUploadAspect(
+    runtime: ScratchRuntime,
+    target: TextureResource,
+    aspect: GPUTextureAspect
+): GPUTextureAspect {
+
+    if (
+        ![ 'all', 'depth-only', 'stencil-only' ].includes(aspect) ||
+        textureFormatCopyFootprint(target.format, aspect, 'destination') === undefined
+    ) {
+        throwTextureUploadDiagnostic({
+            runtime,
+            target,
+            aspect,
+            reason: 'aspect',
+        })
+    }
+
+    return aspect
+}
+
 function normalizeTextureUploadSize(
     runtime: ScratchRuntime,
     target: TextureResource,
     size: TextureUploadSize,
-    origin: { x: number, y: number, z: number }
+    origin: { x: number, y: number, z: number },
+    mipLevel: number
 ): { width: number, height: number, depthOrArrayLayers: number } {
 
     let width
@@ -7379,10 +7422,11 @@ function normalizeTextureUploadSize(
         }
     }
 
+    const targetExtent = textureMipExtent(target, mipLevel)
     if (
-        origin.x + width > target.width ||
-        origin.y + height > target.height ||
-        origin.z + depthOrArrayLayers > target.depthOrArrayLayers
+        origin.x + width > targetExtent.width ||
+        origin.y + height > targetExtent.height ||
+        origin.z + depthOrArrayLayers > targetExtent.depthOrArrayLayers
     ) {
         throwTextureUploadDiagnostic({
             runtime,
@@ -7400,27 +7444,42 @@ function normalizeTextureUploadLayout(
     runtime: ScratchRuntime,
     target: TextureResource,
     layout: TextureUploadLayout = {},
-    size: { width: number, height: number, depthOrArrayLayers: number }
+    size: { width: number, height: number, depthOrArrayLayers: number },
+    aspect: GPUTextureAspect
 ): Required<TextureUploadLayout> {
 
     if (!layout || typeof layout !== 'object') {
         throwTextureUploadDiagnostic({ runtime, target, layout, size, reason: 'layout' })
     }
 
-    const bytesPerPixel = getTextureBytesPerPixel(target.format)
-    if (bytesPerPixel === undefined) {
+    const footprint = textureFormatCopyFootprint(target.format, aspect, 'destination')
+    if (footprint === undefined) {
         throwTextureUploadDiagnostic({
             runtime,
             target,
             layout,
             size,
+            aspect,
             reason: 'format',
         })
     }
 
+    const widthInBlocks = size.width / footprint.blockWidth
+    const heightInBlocks = size.height / footprint.blockHeight
+    if (!Number.isInteger(widthInBlocks) || !Number.isInteger(heightInBlocks)) {
+        throwTextureUploadDiagnostic({
+            runtime,
+            target,
+            layout,
+            size,
+            aspect,
+            reason: 'blockAlignment',
+        })
+    }
+
     const offset = layout.offset ?? 0
-    const bytesPerRow = layout.bytesPerRow ?? size.width * bytesPerPixel
-    const rowsPerImage = layout.rowsPerImage ?? size.height
+    const bytesPerRow = layout.bytesPerRow ?? widthInBlocks * footprint.bytesPerBlock
+    const rowsPerImage = layout.rowsPerImage ?? heightInBlocks
 
     for (const [ key, value ] of Object.entries({ offset, bytesPerRow, rowsPerImage })) {
         if (
@@ -7438,12 +7497,16 @@ function normalizeTextureUploadLayout(
         }
     }
 
-    if (bytesPerRow < size.width * bytesPerPixel || rowsPerImage < size.height) {
+    if (
+        bytesPerRow < widthInBlocks * footprint.bytesPerBlock ||
+        rowsPerImage < heightInBlocks
+    ) {
         throwTextureUploadDiagnostic({
             runtime,
             target,
             layout,
             size,
+            aspect,
             reason: 'layout',
         })
     }
@@ -7462,13 +7525,33 @@ function validateTextureUploadRange(command: TextureUploadCommand) {
             origin: command.origin,
             size: command.size,
             mipLevel: command.mipLevel,
+            aspect: command.aspect,
             reason: 'mipLevel',
         })
     }
 
     const targetExtent = textureMipExtent(command.target, command.mipLevel)
+    const blockSize = textureFormatBlockSize(command.target.format)
+    const footprint = textureFormatCopyFootprint(
+        command.target.format,
+        command.aspect,
+        'destination'
+    )
+    const blockAligned =
+        command.origin.x % blockSize.width === 0 &&
+        command.origin.y % blockSize.height === 0 &&
+        command.size.width % blockSize.width === 0 &&
+        command.size.height % blockSize.height === 0
+    const physicalSubresourceCovered = !textureFormatIsDepthStencil(command.target.format) || (
+        command.size.width === targetExtent.width &&
+        command.size.height === targetExtent.height &&
+        command.size.depthOrArrayLayers === targetExtent.depthOrArrayLayers
+    )
     if (
         command.target.sampleCount !== 1 ||
+        footprint === undefined ||
+        !blockAligned ||
+        !physicalSubresourceCovered ||
         command.origin.x + command.size.width > targetExtent.width ||
         command.origin.y + command.size.height > targetExtent.height ||
         command.origin.z + command.size.depthOrArrayLayers > targetExtent.depthOrArrayLayers
@@ -7481,7 +7564,16 @@ function validateTextureUploadRange(command: TextureUploadCommand) {
             origin: command.origin,
             size: command.size,
             mipLevel: command.mipLevel,
-            reason: command.target.sampleCount !== 1 ? 'sampleCount' : 'range',
+            aspect: command.aspect,
+            reason: command.target.sampleCount !== 1
+                ? 'sampleCount'
+                : footprint === undefined
+                    ? 'aspect'
+                    : !blockAligned
+                        ? 'blockAlignment'
+                        : !physicalSubresourceCovered
+                            ? 'physicalSubresource'
+                            : 'range',
         })
     }
 
@@ -7493,27 +7585,30 @@ function validateTextureUploadRange(command: TextureUploadCommand) {
             data: command.data,
             layout: command.layout,
             size: command.size,
+            aspect: command.aspect,
             reason: 'data',
         })
     }
 
-    const bytesPerPixel = getTextureBytesPerPixel(command.target.format)
-    if (bytesPerPixel === undefined) {
+    if (footprint === undefined) {
         throwTextureUploadDiagnostic({
             runtime: command.runtime,
             target: command.target,
             data: command.data,
             layout: command.layout,
             size: command.size,
+            aspect: command.aspect,
             reason: 'format',
         })
     }
-    const rowBytes = command.size.width * bytesPerPixel
+    const widthInBlocks = command.size.width / footprint.blockWidth
+    const heightInBlocks = command.size.height / footprint.blockHeight
+    const rowBytes = widthInBlocks * footprint.bytesPerBlock
     const imageBytes = command.layout.bytesPerRow * command.layout.rowsPerImage
     const requiredBytes =
         command.layout.offset +
         imageBytes * (command.size.depthOrArrayLayers - 1) +
-        command.layout.bytesPerRow * (command.size.height - 1) +
+        command.layout.bytesPerRow * (heightInBlocks - 1) +
         rowBytes
 
     if (requiredBytes > dataByteLength) {
@@ -7523,26 +7618,10 @@ function validateTextureUploadRange(command: TextureUploadCommand) {
             data: command.data,
             layout: command.layout,
             size: command.size,
+            aspect: command.aspect,
             reason: 'range',
         })
     }
-}
-
-function getTextureBytesPerPixel(format: GPUTextureFormat): number | undefined {
-
-    if ([
-        'rgba8unorm',
-        'rgba8unorm-srgb',
-        'rgba8snorm',
-        'rgba8uint',
-        'rgba8sint',
-        'bgra8unorm',
-        'bgra8unorm-srgb',
-    ].includes(format)) {
-        return 4
-    }
-
-    return undefined
 }
 
 function throwTextureUploadDiagnostic({
@@ -7553,6 +7632,7 @@ function throwTextureUploadDiagnostic({
     origin,
     size,
     mipLevel,
+    aspect,
     reason,
 }: TextureUploadDiagnosticInput): never {
 
@@ -7572,6 +7652,7 @@ function throwTextureUploadDiagnostic({
             layout: '{ offset?: GPUSize64, bytesPerRow?: GPUSize32, rowsPerImage?: GPUSize32 }',
             origin: '{ x?: number, y?: number, z?: number }',
             size: '{ width: number, height: number, depthOrArrayLayers?: number }',
+            aspect: "'all', 'depth-only', or 'stencil-only' compatible with the texture format",
         },
         actual: {
             reason,
@@ -7581,6 +7662,7 @@ function throwTextureUploadDiagnostic({
             origin,
             size,
             mipLevel,
+            aspect,
         },
     })
 }

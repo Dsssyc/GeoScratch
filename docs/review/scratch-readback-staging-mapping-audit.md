@@ -53,11 +53,20 @@ does not await `after.done`. The public entrypoints expose no staging handle.
   outside the tested adapter remain unknown. / physical residency、driver
   padding、free VRAM 与未测试 adapter 行为保持 unknown。
 
-## Explicit Follow-Up Boundary / 明确后续边界
+## Historical Follow-Up Boundary / 历史后续边界
 
-Texture readback, mapped-view leases, stale-operation warning/eviction,
-sampler/query/bind-group creation provenance, general encoder/finalization/
-queue-submit scopes, raw `runtime.device` tracking, legacy example migration,
-and an automatic render graph are not implemented by ADR-034. GPU-native
-texture-to-buffer and buffer-to-texture copies remain explicit `CopyCommand`
-directions; no CPU roundtrip is presented as their replacement.
+At the ADR-034 checkpoint, texture readback and mapped-view leases were not
+implemented. ADR-052 now closes those two items with direct native
+`copyTextureToBuffer()`, padded row facts, tightly packed owned bytes, and
+bounded `MappedReadbackLease` ownership. The same staging allocator and mapping
+transaction remain authoritative; no CPU transfer replaces any GPU-native copy
+direction.
+
+在 ADR-034 checkpoint，texture readback 与 mapped-view lease 尚未实现。ADR-052
+现已通过 direct native `copyTextureToBuffer()`、padded row facts、tight owned
+bytes 与有界 `MappedReadbackLease` ownership 完成这两项。原 staging allocator
+与 mapping transaction 继续作为唯一 authority；任何 GPU-native copy direction
+都没有被 CPU transfer 替代。
+
+Stale-operation warning/eviction, raw `runtime.device` tracking, and an
+automatic render graph remain outside ADR-052.

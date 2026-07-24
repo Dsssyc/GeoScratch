@@ -8,7 +8,6 @@ import {
 } from './native-allocation.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
-import type { BufferResource } from './buffer.js'
 import type {
     GpuAttributionConfidence,
     GpuNativeErrorCategory,
@@ -20,6 +19,7 @@ import type {
 import type { ScopedNativeAllocationFailureKind, ScopedNativeAllocationOutcome } from './native-allocation.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { ScratchPendingGpuOperation, ScratchReadbackStagingReservation } from './runtime-diagnostics.js'
+import type { Resource } from './resource.js'
 
 const BUFFER_USAGE_MAP_READ = 0x1
 const BUFFER_USAGE_COPY_DST = 0x8
@@ -32,7 +32,7 @@ export type ReadbackStagingTarget =
 export type ReadbackStagingAllocationInput = Readonly<{
     runtime: ScratchRuntime
     target: ReadbackStagingTarget
-    source: BufferResource
+    source: Resource
     byteLength: number
     label?: string
 }>
@@ -328,7 +328,7 @@ function stagingTargetId(target: ReadbackStagingTarget): string {
 function throwReadbackStagingBudgetFailure(
     runtime: ScratchRuntime,
     operation: ScratchPendingGpuOperation,
-    source: BufferResource,
+    source: Resource,
     cause: unknown
 ): never {
 
@@ -367,7 +367,7 @@ function throwReadbackStagingBudgetFailure(
 function throwReadbackStagingAllocationFailure(
     runtime: ScratchRuntime,
     operation: ScratchPendingGpuOperation,
-    source: BufferResource,
+    source: Resource,
     outcome: Extract<ScopedNativeAllocationOutcome<GPUBuffer>, { ok: false }>
 ): never {
 

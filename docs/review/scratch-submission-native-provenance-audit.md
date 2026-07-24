@@ -1,8 +1,8 @@
 # Scratch Submission Native Provenance Audit
 
 Date: 2026-07-24
-Decisions: ADR-035, ADR-046, ADR-049, ADR-050, ADR-051
-Status: Current through Scratch RenderBundle and public debug commands
+Decisions: ADR-035, ADR-046, ADR-049, ADR-050, ADR-051, ADR-052
+Status: Current through direct texture readback and mapped readback leases
 
 ## Audit Boundary
 
@@ -41,66 +41,67 @@ native method:
 | N2 | `packages/geoscratch/src/scratch/binding.ts:1172` | `GPUDevice.createBindGroup()` | Selected attempt-local binding command. | Observed command |
 | N3 | `packages/geoscratch/src/scratch/binding.ts:1310` | `GPUTexture.createView()` | Persistent BindSet preparation transaction. | Independently acknowledged |
 | N4 | `packages/geoscratch/src/scratch/binding.ts:1347` | `GPUDevice.createBindGroup()` | Persistent BindSet preparation transaction. | Independently acknowledged |
-| N5 | `packages/geoscratch/src/scratch/command.ts:887` | render `setPipeline()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
-| N6 | `packages/geoscratch/src/scratch/command.ts:889` | `setViewport()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
-| N7 | `packages/geoscratch/src/scratch/command.ts:897` | `setScissorRect()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
-| N8 | `packages/geoscratch/src/scratch/command.ts:903` | `setBlendConstant()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
-| N9 | `packages/geoscratch/src/scratch/command.ts:904` | `setStencilReference()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
-| N10 | `packages/geoscratch/src/scratch/command.ts:932` | bundle `setPipeline()` | Persistent bundle transaction or attempt-local submission. | Acknowledged or observed |
-| N11 | `packages/geoscratch/src/scratch/command.ts:944` | `setVertexBuffer()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
-| N12 | `packages/geoscratch/src/scratch/command.ts:952` | `setIndexBuffer()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
-| N13 | `packages/geoscratch/src/scratch/command.ts:968` | `drawIndexed()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
-| N14 | `packages/geoscratch/src/scratch/command.ts:976` | `draw()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
-| N15 | `packages/geoscratch/src/scratch/command.ts:983` | `drawIndirect()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
-| N16 | `packages/geoscratch/src/scratch/command.ts:985` | `drawIndexedIndirect()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
-| N17 | `packages/geoscratch/src/scratch/command.ts:1131` | `beginOcclusionQuery()` | Render pass-command location. | Observed submission; manual encode deferred |
-| N18 | `packages/geoscratch/src/scratch/command.ts:1255` | `endOcclusionQuery()` | Render pass-command location. | Observed submission; manual encode deferred |
-| N19 | `packages/geoscratch/src/scratch/command.ts:1437` | compute `setPipeline()` | Dispatch pass-command lowering. | Observed submission; manual encode deferred |
-| N20 | `packages/geoscratch/src/scratch/command.ts:1448` | `dispatchWorkgroupsIndirect()` | Dispatch pass-command lowering. | Observed submission; manual encode deferred |
-| N21 | `packages/geoscratch/src/scratch/command.ts:1453` | `dispatchWorkgroups()` | Dispatch pass-command lowering. | Observed submission; manual encode deferred |
-| N22 | `packages/geoscratch/src/scratch/command.ts:1965` | `setImmediates()` | Selected Draw, Dispatch, or BundleDraw snapshot. | Acknowledged or observed |
-| N23 | `packages/geoscratch/src/scratch/command.ts:2685` | `clearBuffer()` | Standalone submission command. | Observed submission; manual encode deferred |
-| N24 | `packages/geoscratch/src/scratch/command.ts:2952` | `copyBufferToBuffer()` | Standalone copy command. | Observed submission; manual encode deferred |
-| N25 | `packages/geoscratch/src/scratch/command.ts:2973` | `copyTextureToTexture()` | Standalone copy command. | Observed submission; manual encode deferred |
-| N26 | `packages/geoscratch/src/scratch/command.ts:3005` | `copyBufferToTexture()` | Standalone copy command. | Observed submission; manual encode deferred |
-| N27 | `packages/geoscratch/src/scratch/command.ts:3036` | `copyTextureToBuffer()` | Standalone copy command. | Observed submission; manual encode deferred |
-| N28 | `packages/geoscratch/src/scratch/command.ts:3358` | ordered-readback `copyBufferToBuffer()` | Ordered readback command location. | Observed submission |
-| N29 | `packages/geoscratch/src/scratch/command.ts:3918` | `resolveQuerySet()` | Resolve command location. | Observed submission |
-| N30 | `packages/geoscratch/src/scratch/command.ts:4339` | `GPUQueue.writeBuffer()` | Shared upload lowering. | Observed submission; direct execute deferred |
-| N31 | `packages/geoscratch/src/scratch/command.ts:4346` | `GPUQueue.writeTexture()` | Shared upload lowering. | Observed submission; direct execute deferred |
-| N32 | `packages/geoscratch/src/scratch/command.ts:4802` | dynamic-offset `setBindGroup()` | Selected Draw/Dispatch/BundleDraw command. | Acknowledged or observed; manual encode deferred |
-| N33 | `packages/geoscratch/src/scratch/command.ts:4810` | static `setBindGroup()` | Selected Draw/Dispatch/BundleDraw command. | Acknowledged or observed; manual encode deferred |
-| N34 | `packages/geoscratch/src/scratch/command.ts:7943` | `copyExternalImageToTexture()` | Shared external-image upload lowering. | Observed submission; direct execute deferred |
+| N5 | `packages/geoscratch/src/scratch/command.ts:889` | render `setPipeline()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
+| N6 | `packages/geoscratch/src/scratch/command.ts:891` | `setViewport()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
+| N7 | `packages/geoscratch/src/scratch/command.ts:899` | `setScissorRect()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
+| N8 | `packages/geoscratch/src/scratch/command.ts:905` | `setBlendConstant()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
+| N9 | `packages/geoscratch/src/scratch/command.ts:906` | `setStencilReference()` | Draw pass-command lowering. | Observed submission; manual encode deferred |
+| N10 | `packages/geoscratch/src/scratch/command.ts:934` | bundle `setPipeline()` | Persistent bundle transaction or attempt-local submission. | Acknowledged or observed |
+| N11 | `packages/geoscratch/src/scratch/command.ts:946` | `setVertexBuffer()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
+| N12 | `packages/geoscratch/src/scratch/command.ts:954` | `setIndexBuffer()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
+| N13 | `packages/geoscratch/src/scratch/command.ts:970` | `drawIndexed()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
+| N14 | `packages/geoscratch/src/scratch/command.ts:978` | `draw()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
+| N15 | `packages/geoscratch/src/scratch/command.ts:985` | `drawIndirect()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
+| N16 | `packages/geoscratch/src/scratch/command.ts:987` | `drawIndexedIndirect()` | Shared Draw/BundleDraw lowering. | Acknowledged or observed; manual encode deferred |
+| N17 | `packages/geoscratch/src/scratch/command.ts:1133` | `beginOcclusionQuery()` | Render pass-command location. | Observed submission; manual encode deferred |
+| N18 | `packages/geoscratch/src/scratch/command.ts:1257` | `endOcclusionQuery()` | Render pass-command location. | Observed submission; manual encode deferred |
+| N19 | `packages/geoscratch/src/scratch/command.ts:1439` | compute `setPipeline()` | Dispatch pass-command lowering. | Observed submission; manual encode deferred |
+| N20 | `packages/geoscratch/src/scratch/command.ts:1450` | `dispatchWorkgroupsIndirect()` | Dispatch pass-command lowering. | Observed submission; manual encode deferred |
+| N21 | `packages/geoscratch/src/scratch/command.ts:1455` | `dispatchWorkgroups()` | Dispatch pass-command lowering. | Observed submission; manual encode deferred |
+| N22 | `packages/geoscratch/src/scratch/command.ts:1967` | `setImmediates()` | Selected Draw, Dispatch, or BundleDraw snapshot. | Acknowledged or observed |
+| N23 | `packages/geoscratch/src/scratch/command.ts:2687` | `clearBuffer()` | Standalone submission command. | Observed submission; manual encode deferred |
+| N24 | `packages/geoscratch/src/scratch/command.ts:2954` | `copyBufferToBuffer()` | Standalone copy command. | Observed submission; manual encode deferred |
+| N25 | `packages/geoscratch/src/scratch/command.ts:2975` | `copyTextureToTexture()` | Standalone copy command. | Observed submission; manual encode deferred |
+| N26 | `packages/geoscratch/src/scratch/command.ts:3007` | `copyBufferToTexture()` | Standalone copy command. | Observed submission; manual encode deferred |
+| N27 | `packages/geoscratch/src/scratch/command.ts:3038` | `copyTextureToBuffer()` | Standalone copy command. | Observed submission; manual encode deferred |
+| N28 | `packages/geoscratch/src/scratch/command.ts:3360` | ordered-readback `copyBufferToBuffer()` | Ordered readback command location. | Observed submission |
+| N29 | `packages/geoscratch/src/scratch/command.ts:3924` | `resolveQuerySet()` | Resolve command location. | Observed submission |
+| N30 | `packages/geoscratch/src/scratch/command.ts:4359` | `GPUQueue.writeBuffer()` | Shared upload lowering. | Observed submission; direct execute deferred |
+| N31 | `packages/geoscratch/src/scratch/command.ts:4366` | `GPUQueue.writeTexture()` | Shared upload lowering. | Observed submission; direct execute deferred |
+| N32 | `packages/geoscratch/src/scratch/command.ts:4823` | dynamic-offset `setBindGroup()` | Selected Draw/Dispatch/BundleDraw command. | Acknowledged or observed; manual encode deferred |
+| N33 | `packages/geoscratch/src/scratch/command.ts:4831` | static `setBindGroup()` | Selected Draw/Dispatch/BundleDraw command. | Acknowledged or observed; manual encode deferred |
+| N34 | `packages/geoscratch/src/scratch/command.ts:8025` | `copyExternalImageToTexture()` | Shared external-image upload lowering. | Observed submission; direct execute deferred |
 | N35 | `packages/geoscratch/src/scratch/debug-command.ts:120` | `pushDebugGroup()` | Enclosing command, pass, or bundle owner. | Acknowledged or observed; manual encode deferred |
 | N36 | `packages/geoscratch/src/scratch/debug-command.ts:127` | `popDebugGroup()` | Same balanced native encoder scope. | Acknowledged or observed; manual encode deferred |
 | N37 | `packages/geoscratch/src/scratch/debug-command.ts:133` | `insertDebugMarker()` | Enclosing command, pass, or bundle owner. | Acknowledged or observed; manual encode deferred |
-| N38 | `packages/geoscratch/src/scratch/readback.ts:483` | `createCommandEncoder()` | Direct readback `encoder-create`. | Observed direct readback |
-| N39 | `packages/geoscratch/src/scratch/readback.ts:485` | `copyBufferToBuffer()` | Direct readback `command-encode`. | Observed direct readback |
-| N40 | `packages/geoscratch/src/scratch/readback.ts:494` | `finish()` | Direct readback `encoder-finish`. | Observed direct readback |
-| N41 | `packages/geoscratch/src/scratch/readback.ts:498` | `queue.submit()` | Direct readback `queue-submit`. | Observed direct readback |
-| N42 | `packages/geoscratch/src/scratch/render-bundle.ts:623` | `executeBundles()` | ExecuteRenderBundles pass-command location. | Observed submission |
-| N43 | `packages/geoscratch/src/scratch/render-bundle.ts:965` | `createRenderBundleEncoder()` | Persistent creation or selected attempt-local realization. | Acknowledged or observed |
-| N44 | `packages/geoscratch/src/scratch/render-bundle.ts:987` | bundle `finish()` | Same bundle realization owner. | Acknowledged or observed |
-| N45 | `packages/geoscratch/src/scratch/submission.ts:787` | `createCommandEncoder()` | Encoder-segment `encoder-create`. | Observed submission |
-| N46 | `packages/geoscratch/src/scratch/submission.ts:823` | `finish()` | Encoder-segment `encoder-finish`. | Observed submission |
-| N47 | `packages/geoscratch/src/scratch/submission.ts:993` | `beginComputePass()` | Compute pass `pass-begin`. | Observed submission |
-| N48 | `packages/geoscratch/src/scratch/submission.ts:1042` | compute pass `end()` | Compute pass `pass-end`. | Observed submission |
-| N49 | `packages/geoscratch/src/scratch/submission.ts:1078` | `beginRenderPass()` | Render pass `pass-begin`. | Observed submission |
-| N50 | `packages/geoscratch/src/scratch/submission.ts:1226` | render pass `end()` | Render pass `pass-end`. | Observed submission |
-| N51 | `packages/geoscratch/src/scratch/submission.ts:1256` | `queue.submit()` | Command-buffer queue action. | Observed submission |
-| N52 | `packages/geoscratch/src/scratch/submission.ts:1789` | detailed `pushDebugGroup()` | Finite per-location diagnostic scope. | Detailed observation only |
-| N53 | `packages/geoscratch/src/scratch/submission.ts:1794` | detailed `popDebugGroup()` | Balanced in `finally` for the same location. | Detailed observation only |
-| N54 | `packages/geoscratch/src/scratch/surface.ts:884` | `getConfiguration()` | Surface configuration commit and managed preflight. | Deterministic transaction/preflight |
-| N55 | `packages/geoscratch/src/scratch/temporal-texture.ts:495` | `importExternalTexture()` | Selected attempt authority command. | Observed command |
-| N56 | `packages/geoscratch/src/scratch/temporal-texture.ts:619` | `getCurrentTexture()` | Shared selected Surface attempt. | Observed attachment or command |
-| N57 | `packages/geoscratch/src/scratch/temporal-texture.ts:657` | attempt-local `createView()` | Shared selected Surface attempt. | Observed attachment or command |
-| N58 | `packages/geoscratch/src/scratch/texture.ts:496` | persistent attachment `createView()` | Submission attachment-view location. | Observed submission |
+| N38 | `packages/geoscratch/src/scratch/readback.ts:672` | `createCommandEncoder()` | Direct readback `encoder-create`. | Observed direct readback |
+| N39 | `packages/geoscratch/src/scratch/readback.ts:677` | `copyBufferToBuffer()` | Direct buffer readback `command-encode`. | Observed direct readback |
+| N40 | `packages/geoscratch/src/scratch/readback.ts:687` | `copyTextureToBuffer()` | Direct texture readback `command-encode`. | Observed direct readback |
+| N41 | `packages/geoscratch/src/scratch/readback.ts:695` | `finish()` | Direct readback `encoder-finish`. | Observed direct readback |
+| N42 | `packages/geoscratch/src/scratch/readback.ts:701` | `queue.submit()` | Direct readback `queue-submit`. | Observed direct readback |
+| N43 | `packages/geoscratch/src/scratch/render-bundle.ts:623` | `executeBundles()` | ExecuteRenderBundles pass-command location. | Observed submission |
+| N44 | `packages/geoscratch/src/scratch/render-bundle.ts:965` | `createRenderBundleEncoder()` | Persistent creation or selected attempt-local realization. | Acknowledged or observed |
+| N45 | `packages/geoscratch/src/scratch/render-bundle.ts:987` | bundle `finish()` | Same bundle realization owner. | Acknowledged or observed |
+| N46 | `packages/geoscratch/src/scratch/submission.ts:787` | `createCommandEncoder()` | Encoder-segment `encoder-create`. | Observed submission |
+| N47 | `packages/geoscratch/src/scratch/submission.ts:823` | `finish()` | Encoder-segment `encoder-finish`. | Observed submission |
+| N48 | `packages/geoscratch/src/scratch/submission.ts:993` | `beginComputePass()` | Compute pass `pass-begin`. | Observed submission |
+| N49 | `packages/geoscratch/src/scratch/submission.ts:1042` | compute pass `end()` | Compute pass `pass-end`. | Observed submission |
+| N50 | `packages/geoscratch/src/scratch/submission.ts:1078` | `beginRenderPass()` | Render pass `pass-begin`. | Observed submission |
+| N51 | `packages/geoscratch/src/scratch/submission.ts:1226` | render pass `end()` | Render pass `pass-end`. | Observed submission |
+| N52 | `packages/geoscratch/src/scratch/submission.ts:1256` | `queue.submit()` | Command-buffer queue action. | Observed submission |
+| N53 | `packages/geoscratch/src/scratch/submission.ts:1789` | detailed `pushDebugGroup()` | Finite per-location diagnostic scope. | Detailed observation only |
+| N54 | `packages/geoscratch/src/scratch/submission.ts:1794` | detailed `popDebugGroup()` | Balanced in `finally` for the same location. | Detailed observation only |
+| N55 | `packages/geoscratch/src/scratch/surface.ts:884` | `getConfiguration()` | Surface configuration commit and managed preflight. | Deterministic transaction/preflight |
+| N56 | `packages/geoscratch/src/scratch/temporal-texture.ts:495` | `importExternalTexture()` | Selected attempt authority command. | Observed command |
+| N57 | `packages/geoscratch/src/scratch/temporal-texture.ts:619` | `getCurrentTexture()` | Shared selected Surface attempt. | Observed attachment or command |
+| N58 | `packages/geoscratch/src/scratch/temporal-texture.ts:657` | attempt-local `createView()` | Shared selected Surface attempt. | Observed attachment or command |
+| N59 | `packages/geoscratch/src/scratch/texture.ts:496` | persistent attachment `createView()` | Submission attachment-view location. | Observed submission |
 
 Inventory totals:
 
-- 58 source call sites, all classified.
+- 59 source call sites, all classified.
 - File distribution: binding 4, command 30, debug command 3, direct readback
-  4, RenderBundle 3, submission 9, Surface 1, temporal texture 3, texture 1.
+  5, RenderBundle 3, submission 9, Surface 1, temporal texture 3, texture 1.
 - Persistent BindSet and RenderBundle creation have independent acknowledged
   operation owners; attempt-local forms remain inside submission ownership.
 - The only deferred managed-object convenience paths are explicit manual

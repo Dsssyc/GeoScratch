@@ -581,6 +581,7 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_COMMAND_DUPLICATE_IN_SUBMISSION'
     | 'SCRATCH_READBACK_COMMAND_RESULT_UNAVAILABLE'
     | 'SCRATCH_READBACK_FAILED'
+    | 'SCRATCH_READBACK_LAYOUT_INVALID'
     | 'SCRATCH_READBACK_LAYOUT_MISSING'
     | 'SCRATCH_READBACK_MAPPING_NATIVE_FAILED'
     | 'SCRATCH_READBACK_OPERATION_CONSTRUCTOR_PRIVATE'
@@ -606,6 +607,7 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_MAPPING_OUT_OF_MEMORY'
     | 'SCRATCH_READBACK_MAPPING_SCOPE_FAILED'
     | 'SCRATCH_READBACK_MAPPING_REJECTED'
+    | 'SCRATCH_READBACK_MAPPED_LEASE_INACTIVE'
     | 'SCRATCH_READBACK_MAPPED_RANGE_FAILED'
     | 'SCRATCH_READBACK_HOST_COPY_FAILED'
     | 'SCRATCH_READBACK_CLEANUP_FAILED'
@@ -614,6 +616,7 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_IN_PROGRESS'
     | 'SCRATCH_READBACK_CANCELLED'
     | 'SCRATCH_READBACK_OPERATION_DISPOSED'
+    | 'SCRATCH_READBACK_TEXTURE_SOURCE_INVALID'
 ```
 
 ## Code Naming And Stability
@@ -740,10 +743,19 @@ type ScratchGpuOperationTarget =
         kind: 'readback'
         readbackId: string
         path: 'direct' | 'ordered'
+        sourceKind?: 'buffer' | 'texture'
         sourceResourceId: string
         allocationVersion: number
         contentEpoch: number
         byteLength: number
+        stagingByteLength?: number
+        textureSubresource?: {
+            format: GPUTextureFormat
+            mipLevel: number
+            origin: { x: number; y: number; z: number }
+            size: { width: number; height: number; depthOrArrayLayers: number }
+            aspect: GPUTextureAspect
+        }
         commandId?: string
         submissionId?: string
         stepIndex?: number
@@ -775,6 +787,10 @@ not copy a complete binding snapshot into each submission record. Supporting
 objects and native views receive no invented byte footprint; an OOM incident
 may include bounded current Buffer/Texture pressure context without claiming
 that the candidate alone caused aggregate exhaustion.
+
+Readback targets distinguish buffer and texture sources without retaining
+native handles or bytes. Texture targets keep only bounded format, aspect,
+mip, origin, extent, logical-byte, and padded-staging-byte facts.
 
 Supporting-object factories settle every scope issued around a candidate before
 choosing a causal primary. Fixed priority is synchronous native exception,

@@ -171,10 +171,19 @@ export type ScratchGpuReadbackOperationTarget = Readonly<{
     kind: 'readback'
     readbackId: string
     path: 'direct' | 'ordered'
+    sourceKind?: 'buffer' | 'texture'
     sourceResourceId: string
     allocationVersion: number
     contentEpoch: number
     byteLength: number
+    stagingByteLength?: number
+    textureSubresource?: Readonly<{
+        format: GPUTextureFormat
+        mipLevel: number
+        origin: Readonly<{ x: number, y: number, z: number }>
+        size: Readonly<{ width: number, height: number, depthOrArrayLayers: number }>
+        aspect: GPUTextureAspect
+    }>
     commandId?: string
     submissionId?: string
     stepIndex?: number

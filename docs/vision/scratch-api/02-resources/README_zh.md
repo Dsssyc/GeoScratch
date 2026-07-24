@@ -124,6 +124,11 @@ epoch。其 `view` 是原生 mapped `ArrayBuffer`，不是 CPU clone。`dispose(
 release 后 getter 会给出结构化失败，所有先前取得的 view 都由原生 `unmap()`
 detach。
 
+`MappedReadbackLease` 是独立 transfer result。它只持有某个
+ReadbackOperation 的 runtime-created readback staging；它不会取得 source
+BufferResource 或 TextureResource 的 mapping authority，也不是 resource
+mapping shortcut。
+
 每个 buffer 只有一个 module-private、O(1) mapping authority。一个 pending 或
 active mapping 会让第二次 mapping，以及所有真正的 Scratch GPU buffer use，在
 queue/encoder effect 前失败。Region construction、LayoutCodec CPU 工作、BindSet

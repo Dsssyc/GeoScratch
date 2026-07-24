@@ -129,6 +129,11 @@ allocation version, and establishment epoch. Its `view` is the native mapped
 getter fails structurally and every previously obtained view is detached by
 native `unmap()`.
 
+`MappedReadbackLease` is a separate transfer result. It owns only
+runtime-created readback staging for one ReadbackOperation; it does not grant
+mapping authority over the source BufferResource or TextureResource and is not
+a resource mapping shortcut.
+
 Each buffer has one module-private O(1) mapping authority. One pending or
 active mapping rejects another map and every actual Scratch GPU buffer use
 before queue or encoder effects. Region construction, LayoutCodec CPU work,

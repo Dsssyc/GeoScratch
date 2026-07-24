@@ -20,7 +20,7 @@ const nativeCalls = Object.freeze([
     [ 'GPUCommandEncoder.copyBufferToBuffer', /\b(?:commandEncoder|encoder)\.copyBufferToBuffer\(/ ],
     [ 'GPUCommandEncoder.copyTextureToTexture', /\bcommandEncoder\.copyTextureToTexture\(/ ],
     [ 'GPUCommandEncoder.copyBufferToTexture', /\bcommandEncoder\.copyBufferToTexture\(/ ],
-    [ 'GPUCommandEncoder.copyTextureToBuffer', /\bcommandEncoder\.copyTextureToBuffer\(/ ],
+    [ 'GPUCommandEncoder.copyTextureToBuffer', /\b(?:commandEncoder|encoder)\.copyTextureToBuffer\(/ ],
     [ 'GPUCommandEncoder.resolveQuerySet', /\bcommandEncoder\.resolveQuerySet\(/ ],
     [ 'GPUCommandEncoder.beginComputePass', /\bencoder\.beginComputePass\(/ ],
     [ 'GPUCommandEncoder.beginRenderPass', /\bencoder\.beginRenderPass\(/ ],
@@ -69,12 +69,12 @@ describe('scratch submission native source audit', () => {
         const callSites = scanNativeCallSites(scratchRoot)
         const inventoryRows = audit.match(/^\| N\d+ \|.*\|$/gm) ?? []
 
-        expect(callSites).to.have.length(58)
+        expect(callSites).to.have.length(59)
         expect(countByFile(callSites)).to.deep.equal({
             'packages/geoscratch/src/scratch/binding.ts': 4,
             'packages/geoscratch/src/scratch/command.ts': 30,
             'packages/geoscratch/src/scratch/debug-command.ts': 3,
-            'packages/geoscratch/src/scratch/readback.ts': 4,
+            'packages/geoscratch/src/scratch/readback.ts': 5,
             'packages/geoscratch/src/scratch/render-bundle.ts': 3,
             'packages/geoscratch/src/scratch/submission.ts': 9,
             'packages/geoscratch/src/scratch/surface.ts': 1,
@@ -132,6 +132,7 @@ describe('scratch submission native source audit', () => {
         for (const nativeCall of [
             'device.createCommandEncoder',
             'encoder.copyBufferToBuffer',
+            'encoder.copyTextureToBuffer',
             'encoder.finish',
             'queue.submit',
         ]) {
@@ -222,6 +223,6 @@ function windowsContaining(source, needle) {
 
     const lines = source.split('\n')
     return lines.flatMap((line, index) => line.includes(needle)
-        ? [ lines.slice(Math.max(0, index - 8), index + 3).join('\n') ]
+        ? [ lines.slice(Math.max(0, index - 16), index + 3).join('\n') ]
         : [])
 }

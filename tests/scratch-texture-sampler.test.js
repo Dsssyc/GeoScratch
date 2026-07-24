@@ -396,6 +396,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
             texture: fixture.texture.gpuTexture,
             mipLevel: 0,
             origin: { x: 0, y: 0, z: 0 },
+            aspect: 'all',
         })
         expect(fixture.calls.queueTextureWrites[0].data).to.be.instanceOf(Uint8Array)
         expect(fixture.calls.queueTextureWrites[0].data.byteLength).to.equal(16)

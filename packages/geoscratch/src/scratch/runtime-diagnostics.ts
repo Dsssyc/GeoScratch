@@ -208,10 +208,19 @@ export type ScratchRuntimeReadbackOperationFact = Readonly<{
     path: 'direct' | 'ordered'
     state: string
     retain: 'consume-on-read' | 'until-dispose'
+    sourceKind?: 'buffer' | 'texture'
     sourceResourceId: string
     allocationVersion: number
     contentEpoch: number
     byteLength: number
+    stagingByteLength?: number
+    textureSubresource?: Readonly<{
+        format: GPUTextureFormat
+        mipLevel: number
+        origin: Readonly<{ x: number, y: number, z: number }>
+        size: Readonly<{ width: number, height: number, depthOrArrayLayers: number }>
+        aspect: GPUTextureAspect
+    }>
     stagingBytes: number
     retainedHostBytes: number
     isMapping: boolean
@@ -2029,6 +2038,19 @@ export class ScratchRuntimeDiagnosticsController {
     }
 }
 
+function immutableTextureReadbackSubresource(
+    fact: NonNullable<ScratchRuntimeReadbackOperationFact['textureSubresource']>
+): NonNullable<ScratchRuntimeReadbackOperationFact['textureSubresource']> {
+
+    return Object.freeze({
+        format: fact.format,
+        mipLevel: fact.mipLevel,
+        origin: Object.freeze({ ...fact.origin }),
+        size: Object.freeze({ ...fact.size }),
+        aspect: fact.aspect,
+    })
+}
+
 function readbackTargetFromFact(
     fact: ScratchRuntimeReadbackOperationFact
 ): ScratchGpuReadbackOperationTarget {
@@ -2037,10 +2059,17 @@ function readbackTargetFromFact(
         kind: 'readback',
         readbackId: fact.id,
         path: fact.path,
+        ...(fact.sourceKind !== undefined ? { sourceKind: fact.sourceKind } : {}),
         sourceResourceId: fact.sourceResourceId,
         allocationVersion: fact.allocationVersion,
         contentEpoch: fact.contentEpoch,
         byteLength: fact.byteLength,
+        ...(fact.stagingByteLength !== undefined
+            ? { stagingByteLength: fact.stagingByteLength }
+            : {}),
+        ...(fact.textureSubresource !== undefined
+            ? { textureSubresource: immutableTextureReadbackSubresource(fact.textureSubresource) }
+            : {}),
         ...(fact.commandId !== undefined ? { commandId: fact.commandId } : {}),
         ...(fact.submissionId !== undefined ? { submissionId: fact.submissionId } : {}),
         ...(fact.stepIndex !== undefined ? { stepIndex: fact.stepIndex } : {}),
@@ -2518,10 +2547,17 @@ function readbackOperationFact(
         path: fact.path,
         state: fact.state,
         retain: fact.retain,
+        ...(fact.sourceKind !== undefined ? { sourceKind: fact.sourceKind } : {}),
         sourceResourceId: fact.sourceResourceId,
         allocationVersion: fact.allocationVersion,
         contentEpoch: fact.contentEpoch,
         byteLength: fact.byteLength,
+        ...(fact.stagingByteLength !== undefined
+            ? { stagingByteLength: fact.stagingByteLength }
+            : {}),
+        ...(fact.textureSubresource !== undefined
+            ? { textureSubresource: immutableTextureReadbackSubresource(fact.textureSubresource) }
+            : {}),
         stagingBytes: fact.stagingBytes,
         retainedHostBytes: fact.retainedHostBytes,
         isMapping: fact.isMapping,

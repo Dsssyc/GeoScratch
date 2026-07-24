@@ -115,7 +115,7 @@ state = empty
 
 The next successful texture upload, external-image upload, copy target write, render attachment write, or storage write advances from that preserved epoch and makes the replacement ready. Transfer commands resolve the current physical allocation when executed and revalidate current mip, origin, extent, and layer ranges before any encoder or queue effect.
 
-`SubmittedWork` remains historical: later resize cannot alter an earlier submission's allocation-version or producer facts. `ReadbackOperation` captures its source allocation version. The implemented readback source is a buffer, so replacing that captured buffer before materialization rejects with `SCRATCH_READBACK_SOURCE_ALLOCATION_STALE`. Texture data reaches host memory through an explicit texture-to-buffer `CopyCommand`; replacing the texture afterward does not rewrite the already captured destination-buffer provenance. A future direct texture-readback path must use the same allocation-stale rule.
+`SubmittedWork` remains historical: later resize cannot alter an earlier submission's allocation-version or producer facts. `ReadbackOperation` captures its source allocation version for both BufferRegion and direct texture-subresource sources. Replacing either captured allocation before direct materialization rejects with `SCRATCH_READBACK_SOURCE_ALLOCATION_STALE`; advancing current content rejects with `SCRATCH_READBACK_SOURCE_EPOCH_STALE`. An explicit texture-to-buffer `CopyCommand` still transfers provenance to its destination buffer, while direct texture readback retains the captured texture allocation and epoch itself.
 
 ## Buffer Host Mapping
 
@@ -204,6 +204,14 @@ The buffer upload path lowers to `GPUQueue.writeBuffer()`. Its target
 Scratch validates that native requirement before a direct queue call or a
 submission timeline can acquire effects.
 
+`TextureUploadCommand` lowers through the single `GPUQueue.writeTexture()`
+path. Its `aspect` defaults to `all` and can select a legal depth-only or
+stencil-only destination aspect. Scratch validates the selected copy
+footprint, block geometry, physical depth/stencil subresource, mip range, and
+source byte range. Queue writes do not inherit encoder-copy requirements:
+their data offset and row stride are not forced to the encoder-only 256-byte
+row alignment.
+
 All three immediate upload variants execute only on their owning
 `ScratchRuntime.queue`. A foreign queue is rejected with
 `SCRATCH_COMMAND_WRONG_RUNTIME` and `actual.queueOwnedByRuntime: false` before
@@ -272,7 +280,10 @@ const readback = runtime.createReadback({
 const values = await readback.toArray(Float32Array)
 ```
 
-`toArray()` and `toBytes()` belong to the readback operation, not to `BufferResource` or `TextureResource`. The operation captures one BufferRegion, its parent allocation/content facts, optional layout witness, and producer submission.
+`toArray()`, `toBytes()`, and `map()` belong to the readback operation, not to
+`BufferResource` or `TextureResource`. The operation captures either one
+BufferRegion or one normalized texture subresource, together with allocation
+and content facts and optional layout interpretation.
 
 Properties:
 
@@ -280,12 +291,23 @@ Properties:
 - **Epoch capture.** A readback reads the content epoch captured by the readback request or by the declared `after` submission. It must not silently drift to the resource's latest contents.
 - **Acknowledged auto staging.** The runtime owns `MAP_READ` staging resources and acknowledges native validation/OOM outcomes before use. User buffers do not need map usage for common readback, but the source needs the appropriate copy usage or an explicit resolve path.
 - **Buffer-specific mapping barrier.** Host materialization waits on the staging buffer's `mapAsync()` rather than inserting an extra whole-queue completion wait.
-- **Layout-derived views.** Buffer layout from `02-resources` decides whether the result is a `TypedArray`, bytes, or a layout-derived structured view. AoS fields are strided and should not be promised as one contiguous typed array unless explicitly deinterleaved.
+- **Layout-derived views.** A compatible LayoutArtifact decides whether the logical result is exposed as a `TypedArray`, bytes, or a layout-derived structured view. AoS fields are strided and should not be promised as one contiguous typed array unless explicitly deinterleaved.
 
 Both direct and ordered buffer readback lower through
 `copyBufferToBuffer()`. Their source `BufferRegion` offset and size must both be
 4-byte aligned before Scratch allocates or claims staging storage. The same
 alignment rule therefore applies regardless of where the readback is ordered.
+
+Direct texture readback lowers through one native `copyTextureToBuffer()`.
+Its source descriptor names the TextureResource, mip, origin, extent, aspect,
+and optional LayoutArtifact. Scratch publishes a `TextureReadbackRowLayout`
+that separates tightly packed logical rows from native staging rows. Native
+staging uses a 256-byte row stride; `toBytes()` removes row and image padding
+into an owned logical result. `map()` instead exposes the padded native staging
+range through a lease and performs no host copy. Format/aspect copyability,
+sample count, physical depth/stencil coverage, compressed-format feature
+level, block alignment, usage, range, allocation version, and content epoch
+are validated before native copy issue.
 
 ## Staging Allocation And Mapping Transaction
 
@@ -366,6 +388,7 @@ type ReadbackState =
     | 'scheduled'
     | 'submitted'
     | 'mapping'
+    | 'mapped'
     | 'ready'
     | 'consumed'
     | 'cancelled'
@@ -379,6 +402,7 @@ State semantics:
 - `scheduled` -> a copy, resolve, or map path has been assigned.
 - `submitted` -> GPU work is in flight. It may not be possible to retract, but the result can still be marked unwanted.
 - `mapping` -> staging copy exists and `mapAsync` or equivalent host availability is pending.
+- `mapped` -> one mapped readback lease owns the staging mapping and no host copy has been made.
 - `ready` -> retained host bytes exist and can be read repeatedly until cancellation or disposal. The default consume-on-read path does not use `ready`.
 - `consumed` -> `toArray()` or `toBytes()` returned an owned copy and runtime staging can be released.
 - `cancelled` -> the caller declared that the result is no longer needed. Already submitted GPU work may still finish, but the runtime should discard the result and release staging.
@@ -408,9 +432,8 @@ const readback = runtime.createReadback({
 
 For the host-copy retention path, the first successful read materializes and stores operation-owned host bytes, releases GPU staging, and returns an owned copy. Later `toBytes()`, `toArray()`, and layout-view reads clone from those retained bytes instead of re-staging GPU work. The retained result represents the materialized epoch even if the source resource later advances.
 
-Mapped-view leasing is a follow-up boundary and is not implemented by this
-contract. A future zero-copy or mapped view must be leased because a mapped
-range becomes invalid after unmap:
+Mapped staging is expressed by a bounded `MappedReadbackLease` because a
+mapped range becomes invalid after native unmap:
 
 ```ts
 const lease = await readback.map()
@@ -422,7 +445,15 @@ try {
 }
 ```
 
-Only the lease exposes the mapped view. The operation tracks active leases, and development validation should warn if a lease is not released before the operation or runtime is disposed.
+Only the lease exposes the mapped view. A buffer lease spans the requested
+buffer range. A texture lease spans padded staging bytes and carries
+`rowLayout` so callers can address rows and images without mistaking padding
+for logical data. One operation has one materialization owner: a mapped lease
+cannot coexist with host-copy materialization or retained host bytes. Lease
+release unmaps and destroys staging, detaches previously obtained views,
+transitions the operation to `consumed`, and retains only immutable identity,
+terminal state, and layout facts. Cancellation, operation/runtime disposal,
+device loss, and cleanup failure terminate the same authority exactly once.
 
 `cancel()` and `dispose()` are explicit:
 
@@ -453,7 +484,7 @@ const submitted = runtime.createSubmission()
 const values = await readParticles.result({ after: submitted }).toArray(Float32Array)
 ```
 
-The buffer-only `ReadbackCommand` ordered-staging path is implemented. Its Promise-only factory acknowledges the reusable staging slot before returning. It validates the explicit source epoch, records a read-only submission ledger entry, and copies into runtime-owned staging at the declared step. `result({ after })` returns the operation associated with that exact submitted work; materialization maps the existing staging buffer and does not submit a second copy. This remains an escape hatch, not the default readback path. Direct texture readback and mapped leases remain future work; finite staging budgets are implemented runtime policy.
+The buffer-only `ReadbackCommand` ordered-staging path is implemented. Its Promise-only factory acknowledges the reusable staging slot before returning. It validates the explicit source epoch, records a read-only submission ledger entry, and copies into runtime-owned staging at the declared step. `result({ after })` returns the operation associated with that exact submitted work; materialization maps the existing staging buffer and does not submit a second copy. This remains an escape hatch, not the default readback path. Direct texture readback and mapped leases use the same allocator, mapping transaction, lifecycle authority, and finite staging budgets without turning ordered commands into a texture API.
 
 Command disposal blocks new submission and reuse, but does not erase historical
 result lookup while the runtime remains active. An operation already linked to
@@ -761,9 +792,10 @@ const runtime = await ScratchRuntime.create({
 })
 ```
 
-Stale-operation warnings, automatic eviction, and mapped-view lease budgets are
-follow-up policy. They are not aliases or optional flags on the implemented
-budget contract.
+Stale-operation warnings, automatic eviction, and a separate mapped-lease
+count budget remain follow-up policy. Active mapped leases are already charged
+against the existing pending-operation and padded staging-byte budgets; these
+facts are not aliases or optional flags on that budget contract.
 
 Stable readback provenance codes using the shared envelope from
 `09-diagnostics-validation` include:
@@ -786,6 +818,9 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_UNMAP_FAILED'
     | 'SCRATCH_READBACK_STAGING_DESTROY_FAILED'
     | 'SCRATCH_READBACK_IN_PROGRESS'
+    | 'SCRATCH_READBACK_LAYOUT_INVALID'
+    | 'SCRATCH_READBACK_MAPPED_LEASE_INACTIVE'
+    | 'SCRATCH_READBACK_TEXTURE_SOURCE_INVALID'
     | 'SCRATCH_READBACK_CANCELLED'
     | 'SCRATCH_READBACK_OPERATION_DISPOSED'
     | 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE'
@@ -806,9 +841,19 @@ type ReadbackDiagnostic = ScratchDiagnostic & {
     ]
     actual?: {
         state: ReadbackState
+        sourceKind?: 'buffer' | 'texture'
         allocationVersion?: number
         contentEpoch?: number
         rangeOrRegion?: unknown
+        logicalByteLength?: number
+        stagingByteLength?: number
+        textureSubresource?: {
+            format: GPUTextureFormat
+            mipLevel: number
+            origin: GPUOrigin3D
+            size: GPUExtent3D
+            aspect: GPUTextureAspect
+        }
         producerSubmissionId?: string
         ageInSubmissions?: number
         ageInMs?: number

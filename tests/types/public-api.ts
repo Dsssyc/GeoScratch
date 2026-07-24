@@ -918,6 +918,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         data: new Uint8Array(16),
         layout: { bytesPerRow: 8, rowsPerImage: 2 },
         size: { width: 2, height: 2 },
+        aspect: 'all',
     })
     // @ts-expect-error buffer upload disposal state is read-only
     upload.isDisposed = false
@@ -929,6 +930,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     textureUpload.isDisposed = false
     // @ts-expect-error normalized texture upload layout is immutable
     textureUpload.layout.bytesPerRow = 256
+    const textureUploadAspect: GPUTextureAspect = textureUpload.aspect
+    // @ts-expect-error normalized texture upload aspect is immutable
+    textureUpload.aspect = 'depth-only'
     const externalImageSources: GPUCopyExternalImageSource[] = [
         typedImageBitmap,
         typedImageData,
@@ -1905,6 +1909,47 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatReadbackRetain: scratchCompat.ReadbackRetentionPolicy = compatReadback.retain
     const compatReadbackLayoutView: Promise<scratchCompat.LayoutReadbackView> = compatReadback.toLayoutView()
     const compatReadbackProducerEpoch: scratchCompat.SubmittedResourceEpoch | undefined = compatReadback.producerEpoch
+    const textureReadbackOrigin: scr.TextureReadbackOrigin = [ 0, 0, 0 ]
+    const textureReadbackSize: scr.TextureReadbackSize = { width: 2, height: 2 }
+    const textureReadbackSourceDescriptor: scr.TextureReadbackSourceDescriptor = {
+        resource: scratchTexture,
+        mipLevel: 0,
+        origin: textureReadbackOrigin,
+        size: textureReadbackSize,
+        aspect: 'all',
+        layout: codec.artifact,
+    }
+    const compatTextureReadbackSourceDescriptor:
+        scratchCompat.TextureReadbackSourceDescriptor = textureReadbackSourceDescriptor
+    const textureReadbackDescriptor: scr.ReadbackOperationDescriptor = {
+        source: textureReadbackSourceDescriptor,
+        retain: 'consume-on-read',
+    }
+    const textureReadbackSourceUnion: scr.ReadbackSource = storageOutputRegion
+    const textureReadback: scr.ReadbackOperation = runtime.createReadback(textureReadbackDescriptor)
+    const textureReadbackKind: 'buffer' | 'texture' = textureReadback.sourceKind
+    const textureReadbackRowLayout: scr.TextureReadbackRowLayout | undefined =
+        textureReadback.rowLayout
+    const mappedReadbackLeasePromise: Promise<scr.MappedReadbackLease> = textureReadback.map()
+    const mappedReadbackLease: scr.MappedReadbackLease = await mappedReadbackLeasePromise
+    const mappedReadbackLeaseState: scr.MappedReadbackLeaseState = mappedReadbackLease.state
+    const mappedReadbackView: ArrayBuffer = mappedReadbackLease.view
+    const mappedReadbackByteLength: number = mappedReadbackLease.byteLength
+    const mappedReadbackLayout: scr.LayoutArtifact | undefined = mappedReadbackLease.layout
+    const mappedReadbackRows: scr.TextureReadbackRowLayout | undefined =
+        mappedReadbackLease.rowLayout
+    mappedReadbackLease.dispose()
+    // @ts-expect-error mapped readback lease construction is closed
+    new scr.MappedReadbackLease()
+    // @ts-expect-error mapped readback lease state is immutable
+    mappedReadbackLease.state = 'released'
+    // @ts-expect-error texture readback source requires an explicit size
+    runtime.createReadback({ source: { resource: scratchTexture } })
+    runtime.createReadbackCommand({
+        // @ts-expect-error ordered ReadbackCommand remains buffer-only
+        source: textureReadbackSourceDescriptor,
+        whenMissing: 'throw',
+    })
 
     void surface
     void resourceState
@@ -2032,6 +2077,21 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void compatReadbackRetain
     void compatReadbackLayoutView
     void compatReadbackProducerEpoch
+    void textureReadbackOrigin
+    void textureReadbackSize
+    void textureReadbackSourceDescriptor
+    void compatTextureReadbackSourceDescriptor
+    void textureReadbackSourceUnion
+    void textureReadback
+    void textureReadbackKind
+    void textureReadbackRowLayout
+    void mappedReadbackLeasePromise
+    void mappedReadbackLease
+    void mappedReadbackLeaseState
+    void mappedReadbackView
+    void mappedReadbackByteLength
+    void mappedReadbackLayout
+    void mappedReadbackRows
     void shaderInspection
     void shaderInspectionInput
     void shaderInspectionOptions
@@ -2048,6 +2108,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     void externalImageUploadAlias
     void bufferUploadKind
     void textureUploadKind
+    void textureUploadAspect
     void externalImageUploadKind
     void canonicalExternalImageSourceInfo
     void canonicalExternalImageDestInfo

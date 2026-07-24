@@ -265,7 +265,7 @@ uploadKind: 'external-image'
 
 合格 target 必须是 single-sampled 2D plain color texture，同时具有 `COPY_DST` 与 `RENDER_ATTACHMENT` usage，并使用设备已启用的 renderable `unorm`、`unorm-srgb`、`float` 或 `ufloat` format。直接执行与 submission 共用同一套 validation、native-call、failure 与 target-epoch path。见 ADR-030。
 
-Buffer `ReadbackCommand` 路径已通过 Promise-only `createReadbackCommand()` / `readbackCommand()` factory 实现。一个 command 只有在确认一个可复用 staging slot 后才变得可见；它使用显式 source `contentEpoch`，通过 `SubmissionBuilder.readback(...)` 进入 submission 顺序，在该位置只 staging 一次，并通过 `result({ after })` 返回关联的 `ReadbackOperation`。直接 texture readback 与 mapped lease 仍属于未来工作；有限 pending-operation 与 staging-byte budget 已是 runtime policy。
+Buffer `ReadbackCommand` 路径已通过 Promise-only `createReadbackCommand()` / `readbackCommand()` factory 实现。一个 command 只有在确认一个可复用 staging slot 后才变得可见；它使用显式 source `contentEpoch`，通过 `SubmissionBuilder.readback(...)` 进入 submission 顺序，在该位置只 staging 一次，并通过 `result({ after })` 返回关联的 `ReadbackOperation`。Direct `ReadbackOperation` 接受 BufferRegion 或显式 texture subresource，并可 materialize owned logical bytes，或返回有界 mapped staging lease。Ordered `ReadbackCommand` 保持 buffer-only。有限 pending-operation 与 padded-staging-byte budget 是 runtime policy。
 
 原生 indexed 与 indirect execution 已实现。Scratch 会把静态 vertex draw、静态 indexed draw、indirect vertex draw、indirect indexed draw、静态 dispatch 和 indirect dispatch 直接降低到对应的 WebGPU encoder method。CPU-dynamic resolver closure 仍是未来工作，等待具体的 `SubmissionContext` 与 tracked dynamic-value contract。
 

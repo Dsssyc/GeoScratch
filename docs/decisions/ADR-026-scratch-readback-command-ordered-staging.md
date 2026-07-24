@@ -3,7 +3,9 @@
 ## Status
 
 Accepted. ADR-034 supersedes staging allocation timing and unrestricted
-cross-submission reuse; the ordered-copy and provenance decisions remain active.
+cross-submission reuse. ADR-052 supersedes the former direct-texture,
+mapped-lease, and staging-budget follow-up boundary. The ordered-copy and
+provenance decisions remain active.
 
 ## Date
 
@@ -87,4 +89,4 @@ Rejected. Texture-to-buffer GPU copies already have an explicit `CopyCommand` di
 - Scheduled materialization never submits a hidden second copy.
 - Source reads participate in submission diagnostics and ledgers without producing user resource epochs.
 - Repeated `result({ after })` calls for the same command and submission return the same operation.
-- Direct texture readback, mapped leases, staging budgets, range-level epochs, automatic scheduling, and non-throw readback readiness policies remain future work.
+- At this historical checkpoint, direct texture readback, mapped leases, staging budgets, range-level epochs, automatic scheduling, and non-throw readback readiness policies remained future work. ADR-034 and ADR-052 later completed the first three.

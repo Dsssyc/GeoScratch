@@ -2,7 +2,7 @@
 
 ## Status
 
-Phase 3 render-bundle and public debug-command parity is complete through
+Phase 4 texture-transfer and readback parity is complete through
 `socu/scratch-webgpu-wgsl-parity-v1`, based on
 `e905b33e7bd8fdc68e9400ffe103a52e89c21488`. This living audit records the
 fixed specification surface and will be finalized only after all seven
@@ -58,7 +58,7 @@ surface inventories.
 | Optional fragment | Native fragment omission and no-color-output depth/stencil | Phase 2 implemented; ADR-050 Accepted |
 | SurfaceTextureLease | Managed current-texture attachment/copy/binding use | Phase 1 implemented; ADR-049 Accepted |
 | Runtime adapter/device parity | feature level, XR request, default queue, immutable adapter facts | Phase 1 implemented |
-| Texture transfer completeness | upload aspect, direct texture readback, mapped lease | Known target gap; ADR-052 Proposed |
+| Texture transfer completeness | upload aspect, direct texture readback, mapped lease | Phase 4 implemented; ADR-052 Accepted |
 | WGSL type/layout semantics | Recursive host-shareable ABI and buffer views | Known target gap; ADR-053 Proposed |
 
 ## Phase 0 Inventory
@@ -159,6 +159,42 @@ Checkpoint evidence:
   classified.
 
 ADR-051 is Accepted. Consolidated headed browser execution remains a Phase 6
+gate and is not claimed by this checkpoint.
+
+## Phase 4 Checkpoint
+
+Phase 4 extends the single `TextureUploadCommand` queue-write path with explicit
+aspect selection and format-aware copy footprints. Direct texture readback
+captures the selected allocation version and content epoch, emits one native
+texture-to-buffer copy with 256-byte staging rows, and exposes a separate tight
+logical row layout to host consumers. Color, depth, stencil, and compressed
+formats follow their physical texel-block and full-subresource constraints.
+
+`ReadbackOperation.map()` now returns a one-owner `MappedReadbackLease` over the
+native staging range without creating an owned host copy. Releasing, cancelling,
+disposing, Runtime disposal, and device loss invalidate the mapped view and
+retire staging ownership. Direct buffer and texture readbacks share the same
+bounded staging, mapping, native-outcome, and diagnostic authority. Ordered
+`ReadbackCommand` remains buffer-only and compositionally matches explicit
+texture-to-buffer copy followed by buffer readback.
+
+Checkpoint evidence:
+
+- `tests/scratch-texture-transfer-readback.test.js`: 19/19 passing;
+- `npm test`: 1106 passing and 2 expected pending;
+- `npm run typecheck`: passed for package, public API, examples, and canonical
+  WebGPU declarations;
+- `npm run build`: passed for the package and all 17 examples;
+- structured parity audit: passed with 80 selected native calls, 319 Scratch
+  exports, and 410 package exports, including all texture-transfer checks;
+- submission native provenance inventory: 59/59 current source call sites
+  classified; and
+- `node tests/stress/scratch-readback-staging-mapping.mjs`: passed with 20,000
+  direct operations, 5,000 ordered reuses, and 5,000 direct texture mapped
+  leases. Terminal pending operations, mappings, staging bytes, and lifecycle
+  subscribers were all zero.
+
+ADR-052 is Accepted. Consolidated headed browser execution remains a Phase 6
 gate and is not claimed by this checkpoint.
 
 ## Required Final Matrices

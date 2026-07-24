@@ -25,6 +25,7 @@ const publicExports = {
     package: scanExports(path.join(root, 'packages', 'geoscratch', 'src', 'index.ts')),
 }
 const forbiddenOldSurfaceInventory = scanOldSurfaceInventory()
+const textureTransferSurfaceInventory = scanTextureTransferSurfaceInventory()
 
 const checks = Object.freeze({
     webGpuManifestReproducible:
@@ -86,6 +87,34 @@ const checks = Object.freeze({
                 'SubmittedRenderBundleFact',
             ].every(name => exports.some(entry => entry.name === name))
         ),
+    textureTransferNativeCoverage:
+        nativeCalls.filter(call =>
+            call.path === 'packages/geoscratch/src/scratch/command.ts' &&
+            call.operation === 'writeTexture'
+        ).length === 1 &&
+        nativeCalls.filter(call =>
+            call.path === 'packages/geoscratch/src/scratch/readback.ts' &&
+            call.operation === 'copyTextureToBuffer'
+        ).length === 1,
+    textureTransferPublicExports:
+        [ publicExports.scratch, publicExports.package ].every(exports =>
+            [
+                'MappedReadbackLease',
+                'MappedReadbackLeaseState',
+                'ReadbackSource',
+                'TextureReadbackOrigin',
+                'TextureReadbackRowLayout',
+                'TextureReadbackSize',
+                'TextureReadbackSource',
+                'TextureReadbackSourceDescriptor',
+            ].every(name => exports.some(entry => entry.name === name))
+        ),
+    textureTransferManagedSurface:
+        textureTransferSurfaceInventory.textureUploadAspect &&
+        textureTransferSurfaceInventory.textureReadbackResource &&
+        textureTransferSurfaceInventory.textureReadbackSize &&
+        textureTransferSurfaceInventory.readbackMap &&
+        textureTransferSurfaceInventory.mappedLeaseDispose,
 })
 
 const failures = Object.entries(checks)
@@ -111,6 +140,7 @@ const result = {
         nativeCalls,
         publicExports,
         forbiddenOldSurfaceInventory,
+        textureTransferSurfaceInventory,
     },
 }
 
@@ -277,6 +307,37 @@ function scanOldSurfaceInventory() {
     }
 }
 
+function scanTextureTransferSurfaceInventory() {
+
+    const command = parse(path.join(scratchRoot, 'command.ts'))
+    const textureReadback = parse(path.join(scratchRoot, 'texture-readback.ts'))
+    const readback = parse(path.join(scratchRoot, 'readback.ts'))
+    const readbackLease = parse(path.join(scratchRoot, 'readback-lease.ts'))
+    return {
+        textureUploadAspect: findTypeMember(
+            command,
+            'TextureUploadCommandDescriptor',
+            'aspect'
+        ),
+        textureReadbackResource: findTypeMember(
+            textureReadback,
+            'TextureReadbackSourceDescriptor',
+            'resource'
+        ),
+        textureReadbackSize: findTypeMember(
+            textureReadback,
+            'TextureReadbackSourceDescriptor',
+            'size'
+        ),
+        readbackMap: findClassMember(readback, 'ReadbackOperation', 'map'),
+        mappedLeaseDispose: findClassMember(
+            readbackLease,
+            'MappedReadbackLease',
+            'dispose'
+        ),
+    }
+}
+
 function findTypeMember(sourceFile, typeName, memberName) {
 
     let found = false
@@ -291,9 +352,8 @@ function findTypeMember(sourceFile, typeName, memberName) {
             ) &&
             node.name.text === typeName
         ) {
-            const members = ts.isTypeAliasDeclaration(node) &&
-                ts.isTypeLiteralNode(node.type)
-                ? node.type.members
+            const members = ts.isTypeAliasDeclaration(node)
+                ? typeMembers(node.type)
                 : ts.isInterfaceDeclaration(node)
                     ? node.members
                     : []
@@ -304,6 +364,29 @@ function findTypeMember(sourceFile, typeName, memberName) {
         }
         ts.forEachChild(node, visit)
     }
+}
+
+function typeMembers(typeNode) {
+
+    if (ts.isTypeLiteralNode(typeNode)) return typeNode.members
+    if (
+        ts.isTypeReferenceNode(typeNode) &&
+        typeNode.typeName.getText() === 'Readonly' &&
+        typeNode.typeArguments?.length === 1
+    ) return typeMembers(typeNode.typeArguments[0])
+    return []
+}
+
+function findClassMember(sourceFile, className, memberName) {
+
+    return sourceFile.statements.some(statement => (
+        ts.isClassDeclaration(statement) &&
+        statement.name?.text === className &&
+        statement.members.some(member => (
+            member.name !== undefined &&
+            member.name.getText(sourceFile) === memberName
+        ))
+    ))
 }
 
 function countMethodCalls(sourceFile, methodName) {

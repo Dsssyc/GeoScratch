@@ -580,6 +580,7 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_COMMAND_DUPLICATE_IN_SUBMISSION'
     | 'SCRATCH_READBACK_COMMAND_RESULT_UNAVAILABLE'
     | 'SCRATCH_READBACK_FAILED'
+    | 'SCRATCH_READBACK_LAYOUT_INVALID'
     | 'SCRATCH_READBACK_LAYOUT_MISSING'
     | 'SCRATCH_READBACK_MAPPING_NATIVE_FAILED'
     | 'SCRATCH_READBACK_OPERATION_CONSTRUCTOR_PRIVATE'
@@ -605,6 +606,7 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_MAPPING_OUT_OF_MEMORY'
     | 'SCRATCH_READBACK_MAPPING_SCOPE_FAILED'
     | 'SCRATCH_READBACK_MAPPING_REJECTED'
+    | 'SCRATCH_READBACK_MAPPED_LEASE_INACTIVE'
     | 'SCRATCH_READBACK_MAPPED_RANGE_FAILED'
     | 'SCRATCH_READBACK_HOST_COPY_FAILED'
     | 'SCRATCH_READBACK_CLEANUP_FAILED'
@@ -613,6 +615,7 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_IN_PROGRESS'
     | 'SCRATCH_READBACK_CANCELLED'
     | 'SCRATCH_READBACK_OPERATION_DISPOSED'
+    | 'SCRATCH_READBACK_TEXTURE_SOURCE_INVALID'
 ```
 
 ## Code Naming 与 Stability
@@ -739,10 +742,19 @@ type ScratchGpuOperationTarget =
         kind: 'readback'
         readbackId: string
         path: 'direct' | 'ordered'
+        sourceKind?: 'buffer' | 'texture'
         sourceResourceId: string
         allocationVersion: number
         contentEpoch: number
         byteLength: number
+        stagingByteLength?: number
+        textureSubresource?: {
+            format: GPUTextureFormat
+            mipLevel: number
+            origin: { x: number; y: number; z: number }
+            size: { width: number; height: number; depthOrArrayLayers: number }
+            aspect: GPUTextureAspect
+        }
         commandId?: string
         submissionId?: string
         stepIndex?: number
@@ -772,6 +784,10 @@ lifecycle recheck、snapshot recheck、commit、cancellation 与 explicit retry�
 snapshot 复制进每条 submission record。Supporting object 与 native view 不获得
 虚构 byte footprint；OOM incident 可以包含有界 current Buffer/Texture pressure
 context，但不能声称 candidate 单独导致 aggregate exhaustion。
+
+Readback target 会区分 buffer 与 texture source，但不保留 native handle 或
+bytes。Texture target 只保留有界 format、aspect、mip、origin、extent、
+logical-byte 与 padded-staging-byte facts。
 
 Supporting-object factory 会先 settle candidate 周围已经 issue 的全部 scope，再
 选择 causal primary。固定优先级是同步 native exception、结构性 scope failure、

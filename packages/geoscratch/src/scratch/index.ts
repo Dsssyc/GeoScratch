@@ -314,8 +314,20 @@ export { ReadbackOperation } from './readback.js'
 export type {
     ReadbackOperationDescriptor,
     ReadbackRetentionPolicy,
+    ReadbackSource,
     ReadbackState,
 } from './readback.js'
+export { MappedReadbackLease } from './readback-lease.js'
+export type {
+    MappedReadbackLeaseState,
+} from './readback-lease.js'
+export type {
+    TextureReadbackOrigin,
+    TextureReadbackRowLayout,
+    TextureReadbackSize,
+    TextureReadbackSource,
+    TextureReadbackSourceDescriptor,
+} from './texture-readback.js'
 export { SubmissionBuilder, SubmittedWork } from './submission.js'
 export type {
     ComputeCommand,

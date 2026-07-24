@@ -12,6 +12,10 @@ import {
     recordReadbackCleanupFailure,
 } from './readback-mapping.js'
 import {
+    constructMappedReadbackLease,
+    setMappedReadbackLeaseState,
+} from './readback-lease.js'
+import {
     adoptRuntimeReadbackOperation,
     registerRuntimeReadbackOperation,
     unregisterRuntimeReadbackOperation,
@@ -25,6 +29,12 @@ import {
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { beginReadbackNativeObservation } from './submission-native-observation.js'
+import {
+    copyTextureReadbackLogicalBytes,
+    normalizeTextureReadbackSource,
+    textureReadbackCopyDestination,
+    textureReadbackCopySource,
+} from './texture-readback.js'
 import { describeValue } from './type-utils.js'
 import type { BufferResource } from './buffer.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -34,11 +44,21 @@ import type {
 } from './gpu-operation.js'
 import type { LayoutArtifact, LayoutReadbackView } from './layout-codec.js'
 import type { ReadbackMappingTransaction } from './readback-mapping.js'
+import type {
+    MappedReadbackLease,
+    MappedReadbackLeaseState,
+} from './readback-lease.js'
 import type { ReadbackStagingCleanupResult, ReadbackStagingSlot } from './readback-staging.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { ScratchRuntimeReadbackOperationFact } from './runtime-diagnostics.js'
 import type { SubmittedResourceEpoch, SubmittedWork } from './submission.js'
 import type { ReadbackNativeSettlement } from './submission-native-observation.js'
+import type {
+    TextureReadbackRowLayout,
+    TextureReadbackSource,
+    TextureReadbackSourceDescriptor,
+} from './texture-readback.js'
+import type { TextureResource } from './texture.js'
 
 const BUFFER_USAGE_COPY_SRC = 0x4
 const readbackOperationToken = Symbol('ReadbackOperation')
@@ -48,6 +68,7 @@ export type ReadbackState =
     | 'scheduled'
     | 'submitted'
     | 'mapping'
+    | 'mapped'
     | 'ready'
     | 'consumed'
     | 'cancelled'
@@ -58,14 +79,17 @@ export type ReadbackRetentionPolicy =
     | 'consume-on-read'
     | 'until-dispose'
 
+export type ReadbackSource = BufferRegion | TextureReadbackSource
+
 export type ReadbackOperationDescriptor = {
     label?: string
-    source: BufferRegion
+    source: BufferRegion | TextureReadbackSourceDescriptor
     after?: SubmittedWork
     retain?: ReadbackRetentionPolicy
 }
 
-export type ScheduledReadbackOperationDescriptor = ReadbackOperationDescriptor & {
+export type ScheduledReadbackOperationDescriptor = Omit<ReadbackOperationDescriptor, 'source'> & {
+    source: BufferRegion
     id: string
     after: SubmittedWork
     commandId: string
@@ -105,12 +129,19 @@ type ReadbackOperationConstruction = Readonly<{
     factReserved?: boolean
 }>
 
+type OpenReadbackMapping = {
+    transaction: ReadbackMappingTransaction
+    mapped: ArrayBuffer
+}
+
 type ReadbackOperationPrivateState = {
     runtime: ScratchRuntime
     id: string
     label: string | undefined
     state: ReadbackState
-    source: BufferRegion
+    source: ReadbackSource
+    sourceKind: 'buffer' | 'texture'
+    rowLayout: TextureReadbackRowLayout | undefined
     layout: LayoutArtifact | undefined
     after: SubmittedWork | undefined
     producerEpoch: SubmittedResourceEpoch | undefined
@@ -128,6 +159,9 @@ type ReadbackOperationPrivateState = {
     stagingAllocationOperationId: string | undefined
     mappingCompleted: boolean
     materialization: Promise<Uint8Array> | undefined
+    materializationOwner: 'bytes' | 'map' | undefined
+    activeLease: MappedReadbackLease | undefined
+    activeLeaseMapping: ReadbackMappingTransaction | undefined
     lifecycleSubscribers: Set<(state: 'cancelled' | 'disposed') => void>
     failureCode: string | undefined
 }
@@ -159,13 +193,19 @@ export class ReadbackOperation {
         }
 
         assertScratchRuntimeActive(runtime)
+        const label = descriptor.label
+        const source = descriptor.source
+        const afterInput = descriptor.after
+        const retain = descriptor.retain
 
         const state: ReadbackOperationPrivateState = {
             runtime,
             id: construction.id ?? `scratch-readback-${UUID()}`,
-            label: descriptor.label,
+            label,
             state: 'requested',
-            source: descriptor.source,
+            source: source as BufferRegion,
+            sourceKind: 'buffer',
+            rowLayout: undefined,
             layout: undefined,
             after: undefined,
             producerEpoch: undefined,
@@ -183,18 +223,25 @@ export class ReadbackOperation {
             stagingAllocationOperationId: construction.stagingAllocationOperationId,
             mappingCompleted: false,
             materialization: undefined,
+            materializationOwner: undefined,
+            activeLease: undefined,
+            activeLeaseMapping: undefined,
             lifecycleSubscribers: new Set(),
             failureCode: undefined,
         }
         readbackOperationStates.set(this, state)
-        state.source = normalizeSource(this, descriptor.source)
-        state.layout = state.source.layout
-        const after = normalizeAfter(this, descriptor.after)
+        const normalizedSource = normalizeSource(this, source)
+        state.source = normalizedSource.source
+        state.sourceKind = normalizedSource.sourceKind
+        state.rowLayout = normalizedSource.rowLayout
+        state.layout = readbackSourceLayout(normalizedSource.source)
+        const after = normalizeAfter(this, afterInput)
         state.after = after
-        state.producerEpoch = construction.producerEpoch ?? findSourceProducerEpoch(after, state.source.buffer)
-        state.contentEpoch = construction.contentEpoch ?? state.producerEpoch?.contentEpoch ?? state.source.buffer.contentEpoch
-        state.allocationVersion = construction.allocationVersion ?? state.producerEpoch?.allocationVersion ?? state.source.buffer.allocationVersion
-        state.retain = normalizeRetentionPolicy(this, descriptor.retain)
+        const sourceResource = readbackSourceResource(state.source)
+        state.producerEpoch = construction.producerEpoch ?? findSourceProducerEpoch(after, sourceResource)
+        state.contentEpoch = construction.contentEpoch ?? state.producerEpoch?.contentEpoch ?? sourceResource.contentEpoch
+        state.allocationVersion = construction.allocationVersion ?? state.producerEpoch?.allocationVersion ?? sourceResource.allocationVersion
+        state.retain = normalizeRetentionPolicy(this, retain)
         if (construction.path === 'direct') assertReadbackSourceCurrent(this)
         readbackOperationPaths.set(this, construction.path)
         if (construction.staging !== undefined) {
@@ -227,9 +274,19 @@ export class ReadbackOperation {
         return readbackStateFor(this).state
     }
 
-    get source(): BufferRegion {
+    get source(): ReadbackSource {
 
         return readbackStateFor(this).source
+    }
+
+    get sourceKind(): 'buffer' | 'texture' {
+
+        return readbackStateFor(this).sourceKind
+    }
+
+    get rowLayout(): TextureReadbackRowLayout | undefined {
+
+        return readbackStateFor(this).rowLayout
     }
 
     get layout(): LayoutArtifact | undefined {
@@ -328,7 +385,7 @@ export class ReadbackOperation {
                 severity: 'error',
                 phase: 'readback',
                 subject: this.subject,
-                related: [ this.source.subject ],
+                related: [ readbackSourceSubject(this.source) ],
                 message: 'ReadbackOperation typed array view does not evenly divide the byte range.',
                 expected: { byteLength: `multiple of ${ViewConstructor.name}.BYTES_PER_ELEMENT` },
                 actual: readbackDiagnosticActual(this, { byteLength: bytes.byteLength, bytesPerElement: elementSize }),
@@ -357,7 +414,7 @@ export class ReadbackOperation {
                 severity: 'error',
                 phase: 'readback',
                 subject: this.subject,
-                related: [ this.source.subject ],
+                related: [ readbackSourceSubject(this.source) ],
                 message: 'ReadbackOperation requires source layout metadata to create a layout view.',
                 expected: { layout: 'LayoutArtifact' },
                 actual: readbackDiagnosticActual(this, { layout: undefined }),
@@ -366,6 +423,40 @@ export class ReadbackOperation {
 
         const bytes = await this._readBytes()
         return createLayoutReadbackView(this.layout, bytes)
+    }
+
+    map(): Promise<MappedReadbackLease> {
+
+        return observeReadbackPromise(this.#map())
+    }
+
+    async #map(): Promise<MappedReadbackLease> {
+
+        this._assertReadableLifecycle()
+        const state = readbackStateFor(this)
+        if (
+            state.materializationOwner !== undefined ||
+            state.retainedBytes !== undefined ||
+            state.activeLease !== undefined
+        ) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_READBACK_IN_PROGRESS',
+                severity: 'error',
+                phase: 'readback',
+                subject: this.subject,
+                related: [ readbackSourceSubject(this.source) ],
+                message: 'ReadbackOperation already has a materialization owner.',
+                expected: { materializationOwners: 0 },
+                actual: readbackDiagnosticActual(this, { materializationOwners: 1 }),
+            })
+        }
+
+        state.materializationOwner = 'map'
+        try {
+            return await this._materializeMappedLease()
+        } finally {
+            if (state.activeLease === undefined) state.materializationOwner = undefined
+        }
     }
 
     cancel(reason?: string) {
@@ -377,6 +468,7 @@ export class ReadbackOperation {
         state.isCancelled = true
         if (reason !== undefined) state.cancelReason = reason
         this._setState('cancelled')
+        this._closeMappedLease(reason === 'device-lost' ? 'failed' : 'cancelled')
         publishReadbackLifecycle(this, 'cancelled')
         this._releaseStagingBuffer(true)
         this._unregister()
@@ -389,6 +481,9 @@ export class ReadbackOperation {
         this._clearRetainedBytes()
         readbackStateFor(this).isDisposed = true
         this._setState('disposed')
+        this._closeMappedLease(
+            this.runtime.isDisposed || this.runtime.isDeviceLost ? 'failed' : 'disposed'
+        )
         publishReadbackLifecycle(this, 'disposed')
         this._releaseStagingBuffer(true)
         this._unregister()
@@ -403,6 +498,19 @@ export class ReadbackOperation {
             return cloneBytes(retainedBytes)
         }
 
+        if (state.materializationOwner === 'map') {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_READBACK_IN_PROGRESS',
+                severity: 'error',
+                phase: 'readback',
+                subject: this.subject,
+                related: [ readbackSourceSubject(this.source) ],
+                message: 'ReadbackOperation already has a mapped materialization owner.',
+                expected: { materializationOwners: 1 },
+                actual: readbackDiagnosticActual(this, { materializationOwners: 1 }),
+            })
+        }
+
         if (state.materialization !== undefined) {
             if (this.retain === 'until-dispose') {
                 return cloneBytes(await state.materialization)
@@ -412,7 +520,7 @@ export class ReadbackOperation {
                 severity: 'error',
                 phase: 'readback',
                 subject: this.subject,
-                related: [ this.source.subject ],
+                related: [ readbackSourceSubject(this.source) ],
                 message: 'ReadbackOperation already has a consume-on-read materialization owner.',
                 expected: { materializationOwners: 1 },
                 actual: readbackDiagnosticActual(this, { materializationOwners: 1 }),
@@ -421,15 +529,98 @@ export class ReadbackOperation {
 
         const materialization = this._materializeBytes()
         state.materialization = materialization
+        state.materializationOwner = 'bytes'
         try {
             const bytes = await materialization
             return this.retain === 'until-dispose' ? cloneBytes(bytes) : bytes
         } finally {
             if (state.materialization === materialization) state.materialization = undefined
+            if (state.materializationOwner === 'bytes') state.materializationOwner = undefined
         }
     }
 
     async _materializeBytes(): Promise<Uint8Array> {
+
+        const opened = await this._openMappedStaging()
+        let mappingTransaction: ReadbackMappingTransaction | undefined = opened.transaction
+        try {
+            let bytes: Uint8Array
+            try {
+                bytes = this.sourceKind === 'texture'
+                    ? copyTextureReadbackLogicalBytes(
+                        opened.mapped,
+                        this.rowLayout!,
+                        (this.source as TextureReadbackSource).size.depthOrArrayLayers
+                    )
+                    : new Uint8Array(opened.mapped.slice(0))
+            } catch (cause) {
+                const transaction = mappingTransaction
+                mappingTransaction = undefined
+                return failReadbackMapping(transaction, {
+                    stage: 'host-copy',
+                    code: 'SCRATCH_READBACK_HOST_COPY_FAILED',
+                    cause,
+                })
+            }
+
+            const cleanup = this._releaseStagingBuffer(true)
+            if (cleanup !== undefined && cleanup.failures.length > 0) {
+                recordReadbackCleanupFailure(mappingTransaction, cleanup)
+            } else {
+                completeReadbackMapping(mappingTransaction)
+            }
+            mappingTransaction = undefined
+
+            if (this.retain === 'until-dispose') {
+                const state = readbackStateFor(this)
+                state.retainedBytes = bytes
+                state.isResultRetained = true
+                state.retainedByteLength = bytes.byteLength
+                this._setState('ready', {
+                    isMapping: false,
+                    stagingBytes: 0,
+                    retainedHostBytes: bytes.byteLength,
+                })
+                return bytes
+            }
+
+            this._clearRetainedBytes()
+            this._setState('consumed', { isMapping: false, stagingBytes: 0 })
+            this._unregister()
+            return bytes
+        } catch (error: unknown) {
+            if (mappingTransaction !== undefined) {
+                cancelReadbackMapping(mappingTransaction)
+            }
+            return this._failMaterialization(error, 'host-copy')
+        }
+    }
+
+    async _materializeMappedLease(): Promise<MappedReadbackLease> {
+
+        const opened = await this._openMappedStaging()
+        const state = readbackStateFor(this)
+        state.activeLeaseMapping = opened.transaction
+        let lease: MappedReadbackLease
+        try {
+            lease = constructMappedReadbackLease({
+                operation: this,
+                view: opened.mapped,
+                ...(this.rowLayout !== undefined ? { rowLayout: this.rowLayout } : {}),
+                ...(this.layout !== undefined ? { layout: this.layout } : {}),
+                close: () => this._closeMappedLease('released'),
+            })
+        } catch (error) {
+            state.activeLeaseMapping = undefined
+            cancelReadbackMapping(opened.transaction)
+            return this._failMaterialization(error, 'mapped-range')
+        }
+        state.activeLease = lease
+        this._setState('mapped', { isMapping: true })
+        return lease
+    }
+
+    async _openMappedStaging(): Promise<OpenReadbackMapping> {
 
         let mappingTransaction: ReadbackMappingTransaction | undefined
         let directNativeSettlement: Promise<ReadbackNativeSettlement> | undefined
@@ -442,14 +633,12 @@ export class ReadbackOperation {
 
             if (!isScheduled) {
                 this._setState('scheduled')
-                const device = this.runtime.device
-                const queue = this.runtime.queue
                 const stagingLabel = labelWithSuffix(this.label, 'staging')
                 const slot = await allocateReadbackStaging({
                     runtime: this.runtime,
                     target: readbackTarget(this),
-                    source: this.source.buffer,
-                    byteLength: this.source.size,
+                    source: readbackSourceResource(this.source),
+                    byteLength: readbackStagingByteLength(this),
                     ...(stagingLabel !== undefined ? { label: stagingLabel } : {}),
                 })
                 directReadbackStaging.set(this, slot)
@@ -480,22 +669,37 @@ export class ReadbackOperation {
                     if (encoderLabel !== undefined) encoderDescriptor.label = encoderLabel
                     const encoder = nativeObservation.issue(
                         'encoder-create',
-                        () => device.createCommandEncoder(encoderDescriptor)
+                        () => this.runtime.device.createCommandEncoder(encoderDescriptor)
                     )
-                    nativeObservation.issue('command-encode', () => encoder.copyBufferToBuffer(
-                        this.source.buffer.gpuBuffer,
-                        this.source.offset,
-                        stagingBuffer,
-                        0,
-                        this.source.size
-                    ))
+                    nativeObservation.issue('command-encode', () => {
+                        if (this.sourceKind === 'buffer') {
+                            const source = this.source as BufferRegion
+                            encoder.copyBufferToBuffer(
+                                source.buffer.gpuBuffer,
+                                source.offset,
+                                stagingBuffer,
+                                0,
+                                source.size
+                            )
+                            return
+                        }
+                        const source = this.source as TextureReadbackSource
+                        encoder.copyTextureToBuffer(
+                            textureReadbackCopySource(source),
+                            textureReadbackCopyDestination(stagingBuffer, this.rowLayout!),
+                            source.size
+                        )
+                    })
                     const commandBuffer = nativeObservation.issue(
                         'encoder-finish',
                         () => encoder.finish()
                     )
 
                     this._setState('submitted')
-                    nativeObservation.issue('queue-submit', () => queue.submit([ commandBuffer ]))
+                    nativeObservation.issue(
+                        'queue-submit',
+                        () => this.runtime.queue.submit([ commandBuffer ])
+                    )
                 } catch (cause) {
                     issueFailed = true
                     issueFailure = cause
@@ -517,7 +721,7 @@ export class ReadbackOperation {
                 runtime: this.runtime,
                 target: readbackTarget(this),
                 buffer: stagingBuffer,
-                byteLength: this.source.size,
+                byteLength: readbackStagingByteLength(this),
                 ...(this.label !== undefined ? { label: `${this.label} mapping` } : {}),
                 lifecycleState: () => readbackLifecycleState(this),
                 subscribeLifecycle: listener => subscribeReadbackLifecycle(this, listener),
@@ -536,10 +740,11 @@ export class ReadbackOperation {
                 mappingTransaction = undefined
                 throw error
             }
+
             failureStage = 'mapped-range'
             let mapped: ArrayBuffer
             try {
-                mapped = stagingBuffer.getMappedRange(0, this.source.size)
+                mapped = stagingBuffer.getMappedRange(0, readbackStagingByteLength(this))
             } catch (cause) {
                 const transaction = mappingTransaction
                 mappingTransaction = undefined
@@ -549,119 +754,132 @@ export class ReadbackOperation {
                     cause,
                 })
             }
-            failureStage = 'host-copy'
-            let bytes: Uint8Array
+
             try {
-                bytes = new Uint8Array(mapped.slice(0))
-            } catch (cause) {
-                const transaction = mappingTransaction
+                if (isScheduled) {
+                    const after = readbackStateFor(this).after
+                    if (after === undefined) {
+                        throw new TypeError('Ordered readback is missing its SubmittedWork owner.')
+                    }
+                    assertOrderedReadbackNativeOutcome(this, await after.nativeOutcome)
+                } else {
+                    if (directNativeSettlement === undefined) {
+                        throw new TypeError('Direct readback is missing its native observation.')
+                    }
+                    assertDirectReadbackNativeSettlement(this, await directNativeSettlement)
+                }
+            } catch (error) {
+                const cleanup = this._releaseStagingBuffer(true)
+                if (cleanup !== undefined && cleanup.failures.length > 0) {
+                    recordReadbackCleanupFailure(mappingTransaction, cleanup)
+                } else {
+                    completeReadbackMapping(mappingTransaction)
+                }
                 mappingTransaction = undefined
-                return failReadbackMapping(transaction, {
-                    stage: 'host-copy',
-                    code: 'SCRATCH_READBACK_HOST_COPY_FAILED',
-                    cause,
-                })
-            }
-
-            failureStage = 'cleanup'
-            const cleanup = this._releaseStagingBuffer(true)
-            if (cleanup !== undefined && cleanup.failures.length > 0) {
-                recordReadbackCleanupFailure(mappingTransaction, cleanup)
-            } else {
-                completeReadbackMapping(mappingTransaction)
-            }
-            mappingTransaction = undefined
-
-            if (isScheduled) {
-                const after = readbackStateFor(this).after
-                if (after === undefined) {
-                    throw new TypeError('Ordered readback is missing its SubmittedWork owner.')
-                }
-                assertOrderedReadbackNativeOutcome(this, await after.nativeOutcome)
-            } else {
-                if (directNativeSettlement === undefined) {
-                    throw new TypeError('Direct readback is missing its native observation.')
-                }
-                assertDirectReadbackNativeSettlement(this, await directNativeSettlement)
-            }
-
-            if (this.retain === 'until-dispose') {
-                const state = readbackStateFor(this)
-                state.retainedBytes = bytes
-                state.isResultRetained = true
-                state.retainedByteLength = bytes.byteLength
-                this._setState('ready', {
-                    isMapping: false,
-                    stagingBytes: 0,
-                    retainedHostBytes: bytes.byteLength,
-                })
-                return bytes
-            }
-
-            this._clearRetainedBytes()
-            this._setState('consumed', { isMapping: false, stagingBytes: 0 })
-            this._unregister()
-            return bytes
-        } catch (error: unknown) {
-            if (mappingTransaction !== undefined) {
-                cancelReadbackMapping(mappingTransaction)
-                mappingTransaction = undefined
-            }
-            if (isScratchDiagnosticError(error)) {
-                this._releaseStagingBuffer(true)
-                if (this.state !== 'cancelled' && this.state !== 'disposed') {
-                    readbackStateFor(this).failureCode = error.diagnostic.code
-                    this._clearRetainedBytes()
-                    this._setState('failed', {
-                        isMapping: false,
-                        stagingBytes: 0,
-                        retainedHostBytes: 0,
-                    })
-                    this._unregister()
-                }
                 throw error
             }
 
-            const failureCode = unexpectedReadbackFailureCode(failureStage)
-            readbackStateFor(this).failureCode = failureCode
-            this._setState('failed', {
-                isMapping: false,
-                stagingBytes: 0,
-                retainedHostBytes: 0,
-            })
-            const actual = readbackDiagnosticActual(this, {
-                error: error instanceof Error ? error.message : String(error),
-            })
+            this._assertReadableLifecycle()
+            return { transaction: mappingTransaction, mapped }
+        } catch (error: unknown) {
+            if (mappingTransaction !== undefined) cancelReadbackMapping(mappingTransaction)
+            return this._failMaterialization(error, failureStage)
+        }
+    }
+
+    _closeMappedLease(
+        requestedState: Exclude<MappedReadbackLeaseState, 'mapped'>
+    ): void {
+
+        const state = readbackStateFor(this)
+        const lease = state.activeLease
+        const mappingTransaction = state.activeLeaseMapping
+        if (lease === undefined || mappingTransaction === undefined) return
+
+        state.activeLease = undefined
+        state.activeLeaseMapping = undefined
+        state.materializationOwner = undefined
+        const cleanup = this._releaseStagingBuffer(true)
+        const cleanupFailed = cleanup !== undefined && cleanup.failures.length > 0
+        setMappedReadbackLeaseState(lease, cleanupFailed ? 'failed' : requestedState)
+        if (cleanupFailed) {
+            recordReadbackCleanupFailure(mappingTransaction, cleanup)
+        } else if (requestedState === 'released') {
+            completeReadbackMapping(mappingTransaction)
+        } else {
+            cancelReadbackMapping(mappingTransaction)
+        }
+
+        if (requestedState === 'released' && !cleanupFailed) {
             this._clearRetainedBytes()
-            this._releaseStagingBuffer(true)
+            this._setState('consumed', { isMapping: false, stagingBytes: 0 })
             this._unregister()
-            const nativeError = serializeNativeGpuError(error)
-            const controller = diagnosticsControllerFor(this.runtime)
-            const incident = controller.recordIncident({
-                kind: 'readback-failure',
+        } else if (cleanupFailed && this.state !== 'cancelled' && this.state !== 'disposed') {
+            readbackStateFor(this).failureCode = 'SCRATCH_READBACK_CLEANUP_FAILED'
+            this._setState('failed', { isMapping: false, stagingBytes: 0 })
+            this._unregister()
+        }
+    }
+
+    _failMaterialization(
+        error: unknown,
+        failureStage: ScratchReadbackFailureStage
+    ): never {
+
+        if (isScratchDiagnosticError(error)) {
+            this._releaseStagingBuffer(true)
+            if (this.state !== 'cancelled' && this.state !== 'disposed') {
+                readbackStateFor(this).failureCode = error.diagnostic.code
+                this._clearRetainedBytes()
+                this._setState('failed', {
+                    isMapping: false,
+                    stagingBytes: 0,
+                    retainedHostBytes: 0,
+                })
+                this._unregister()
+            }
+            throw error
+        }
+
+        const failureCode = unexpectedReadbackFailureCode(failureStage)
+        readbackStateFor(this).failureCode = failureCode
+        this._setState('failed', {
+            isMapping: false,
+            stagingBytes: 0,
+            retainedHostBytes: 0,
+        })
+        const actual = readbackDiagnosticActual(this, {
+            error: error instanceof Error ? error.message : String(error),
+        })
+        this._clearRetainedBytes()
+        this._releaseStagingBuffer(true)
+        this._unregister()
+        const nativeError = serializeNativeGpuError(error)
+        const controller = diagnosticsControllerFor(this.runtime)
+        const incident = controller.recordIncident({
+            kind: 'readback-failure',
+            diagnosticCode: failureCode,
+            nativeErrorCategory: 'native-exception',
+            attribution: 'exact-operation',
+            target: readbackTarget(this),
+            failureStage,
+            nativeError,
+            outcomes: [ Object.freeze({
+                stage: failureStage,
                 diagnosticCode: failureCode,
                 nativeErrorCategory: 'native-exception',
-                attribution: 'exact-operation',
-                target: readbackTarget(this),
-                failureStage,
                 nativeError,
-                outcomes: [ Object.freeze({
-                    stage: failureStage,
-                    diagnosticCode: failureCode,
-                    nativeErrorCategory: 'native-exception',
-                    nativeError,
-                }) ],
-            })
-            throwScratchDiagnostic({
-                code: failureCode,
-                severity: 'error',
-                phase: 'readback',
-                subject: this.subject,
-                related: [ this.source.subject, incident.subject ],
-                message: unexpectedReadbackFailureMessage(failureStage),
-                actual: { ...actual, failureStage, nativeError },
-            }, { cause: error, incident })
-        }
+            }) ],
+        })
+        throwScratchDiagnostic({
+            code: failureCode,
+            severity: 'error',
+            phase: 'readback',
+            subject: this.subject,
+            related: [ readbackSourceSubject(this.source), incident.subject ],
+            message: unexpectedReadbackFailureMessage(failureStage),
+            actual: { ...actual, failureStage, nativeError },
+        }, { cause: error, incident })
     }
 
     _assertReadableLifecycle() {
@@ -674,7 +892,7 @@ export class ReadbackOperation {
                 severity: 'error',
                 phase: 'readback',
                 subject: this.subject,
-                related: [ this.source.subject ],
+                related: [ readbackSourceSubject(this.source) ],
                 message: 'ReadbackOperation has been disposed.',
                 actual: readbackDiagnosticActual(this),
             })
@@ -686,7 +904,7 @@ export class ReadbackOperation {
                 severity: 'error',
                 phase: 'readback',
                 subject: this.subject,
-                related: [ this.source.subject ],
+                related: [ readbackSourceSubject(this.source) ],
                 message: 'ReadbackOperation has been cancelled.',
                 actual: readbackDiagnosticActual(this),
             })
@@ -698,7 +916,7 @@ export class ReadbackOperation {
                 severity: 'error',
                 phase: 'readback',
                 subject: this.subject,
-                related: [ this.source.subject ],
+                related: [ readbackSourceSubject(this.source) ],
                 message: 'ReadbackOperation has already been consumed.',
                 actual: readbackDiagnosticActual(this),
             })
@@ -710,7 +928,7 @@ export class ReadbackOperation {
                 severity: 'error',
                 phase: 'readback',
                 subject: this.subject,
-                related: [ this.source.subject ],
+                related: [ readbackSourceSubject(this.source) ],
                 message: 'ReadbackOperation failed during an earlier materialization attempt.',
                 actual: readbackDiagnosticActual(this),
             })
@@ -721,8 +939,11 @@ export class ReadbackOperation {
 
         this._assertReadableLifecycle()
         if (scheduledReadbackOperations.has(this)) return
-        this.source.assertUsable()
-        assertBufferAvailableForGpuUse(this.source.buffer, this.subject)
+        const resource = readbackSourceResource(this.source)
+        resource.assertUsable()
+        if (this.sourceKind === 'buffer') {
+            assertBufferAvailableForGpuUse((this.source as BufferRegion).buffer, this.subject)
+        }
         assertReadbackSourceCurrent(this)
     }
 
@@ -846,7 +1067,7 @@ function assertDirectReadbackNativeSettlement(
         phase: 'readback',
         subject: operation.subject,
         related: [
-            operation.source.subject,
+            readbackSourceSubject(operation.source),
             ...(incident !== undefined ? [ incident.subject ] : []),
         ],
         message: 'Direct readback copy issue produced a captured native failure.',
@@ -899,7 +1120,7 @@ function assertOrderedReadbackNativeOutcome(
         phase: 'readback',
         subject: operation.subject,
         related: [
-            operation.source.subject,
+            readbackSourceSubject(operation.source),
             { kind: 'Submission', id: outcome.submissionId },
             incident.subject,
         ],
@@ -998,14 +1219,29 @@ function constructReadbackOperation(
 function readbackTarget(operation: ReadbackOperation) {
 
     const state = readbackStateFor(operation)
+    const sourceResource = readbackSourceResource(operation.source)
+    const textureSource = operation.sourceKind === 'texture'
+        ? operation.source as TextureReadbackSource
+        : undefined
     return {
         kind: 'readback' as const,
         readbackId: operation.id,
         path: readbackOperationPaths.get(operation) ?? 'direct',
-        sourceResourceId: operation.source.buffer.id,
+        sourceKind: operation.sourceKind,
+        sourceResourceId: sourceResource.id,
         allocationVersion: operation.allocationVersion,
         contentEpoch: operation.contentEpoch,
-        byteLength: operation.source.size,
+        byteLength: readbackLogicalByteLength(operation),
+        stagingByteLength: readbackStagingByteLength(operation),
+        ...(textureSource !== undefined ? {
+            textureSubresource: {
+                format: textureSource.resource.format,
+                mipLevel: textureSource.mipLevel,
+                origin: textureSource.origin,
+                size: textureSource.size,
+                aspect: textureSource.aspect,
+            },
+        } : {}),
         ...(state.commandId !== undefined ? { commandId: state.commandId } : {}),
         ...(operation.after !== undefined ? { submissionId: operation.after.id } : {}),
         ...(state.stepIndex !== undefined ? { stepIndex: state.stepIndex } : {}),
@@ -1016,17 +1252,34 @@ function readbackFact(operation: ReadbackOperation): ScratchRuntimeReadbackOpera
 
     const path = readbackOperationPaths.get(operation) ?? 'direct'
     const state = readbackStateFor(operation)
+    const sourceResource = readbackSourceResource(operation.source)
+    const textureSource = operation.sourceKind === 'texture'
+        ? operation.source as TextureReadbackSource
+        : undefined
     return {
         id: operation.id,
         ...(operation.label !== undefined ? { label: operation.label } : {}),
         path,
         state: operation.state,
         retain: operation.retain,
-        sourceResourceId: operation.source.buffer.id,
+        sourceKind: operation.sourceKind,
+        sourceResourceId: sourceResource.id,
         allocationVersion: operation.allocationVersion,
         contentEpoch: operation.contentEpoch,
-        byteLength: operation.source.size,
-        stagingBytes: scheduledReadbackStaging.has(operation) ? operation.source.size : 0,
+        byteLength: readbackLogicalByteLength(operation),
+        stagingByteLength: readbackStagingByteLength(operation),
+        ...(textureSource !== undefined ? {
+            textureSubresource: {
+                format: textureSource.resource.format,
+                mipLevel: textureSource.mipLevel,
+                origin: textureSource.origin,
+                size: textureSource.size,
+                aspect: textureSource.aspect,
+            },
+        } : {}),
+        stagingBytes: scheduledReadbackStaging.has(operation)
+            ? readbackStagingByteLength(operation)
+            : 0,
         retainedHostBytes: operation.retainedByteLength ?? 0,
         isMapping: operation.state === 'mapping',
         ...(state.commandId !== undefined ? { commandId: state.commandId } : {}),
@@ -1038,7 +1291,10 @@ function readbackFact(operation: ReadbackOperation): ScratchRuntimeReadbackOpera
     }
 }
 
-function findSourceProducerEpoch(after: SubmittedWork | undefined, source: BufferResource): SubmittedResourceEpoch | undefined {
+function findSourceProducerEpoch(
+    after: SubmittedWork | undefined,
+    source: BufferResource | TextureResource
+): SubmittedResourceEpoch | undefined {
 
     if (after === undefined) return undefined
 
@@ -1052,7 +1308,8 @@ function findSourceProducerEpoch(after: SubmittedWork | undefined, source: Buffe
 
 function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
 
-    if (operation.source.buffer.state === 'indeterminate') {
+    const resource = readbackSourceResource(operation.source)
+    if (resource.state === 'indeterminate') {
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE',
             severity: 'error',
@@ -1062,15 +1319,15 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
             message: 'ReadbackOperation cannot read source content whose current value is indeterminate.',
             expected: { state: 'ready' },
             actual: readbackDiagnosticActual(operation, {
-                state: operation.source.buffer.state,
-                contentEpoch: operation.source.buffer.contentEpoch,
+                state: resource.state,
+                contentEpoch: resource.contentEpoch,
                 capturedContentEpoch: operation.contentEpoch,
                 recovery: 'explicit later producer before direct readback',
             }),
         })
     }
 
-    if (operation.source.buffer.contentEpoch !== operation.contentEpoch) {
+    if (resource.contentEpoch !== operation.contentEpoch) {
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_EPOCH_STALE',
             severity: 'error',
@@ -1080,14 +1337,14 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
             message: 'ReadbackOperation source content epoch no longer matches the captured readback epoch.',
             expected: { contentEpoch: operation.contentEpoch },
             actual: readbackDiagnosticActual(operation, {
-                contentEpoch: operation.source.buffer.contentEpoch,
+                contentEpoch: resource.contentEpoch,
                 capturedContentEpoch: operation.contentEpoch,
                 producerEpoch: operation.producerEpoch?.contentEpoch,
             }),
         })
     }
 
-    if (operation.source.buffer.allocationVersion !== operation.allocationVersion) {
+    if (resource.allocationVersion !== operation.allocationVersion) {
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE',
             severity: 'error',
@@ -1097,7 +1354,7 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
             message: 'ReadbackOperation source allocation version no longer matches the captured readback allocation.',
             expected: { allocationVersion: operation.allocationVersion },
             actual: readbackDiagnosticActual(operation, {
-                allocationVersion: operation.source.buffer.allocationVersion,
+                allocationVersion: resource.allocationVersion,
                 capturedAllocationVersion: operation.allocationVersion,
                 producerAllocationVersion: operation.producerEpoch?.allocationVersion,
             }),
@@ -1108,14 +1365,30 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
 function readbackRelatedSubjects(operation: ReadbackOperation): DiagnosticSubject[] {
 
     return [
-        operation.source.subject,
+        readbackSourceSubject(operation.source),
         operation.after?.subject,
     ].filter((subject): subject is DiagnosticSubject => subject !== undefined)
 }
 
-function normalizeSource(operation: ReadbackOperation, source: BufferRegion): BufferRegion {
+function normalizeSource(
+    operation: ReadbackOperation,
+    source: BufferRegion | TextureReadbackSourceDescriptor
+): Readonly<{
+    source: ReadbackSource
+    sourceKind: 'buffer' | 'texture'
+    rowLayout?: TextureReadbackRowLayout
+}> {
 
-    if (!isBufferRegion(source) || source.size <= 0) {
+    if (!isBufferRegion(source)) {
+        const normalized = normalizeTextureReadbackSource(operation.runtime, source, operation.subject)
+        return Object.freeze({
+            source: normalized.source,
+            sourceKind: 'texture' as const,
+            rowLayout: normalized.rowLayout,
+        })
+    }
+
+    if (source.size <= 0) {
         throwScratchDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_INVALID',
             severity: 'error',
@@ -1156,7 +1429,10 @@ function normalizeSource(operation: ReadbackOperation, source: BufferRegion): Bu
         })
     }
 
-    return source
+    return Object.freeze({
+        source,
+        sourceKind: 'buffer' as const,
+    })
 }
 
 function normalizeRetentionPolicy(operation: ReadbackOperation, retain: unknown): ReadbackRetentionPolicy {
@@ -1169,7 +1445,7 @@ function normalizeRetentionPolicy(operation: ReadbackOperation, retain: unknown)
         severity: 'error',
         phase: 'readback',
         subject: operation.subject,
-        related: [ operation.source.subject ],
+        related: [ readbackSourceSubject(operation.source) ],
         message: 'ReadbackOperation retain must be consume-on-read or until-dispose.',
         expected: { retain: [ 'consume-on-read', 'until-dispose' ] },
         actual: readbackDiagnosticActual(operation, { retain }),
@@ -1211,21 +1487,61 @@ function observeReadbackPromise<T>(promise: Promise<T>): Promise<T> {
     return promise
 }
 
+function readbackSourceResource(source: ReadbackSource): BufferResource | TextureResource {
+
+    return isBufferRegion(source) ? source.buffer : source.resource
+}
+
+function readbackSourceSubject(source: ReadbackSource): DiagnosticSubject {
+
+    return isBufferRegion(source) ? source.subject : source.resource.subject
+}
+
+function readbackSourceLayout(source: ReadbackSource): LayoutArtifact | undefined {
+
+    return source.layout
+}
+
+function readbackLogicalByteLength(operation: ReadbackOperation): number {
+
+    return operation.rowLayout?.logicalByteLength ??
+        (operation.source as BufferRegion).size
+}
+
+function readbackStagingByteLength(operation: ReadbackOperation): number {
+
+    return operation.rowLayout?.stagingByteLength ??
+        (operation.source as BufferRegion).size
+}
+
 function readbackDiagnosticActual(
     operation: ReadbackOperation,
     actual: Record<string, unknown> = {}
 ): Record<string, unknown> {
 
+    const sourceResource = readbackSourceResource(operation.source)
     const result: Record<string, unknown> = {
         state: operation.state,
         retain: operation.retain,
-        sourceId: operation.source.buffer.id,
-        sourceRegion: {
-            offset: operation.source.offset,
-            size: operation.source.size,
-        },
+        sourceKind: operation.sourceKind,
+        sourceId: sourceResource.id,
         contentEpoch: operation.contentEpoch,
         allocationVersion: operation.allocationVersion,
+        logicalByteLength: readbackLogicalByteLength(operation),
+    }
+    if (operation.sourceKind === 'buffer') {
+        const source = operation.source as BufferRegion
+        result.sourceRegion = { offset: source.offset, size: source.size }
+    } else {
+        const source = operation.source as TextureReadbackSource
+        result.textureSubresource = {
+            format: source.resource.format,
+            mipLevel: source.mipLevel,
+            origin: source.origin,
+            size: source.size,
+            aspect: source.aspect,
+        }
+        result.rowLayout = operation.rowLayout
     }
 
     if (operation.producerEpoch !== undefined && operation.after !== undefined) {
@@ -1235,7 +1551,7 @@ function readbackDiagnosticActual(
         result.retainedByteLength = operation.retainedByteLength
     }
     if (directReadbackStaging.has(operation) || scheduledReadbackStaging.has(operation)) {
-        result.stagingBytes = operation.source.size
+        result.stagingBytes = readbackStagingByteLength(operation)
     }
     if (operation.cancelReason !== undefined) {
         result.reason = operation.cancelReason

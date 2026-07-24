@@ -191,6 +191,28 @@ const direct = runtime.createReadback({ source: resultRegion })
 const directBytes = await direct.toBytes()
 ```
 
+同一个 operation 也接受 texture subresource。`toBytes()` 会移除 native row
+padding；`map()` 则在不增加 host copy 的情况下暴露 padded staging:
+
+```js
+const pixels = runtime.createReadback({
+    source: {
+        resource: colorTexture,
+        mipLevel: 0,
+        size: { width: 64, height: 64 },
+        aspect: 'all',
+    },
+})
+const lease = await pixels.map()
+try {
+    const mapped = new Uint8Array(lease.view)
+    const { stagingBytesPerRow } = lease.rowLayout
+    // 只在 lease active 期间读取 mapped rows。
+} finally {
+    lease.dispose()
+}
+```
+
 Ordered readback command 持有一个已确认的可复用 staging slot，因此 factory
 只能返回 Promise，而 `submit()` 保持同步:
 
@@ -212,7 +234,8 @@ completion，以及该 completion 结算前的 lifecycle；它不覆盖 mapping 
 copy。Direct readback 会在 staging allocation 前拒绝当前为 `indeterminate` 的
 source content。Runtime options
 `maxPendingOperations` 与 `maxStagingBytes` 限制当前
-readback ownership。Mapping validation 使用结构化 code
+readback ownership，包括 padded texture staging 与 active mapped lease。
+Mapping validation 使用结构化 code
 `SCRATCH_READBACK_MAPPING_VALIDATION_FAILED`；native message prose 只是
 evidence，不是 classifier。
 

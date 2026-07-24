@@ -113,7 +113,7 @@ state = empty
 
 下一次成功 texture upload、external-image upload、copy target write、render attachment write 或 storage write 会从保留的 epoch 继续递增，并让 replacement ready。Transfer command 在执行时解析 current physical allocation，并在任何 encoder 或 queue effect 前重新校验当前 mip、origin、extent 与 layer range。
 
-`SubmittedWork` 保持历史事实：之后的 resize 不能改变早先 submission 的 allocation-version 或 producer facts。`ReadbackOperation` 会捕获 source allocation version。当前已实现的 readback source 是 buffer，因此 captured buffer 在 materialization 前被替换时，会以 `SCRATCH_READBACK_SOURCE_ALLOCATION_STALE` 拒绝。Texture 数据通过显式 texture-to-buffer `CopyCommand` 到达 host memory；之后替换 texture 不会改写已捕获的 destination-buffer provenance。未来直接 texture-readback 路径必须遵守同一个 allocation-stale 规则。
+`SubmittedWork` 保持历史事实：之后的 resize 不能改变早先 submission 的 allocation-version 或 producer facts。`ReadbackOperation` 会为 BufferRegion 与 direct texture-subresource source 捕获 allocation version。任一 captured allocation 在 direct materialization 前被替换时，都会以 `SCRATCH_READBACK_SOURCE_ALLOCATION_STALE` 拒绝；current content 推进后则以 `SCRATCH_READBACK_SOURCE_EPOCH_STALE` 拒绝。显式 texture-to-buffer `CopyCommand` 仍会把 provenance 转交给 destination buffer，而 direct texture readback 直接保留 captured texture allocation 与 epoch。
 
 ## Buffer Host Mapping
 
@@ -192,6 +192,13 @@ Buffer upload path 会降低到 `GPUQueue.writeBuffer()`。其 target
 `BufferRegion` offset 与所选 byte length 都必须满足 4-byte alignment。Scratch
 会在直接 queue call 或 submission timeline 获得任何 effect 前校验这条原生规则。
 
+`TextureUploadCommand` 通过唯一 `GPUQueue.writeTexture()` 路径 lowering。
+其 `aspect` 默认是 `all`，也可选择合法的 depth-only 或 stencil-only
+destination aspect。Scratch 会验证 selected copy footprint、block geometry、
+physical depth/stencil subresource、mip range 与 source byte range。Queue write
+不继承 encoder-copy requirement：data offset 与 row stride 不会被强制套用
+encoder-only 256-byte row alignment。
+
 三种 immediate upload variant 都只能在其所属的 `ScratchRuntime.queue` 上执行。
 foreign queue 会在 `writeBuffer()`、`writeTexture()`、`copyExternalImageToTexture()`
 或任何逻辑 content-epoch effect 前以 `SCRATCH_COMMAND_WRONG_RUNTIME` 和
@@ -259,7 +266,10 @@ const readback = runtime.createReadback({
 const values = await readback.toArray(Float32Array)
 ```
 
-`toArray()` 与 `toBytes()` 属于 readback operation，不属于 `BufferResource` 或 `TextureResource`。该 operation 捕获一个 BufferRegion、其 parent allocation/content facts、可选 layout witness 与 producer submission。
+`toArray()`、`toBytes()` 与 `map()` 属于 readback operation，而不是
+`BufferResource` 或 `TextureResource`。operation 会捕获一个 BufferRegion 或
+一个 normalized texture subresource，并同时捕获 allocation/content facts 与
+optional layout interpretation。
 
 性质:
 
@@ -267,12 +277,22 @@ const values = await readback.toArray(Float32Array)
 - **Epoch 捕获。** readback 读取 readback request 或声明的 `after` submission 捕获的 content epoch。它不能静默漂移到 resource 的最新内容。
 - **可确认的自动 staging。** runtime 持有 `MAP_READ` staging resources，并在使用前确认原生 validation/OOM outcome。常见 readback 下用户 buffer 不需要 map usage，但 source 需要合适的 copy usage 或显式 resolve 路径。
 - **Buffer-specific mapping barrier。** Host materialization 等待 staging buffer 自身的 `mapAsync()`，不会额外插入一次全 queue completion wait。
-- **由 layout 派生视图。** `02-resources` 的 buffer layout 决定结果是 `TypedArray`、bytes，还是 layout-derived structured view。AoS 字段是 strided 的，除非显式 deinterleave，否则不承诺为一个连续 typed array。
+- **由 layout 派生视图。** Compatible LayoutArtifact 决定 logical result 是 `TypedArray`、bytes，还是 layout-derived structured view。AoS 字段是 strided 的，除非显式 deinterleave，否则不承诺为一个连续 typed array。
 
 Direct 与 ordered buffer readback 都通过 `copyBufferToBuffer()` 降低。Source
 `BufferRegion` offset 与 size 都必须在 Scratch 分配或 claim staging storage
 之前满足 4-byte alignment。因此，无论 readback 被安排在哪个位置，都使用同一
 alignment rule。
+
+Direct texture readback lowering 为一次原生 `copyTextureToBuffer()`。Source
+descriptor 指定 TextureResource、mip、origin、extent、aspect 与 optional
+LayoutArtifact。Scratch 发布 `TextureReadbackRowLayout`，明确区分 tight logical
+rows 与 native staging rows。Native staging 使用 256-byte row stride；
+`toBytes()` 会移除 row/image padding 并返回 owned logical result。`map()` 则通过
+lease 暴露 padded native staging range，不执行 host copy。Format/aspect
+copyability、sample count、physical depth/stencil coverage、compressed-format
+feature level、block alignment、usage、range、allocation version 与 content
+epoch 都会在 native copy issue 前完成验证。
 
 ## Staging Allocation 与 Mapping Transaction
 
@@ -347,6 +367,7 @@ type ReadbackState =
     | 'scheduled'
     | 'submitted'
     | 'mapping'
+    | 'mapped'
     | 'ready'
     | 'consumed'
     | 'cancelled'
@@ -360,6 +381,7 @@ type ReadbackState =
 - `scheduled` -> 已选择 copy、resolve 或 map 路径。
 - `submitted` -> GPU work 已在飞行中。它可能无法撤回，但结果仍可标记为不再需要。
 - `mapping` -> staging copy 已存在，正在等待 `mapAsync` 或等价 host 可用性。
+- `mapped` -> 一个 mapped readback lease 持有 staging mapping，且尚未发生 host copy。
 - `ready` -> retained host bytes 已存在，并可在 cancel 或 dispose 前重复读取。默认 consume-on-read 路径不使用 `ready`。
 - `consumed` -> `toArray()` 或 `toBytes()` 已返回 owned copy，runtime staging 可释放。
 - `cancelled` -> 调用方声明不再需要结果。已提交的 GPU work 仍可能完成，但 runtime 应丢弃结果并释放 staging。
@@ -389,8 +411,8 @@ const readback = runtime.createReadback({
 
 对 host-copy retention 路径，第一次成功读取会 materialize 并存储 operation-owned host bytes，释放 GPU staging，并返回 owned copy。之后的 `toBytes()`、`toArray()` 和 layout-view 读取从 retained bytes 克隆结果，不会重新 staging GPU work。即使 source resource 后续推进 epoch，retained result 仍代表已 materialize 的那份 epoch。
 
-Mapped-view lease 是 follow-up boundary，本契约尚未实现。未来 zero-copy 或
-mapped view 必须以 lease 表达，因为 mapped range 在 unmap 后失效:
+Mapped staging 以有界 `MappedReadbackLease` 表达，因为 mapped range 在
+native unmap 后失效:
 
 ```ts
 const lease = await readback.map()
@@ -402,7 +424,14 @@ try {
 }
 ```
 
-只有 lease 暴露 mapped view。operation 追踪 active leases; 如果 lease 在 operation 或 runtime dispose 前没有释放，开发期 validation 应告警。
+只有 lease 暴露 mapped view。Buffer lease 覆盖 requested buffer range；
+texture lease 覆盖 padded staging bytes，并携带 `rowLayout`，使调用方能够寻址
+row/image，而不会把 padding 误当作 logical data。一个 operation 只有一个
+materialization owner：mapped lease 不能与 host-copy materialization 或 retained
+host bytes 共存。Lease release 会 unmap/destroy staging、detach 已取得的 view、
+把 operation 转为 `consumed`，并只保留 immutable identity、terminal state 与
+layout facts。Cancellation、operation/runtime disposal、device loss 与 cleanup
+failure 都只终止同一 authority 一次。
 
 `cancel()` 与 `dispose()` 是显式操作:
 
@@ -433,7 +462,7 @@ const submitted = runtime.createSubmission()
 const values = await readParticles.result({ after: submitted }).toArray(Float32Array)
 ```
 
-buffer-only `ReadbackCommand` ordered-staging 路径现已实现。它的 Promise-only factory 会在返回前确认可复用 staging slot。它验证显式 source epoch，记录 read-only submission ledger entry，并在声明的 step 把数据复制到 runtime-owned staging。`result({ after })` 返回与该次 submitted work 精确关联的 operation；materialization 只映射已有 staging buffer，不会再次提交 copy。它仍是逃生口，不是默认 readback 路径。直接 texture readback 与 mapped lease 仍属于未来工作；有限 staging budget 已是 runtime policy。
+buffer-only `ReadbackCommand` ordered-staging 路径现已实现。它的 Promise-only factory 会在返回前确认可复用 staging slot。它验证显式 source epoch，记录 read-only submission ledger entry，并在声明的 step 把数据复制到 runtime-owned staging。`result({ after })` 返回与该次 submitted work 精确关联的 operation；materialization 只映射已有 staging buffer，不会再次提交 copy。它仍是逃生口，不是默认 readback 路径。Direct texture readback 与 mapped lease 复用同一个 allocator、mapping transaction、lifecycle authority 与 finite staging budget，而不会把 ordered command 扩展成 texture API。
 
 Command disposal 会阻止新的 submission 与 reuse，但在 runtime 仍 active 时不会
 抹掉 historical result lookup。已经关联到 `SubmittedWork` 的 operation 仍可通过
@@ -737,8 +766,9 @@ const runtime = await ScratchRuntime.create({
 })
 ```
 
-Stale-operation warning、automatic eviction 与 mapped-view lease budget 是
-follow-up policy，不是已实现 budget contract 上的 alias 或 optional flag。
+Stale-operation warning、automatic eviction 与独立 mapped-lease count budget
+仍是 follow-up policy。Active mapped lease 已计入现有 pending-operation 与 padded
+staging-byte budget；这些事实不是该 budget contract 上的 alias 或 optional flag。
 
 使用 `09-diagnostics-validation` 共享 envelope 的稳定 readback provenance
 codes 包括:
@@ -761,6 +791,9 @@ type ReadbackDiagnosticCode =
     | 'SCRATCH_READBACK_UNMAP_FAILED'
     | 'SCRATCH_READBACK_STAGING_DESTROY_FAILED'
     | 'SCRATCH_READBACK_IN_PROGRESS'
+    | 'SCRATCH_READBACK_LAYOUT_INVALID'
+    | 'SCRATCH_READBACK_MAPPED_LEASE_INACTIVE'
+    | 'SCRATCH_READBACK_TEXTURE_SOURCE_INVALID'
     | 'SCRATCH_READBACK_CANCELLED'
     | 'SCRATCH_READBACK_OPERATION_DISPOSED'
     | 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE'
@@ -781,9 +814,19 @@ type ReadbackDiagnostic = ScratchDiagnostic & {
     ]
     actual?: {
         state: ReadbackState
+        sourceKind?: 'buffer' | 'texture'
         allocationVersion?: number
         contentEpoch?: number
         rangeOrRegion?: unknown
+        logicalByteLength?: number
+        stagingByteLength?: number
+        textureSubresource?: {
+            format: GPUTextureFormat
+            mipLevel: number
+            origin: GPUOrigin3D
+            size: GPUExtent3D
+            aspect: GPUTextureAspect
+        }
         producerSubmissionId?: string
         ageInSubmissions?: number
         ageInMs?: number

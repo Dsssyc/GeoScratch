@@ -16,37 +16,54 @@ const orderedIterations = positiveInteger(
     process.env.SCRATCH_READBACK_STRESS_ORDERED,
     5_000
 )
+const textureLeaseIterations = positiveInteger(
+    process.env.SCRATCH_READBACK_STRESS_TEXTURE_LEASE,
+    5_000
+)
 const allowShort = process.env.SCRATCH_READBACK_STRESS_ALLOW_SHORT === '1'
 
 if (!allowShort) {
     assertStress(directIterations >= 20_000, 'direct stress must run at least 20,000 operations')
     assertStress(orderedIterations >= 5_000, 'ordered stress must run at least 5,000 reuses')
+    assertStress(
+        textureLeaseIterations >= 5_000,
+        'texture mapped-lease stress must run at least 5,000 operations'
+    )
 }
 
 const direct = await stressDirect(directIterations)
 const ordered = await stressOrdered(orderedIterations)
+const textureLease = await stressTextureMappedLease(textureLeaseIterations)
 const result = {
     schemaVersion: 1,
     measurementBoundary: {
         device: 'deterministic in-process fake GPUDevice',
         direct: 'create ReadbackOperation through owned host copy and terminal cleanup',
         ordered: 'reuse one acknowledged ReadbackCommand through submit, map, host copy, and slot return',
+        textureLease: 'direct native texture-to-buffer copy through mapped lease release and view detachment',
         recorder: '64 operations / 8 incidents / 64 KiB serialized evidence',
         excludes: [ 'browser IPC', 'driver work', 'physical GPU residency' ],
     },
     direct,
     ordered,
+    textureLease,
     verification: {
         status: 'passed',
         minimumDirectOperations: 20_000,
         minimumOrderedReuses: 5_000,
+        minimumTextureMappedLeases: 5_000,
         terminalPendingOperations: direct.terminal.pendingOperationCount +
-            ordered.terminal.pendingOperationCount,
-        terminalActiveMappings: direct.terminal.activeMappings + ordered.terminal.activeMappings,
+            ordered.terminal.pendingOperationCount +
+            textureLease.terminal.pendingOperationCount,
+        terminalActiveMappings: direct.terminal.activeMappings +
+            ordered.terminal.activeMappings +
+            textureLease.terminal.activeMappings,
         terminalLifecycleSubscribers: direct.terminal.lifecycleSubscriberCount +
-            ordered.terminal.lifecycleSubscriberCount,
+            ordered.terminal.lifecycleSubscriberCount +
+            textureLease.terminal.lifecycleSubscriberCount,
         terminalStagingBytes: direct.terminal.currentStagingBytes +
-            ordered.terminal.currentStagingBytes,
+            ordered.terminal.currentStagingBytes +
+            textureLease.terminal.currentStagingBytes,
     },
 }
 
@@ -145,6 +162,52 @@ async function stressOrdered(iterations) {
     }
 }
 
+async function stressTextureMappedLease(iterations) {
+
+    const fake = createFakeGpu()
+    const runtime = await createStressRuntime(fake)
+    const source = await createReadyTexture(runtime)
+    const counters = emptyNativeCounters()
+    clearFakeCalls(fake)
+    const startedAt = performance.now()
+
+    for (let index = 0; index < iterations; index++) {
+        const operation = runtime.createReadback({
+            label: `texture mapped lease stress ${index}`,
+            source: {
+                resource: source,
+                size: [ 3, 2, 1 ],
+            },
+        })
+        const lease = await operation.map()
+        const mappedView = lease.view
+        assertStress(lease.byteLength === 512, `texture lease ${index} staging size drifted`)
+        assertStress(operation.state === 'mapped', `texture lease ${index} did not map`)
+        lease.dispose()
+        assertStress(mappedView.byteLength === 0, `texture lease ${index} view remained attached`)
+        assertStress(operation.state === 'consumed', `texture lease ${index} did not consume`)
+        if ((index + 1) % 128 === 0) flushFakeCounters(fake, counters)
+    }
+    flushFakeCounters(fake, counters)
+    const elapsedMs = performance.now() - startedAt
+    const terminal = terminalFacts(runtime)
+
+    assertStress(counters.stagingAllocations === iterations, 'texture staging allocation count drifted')
+    assertStress(counters.textureCopies === iterations, 'texture native copy count drifted')
+    assertStress(counters.maps === iterations, 'texture mapped-lease map count drifted')
+    assertStress(counters.destroys === iterations, 'texture staging destroy count drifted')
+    assertTerminal(runtime, terminal, { expectedCommands: 0 })
+    assertStress(terminal.overwrittenOperations > 0, 'texture recorder did not overflow')
+    runtime.dispose()
+    return {
+        operations: iterations,
+        elapsedMs,
+        operationsPerSecond: iterations / (elapsedMs / 1_000),
+        native: counters,
+        terminal,
+    }
+}
+
 async function createStressRuntime(fake) {
 
     return ScratchRuntime.create({
@@ -175,6 +238,26 @@ async function createReadySource(runtime) {
     const submitted = runtime.createSubmission().upload(upload).submit()
     await submitted.done
     assertStress(source.contentEpoch === 1, 'stress source upload did not advance content epoch')
+    return source
+}
+
+async function createReadyTexture(runtime) {
+
+    const source = await runtime.createTexture({
+        label: 'texture readback stress source',
+        size: { width: 3, height: 2 },
+        format: 'rgba8unorm',
+        usage: 0x1 | 0x2,
+    })
+    const upload = runtime.createTextureUploadCommand({
+        target: source,
+        data: new Uint8Array(24),
+        layout: { bytesPerRow: 12, rowsPerImage: 2 },
+        size: { width: 3, height: 2 },
+    })
+    const submitted = runtime.createSubmission().upload(upload).submit()
+    await submitted.done
+    assertStress(source.contentEpoch === 1, 'texture stress upload did not advance content epoch')
     return source
 }
 
@@ -217,12 +300,13 @@ function assertTerminal(runtime, facts, { expectedCommands }) {
 
 function emptyNativeCounters() {
 
-    return { stagingAllocations: 0, maps: 0, destroys: 0 }
+    return { stagingAllocations: 0, textureCopies: 0, maps: 0, destroys: 0 }
 }
 
 function flushFakeCounters(fake, counters) {
 
     counters.stagingAllocations += fake.calls.buffers.filter(isStagingBuffer).length
+    counters.textureCopies += fake.calls.textureBufferCopies.length
     counters.maps += fake.calls.maps.length
     counters.destroys += fake.calls.bufferDestroys.length
     clearFakeCalls(fake)
