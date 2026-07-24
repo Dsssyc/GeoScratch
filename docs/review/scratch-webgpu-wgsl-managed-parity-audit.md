@@ -2,12 +2,15 @@
 
 ## Status
 
-Phase 6/7 evidence closure is complete on
+Phase 6/7 fixed-convergence work is complete on
 `socu/scratch-webgpu-wgsl-evidence-closure-v1`, based on
 `f8d82ebfce1ab324d95d8d59acf654cda16ee28d`. The frozen Phase 0 manifests
-remain unchanged. A separate current-state manifest now closes all 662
-formal entries with explicit, fail-closed evidence rules: 591 WebGPU entries,
-65 previously scoped WGSL entries, and six formal WGSL `enable` extensions.
+remain unchanged. A separate current-state manifest classifies all 662 formal
+entries with explicit, fail-closed evidence rules: 591 WebGPU entries, 65
+previously scoped WGSL entries, and six formal WGSL `enable` extensions.
+The final browser gate found two invalid language-feature proof shaders, so
+the Goal terminates `issues-found` rather than claiming complete evidence
+closure.
 
 The final acceptance gate is bound to the clean correction commit containing
 this audit. Its result is `clean` only when every command in the final gate
@@ -331,8 +334,8 @@ feature. A source containing only `requires` is not accepted as evidence.
 | --- | --- | --- |
 | `readonly_and_readwrite_storage_textures` | passed | read/write `r32uint` storage texture and buffer readback |
 | `packed_4x8_integer_dot_product` | passed | `dot4U8Packed` result readback |
-| `unrestricted_pointer_parameters` | passed | storage pointer function parameter writes output |
-| `pointer_composite_access` | passed | vector-component pointer dereference |
+| `unrestricted_pointer_parameters` | failed | proof parameter name `target` is a reserved WGSL keyword |
+| `pointer_composite_access` | failed | proof attempts to take the address of a vector component, which native validation rejects |
 | `uniform_buffer_standard_layout` | passed | tightly packed uniform array through LayoutCodec |
 | `subgroup_id` | passed | subgroup built-ins affect readback |
 | `subgroup_uniformity` | passed | subgroup diagnostic and operation affect readback |
@@ -343,13 +346,14 @@ feature. A source containing only `requires` is not accepted as evidence.
 | `buffer_view` | skipped | browser omitted the WGSL language feature |
 
 The same matrix separately executes nested `mat3x2f` layout readback. The
-final matrix therefore contains 19 unique proofs: 16 passed, three skipped,
-and zero failed. Every executed proof creates a real Scratch Runtime,
+final matrix therefore contains 19 unique proofs: 14 passed, three skipped,
+and two failed. Every successful proof creates a real Scratch Runtime,
 ShaderModule, Program, pipeline, submission, and GPU readback. All use the
-same `high-performance` adapter selection facts; all executed terminals have
-zero live resources, mappings, readbacks, pending native observations,
-uncaptured errors, device losses, validation errors, internal errors, and OOM
-errors.
+same `high-performance` adapter selection facts. The two failed proofs each
+produce one captured validation error and no uncaptured error, device loss,
+internal error, or OOM error. Every attempted proof, including both failures,
+terminates with zero live resources, mappings, readbacks, pending operations,
+and pending native observations.
 
 The headed environment is Chrome `150.0.7871.184`. The three skips are
 capability facts, not fallbacks: the adapter omitted
@@ -437,7 +441,7 @@ The reviewer reported `issues-found` before correction:
 | --- | --- |
 | Catch-all/self-certifying current-manifest mappings, including wrong mappings for discovery, immediate data, and public symbols | Replaced with explicit fail-closed coverage rules, exact exported symbols, located native operations, and no fallback |
 | Missing feature/language/limit conditions for conditional WebGPU domains | Added structured conditions for depth clipping, timestamps, swizzle, immediate data, dual-source blending, indirect first instance, compressed/storage/float texture formats, and tier dependencies |
-| Language proofs merely declared `requires` while executing unrelated constants | Replaced with feature-specific shaders whose semantics determine GPU readback |
+| Language proofs merely declared `requires` while executing unrelated constants | Replaced with feature-specific shaders intended to determine GPU readback; the final native gate then exposed two invalid proof programs listed below |
 | Capability discovery and proof runtimes could select different adapters, and incomplete proof rows could pass validation | Discovery now uses ScratchRuntime with the same power preference; validator requires the exact 19-row set, adapter facts, contracts, execution evidence, and clean terminals |
 | Final provenance, gate, and audit record were incomplete | Pinned source URLs/commits/hashes and completed this living audit |
 
@@ -451,8 +455,10 @@ single final full gate.
 
 ## Final Gate
 
-The final gate targets the clean correction commit containing every reviewed
-byte. Commands run once, sequentially, in this exact order:
+The final gate targeted clean correction commit `6c0b20c`. Commands ran once,
+sequentially, in this exact order. This terminal `issues-found` audit update
+records their result after execution; it does not alter implementation or
+authorize a gate rerun.
 
 | Command | Result |
 | --- | --- |
@@ -469,7 +475,7 @@ byte. Commands run once, sequentially, in this exact order:
 | `node tests/stress/scratch-persistent-binding-views.mjs` | passed |
 | `node tests/stress/scratch-readback-staging-mapping.mjs` | passed |
 | `node tests/stress/scratch-submission-native-provenance.mjs` | passed |
-| `node tests/browser/scratch-wgsl-capability-matrix.mjs` | passed: 16 pass, 3 capability skips, 0 fail |
+| `node tests/browser/scratch-wgsl-capability-matrix.mjs` | failed: 14 pass, 3 capability skips, 2 invalid shader proofs |
 | `node tests/browser/scratch-flow-layer.mjs` | passed |
 | `node tests/browser/scratch-dem-layer.mjs` | passed |
 | `node tests/browser/scratch-hello-gaw.mjs` | passed |
@@ -477,12 +483,36 @@ byte. Commands run once, sequentially, in this exact order:
 
 ## Completion
 
-Final result: `clean`.
+Final result: `issues-found`.
 
-The current formal baseline has no unclassified editor delta, all 662 entries
-have machine-resolvable evidence, `unresolved` is zero, all formal capabilities
-have a managed Scratch or explicit caller-WGSL path, and no capability depends
-on raw device/queue access. Supported browser paths execute successfully;
-unsupported paths carry exact capability facts. The only independent review's
-material findings are closed by the one allowed correction, all required
-gates pass, and the final worktree is clean.
+Seventeen of the 18 final commands pass. The current formal baseline has no
+unclassified editor delta, all 662 entries have structurally resolvable
+evidence, `unresolved` is zero, no expression path depends on raw
+device/queue access, all six enable contracts behave as expected on the
+available adapter, and all example and stress regressions pass. The final
+capability matrix nevertheless prevents a `clean` conclusion:
+
+1. `unrestricted_pointer_parameters` is advertised by
+   `navigator.gpu.wgslLanguageFeatures`, but its proof fails at ShaderModule
+   parsing because `target` at WGSL source line 8, column 5 is a reserved
+   keyword. Scratch reports `SCRATCH_SHADER_MODULE_COMPILATION_FAILED`, one
+   captured validation incident, exact ShaderModule attribution, and a clean
+   terminal. This is a defect in the proof source, not evidence that the
+   Scratch Program contract or managed path is missing.
+2. `pointer_composite_access` is advertised, but its proof fails at WGSL
+   source line 10, column 21 because it takes the address of a vector
+   component. Scratch reports the same structured compilation diagnostic and
+   clean terminal. The proof does not yet exercise the formal feature through
+   a native-valid operation, so the current manifest's evidence claim is not
+   browser-proven.
+
+These defects remain because the Goal permits only one concentrated
+correction followed by one final full gate. Fixing and rerunning them here
+would violate the convergence contract. A bounded follow-up Goal should
+change only the two pinned proof shaders: rename the reserved parameter,
+replace the vector-component address expression with a
+WGSL-CRD-conformant `pointer_composite_access` operation, add source-shape
+unit assertions, and run one focused capability matrix plus the four existing
+business regressions. It must not refresh the specification, alter Scratch
+runtime/API code, or reopen the 662-entry classification unless a corrected
+native-valid proof reveals an actual managed-path defect.
