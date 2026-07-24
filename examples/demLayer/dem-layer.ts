@@ -9,7 +9,7 @@ import type {
     BindVisibility,
     BufferResource,
     LayoutCodec,
-    LayoutFieldDescriptor,
+    LayoutFixedFieldDescriptor,
     ProgramBufferLayoutRequirement,
     ScratchRuntimeDiagnosticsSnapshot,
     SubmittedWork,
@@ -336,7 +336,7 @@ const defaultFailureProof: DemFailureProof = Object.freeze({
 
 function createCodecs() {
 
-    const uniform = (name: string, fields: LayoutFieldDescriptor[]) =>
+    const uniform = (name: string, fields: LayoutFixedFieldDescriptor[]) =>
         layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
     return Object.freeze({
         map: uniform('DemMapUniform', [
@@ -546,7 +546,7 @@ async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
         name,
         type: 'uniform',
         visibility,
-        minBindingSize: codec.artifact.byteLength,
+        minBindingSize: codec.byteLength(),
     })
     const readStorage = (binding: number, name: string): BindLayoutEntry => ({
         binding,

@@ -292,7 +292,9 @@ describe('scratch layout-aware ReadbackOperation', () => {
         })
         expect(diagnostic.expected).to.deep.equal({
             offsetAlignment: codec.artifact.alignment,
-            sizeStride: codec.artifact.stride,
+            minimumBindingSize: codec.artifact.minimumBindingSize,
+            extent: 'fixed',
+            fixedStride: codec.artifact.stride,
         })
         expect(diagnostic.actual).to.deep.equal({ offset: 0, size: byteLength })
     })

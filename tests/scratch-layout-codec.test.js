@@ -44,7 +44,10 @@ describe('scratch LayoutCodec', () => {
             alignmentMode: 'host-shareable',
         })
         expect(codec.artifact.usages).to.deep.equal([ 'uniform', 'storage', 'readback' ])
-        expect(codec.artifact.usageCompatibility).to.deep.equal({
+        expect(Object.fromEntries(
+            Object.entries(codec.artifact.usageCompatibility)
+                .map(([ usage, fact ]) => [ usage, fact.compatible ])
+        )).to.deep.equal({
             uniform: true,
             storage: true,
             readback: true,
@@ -82,16 +85,16 @@ describe('scratch LayoutCodec', () => {
         expect(changedArtifact.schemaHash).to.not.equal(codec.artifact.schemaHash)
         expect(codec.artifact.fields.map(field => ({
             name: field.name,
-            type: field.type,
+            type: field.wgslType,
             offset: field.offset,
-            size: field.size,
+            byteLength: field.byteLength,
             alignment: field.alignment,
             padding: field.padding,
         }))).to.deep.equal([
-            { name: 'time', type: 'f32', offset: 0, size: 4, alignment: 4, padding: 12 },
-            { name: 'position', type: 'vec3f', offset: 16, size: 12, alignment: 16, padding: 4 },
-            { name: 'flags', type: 'vec2u', offset: 32, size: 8, alignment: 8, padding: 8 },
-            { name: 'viewProjection', type: 'mat4x4f', offset: 48, size: 64, alignment: 16, padding: 0 },
+            { name: 'time', type: 'f32', offset: 0, byteLength: 4, alignment: 4, padding: 12 },
+            { name: 'position', type: 'vec3f', offset: 16, byteLength: 12, alignment: 16, padding: 4 },
+            { name: 'flags', type: 'vec2u', offset: 32, byteLength: 8, alignment: 8, padding: 8 },
+            { name: 'viewProjection', type: 'mat4x4f', offset: 48, byteLength: 64, alignment: 16, padding: 0 },
         ])
     })
 
@@ -110,13 +113,15 @@ describe('scratch LayoutCodec', () => {
         expect(codec.artifact.fields.map(field => ({
             name: field.name,
             offset: field.offset,
-            size: field.size,
+            byteLength: field.byteLength,
             alignment: field.alignment,
-            arrayStride: field.arrayStride,
+            elementStride: field.type.kind === 'array'
+                ? field.type.elementStride
+                : undefined,
         }))).to.deep.equal([
-            { name: 'position', offset: 0, size: 12, alignment: 16, arrayStride: undefined },
-            { name: 'mass', offset: 12, size: 4, alignment: 4, arrayStride: undefined },
-            { name: 'directions', offset: 16, size: 32, alignment: 16, arrayStride: 16 },
+            { name: 'position', offset: 0, byteLength: 12, alignment: 16, elementStride: undefined },
+            { name: 'mass', offset: 12, byteLength: 4, alignment: 4, elementStride: undefined },
+            { name: 'directions', offset: 16, byteLength: 32, alignment: 16, elementStride: 16 },
         ])
 
         const bytes = codec.pack({
@@ -204,19 +209,17 @@ describe('scratch LayoutCodec', () => {
             usage: [ 'uniform', 'storage', 'readback' ],
         })
 
-        expect(scalarArray.artifact.fields[0].arrayStride).to.equal(4)
-        expect(vectorArray.artifact.fields[0].arrayStride).to.equal(8)
-        expect(scalarArray.artifact.usageCompatibility).to.include({
-            uniform: false,
-            storage: true,
-            readback: true,
-        })
-        expect(vectorArray.artifact.usageCompatibility.uniform).to.equal(false)
+        expect(scalarArray.artifact.fields[0].type.elementStride).to.equal(4)
+        expect(vectorArray.artifact.fields[0].type.elementStride).to.equal(8)
+        expect(scalarArray.artifact.usageCompatibility.uniform.compatible).to.equal(false)
+        expect(scalarArray.artifact.usageCompatibility.storage.compatible).to.equal(true)
+        expect(scalarArray.artifact.usageCompatibility.readback.compatible).to.equal(true)
+        expect(vectorArray.artifact.usageCompatibility.uniform.compatible).to.equal(false)
         expect(alignedArray.artifact.fields[1]).to.include({
             offset: 16,
-            arrayStride: 16,
         })
-        expect(alignedArray.artifact.usageCompatibility.uniform).to.equal(true)
+        expect(alignedArray.artifact.fields[1].type.elementStride).to.equal(16)
+        expect(alignedArray.artifact.usageCompatibility.uniform.compatible).to.equal(true)
     })
 
     it('reports and enforces immediate-address-space compatibility', () => {
@@ -234,7 +237,7 @@ describe('scratch LayoutCodec', () => {
         })
 
         expect(codec.artifact.usages).to.deep.equal([ 'immediate' ])
-        expect(codec.artifact.usageCompatibility.immediate).to.equal(true)
+        expect(codec.artifact.usageCompatibility.immediate.compatible).to.equal(true)
         expect(Object.isFrozen(codec.artifact.usageCompatibility)).to.equal(true)
         const wgsl = codec.wgslAccessors({ namespace: 'ImmediateParametersLayout' })
         expect(wgsl).to.not.include('requires immediate_address_space')
@@ -249,7 +252,7 @@ describe('scratch LayoutCodec', () => {
         const storageCodec = layoutCodec(arraySpec, {
             usage: [ 'storage' ],
         })
-        expect(storageCodec.artifact.usageCompatibility.immediate).to.equal(false)
+        expect(storageCodec.artifact.usageCompatibility.immediate.compatible).to.equal(false)
 
         try {
             layoutCodec(arraySpec, {
@@ -259,14 +262,16 @@ describe('scratch LayoutCodec', () => {
         } catch (error) {
             expect(error).to.be.instanceOf(ScratchDiagnosticError)
             expect(error.diagnostic).to.include({
-                code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
+                code: 'SCRATCH_LAYOUT_USAGE_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'layout-codec',
             })
             expect(error.diagnostic.actual).to.deep.include({
                 usage: 'immediate',
-                reason: 'usage-incompatible',
             })
+            expect(error.diagnostic.actual.reasons).to.include(
+                'immediate store type must not be or contain an array'
+            )
         }
     })
 
@@ -418,7 +423,7 @@ describe('scratch LayoutCodec', () => {
             })
         } catch (error) {
             expect(error.diagnostic).to.include({
-                code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
+                code: 'SCRATCH_LAYOUT_TYPE_UNSUPPORTED',
                 severity: 'error',
                 phase: 'layout-codec',
             })

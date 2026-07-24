@@ -26,6 +26,7 @@ const publicExports = {
 }
 const forbiddenOldSurfaceInventory = scanOldSurfaceInventory()
 const textureTransferSurfaceInventory = scanTextureTransferSurfaceInventory()
+const wgslLayoutSurfaceInventory = scanWgslLayoutSurfaceInventory()
 
 const checks = Object.freeze({
     webGpuManifestReproducible:
@@ -115,6 +116,21 @@ const checks = Object.freeze({
         textureTransferSurfaceInventory.textureReadbackSize &&
         textureTransferSurfaceInventory.readbackMap &&
         textureTransferSurfaceInventory.mappedLeaseDispose,
+    wgslRecursiveLayoutDeclarations:
+        Object.values(wgslLayoutSurfaceInventory.declarations).every(Boolean),
+    wgslLayoutCodecOperations:
+        Object.values(wgslLayoutSurfaceInventory.layoutCodecMethods).every(Boolean),
+    wgslProgramBufferViewContracts:
+        wgslLayoutSurfaceInventory.programBufferViews,
+    wgslLayoutPublicExports:
+        Object.values(wgslLayoutSurfaceInventory.publicExports)
+            .every(entrypoint => Object.values(entrypoint).every(Boolean)),
+    wgslLayoutPrimitiveReplacement:
+        !wgslLayoutSurfaceInventory.legacyLayoutPrimitiveType.declared &&
+        !wgslLayoutSurfaceInventory.legacyLayoutPrimitiveType.scratchExported &&
+        !wgslLayoutSurfaceInventory.legacyLayoutPrimitiveType.packageExported &&
+        wgslLayoutSurfaceInventory.layoutTypeShorthand.scratchExported &&
+        wgslLayoutSurfaceInventory.layoutTypeShorthand.packageExported,
 })
 
 const failures = Object.entries(checks)
@@ -141,6 +157,7 @@ const result = {
         publicExports,
         forbiddenOldSurfaceInventory,
         textureTransferSurfaceInventory,
+        wgslLayoutSurfaceInventory,
     },
 }
 
@@ -336,6 +353,123 @@ function scanTextureTransferSurfaceInventory() {
             'dispose'
         ),
     }
+}
+
+function scanWgslLayoutSurfaceInventory() {
+
+    const layoutArtifact = parse(path.join(scratchRoot, 'layout-artifact.ts'))
+    const layoutCodec = parse(path.join(scratchRoot, 'layout-codec.ts'))
+    const program = parse(path.join(scratchRoot, 'program.ts'))
+    const declarationNames = [
+        'LayoutScalarType',
+        'LayoutVectorType',
+        'LayoutMatrixType',
+        'LayoutAtomicTypeDescriptor',
+        'LayoutArrayTypeDescriptor',
+        'LayoutRuntimeArrayTypeDescriptor',
+        'LayoutFixedStructTypeDescriptor',
+        'LayoutRuntimeStructTypeDescriptor',
+        'LayoutBufferTypeDescriptor',
+        'FixedLayoutArtifact',
+        'RuntimeLayoutArtifact',
+        'LayoutBufferViewContract',
+    ]
+    const methodNames = [
+        'byteLength',
+        'bufferView',
+        'wgslBufferViewConstants',
+    ]
+    const publicNames = [
+        'LayoutCodec',
+        'layoutCodec',
+        'LayoutArtifact',
+        'FixedLayoutArtifact',
+        'RuntimeLayoutArtifact',
+        'LayoutTypeShorthand',
+        'LayoutScalarType',
+        'LayoutVectorType',
+        'LayoutMatrixType',
+        'LayoutAtomicTypeDescriptor',
+        'LayoutArrayTypeDescriptor',
+        'LayoutRuntimeArrayTypeDescriptor',
+        'LayoutFixedStructTypeDescriptor',
+        'LayoutRuntimeStructTypeDescriptor',
+        'LayoutBufferTypeDescriptor',
+        'LayoutBufferViewContract',
+        'LayoutBufferViewDescriptor',
+        'LayoutRuntimeExtent',
+    ]
+    return {
+        declarations: Object.fromEntries(declarationNames.map(name => [
+            name,
+            hasTopLevelDeclaration(layoutArtifact, name),
+        ])),
+        layoutCodecMethods: Object.fromEntries(methodNames.map(name => [
+            name,
+            findClassMember(layoutCodec, 'LayoutCodec', name),
+        ])),
+        programBufferViews: findTypeMember(
+            program,
+            'ProgramBufferLayoutRequirement',
+            'bufferViews'
+        ),
+        publicExports: {
+            scratch: namedExportInventory(publicExports.scratch, publicNames),
+            package: namedExportInventory(publicExports.package, publicNames),
+        },
+        legacyLayoutPrimitiveType: {
+            declared: hasTopLevelDeclaration(
+                layoutArtifact,
+                'LayoutPrimitiveType'
+            ),
+            scratchExported: hasNamedExport(
+                publicExports.scratch,
+                'LayoutPrimitiveType'
+            ),
+            packageExported: hasNamedExport(
+                publicExports.package,
+                'LayoutPrimitiveType'
+            ),
+        },
+        layoutTypeShorthand: {
+            declared: hasTopLevelDeclaration(layoutArtifact, 'LayoutTypeShorthand'),
+            scratchExported: hasNamedExport(
+                publicExports.scratch,
+                'LayoutTypeShorthand'
+            ),
+            packageExported: hasNamedExport(
+                publicExports.package,
+                'LayoutTypeShorthand'
+            ),
+        },
+    }
+}
+
+function hasTopLevelDeclaration(sourceFile, name) {
+
+    return sourceFile.statements.some(statement => (
+        (
+            ts.isTypeAliasDeclaration(statement) ||
+            ts.isInterfaceDeclaration(statement) ||
+            ts.isClassDeclaration(statement) ||
+            ts.isFunctionDeclaration(statement) ||
+            ts.isEnumDeclaration(statement)
+        ) &&
+        statement.name?.text === name
+    ))
+}
+
+function namedExportInventory(exports, names) {
+
+    return Object.fromEntries(names.map(name => [
+        name,
+        hasNamedExport(exports, name),
+    ]))
+}
+
+function hasNamedExport(exports, name) {
+
+    return exports.some(entry => entry.name === name)
 }
 
 function findTypeMember(sourceFile, typeName, memberName) {

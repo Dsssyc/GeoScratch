@@ -91,7 +91,13 @@ type DiagnosticSubject =
     | { kind: 'ScratchRuntime', id: string, label?: string }
     | { kind: 'Surface', id: string, label?: string }
     | { kind: 'Resource', id: string, label?: string, resourceKind?: string }
-    | { kind: 'LayoutArtifact', hash: string, label?: string }
+    | {
+        kind: 'LayoutArtifact',
+        abiHash?: string,
+        schemaHash?: string,
+        hash?: 'unresolved',
+        label?: string,
+      }
     | { kind: 'LayoutField', path: string, label?: string }
     | { kind: 'Program', id: string, label?: string }
     | { kind: 'ShaderEntryPoint', programId?: string, name: string, stage: string }
@@ -279,13 +285,23 @@ Layout codec diagnostics 覆盖 layout lowering、CPU writer、upload byte range
 不安全的 array-size multiplication、field-end addition 或 alignment rounding 使用
 `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT`；`actual.reason` 与 `actual.operation` 标识失败的
 arithmetic step。`actual.safeIntegerMax` 与 `actual.wgslU32Max` 区分 JavaScript 和
-generated-WGSL numeric bound；不会发布 `LayoutArtifact`。
+generated-WGSL numeric bound；不会发布 `LayoutArtifact`。Recursive type、
+member attribute、runtime tail、runtime extent、usage 与 buffer-view failure
+保留可用的最小 `LayoutField` path。已注册 artifact subject 同时携带 `abiHash`
+与 `schemaHash`；尚未解析的 descriptor 只使用有界的
+`hash: 'unresolved'` sentinel。
 
 候选 codes:
 
 ```ts
 type LayoutCodecDiagnosticCode =
     | 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT'
+    | 'SCRATCH_LAYOUT_TYPE_UNSUPPORTED'
+    | 'SCRATCH_LAYOUT_MEMBER_ATTRIBUTE_INVALID'
+    | 'SCRATCH_LAYOUT_RUNTIME_ARRAY_INVALID'
+    | 'SCRATCH_LAYOUT_RUNTIME_EXTENT_INVALID'
+    | 'SCRATCH_LAYOUT_USAGE_INCOMPATIBLE'
+    | 'SCRATCH_LAYOUT_BUFFER_VIEW_INVALID'
     | 'SCRATCH_LAYOUT_ABI_MISMATCH'
     | 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH'
     | 'SCRATCH_CODEC_SCHEMA_MISMATCH'

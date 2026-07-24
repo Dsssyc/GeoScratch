@@ -370,6 +370,406 @@ describe('scratch Program buffer layout requirements', () => {
         expect(computePipeline).to.be.instanceOf(ScratchComputePipeline)
     })
 
+    it('derives f16 device requirements from Program layout contracts', async() => {
+
+        const unsupported = createFakeGpu()
+        const unsupportedRuntime = await ScratchRuntime.create({
+            gpu: unsupported.gpu,
+        })
+        const codec = layoutCodec({
+            name: 'HalfValues',
+            fields: [
+                { name: 'value', type: 'f16' },
+            ],
+        }, {
+            usage: [ 'storage' ],
+        })
+
+        let unavailable
+        try {
+            await createTestProgram(unsupportedRuntime, {
+                sourceParts: [ computeWgsl ],
+                compute: 'csMain',
+                layoutRequirements: [
+                    createRequirement(codec),
+                ],
+            })
+        } catch (error) {
+            unavailable = error
+        }
+        expect(unavailable).to.be.instanceOf(ScratchDiagnosticError)
+        expect(unavailable.diagnostic).to.include({
+            code: 'SCRATCH_PROGRAM_FEATURE_UNAVAILABLE',
+            severity: 'error',
+            phase: 'program',
+        })
+        expect(unavailable.diagnostic.expected).to.deep.equal({
+            feature: 'shader-f16',
+        })
+
+        const supported = createFakeGpu()
+        supported.device.features.add('shader-f16')
+        const supportedRuntime = await ScratchRuntime.create({
+            gpu: supported.gpu,
+        })
+        const program = await createTestProgram(supportedRuntime, {
+            sourceParts: [ computeWgsl ],
+            compute: 'csMain',
+            layoutRequirements: [
+                createRequirement(codec),
+            ],
+        })
+        expect(program.requiredFeatures).to.deep.equal([ 'shader-f16' ])
+    })
+
+    it('derives uniform_buffer_standard_layout from the named layout contract', async() => {
+
+        const codec = layoutCodec({
+            name: 'StandardUniformValues',
+            fields: [
+                {
+                    name: 'values',
+                    type: {
+                        kind: 'array',
+                        element: 'u32',
+                        count: 4,
+                    },
+                },
+            ],
+        }, {
+            usage: [ 'uniform' ],
+            uniformLayout: 'uniform_buffer_standard_layout',
+        })
+        const requirement = createRequirement(codec, {
+            type: 'uniform',
+        })
+
+        const unsupported = createFakeGpu()
+        const unsupportedRuntime = await ScratchRuntime.create({
+            gpu: unsupported.gpu,
+        })
+        let unavailable
+        try {
+            await createTestProgram(unsupportedRuntime, {
+                sourceParts: [ computeWgsl ],
+                compute: 'csMain',
+                layoutRequirements: [ requirement ],
+            })
+        } catch (error) {
+            unavailable = error
+        }
+        expect(unavailable).to.be.instanceOf(ScratchDiagnosticError)
+        expect(unavailable.diagnostic).to.include({
+            code: 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
+            severity: 'error',
+            phase: 'program',
+        })
+        expect(unavailable.diagnostic.expected).to.deep.equal({
+            languageFeature: 'uniform_buffer_standard_layout',
+        })
+
+        const supported = createFakeGpu()
+        supported.gpu.wgslLanguageFeatures = new Set([
+            'uniform_buffer_standard_layout',
+        ])
+        const supportedRuntime = await ScratchRuntime.create({
+            gpu: supported.gpu,
+        })
+        const program = await createTestProgram(supportedRuntime, {
+            sourceParts: [ computeWgsl ],
+            compute: 'csMain',
+            layoutRequirements: [ requirement ],
+        })
+        expect(program.requiredLanguageFeatures).to.deep.equal([
+            'uniform_buffer_standard_layout',
+        ])
+    })
+
+    it('carries buffer-view contracts through Program and a typed BufferRegion', async() => {
+
+        const fixture = createFakeGpu()
+        fixture.gpu.wgslLanguageFeatures = new Set([
+            'buffer_view',
+            'unrestricted_pointer_parameters',
+        ])
+        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const raw = layoutCodec({
+            name: 'RawBytes',
+            type: {
+                kind: 'buffer',
+                byteLength: 64,
+            },
+        })
+        const target = layoutCodec({
+            name: 'RuntimeVectors',
+            type: {
+                kind: 'runtime-array',
+                element: 'vec4u',
+            },
+        })
+        const parameter = layoutCodec({
+            name: 'RawBytesParameter',
+            type: {
+                kind: 'buffer',
+                byteLength: 48,
+            },
+        })
+        const view = raw.bufferView({
+            kind: 'bufferArrayView',
+            target: target.artifact,
+            addressSpace: 'storage',
+            accessMode: 'read',
+            byteOffset: 16,
+            byteLength: 32,
+            pointerPath: 'function-parameter',
+            parameterBuffers: [ parameter.artifact ],
+        })
+        const requirement = {
+            group: 0,
+            binding: 0,
+            name: 'bytes',
+            type: 'read-storage',
+            visibility: [ 'compute' ],
+            hasDynamicOffset: false,
+            layout: raw.artifact,
+            bufferViews: [ view ],
+        }
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ computeWgsl ],
+            compute: 'csMain',
+            layoutRequirements: [ requirement ],
+        })
+        expect(program.requiredLanguageFeatures).to.deep.equal([
+            'buffer_view',
+            'unrestricted_pointer_parameters',
+        ])
+        expect(program.layoutRequirements[0].bufferViews).to.deep.equal([ view ])
+        expect(Object.isFrozen(program.layoutRequirements[0].bufferViews)).to.equal(true)
+
+        const bindLayout = await runtime.createBindLayout({
+            group: 0,
+            entries: [
+                {
+                    binding: 0,
+                    name: 'bytes',
+                    type: 'read-storage',
+                    visibility: [ 'compute' ],
+                    minBindingSize: 64,
+                },
+            ],
+        })
+        const pipeline = await runtime.createComputePipeline({
+            program,
+            layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
+        })
+        const buffer = await runtime.createBuffer({
+            size: 64,
+            usage: GPU_BUFFER_USAGE_STORAGE,
+        })
+        const region = buffer.region({ layout: raw.artifact })
+        const bindSet = await runtime.createBindSet(bindLayout, {
+            bytes: region,
+        })
+        const dispatch = runtime.createDispatchCommand({
+            pipeline,
+            bindSets: [ { set: bindSet } ],
+            count: { workgroups: [ 1 ] },
+            resources: {
+                read: [ readResource(buffer) ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+        expect(dispatch).to.be.instanceOf(DispatchCommand)
+    })
+
+    it('derives runtime-buffer minimums and validates explicit view ranges at command time', async() => {
+
+        const raw = layoutCodec({
+            name: 'RuntimeRawBytes',
+            type: { kind: 'buffer' },
+        })
+        const target = layoutCodec({
+            name: 'RuntimeViewValues',
+            type: {
+                kind: 'runtime-array',
+                element: 'vec4u',
+            },
+        })
+        const view = raw.bufferView({
+            kind: 'bufferArrayView',
+            target: target.artifact,
+            addressSpace: 'storage',
+            accessMode: 'read',
+            byteOffset: 16,
+            byteLength: 32,
+        })
+        const requirement = {
+            group: 0,
+            binding: 0,
+            name: 'bytes',
+            type: 'read-storage',
+            visibility: [ 'compute' ],
+            hasDynamicOffset: false,
+            layout: raw.artifact,
+            bufferViews: [ view ],
+        }
+
+        const unavailableFixture = createFakeGpu()
+        const unavailableRuntime = await ScratchRuntime.create({
+            gpu: unavailableFixture.gpu,
+        })
+        let unavailable
+        try {
+            await createTestProgram(unavailableRuntime, {
+                sourceParts: [ computeWgsl ],
+                compute: 'csMain',
+                layoutRequirements: [ requirement ],
+            })
+        } catch (error) {
+            unavailable = error
+        }
+        expect(unavailable).to.be.instanceOf(ScratchDiagnosticError)
+        expect(unavailable.diagnostic).to.include({
+            code: 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
+            severity: 'error',
+            phase: 'program',
+        })
+        expect(unavailable.diagnostic.expected).to.deep.equal({
+            languageFeature: 'buffer_view',
+        })
+
+        const fixture = createFakeGpu()
+        fixture.gpu.wgslLanguageFeatures = new Set([ 'buffer_view' ])
+        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const program = await createTestProgram(runtime, {
+            sourceParts: [ computeWgsl ],
+            compute: 'csMain',
+            layoutRequirements: [ requirement ],
+        })
+        const tooSmallLayout = await runtime.createBindLayout({
+            group: 0,
+            entries: [
+                {
+                    binding: 0,
+                    name: 'bytes',
+                    type: 'read-storage',
+                    visibility: [ 'compute' ],
+                    minBindingSize: 12,
+                },
+            ],
+        })
+        const pipelineDiagnostic = await expectAsyncProgramLayoutDiagnostic(
+            async() => {
+                await runtime.createComputePipeline({
+                    program,
+                    layout: {
+                        mode: 'explicit',
+                        bindLayouts: [ tooSmallLayout ],
+                    },
+                })
+            }
+        )
+        expect(pipelineDiagnostic.expected).to.deep.include({
+            minimumBindingSize: 16,
+            minBindingSize: '0 or >= 16',
+        })
+
+        const deferredLayout = await runtime.createBindLayout({
+            group: 0,
+            entries: [
+                {
+                    binding: 0,
+                    name: 'bytes',
+                    type: 'read-storage',
+                    visibility: [ 'compute' ],
+                    minBindingSize: 0,
+                },
+            ],
+        })
+        const pipeline = await runtime.createComputePipeline({
+            program,
+            layout: {
+                mode: 'explicit',
+                bindLayouts: [ deferredLayout ],
+            },
+        })
+        const shortBuffer = await runtime.createBuffer({
+            size: 32,
+            usage: GPU_BUFFER_USAGE_STORAGE,
+        })
+        const shortSet = await runtime.createBindSet(deferredLayout, {
+            bytes: shortBuffer.region({ layout: raw.artifact }),
+        })
+        const commandDiagnostic = expectProgramLayoutDiagnostic(() => {
+            runtime.createDispatchCommand({
+                pipeline,
+                bindSets: [ { set: shortSet } ],
+                count: { workgroups: [ 1 ] },
+                resources: {
+                    read: [ readResource(shortBuffer) ],
+                    write: [],
+                },
+                whenMissing: 'throw',
+            })
+        })
+        expect(commandDiagnostic.actual).to.deep.include({
+            bindingSize: 32,
+            requiredBindingSize: 48,
+        })
+
+        const completeBuffer = await runtime.createBuffer({
+            size: 48,
+            usage: GPU_BUFFER_USAGE_STORAGE,
+        })
+        const completeSet = await runtime.createBindSet(deferredLayout, {
+            bytes: completeBuffer.region({ layout: raw.artifact }),
+        })
+        const dispatch = runtime.createDispatchCommand({
+            pipeline,
+            bindSets: [ { set: completeSet } ],
+            count: { workgroups: [ 1 ] },
+            resources: {
+                read: [ readResource(completeBuffer) ],
+                write: [],
+            },
+            whenMissing: 'throw',
+        })
+        expect(dispatch).to.be.instanceOf(DispatchCommand)
+    })
+
+    it('rejects atomic layouts from read-only Program storage requirements', async() => {
+
+        const { runtime } = await createRuntimeFixture()
+        const atomic = layoutCodec({
+            name: 'AtomicValue',
+            fields: [
+                {
+                    name: 'value',
+                    type: { kind: 'atomic', component: 'u32' },
+                },
+            ],
+        })
+        const diagnostic = await expectAsyncProgramLayoutDiagnostic(async() => {
+            await createTestProgram(runtime, {
+                sourceParts: [ computeWgsl ],
+                compute: 'csMain',
+                layoutRequirements: [
+                    createRequirement(atomic, {
+                        type: 'read-storage',
+                    }),
+                ],
+            })
+        })
+        expect(diagnostic.actual).to.deep.include({
+            bindingType: 'read-storage',
+        })
+        expect(diagnostic.actual.compatibility).to.include({
+            compatible: true,
+            requiresMutableStorage: true,
+        })
+    })
+
     it('rejects pipeline creation when a required bind layout group is missing', async() => {
 
         const { runtime } = await createRuntimeFixture()
@@ -397,8 +797,8 @@ describe('scratch Program buffer layout requirements', () => {
             type: 'storage',
             visibility: [ 'compute' ],
             hasDynamicOffset: false,
-            abiByteLength: codec.artifact.byteLength,
-            minBindingSize: `0 or >= ${codec.artifact.byteLength}`,
+            minimumBindingSize: codec.artifact.minimumBindingSize,
+            minBindingSize: `0 or >= ${codec.artifact.minimumBindingSize}`,
             abiHash: codec.artifact.abiHash,
             schemaHash: codec.artifact.schemaHash,
         })
@@ -509,8 +909,8 @@ describe('scratch Program buffer layout requirements', () => {
 
         expect(pipeline).to.be.instanceOf(ScratchComputePipeline)
         expect(diagnostic.expected).to.deep.include({
-            abiByteLength: codec.artifact.byteLength,
-            minBindingSize: `0 or >= ${codec.artifact.byteLength}`,
+            minimumBindingSize: codec.artifact.minimumBindingSize,
+            minBindingSize: `0 or >= ${codec.artifact.minimumBindingSize}`,
         })
         expect(diagnostic.actual).to.deep.equal({
             minBindingSize: codec.artifact.byteLength - 4,

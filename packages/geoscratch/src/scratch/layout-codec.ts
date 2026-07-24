@@ -1,235 +1,193 @@
 import { createScratchDiagnosticReport, throwScratchDiagnostic } from './diagnostics.js'
+import {
+    createLayoutArtifact,
+    createLayoutBufferViewContract,
+    describeLayoutCompatibilityDifference,
+    isLayoutArtifact,
+    isLayoutBufferViewContract,
+    layoutArtifactAcceptsBindingByteLength,
+    layoutArtifactAcceptsViewByteLength,
+    layoutArtifactByteLength,
+    layoutArtifactRuntimeElementCount,
+    layoutArtifactSubject,
+    layoutArtifactsAbiCompatible,
+    layoutArtifactsSchemaCompatible,
+} from './layout-artifact.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { DiagnosticSubject, ScratchDiagnosticReport } from './diagnostics.js'
+import type {
+    LayoutArtifact,
+    LayoutAtomicTypeArtifact,
+    LayoutBufferViewContract,
+    LayoutBufferViewDescriptor,
+    LayoutCanonicalSpec,
+    LayoutCodecOptions,
+    LayoutFieldArtifact,
+    LayoutRuntimeExtent,
+    LayoutScalarType,
+    LayoutSpec,
+    LayoutStructTypeDescriptor,
+    LayoutTypeArtifact,
+} from './layout-artifact.js'
 
-export type LayoutScalarType = 'f32' | 'i32' | 'u32'
-
-export type LayoutVectorType =
-    | 'vec2f'
-    | 'vec3f'
-    | 'vec4f'
-    | 'vec2i'
-    | 'vec3i'
-    | 'vec4i'
-    | 'vec2u'
-    | 'vec3u'
-    | 'vec4u'
-
-export type LayoutMatrixType = 'mat4x4f'
-
-export type LayoutPrimitiveType = LayoutScalarType | LayoutVectorType | LayoutMatrixType
-
-export type LayoutArrayTypeDescriptor = {
-    element: LayoutPrimitiveType
-    count: number
+export type * from './layout-artifact.js'
+export {
+    describeLayoutCompatibilityDifference,
+    isLayoutArtifact,
+    isLayoutBufferViewContract,
+    layoutArtifactAcceptsBindingByteLength,
+    layoutArtifactAcceptsViewByteLength,
+    layoutArtifactByteLength,
+    layoutArtifactRuntimeElementCount,
+    layoutArtifactSubject,
+    layoutArtifactsAbiCompatible,
+    layoutArtifactsSchemaCompatible,
 }
 
-export type LayoutFieldType = LayoutPrimitiveType | LayoutArrayTypeDescriptor
+export type LayoutValue = unknown
+export type LayoutValues = Record<string, unknown>
 
-export type LayoutFieldDescriptor = {
-    name: string
-    type: LayoutFieldType
-}
-
-export type LayoutSpec = {
-    label?: string
-    name: string
-    fields: LayoutFieldDescriptor[]
-}
-
-export type LayoutCodecUsage = 'uniform' | 'storage' | 'readback' | 'vertex' | 'immediate'
-
-export type LayoutUsageCompatibility = Record<LayoutCodecUsage, boolean>
-
-export type LayoutCodecOptions = {
-    usage?: LayoutCodecUsage[]
-}
-
-export type LayoutFieldArtifact = Readonly<{
-    kind: 'LayoutField'
-    name: string
-    path: string
-    type: string
-    wgslType: string
-    offset: number
-    size: number
-    alignment: number
-    padding: number
-    componentType?: LayoutScalarType
-    componentCount?: number
-    arrayLength?: number
-    arrayStride?: number
-    elementType?: string
-    elementSize?: number
-    elementAlignment?: number
-}>
-
-export type LayoutArtifact = Readonly<{
-    kind: 'LayoutArtifact'
-    name: string
-    label?: string
-    alignmentMode: 'host-shareable'
-    alignment: number
-    byteLength: number
-    stride: number
-    fields: readonly LayoutFieldArtifact[]
-    abiHash: string
-    schemaHash: string
-    usages: readonly LayoutCodecUsage[]
-    usageCompatibility: Readonly<LayoutUsageCompatibility>
-}>
-
-export type LayoutCompatibilityDifference = Readonly<{
-    path: string
-    expected: unknown
-    actual: unknown
-}>
-
-export type LayoutUploadView = {
+export type LayoutUploadView = Readonly<{
     bytes: Uint8Array
     byteOffset: number
     byteLength: number
     artifact: LayoutArtifact
-}
+}>
 
-export type LayoutReadbackView = {
+export type LayoutReadbackView = Readonly<{
     artifact: LayoutArtifact
     bytes: Uint8Array
     dataView: DataView
     count: number
     byteLength: number
+    runtimeElementCount?: number
+    toValue(index?: number): unknown
     toObject(index?: number): Record<string, unknown>
     toArray(): Record<string, unknown>[]
-}
+}>
 
-export type LayoutWriteOptions = {
+export type LayoutWriteOptions = Readonly<{
     byteOffset?: number
-}
+    runtimeElementCount?: number
+}>
 
-type PrimitiveDefinition = {
-    type: LayoutPrimitiveType
-    wgslType: string
-    alignment: number
-    size: number
-    componentType: LayoutScalarType
-    componentCount: number
-}
+export type LayoutPackOptions = LayoutRuntimeExtent
 
-type LoweredFieldType = {
-    type: string
-    wgslType: string
-    alignment: number
-    size: number
-    componentType?: LayoutScalarType
-    componentCount?: number
-    arrayLength?: number
-    arrayStride?: number
-    element?: LoweredPrimitiveFieldType
-}
+export type LayoutWgslAccessorOptions = Readonly<{
+    namespace?: string
+}>
 
-type LoweredPrimitiveFieldType = LoweredFieldType & {
-    primitive: PrimitiveDefinition
-    componentType: LayoutScalarType
-    componentCount: number
-}
+export type LayoutWgslBufferViewOptions = Readonly<{
+    namespace?: string
+}>
 
-type LayoutValues = Record<string, unknown>
-
-// Source: https://www.w3.org/TR/WGSL/#alignment-and-size
-const PRIMITIVE_DEFINITIONS: Record<LayoutPrimitiveType, PrimitiveDefinition> = {
-    f32: { type: 'f32', wgslType: 'f32', alignment: 4, size: 4, componentType: 'f32', componentCount: 1 },
-    i32: { type: 'i32', wgslType: 'i32', alignment: 4, size: 4, componentType: 'i32', componentCount: 1 },
-    u32: { type: 'u32', wgslType: 'u32', alignment: 4, size: 4, componentType: 'u32', componentCount: 1 },
-    vec2f: { type: 'vec2f', wgslType: 'vec2f', alignment: 8, size: 8, componentType: 'f32', componentCount: 2 },
-    vec3f: { type: 'vec3f', wgslType: 'vec3f', alignment: 16, size: 12, componentType: 'f32', componentCount: 3 },
-    vec4f: { type: 'vec4f', wgslType: 'vec4f', alignment: 16, size: 16, componentType: 'f32', componentCount: 4 },
-    vec2i: { type: 'vec2i', wgslType: 'vec2i', alignment: 8, size: 8, componentType: 'i32', componentCount: 2 },
-    vec3i: { type: 'vec3i', wgslType: 'vec3i', alignment: 16, size: 12, componentType: 'i32', componentCount: 3 },
-    vec4i: { type: 'vec4i', wgslType: 'vec4i', alignment: 16, size: 16, componentType: 'i32', componentCount: 4 },
-    vec2u: { type: 'vec2u', wgslType: 'vec2u', alignment: 8, size: 8, componentType: 'u32', componentCount: 2 },
-    vec3u: { type: 'vec3u', wgslType: 'vec3u', alignment: 16, size: 12, componentType: 'u32', componentCount: 3 },
-    vec4u: { type: 'vec4u', wgslType: 'vec4u', alignment: 16, size: 16, componentType: 'u32', componentCount: 4 },
-    mat4x4f: { type: 'mat4x4f', wgslType: 'mat4x4f', alignment: 16, size: 64, componentType: 'f32', componentCount: 16 },
-}
-
-const DEFAULT_USAGES: LayoutCodecUsage[] = [ 'storage', 'readback' ]
-const WGSL_U32_MAX = 0xffff_ffff
-const layoutCanonicalSignatures = new WeakMap<LayoutArtifact, Readonly<{
-    abi: string
-    schema: string
-}>>()
 const layoutCodecs = new WeakSet<LayoutCodec>()
-
-export interface LayoutCodec {
-    spec: LayoutSpec
-    artifact: LayoutArtifact
-    report: ScratchDiagnosticReport
-}
+const float64BitScratch = new DataView(new ArrayBuffer(8))
 
 export class LayoutCodec {
 
+    readonly spec: LayoutCanonicalSpec
+    readonly artifact: LayoutArtifact
+    readonly report: ScratchDiagnosticReport
+
     constructor(spec: LayoutSpec, options: LayoutCodecOptions = {}) {
 
-        this.spec = normalizeSpec(spec)
-        this.artifact = lowerLayoutArtifact(this.spec, options)
+        const prepared = createLayoutArtifact(spec, options)
+        this.spec = prepared.spec
+        this.artifact = prepared.artifact
         this.report = createScratchDiagnosticReport()
         layoutCodecs.add(this)
     }
 
     get subject(): DiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
-            kind: 'LayoutArtifact',
-            abiHash: this.artifact.abiHash,
-            schemaHash: this.artifact.schemaHash,
-        }
-        subject.label = this.artifact.label ?? this.artifact.name
-
-        return subject
+        return layoutArtifactSubject(this.artifact)
     }
 
-    pack(values: LayoutValues | LayoutValues[]): Uint8Array {
+    byteLength(options?: LayoutRuntimeExtent): number {
 
-        const records = normalizeRecords(this, values)
-        const target = new ArrayBuffer(records.length * this.artifact.stride)
+        return layoutArtifactByteLength(this.artifact, options)
+    }
 
-        return this.write(target, records)
+    bufferView(descriptor: LayoutBufferViewDescriptor): LayoutBufferViewContract {
+
+        return createLayoutBufferViewContract(this.artifact, descriptor)
+    }
+
+    pack(
+        values: LayoutValue | readonly LayoutValues[],
+        options?: LayoutPackOptions
+    ): Uint8Array {
+
+        if (this.artifact.type.kind === 'buffer') {
+            return packOpaqueBuffer(this, values, options)
+        }
+        const records = normalizeRootValues(this, values)
+        const byteLength = packedByteLength(this, records.length, options)
+        const target = new ArrayBuffer(byteLength)
+
+        return this.write(target, values, options)
     }
 
     write(
         target: ArrayBuffer | ArrayBufferView,
-        values: LayoutValues | LayoutValues[],
+        values: LayoutValue | readonly LayoutValues[],
         options: LayoutWriteOptions = {}
     ): Uint8Array {
 
-        const records = normalizeRecords(this, values)
-        const byteLength = records.length * this.artifact.stride
-        const byteOffset = normalizeByteOffset(this, options.byteOffset)
-        const bytes = createByteView(this, target, byteOffset, byteLength)
+        if (this.artifact.type.kind === 'buffer') {
+            return writeOpaqueBuffer(this, target, values, options)
+        }
+        const records = normalizeRootValues(this, values)
+        const runtimeExtent = runtimeExtentFromWriteOptions(options)
+        const byteLength = packedByteLength(this, records.length, runtimeExtent)
+        const byteOffset = normalizeByteOffset(this.subject, options.byteOffset)
+        const bytes = createByteView(this.subject, target, byteOffset, byteLength)
         const dataView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 
         bytes.fill(0)
+        if (this.artifact.extent === 'runtime') {
+            const count = requireRuntimeElementCount(this.artifact, runtimeExtent)
+            writeLayoutValue(
+                this.artifact,
+                dataView,
+                0,
+                this.artifact.type,
+                records[0],
+                this.artifact.name,
+                count
+            )
+            return bytes
+        }
 
+        const artifact = this.artifact
         records.forEach((record, recordIndex) => {
-            const baseOffset = recordIndex * this.artifact.stride
-            for (const field of this.artifact.fields) {
-                writeFieldValue(this, dataView, baseOffset + field.offset, field, record[field.name])
-            }
+            writeLayoutValue(
+                artifact,
+                dataView,
+                recordIndex * artifact.stride,
+                artifact.type,
+                record,
+                artifact.name,
+                undefined
+            )
         })
-
         return bytes
     }
 
-    uploadView(values: LayoutValues | LayoutValues[]): LayoutUploadView {
+    uploadView(
+        values: LayoutValue | readonly LayoutValues[],
+        options?: LayoutPackOptions
+    ): LayoutUploadView {
 
-        const bytes = this.pack(values)
+        const bytes = this.pack(values, options)
 
-        return {
+        return Object.freeze({
             bytes,
             byteOffset: bytes.byteOffset,
             byteLength: bytes.byteLength,
             artifact: this.artifact,
-        }
+        })
     }
 
     createReadbackView(bytes: ArrayBuffer | ArrayBufferView): LayoutReadbackView {
@@ -237,39 +195,70 @@ export class LayoutCodec {
         return createLayoutReadbackView(this.artifact, bytes)
     }
 
-    wgslAccessors(options: { namespace?: string } = {}): string {
+    wgslAccessors(options: LayoutWgslAccessorOptions = {}): string {
 
-        const namespace = normalizeNamespace(this, options.namespace)
-        const lines = [
-            `struct ${this.artifact.name} {`,
-            ...this.artifact.fields.map(field => `    ${field.name}: ${field.wgslType},`),
-            `}`,
-            ``,
-            `const ${namespace}_BYTE_LENGTH: u32 = ${this.artifact.byteLength}u;`,
-            `const ${namespace}_ALIGNMENT: u32 = ${this.artifact.alignment}u;`,
-        ]
+        const namespace = normalizeNamespace(this.subject, options.namespace, this.artifact.name)
+        return generateWgslAccessors(this.artifact, namespace)
+    }
 
-        for (const field of this.artifact.fields) {
-            const constantName = `${namespace}_${constantSegment(field.name)}`
-            lines.push(`const ${constantName}_OFFSET: u32 = ${field.offset}u;`)
-            lines.push(`const ${constantName}_SIZE: u32 = ${field.size}u;`)
-            lines.push(`fn ${namespace}_read${pascalName(field.name)}(value: ${this.artifact.name}) -> ${field.wgslType} {`)
-            lines.push(`    return value.${field.name};`)
-            lines.push(`}`)
+    wgslBufferViewConstants(
+        contract: LayoutBufferViewContract,
+        options: LayoutWgslBufferViewOptions = {}
+    ): string {
+
+        if (
+            !isLayoutBufferViewContract(contract) ||
+            contract.source !== this.artifact
+        ) {
+            throwCodecDiagnostic(
+                'SCRATCH_LAYOUT_BUFFER_VIEW_INVALID',
+                this.subject,
+                'WGSL buffer-view constants require a contract created by this LayoutCodec.',
+                { contract: 'LayoutBufferViewContract owned by this LayoutCodec' },
+                {
+                    contract: describeValue(contract),
+                    sourceMatches: isLayoutBufferViewContract(contract)
+                        ? contract.source === this.artifact
+                        : false,
+                }
+            )
         }
-
-        return lines.join('\n')
+        const namespace = normalizeNamespace(
+            this.subject,
+            options.namespace,
+            `${this.artifact.name}View`
+        )
+        return generateBufferViewConstants(contract, namespace)
     }
 }
 
 export function isLayoutCodec(value: unknown): value is LayoutCodec {
 
-    return typeof value === 'object' && value !== null && layoutCodecs.has(value as LayoutCodec)
+    return typeof value === 'object' &&
+        value !== null &&
+        Object.getPrototypeOf(value) === LayoutCodec.prototype &&
+        layoutCodecs.has(value as LayoutCodec)
 }
 
-export function layoutCodec(spec: LayoutSpec, options?: LayoutCodecOptions): LayoutCodec {
+export function layoutCodec(
+    spec: LayoutSpec,
+    options?: LayoutCodecOptions
+): LayoutCodec {
 
     return new LayoutCodec(spec, options)
+}
+
+export function isLayoutUploadView(value: unknown): value is LayoutUploadView {
+
+    return isRecord(value) &&
+        value.bytes instanceof Uint8Array &&
+        typeof value.byteOffset === 'number' &&
+        Number.isSafeInteger(value.byteOffset) &&
+        value.byteOffset >= 0 &&
+        typeof value.byteLength === 'number' &&
+        Number.isSafeInteger(value.byteLength) &&
+        value.byteLength > 0 &&
+        isLayoutArtifact(value.artifact)
 }
 
 export function createLayoutReadbackView(
@@ -278,799 +267,1118 @@ export function createLayoutReadbackView(
 ): LayoutReadbackView {
 
     if (!isLayoutArtifact(artifact)) {
-        throwUnsupportedFormat({
-            kind: 'LayoutArtifact',
-            hash: 'unresolved',
-        }, {
-            expected: { layout: 'LayoutArtifact' },
-            actual: { layout: describeValue(artifact) },
-            message: 'Layout readback view requires a LayoutArtifact.',
-        })
+        throwCodecDiagnostic(
+            'SCRATCH_LAYOUT_TYPE_UNSUPPORTED',
+            unresolvedArtifactSubject(),
+            'Layout readback view requires a Scratch LayoutArtifact.',
+            { layout: 'LayoutArtifact' },
+            { layout: describeValue(artifact) }
+        )
     }
-
-    const subject = layoutArtifactSubject(artifact)
-    const source = normalizeBytes(subject, bytes)
-
-    if (source.byteLength === 0 || source.byteLength % artifact.stride !== 0) {
-        throwByteLengthDiagnostic(subject, {
-            expected: { byteLength: `positive multiple of ${artifact.stride}` },
-            actual: { byteLength: source.byteLength },
-        })
-    }
+    const source = normalizeBytes(layoutArtifactSubject(artifact), bytes)
+    validateReadbackByteLength(artifact, source.byteLength)
 
     return new LayoutReadbackViewImpl(artifact, source)
 }
 
-export function isLayoutArtifact(value: unknown): value is LayoutArtifact {
-
-    return isRecord(value) &&
-        layoutCanonicalSignatures.has(value as LayoutArtifact) &&
-        value.kind === 'LayoutArtifact' &&
-        typeof value.name === 'string' &&
-        value.alignmentMode === 'host-shareable' &&
-        isPositiveSafeInteger(value.alignment) &&
-        isPositiveSafeInteger(value.byteLength) &&
-        isPositiveSafeInteger(value.stride) &&
-        Array.isArray(value.fields) &&
-        typeof value.abiHash === 'string' &&
-        typeof value.schemaHash === 'string' &&
-        Array.isArray(value.usages) &&
-        isRecord(value.usageCompatibility)
-}
-
-export function layoutArtifactsAbiCompatible(left: LayoutArtifact, right: LayoutArtifact): boolean {
-
-    const leftSignatures = layoutCanonicalSignatures.get(left)
-    const rightSignatures = layoutCanonicalSignatures.get(right)
-    return leftSignatures !== undefined &&
-        rightSignatures !== undefined &&
-        left.abiHash === right.abiHash &&
-        leftSignatures.abi === rightSignatures.abi
-}
-
-export function layoutArtifactsSchemaCompatible(left: LayoutArtifact, right: LayoutArtifact): boolean {
-
-    const leftSignatures = layoutCanonicalSignatures.get(left)
-    const rightSignatures = layoutCanonicalSignatures.get(right)
-    return leftSignatures !== undefined &&
-        rightSignatures !== undefined &&
-        left.schemaHash === right.schemaHash &&
-        leftSignatures.schema === rightSignatures.schema
-}
-
-export function describeLayoutCompatibilityDifference(
-    expected: LayoutArtifact,
-    actual: LayoutArtifact,
-    kind: 'abi' | 'schema'
-): LayoutCompatibilityDifference | undefined {
-
-    const expectedSignature = layoutCanonicalSignatures.get(expected)?.[kind]
-    const actualSignature = layoutCanonicalSignatures.get(actual)?.[kind]
-    if (expectedSignature === undefined || actualSignature === undefined) {
-        return Object.freeze({
-            path: kind,
-            expected: expectedSignature === undefined ? 'registered LayoutArtifact' : 'available',
-            actual: actualSignature === undefined ? 'unregistered LayoutArtifact' : 'available',
-        })
-    }
-    if (expectedSignature === actualSignature) return undefined
-
-    return Object.freeze(firstCanonicalDifference(
-        JSON.parse(expectedSignature) as unknown,
-        JSON.parse(actualSignature) as unknown,
-        kind
-    ))
-}
-
-export function isLayoutUploadView(value: unknown): value is LayoutUploadView {
-
-    return isRecord(value) &&
-        value.bytes instanceof Uint8Array &&
-        typeof value.byteOffset === 'number' &&
-        typeof value.byteLength === 'number' &&
-        isLayoutArtifact(value.artifact)
-}
-
-export function layoutArtifactSubject(artifact: LayoutArtifact): DiagnosticSubject {
-
-    const subject: DiagnosticSubject = {
-        kind: 'LayoutArtifact',
-        abiHash: artifact.abiHash,
-        schemaHash: artifact.schemaHash,
-    }
-    subject.label = artifact.label ?? artifact.name
-
-    return subject
-}
-
 class LayoutReadbackViewImpl implements LayoutReadbackView {
 
-    artifact: LayoutArtifact
-    bytes: Uint8Array
-    dataView: DataView
-    count: number
-    byteLength: number
+    readonly artifact: LayoutArtifact
+    readonly bytes: Uint8Array
+    readonly dataView: DataView
+    readonly count: number
+    readonly byteLength: number
+    readonly runtimeElementCount?: number
 
     constructor(artifact: LayoutArtifact, bytes: Uint8Array) {
 
         this.artifact = artifact
         this.bytes = bytes
         this.dataView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-        this.count = bytes.byteLength / artifact.stride
         this.byteLength = bytes.byteLength
+        if (artifact.extent === 'runtime') {
+            this.count = 1
+            const runtimeElementCount = layoutArtifactRuntimeElementCount(
+                artifact,
+                bytes.byteLength
+            )
+            if (runtimeElementCount !== undefined) {
+                this.runtimeElementCount = runtimeElementCount
+            }
+        } else if (bytes.byteLength === artifact.byteLength) {
+            this.count = 1
+        } else {
+            this.count = bytes.byteLength / artifact.stride
+        }
+        Object.freeze(this)
+    }
+
+    toValue(index = 0): unknown {
+
+        validateReadbackIndex(this.artifact, this.count, index)
+        const baseOffset = this.artifact.extent === 'fixed'
+            ? index * this.artifact.stride
+            : 0
+        if (this.artifact.type.kind === 'buffer') {
+            const length = this.artifact.extent === 'fixed'
+                ? this.artifact.byteLength
+                : this.bytes.byteLength
+            return this.bytes.slice(baseOffset, baseOffset + length)
+        }
+        return readLayoutValue(
+            this.dataView,
+            baseOffset,
+            this.artifact.type,
+            this.runtimeElementCount
+        )
     }
 
     toObject(index = 0): Record<string, unknown> {
 
-        if (!Number.isInteger(index) || index < 0 || index >= this.count) {
-            throwScratchDiagnostic({
-                code: 'SCRATCH_CODEC_READBACK_VIEW_UNSAFE',
-                severity: 'error',
-                phase: 'layout-codec',
-                subject: layoutArtifactSubject(this.artifact),
-                message: 'LayoutCodec readback index is outside the view.',
-                expected: { index: `integer in [0, ${this.count})` },
-                actual: { index },
-            })
+        if (this.artifact.type.kind !== 'struct') {
+            throwCodecDiagnostic(
+                'SCRATCH_CODEC_READBACK_VIEW_UNSAFE',
+                layoutArtifactSubject(this.artifact),
+                'Layout readback toObject() requires a structure root type.',
+                { type: 'struct' },
+                { type: this.artifact.type.kind }
+            )
         }
-
-        const record: Record<string, unknown> = {}
-        const baseOffset = index * this.artifact.stride
-
-        for (const field of this.artifact.fields) {
-            record[field.name] = readFieldValue(this.artifact, this.dataView, baseOffset + field.offset, field)
-        }
-
-        return record
+        return this.toValue(index) as Record<string, unknown>
     }
 
     toArray(): Record<string, unknown>[] {
 
-        return Array.from({ length: this.count }, (_, index) => this.toObject(index))
-    }
-}
-
-function normalizeSpec(spec: unknown): LayoutSpec {
-
-    if (!isRecord(spec)) {
-        throwUnsupportedFormat({
-            kind: 'LayoutArtifact',
-            hash: 'unresolved',
-        }, {
-            expected: { spec: 'LayoutSpec' },
-            actual: { spec: describeValue(spec) },
-            message: 'LayoutCodec requires a LayoutSpec object.',
-        })
-    }
-
-    const name = spec.name
-    if (typeof name !== 'string' || !isIdentifier(name)) {
-        throwUnsupportedFormat({
-            kind: 'LayoutArtifact',
-            hash: 'unresolved',
-        }, {
-            expected: { name: 'WGSL identifier string' },
-            actual: { name },
-            message: 'LayoutSpec name must be a WGSL identifier.',
-        })
-    }
-
-    const label = spec.label
-    if (label !== undefined && typeof label !== 'string') {
-        throwUnsupportedFormat({
-            kind: 'LayoutArtifact',
-            hash: 'unresolved',
-        }, {
-            expected: { label: 'string' },
-            actual: { label: describeValue(label) },
-            message: 'LayoutSpec label must be a string.',
-        })
-    }
-
-    const fields = spec.fields
-    if (!Array.isArray(fields) || fields.length === 0) {
-        throwUnsupportedFormat(unresolvedArtifactSubject(label), {
-            expected: { fields: 'non-empty LayoutFieldDescriptor[]' },
-            actual: { fields: Array.isArray(fields) ? fields.length : describeValue(fields) },
-            message: 'LayoutSpec requires at least one field.',
-        })
-    }
-
-    const names = new Set<string>()
-    const normalizedFields = fields.map((field, index) => normalizeFieldDescriptor(field, index, names))
-    const normalized: LayoutSpec = { name, fields: normalizedFields }
-    if (label !== undefined) normalized.label = label
-
-    return normalized
-}
-
-function normalizeFieldDescriptor(field: unknown, index: number, names: Set<string>): LayoutFieldDescriptor {
-
-    if (!isRecord(field)) {
-        throwUnsupportedFormat({
-            kind: 'LayoutField',
-            path: String(index),
-        }, {
-            expected: { field: 'LayoutFieldDescriptor' },
-            actual: { field: describeValue(field) },
-            message: 'Layout field descriptor must be an object.',
-        })
-    }
-
-    const name = field.name
-    if (typeof name !== 'string' || !isIdentifier(name)) {
-        throwUnsupportedFormat({
-            kind: 'LayoutField',
-            path: String(index),
-        }, {
-            expected: { name: 'WGSL identifier string' },
-            actual: { name },
-            message: 'Layout field name must be a WGSL identifier.',
-        })
-    }
-
-    if (names.has(name)) {
-        throwUnsupportedFormat({
-            kind: 'LayoutField',
-            path: name,
-            label: name,
-        }, {
-            expected: { name: 'unique field name' },
-            actual: { name },
-            message: 'Layout field names must be unique.',
-        })
-    }
-    names.add(name)
-
-    return {
-        name,
-        type: normalizeFieldTypeDescriptor(name, field.type),
-    }
-}
-
-function normalizeFieldTypeDescriptor(path: string, type: unknown): LayoutFieldType {
-
-    if (typeof type === 'string') {
-        if (isPrimitiveType(type)) return type
-        throwUnsupportedFormat(fieldSubject(path), {
-            expected: { type: Object.keys(PRIMITIVE_DEFINITIONS) },
-            actual: { type },
-            message: 'Layout field type is not supported.',
-        })
-    }
-
-    if (isRecord(type)) {
-        const element = type.element
-        const count = type.count
-
-        if (typeof element !== 'string' || !isPrimitiveType(element)) {
-            throwUnsupportedFormat(fieldSubject(path), {
-                expected: { element: Object.keys(PRIMITIVE_DEFINITIONS) },
-                actual: { element },
-                message: 'Layout array element type is not supported.',
-            })
-        }
-
-        if (typeof count !== 'number' || !Number.isSafeInteger(count) || count <= 0) {
-            throwUnsupportedFormat(fieldSubject(path), {
-                expected: { count: 'positive safe integer' },
-                actual: { count },
-                message: 'Layout array count must be a positive safe integer.',
-            })
-        }
-
-        return { element, count }
-    }
-
-    throwUnsupportedFormat(fieldSubject(path), {
-        expected: { type: 'LayoutPrimitiveType or LayoutArrayTypeDescriptor' },
-        actual: { type: describeValue(type) },
-        message: 'Layout field type is not supported.',
-    })
-}
-
-function lowerLayoutArtifact(spec: LayoutSpec, options: LayoutCodecOptions): LayoutArtifact {
-
-    const usages = normalizeUsages(spec, options.usage)
-    const lowered = spec.fields.map((field) => {
-        const type = lowerFieldType(field.name, field.type)
-        return {
-            descriptor: field,
-            type,
-            offset: 0,
-        }
-    })
-
-    let cursor = 0
-    let alignment = 1
-
-    for (const field of lowered) {
-        alignment = Math.max(alignment, field.type.alignment)
-        field.offset = checkedRoundUp(
-            fieldSubject(field.descriptor.name),
-            field.type.alignment,
-            cursor,
-            'field-offset'
-        )
-        cursor = checkedAddLayoutSize(
-            fieldSubject(field.descriptor.name),
-            field.offset,
-            field.type.size,
-            'field-end'
-        )
-    }
-
-    const byteLength = checkedRoundUp(artifactSubject(spec), alignment, cursor, 'struct-size')
-    const fields: LayoutFieldArtifact[] = lowered.map((field, index) => {
-        const nextOffset = lowered[index + 1]?.offset ?? byteLength
-        return {
-            kind: 'LayoutField',
-            name: field.descriptor.name,
-            path: field.descriptor.name,
-            type: field.type.type,
-            wgslType: field.type.wgslType,
-            offset: field.offset,
-            size: field.type.size,
-            alignment: field.type.alignment,
-            padding: nextOffset - (field.offset + field.type.size),
-            ...(field.type.element === undefined && field.type.componentType !== undefined
-                ? { componentType: field.type.componentType }
-                : {}),
-            ...(field.type.element === undefined && field.type.componentCount !== undefined
-                ? { componentCount: field.type.componentCount }
-                : {}),
-            ...(field.type.arrayLength !== undefined ? { arrayLength: field.type.arrayLength } : {}),
-            ...(field.type.arrayStride !== undefined ? { arrayStride: field.type.arrayStride } : {}),
-            ...(field.type.element !== undefined ? {
-                elementType: field.type.element.type,
-                elementSize: field.type.element.size,
-                elementAlignment: field.type.element.alignment,
-                ...(field.type.element.componentType !== undefined
-                    ? { componentType: field.type.element.componentType }
-                    : {}),
-                ...(field.type.element.componentCount !== undefined
-                    ? { componentCount: field.type.element.componentCount }
-                    : {}),
-            } : {}),
-        }
-    })
-    const usageCompatibility = computeUsageCompatibility(fields)
-    if (usages.includes('immediate') && !usageCompatibility.immediate) {
-        throwUnsupportedFormat(artifactSubject(spec), {
-            expected: {
-                usage: 'immediate',
-                fields: 'scalar, vector, or mat4x4f fields without array members',
-            },
-            actual: {
-                usage: 'immediate',
-                reason: 'usage-incompatible',
-                arrayFields: fields
-                    .filter(field => field.arrayLength !== undefined)
-                    .map(field => field.path),
-            },
-            message: 'LayoutSpec is not compatible with WGSL immediate address space.',
-        })
-    }
-
-    const abiCanonical = {
-        alignmentMode: 'host-shareable',
-        alignment,
-        byteLength,
-        stride: byteLength,
-        fields: fields.map(field => ({
-            type: field.type,
-            offset: field.offset,
-            size: field.size,
-            alignment: field.alignment,
-            padding: field.padding,
-            componentType: field.componentType,
-            componentCount: field.componentCount,
-            arrayLength: field.arrayLength,
-            arrayStride: field.arrayStride,
-            elementType: field.elementType,
-            elementSize: field.elementSize,
-            elementAlignment: field.elementAlignment,
-        })),
-    }
-    const schemaCanonical = {
-        name: spec.name,
-        fields: fields.map(field => ({
-            name: field.name,
-            type: field.type,
-            componentType: field.componentType,
-            componentCount: field.componentCount,
-            arrayLength: field.arrayLength,
-            arrayStride: field.arrayStride,
-            elementType: field.elementType,
-        })),
-    }
-    const abiSignature = JSON.stringify(abiCanonical)
-    const schemaSignature = JSON.stringify(schemaCanonical)
-    const artifact: LayoutArtifact = {
-        kind: 'LayoutArtifact',
-        name: spec.name,
-        ...(spec.label !== undefined ? { label: spec.label } : {}),
-        alignmentMode: 'host-shareable',
-        alignment,
-        byteLength,
-        stride: byteLength,
-        fields,
-        abiHash: `layout-abi-${fnv1a64(abiSignature)}`,
-        schemaHash: `layout-schema-${fnv1a64(schemaSignature)}`,
-        usages,
-        usageCompatibility,
-    }
-
-    layoutCanonicalSignatures.set(artifact, Object.freeze({
-        abi: abiSignature,
-        schema: schemaSignature,
-    }))
-    return freezeLayoutArtifact(artifact)
-}
-
-function lowerFieldType(path: string, type: LayoutFieldType): LoweredFieldType {
-
-    if (typeof type === 'string') {
-        return lowerPrimitiveFieldType(path, type)
-    }
-
-    const element = lowerPrimitiveFieldType(path, type.element)
-    const arrayStride = checkedRoundUp(fieldSubject(path), element.alignment, element.size, 'array-stride')
-    const size = checkedMultiplyLayoutSize(
-        fieldSubject(path),
-        arrayStride,
-        type.count,
-        'array-size'
-    )
-
-    return {
-        type: `array<${element.type}, ${type.count}>`,
-        wgslType: `array<${element.wgslType}, ${type.count}>`,
-        alignment: element.alignment,
-        size,
-        arrayLength: type.count,
-        arrayStride,
-        element,
-    }
-}
-
-function lowerPrimitiveFieldType(path: string, type: LayoutPrimitiveType): LoweredPrimitiveFieldType {
-
-    const primitive = PRIMITIVE_DEFINITIONS[type]
-    if (primitive === undefined) {
-        throwUnsupportedFormat(fieldSubject(path), {
-            expected: { type: Object.keys(PRIMITIVE_DEFINITIONS) },
-            actual: { type },
-            message: 'Layout field type is not supported.',
-        })
-    }
-
-    return {
-        type: primitive.type,
-        wgslType: primitive.wgslType,
-        alignment: primitive.alignment,
-        size: primitive.size,
-        componentType: primitive.componentType,
-        componentCount: primitive.componentCount,
-        primitive,
-    }
-}
-
-function normalizeUsages(spec: LayoutSpec, usage: unknown): LayoutCodecUsage[] {
-
-    if (usage === undefined) return [ ...DEFAULT_USAGES ]
-    if (!Array.isArray(usage) || usage.length === 0) {
-        throwUnsupportedFormat(artifactSubject(spec), {
-            expected: { usage: 'non-empty LayoutCodecUsage[]' },
-            actual: { usage: describeValue(usage) },
-            message: 'LayoutCodec usage must be a non-empty array.',
-        })
-    }
-
-    const seen = new Set<LayoutCodecUsage>()
-    const normalized: LayoutCodecUsage[] = []
-
-    for (const value of usage) {
-        if (!isUsage(value)) {
-            throwUnsupportedFormat(artifactSubject(spec), {
-                expected: { usage: [ 'uniform', 'storage', 'readback', 'vertex', 'immediate' ] },
-                actual: { usage: value },
-                message: 'LayoutCodec usage includes an unsupported value.',
-            })
-        }
-
-        if (!seen.has(value)) {
-            seen.add(value)
-            normalized.push(value)
-        }
-    }
-
-    return normalized
-}
-
-function computeUsageCompatibility(fields: LayoutFieldArtifact[]): LayoutUsageCompatibility {
-
-    return {
-        uniform: fields.every(field =>
-            field.arrayLength === undefined || (
-                field.offset % 16 === 0 &&
-                field.arrayStride !== undefined &&
-                field.arrayStride % 16 === 0
+        if (this.artifact.type.kind !== 'struct') {
+            throwCodecDiagnostic(
+                'SCRATCH_CODEC_READBACK_VIEW_UNSAFE',
+                layoutArtifactSubject(this.artifact),
+                'Layout readback toArray() requires a structure root type.',
+                { type: 'struct' },
+                { type: this.artifact.type.kind }
             )
-        ),
-        storage: true,
-        readback: true,
-        vertex: fields.every(field => field.arrayLength === undefined && field.type !== 'mat4x4f'),
-        immediate: fields.every(field => field.arrayLength === undefined),
+        }
+        return Array.from(
+            { length: this.count },
+            (_, index) => this.toObject(index)
+        )
     }
 }
 
-function normalizeRecords(codec: LayoutCodec, values: LayoutValues | LayoutValues[]): LayoutValues[] {
+function packedByteLength(
+    codec: LayoutCodec,
+    recordCount: number,
+    options: LayoutRuntimeExtent | undefined
+): number {
 
-    const records = Array.isArray(values) ? values : [ values ]
-    if (records.length === 0 || !records.every(isRecord)) {
-        throwUnsupportedFormat(codec.subject, {
-            expected: { values: 'LayoutValues or non-empty LayoutValues[]' },
-            actual: { values: Array.isArray(values) ? values.map(describeValue) : describeValue(values) },
-            message: 'LayoutCodec values must be objects keyed by field name.',
+    if (codec.artifact.extent === 'runtime') {
+        if (recordCount !== 1) {
+            throwCodecDiagnostic(
+                'SCRATCH_LAYOUT_RUNTIME_EXTENT_INVALID',
+                layoutArtifactSubject(codec.artifact),
+                'A runtime-sized layout describes exactly one root value.',
+                { values: 'one root value' },
+                { recordCount }
+            )
+        }
+        return layoutArtifactByteLength(codec.artifact, options)
+    }
+    if (options !== undefined) {
+        return layoutArtifactByteLength(codec.artifact, options)
+    }
+    return recordCount === 1
+        ? codec.artifact.byteLength
+        : checkedProduct(codec, codec.artifact.stride, recordCount)
+}
+
+function normalizeRootValues(
+    codec: LayoutCodec,
+    values: LayoutValue | readonly LayoutValues[]
+): unknown[] {
+
+    if (
+        codec.artifact.extent === 'fixed' &&
+        codec.artifact.type.kind === 'struct' &&
+        Array.isArray(values) &&
+        values.length > 0 &&
+        values.every(isRecord)
+    ) {
+        return [ ...values ]
+    }
+    if (
+        codec.artifact.extent === 'fixed' &&
+        codec.artifact.type.kind === 'struct' &&
+        !isRecord(values)
+    ) {
+        throwValueDiagnostic(
+            codec.artifact.name,
+            'object or non-empty object array',
+            values
+        )
+    }
+    return [ values ]
+}
+
+function runtimeExtentFromWriteOptions(
+    options: LayoutWriteOptions
+): LayoutRuntimeExtent | undefined {
+
+    return options.runtimeElementCount === undefined
+        ? undefined
+        : { runtimeElementCount: options.runtimeElementCount }
+}
+
+function requireRuntimeElementCount(
+    artifact: LayoutArtifact,
+    options: LayoutRuntimeExtent | undefined
+): number {
+
+    layoutArtifactByteLength(artifact, options)
+    return options!.runtimeElementCount
+}
+
+function packOpaqueBuffer(
+    codec: LayoutCodec,
+    value: unknown,
+    options: LayoutPackOptions | undefined
+): Uint8Array {
+
+    if (options !== undefined) {
+        layoutArtifactByteLength(codec.artifact, options)
+    }
+    const source = normalizeBytes(codec.subject, value)
+    validateOpaqueBufferBytes(codec.artifact, source.byteLength)
+    const bytes = new Uint8Array(source.byteLength)
+    bytes.set(source)
+    return bytes
+}
+
+function writeOpaqueBuffer(
+    codec: LayoutCodec,
+    target: ArrayBuffer | ArrayBufferView,
+    value: unknown,
+    options: LayoutWriteOptions
+): Uint8Array {
+
+    if (options.runtimeElementCount !== undefined) {
+        layoutArtifactByteLength(codec.artifact, {
+            runtimeElementCount: options.runtimeElementCount,
         })
     }
-
-    return records
+    const source = normalizeBytes(codec.subject, value)
+    validateOpaqueBufferBytes(codec.artifact, source.byteLength)
+    const byteOffset = normalizeByteOffset(codec.subject, options.byteOffset)
+    const bytes = createByteView(
+        codec.subject,
+        target,
+        byteOffset,
+        source.byteLength
+    )
+    bytes.set(source)
+    return bytes
 }
 
-function normalizeByteOffset(codec: LayoutCodec, byteOffset: unknown): number {
+function validateOpaqueBufferBytes(
+    artifact: LayoutArtifact,
+    byteLength: number
+) {
+
+    const valid = artifact.extent === 'fixed'
+        ? byteLength === artifact.byteLength
+        : byteLength >= artifact.minimumBindingSize &&
+            artifact.type.kind === 'buffer' &&
+            byteLength % artifact.type.byteGranularity === 0
+    if (!valid) {
+        throwByteLengthDiagnostic(
+            layoutArtifactSubject(artifact),
+            artifact.extent === 'fixed'
+                ? { byteLength: artifact.byteLength }
+                : {
+                    byteLength: `>= ${artifact.minimumBindingSize} and divisible by ${
+                        artifact.type.kind === 'buffer'
+                            ? artifact.type.byteGranularity
+                            : 'its byte granularity'
+                    }`,
+                },
+            { byteLength }
+        )
+    }
+}
+
+function writeLayoutValue(
+    artifact: LayoutArtifact,
+    view: DataView,
+    offset: number,
+    type: LayoutTypeArtifact,
+    value: unknown,
+    path: string,
+    runtimeElementCount: number | undefined
+) {
+
+    if (type.kind === 'scalar') {
+        writeScalar(view, offset, type.component, normalizeScalarValue(path, type.component, value))
+        return
+    }
+    if (type.kind === 'atomic') {
+        writeScalar(view, offset, type.component, normalizeScalarValue(path, type.component, value))
+        return
+    }
+    if (type.kind === 'vector') {
+        const values = normalizeNumberArray(path, value, type.length)
+            .map((component, index) => normalizeScalarValue(
+                `${path}[${index}]`,
+                type.component,
+                component
+            ))
+        const componentSize = type.component === 'f16' ? 2 : 4
+        values.forEach((component, index) => {
+            writeScalar(view, offset + index * componentSize, type.component, component)
+        })
+        return
+    }
+    if (type.kind === 'matrix') {
+        const columns = normalizeMatrixValue(
+            path,
+            value,
+            type.columns,
+            type.rows
+        ).map((column, columnIndex) => column.map(
+            (component, rowIndex) => normalizeScalarValue(
+                `${path}[${columnIndex}][${rowIndex}]`,
+                type.component,
+                component
+            )
+        ))
+        const componentSize = type.component === 'f16' ? 2 : 4
+        columns.forEach((column, columnIndex) => {
+            column.forEach((component, rowIndex) => {
+                writeScalar(
+                    view,
+                    offset + columnIndex * type.columnStride + rowIndex * componentSize,
+                    type.component,
+                    component
+                )
+            })
+        })
+        return
+    }
+    if (type.kind === 'array' || type.kind === 'runtime-array') {
+        const count = type.kind === 'array'
+            ? type.count
+            : requireRuntimeValueCount(artifact, path, value, runtimeElementCount)
+        if (!Array.isArray(value) || value.length !== count) {
+            throwValueDiagnostic(path, `array length ${count}`, value)
+        }
+        for (let index = 0; index < count; index++) {
+            writeLayoutValue(
+                artifact,
+                view,
+                offset + index * type.elementStride,
+                type.element,
+                value[index],
+                `${path}[${index}]`,
+                undefined
+            )
+        }
+        return
+    }
+    if (type.kind === 'struct') {
+        if (!isRecord(value)) {
+            throwValueDiagnostic(path, `object matching ${type.name}`, value)
+        }
+        for (const member of type.members) {
+            writeLayoutValue(
+                artifact,
+                view,
+                offset + member.offset,
+                member.type,
+                value[member.name],
+                member.path,
+                member.extent === 'runtime'
+                    ? runtimeElementCount
+                    : undefined
+            )
+        }
+        return
+    }
+    throwValueDiagnostic(path, 'opaque buffer bytes through the root codec', value)
+}
+
+function readLayoutValue(
+    view: DataView,
+    offset: number,
+    type: LayoutTypeArtifact,
+    runtimeElementCount: number | undefined
+): unknown {
+
+    if (type.kind === 'scalar' || type.kind === 'atomic') {
+        return readScalar(view, offset, type.component)
+    }
+    if (type.kind === 'vector') {
+        const componentSize = type.component === 'f16' ? 2 : 4
+        return Array.from(
+            { length: type.length },
+            (_, index) => readScalar(
+                view,
+                offset + index * componentSize,
+                type.component
+            )
+        )
+    }
+    if (type.kind === 'matrix') {
+        const componentSize = type.component === 'f16' ? 2 : 4
+        return Array.from(
+            { length: type.columns },
+            (_, columnIndex) => Array.from(
+                { length: type.rows },
+                (_, rowIndex) => readScalar(
+                    view,
+                    offset + columnIndex * type.columnStride + rowIndex * componentSize,
+                    type.component
+                )
+            )
+        )
+    }
+    if (type.kind === 'array' || type.kind === 'runtime-array') {
+        const count = type.kind === 'array'
+            ? type.count
+            : runtimeElementCount ?? 0
+        return Array.from(
+            { length: count },
+            (_, index) => readLayoutValue(
+                view,
+                offset + index * type.elementStride,
+                type.element,
+                undefined
+            )
+        )
+    }
+    if (type.kind === 'struct') {
+        const record: Record<string, unknown> = {}
+        for (const member of type.members) {
+            record[member.name] = readLayoutValue(
+                view,
+                offset + member.offset,
+                member.type,
+                member.extent === 'runtime'
+                    ? runtimeElementCount
+                    : undefined
+            )
+        }
+        return record
+    }
+    return new Uint8Array(
+        view.buffer,
+        view.byteOffset + offset,
+        view.byteLength - offset
+    ).slice()
+}
+
+function requireRuntimeValueCount(
+    artifact: LayoutArtifact,
+    path: string,
+    value: unknown,
+    runtimeElementCount: number | undefined
+): number {
+
+    if (
+        runtimeElementCount === undefined ||
+        !Number.isSafeInteger(runtimeElementCount) ||
+        runtimeElementCount <= 0
+    ) {
+        throwCodecDiagnostic(
+            'SCRATCH_LAYOUT_RUNTIME_EXTENT_INVALID',
+            fieldSubject(path),
+            'Runtime-sized layout values require one explicit positive element count.',
+            { runtimeElementCount: 'positive safe integer' },
+            { runtimeElementCount }
+        )
+    }
+    if (!Array.isArray(value) || value.length !== runtimeElementCount) {
+        throwCodecDiagnostic(
+            'SCRATCH_LAYOUT_RUNTIME_EXTENT_INVALID',
+            fieldSubject(path),
+            'Runtime array value length must match its explicit layout extent.',
+            {
+                runtimeElementCount,
+                valueLength: runtimeElementCount,
+            },
+            {
+                runtimeElementCount,
+                valueLength: Array.isArray(value)
+                    ? value.length
+                    : describeValue(value),
+                artifact: artifact.abiHash,
+            }
+        )
+    }
+    return runtimeElementCount
+}
+
+function normalizeScalarValue(
+    path: string,
+    type: LayoutScalarType,
+    value: unknown
+): number {
+
+    if (typeof value !== 'number') {
+        throwValueDiagnostic(path, type, value)
+    }
+    if (type === 'f32' || type === 'f16') return value
+    if (!Number.isInteger(value)) {
+        throwValueDiagnostic(path, `${type} integer`, value)
+    }
+    if (type === 'i32' && (value < -0x8000_0000 || value > 0x7fff_ffff)) {
+        throwValueDiagnostic(path, 'i32 integer', value)
+    }
+    if (type === 'u32' && (value < 0 || value > 0xffff_ffff)) {
+        throwValueDiagnostic(path, 'u32 integer', value)
+    }
+    return value
+}
+
+function normalizeNumberArray(
+    path: string,
+    value: unknown,
+    length: number
+): number[] {
+
+    if (
+        !Array.isArray(value) ||
+        value.length !== length ||
+        !value.every(component => typeof component === 'number')
+    ) {
+        throwValueDiagnostic(path, `number[${length}]`, value)
+    }
+    return value
+}
+
+function normalizeMatrixValue(
+    path: string,
+    value: unknown,
+    columns: number,
+    rows: number
+): number[][] {
+
+    if (
+        Array.isArray(value) &&
+        value.length === columns &&
+        value.every(column =>
+            Array.isArray(column) &&
+            column.length === rows &&
+            column.every(component => typeof component === 'number')
+        )
+    ) {
+        return value as number[][]
+    }
+    if (
+        Array.isArray(value) &&
+        value.length === columns * rows &&
+        value.every(component => typeof component === 'number')
+    ) {
+        return Array.from(
+            { length: columns },
+            (_, column) => (value as number[]).slice(
+                column * rows,
+                (column + 1) * rows
+            )
+        )
+    }
+    throwValueDiagnostic(
+        path,
+        `column-major number[${columns}][${rows}] or number[${columns * rows}]`,
+        value
+    )
+}
+
+function writeScalar(
+    view: DataView,
+    offset: number,
+    type: LayoutScalarType,
+    value: number
+) {
+
+    if (type === 'f16') {
+        view.setUint16(offset, numberToFloat16Bits(value), true)
+        return
+    }
+    if (type === 'f32') {
+        view.setFloat32(offset, value, true)
+        return
+    }
+    if (type === 'i32') {
+        view.setInt32(offset, value, true)
+        return
+    }
+    view.setUint32(offset, value, true)
+}
+
+function readScalar(
+    view: DataView,
+    offset: number,
+    type: LayoutScalarType
+): number {
+
+    if (type === 'f16') {
+        return float16BitsToNumber(view.getUint16(offset, true))
+    }
+    if (type === 'f32') return view.getFloat32(offset, true)
+    if (type === 'i32') return view.getInt32(offset, true)
+    return view.getUint32(offset, true)
+}
+
+function numberToFloat16Bits(value: number): number {
+
+    const bits = float64Bits(value)
+    const sign = Number((bits >> 48n) & 0x8000n)
+    const exponentBits = Number((bits >> 52n) & 0x7ffn)
+    const fraction = bits & 0x000f_ffff_ffff_ffffn
+
+    if (exponentBits === 0x7ff) {
+        return sign | (fraction === 0n ? 0x7c00 : 0x7e00)
+    }
+    if (exponentBits === 0 && fraction === 0n) return sign
+
+    const exponent = exponentBits === 0
+        ? -1022
+        : exponentBits - 1023
+    const significand = exponentBits === 0
+        ? fraction
+        : (1n << 52n) | fraction
+
+    if (exponent >= -14) {
+        let halfExponent = exponent + 15
+        let rounded = roundEvenRightShift(significand, 42)
+        if (rounded === 0x800n) {
+            rounded = 0x400n
+            halfExponent++
+        }
+        if (halfExponent >= 31) return sign | 0x7c00
+        return sign |
+            (halfExponent << 10) |
+            Number(rounded & 0x3ffn)
+    }
+
+    const shift = 28 - exponent
+    if (shift > 1075) return sign
+    const rounded = roundEvenRightShift(significand, shift)
+    if (rounded >= 0x400n) return sign | 0x0400
+    return sign | Number(rounded)
+}
+
+function float16BitsToNumber(bits: number): number {
+
+    const sign = (bits & 0x8000) === 0 ? 1 : -1
+    const exponent = (bits >>> 10) & 0x1f
+    const fraction = bits & 0x03ff
+    if (exponent === 0) {
+        return fraction === 0
+            ? sign < 0 ? -0 : 0
+            : sign * fraction * 2 ** -24
+    }
+    if (exponent === 0x1f) {
+        return fraction === 0 ? sign * Infinity : NaN
+    }
+    return sign * (1 + fraction / 1024) * 2 ** (exponent - 15)
+}
+
+function float64Bits(value: number): bigint {
+
+    float64BitScratch.setFloat64(0, value, false)
+    return float64BitScratch.getBigUint64(0, false)
+}
+
+function roundEvenRightShift(value: bigint, shift: number): bigint {
+
+    if (shift <= 0) return value << BigInt(-shift)
+    const shiftBits = BigInt(shift)
+    const quotient = value >> shiftBits
+    const remainderMask = (1n << shiftBits) - 1n
+    const remainder = value & remainderMask
+    const halfway = 1n << (shiftBits - 1n)
+    return remainder > halfway ||
+        (remainder === halfway && (quotient & 1n) === 1n)
+        ? quotient + 1n
+        : quotient
+}
+
+function generateWgslAccessors(
+    artifact: LayoutArtifact,
+    namespace: string
+): string {
+
+    const lines: string[] = []
+    const structs = collectStructArtifacts(artifact.type)
+    structs.forEach((type, index) => {
+        lines.push(renderStruct(type))
+        if (index < structs.length - 1) lines.push('')
+    })
+    if (structs.length > 0) lines.push('')
+
+    if (artifact.extent === 'fixed') {
+        lines.push(`const ${namespace}_BYTE_LENGTH: u32 = ${artifact.byteLength}u;`)
+        lines.push(`const ${namespace}_STRIDE: u32 = ${artifact.stride}u;`)
+    } else {
+        lines.push(
+            `const ${namespace}_FIXED_PREFIX_BYTE_LENGTH: u32 = ${
+                artifact.fixedPrefixByteLength
+            }u;`
+        )
+        lines.push(
+            `const ${namespace}_MINIMUM_BINDING_SIZE: u32 = ${
+                artifact.minimumBindingSize
+            }u;`
+        )
+    }
+    if (artifact.alignment !== null) {
+        lines.push(`const ${namespace}_ALIGNMENT: u32 = ${artifact.alignment}u;`)
+    }
+
+    for (const field of artifact.fields) {
+        const constantName = `${namespace}_${constantSegment(field.name)}`
+        lines.push(`const ${constantName}_OFFSET: u32 = ${field.offset}u;`)
+        if (field.byteLength !== undefined) {
+            lines.push(`const ${constantName}_SIZE: u32 = ${field.byteLength}u;`)
+        }
+        if (
+            field.type.kind === 'array' ||
+            field.type.kind === 'runtime-array'
+        ) {
+            lines.push(
+                `const ${constantName}_STRIDE: u32 = ${field.type.elementStride}u;`
+            )
+        }
+    }
+
+    const accessorLines = generateRootAccessors(artifact, namespace)
+    if (accessorLines.length > 0) {
+        lines.push('')
+        lines.push(...accessorLines)
+    }
+    return lines.join('\n')
+}
+
+function collectStructArtifacts(
+    root: LayoutTypeArtifact
+): Array<Extract<LayoutTypeArtifact, { kind: 'struct' }>> {
+
+    const result: Array<Extract<LayoutTypeArtifact, { kind: 'struct' }>> = []
+    const seen = new Set<string>()
+
+    const visit = (type: LayoutTypeArtifact) => {
+        if (type.kind === 'array' || type.kind === 'runtime-array') {
+            visit(type.element)
+            return
+        }
+        if (type.kind !== 'struct') return
+        for (const member of type.members) visit(member.type)
+        if (!seen.has(type.name)) {
+            seen.add(type.name)
+            result.push(type)
+        }
+    }
+    visit(root)
+    return result
+}
+
+function renderStruct(
+    type: Extract<LayoutTypeArtifact, { kind: 'struct' }>
+): string {
+
+    const lines = [ `struct ${type.name} {` ]
+    for (const member of type.members) {
+        const attributes = [
+            member.explicitAlign === undefined
+                ? undefined
+                : `@align(${member.explicitAlign})`,
+            member.explicitSize === undefined
+                ? undefined
+                : `@size(${member.explicitSize})`,
+        ].filter((attribute): attribute is string => attribute !== undefined)
+        const prefix = attributes.length === 0
+            ? ''
+            : `${attributes.join(' ')} `
+        lines.push(`    ${prefix}${member.name}: ${member.wgslType},`)
+    }
+    lines.push('}')
+    return lines.join('\n')
+}
+
+function generateRootAccessors(
+    artifact: LayoutArtifact,
+    namespace: string
+): string[] {
+
+    if (artifact.type.kind !== 'struct') return []
+    const lines: string[] = []
+    const root = artifact.type
+    for (const member of root.members) {
+        if (member.type.kind === 'runtime-array') {
+            const suffix = pascalName(member.name)
+            const access = member.type.containsAtomic ? 'read_write' : 'read'
+            lines.push(
+                `fn ${namespace}_length${suffix}(value: ptr<storage, ${root.name}, ${access}>) -> u32 {`
+            )
+            lines.push(`    return arrayLength(&(*value).${member.name});`)
+            lines.push('}')
+        }
+        if (member.type.containsAtomic) {
+            generateAtomicAccessors(
+                lines,
+                namespace,
+                root.name,
+                member.type,
+                `(*value).${member.name}`,
+                [ member.name ],
+                []
+            )
+            continue
+        }
+        if (member.type.kind === 'runtime-array') {
+            const suffix = pascalName(member.name)
+            const elementType = member.type.element.wgslType
+            if (member.type.element.constructible) {
+                lines.push(
+                    `fn ${namespace}_read${suffix}(value: ptr<storage, ${
+                        root.name
+                    }, read>, index: u32) -> ${elementType} {`
+                )
+                lines.push(`    return (*value).${member.name}[index];`)
+                lines.push('}')
+            }
+            continue
+        }
+        if (artifact.extent === 'fixed' && root.constructible) {
+            lines.push(
+                `fn ${namespace}_read${pascalName(member.name)}(value: ${
+                    root.name
+                }) -> ${member.wgslType} {`
+            )
+            lines.push(`    return value.${member.name};`)
+            lines.push('}')
+        } else if (member.type.constructible) {
+            const access = root.containsAtomic ? 'read_write' : 'read'
+            lines.push(
+                `fn ${namespace}_read${pascalName(member.name)}(value: ptr<storage, ${
+                    root.name
+                }, ${access}>) -> ${member.wgslType} {`
+            )
+            lines.push(`    return (*value).${member.name};`)
+            lines.push('}')
+        }
+    }
+    return lines
+}
+
+function generateAtomicAccessors(
+    lines: string[],
+    namespace: string,
+    rootName: string,
+    type: LayoutTypeArtifact,
+    expression: string,
+    memberPath: string[],
+    indexes: string[]
+) {
+
+    if (type.kind === 'atomic') {
+        const suffix = pascalName(memberPath.join('_'))
+        const parameters = indexes.map(index => `${index}: u32`)
+        const parameterSuffix = parameters.length === 0
+            ? ''
+            : `, ${parameters.join(', ')}`
+        lines.push(
+            `fn ${namespace}_load${suffix}(value: ptr<storage, ${
+                rootName
+            }, read_write>${parameterSuffix}) -> ${type.component} {`
+        )
+        lines.push(`    return atomicLoad(&${expression});`)
+        lines.push('}')
+        lines.push(
+            `fn ${namespace}_store${suffix}(value: ptr<storage, ${
+                rootName
+            }, read_write>${parameterSuffix}, next: ${type.component}) {`
+        )
+        lines.push(`    atomicStore(&${expression}, next);`)
+        lines.push('}')
+        return
+    }
+    if (type.kind === 'array' || type.kind === 'runtime-array') {
+        const indexName = `index${indexes.length}`
+        generateAtomicAccessors(
+            lines,
+            namespace,
+            rootName,
+            type.element,
+            `${expression}[${indexName}]`,
+            memberPath,
+            [ ...indexes, indexName ]
+        )
+        return
+    }
+    if (type.kind === 'struct') {
+        for (const member of type.members) {
+            if (!member.type.containsAtomic) continue
+            generateAtomicAccessors(
+                lines,
+                namespace,
+                rootName,
+                member.type,
+                `${expression}.${member.name}`,
+                [ ...memberPath, member.name ],
+                indexes
+            )
+        }
+    }
+}
+
+function generateBufferViewConstants(
+    contract: LayoutBufferViewContract,
+    namespace: string
+): string {
+
+    const lines = [
+        `const ${namespace}_REQUIRED_ALIGNMENT: u32 = ${contract.requiredAlignment}u;`,
+        `const ${namespace}_MINIMUM_TYPE_SIZE: u32 = ${contract.minimumTypeSize}u;`,
+    ]
+    if (contract.byteOffset !== undefined) {
+        lines.push(`const ${namespace}_BYTE_OFFSET: u32 = ${contract.byteOffset}u;`)
+    }
+    if (contract.byteLength !== undefined) {
+        lines.push(`const ${namespace}_BYTE_LENGTH: u32 = ${contract.byteLength}u;`)
+    }
+    if (contract.arrayOffset !== undefined) {
+        lines.push(`const ${namespace}_ARRAY_OFFSET: u32 = ${contract.arrayOffset}u;`)
+    }
+    if (contract.arrayStride !== undefined) {
+        lines.push(`const ${namespace}_ARRAY_STRIDE: u32 = ${contract.arrayStride}u;`)
+    }
+    if (contract.staticBufferByteLength !== undefined) {
+        lines.push(
+            `const ${namespace}_STATIC_BUFFER_LENGTH: u32 = ${
+                contract.staticBufferByteLength
+            }u;`
+        )
+    }
+    return lines.join('\n')
+}
+
+function validateReadbackByteLength(
+    artifact: LayoutArtifact,
+    byteLength: number
+) {
+
+    let valid = false
+    let expected: unknown
+    if (artifact.extent === 'runtime') {
+        valid = layoutArtifactAcceptsViewByteLength(artifact, byteLength)
+        expected = artifact.type.kind === 'buffer'
+            ? `>= ${artifact.minimumBindingSize} with valid buffer granularity`
+            : `>= ${artifact.minimumBindingSize}`
+    } else {
+        valid = byteLength === artifact.byteLength ||
+            (
+                byteLength >= artifact.stride &&
+                byteLength % artifact.stride === 0
+            )
+        expected = artifact.byteLength === artifact.stride
+            ? `positive multiple of ${artifact.stride}`
+            : `${artifact.byteLength} or a positive multiple of ${artifact.stride}`
+    }
+    if (!valid) {
+        throwByteLengthDiagnostic(
+            layoutArtifactSubject(artifact),
+            { byteLength: expected },
+            { byteLength }
+        )
+    }
+}
+
+function validateReadbackIndex(
+    artifact: LayoutArtifact,
+    count: number,
+    index: unknown
+) {
+
+    if (
+        typeof index !== 'number' ||
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= count
+    ) {
+        throwCodecDiagnostic(
+            'SCRATCH_CODEC_READBACK_VIEW_UNSAFE',
+            layoutArtifactSubject(artifact),
+            'LayoutCodec readback index is outside the view.',
+            { index: `integer in [0, ${count})` },
+            { index }
+        )
+    }
+}
+
+function normalizeByteOffset(
+    subject: DiagnosticSubject,
+    byteOffset: unknown
+): number {
 
     const normalized = byteOffset ?? 0
-    if (typeof normalized !== 'number' || !Number.isInteger(normalized) || normalized < 0) {
-        throwByteLengthDiagnostic(codec, {
-            expected: { byteOffset: 'non-negative integer' },
-            actual: { byteOffset },
-        })
+    if (
+        typeof normalized !== 'number' ||
+        !Number.isSafeInteger(normalized) ||
+        normalized < 0
+    ) {
+        throwByteLengthDiagnostic(
+            subject,
+            { byteOffset: 'non-negative safe integer' },
+            { byteOffset }
+        )
     }
-
     return normalized
 }
 
 function createByteView(
-    codec: LayoutCodec,
+    subject: DiagnosticSubject,
     target: ArrayBuffer | ArrayBufferView,
     byteOffset: number,
     byteLength: number
 ): Uint8Array {
 
     if (target instanceof ArrayBuffer) {
-        if (byteOffset + byteLength > target.byteLength) {
-            throwByteLengthDiagnostic(codec, {
-                expected: { byteLength, byteOffset },
-                actual: { targetByteLength: target.byteLength },
-            })
+        if (byteOffset + byteLength <= target.byteLength) {
+            return new Uint8Array(target, byteOffset, byteLength)
         }
-        return new Uint8Array(target, byteOffset, byteLength)
-    }
-
-    if (ArrayBuffer.isView(target)) {
-        if (byteOffset + byteLength > target.byteLength) {
-            throwByteLengthDiagnostic(codec, {
-                expected: { byteLength, byteOffset },
-                actual: { targetByteLength: target.byteLength },
-            })
+    } else if (ArrayBuffer.isView(target)) {
+        if (byteOffset + byteLength <= target.byteLength) {
+            return new Uint8Array(
+                target.buffer,
+                target.byteOffset + byteOffset,
+                byteLength
+            )
         }
-        return new Uint8Array(target.buffer, target.byteOffset + byteOffset, byteLength)
+    } else {
+        throwByteLengthDiagnostic(
+            subject,
+            { target: 'ArrayBuffer or ArrayBufferView' },
+            { target: describeValue(target) }
+        )
     }
-
-    throwByteLengthDiagnostic(codec, {
-        expected: { target: 'ArrayBuffer or ArrayBufferView' },
-        actual: { target: describeValue(target) },
-    })
+    throwByteLengthDiagnostic(
+        subject,
+        { byteOffset, byteLength, range: 'within target storage' },
+        {
+            byteOffset,
+            byteLength,
+            targetByteLength: ArrayBuffer.isView(target)
+                ? target.byteLength
+                : target.byteLength,
+        }
+    )
 }
 
-function normalizeBytes(subject: LayoutCodec | DiagnosticSubject, bytes: ArrayBuffer | ArrayBufferView): Uint8Array {
+function normalizeBytes(
+    subject: DiagnosticSubject,
+    bytes: unknown
+): Uint8Array {
 
     if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes)
-    if (ArrayBuffer.isView(bytes)) return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-
-    throwByteLengthDiagnostic(subject, {
-        expected: { bytes: 'ArrayBuffer or ArrayBufferView' },
-        actual: { bytes: describeValue(bytes) },
-    })
-}
-
-function writeFieldValue(
-    codec: LayoutCodec,
-    dataView: DataView,
-    offset: number,
-    field: LayoutFieldArtifact,
-    value: unknown
-) {
-
-    if (field.arrayLength !== undefined) {
-        if (!Array.isArray(value) || value.length !== field.arrayLength) {
-            throwUnsupportedFormat(fieldSubject(field.path), {
-                expected: { value: `array length ${field.arrayLength}` },
-                actual: { value: Array.isArray(value) ? value.length : describeValue(value) },
-                message: 'LayoutCodec array field value has the wrong shape.',
-            })
-        }
-
-        for (let index = 0; index < field.arrayLength; index++) {
-            writePrimitiveValue(codec, dataView, offset + index * requireArrayStride(codec, field), field, value[index])
-        }
-        return
+    if (ArrayBuffer.isView(bytes)) {
+        return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
     }
-
-    writePrimitiveValue(codec, dataView, offset, field, value)
+    throwByteLengthDiagnostic(
+        subject,
+        { bytes: 'ArrayBuffer or ArrayBufferView' },
+        { bytes: describeValue(bytes) }
+    )
 }
 
-function writePrimitiveValue(
-    codec: LayoutCodec,
-    dataView: DataView,
-    offset: number,
-    field: LayoutFieldArtifact,
-    value: unknown
-) {
-
-    if (field.componentType === undefined || field.componentCount === undefined) {
-        throwUnsupportedFormat(fieldSubject(field.path), {
-            expected: { field: 'primitive field metadata' },
-            actual: { field },
-            message: 'LayoutCodec field metadata is missing primitive component facts.',
-        })
-    }
-
-    const values = field.componentCount === 1 ? [ value ] : value
-    if (!Array.isArray(values) || values.length !== field.componentCount || !values.every(component => typeof component === 'number')) {
-        throwUnsupportedFormat(fieldSubject(field.path), {
-            expected: { value: field.componentCount === 1 ? 'number' : `number[${field.componentCount}]` },
-            actual: { value: Array.isArray(value) ? value.map(describeValue) : describeValue(value) },
-            message: 'LayoutCodec field value has the wrong shape.',
-        })
-    }
-
-    values.forEach((component, index) => {
-        writeScalar(dataView, offset + index * 4, field.componentType!, component)
-    })
-}
-
-function readFieldValue(artifact: LayoutArtifact, dataView: DataView, offset: number, field: LayoutFieldArtifact): unknown {
-
-    if (field.arrayLength !== undefined) {
-        return Array.from({ length: field.arrayLength }, (_, index) => {
-            return readPrimitiveValue(dataView, offset + index * requireArrayStride(artifact, field), field)
-        })
-    }
-
-    return readPrimitiveValue(dataView, offset, field)
-}
-
-function readPrimitiveValue(dataView: DataView, offset: number, field: LayoutFieldArtifact): unknown {
-
-    if (field.componentType === undefined || field.componentCount === undefined) {
-        return undefined
-    }
-
-    const values = Array.from({ length: field.componentCount }, (_, index) => {
-        return readScalar(dataView, offset + index * 4, field.componentType!)
-    })
-
-    return field.componentCount === 1 ? values[0] : values
-}
-
-function writeScalar(dataView: DataView, offset: number, type: LayoutScalarType, value: number) {
-
-    if (type === 'f32') dataView.setFloat32(offset, value, true)
-    if (type === 'i32') dataView.setInt32(offset, value, true)
-    if (type === 'u32') dataView.setUint32(offset, value, true)
-}
-
-function readScalar(dataView: DataView, offset: number, type: LayoutScalarType): number {
-
-    if (type === 'f32') return dataView.getFloat32(offset, true)
-    if (type === 'i32') return dataView.getInt32(offset, true)
-    return dataView.getUint32(offset, true)
-}
-
-function requireArrayStride(context: LayoutCodec | LayoutArtifact, field: LayoutFieldArtifact): number {
-
-    if (field.arrayStride !== undefined) return field.arrayStride
-    throwUnsupportedFormat(layoutDiagnosticSubject(context), {
-        expected: { field: 'array field stride metadata' },
-        actual: { field },
-        message: 'LayoutCodec array field is missing stride metadata.',
-    })
-}
-
-function normalizeNamespace(codec: LayoutCodec, namespace: unknown): string {
-
-    if (namespace === undefined) return codec.artifact.name
-    if (typeof namespace === 'string' && isIdentifier(namespace)) return namespace
-
-    throwUnsupportedFormat(codec.subject, {
-        expected: { namespace: 'WGSL identifier string' },
-        actual: { namespace },
-        message: 'LayoutCodec WGSL accessor namespace must be a WGSL identifier.',
-    })
-}
-
-function throwUnsupportedFormat(
+function normalizeNamespace(
     subject: DiagnosticSubject,
-    details: { expected: unknown, actual: unknown, message: string }
+    namespace: unknown,
+    fallback: string
+): string {
+
+    if (namespace === undefined) return fallback
+    if (typeof namespace === 'string' && isIdentifier(namespace)) return namespace
+    throwCodecDiagnostic(
+        'SCRATCH_LAYOUT_TYPE_UNSUPPORTED',
+        subject,
+        'LayoutCodec WGSL namespace must be a WGSL identifier.',
+        { namespace: 'WGSL identifier string' },
+        { namespace }
+    )
+}
+
+function checkedProduct(
+    codec: LayoutCodec,
+    left: number,
+    right: number
+): number {
+
+    const result = left * right
+    if (
+        !Number.isSafeInteger(result) ||
+        result <= 0 ||
+        result > 0xffff_ffff
+    ) {
+        throwByteLengthDiagnostic(
+            codec.subject,
+            { byteLength: 'positive safe integer <= WGSL u32 max' },
+            { left, right, byteLength: result }
+        )
+    }
+    return result
+}
+
+function throwValueDiagnostic(
+    path: string,
+    expected: unknown,
+    value: unknown
 ): never {
 
-    throwScratchDiagnostic({
-        code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
-        severity: 'error',
-        phase: 'layout-codec',
-        subject,
-        message: details.message,
-        expected: details.expected,
-        actual: details.actual,
-    })
+    throwCodecDiagnostic(
+        'SCRATCH_LAYOUT_TYPE_UNSUPPORTED',
+        fieldSubject(path),
+        'LayoutCodec value does not match its recursive layout type.',
+        { value: expected },
+        {
+            value: Array.isArray(value)
+                ? value.map(describeValue)
+                : describeValue(value),
+        }
+    )
 }
 
 function throwByteLengthDiagnostic(
-    subject: LayoutCodec | DiagnosticSubject,
-    details: { expected: unknown, actual: unknown }
+    subject: DiagnosticSubject,
+    expected: unknown,
+    actual: unknown
+): never {
+
+    throwCodecDiagnostic(
+        'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
+        subject,
+        'LayoutCodec byte range does not match its LayoutArtifact.',
+        expected,
+        actual
+    )
+}
+
+function throwCodecDiagnostic(
+    code: string,
+    subject: DiagnosticSubject,
+    message: string,
+    expected: unknown,
+    actual: unknown
 ): never {
 
     throwScratchDiagnostic({
-        code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
+        code,
         severity: 'error',
         phase: 'layout-codec',
-        subject: layoutDiagnosticSubject(subject),
-        message: 'LayoutCodec byte length does not match its LayoutArtifact.',
-        expected: details.expected,
-        actual: details.actual,
+        subject,
+        message,
+        expected,
+        actual,
     })
-}
-
-function layoutDiagnosticSubject(context: LayoutCodec | LayoutArtifact | DiagnosticSubject): DiagnosticSubject {
-
-    if (isLayoutCodec(context)) return context.subject
-    if (isLayoutArtifact(context)) return layoutArtifactSubject(context)
-
-    return context
-}
-
-function isPrimitiveType(type: string): type is LayoutPrimitiveType {
-
-    return Object.prototype.hasOwnProperty.call(PRIMITIVE_DEFINITIONS, type)
-}
-
-function isUsage(value: unknown): value is LayoutCodecUsage {
-
-    return value === 'uniform' ||
-        value === 'storage' ||
-        value === 'readback' ||
-        value === 'vertex' ||
-        value === 'immediate'
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-
-    return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-}
-
-function isIdentifier(value: string): boolean {
-
-    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)
-}
-
-function artifactSubject(spec: LayoutSpec): DiagnosticSubject {
-
-    return unresolvedArtifactSubject(spec.label)
-}
-
-function unresolvedArtifactSubject(label: string | undefined): DiagnosticSubject {
-
-    const subject: DiagnosticSubject = {
-        kind: 'LayoutArtifact',
-        abiHash: 'unresolved',
-        schemaHash: 'unresolved',
-    }
-    if (label !== undefined) subject.label = label
-
-    return subject
 }
 
 function fieldSubject(path: string): DiagnosticSubject {
@@ -1082,144 +1390,32 @@ function fieldSubject(path: string): DiagnosticSubject {
     }
 }
 
-function checkedAddLayoutSize(
-    subject: DiagnosticSubject,
-    left: number,
-    right: number,
-    reason: string
-): number {
+function unresolvedArtifactSubject(): DiagnosticSubject {
 
-    return requireSafeLayoutSize(subject, left + right, {
-        reason,
-        operation: 'addition',
-        left,
-        right,
-    })
+    return {
+        kind: 'LayoutArtifact',
+        hash: 'unresolved',
+    }
 }
 
-function checkedMultiplyLayoutSize(
-    subject: DiagnosticSubject,
-    left: number,
-    right: number,
-    reason: string
-): number {
+function isIdentifier(value: string): boolean {
 
-    return requireSafeLayoutSize(subject, left * right, {
-        reason,
-        operation: 'multiplication',
-        left,
-        right,
-    })
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)
 }
 
-function checkedRoundUp(
-    subject: DiagnosticSubject,
-    alignment: number,
-    value: number,
-    reason: string
-): number {
+function pascalName(value: string): string {
 
-    return requireSafeLayoutSize(subject, Math.ceil(value / alignment) * alignment, {
-        reason,
-        operation: 'alignment-rounding',
-        alignment,
-        value,
-    })
-}
-
-function requireSafeLayoutSize(
-    subject: DiagnosticSubject,
-    result: number,
-    actual: Record<string, unknown>
-): number {
-
-    if (Number.isSafeInteger(result) && result >= 0 && result <= WGSL_U32_MAX) return result
-
-    throwUnsupportedFormat(subject, {
-        expected: {
-            result: 'non-negative safe integer layout byte size representable by WGSL u32',
-            safeIntegerMax: Number.MAX_SAFE_INTEGER,
-            wgslU32Max: WGSL_U32_MAX,
-        },
-        actual: {
-            ...actual,
-            result,
-            safeIntegerMax: Number.MAX_SAFE_INTEGER,
-            wgslU32Max: WGSL_U32_MAX,
-        },
-        message: 'Layout byte-size arithmetic exceeds the JavaScript safe-integer or WGSL u32 domain.',
-    })
-}
-
-function constantSegment(name: string): string {
-
-    return name
-        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-        .replace(/[^A-Za-z0-9]+/g, '_')
-        .toUpperCase()
-}
-
-function pascalName(name: string): string {
-
-    return name
-        .split(/_+/g)
-        .map(segment => `${segment.slice(0, 1).toUpperCase()}${segment.slice(1)}`)
+    return value
+        .split(/[^A-Za-z0-9]+/)
+        .filter(Boolean)
+        .map(segment => segment[0].toUpperCase() + segment.slice(1))
         .join('')
 }
 
-function fnv1a64(value: string): string {
+function constantSegment(value: string): string {
 
-    let hash = 0xcbf29ce484222325n
-    for (let index = 0; index < value.length; index++) {
-        hash ^= BigInt(value.charCodeAt(index))
-        hash = BigInt.asUintN(64, hash * 0x100000001b3n)
-    }
-
-    return hash.toString(16).padStart(16, '0')
-}
-
-function freezeLayoutArtifact(artifact: LayoutArtifact): LayoutArtifact {
-
-    for (const field of artifact.fields) Object.freeze(field)
-    Object.freeze(artifact.fields)
-    Object.freeze(artifact.usages)
-    Object.freeze(artifact.usageCompatibility)
-    return Object.freeze(artifact)
-}
-
-function firstCanonicalDifference(
-    expected: unknown,
-    actual: unknown,
-    path: string
-): LayoutCompatibilityDifference {
-
-    if (Object.is(expected, actual)) return { path, expected, actual }
-    if (Array.isArray(expected) && Array.isArray(actual)) {
-        const length = Math.max(expected.length, actual.length)
-        for (let index = 0; index < length; index++) {
-            if (!Object.is(expected[index], actual[index])) {
-                return firstCanonicalDifference(expected[index], actual[index], `${path}[${index}]`)
-            }
-        }
-    }
-    if (isRecord(expected) && isRecord(actual)) {
-        const keys = [ ...new Set([ ...Object.keys(expected), ...Object.keys(actual) ]) ].sort()
-        for (const key of keys) {
-            if (!Object.is(expected[key], actual[key])) {
-                return firstCanonicalDifference(expected[key], actual[key], `${path}.${key}`)
-            }
-        }
-    }
-
-    return {
-        path,
-        expected: boundedDifferenceValue(expected),
-        actual: boundedDifferenceValue(actual),
-    }
-}
-
-function boundedDifferenceValue(value: unknown): unknown {
-
-    if (typeof value !== 'string') return value
-    return value.length <= 128 ? value : `${value.slice(0, 128)}...`
+    return value
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/[^A-Za-z0-9]+/g, '_')
+        .toUpperCase()
 }

@@ -661,6 +661,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const typedReadback = codec.createReadbackView(packed)
     const wgslAccessors: string = codec.wgslAccessors({ namespace: 'TypedUniformsLayout' })
+    if (codec.artifact.extent !== 'fixed') {
+        throw new Error('TypedUniforms is expected to have a fixed footprint')
+    }
     const artifactByteLength: number = codec.artifact.byteLength
     const artifactAbiHash: string = codec.artifact.abiHash
     const artifactSchemaHash: string = codec.artifact.schemaHash
@@ -674,7 +677,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const reinterpretedRegion: scr.BufferRegion = typedRegion.interpretAs(codec.artifact)
     const regionElementCount: number | undefined = reinterpretedRegion.elementCount
     const usageCompatibility: scr.LayoutUsageCompatibility = codec.artifact.usageCompatibility
-    const immediateCompatibility: boolean = usageCompatibility.immediate
+    const immediateCompatibility: boolean = usageCompatibility.immediate.compatible
     const immediateUsage: scr.LayoutCodecUsage = 'immediate'
     const immediateCodec = scr.layoutCodec({
         name: 'TypedImmediate',
@@ -727,6 +730,181 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         layout: codec.artifact,
     }
     const compatProgramBufferRequirement: scratchCompat.ProgramBufferLayoutRequirement = programBufferRequirement
+    const recursiveCodec = scr.layoutCodec({
+        name: 'TypedRecursiveValues',
+        fields: [
+            {
+                name: 'header',
+                type: {
+                    kind: 'struct',
+                    name: 'TypedHeader',
+                    fields: [
+                        { name: 'scale', type: 'f16' },
+                        { name: 'basis', type: 'mat3x2f' },
+                    ],
+                },
+                align: 16,
+                size: 48,
+            },
+            {
+                name: 'values',
+                type: {
+                    kind: 'runtime-array',
+                    element: {
+                        kind: 'struct',
+                        name: 'TypedValue',
+                        fields: [
+                            { name: 'position', type: 'vec3f' },
+                            {
+                                name: 'counter',
+                                type: { kind: 'atomic', component: 'u32' },
+                            },
+                        ],
+                    },
+                },
+            },
+        ],
+    })
+    if (recursiveCodec.artifact.extent !== 'runtime') {
+        throw new Error('TypedRecursiveValues is expected to have a runtime tail')
+    }
+    const recursiveByteLength: number = recursiveCodec.byteLength({
+        runtimeElementCount: 2,
+    })
+    const recursiveBytes: Uint8Array = recursiveCodec.pack({
+        header: {
+            scale: 1,
+            basis: [
+                [ 1, 0 ],
+                [ 0, 1 ],
+                [ 0, 0 ],
+            ],
+        },
+        values: [
+            { position: [ 1, 2, 3 ], counter: 4 },
+            { position: [ 5, 6, 7 ], counter: 8 },
+        ],
+    }, {
+        runtimeElementCount: 2,
+    })
+    const recursiveReadback: scr.LayoutReadbackView =
+        recursiveCodec.createReadbackView(recursiveBytes)
+    const recursiveRuntimeCount: number | undefined =
+        recursiveReadback.runtimeElementCount
+    // @ts-expect-error Runtime artifacts deliberately have no fixed byteLength
+    recursiveCodec.artifact.byteLength
+    // @ts-expect-error Runtime artifacts deliberately have no fixed stride
+    recursiveCodec.artifact.stride
+
+    const rawCodec = scr.layoutCodec({
+        name: 'TypedRawBuffer',
+        type: {
+            kind: 'buffer',
+            byteLength: 128,
+            f16Enabled: true,
+        },
+    })
+    const runtimeTargetCodec = scr.layoutCodec({
+        name: 'TypedRuntimeTarget',
+        type: {
+            kind: 'runtime-array',
+            element: 'vec4u',
+        },
+    })
+    const parameterBufferCodec = scr.layoutCodec({
+        name: 'TypedParameterBuffer',
+        type: {
+            kind: 'buffer',
+            byteLength: 64,
+            f16Enabled: true,
+        },
+    })
+    const bufferViewContract: scr.LayoutBufferViewContract = rawCodec.bufferView({
+        kind: 'bufferArrayView',
+        target: runtimeTargetCodec.artifact,
+        addressSpace: 'storage',
+        accessMode: 'read',
+        byteOffset: 16,
+        byteLength: 32,
+        pointerPath: 'function-parameter',
+        parameterBuffers: [ parameterBufferCodec.artifact ],
+    })
+    const bufferViewConstants: string = rawCodec.wgslBufferViewConstants(
+        bufferViewContract,
+        { namespace: 'TypedRawView' }
+    )
+    const bufferViewProgramRequirement: scr.ProgramBufferLayoutRequirement = {
+        group: 0,
+        binding: 1,
+        name: 'rawBytes',
+        type: 'read-storage',
+        visibility: [ 'compute' ],
+        hasDynamicOffset: false,
+        layout: rawCodec.artifact,
+        bufferViews: [ bufferViewContract ],
+    }
+    scr.layoutCodec({
+        name: 'InvalidBooleanField',
+        fields: [
+            {
+                name: 'flag',
+                // @ts-expect-error bool is not an ordinary host-shareable LayoutCodec field
+                type: 'bool',
+            },
+        ],
+    })
+    scr.layoutCodec({
+        name: 'InvalidAtomicComponent',
+        fields: [
+            {
+                name: 'counter',
+                // @ts-expect-error Scratch atomics are limited to atomic<i32> and atomic<u32>
+                type: { kind: 'atomic', component: 'f32' },
+            },
+        ],
+    })
+    scr.layoutCodec({
+        name: 'InvalidNestedBuffer',
+        fields: [
+            {
+                name: 'bytes',
+                // @ts-expect-error buffer and buffer<N> are root-only opaque layout types
+                type: { kind: 'buffer', byteLength: 16 },
+            },
+        ],
+    })
+    scr.layoutCodec({
+        name: 'InvalidRuntimePlacement',
+        fields: [
+            {
+                name: 'values',
+                // @ts-expect-error A runtime array must be the final structure member
+                type: { kind: 'runtime-array', element: 'u32' },
+            },
+            { name: 'tail', type: 'u32' },
+        ],
+    })
+    // @ts-expect-error A uniform buffer pointer has read access
+    rawCodec.bufferView({
+        kind: 'bufferLength',
+        addressSpace: 'uniform',
+        accessMode: 'read_write',
+    })
+    // @ts-expect-error Function-parameter buffer paths require the complete parameter path
+    rawCodec.bufferView({
+        kind: 'bufferLength',
+        addressSpace: 'storage',
+        accessMode: 'read',
+        pointerPath: 'function-parameter',
+    })
+    // @ts-expect-error Originating-variable paths cannot declare parameter buffers
+    rawCodec.bufferView({
+        kind: 'bufferLength',
+        addressSpace: 'storage',
+        accessMode: 'read',
+        pointerPath: 'originating-variable',
+        parameterBuffers: [ parameterBufferCodec.artifact ],
+    })
 
     buffer.assertRuntime(runtime)
 

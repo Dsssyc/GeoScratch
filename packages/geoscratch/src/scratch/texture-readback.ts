@@ -1,5 +1,8 @@
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { isLayoutArtifact } from './layout-codec.js'
+import {
+    isLayoutArtifact,
+    layoutArtifactAcceptsViewByteLength,
+} from './layout-codec.js'
 import {
     isTextureResource,
     textureFormatBlockSize,
@@ -212,8 +215,8 @@ export function normalizeTextureReadbackSource(
     if (
         layout !== undefined &&
         (
-            layout.usageCompatibility.readback !== true ||
-            logicalByteLength % layout.stride !== 0
+            !layout.usageCompatibility.readback.compatible ||
+            !layoutArtifactAcceptsViewByteLength(layout, logicalByteLength)
         )
     ) {
         throwScratchDiagnostic({
@@ -225,12 +228,12 @@ export function normalizeTextureReadbackSource(
             message: 'Texture readback interpretation must cover complete logical result records.',
             expected: {
                 usageCompatibility: { readback: true },
-                logicalByteLength: `multiple of layout stride ${layout.stride}`,
+                logicalByteLength: `compatible with ${layout.extent} layout extent`,
             },
             actual: {
                 usageCompatibility: layout.usageCompatibility,
                 logicalByteLength,
-                layoutStride: layout.stride,
+                minimumBindingSize: layout.minimumBindingSize,
             },
         })
     }

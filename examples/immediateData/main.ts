@@ -114,8 +114,8 @@ async function main() {
     ).maxImmediateSize
     canvas.dataset.maxImmediateSize = String(maxImmediateSize ?? 'unavailable')
     const requiredImmediateSize = Math.max(
-        computeCodec.artifact.byteLength,
-        renderCodec.artifact.byteLength
+        computeCodec.byteLength(),
+        renderCodec.byteLength()
     )
     if (
         typeof maxImmediateSize !== 'number' ||
@@ -197,14 +197,14 @@ async function main() {
         label: 'immediate compute pipeline',
         program: computeProgram,
         layout: { mode: 'explicit', bindLayouts: [ computeLayout ] },
-        immediateSize: computeCodec.artifact.byteLength,
+        immediateSize: computeCodec.byteLength(),
     })
     const renderPipeline = await runtime.createRenderPipeline({
         label: 'immediate render pipeline',
         program: renderProgram,
         layout: { mode: 'explicit', bindLayouts: [ renderLayout ] },
         targets: [ { format: surface.format } ],
-        immediateSize: renderCodec.artifact.byteLength,
+        immediateSize: renderCodec.byteLength(),
     })
     const computePass = runtime.createComputePass({
         label: 'immediate compute pass',

@@ -7,6 +7,8 @@ import {
 import {
     describeLayoutCompatibilityDifference,
     isLayoutArtifact,
+    layoutArtifactAcceptsBindingByteLength,
+    layoutArtifactRuntimeElementCount,
     layoutArtifactSubject,
     layoutArtifactsAbiCompatible,
 } from './layout-codec.js'
@@ -206,8 +208,14 @@ export class BufferRegion {
 
     get elementCount(): number | undefined {
 
-        if (this.layout === undefined || this.size % this.layout.stride !== 0) return undefined
-        return this.size / this.layout.stride
+        if (this.layout === undefined) return undefined
+        return layoutArtifactRuntimeElementCount(this.layout, this.size)
+    }
+
+    get runtimeElementCount(): number | undefined {
+
+        if (this.layout?.extent !== 'runtime') return undefined
+        return layoutArtifactRuntimeElementCount(this.layout, this.size)
     }
 
     get subject(): DiagnosticSubject {
@@ -481,7 +489,12 @@ function validateBufferRegionLayout(
     layout: LayoutArtifact
 ): void {
 
-    if (offset % layout.alignment !== 0 || size % layout.stride !== 0) {
+    const offsetAlignment = layout.alignment ??
+        (layout.type.kind === 'buffer' ? layout.type.byteGranularity : 1)
+    if (
+        offset % offsetAlignment !== 0 ||
+        !layoutArtifactAcceptsBindingByteLength(layout, size)
+    ) {
         throwScratchDiagnostic({
             code: 'SCRATCH_BUFFER_REGION_LAYOUT_INVALID',
             severity: 'error',
@@ -497,8 +510,15 @@ function validateBufferRegionLayout(
             related: [ buffer.subject, layoutArtifactSubject(layout) ],
             message: 'BufferRegion range is incompatible with its LayoutArtifact.',
             expected: {
-                offsetAlignment: layout.alignment,
-                sizeStride: layout.stride,
+                offsetAlignment,
+                minimumBindingSize: layout.minimumBindingSize,
+                extent: layout.extent,
+                ...(layout.extent === 'fixed'
+                    ? { fixedStride: layout.stride }
+                    : {}),
+                ...(layout.type.kind === 'buffer'
+                    ? { byteGranularity: layout.type.byteGranularity }
+                    : {}),
             },
             actual: { offset, size },
         })

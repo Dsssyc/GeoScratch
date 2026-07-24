@@ -16,7 +16,11 @@ import {
     layoutArtifactsAbiCompatible,
     layoutArtifactsSchemaCompatible,
 } from './layout-codec.js'
-import { programLayoutRequirementExpected, programLayoutRequirementSubject } from './program.js'
+import {
+    programLayoutRequirementExpected,
+    programLayoutRequirementRequiredBindingSize,
+    programLayoutRequirementSubject,
+} from './program.js'
 import { isComputePipeline, isRenderPipeline, programLayoutRequirementsForPipeline } from './pipeline.js'
 import { currentRenderPassAttachmentExtent } from './pass.js'
 import { QuerySetResource, isQuerySetResource } from './query-set.js'
@@ -1505,9 +1509,8 @@ function normalizeCommandImmediateData(
         immediateData
     )
     if (uploadView !== undefined) {
-        const immediateCompatible = (
-            uploadView.artifact.usageCompatibility as Record<string, boolean>
-        ).immediate === true
+        const immediateCompatible =
+            uploadView.artifact.usageCompatibility.immediate.compatible
         if (!immediateCompatible) {
             throwCommandImmediateDataDiagnostic(command, {
                 expectedByteLength,
@@ -4906,6 +4909,23 @@ function validateProgramLayoutRequirementsForCommand(command: DrawCommand | Disp
                         region.layout,
                         'schema'
                     ),
+                },
+            })
+        }
+        const requiredBindingSize =
+            programLayoutRequirementRequiredBindingSize(requirement)
+        if (region.size < requiredBindingSize) {
+            throwCommandProgramLayoutMismatch(command, requirement, {
+                bindSet,
+                entry: binding.entry,
+                resource: region.subject,
+                actualLayout: layoutArtifactSubject(region.layout),
+                actual: {
+                    bindingSize: region.size,
+                    requiredBindingSize,
+                    bufferViewContracts: requirement.bufferViews?.map(
+                        contract => contract.contractHash
+                    ) ?? [],
                 },
             })
         }

@@ -77,14 +77,31 @@ code 持有的 lock 或 caller-visible preparation state。
 
 `LayoutCodec` 不是 resource，也不是 scheduler 特性。它是 typed layout 与 CPU、WGSL、readback 所需字节事实之间的桥。
 
-目标输出:
+输出:
 
-- `LayoutArtifact`: segment offset、element stride、field offset、padding、alignment mode、total byte length、storage/vertex/readback compatibility、`abiHash`、`schemaHash` 与 canonical signature
+- `FixedLayoutArtifact` 或 `RuntimeLayoutArtifact`：recursive type fact、
+  offset、element/column stride、padding、显式 member layout、alignment、fixed
+  length 或 runtime-tail fact、结构化 usage compatibility、capability
+  requirement、`abiHash`、`schemaHash` 与 canonical signature
 - CPU writer: 把逻辑值写入 GPU-aligned bytes，并跳过 padding
 - upload view: 可由一个 upload command 发送的连续字节范围
 - readback view factory: 从返回字节创建 typed、`DataView`、strided 或显式 deinterleaved view
 - WGSL accessor module: 用于 shader 侧安全访问字段的生成 struct/function/constant
+- buffer-view contract 与 WGSL constant：为 `bufferView`、`bufferArrayView`
+  和 `bufferLength` 显式记录 source/target type、byte range、alignment、pointer
+  path 与 required language feature
 - diagnostics: 不支持的 field format、不兼容 usage、无法表达的 alignment、byte-length mismatch 或不安全 strided view request，并通过 `ScratchDiagnostic` 报告
+
+一套 recursive model 覆盖 scope 内完整 host-shareable family：scalar、vector、
+floating matrix、fixed array、structure、final-member runtime array、storage
+atomic、显式 member `@align` / `@size`，以及 opaque fixed/runtime buffer root。
+精确 binary16 conversion 属于 CPU ABI。TypeScript descriptor grammar 排除静态非法
+nesting；runtime validation 对 JavaScript 与 dynamic input 执行相同约束。
+
+只有 fixed artifact 发布 total `byteLength` 与 `stride`。Runtime artifact 发布 fixed
+prefix 与 minimum binding size，并要求显式 `runtimeElementCount` 才产生具体 host
+byte range。该 extent 贯穿 packing、writing、upload/readback view、BufferRegion
+witness、Program minimum binding size 与 command range validation。
 
 高性能 CPU 路径是:
 
@@ -98,12 +115,17 @@ source AoS/SoA data
 
 Raw packed bytes 仍然是 escape hatch，但不是默认 authoring model。要求作者在 shader 中手动复刻 WGSL padding 是正确性风险，尤其在 AI 辅助写代码时更容易出错。
 
-当前 artifact 保持一套通用 host-shareable/storage ABI。其
-`usageCompatibility.uniform` flag 表示不启用 `uniform_buffer_standard_layout` 时的
-可移植 WGSL 结果：array member 只有在 field offset 与 `arrayStride` 都是 16 的倍数
-时才兼容。Codec 会把自然紧密排列的 scalar 与 `vec2` array 报告为不兼容，而不会
-声称 4-byte 或 8-byte stride 可作为 core uniform layout 绑定；它也不会静默选择第二
-套 ABI。未来 extension-aware layout 必须显式命名该 capability。
+Artifact 保持一套通用 host-shareable ABI。每个 `usageCompatibility` member
+都是 immutable object，而不是 Boolean：它报告 compatibility、reason、required
+device feature、required language feature 与 mutable-storage requirement。具名
+`portable` uniform contract 应用 core uniform-address-space constraint；具名
+`uniform_buffer_standard_layout` contract 保留同一 ABI，同时派生该
+language-feature requirement。两者都不会静默选择第二套 packing。
+
+ABI 与 schema identity 覆盖 recursive type 与 capability contract。Typed Program
+requirement 默认要求 exact schema compatibility；native binding 独立校验 ABI、
+usage、range 与 alignment。短 hash 是有界 identifier，因此不可变 canonical
+signature 仍是最终 equality evidence。
 
 ## ShaderModule 与 Program
 
@@ -268,21 +290,32 @@ runtime 应能 inspect artifact metadata，并确认:
 
 `Program.requiredLanguageFeatures` 是显式 WGSL language-extension name iterable，
 与 device `requiredFeatures` 分离。Program 创建及每个未来 pipeline transaction
-都会针对 Runtime snapshot 校验该 requirement。Scratch 不解析或重写 `requires`
-directive；调用方 WGSL source 仍是事实来源。
+都会针对 Runtime snapshot 校验该 requirement。Scratch 还会从关联 layout 与
+buffer-view contract 派生 requirement：`shader-f16` 是 device feature；
+`buffer_view`、`unrestricted_pointer_parameters`、
+`uniform_buffer_standard_layout` 与 `immediate_address_space` 在适用时是 WGSL
+language feature。
 
 `LayoutCodecUsage` 包含 `'immediate'`。
-`LayoutArtifact.usageCompatibility.immediate` 对当前 scalar、vector 与 `mat4x4f`
-field vocabulary 为 true，对任何 array member 为 false。显式请求不兼容的
-immediate usage 会产生结构化 LayoutCodec diagnostic。只有 compatible
-LayoutUploadView 才能作为 command immediate data。其显式 `byteOffset` 与
-`byteLength` 从 `bytes.buffer` 中选择字节，与既有 upload path 保持一致；
-该范围不要求落在 `bytes` view 自身的 visible subrange 内。
+`LayoutArtifact.usageCompatibility.immediate` 只在 store type 为 constructible、
+fixed-footprint 且不包含 array、atomic 或 opaque buffer 时 compatible。显式请求
+不兼容 immediate usage 会产生结构化 LayoutCodec diagnostic。只有 compatible
+`LayoutUploadView` 才能作为 command immediate data。其显式 `byteOffset` 与
+`byteLength` 从 `bytes.buffer` 中选择字节，与既有 upload path 保持一致；该范围
+不要求落在 `bytes` view 自身的 visible subrange 内。
+
+`LayoutBufferViewContract` 同样让 buffer-view builtin 保持显式。它记录 address
+space/access、source/target layout、fixed/runtime buffer size、byte range、
+required alignment，以及 pointer 来自 originating variable 还是声明过的
+function-parameter chain。Fixed parameter path 可以缩窄但不能扩大；
+runtime-to-fixed path 会 fail closed。Program minimum binding size 与 command
+range validation 直接消费这些事实，而不是从 shader prose 重建。
 
 生成 accessor 仍只输出 struct、constant 与 field reader，绝不注入
-`requires immediate_address_space;` 或 `var<immediate>`。Raw ArrayBuffer 与
-ArrayBufferView 路径继续存在，因此当前 codec vocabulary 不会限制合法 WGSL
-store type。
+`requires`/`enable` directive 或 resource declaration。Scratch 不解析或重写任意
+caller WGSL、override expression 或 dynamic value；调用方 source 仍是事实来源。
+Raw ArrayBuffer 与 ArrayBufferView 路径继续用于 managed host-layout vocabulary
+之外的合法 WGSL domain。
 
 ## 吸收工业经验，但不照搬
 

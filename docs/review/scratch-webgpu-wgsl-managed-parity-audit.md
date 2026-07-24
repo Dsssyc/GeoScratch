@@ -2,12 +2,13 @@
 
 ## Status
 
-Phase 4 texture-transfer and readback parity is complete through
+Phase 5 recursive WGSL layout parity is complete through
 `socu/scratch-webgpu-wgsl-parity-v1`, based on
 `e905b33e7bd8fdc68e9400ffe103a52e89c21488`. This living audit records the
-fixed specification surface and will be finalized only after all seven
-WebGPU families, the scoped WGSL layout family, consumer migration, full
-gates, and the single independent review are complete.
+fixed specification surface. All seven selected WebGPU families and the
+scoped WGSL layout family are now implemented. The audit will be finalized
+only after Phase 6 consumer/browser regression, final sequential gates, and
+the single Phase 7 independent review are complete.
 
 ## Frozen Specification Baseline
 
@@ -59,7 +60,7 @@ surface inventories.
 | SurfaceTextureLease | Managed current-texture attachment/copy/binding use | Phase 1 implemented; ADR-049 Accepted |
 | Runtime adapter/device parity | feature level, XR request, default queue, immutable adapter facts | Phase 1 implemented |
 | Texture transfer completeness | upload aspect, direct texture readback, mapped lease | Phase 4 implemented; ADR-052 Accepted |
-| WGSL type/layout semantics | Recursive host-shareable ABI and buffer views | Known target gap; ADR-053 Proposed |
+| WGSL type/layout semantics | Recursive host-shareable ABI and buffer views | Phase 5 implemented; ADR-053 Accepted |
 
 ## Phase 0 Inventory
 
@@ -196,6 +197,61 @@ Checkpoint evidence:
 
 ADR-052 is Accepted. Consolidated headed browser execution remains a Phase 6
 gate and is not claimed by this checkpoint.
+
+## Phase 5 Checkpoint
+
+Phase 5 replaces the former flat primitive layout surface with one recursive
+host-layout model. It covers every scoped scalar, vector, and floating matrix
+shape; exact binary16 packing; recursive fixed arrays and structures;
+final-member runtime arrays; storage atomics; explicit member `@align` /
+`@size`; and opaque `buffer<N>` / runtime `buffer` roots. Public TypeScript
+descriptors encode fixed-footprint nesting and final-runtime-member grammar,
+while runtime validation retains the same fail-closed rules for JavaScript and
+dynamic input.
+
+`FixedLayoutArtifact` and `RuntimeLayoutArtifact` are distinct public facts.
+Only fixed artifacts expose a total byte length and stride. Runtime artifacts
+retain a fixed prefix, minimum binding size, runtime-tail or byte-granularity
+facts, and require an explicit element count for concrete host ranges. ABI and
+schema identity cover recursive layout and capability contracts. Every usage
+compatibility result reports reasons plus required device/language features;
+`shader-f16`, `uniform_buffer_standard_layout`, and
+`immediate_address_space` are derived rather than implied.
+
+`LayoutBufferViewContract` models `bufferView`, `bufferArrayView`, and
+`bufferLength` with explicit byte ranges, alignment, source/target layout,
+address/access mode, and pointer provenance. Function-parameter chains derive
+`unrestricted_pointer_parameters`; all buffer views derive `buffer_view`.
+Program requirements carry these contracts into pipeline minimum binding size
+and command-time exact range validation. Generated constants never hide the
+dynamic byte range, and Program remains the authority for caller-authored WGSL
+directives, overrides, and dynamic values.
+
+Checkpoint evidence:
+
+- recursive LayoutCodec, readback, and Program focused tests: 50/50 passing;
+- `npm test`: 1120 passing and 2 expected pending;
+- `npm run typecheck`: passed for package, public API, all examples, and
+  canonical WebGPU declarations;
+- structured parity audit: passed with 80 selected native calls, 392 Scratch
+  exports, and 483 package exports; its TypeScript-AST Phase 5 inventory
+  confirms recursive declarations, codec operations, Program buffer-view
+  contracts, both-entrypoint exports, and removal of `LayoutPrimitiveType`;
+- persistent-binding structural parity audit: passed with the fixed/runtime
+  and capability-contract documentation checks;
+- `node tests/stress/scratch-layout-codec.mjs`: passed 20,000 recursive
+  fixed/runtime cycles with 3,360,000 packed bytes, 3,141,584 bytes peak heap
+  growth against a 128 MiB bound, and zero terminal handles, mappings, staging
+  bytes, pending operations, or retained native handles; and
+- ADR-053 is Accepted and the English/Chinese resource, Program/codec, and
+  diagnostic modules describe the implemented model.
+
+The frozen WGSL manifest intentionally retains its goal-start
+`known-target-gap` classifications. The living matrix and checkpoint describe
+the current implementation; silently rewriting the frozen baseline would
+erase the evidence of what this goal closed. Consolidated browser shader
+proofs for nested matrices, `f16` when supported, and `buffer_view` when
+supported remain a Phase 6 gate and are not claimed here.
 
 ## Required Final Matrices
 

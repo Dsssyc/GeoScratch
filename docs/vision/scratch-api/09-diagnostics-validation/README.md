@@ -91,7 +91,13 @@ type DiagnosticSubject =
     | { kind: 'ScratchRuntime', id: string, label?: string }
     | { kind: 'Surface', id: string, label?: string }
     | { kind: 'Resource', id: string, label?: string, resourceKind?: string }
-    | { kind: 'LayoutArtifact', hash: string, label?: string }
+    | {
+        kind: 'LayoutArtifact',
+        abiHash?: string,
+        schemaHash?: string,
+        hash?: 'unresolved',
+        label?: string,
+      }
     | { kind: 'LayoutField', path: string, label?: string }
     | { kind: 'Program', id: string, label?: string }
     | { kind: 'ShaderEntryPoint', programId?: string, name: string, stage: string }
@@ -280,12 +286,22 @@ Unsafe array-size multiplication, field-end addition, or alignment rounding uses
 `SCRATCH_LAYOUT_UNSUPPORTED_FORMAT`; `actual.reason` and `actual.operation` identify the
 failed arithmetic step. `actual.safeIntegerMax` and `actual.wgslU32Max` distinguish the
 JavaScript and generated-WGSL numeric bounds; no `LayoutArtifact` is published.
+Recursive type, member-attribute, runtime-tail, runtime-extent, usage, and
+buffer-view failures retain the smallest available `LayoutField` path. A registered
+artifact subject carries both `abiHash` and `schemaHash`; an unresolved descriptor
+uses only the bounded `hash: 'unresolved'` sentinel.
 
 Candidate codes:
 
 ```ts
 type LayoutCodecDiagnosticCode =
     | 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT'
+    | 'SCRATCH_LAYOUT_TYPE_UNSUPPORTED'
+    | 'SCRATCH_LAYOUT_MEMBER_ATTRIBUTE_INVALID'
+    | 'SCRATCH_LAYOUT_RUNTIME_ARRAY_INVALID'
+    | 'SCRATCH_LAYOUT_RUNTIME_EXTENT_INVALID'
+    | 'SCRATCH_LAYOUT_USAGE_INCOMPATIBLE'
+    | 'SCRATCH_LAYOUT_BUFFER_VIEW_INVALID'
     | 'SCRATCH_LAYOUT_ABI_MISMATCH'
     | 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH'
     | 'SCRATCH_CODEC_SCHEMA_MISMATCH'

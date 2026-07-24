@@ -15,7 +15,7 @@ import type {
     DrawCommand,
     ExternalImageUploadCommand,
     LayoutCodec,
-    LayoutFieldDescriptor,
+    LayoutFixedFieldDescriptor,
     Program,
     ProgramBufferLayoutRequirement,
     ScratchDiagnosticCapture,
@@ -510,7 +510,7 @@ async function createRenderGraph(
 
 function createCodecs() {
 
-    const uniform = (name: string, fields: LayoutFieldDescriptor[]) => (
+    const uniform = (name: string, fields: LayoutFixedFieldDescriptor[]) => (
         layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
     )
 
@@ -1011,7 +1011,7 @@ async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
         name,
         type: 'uniform',
         visibility,
-        minBindingSize: codec.artifact.byteLength,
+        minBindingSize: codec.byteLength(),
     })
     const textureEntry = (
         binding: number,

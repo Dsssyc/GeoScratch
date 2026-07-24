@@ -1,6 +1,9 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
-import { isLayoutArtifact } from './layout-codec.js'
+import {
+    isLayoutArtifact,
+    isLayoutBufferViewContract,
+} from './layout-codec.js'
 import {
     assertScratchRuntimeActive,
     assertScratchRuntimeAuthority,
@@ -12,7 +15,11 @@ import { isShaderModule } from './shader-module.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { BindVisibility } from './binding.js'
 import type { DiagnosticSubject } from './diagnostics.js'
-import type { LayoutArtifact } from './layout-codec.js'
+import type {
+    LayoutArtifact,
+    LayoutBufferViewContract,
+    LayoutUsageCompatibilityFact,
+} from './layout-codec.js'
 import type { ScratchRuntime } from './runtime.js'
 import type {
     ScratchRuntimeAuthorityObservation,
@@ -39,6 +46,7 @@ export type ProgramBufferLayoutRequirement = Readonly<{
     visibility?: readonly BindVisibility[]
     hasDynamicOffset: boolean
     layout: LayoutArtifact
+    bufferViews?: readonly LayoutBufferViewContract[]
 }>
 
 export type ProgramDescriptor = Readonly<{
@@ -271,6 +279,8 @@ export function programLayoutRequirementExpected(
     requirement: ProgramBufferLayoutRequirement
 ) {
 
+    const minimumBindingSize =
+        programLayoutRequirementMinimumBindingSize(requirement)
     return {
         group: requirement.group,
         binding: requirement.binding,
@@ -278,11 +288,46 @@ export function programLayoutRequirementExpected(
         type: requirement.type,
         ...(requirement.visibility !== undefined ? { visibility: requirement.visibility } : {}),
         hasDynamicOffset: requirement.hasDynamicOffset,
-        abiByteLength: requirement.layout.byteLength,
-        minBindingSize: `0 or >= ${requirement.layout.byteLength}`,
+        minimumBindingSize,
+        minBindingSize: `0 or >= ${minimumBindingSize}`,
         abiHash: requirement.layout.abiHash,
         schemaHash: requirement.layout.schemaHash,
+        ...(requirement.bufferViews !== undefined
+            ? {
+                bufferViewContracts: requirement.bufferViews.map(
+                    contract => contract.contractHash
+                ),
+            }
+            : {}),
     }
+}
+
+export function programLayoutRequirementMinimumBindingSize(
+    requirement: ProgramBufferLayoutRequirement
+): number {
+
+    return Math.max(
+        requirement.layout.minimumBindingSize,
+        ...(requirement.bufferViews ?? []).map(
+            contract => contract.minimumTypeSize
+        )
+    )
+}
+
+export function programLayoutRequirementRequiredBindingSize(
+    requirement: ProgramBufferLayoutRequirement
+): number {
+
+    return Math.max(
+        programLayoutRequirementMinimumBindingSize(requirement),
+        ...(requirement.bufferViews ?? []).map(contract => {
+            const offset = contract.byteOffset ?? 0
+            if (contract.byteLength !== undefined) {
+                return offset + contract.byteLength
+            }
+            return offset + contract.minimumTypeSize
+        })
+    )
 }
 
 function normalizeProgramDescriptor(
@@ -312,24 +357,22 @@ function normalizeProgramDescriptor(
         })
     }
 
-    const requiredFeatures = Object.freeze(
+    const declaredFeatures =
         normalizeStringIterable<GPUFeatureName>(
             subject,
             'requiredFeatures',
             descriptor.requiredFeatures
         )
-    )
     const requiredLimits = normalizeRequiredLimits(
         subject,
         descriptor.requiredLimits
     )
-    const requiredLanguageFeatures = Object.freeze(
+    const declaredLanguageFeatures =
         normalizeStringIterable(
             subject,
             'requiredLanguageFeatures',
             descriptor.requiredLanguageFeatures
         )
-    )
     const layoutRequirements = normalizeLayoutRequirements(
         subject,
         descriptor.layoutRequirements
@@ -339,6 +382,18 @@ function normalizeProgramDescriptor(
         fragment,
         compute,
     ])
+    const derivedCapabilities = collectLayoutCapabilities(
+        layoutRequirements,
+        sourcePartDependencies
+    )
+    const requiredFeatures = Object.freeze(uniqueStrings([
+        ...declaredFeatures,
+        ...derivedCapabilities.deviceFeatures,
+    ])) as readonly GPUFeatureName[]
+    const requiredLanguageFeatures = Object.freeze(uniqueStrings([
+        ...declaredLanguageFeatures,
+        ...derivedCapabilities.languageFeatures,
+    ]))
 
     const normalized = Object.freeze({
         ...(descriptor.label !== undefined ? { label: descriptor.label } : {}),
@@ -551,7 +606,16 @@ function normalizeLayoutRequirement(
             actual: { requirement: describeValue(requirement) },
         })
     }
-    const { group, binding, name, type, visibility, hasDynamicOffset, layout } = requirement
+    const {
+        group,
+        binding,
+        name,
+        type,
+        visibility,
+        hasDynamicOffset,
+        layout,
+        bufferViews,
+    } = requirement
     if (typeof group !== 'number' || !Number.isInteger(group) || group < 0) {
         throwLayoutRequirementDiagnostic(subject, requirement, {
             expected: { group: 'non-negative integer' },
@@ -589,6 +653,34 @@ function normalizeLayoutRequirement(
             actual: { layout: describeValue(layout) },
         })
     }
+    const compatibility = layoutCompatibilityForBinding(layout, type)
+    if (
+        !compatibility.compatible ||
+        (
+            compatibility.requiresMutableStorage &&
+            type !== 'storage'
+        )
+    ) {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: {
+                layoutUsage: type === 'uniform' ? 'uniform' : 'storage',
+                compatible: true,
+                requiresMutableStorage: type === 'storage',
+            },
+            actual: {
+                layoutUsage: type === 'uniform' ? 'uniform' : 'storage',
+                compatibility,
+                bindingType: type,
+            },
+        })
+    }
+    const normalizedBufferViews = normalizeBufferViewRequirements(
+        subject,
+        requirement,
+        layout,
+        type,
+        bufferViews
+    )
     return Object.freeze({
         group,
         binding,
@@ -597,7 +689,117 @@ function normalizeLayoutRequirement(
         ...(normalizedVisibility !== undefined ? { visibility: normalizedVisibility } : {}),
         hasDynamicOffset,
         layout,
+        ...(normalizedBufferViews !== undefined
+            ? { bufferViews: normalizedBufferViews }
+            : {}),
     })
+}
+
+function normalizeBufferViewRequirements(
+    subject: DiagnosticSubject,
+    requirement: Record<string, unknown>,
+    layout: LayoutArtifact,
+    type: ProgramBufferLayoutRequirement['type'],
+    value: unknown
+): readonly LayoutBufferViewContract[] | undefined {
+
+    if (value === undefined) return undefined
+    if (!Array.isArray(value) || value.length === 0) {
+        throwLayoutRequirementDiagnostic(subject, requirement, {
+            expected: { bufferViews: 'non-empty LayoutBufferViewContract[]' },
+            actual: { bufferViews: describeValue(value) },
+        })
+    }
+    const expectedAddressSpace = type === 'uniform' ? 'uniform' : 'storage'
+    const expectedAccessMode = type === 'storage' ? 'read_write' : 'read'
+    const hashes = new Set<string>()
+    const normalized: LayoutBufferViewContract[] = []
+    for (const contract of value) {
+        if (!isLayoutBufferViewContract(contract)) {
+            throwLayoutRequirementDiagnostic(subject, requirement, {
+                expected: { bufferView: 'LayoutBufferViewContract' },
+                actual: { bufferView: describeValue(contract) },
+            })
+        }
+        if (
+            contract.source !== layout ||
+            contract.addressSpace !== expectedAddressSpace ||
+            contract.accessMode !== expectedAccessMode
+        ) {
+            throwLayoutRequirementDiagnostic(subject, requirement, {
+                expected: {
+                    sourceAbiHash: layout.abiHash,
+                    addressSpace: expectedAddressSpace,
+                    accessMode: expectedAccessMode,
+                },
+                actual: {
+                    sourceAbiHash: contract.source.abiHash,
+                    addressSpace: contract.addressSpace,
+                    accessMode: contract.accessMode,
+                    contractHash: contract.contractHash,
+                },
+            })
+        }
+        if (hashes.has(contract.contractHash)) {
+            throwLayoutRequirementDiagnostic(subject, requirement, {
+                expected: { bufferViews: 'unique contract hashes' },
+                actual: { duplicateContractHash: contract.contractHash },
+            })
+        }
+        hashes.add(contract.contractHash)
+        normalized.push(contract)
+    }
+    return Object.freeze(normalized)
+}
+
+function layoutCompatibilityForBinding(
+    layout: LayoutArtifact,
+    type: ProgramBufferLayoutRequirement['type']
+): LayoutUsageCompatibilityFact {
+
+    return type === 'uniform'
+        ? layout.usageCompatibility.uniform
+        : layout.usageCompatibility.storage
+}
+
+function collectLayoutCapabilities(
+    requirements: readonly ProgramBufferLayoutRequirement[],
+    dependencies: readonly LayoutArtifact[]
+): Readonly<{
+    deviceFeatures: readonly GPUFeatureName[]
+    languageFeatures: readonly string[]
+}> {
+
+    const deviceFeatures: GPUFeatureName[] = []
+    const languageFeatures: string[] = []
+    const addArtifact = (artifact: LayoutArtifact) => {
+        deviceFeatures.push(...artifact.requiredDeviceFeatures)
+        languageFeatures.push(...artifact.requiredLanguageFeatures)
+    }
+    dependencies.forEach(addArtifact)
+    for (const requirement of requirements) {
+        addArtifact(requirement.layout)
+        const compatibility = layoutCompatibilityForBinding(
+            requirement.layout,
+            requirement.type
+        )
+        deviceFeatures.push(...compatibility.requiredDeviceFeatures)
+        languageFeatures.push(...compatibility.requiredLanguageFeatures)
+        for (const contract of requirement.bufferViews ?? []) {
+            deviceFeatures.push(...contract.requiredDeviceFeatures)
+            languageFeatures.push(...contract.requiredLanguageFeatures)
+            if (contract.target !== undefined) addArtifact(contract.target)
+        }
+    }
+    return Object.freeze({
+        deviceFeatures: Object.freeze(uniqueStrings(deviceFeatures)) as readonly GPUFeatureName[],
+        languageFeatures: Object.freeze(uniqueStrings(languageFeatures)),
+    })
+}
+
+function uniqueStrings<T extends string>(values: readonly T[]): T[] {
+
+    return [ ...new Set(values) ].sort((left, right) => left.localeCompare(right))
 }
 
 function normalizeVisibility(

@@ -153,7 +153,8 @@ authority, epoch, readiness, or diagnostic guarantees.
 
 ## LayoutArtifact And LayoutCodec
 
-`LayoutCodec` synchronously prepares CPU packing, WGSL accessors, and readback views from one immutable `LayoutArtifact`:
+`LayoutCodec` synchronously prepares CPU packing, WGSL accessors, buffer-view
+contracts, and readback views from one immutable `LayoutArtifact`:
 
 ```ts
 const codec = layoutCodec({
@@ -169,28 +170,68 @@ const codec = layoutCodec({
 const particleLayout = codec.artifact
 ```
 
-Each artifact exposes two separate facts:
+The canonical recursive vocabulary covers `i32`, `u32`, `f32`, exact IEEE
+binary16 `f16`, all valid numeric vectors, every floating matrix shape,
+recursive fixed arrays and structures, final-member runtime-sized arrays,
+storage atomics, explicit member `@align` / `@size`, and opaque fixed or runtime
+buffer roots. `bool`, abstract numerics, pointers, references, textures,
+samplers, and external textures are not host layout fields.
+
+The public TypeScript grammar admits only layouts WGSL can place in host
+memory: fixed arrays contain fixed-footprint elements, opaque buffers are
+root-only, and a runtime-sized array is either the root or the final member of
+its containing structure. Runtime validation applies the same rules to
+JavaScript and dynamically sourced descriptors.
+
+`LayoutArtifact` is discriminated by `extent`:
+
+- `FixedLayoutArtifact` publishes `byteLength`, `stride`, and a fixed
+  `minimumBindingSize`;
+- `RuntimeLayoutArtifact` publishes `fixedPrefixByteLength`,
+  `minimumBindingSize`, and either a `runtimeTail` or opaque-buffer byte
+  granularity. It never fabricates a fixed total byte length.
+
+Callers supply `{ runtimeElementCount }` when a runtime layout needs a concrete
+host range. `codec.byteLength()`, packing, writing, upload views, readback
+views, `BufferRegion` witnesses, and buffer-view contracts all use the same
+extent calculation.
+
+Each artifact exposes two separate identities:
 
 - `abiHash` identifies normalized GPU-visible alignment, offsets, sizes, strides, and physical types;
 - `schemaHash` identifies logical names, field names/order, nesting, and semantic types.
 
 Short hashes are bounded identifiers, not collision-proof proof. Scratch also retains and compares immutable canonical ABI/schema signatures. Typed Program requirements default to exact schema compatibility; native binding separately validates ABI, usage, range, and alignment. ABI-compatible schema reinterpretation is never automatic.
 
-Layout lowering publishes an artifact only when every array count, byte-size product,
-field offset/end, and final alignment round-up remains a non-negative
-JavaScript safe integer representable by the generated WGSL `u32` constants, whose
-maximum is `0xffffffff`. Overflow in either domain fails closed with
-`SCRATCH_LAYOUT_UNSUPPORTED_FORMAT` and structured arithmetic facts; Scratch never
-publishes an internally self-invalid `LayoutArtifact`.
+Layout lowering publishes an artifact only when every count, byte-size product,
+field offset/end, stride, and final alignment round-up remains a non-negative
+JavaScript safe integer and every generated WGSL `u32` constant remains at
+most `0xffffffff`. Overflow fails closed with
+`SCRATCH_LAYOUT_UNSUPPORTED_FORMAT` and structured arithmetic facts; Scratch
+never publishes an internally self-invalid artifact.
 
-`usageCompatibility.uniform` is the portable WGSL uniform-address-space result without
-the optional `uniform_buffer_standard_layout` language extension. The common
-host-shareable/storage ABI is retained rather than silently repacked: every array field
-must have both a 16-byte-aligned field offset and an `arrayStride` divisible by 16.
-Scalar and `vec2` arrays with natural 4-byte or 8-byte stride therefore report
-`uniform: false`, while aligned `vec3`, `vec4`, and `mat4x4` arrays remain compatible.
-Extension-specific compatibility must become an explicit capability-aware contract; it
-must not silently widen this portable fact.
+Every `usageCompatibility` entry is a structured fact containing
+`compatible`, `reasons`, `requiredDeviceFeatures`,
+`requiredLanguageFeatures`, and `requiresMutableStorage`. `f16` derives
+`shader-f16`; atomics require mutable storage; vertex and immediate use reject
+types their WGSL domains cannot represent. Uniform compatibility follows the
+artifact's named `capabilityContract.uniformLayout`:
+
+- `portable` applies core uniform-address-space alignment constraints without
+  silently repacking the common host-shareable ABI;
+- `uniform_buffer_standard_layout` keeps that ABI and explicitly derives the
+  language-feature requirement.
+
+`codec.bufferView()` creates an immutable `LayoutBufferViewContract` for
+`bufferView`, `bufferArrayView`, or `bufferLength`. The contract keeps source
+and target layouts, address space, access mode, pointer path, parameter-buffer
+chain, offsets, length, alignment, minimum type size, and all derived feature
+requirements visible. Uniform views are read-only, workgroup views are
+read-write, and storage views may be read or read-write. Function-parameter
+paths explicitly derive `unrestricted_pointer_parameters`; all buffer views
+derive `buffer_view`. Program and command validation consume the same contract
+so a dynamic binding cannot bypass the layout's minimum or statically required
+byte range.
 
 ## TextureResource And TextureViewSpec
 

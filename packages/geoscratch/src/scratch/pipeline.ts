@@ -23,6 +23,7 @@ import {
     observeProgramPipelineAuthority,
     programAuthoritySubject,
     programLayoutRequirementExpected,
+    programLayoutRequirementMinimumBindingSize,
     programLayoutRequirementSubject,
     snapshotProgramPipelineFacts,
 } from './program.js'
@@ -2126,7 +2127,8 @@ function validateProgramLayoutRequirements(pipeline: PipelineValidationContext):
         if (
             (entry.type === 'uniform' || entry.type === 'read-storage' || entry.type === 'storage') &&
             entry.minBindingSize !== 0 &&
-            entry.minBindingSize < requirement.layout.byteLength
+            entry.minBindingSize <
+                programLayoutRequirementMinimumBindingSize(requirement)
         ) {
             throwProgramLayoutMismatch(pipeline, requirement, {
                 related: [

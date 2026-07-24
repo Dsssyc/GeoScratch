@@ -81,14 +81,33 @@ caller code, or caller-visible preparation state.
 
 `LayoutCodec` is not a resource and not a scheduler feature. It is a bridge between a typed layout and the byte-level facts needed by CPU, WGSL, and readback.
 
-Target outputs:
+Outputs:
 
-- `LayoutArtifact`: segment offsets, element stride, field offsets, padding, alignment mode, total byte length, storage/vertex/readback compatibility, `abiHash`, `schemaHash`, and canonical signatures
+- `FixedLayoutArtifact` or `RuntimeLayoutArtifact`: recursive type facts,
+  offsets, element/column stride, padding, explicit member layout, alignment,
+  fixed length or runtime-tail facts, structured usage compatibility,
+  capability requirements, `abiHash`, `schemaHash`, and canonical signatures
 - CPU writer: packs logical values into GPU-aligned bytes while skipping padding
 - upload view: the contiguous byte range that can be sent with one upload command
 - readback view factory: creates typed, `DataView`, strided, or explicitly deinterleaved views from returned bytes
 - WGSL accessor module: generated structs/functions/constants for safe shader-side field access
+- buffer-view contract and WGSL constants: explicit source/target types, byte
+  range, alignment, pointer path, and required language features for
+  `bufferView`, `bufferArrayView`, and `bufferLength`
 - diagnostics: unsupported field format, incompatible usage, non-representable alignment, byte-length mismatch, or unsafe strided view requests, reported through `ScratchDiagnostic`
+
+One recursive model covers the complete scoped host-shareable family: scalar,
+vector, floating matrix, fixed array, structure, final-member runtime array,
+storage atomic, explicit member `@align` / `@size`, and opaque fixed/runtime
+buffer roots. Exact binary16 conversion is part of the CPU ABI. The TypeScript
+descriptor grammar excludes statically invalid nesting; runtime validation
+applies the same constraints to JavaScript and dynamic input.
+
+Only fixed artifacts publish a total `byteLength` and `stride`. Runtime
+artifacts publish a fixed prefix and minimum binding size, then require an
+explicit `runtimeElementCount` to produce a concrete host byte range. This
+extent flows through packing, writing, upload/readback views, BufferRegion
+witnesses, Program minimum binding sizes, and command range validation.
 
 The high-performance CPU path is:
 
@@ -102,13 +121,20 @@ This avoids one CPU-to-GPU operation per structure and also avoids a GPU-side re
 
 Raw packed bytes remain an escape hatch, but they are not the default authoring model. Forcing authors to manually mirror WGSL padding in shader code is a correctness hazard, especially when code is AI-assisted.
 
-The current artifact keeps one common host-shareable/storage ABI. Its
-`usageCompatibility.uniform` flag is the portable WGSL result without
-`uniform_buffer_standard_layout`: an array member is compatible only when both its field
-offset and `arrayStride` are multiples of 16. The codec reports incompatible naturally
-packed scalar and `vec2` arrays instead of claiming that 4-byte or 8-byte strides can be
-bound as core uniform layout. It does not silently select a second ABI. A future
-extension-aware layout must name that capability explicitly.
+The artifact keeps one common host-shareable ABI. Every
+`usageCompatibility` member is an immutable object, not a Boolean: it reports
+compatibility, reasons, required device features, required language features,
+and mutable-storage requirements. A named `portable` uniform contract applies
+the core uniform-address-space constraints. A named
+`uniform_buffer_standard_layout` contract retains the same ABI while deriving
+that language-feature requirement. Neither contract silently selects a second
+packing.
+
+ABI and schema identities cover the recursive type and capability contract.
+Typed Program requirements default to exact schema compatibility; native
+binding independently validates ABI, usage, range, and alignment. Short hashes
+are bounded identifiers, so immutable canonical signatures remain the final
+equality evidence.
 
 ## ShaderModule And Program
 
@@ -281,22 +307,34 @@ Diagnostic payloads for these checks should use structured subjects such as `Lay
 `Program.requiredLanguageFeatures` is an explicit iterable of WGSL language-extension
 names, separate from device `requiredFeatures`. Program creation and every future
 pipeline transaction validate the requirement against the Runtime snapshot. Scratch
-does not parse or rewrite `requires` directives; caller-authored WGSL remains the
-source of truth.
+also derives requirements from attached layout and buffer-view contracts:
+`shader-f16` is a device feature, while `buffer_view`,
+`unrestricted_pointer_parameters`, `uniform_buffer_standard_layout`, and
+`immediate_address_space` are WGSL language features as applicable.
 
 `LayoutCodecUsage` includes `'immediate'`.
-`LayoutArtifact.usageCompatibility.immediate` is true for the current scalar, vector,
-and `mat4x4f` field vocabulary and false for any array member. Explicitly requesting
-an incompatible immediate usage fails with a structured LayoutCodec diagnostic.
-Only a compatible LayoutUploadView can be command immediate data. Its explicit
-`byteOffset` and `byteLength` select bytes from `bytes.buffer`, consistent with the
-existing upload path; they are not constrained to the `bytes` view's visible
-subrange.
+`LayoutArtifact.usageCompatibility.immediate` is compatible only for a
+constructible fixed-footprint store type that contains no array, atomic, or
+opaque buffer. Explicitly requesting an incompatible immediate usage fails
+with a structured LayoutCodec diagnostic. Only a compatible
+`LayoutUploadView` can be command immediate data. Its explicit `byteOffset` and
+`byteLength` select bytes from `bytes.buffer`, consistent with the existing
+upload path; they are not constrained to the `bytes` view's visible subrange.
+
+`LayoutBufferViewContract` makes buffer-view built-ins equally explicit. It
+records address space/access, source and target layouts, fixed or runtime
+buffer size, byte range, required alignment, and whether the pointer comes
+from the originating variable or a declared function-parameter chain. Fixed
+parameter paths may narrow but not widen; runtime-to-fixed paths fail closed.
+Program minimum binding size and command range validation consume these facts
+instead of reconstructing them from shader prose.
 
 Generated accessors continue to emit structs, constants, and field readers only. They
-never inject `requires immediate_address_space;` or `var<immediate>`. Raw ArrayBuffer
-and ArrayBufferView sources remain available so the current codec vocabulary does not
-limit legal WGSL store types.
+never inject `requires`/`enable` directives or resource declarations. Scratch
+does not parse or rewrite arbitrary caller WGSL, override expressions, or
+dynamic values; caller-authored source remains authoritative. Raw ArrayBuffer
+and ArrayBufferView sources remain available for legal WGSL domains outside
+the managed host-layout vocabulary.
 
 ## Industrial Lesson To Keep, Not Copy
 

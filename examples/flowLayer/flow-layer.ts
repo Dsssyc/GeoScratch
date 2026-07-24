@@ -15,7 +15,7 @@ import type {
     DispatchCommand,
     DrawCommand,
     LayoutCodec,
-    LayoutFieldDescriptor,
+    LayoutFixedFieldDescriptor,
     Program,
     ProgramBufferLayoutRequirement,
     RenderPassSpec,
@@ -430,7 +430,7 @@ function normalizeOptions(options: FlowLayerOptions): FlowSettings {
 
 function createCodecs() {
 
-    const uniform = (name: string, fields: LayoutFieldDescriptor[]) => (
+    const uniform = (name: string, fields: LayoutFixedFieldDescriptor[]) => (
         layoutCodec({ name, fields }, { usage: [ 'uniform' ] })
     )
     return Object.freeze({
@@ -779,7 +779,7 @@ async function createBindLayouts(runtime: ScratchRuntime, codecs: FlowCodecs) {
         name,
         type: 'uniform',
         visibility,
-        minBindingSize: codec.artifact.byteLength,
+        minBindingSize: codec.byteLength(),
     })
     const texture = (
         binding: number,

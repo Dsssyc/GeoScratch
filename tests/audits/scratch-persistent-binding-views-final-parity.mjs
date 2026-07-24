@@ -59,6 +59,7 @@ const currentPaths = Object.freeze({
     buffer: 'packages/geoscratch/src/scratch/buffer.ts',
     texture: 'packages/geoscratch/src/scratch/texture.ts',
     textureFormatCapabilities: 'packages/geoscratch/src/scratch/texture-format-capabilities.ts',
+    layoutArtifact: 'packages/geoscratch/src/scratch/layout-artifact.ts',
     layoutCodec: 'packages/geoscratch/src/scratch/layout-codec.ts',
     sampler: 'packages/geoscratch/src/scratch/sampler.ts',
     querySet: 'packages/geoscratch/src/scratch/query-set.ts',
@@ -82,6 +83,7 @@ const baselinePaths = Object.freeze(Object.fromEntries(
         name !== 'scratchShim' &&
         name !== 'runtimeAuthority' &&
         name !== 'textureFormatCapabilities' &&
+        name !== 'layoutArtifact' &&
         name !== 'debugCommand' &&
         name !== 'renderBundle' &&
         name !== 'supportingObjectCreation' &&
@@ -533,12 +535,23 @@ const capabilityRows = [
         historical: 'not-applicable',
         historicalNote: 'The fixed pre-TypeScript JavaScript snapshot predates LayoutCodec.',
         target: 'Collision-safe physical ABI and semantic schema identities with CPU/WGSL/readback helpers preserved',
-        final: hasAll(current.layoutCodec, [ 'abiHash', 'schemaHash', 'abiCanonical', 'schemaCanonical', 'layoutCanonicalSignatures', 'pack(', 'wgslAccessors(', 'createReadbackView(' ]) &&
+        final: hasAll(current.layoutArtifact, [
+            'abiHash',
+            'schemaHash',
+            'abiCanonical',
+            'schemaCanonical',
+            'layoutCanonicalSignatures',
+        ]) &&
+            hasAll(current.layoutCodec, [
+                'pack(',
+                'wgslAccessors(',
+                'createReadbackView(',
+            ]) &&
             !current.layoutCodec.includes('structuralHash'),
-        implementation: 'scratch/layout-codec.ts',
-        tests: 'scratch-layout-codec.test.js and scratch-resource-views.test.js',
-        docs: 'scratch-api/02-resources and ADR-036',
-        replacement: 'structuralHash -> abiHash plus schemaHash; no alias',
+        implementation: 'scratch/layout-artifact.ts and scratch/layout-codec.ts',
+        tests: 'scratch-layout-codec.test.js and scratch-recursive-layout-codec.test.js',
+        docs: 'scratch-api/02-resources, ADR-036, and ADR-053',
+        replacement: 'flat structuralHash -> recursive abiHash plus schemaHash; no alias',
     }),
     capability({
         id: 'buffer-ranges',
@@ -727,6 +740,7 @@ const historicalMissingValues = difference(historicalValueExports, currentValueE
 
 const baselineTypeReplacements = Object.freeze({
     CommandDynamicOffsets: 'CommandBindSetInvocation',
+    LayoutPrimitiveType: 'LayoutTypeShorthand',
     PipelineCompilationMessage: 'ShaderModuleCompilationMessage',
     PipelineCompilationModuleFact: 'ShaderModuleCompilationSourcePartFact',
     PipelineCompilationModuleLocation: 'ShaderModuleCompilationSourcePartLocation',
@@ -805,6 +819,10 @@ const goalStartChangedPublicMemberReplacements = Object.freeze({
     'CopyCommand.encode:method': 'submission-owned attempt-local texture authority for Surface copy endpoints',
     'DispatchCommand.encode:method': 'submission-resolved immediate snapshot for complete per-dispatch state',
     'DrawCommand.encode:method': 'submission-resolved attachment extent and immediate snapshot for complete per-draw state',
+    'LayoutCodec.pack:method': 'canonical recursive root values plus explicit runtime-sized extent',
+    'LayoutCodec.uploadView:method': 'canonical recursive root values plus explicit runtime-sized extent',
+    'LayoutCodec.wgslAccessors:method': 'named recursive WGSL accessor options',
+    'LayoutCodec.write:method': 'canonical recursive root values plus explicit runtime-sized extent',
     'ReadbackOperation.source:get': 'whole BufferResource source -> explicit BufferRegion source',
     'ScratchRuntime.bindLayout:method': 'Promise-only acknowledged BindLayout factory',
     'ScratchRuntime.bindSet:method': 'Promise-only initially prepared BindSet factory',
@@ -1383,13 +1401,16 @@ const documentationAudit = Object.freeze({
         !externalImageQueueOwnershipTest.includes('SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID'),
     safeLayoutArithmetic: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
         hasAll(source, [
-            'array count',
-            'alignment round-up',
+            'count',
+            'alignment',
+            'round-up',
             'JavaScript safe integer',
             'WGSL `u32`',
             '`0xffffffff`',
             '`SCRATCH_LAYOUT_UNSUPPORTED_FORMAT`',
             '`LayoutArtifact`',
+            '`RuntimeLayoutArtifact`',
+            'runtimeElementCount',
         ])
     ) && [ finalDocs.diagnostics, finalDocs.diagnosticsZh ].every(source =>
         hasAll(source, [
@@ -1406,12 +1427,21 @@ const documentationAudit = Object.freeze({
         finalDocs.programs,
         finalDocs.programsZh,
     ].every(source => hasAll(source, [
-        '`usageCompatibility.uniform`',
+        '`usageCompatibility`',
         '`uniform_buffer_standard_layout`',
-        '`arrayStride`',
-        '16',
-        'host-shareable/storage ABI',
-    ])),
+        '`portable`',
+        'host-shareable ABI',
+    ])) &&
+        [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
+            hasAll(source, [
+                '`capabilityContract.uniformLayout`',
+                '`requiredLanguageFeatures`',
+                '`requiresMutableStorage`',
+            ])
+        ) &&
+        [ finalDocs.programs, finalDocs.programsZh ].every(source =>
+            hasAll(source, [ 'Boolean' ])
+        ),
     supportingObjectNativeIdentity: [ finalDocs.resources, finalDocs.resourcesZh ].every(source =>
         hasAll(source, [
             '`gpuSampler`',
