@@ -321,6 +321,7 @@ contract。
 type ProgramDiagnosticCode =
     | 'SCRATCH_PROGRAM_DESCRIPTOR_INVALID'
     | 'SCRATCH_PROGRAM_ENTRY_POINT_INVALID'
+    | 'SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING'
     | 'SCRATCH_PROGRAM_FEATURE_UNAVAILABLE'
     | 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE'
     | 'SCRATCH_PROGRAM_LIMIT_UNAVAILABLE'
@@ -958,6 +959,14 @@ category 是结构化事实。独立 Promise outcome 在 join 时不把 settleme
 
 Runtime request validation 使用 `SCRATCH_RUNTIME_REQUEST_INVALID`，在 native
 request 开始前拒绝 malformed adapter/device/queue option。
+
+正式 feature dependency 在两个显式声明边界都进行校验，且不从 WGSL 推导。
+Runtime request 包含 `subgroup-size-control` 却缺少 `subgroups` 时，会在 adapter
+work 前使用 `SCRATCH_RUNTIME_REQUEST_INVALID`。Program 存在相同的不完整声明时，
+会在 availability check 或 native pipeline work 前使用
+`SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING`。两种 diagnostic 都会标明 dependent
+feature、required feature 与完整 normalized declaration；Scratch 绝不会静默
+插入依赖。
 
 Attempt-local binding authority 按边界使用稳定结构化 code：
 

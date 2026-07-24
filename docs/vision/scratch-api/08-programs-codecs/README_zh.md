@@ -296,6 +296,15 @@ buffer-view contract 派生 requirement：`shader-f16` 是 device feature；
 `uniform_buffer_standard_layout` 与 `immediate_address_space` 在适用时是 WGSL
 language feature。
 
+WGSL `enable` extension 继续由 caller-authored directive 表达。对应 WebGPU
+capability 分别保留在 `ScratchRuntime.create({ requiredFeatures })` 与
+`Program.requiredFeatures`；Scratch 不增加平行的
+`requiredEnableExtensions` 字段，不解析 WGSL 推导 capability，也不注入缺失
+feature。正式 WebGPU feature dependency 共用一份本地 contract。具体而言，
+`subgroup-size-control` 必须显式同时声明 `subgroups`。Runtime 在 adapter work
+前使用 `SCRATCH_RUNTIME_REQUEST_INVALID` 拒绝缺失依赖；Program 在 native
+pipeline work 前报告 `SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING`。
+
 `LayoutCodecUsage` 包含 `'immediate'`。
 `LayoutArtifact.usageCompatibility.immediate` 只在 store type 为 constructible、
 fixed-footprint 且不包含 array、atomic 或 opaque buffer 时 compatible。显式请求

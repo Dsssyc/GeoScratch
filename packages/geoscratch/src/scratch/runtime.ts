@@ -27,6 +27,10 @@ import {
 } from './command.js'
 import { createDebugCommand as createScratchDebugCommand } from './debug-command.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
+import {
+    findMissingScratchFeatureDependency,
+    normalizeScratchRequiredFeatures,
+} from './feature-contract.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import {
     createComputePipeline as createScratchComputePipeline,
@@ -882,9 +886,29 @@ function snapshotRuntimeRequest(options: ScratchRuntimeCreateOptions): RuntimeRe
                 )
             }
         }
-        deviceDescriptor.requiredFeatures = Object.freeze(
-            requiredFeatures
-        ) as unknown as GPUFeatureName[]
+        const normalizedFeatures = normalizeScratchRequiredFeatures(
+            requiredFeatures as GPUFeatureName[]
+        )
+        const missingDependency = findMissingScratchFeatureDependency(
+            normalizedFeatures
+        )
+        if (missingDependency !== undefined) {
+            throwScratchDiagnostic({
+                code: 'SCRATCH_RUNTIME_REQUEST_INVALID',
+                severity: 'error',
+                phase: 'runtime',
+                subject: { kind: 'ScratchRuntime' },
+                message: 'ScratchRuntime requiredFeatures omit a WebGPU feature dependency.',
+                expected: missingDependency,
+                actual: { requiredFeatures: normalizedFeatures },
+                hints: [
+                    `Declare both ${missingDependency.feature} and ` +
+                    `${missingDependency.requiredFeature}; Scratch does not inject features.`,
+                ],
+            })
+        }
+        deviceDescriptor.requiredFeatures =
+            normalizedFeatures as unknown as GPUFeatureName[]
     }
     if (options.requiredLimits !== undefined) {
         deviceDescriptor.requiredLimits = snapshotRequiredLimits(options.requiredLimits)

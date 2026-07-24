@@ -1,6 +1,10 @@
 import { UUID } from '../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import {
+    findMissingScratchFeatureDependency,
+    normalizeScratchRequiredFeatures,
+} from './feature-contract.js'
+import {
     isLayoutArtifact,
     isLayoutBufferViewContract,
 } from './layout-codec.js'
@@ -386,10 +390,10 @@ function normalizeProgramDescriptor(
         layoutRequirements,
         sourcePartDependencies
     )
-    const requiredFeatures = Object.freeze(uniqueStrings([
+    const requiredFeatures = normalizeScratchRequiredFeatures([
         ...declaredFeatures,
         ...derivedCapabilities.deviceFeatures,
-    ])) as readonly GPUFeatureName[]
+    ])
     const requiredLanguageFeatures = Object.freeze(uniqueStrings([
         ...declaredLanguageFeatures,
         ...derivedCapabilities.languageFeatures,
@@ -412,6 +416,7 @@ function normalizeProgramDescriptor(
         label: descriptor.label,
         subject,
     } as unknown as Program
+    validateRequiredFeatureDependencies(placeholder, requiredFeatures)
     validateRequiredFeatures(placeholder, runtime, requiredFeatures)
     validateRequiredLimits(placeholder, runtime, requiredLimits)
     validateRequiredLanguageFeatures(placeholder, runtime, requiredLanguageFeatures)
@@ -860,6 +865,28 @@ function validateRequiredFeatures(
             actual: { features: [ ...(runtime.deviceFeatures ?? []) ] },
         })
     }
+}
+
+function validateRequiredFeatureDependencies(
+    program: Program,
+    requiredFeatures: readonly GPUFeatureName[]
+): void {
+
+    const missingDependency = findMissingScratchFeatureDependency(requiredFeatures)
+    if (missingDependency === undefined) return
+    throwScratchDiagnostic({
+        code: 'SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING',
+        severity: 'error',
+        phase: 'program',
+        subject: programSubjectForValidation(program),
+        message: 'Program requiredFeatures omit a WebGPU feature dependency.',
+        expected: missingDependency,
+        actual: { requiredFeatures },
+        hints: [
+            `Declare both ${missingDependency.feature} and ` +
+            `${missingDependency.requiredFeature}; Scratch does not inject features.`,
+        ],
+    })
 }
 
 function validateRequiredLimits(

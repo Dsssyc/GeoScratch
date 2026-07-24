@@ -321,6 +321,7 @@ Candidate codes:
 type ProgramDiagnosticCode =
     | 'SCRATCH_PROGRAM_DESCRIPTOR_INVALID'
     | 'SCRATCH_PROGRAM_ENTRY_POINT_INVALID'
+    | 'SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING'
     | 'SCRATCH_PROGRAM_FEATURE_UNAVAILABLE'
     | 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE'
     | 'SCRATCH_PROGRAM_LIMIT_UNAVAILABLE'
@@ -973,6 +974,15 @@ without treating settlement order or localized text as causality.
 
 Runtime request validation uses `SCRATCH_RUNTIME_REQUEST_INVALID` for malformed
 adapter/device/queue options before native request work begins.
+
+Formal feature dependencies are validated at both explicit declaration
+boundaries without inferring them from WGSL. A Runtime request containing
+`subgroup-size-control` without `subgroups` uses
+`SCRATCH_RUNTIME_REQUEST_INVALID` before adapter work. A Program with the same
+incomplete declaration uses `SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING`
+before availability checks or native pipeline work. Both diagnostics identify
+the dependent feature, the required feature, and the complete normalized
+declaration. Scratch never silently inserts the dependency.
 
 Attempt-local binding authority uses stable structural codes by boundary:
 

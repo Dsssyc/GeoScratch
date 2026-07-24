@@ -312,6 +312,16 @@ also derives requirements from attached layout and buffer-view contracts:
 `unrestricted_pointer_parameters`, `uniform_buffer_standard_layout`, and
 `immediate_address_space` are WGSL language features as applicable.
 
+WGSL `enable` extensions remain caller-authored directives. Their matching
+WebGPU capabilities stay in `ScratchRuntime.create({ requiredFeatures })` and
+`Program.requiredFeatures`; Scratch does not add a parallel
+`requiredEnableExtensions` field, parse WGSL to infer capabilities, or inject
+missing features. Formal WebGPU feature dependencies use one shared local
+contract. In particular, `subgroup-size-control` requires an explicit
+`subgroups` declaration. Runtime rejects a missing dependency with
+`SCRATCH_RUNTIME_REQUEST_INVALID` before adapter work, while Program reports
+`SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING` before native pipeline work.
+
 `LayoutCodecUsage` includes `'immediate'`.
 `LayoutArtifact.usageCompatibility.immediate` is compatible only for a
 constructible fixed-footprint store type that contains no array, atomic, or

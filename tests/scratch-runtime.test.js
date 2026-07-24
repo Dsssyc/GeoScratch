@@ -183,6 +183,63 @@ describe('ScratchRuntime', () => {
         })
     })
 
+    it('rejects missing WebGPU feature dependencies before requesting an adapter', async() => {
+
+        const { gpu } = createFakeGpu()
+        let caught
+
+        try {
+            await ScratchRuntime.create({
+                gpu,
+                requiredFeatures: [ 'subgroup-size-control' ],
+            })
+        } catch (error) {
+            caught = error
+        }
+
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic).to.include({
+            code: 'SCRATCH_RUNTIME_REQUEST_INVALID',
+            severity: 'error',
+            phase: 'runtime',
+        })
+        expect(caught.diagnostic.expected).to.deep.equal({
+            feature: 'subgroup-size-control',
+            requiredFeature: 'subgroups',
+        })
+        expect(caught.diagnostic.actual).to.deep.equal({
+            requiredFeatures: [ 'subgroup-size-control' ],
+        })
+        expect(gpu.requestAdapterCalls).to.have.length(0)
+    })
+
+    it('freezes, deduplicates, and stably orders valid WebGPU feature dependencies', async() => {
+
+        const { gpu, adapter, device } = createFakeGpu()
+        for (const feature of [ 'subgroups', 'subgroup-size-control' ]) {
+            adapter.features.add(feature)
+            device.features.add(feature)
+        }
+
+        const runtime = await ScratchRuntime.create({
+            gpu,
+            requiredFeatures: [
+                'subgroups',
+                'subgroup-size-control',
+                'subgroups',
+            ],
+        })
+
+        expect(runtime.requestFacts.device.requiredFeatures).to.deep.equal([
+            'subgroup-size-control',
+            'subgroups',
+        ])
+        expect(adapter.requestDeviceCalls[0].requiredFeatures).to.equal(
+            runtime.requestFacts.device.requiredFeatures
+        )
+        expect(Object.isFrozen(runtime.requestFacts.device.requiredFeatures)).to.equal(true)
+    })
+
     it('represents absent or partial adapter info without serializing the native adapter', async() => {
 
         const { gpu, adapter } = createFakeGpu()

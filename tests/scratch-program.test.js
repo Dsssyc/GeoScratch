@@ -120,6 +120,86 @@ describe('scratch Program', () => {
         }
     })
 
+    it('rejects missing WebGPU feature dependencies before pipeline work', async() => {
+
+        const { gpu, adapter, device, calls } = createFakeGpu()
+        for (const feature of [ 'subgroups', 'subgroup-size-control' ]) {
+            adapter.features.add(feature)
+            device.features.add(feature)
+        }
+        const runtime = await ScratchRuntime.create({
+            gpu,
+            requiredFeatures: [ 'subgroups', 'subgroup-size-control' ],
+        })
+        const shaderModule = await runtime.createShaderModule({
+            sourceParts: [ { code: triangleWgsl } ],
+        })
+        const pipelineCount = calls.renderPipelines.length + calls.computePipelines.length
+        let caught
+
+        try {
+            runtime.createProgram({
+                vertex: {
+                    module: shaderModule,
+                    entryPoint: 'vsMain',
+                },
+                requiredFeatures: [ 'subgroup-size-control' ],
+            })
+        } catch (error) {
+            caught = error
+        }
+
+        expect(caught).to.be.instanceOf(ScratchDiagnosticError)
+        expect(caught.diagnostic).to.include({
+            code: 'SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING',
+            severity: 'error',
+            phase: 'program',
+        })
+        expect(caught.diagnostic.expected).to.deep.equal({
+            feature: 'subgroup-size-control',
+            requiredFeature: 'subgroups',
+        })
+        expect(caught.diagnostic.actual).to.deep.equal({
+            requiredFeatures: [ 'subgroup-size-control' ],
+        })
+        expect(calls.renderPipelines.length + calls.computePipelines.length).to.equal(
+            pipelineCount
+        )
+    })
+
+    it('freezes, deduplicates, and stably orders valid Program feature dependencies', async() => {
+
+        const { gpu, adapter, device } = createFakeGpu()
+        for (const feature of [ 'subgroups', 'subgroup-size-control' ]) {
+            adapter.features.add(feature)
+            device.features.add(feature)
+        }
+        const runtime = await ScratchRuntime.create({
+            gpu,
+            requiredFeatures: [ 'subgroups', 'subgroup-size-control' ],
+        })
+        const shaderModule = await runtime.createShaderModule({
+            sourceParts: [ { code: triangleWgsl } ],
+        })
+        const program = runtime.createProgram({
+            vertex: {
+                module: shaderModule,
+                entryPoint: 'vsMain',
+            },
+            requiredFeatures: [
+                'subgroups',
+                'subgroup-size-control',
+                'subgroups',
+            ],
+        })
+
+        expect(program.requiredFeatures).to.deep.equal([
+            'subgroup-size-control',
+            'subgroups',
+        ])
+        expect(Object.isFrozen(program.requiredFeatures)).to.equal(true)
+    })
+
     it('rejects use after disposal with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
