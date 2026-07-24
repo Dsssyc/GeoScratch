@@ -675,10 +675,10 @@ requires unrestricted_pointer_parameters;
 var<storage, read_write> outputValues: u32;
 
 fn writeThroughStoragePointer(
-    target: ptr<storage, u32, read_write>,
+    destination: ptr<storage, u32, read_write>,
     value: u32
 ) {
-    *target = value;
+    *destination = value;
 }
 
 @compute @workgroup_size(1)
@@ -697,9 +697,9 @@ var<storage, read_write> outputValues: array<u32>;
 
 @compute @workgroup_size(1)
 fn csMain() {
-    var localValue = vec4u(101u, 102u, 104u, 105u);
-    let selected = &localValue.z;
-    outputValues[0] = *selected;
+    var localValues = array<u32, 4>(101u, 102u, 104u, 105u);
+    let valuesPointer = &localValues;
+    outputValues[0] = valuesPointer[2u];
 }
 `,
                 expected: 104,

@@ -61,6 +61,10 @@ const scratchRuntimeExportNames = Object.keys(scratchEntrypoint).sort()
 const packageSourceExportNames = collectNamedExports(
     'packages/geoscratch/src/index.ts'
 )
+const pointerProofCases = tryExtractSemanticCases(
+    'tests/browser/scratch-wgsl-capability-matrix.mjs',
+    [ 'unrestricted-pointer', 'pointer-composite' ]
+)
 
 const checks = {
     currentManifestReproducible: deepEqual(current, generatedCurrent),
@@ -198,6 +202,14 @@ const checks = {
         dependencyDiagnosticIsDocumented(),
     browserMatrixIsManagedAndSelfContained:
         browserMatrixIsManagedAndSelfContained(),
+    unrestrictedPointerProofSourceIsConformant:
+        unrestrictedPointerProofSourceIsConformant(
+            pointerProofCases.cases.get('unrestricted-pointer')
+        ),
+    pointerCompositeProofSourceIsConformant:
+        pointerCompositeProofSourceIsConformant(
+            pointerProofCases.cases.get('pointer-composite')
+        ),
     requiredPublicExportsPresent:
         [ packageEntrypoint, scratchEntrypoint ].every(entrypoint =>
             requiredRuntimeExports.every(name => name in entrypoint)
@@ -258,6 +270,10 @@ const result = {
         ),
         sourceDeclarationExportCount: packageSourceExportNames.size,
         compatibilityShim: 'export-all',
+    },
+    pointerProofSources: {
+        extractionError: pointerProofCases.error,
+        caseNames: [ ...pointerProofCases.cases.keys() ].sort(),
     },
 }
 
@@ -515,6 +531,152 @@ function browserMatrixIsManagedAndSelfContained() {
         !source.includes('runtime.device.create') &&
         !source.includes('runtime.queue.')
     )
+}
+
+function unrestrictedPointerProofSourceIsConformant(proof) {
+
+    const source = proof?.source ?? ''
+    return (
+        proof?.expected === 103 &&
+        source.includes('requires unrestricted_pointer_parameters;') &&
+        /destination\s*:\s*ptr<storage,\s*u32,\s*read_write>/.test(source) &&
+        /\*destination\s*=\s*value\s*;/.test(source) &&
+        /writeThroughStoragePointer\s*\(\s*&outputValues\s*,\s*103u\s*\)/
+            .test(source) &&
+        !/\btarget\s*:/.test(source)
+    )
+}
+
+function pointerCompositeProofSourceIsConformant(proof) {
+
+    const source = proof?.source ?? ''
+    return (
+        proof?.expected === 104 &&
+        source.includes('requires pointer_composite_access;') &&
+        /var\s+localValues\s*=\s*array<u32,\s*4>\s*\(/.test(source) &&
+        /let\s+valuesPointer\s*=\s*&localValues\s*;/.test(source) &&
+        /outputValues\s*\[\s*0u?\s*\]\s*=\s*valuesPointer\s*\[\s*2u\s*\]\s*;/
+            .test(source) &&
+        !/\*\s*valuesPointer\b/.test(source) &&
+        !/&\s*[A-Za-z_]\w*\s*\.\s*[xyzwrgba]{1,4}\b/.test(source)
+    )
+}
+
+function tryExtractSemanticCases(relativePath, requiredNames) {
+
+    try {
+        return {
+            cases: extractSemanticCases(relativePath, requiredNames),
+            error: undefined,
+        }
+    } catch (error) {
+        return {
+            cases: new Map(),
+            error: error instanceof Error ? error.message : String(error),
+        }
+    }
+}
+
+function extractSemanticCases(relativePath, requiredNames) {
+
+    const source = readText(relativePath)
+    const file = ts.createSourceFile(
+        relativePath,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.JS
+    )
+    const declarations = []
+    visit(file)
+
+    function visit(node) {
+
+        if (
+            ts.isVariableDeclaration(node) &&
+            ts.isIdentifier(node.name) &&
+            node.name.text === 'semanticCases'
+        ) {
+            declarations.push(node)
+        }
+        ts.forEachChild(node, visit)
+    }
+
+    if (declarations.length !== 1) {
+        throw new Error(
+            `Expected one semanticCases declaration, found ${declarations.length}`
+        )
+    }
+    const initializer = declarations[0].initializer
+    if (!ts.isObjectLiteralExpression(initializer)) {
+        throw new Error('semanticCases must be an object literal')
+    }
+
+    const required = new Set(requiredNames)
+    const cases = new Map()
+    for (const property of initializer.properties) {
+        if (!ts.isPropertyAssignment(property)) continue
+        const caseName = staticPropertyName(property.name)
+        if (!required.has(caseName)) continue
+        if (cases.has(caseName)) {
+            throw new Error(`Duplicate semantic case ${caseName}`)
+        }
+        if (!ts.isObjectLiteralExpression(property.initializer)) {
+            throw new Error(`Semantic case ${caseName} must be an object literal`)
+        }
+        const sourceProperty = findProperty(property.initializer, 'source')
+        const expectedProperty = findProperty(property.initializer, 'expected')
+        if (
+            sourceProperty === undefined ||
+            !ts.isNoSubstitutionTemplateLiteral(sourceProperty.initializer)
+        ) {
+            throw new Error(
+                `Semantic case ${caseName} must have a static source template`
+            )
+        }
+        if (
+            expectedProperty === undefined ||
+            !ts.isNumericLiteral(expectedProperty.initializer)
+        ) {
+            throw new Error(
+                `Semantic case ${caseName} must have a numeric expected value`
+            )
+        }
+        cases.set(caseName, {
+            source: sourceProperty.initializer.text,
+            expected: Number(expectedProperty.initializer.text),
+        })
+    }
+    for (const requiredName of required) {
+        if (!cases.has(requiredName)) {
+            throw new Error(`Missing semantic case ${requiredName}`)
+        }
+    }
+    return cases
+}
+
+function findProperty(object, name) {
+
+    const matches = object.properties.filter(property =>
+        ts.isPropertyAssignment(property) &&
+        staticPropertyName(property.name) === name
+    )
+    if (matches.length > 1) {
+        throw new Error(`Duplicate property ${name}`)
+    }
+    return matches[0]
+}
+
+function staticPropertyName(name) {
+
+    if (
+        ts.isIdentifier(name) ||
+        ts.isStringLiteral(name) ||
+        ts.isNoSubstitutionTemplateLiteral(name)
+    ) {
+        return name.text
+    }
+    return undefined
 }
 
 function declarationEntrypointParityIsExact() {
