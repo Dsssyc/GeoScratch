@@ -14,6 +14,9 @@ import {
     webGpuManifestPath,
     wgslManifestPath,
 } from '../../scripts/scratch-webgpu-wgsl-parity-manifest.mjs'
+import {
+    normativeArtifactPaths,
+} from '../../scripts/refresh-scratch-webgpu-wgsl-baseline.mjs'
 
 const pointerProofCaseNames = [
     'unrestricted-pointer',
@@ -60,6 +63,10 @@ const generatedCurrent = createCurrentCoverageManifest()
 const generatedEnableExtensions = createWgslEnableExtensionManifest()
 const frozenWebGpu = readJson(webGpuManifestPath)
 const frozenWgsl = readJson(wgslManifestPath)
+const normativeWebGpu = readJson(normativeArtifactPaths.webgpu)
+const normativeWgsl = readJson(normativeArtifactPaths.wgsl)
+const capabilityDependencies = readJson(normativeArtifactPaths.dependencies)
+const proposalWatchlist = readJson(normativeArtifactPaths.proposals)
 const generatedFrozenWebGpu = createWebGpuManifest()
 const generatedFrozenWgsl = createWgslManifest()
 const evidenceById = new Map(
@@ -113,20 +120,25 @@ const checks = {
     frozenWgslManifestUnchanged:
         deepEqual(frozenWgsl, generatedFrozenWgsl),
     exactEntryCounts:
-        current.summary.entryCount === 662 &&
-        current.summary.webgpuEntryCount === 591 &&
-        current.summary.wgslBaselineEntryCount === 65 &&
-        current.summary.wgslEnableExtensionEntryCount === 6,
+        current.summary.entryCount === 1244 &&
+        current.summary.webgpuNormativeEntryCount === 582 &&
+        current.summary.wgslNormativeEntryCount === 662 &&
+        current.summary.frozenWebgpuHistoricalEntryCount === 591 &&
+        current.summary.frozenWgslHistoricalEntryCount === 65,
     exactCurrentClassifications:
-        current.summary.byClassification['managed-first-class'] === 415 &&
-        current.summary.byClassification['managed-semantic-equivalent'] === 193 &&
-        current.summary.byClassification['not-applicable'] === 54 &&
+        current.summary.byClassification['managed-first-class'] === 683 &&
+        current.summary.byClassification['managed-semantic-equivalent'] === 559 &&
+        current.summary.byClassification['not-applicable'] === 2 &&
         (current.summary.byClassification.unresolved ?? 0) === 0,
     exactCurrentStatuses:
-        current.summary.byStatus.managed === 608 &&
-        current.summary.byStatus['not-applicable'] === 54 &&
+        current.summary.byStatus.managed === 1242 &&
+        current.summary.byStatus['not-applicable'] === 2 &&
         (current.summary.byStatus.unresolved ?? 0) === 0 &&
         current.summary.unresolvedCount === 0,
+    normativeInventoryClosure:
+        currentEntriesCloseNormativeInventories(),
+    normativeAuthorityIsExplicit:
+        normativeAuthorityIsExplicit(),
     uniqueEntryIds:
         new Set(current.entries.map(entry => entry.id)).size ===
         current.entries.length,
@@ -225,15 +237,9 @@ const checks = {
             ]
         ),
     enableAndLanguageFeaturesRemainSeparate:
-        enableExtensions.entries.every(entry =>
-            entry.requiredLanguageFeatures.length === 0
-        ) &&
-        current.entries
-            .filter(entry => entry.kind === 'language-extension')
-            .every(entry =>
-                entry.requirements.languageFeatures.length === 1 &&
-                entry.requirements.deviceFeatures.length === 0
-            ),
+        enableAndLanguageRequirementsMatchInventory(),
+    proposalsRemainNonNormative:
+        proposalsRemainNonNormative(),
     dependencyPreflightHasOneAuthority:
         featureDependencySourceIsShared(),
     dependencyDiagnosticDocumented:
@@ -274,6 +280,24 @@ const result = {
         enableExtensions: {
             path: relative(wgslEnableExtensionManifestPath),
             summary: enableExtensions.summary,
+        },
+        normative: {
+            webgpu: {
+                path: relative(normativeArtifactPaths.webgpu),
+                summary: normativeWebGpu.summary,
+            },
+            wgsl: {
+                path: relative(normativeArtifactPaths.wgsl),
+                summary: normativeWgsl.summary,
+            },
+            dependencies: {
+                path: relative(normativeArtifactPaths.dependencies),
+                summary: capabilityDependencies.summary,
+            },
+            proposals: {
+                path: relative(normativeArtifactPaths.proposals),
+                summary: proposalWatchlist.summary,
+            },
         },
         frozen: {
             webgpu: {
@@ -318,6 +342,121 @@ const result = {
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 if (failures.length > 0) process.exitCode = 1
 
+function currentEntriesCloseNormativeInventories() {
+
+    const expected = [
+        ...normativeWebGpu.entries.map(entry => ({
+            id: entry.id,
+            domain: 'webgpu',
+            anchor: entry.sourceAnchor,
+            manifest: relative(normativeArtifactPaths.webgpu),
+        })),
+        ...normativeWgsl.entries.map(entry => ({
+            id: entry.id,
+            domain: 'wgsl',
+            anchor: entry.sourceAnchor,
+            manifest: relative(normativeArtifactPaths.wgsl),
+        })),
+    ].sort((left, right) => left.id.localeCompare(right.id))
+    const actual = current.entries.map(entry => ({
+        id: entry.id,
+        domain: entry.domain,
+        anchor: entry.source.anchor,
+        manifest: entry.source.normativeManifest,
+    }))
+    return deepEqual(actual, expected)
+}
+
+function normativeAuthorityIsExplicit() {
+
+    const source = readText(
+        'scripts/scratch-webgpu-wgsl-current-coverage.mjs'
+    )
+    return (
+        deepEqual(
+            Object.keys(current.normativeManifests).sort(),
+            [ 'dependencies', 'proposals', 'webgpu', 'wgsl' ]
+        ) &&
+        deepEqual(
+            Object.keys(current.frozenManifests).sort(),
+            [ 'webgpuHistoricalBaseline', 'wgslHistoricalBaseline' ]
+        ) &&
+        !/\bcreateWgslManifest\s*\(/.test(source) &&
+        !/\benableExtensionContracts\b/.test(source) &&
+        !source.includes('shader-semantic-domain') &&
+        !/fallback|catch[- ]?all/i.test(source)
+    )
+}
+
+function enableAndLanguageRequirementsMatchInventory() {
+
+    if (!enableExtensions.entries.every(entry =>
+        entry.requiredLanguageFeatures.length === 0
+    )) {
+        return false
+    }
+    const languageDevice = new Map()
+    const languageEnable = new Map()
+    for (const dependency of capabilityDependencies.entries) {
+        if (dependency.kind === 'language-to-device-prerequisite') {
+            const features = languageDevice.get(
+                dependency.languageFeature
+            ) ?? []
+            features.push(dependency.requiredFeature)
+            languageDevice.set(dependency.languageFeature, features)
+        } else if (
+            dependency.kind === 'language-to-enable-prerequisite'
+        ) {
+            const extensions = languageEnable.get(
+                dependency.languageFeature
+            ) ?? []
+            extensions.push(dependency.requiredEnableExtension)
+            languageEnable.set(dependency.languageFeature, extensions)
+        }
+    }
+    return current.entries
+        .filter(entry => entry.kind === 'language-extension')
+        .every((entry) => {
+            const languageFeature = entry.id.slice(
+                'language-extension.'.length
+            )
+            return (
+                deepEqual(
+                    entry.requirements.languageFeatures,
+                    [ languageFeature ]
+                ) &&
+                deepEqual(
+                    entry.requirements.deviceFeatures,
+                    uniqueSorted(
+                        languageDevice.get(languageFeature) ?? []
+                    )
+                ) &&
+                deepEqual(
+                    entry.requirements.enableExtensions,
+                    uniqueSorted(
+                        languageEnable.get(languageFeature) ?? []
+                    )
+                )
+            )
+        })
+}
+
+function proposalsRemainNonNormative() {
+
+    const proposalIds = new Set(
+        proposalWatchlist.entries.map(entry => entry.id)
+    )
+    return (
+        proposalWatchlist.normative === false &&
+        proposalWatchlist.status === 'complete' &&
+        proposalWatchlist.unresolved.length === 0 &&
+        current.entries.every(entry => !proposalIds.has(entry.id)) &&
+        proposalWatchlist.entries
+            .filter(entry => entry.status !== 'merged')
+            .every(entry => entry.normative === false)
+    )
+}
+
 function entryShapeIsComplete(entry) {
 
     return (
@@ -330,6 +469,8 @@ function entryShapeIsComplete(entry) {
         entry.source.url.startsWith('https://') &&
         typeof entry.source.anchor === 'string' &&
         entry.source.anchor.length > 0 &&
+        typeof entry.source.normativeManifest === 'string' &&
+        entry.source.normativeManifest.length > 0 &&
         typeof entry.goalStart === 'object' &&
         typeof entry.goalStart.status === 'string' &&
         typeof entry.goalStart.rationale === 'string' &&
@@ -346,6 +487,7 @@ function entryShapeIsComplete(entry) {
         Array.isArray(entry.nativeLowering.sourcePaths) &&
         Array.isArray(entry.nativeLowering.operations) &&
         typeof entry.requirements === 'object' &&
+        Array.isArray(entry.requirements.enableExtensions) &&
         Array.isArray(entry.requirements.deviceFeatures) &&
         Array.isArray(entry.requirements.languageFeatures) &&
         Array.isArray(entry.requirements.limits) &&
@@ -378,7 +520,9 @@ function evidenceIsLocatedAndBounded(record) {
             fs.existsSync(path.join(root, relativePath))
         ) &&
         used > 0 &&
-        used <= 100
+        record.sourcePaths.length <= 5 &&
+        record.testPaths.length <= 3 &&
+        record.browserPaths.length <= 1
     )
 }
 
@@ -798,6 +942,11 @@ function readText(relativePath) {
 function deepEqual(left, right) {
 
     return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function uniqueSorted(values) {
+
+    return [ ...new Set(values) ].sort()
 }
 
 function relative(absolute) {

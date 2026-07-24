@@ -632,3 +632,100 @@ malformed JavaScript, property overrides, extra predicates, or commented-out
 feature operations. The current 662-entry coverage facts remain unchanged,
 all required final gates pass, and no corrected native proof exposed a
 Scratch managed-path defect.
+
+## Normative Inventory Drift Gate Follow-Up (2026-07-25)
+
+This section supersedes the preceding 662-entry current-coverage authority
+without rewriting that earlier audit as history. The frozen
+`scratch-webgpu-2026-07-14.json` and `scratch-wgsl-2026-07-16.json`
+manifests remain unchanged historical baselines. Living coverage now consumes
+fixed, generated normative inventories for WebGPU, WGSL, capability
+dependencies, and proposals.
+
+### Fixed Source Observation
+
+The single allowed online refresh reached the official publication and
+repository metadata, then the raw `gpuweb/types` declaration request timed
+out. It was not retried. The checked baseline records `status: partial`,
+`retryCount: 0`, and `failedSource: gpuweb/types raw declaration`.
+
+The generated inventories were subsequently reproduced offline from the
+already available GPUWeb checkout at
+`b33e6efb182d11156851271586563cc77575059c` and the installed
+`@webgpu/types` `0.1.71` declaration matching the fixed hash. This proves
+deterministic extraction from the pinned inputs; it does not rewrite the
+incomplete one-shot network observation as a successful refresh.
+
+| Source | Fixed fact |
+| --- | --- |
+| WebGPU | CRD 14 July 2026; publication SHA-256 `23b38cef5e23be710ef865b800f63e5874edd03bb08bbecfa8ac5b3020b47d30` |
+| GPUWeb repository | `b33e6efb182d11156851271586563cc77575059c` |
+| WebGPU source files | `spec/index.bs` `39beba36023c6b9081c2a45f4e01db3fcb555517d350d5d30910dc91f0b3e408`; `copies.bs` `ff03e128d21f18ecbb30b9fea9e3fbd61718c73cc6636ace718907a4cebcf1d8`; privacy/security `9e1bcc0389d21fea6015ed72377fe94f012f4aa07cff32c0d1bc0bde03cc4b2c` |
+| WGSL | CRD 16 July 2026; publication SHA-256 `2ae2de9464930086cb7c611951262bfd4c989a312802e30162cfd246567d66aa` |
+| WGSL source | `wgsl/index.bs` `73b68a97453b8b385535f63772bfdba067a86e617cbe3725adc0f3e2d02b0e2d` |
+| gpuweb/types | repository `9ba8a0618e1efad8e1ee444ef6ecfae761b2bc30`; declaration SHA-256 `d2e5cfb2397ec8cacfd30de0e6f7992eb7db7b02cc83b7c43ef58bcd5aa88bc3` |
+| Proposal index | SHA-256 `25d168b6796672bb1037933cddc31468fd10f7b7aa2f2196b7681d9f20213018` |
+
+### Generated Authority
+
+| Inventory | Result |
+| --- | --- |
+| WebGPU normative IDL | 582 entries; 0 unresolved |
+| GPUWeb IDL against `@webgpu/types` | 543 comparable identities matched; 0 spec-only; 0 types-only; 6 declared representation differences |
+| WGSL normative semantics | 662 entries; 6 enable extensions; 12 language extensions; 167 named built-in functions; 20 built-in values; 124 grammar productions; 0 unresolved |
+| Living current coverage | 1,244 entries; 1,242 managed; 2 explained DOM-composition not applicable; 0 unresolved |
+| Current classifications | 683 managed first class; 559 managed semantic equivalent; 2 not applicable |
+
+The WGSL extractor now identifies functions by membership in the normative
+Built-in Functions section instead of guessing from anchor suffixes. This
+recovers `textureSample`, the texture query/load/store functions, and atomic
+functions as named entries while removing the false
+`built-in-function.builtin` entry. Built-in-value capability requirements are
+read from the normative input/output table row by row, so `subgroups` no
+longer leaks onto unrelated values such as `position` or `frag_depth`.
+
+Format capability extraction is bounded to individual HTML tables and
+individual feature sections. The resulting 92 format conditions retain
+separate feature-gated facts for compression, format tiers, storage,
+filterability, blendability, and `depth32float-stencil8` instead of treating
+all formats as one unconditional feature conjunction.
+
+### Dependency And Proposal Boundaries
+
+The dependency inventory has 155 entries:
+
+| Kind | Count |
+| --- | ---: |
+| enable extension to device feature | 6 |
+| caller-declared companion | 1 |
+| native feature implication | 3 |
+| language feature to device feature | 2 |
+| language feature to enable extension | 2 |
+| adapter support prerequisite | 2 |
+| feature alternatives | 1 |
+| format-specific condition | 92 |
+| limit-bound capability | 46 |
+
+Only the six enable-to-feature facts and the one caller companion are
+preflight facts. The sole caller companion remains
+`subgroup-size-control -> subgroups`; the three native implications are not
+converted into caller work. `feature-contract.ts` is audited against that
+exact companion set.
+
+The independent proposal watchlist contains 23 non-normative entries: 8
+merged, 11 draft, 2 inactive, and 2 obsolete. The draft `subgroup-id`
+proposal overlaps the formal specification; the formal WGSL entry remains
+authoritative and the proposal contributes no coverage.
+
+### Scope And Disposition
+
+No Scratch public API, runtime behavior, examples, browser proofs, or
+proposal implementation changed in this follow-up. Normal audits remain
+offline, and refresh requires an explicit local `--gpuweb-root`.
+
+The generated normative and living coverage facts are clean: every current
+entry has a source anchor, explicit classification, requirements, expression
+path, and bounded evidence, with zero unresolved items. The Goal's terminal
+result is nevertheless `issues-found` because the one allowed online refresh
+was partial. The issue is source-observation completeness, not a discovered
+WebGPU/WGSL expression gap in Scratch.

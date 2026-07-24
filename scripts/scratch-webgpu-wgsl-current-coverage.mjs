@@ -1367,6 +1367,7 @@ function webGpuRequirements(entry, dependencyManifest) {
     }
 
     return {
+        enableExtensions: [],
         deviceFeatures: uniqueSorted(deviceFeatures),
         languageFeatures: uniqueSorted(languageFeatures),
         limits: uniqueSorted(limits),
