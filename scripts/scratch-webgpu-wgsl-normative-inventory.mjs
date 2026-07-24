@@ -83,6 +83,26 @@ export const normativeBaseline = Object.freeze({
 const webGpuOwnerPattern =
     /^(?:GPU|WGSL|NavigatorGPU|Navigator|WorkerNavigator)/
 
+const webGpuTypesHelperOwners = new Set([
+    'GPUCanvasConfigurationOut',
+    'GPUExtent3DDictStrict',
+    'GPUOrigin2DDictStrict',
+    'Navigator',
+    'WorkerNavigator',
+])
+
+const webGpuTypesHelperAliases = new Set([
+    'GPUAllowSharedBufferSource',
+    'GPUExtent3DStrict',
+    'GPUImageCopyBuffer',
+    'GPUImageCopyExternalImage',
+    'GPUImageCopyExternalImageSource',
+    'GPUImageCopyTexture',
+    'GPUImageCopyTextureTagged',
+    'GPUImageDataLayout',
+    'GPUOrigin2DStrict',
+])
+
 const wgslRequiredFamilies = Object.freeze([
     'access-modes',
     'address-spaces',
@@ -265,13 +285,15 @@ export function extractWebGpuTypesEntries(source) {
             webGpuOwnerPattern.test(statement.name.text)
         ) {
             const owner = statement.name.text
+            const helperOwner = webGpuTypesHelperOwners.has(owner)
             addIdentity(entries, {
                 id: `interface.${owner}`,
                 kind: 'interface',
                 owner,
                 sourceKind: 'typescript-interface',
                 sourceAnchor: 'types-index',
-                crossSourceComparable: true,
+                crossSourceComparable: !helperOwner,
+                helper: helperOwner,
             })
             for (const member of statement.members) {
                 const name = typesDeclarationName(member.name, sourceFile)
@@ -284,7 +306,16 @@ export function extractWebGpuTypesEntries(source) {
                     })
                     continue
                 }
-                const helper = name === '__brand'
+                const helper =
+                    helperOwner ||
+                    name === '__brand' ||
+                    (
+                        owner === 'GPUDevice' &&
+                        new Set([
+                            'addEventListener',
+                            'removeEventListener',
+                        ]).has(name)
+                    )
                 addIdentity(entries, {
                     id: `${owner}.${name}`,
                     kind: typesMemberKind(member),
@@ -300,14 +331,46 @@ export function extractWebGpuTypesEntries(source) {
             ts.isTypeAliasDeclaration(statement) &&
             /^(?:GPU|WGSL)/.test(statement.name.text)
         ) {
+            const helper = webGpuTypesHelperAliases.has(statement.name.text)
             addIdentity(entries, {
                 id: `type.${statement.name.text}`,
                 kind: 'type-alias',
                 owner: statement.name.text,
                 sourceKind: 'typescript-type-alias',
                 sourceAnchor: 'types-index',
-                crossSourceComparable: true,
+                crossSourceComparable: !helper,
+                helper,
             })
+        } else if (ts.isVariableStatement(statement)) {
+            for (const declaration of statement.declarationList.declarations) {
+                if (
+                    !ts.isIdentifier(declaration.name) ||
+                    !webGpuOwnerPattern.test(declaration.name.text) ||
+                    declaration.type === undefined ||
+                    !ts.isTypeLiteralNode(declaration.type)
+                ) {
+                    continue
+                }
+                const owner = declaration.name.text
+                for (const member of declaration.type.members) {
+                    if (
+                        !ts.isConstructSignatureDeclaration(member) ||
+                        member.type === undefined ||
+                        member.type.getText(sourceFile) === 'never'
+                    ) {
+                        continue
+                    }
+                    addIdentity(entries, {
+                        id: `${owner}.constructor`,
+                        kind: 'method',
+                        owner,
+                        member: 'constructor',
+                        sourceKind: 'typescript-constructor',
+                        sourceAnchor: 'types-index',
+                        crossSourceComparable: true,
+                    })
+                }
+            }
         }
     }
 
@@ -319,11 +382,41 @@ export function extractWebGpuTypesEntries(source) {
 
 export function compareWebGpuNormativeSources(specEntries, typesEntries) {
 
-    const specIds = comparableIds(specEntries)
-    const typesIds = comparableIds(typesEntries)
-    const specOnlyIds = difference(specIds, typesIds)
-    const typesOnlyIds = difference(typesIds, specIds)
+    const specByIdentity = comparableIdentityMap(specEntries)
+    const typesByIdentity = comparableIdentityMap(typesEntries)
+    const specIds = [ ...specByIdentity.keys() ].sort()
+    const typesIds = [ ...typesByIdentity.keys() ].sort()
+    const specOnlyIdentities = difference(specIds, typesIds)
+    const typesOnlyIdentities = difference(typesIds, specIds)
     const matchedIds = intersection(specIds, typesIds)
+    const specOnlyIds = specOnlyIdentities.flatMap(
+        identity => specByIdentity.get(identity)
+    ).sort()
+    const typesOnlyIds = typesOnlyIdentities.flatMap(
+        identity => typesByIdentity.get(identity)
+    ).sort()
+    const representationDifferences = matchedIds
+        .map((identity) => {
+            const specIdsForIdentity = [
+                ...specByIdentity.get(identity),
+            ].sort()
+            const typesIdsForIdentity = [
+                ...typesByIdentity.get(identity),
+            ].sort()
+            return JSON.stringify(specIdsForIdentity) ===
+                JSON.stringify(typesIdsForIdentity)
+                ? undefined
+                : {
+                    identity,
+                    specIds: specIdsForIdentity,
+                    typesIds: typesIdsForIdentity,
+                    reason:
+                        'Equivalent WebIDL and TypeScript root declaration representations.',
+                }
+        })
+        .filter(value => value !== undefined)
+    const ignoredSpecIds = ignoredIds(specEntries)
+    const ignoredTypesIds = ignoredIds(typesEntries)
 
     return {
         status:
@@ -333,8 +426,19 @@ export function compareWebGpuNormativeSources(specEntries, typesEntries) {
         matchedIds,
         specOnlyIds,
         typesOnlyIds,
-        ignoredSpecIds: ignoredIds(specEntries),
-        ignoredTypesIds: ignoredIds(typesEntries),
+        representationDifferences,
+        ignoredSpecIds,
+        ignoredTypesIds,
+        ignoredSpecEntries: ignoredSpecIds.map(id => ({
+            id,
+            reason:
+                'WebIDL collection or mixin composition is flattened by TypeScript declarations.',
+        })),
+        ignoredTypesEntries: ignoredTypesIds.map(id => ({
+            id,
+            reason:
+                'TypeScript nominal-brand, compatibility, strictness, or DOM integration helper outside normative WebGPU IDL identity.',
+        })),
     }
 }
 
@@ -509,6 +613,73 @@ export function extractWgslNormativeEntries(source) {
         ))
     }
 
+    for (const match of source.matchAll(
+        /<dfn\b[^>]*(?:dfn-for|for)=(?:"|')?trigger(?:"|')?[^>]*>([\s\S]*?)<\/dfn>/gi
+    )) {
+        const name = stripMarkup(match[1])
+        addWgslEntry(entries, namedWgslEntry(
+            'diagnostic-rule',
+            'diagnostic-rule',
+            'diagnostics',
+            name,
+            'filterable-triggering-rules',
+            match.index
+        ))
+    }
+
+    for (const [ owner, prefix, kind ] of [
+        [ 'interpolation type', 'interpolation-type', 'interpolation-type' ],
+        [
+            'interpolation sampling',
+            'interpolation-sampling',
+            'interpolation-sampling',
+        ],
+    ]) {
+        const pattern = new RegExp(
+            `<dfn\\b[^>]*(?:dfn-for|for)=(?:\"|')?${owner}(?:\"|')?[^>]*>([\\s\\S]*?)<\\/dfn>`,
+            'gi'
+        )
+        for (const match of source.matchAll(pattern)) {
+            const name = stripMarkup(match[1])
+            addWgslEntry(entries, namedWgslEntry(
+                prefix,
+                kind,
+                'interpolation',
+                name,
+                'interpolation',
+                match.index
+            ))
+        }
+    }
+
+    const wgslLimitsTable = extractCaptionTable(
+        source,
+        'Quantifiable shader complexity limits'
+    )
+    if (wgslLimitsTable !== undefined) {
+        for (const row of splitHtmlRows(wgslLimitsTable.source)) {
+            const cells = row.split(/<td\b[^>]*>/i).slice(1)
+            if (cells.length < 2) continue
+            const name = normalizeWhitespace(stripMarkup(cells[0]))
+            if (name.length === 0 || name === 'Limit') continue
+            const requirements = emptyRequirements()
+            requirements.limits = uniqueSorted(
+                [ ...row.matchAll(
+                    /supported limits\/([A-Za-z0-9_]+)/g
+                ) ].map(match => match[1])
+            )
+            addWgslEntry(entries, {
+                id: `wgsl-limit.${slugify(name)}`,
+                kind: 'wgsl-limit',
+                family: 'limits',
+                name,
+                sourceAnchor: 'limits',
+                sourceIndex: wgslLimitsTable.index,
+                requirements,
+            })
+        }
+    }
+
     const texelNames = new Set()
     for (const match of source.matchAll(
         /\[=texel format\/([A-Za-z0-9_]+)=\]/g
@@ -588,6 +759,254 @@ export function extractProposalWatchlistEntries(source) {
         }
     }
     return entries
+}
+
+export function extractCapabilityDependencyEntries({
+    webGpuSource,
+    wgslSource,
+}) {
+
+    assertSource(webGpuSource, 'WebGPU capability')
+    assertSource(wgslSource, 'WGSL capability')
+    const entries = new Map()
+    const unresolved = []
+    const wgsl = extractWgslNormativeEntries(wgslSource)
+    const enableEntries = wgsl.entries.filter(
+        entry => entry.kind === 'enable-extension'
+    )
+    const featureByExtension = new Map()
+
+    for (const entry of enableEntries) {
+        const features = entry.requirements.deviceFeatures
+        if (features.length !== 1) {
+            unresolved.push({
+                reason: 'enable-extension-feature-cardinality',
+                extension: entry.name,
+                sourceAnchor: entry.sourceAnchor,
+                observedFeatures: features,
+            })
+            continue
+        }
+        const feature = features[0]
+        featureByExtension.set(entry.name, feature)
+        addCapability(entries, {
+            id: `enable-to-feature.${entry.name}`,
+            kind: 'enable-to-device-feature',
+            extension: entry.name,
+            feature,
+            callerPreflight: true,
+            source: {
+                domain: 'wgsl',
+                anchor: entry.sourceAnchor,
+            },
+        })
+    }
+
+    for (const entry of enableEntries) {
+        for (const dependency of entry.requirements.dependencies) {
+            if (dependency.kind !== 'enable-extension-companion') continue
+            const feature = featureByExtension.get(entry.name)
+            const requiredFeature = featureByExtension.get(
+                dependency.requiredExtension
+            )
+            if (feature === undefined || requiredFeature === undefined) {
+                unresolved.push({
+                    reason: 'unknown-enable-extension-companion',
+                    extension: entry.name,
+                    requiredExtension: dependency.requiredExtension,
+                    sourceAnchor: entry.sourceAnchor,
+                })
+                continue
+            }
+            addCapability(entries, {
+                id: `caller-companion.${feature}.${requiredFeature}`,
+                kind: 'caller-declared-companion',
+                extension: entry.name,
+                requiredExtension: dependency.requiredExtension,
+                feature,
+                requiredFeature,
+                callerPreflight: true,
+                source: {
+                    domain: 'wgsl',
+                    anchor: entry.sourceAnchor,
+                },
+            })
+        }
+    }
+
+    const languageTable = extractCaptionTable(
+        wgslSource,
+        'Language extensions'
+    )
+    if (languageTable !== undefined) {
+        for (const row of splitHtmlRows(languageTable.source)) {
+            const languageFeature = extractDfnName(
+                row,
+                'language_extension'
+            )
+            if (languageFeature === undefined) continue
+            const requiredExtensions = uniqueSorted(
+                [ ...row.matchAll(
+                    /\[=extension\/([A-Za-z0-9_]+)=\]/g
+                ) ].map(match => match[1])
+            )
+            for (const requiredEnableExtension of requiredExtensions) {
+                const requiredFeature = featureByExtension.get(
+                    requiredEnableExtension
+                )
+                if (requiredFeature === undefined) {
+                    unresolved.push({
+                        reason: 'unknown-language-enable-prerequisite',
+                        languageFeature,
+                        requiredEnableExtension,
+                        sourceAnchor:
+                            `language_extension-${languageFeature}`,
+                    })
+                    continue
+                }
+                addCapability(entries, {
+                    id:
+                        `language-to-enable.${languageFeature}.` +
+                        requiredEnableExtension,
+                    kind: 'language-to-enable-prerequisite',
+                    languageFeature,
+                    requiredEnableExtension,
+                    callerPreflight: false,
+                    source: {
+                        domain: 'wgsl',
+                        anchor: `language_extension-${languageFeature}`,
+                    },
+                })
+                addCapability(entries, {
+                    id:
+                        `language-to-device.${languageFeature}.` +
+                        requiredFeature,
+                    kind: 'language-to-device-prerequisite',
+                    languageFeature,
+                    requiredFeature,
+                    callerPreflight: false,
+                    source: {
+                        domain: 'wgsl',
+                        anchor: `language_extension-${languageFeature}`,
+                    },
+                })
+            }
+        }
+    }
+
+    for (const match of webGpuSource.matchAll(
+        /Enabling\s+\{\{GPUFeatureName\/"([^"]+)"\}\}[\s\S]{0,180}?will enable\s+\{\{GPUFeatureName\/"([^"]+)"\}\}/g
+    )) {
+        addCapability(entries, {
+            id: `native-implication.${match[1]}.${match[2]}`,
+            kind: 'native-feature-implication',
+            feature: match[1],
+            impliedFeature: match[2],
+            callerPreflight: false,
+            source: {
+                domain: 'webgpu',
+                anchor: nearestSourceAnchor(webGpuSource, match.index),
+            },
+        })
+    }
+
+    for (const match of webGpuSource.matchAll(
+        /If\s+\{\{GPUFeatureName\/"([^"]+)"\}\}\s+is supported,\s+then\s+\{\{GPUFeatureName\/"([^"]+)"\}\}\s+must be supported\./g
+    )) {
+        addCapability(entries, {
+            id: `support-prerequisite.${match[1]}.${match[2]}`,
+            kind: 'adapter-support-prerequisite',
+            feature: match[1],
+            requiredSupportedFeature: match[2],
+            callerPreflight: false,
+            source: {
+                domain: 'webgpu',
+                anchor: nearestSourceAnchor(webGpuSource, match.index),
+            },
+        })
+    }
+
+    const alternatives = webGpuSource.match(
+        /At least one of the following must be true:\s*-\s*\{\{GPUFeatureName\/"([^"]+)"\}\} is supported\.\s*-\s*Both\s*\{\{GPUFeatureName\/"([^"]+)"\}\} and\s*\{\{GPUFeatureName\/"([^"]+)"\}\} are supported\./
+    )
+    if (alternatives !== null) {
+        addCapability(entries, {
+            id: 'feature-alternative.adapter-compression',
+            kind: 'feature-alternatives',
+            alternatives: [
+                [ alternatives[1] ],
+                [ alternatives[2], alternatives[3] ],
+            ],
+            callerPreflight: false,
+            source: {
+                domain: 'webgpu',
+                anchor: 'adapter-capability-guarantees',
+            },
+        })
+    }
+
+    const supportedLimitsTable = extractSupportedLimitsTable(webGpuSource)
+    if (supportedLimitsTable !== undefined) {
+        for (const row of splitHtmlRows(supportedLimitsTable.source)) {
+            const limit = row.match(/<dfn\b[^>]*>([A-Za-z0-9_]+)<\/dfn>/i)
+            if (limit === null) continue
+            addCapability(entries, {
+                id: `webgpu-limit.${limit[1]}`,
+                kind: 'limit-bound-capability',
+                limit: limit[1],
+                callerPreflight: false,
+                source: {
+                    domain: 'webgpu',
+                    anchor: 'limits',
+                },
+            })
+        }
+    }
+
+    for (const entry of wgsl.entries.filter(
+        candidate => candidate.kind === 'wgsl-limit'
+    )) {
+        addCapability(entries, {
+            id: entry.id,
+            kind: 'limit-bound-capability',
+            limit: entry.name,
+            mappedWebGpuLimits: entry.requirements.limits,
+            callerPreflight: false,
+            source: {
+                domain: 'wgsl',
+                anchor: entry.sourceAnchor,
+            },
+        })
+    }
+
+    for (const row of webGpuSource.split(/<tr\b[^>]*>/i).slice(1)) {
+        const format = row.match(
+            /GPUTextureFormat\/(?:"|')?([A-Za-z0-9_-]+)/
+        )
+        if (format === null) continue
+        const requiredFeatures = uniqueSorted(
+            [ ...row.matchAll(
+                /GPUFeatureName\/"([^"]+)"/g
+            ) ].map(match => match[1])
+        )
+        if (requiredFeatures.length === 0) continue
+        addCapability(entries, {
+            id: `format-condition.${format[1]}`,
+            kind: 'format-specific-condition',
+            format: format[1],
+            requiredFeatures,
+            callerPreflight: false,
+            source: {
+                domain: 'webgpu',
+                anchor: 'texture-format-caps',
+            },
+        })
+    }
+
+    return {
+        entries: [ ...entries.values() ].sort(compareIds),
+        unresolved: sortUnresolved(unresolved),
+    }
 }
 
 export function validateNormativeInventory(inventory) {
@@ -1118,6 +1537,20 @@ function extractCaptionTable(source, caption) {
     }
 }
 
+function extractSupportedLimitsTable(source) {
+
+    const match = source.match(
+        /<table\b[^>]*dfn-for=(?:"|')supported limits(?:"|')[^>]*>/i
+    )
+    if (match === null || match.index === undefined) return undefined
+    const end = source.indexOf('</table>', match.index)
+    if (end === -1) return undefined
+    return {
+        source: source.slice(match.index, end + '</table>'.length),
+        index: match.index,
+    }
+}
+
 function splitHtmlRows(table) {
 
     return table
@@ -1187,6 +1620,22 @@ function decodeEntities(value) {
         .replaceAll('&gt;', '>')
         .replaceAll('&amp;', '&')
         .replaceAll('&quot;', '"')
+}
+
+function nearestSourceAnchor(source, index) {
+
+    const prefix = source.slice(0, index)
+    const candidates = []
+    for (const match of prefix.matchAll(/\{#([A-Za-z0-9_.:-]+)\}/g)) {
+        candidates.push({ index: match.index, anchor: match[1] })
+    }
+    for (const match of prefix.matchAll(
+        /<h[1-6]\b[^>]*\bid=(?:"|')?([A-Za-z0-9_.:-]+)(?:"|')?[^>]*>/gi
+    )) {
+        candidates.push({ index: match.index, anchor: match[1] })
+    }
+    candidates.sort((left, right) => left.index - right.index)
+    return candidates.at(-1)?.anchor ?? 'spec-root'
 }
 
 function nearestHeadingAnchor(headings, index) {
@@ -1322,6 +1771,22 @@ function ignoredIds(entries) {
         .sort()
 }
 
+function comparableIdentityMap(entries) {
+
+    const result = new Map()
+    for (const entry of entries) {
+        if (entry.crossSourceComparable === false) continue
+        const identity = entry.id.replace(
+            /^(?:interface|type)\.([A-Za-z_]\w*)$/,
+            'declaration.$1'
+        )
+        const ids = result.get(identity) ?? []
+        ids.push(entry.id)
+        result.set(identity, ids)
+    }
+    return result
+}
+
 function difference(left, right) {
 
     const rightSet = new Set(right)
@@ -1361,6 +1826,24 @@ function uniqueObjects(values) {
         .map(([, value ]) => value)
 }
 
+function addCapability(entries, entry) {
+
+    const existing = entries.get(entry.id)
+    if (existing === undefined) {
+        entries.set(entry.id, entry)
+        return
+    }
+    for (const [ key, value ] of Object.entries(entry)) {
+        if (!Array.isArray(value)) continue
+        const current = existing[key] ?? []
+        if (value.every(item => typeof item === 'string')) {
+            existing[key] = uniqueSorted([ ...current, ...value ])
+        } else {
+            existing[key] = uniqueObjects([ ...current, ...value ])
+        }
+    }
+}
+
 function sortObjectKeys(value) {
 
     if (Array.isArray(value)) return value.map(sortObjectKeys)
@@ -1370,6 +1853,15 @@ function sortObjectKeys(value) {
             .sort()
             .map(key => [ key, sortObjectKeys(value[key]) ])
     )
+}
+
+function slugify(value) {
+
+    return value
+        .toLowerCase()
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
 }
 
 function validateManifestSource(source) {

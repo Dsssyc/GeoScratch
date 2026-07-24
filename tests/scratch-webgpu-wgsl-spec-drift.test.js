@@ -6,13 +6,19 @@ import {
     canonicalManifestJson,
     compareWebGpuNormativeSources,
     createNormativeInventoryManifest,
+    extractCapabilityDependencyEntries,
     extractProposalWatchlistEntries,
     extractWebGpuIdlEntries,
     extractWebGpuTypesEntries,
     extractWgslNormativeEntries,
     normativeBaseline,
+    sha256,
     validateNormativeInventory,
 } from '../scripts/scratch-webgpu-wgsl-normative-inventory.mjs'
+import {
+    createScratchNormativeArtifacts,
+    normativeArtifactPaths,
+} from '../scripts/refresh-scratch-webgpu-wgsl-baseline.mjs'
 
 const webGpuIdlFixture = `
 <script type=idl>
@@ -88,6 +94,8 @@ const wgslFixture = `
 # Entry Points # {#entry-points}
 ## Shader Interface ## {#shader-interface}
 #### Interpolation #### {#interpolation}
+<dfn for="interpolation type" export>flat</dfn>
+<dfn for="interpolation sampling" export>center</dfn>
 ##### \`fixture_value\` ##### {#fixture-value-builtin-value}
 <dfn noexport dfn-for="built-in values">fixture_value</dfn>
 
@@ -102,9 +110,68 @@ const wgslFixture = `
 
 # Execution # {#execution}
 ## Limits ## {#limits}
+<table class='data'>
+  <caption>Quantifiable shader complexity limits</caption>
+  <tr><td>Maximum fixture nesting depth<td>15
+</table>
 ## Diagnostics ## {#diagnostics}
+<dfn noexport dfn-for="trigger">fixture_uniformity</dfn>
 # Built-in Functions # {#builtin-functions}
 ### \`fixtureBuiltin\` ### {#fixtureBuiltin-builtin}
+`
+
+const capabilityWebGpuFixture = `
+# Optional Features # {#optional-features}
+<h3 id=feature-base data-dfn-type=enum-value data-dfn-for=GPUFeatureName>
+\`"feature-base"\`
+</h3>
+<h3 id=feature-parent data-dfn-type=enum-value data-dfn-for=GPUFeatureName>
+\`"feature-parent"\`
+</h3>
+Enabling {{GPUFeatureName/"feature-parent"}} at device creation will enable
+{{GPUFeatureName/"feature-base"}}.
+
+## Adapter Capability Guarantees ## {#adapter-capability-guarantees}
+- At least one of the following must be true:
+    - {{GPUFeatureName/"compression-a"}} is supported.
+    - Both {{GPUFeatureName/"compression-b"}} and
+      {{GPUFeatureName/"compression-c"}} are supported.
+- If {{GPUFeatureName/"compression-a-sliced"}}
+  is supported, then {{GPUFeatureName/"compression-a"}} must be supported.
+
+## Limits ## {#limits}
+<table class=data dfn-type=attribute dfn-for="supported limits">
+  <tr><td><dfn>maxFixtureSize</dfn>
+      <td>GPUSize32 <td>maximum <td>64
+</table>
+
+## Texture Format Capabilities ## {#texture-format-caps}
+<table class=data>
+  <tr>
+    <td>{{GPUTextureFormat/fixture-format}}
+    <td>If {{GPUFeatureName/"feature-base"}} is enabled
+</table>
+`
+
+const capabilityWgslFixture = `
+### Enable Extensions ### {#enable-extensions-sec}
+<table class='data'>
+  <caption>Enable-extensions</caption>
+  <tr><td><dfn noexport dfn-for="extension">\`fixture_base\`</dfn>
+      <td>[[WebGPU#feature-base|"feature-base"]]
+      <td>Base.
+  <tr><td><dfn noexport dfn-for="extension">\`fixture_parent\`</dfn>
+      <td>[[WebGPU#feature-parent|"feature-parent"]]
+      <td>Must be enabled together with the
+          [=extension/fixture_base=] extension.
+</table>
+
+### Language Extensions ### {#language-extensions-sec}
+<table class='data'>
+  <caption>Language extensions</caption>
+  <tr><td><dfn for="language_extension">fixture_language</dfn>
+      <td>Requires the [=extension/fixture_base=] extension.
+</table>
 `
 
 const proposalFixture = `
@@ -193,6 +260,35 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
         ])
     })
 
+    it('reports equivalent IDL and TypeScript declaration representations', () => {
+
+        const comparison = compareWebGpuNormativeSources(
+            [
+                {
+                    id: 'interface.GPUEmptyDescriptor',
+                    crossSourceComparable: true,
+                },
+            ],
+            [
+                {
+                    id: 'type.GPUEmptyDescriptor',
+                    crossSourceComparable: true,
+                },
+            ]
+        )
+
+        expect(comparison.status).to.equal('matched')
+        expect(comparison.representationDifferences).to.deep.equal([
+            {
+                identity: 'declaration.GPUEmptyDescriptor',
+                specIds: [ 'interface.GPUEmptyDescriptor' ],
+                typesIds: [ 'type.GPUEmptyDescriptor' ],
+                reason:
+                    'Equivalent WebIDL and TypeScript root declaration representations.',
+            },
+        ])
+    })
+
     it('turns unsupported IDL constructs into unresolved extraction facts', () => {
 
         const result = extractWebGpuIdlEntries(`
@@ -230,6 +326,10 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
             'address-space.storage',
             'semantic-section.control-flow',
             'semantic-section.alignment-and-size',
+            'wgsl-limit.maximum-fixture-nesting-depth',
+            'diagnostic-rule.fixture_uniformity',
+            'interpolation-type.flat',
+            'interpolation-sampling.center',
         ])
         expect(ids.some(id => id.includes('functions-builtins'))).to.equal(false)
         expect(result.entries.find(
@@ -269,6 +369,72 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
             { id: 'paused', status: 'inactive', href: 'paused.md' },
             { id: 'retired', status: 'obsolete', href: 'retired.md' },
         ])
+    })
+
+    it('keeps capability dependency categories and preflight semantics distinct', () => {
+
+        const result = extractCapabilityDependencyEntries({
+            webGpuSource: capabilityWebGpuFixture,
+            wgslSource: capabilityWgslFixture,
+        })
+        const entries = new Map(
+            result.entries.map(entry => [ entry.id, entry ])
+        )
+
+        expect(result.unresolved).to.deep.equal([])
+        expect(entries.get('enable-to-feature.fixture_parent')).to.deep.include({
+            kind: 'enable-to-device-feature',
+            extension: 'fixture_parent',
+            feature: 'feature-parent',
+            callerPreflight: true,
+        })
+        expect(entries.get(
+            'caller-companion.feature-parent.feature-base'
+        )).to.deep.include({
+            kind: 'caller-declared-companion',
+            feature: 'feature-parent',
+            requiredFeature: 'feature-base',
+            callerPreflight: true,
+        })
+        expect(entries.get(
+            'native-implication.feature-parent.feature-base'
+        )).to.deep.include({
+            kind: 'native-feature-implication',
+            feature: 'feature-parent',
+            impliedFeature: 'feature-base',
+            callerPreflight: false,
+        })
+        expect(entries.get(
+            'support-prerequisite.compression-a-sliced.compression-a'
+        )).to.deep.include({
+            kind: 'adapter-support-prerequisite',
+            callerPreflight: false,
+        })
+        expect(entries.get('feature-alternative.adapter-compression'))
+            .to.deep.include({
+                kind: 'feature-alternatives',
+                callerPreflight: false,
+            })
+        expect(entries.get('format-condition.fixture-format'))
+            .to.deep.include({
+                kind: 'format-specific-condition',
+                format: 'fixture-format',
+                requiredFeatures: [ 'feature-base' ],
+                callerPreflight: false,
+            })
+        expect(entries.get('webgpu-limit.maxFixtureSize')).to.deep.include({
+            kind: 'limit-bound-capability',
+            limit: 'maxFixtureSize',
+            callerPreflight: false,
+        })
+        expect(entries.get(
+            'language-to-enable.fixture_language.fixture_base'
+        )).to.deep.include({
+            kind: 'language-to-enable-prerequisite',
+            languageFeature: 'fixture_language',
+            requiredEnableExtension: 'fixture_base',
+            callerPreflight: false,
+        })
     })
 
     it('serializes manifests deterministically and keeps extraction offline', () => {
@@ -331,4 +497,196 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
             }))
         )
     })
+
+    it('rebuilds all checked artifacts byte-for-byte and rejects source drift', () => {
+
+        const webGpuSource = `${webGpuIdlFixture}\n${capabilityWebGpuFixture}`
+        const sourceFacts = {
+            observedOn: '2026-07-25',
+            gpuwebCommit: 'fixture-gpuweb',
+            gpuwebTypesCommit: 'fixture-types',
+            webgpu: {
+                publicationUrl: 'https://example.test/webgpu/',
+                files: [
+                    {
+                        path: 'spec/index.bs',
+                        sha256: sha256(webGpuSource),
+                    },
+                ],
+            },
+            wgsl: {
+                publicationUrl: 'https://example.test/wgsl/',
+                files: [
+                    {
+                        path: 'wgsl/index.bs',
+                        sha256: sha256(wgslFixture),
+                    },
+                ],
+            },
+            types: {
+                packageVersion: 'fixture',
+                files: [
+                    {
+                        path: 'dist/index.d.ts',
+                        sha256: sha256(webGpuTypesFixture),
+                    },
+                ],
+            },
+            proposals: {
+                files: [
+                    {
+                        path: 'proposals/README.md',
+                        sha256: sha256(proposalFixture),
+                    },
+                ],
+            },
+        }
+        const input = {
+            sourceFacts,
+            webGpuFiles: [
+                { path: 'spec/index.bs', source: webGpuSource },
+            ],
+            wgslFiles: [
+                { path: 'wgsl/index.bs', source: wgslFixture },
+            ],
+            typesFile: {
+                path: 'dist/index.d.ts',
+                source: webGpuTypesFixture,
+            },
+            proposalFile: {
+                path: 'proposals/README.md',
+                source: proposalFixture,
+            },
+        }
+
+        const first = createScratchNormativeArtifacts(input)
+        const second = createScratchNormativeArtifacts(input)
+
+        expect(Object.keys(first)).to.deep.equal([
+            'webgpu',
+            'wgsl',
+            'dependencies',
+            'proposals',
+        ])
+        expect(canonicalManifestJson(first)).to.equal(
+            canonicalManifestJson(second)
+        )
+        expect(first.webgpu.crossSourceComparison.status).to.equal('matched')
+        expect(first.proposals.normative).to.equal(false)
+        expect(first.proposals.summary.byStatus).to.deep.equal({
+            draft: 1,
+            inactive: 1,
+            merged: 1,
+            obsolete: 1,
+        })
+
+        expect(() => createScratchNormativeArtifacts({
+            ...input,
+            typesFile: {
+                ...input.typesFile,
+                source: `${webGpuTypesFixture}\n// drift`,
+            },
+        })).to.throw(/SHA-256 mismatch/)
+    })
+
+    it('checks in the complete fine-grained normative artifacts', () => {
+
+        const webgpu = readJson(normativeArtifactPaths.webgpu)
+        const wgsl = readJson(normativeArtifactPaths.wgsl)
+        const dependencies = readJson(normativeArtifactPaths.dependencies)
+        const proposals = readJson(normativeArtifactPaths.proposals)
+
+        expect(webgpu.status).to.equal('complete')
+        expect(webgpu.summary.entryCount).to.equal(582)
+        expect(webgpu.crossSourceComparison).to.deep.include({
+            status: 'matched',
+            specOnlyIds: [],
+            typesOnlyIds: [],
+        })
+        expect(webgpu.crossSourceComparison.representationDifferences)
+            .to.have.length(6)
+
+        expect(wgsl.status).to.equal('complete')
+        expect(wgsl.summary).to.deep.include({
+            entryCount: 663,
+            enableExtensionCount: 6,
+            languageExtensionCount: 12,
+            unresolvedCount: 0,
+        })
+        expect(wgsl.summary.byKind['built-in-function']).to.equal(141)
+        expect(wgsl.entries.some(
+            entry => entry.id === 'shader-domain.functions-builtins'
+        )).to.equal(false)
+
+        expect(dependencies.status).to.equal('complete')
+        expect(dependencies.summary).to.deep.include({
+            entryCount: 106,
+            callerCompanionPreflightCount: 1,
+            unresolvedCount: 0,
+        })
+        expect(dependencies.entries
+            .filter(entry =>
+                entry.kind === 'caller-declared-companion'
+            )
+            .map(entry => ({
+                feature: entry.feature,
+                requiredFeature: entry.requiredFeature,
+            }))).to.deep.equal([
+            {
+                feature: 'subgroup-size-control',
+                requiredFeature: 'subgroups',
+            },
+        ])
+
+        expect(proposals).to.deep.include({
+            status: 'complete',
+            normative: false,
+        })
+        expect(proposals.summary.byStatus).to.deep.equal({
+            draft: 11,
+            inactive: 2,
+            merged: 8,
+            obsolete: 2,
+        })
+        expect(proposals.conflicts.map(entry => entry.proposal))
+            .to.deep.equal([ 'subgroup-id' ])
+    })
+
+    it('keeps runtime preflight equal to caller-declared companions only', () => {
+
+        const dependencies = readJson(normativeArtifactPaths.dependencies)
+        const expected = dependencies.entries
+            .filter(entry =>
+                entry.kind === 'caller-declared-companion' &&
+                entry.callerPreflight
+            )
+            .map(entry => ({
+                feature: entry.feature,
+                requiredFeature: entry.requiredFeature,
+            }))
+        const contract = fs.readFileSync(path.join(
+            process.cwd(),
+            'packages',
+            'geoscratch',
+            'src',
+            'scratch',
+            'feature-contract.ts'
+        ), 'utf8')
+        const actual = [ ...contract.matchAll(
+            /feature:\s*'([^']+)'[\s\S]*?requiredFeature:\s*'([^']+)'/g
+        ) ].map(match => ({
+            feature: match[1],
+            requiredFeature: match[2],
+        }))
+
+        expect(actual).to.deep.equal(expected)
+        expect(dependencies.entries
+            .filter(entry => entry.kind === 'native-feature-implication')
+            .every(entry => !entry.callerPreflight)).to.equal(true)
+    })
 })
+
+function readJson(file) {
+
+    return JSON.parse(fs.readFileSync(file, 'utf8'))
+}
