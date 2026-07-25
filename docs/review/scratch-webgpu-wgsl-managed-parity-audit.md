@@ -729,3 +729,105 @@ path, and bounded evidence, with zero unresolved items. The Goal's terminal
 result is nevertheless `issues-found` because the one allowed online refresh
 was partial. The issue is source-observation completeness, not a discovered
 WebGPU/WGSL expression gap in Scratch.
+
+## Normative Entry Evidence Attribution Follow-Up (2026-07-25)
+
+This follow-up starts from exact `dev-feature`
+`4f14d73826fd00760b0758acb04195cb257b75aa` on
+`socu/scratch-normative-evidence-attribution-v1`. It hardens the proof system
+only. Scratch runtime behavior, public API behavior, examples, browser
+rendering, and the frozen normative inventories are outside its change scope.
+
+### Fixed Freshness Observation
+
+Each official source was observed once. All observations matched the fixed
+baseline, so no specification drift widened this Goal:
+
+| Source | Observed fact |
+| --- | --- |
+| WebGPU CRD 14 July 2026 | SHA-256 `23b38cef5e23be710ef865b800f63e5874edd03bb08bbecfa8ac5b3020b47d30` |
+| WGSL CRD 16 July 2026 | SHA-256 `2ae2de9464930086cb7c611951262bfd4c989a312802e30162cfd246567d66aa` |
+| GPUWeb repository | `b33e6efb182d11156851271586563cc77575059c` |
+| `gpuweb/types` repository | `9ba8a0618e1efad8e1ee444ef6ecfae761b2bc30` |
+
+### Entry-Proof Schema
+
+The living coverage manifest now uses schema version 3. Every WebGPU entry
+has entry granularity and its own ID selector. WGSL proof sharing is limited
+to an explicit normative kind or an explicit semantic family. A managed entry
+contains:
+
+- a named proof profile and entry-specific rationale;
+- public Scratch symbols resolved through the package source export graph;
+- native operation evidence as exact operation/source-path pairs;
+- source paths and operation lists derived from those pairs;
+- typed feature, language-feature, enable-extension, limit, dependency, and
+  conditional requirement arrays.
+
+All 78 normative WebGPU methods are registered as exact rules. Their emitted
+operation evidence contains one corresponding native method, except the two
+documented synchronous-pipeline semantic equivalents, which deliberately
+point to `createComputePipelineAsync` and `createRenderPipelineAsync`, and the
+five native error constructors, which point to structured
+`serializeNativeGpuError` normalization. `GPUDevice` has no owner-level rule,
+so an unregistered member cannot inherit generic runtime evidence.
+
+Non-method owner rules are limited to homogeneous finite groups. Bind-set
+descriptors are separated from bind-layout descriptors; render and compute
+pipeline state are separated; query allocation is separated from render and
+compute timestamp writes; shader creation is separated from compilation
+messages; texture allocation is separated from texture views; command
+encoder creation is separated from command-buffer finish; render-bundle
+encoder creation is separated from bundle finish; and texel-copy buffer and
+texture records carry only the copy quadrants that actually consume them.
+Regression assertions pin representative entries from every split.
+
+Historical classifications remain visible in `goalStart`, but they do not
+control the current verdict. In particular, descriptor fields and constants
+are not retained as semantic equivalents merely because an older manifest
+used that label. The current result is derived from the current finite rules:
+
+| Result | Count |
+| --- | ---: |
+| WebGPU normative entries | 582 |
+| WGSL normative entries | 662 |
+| Managed first class | 668 |
+| Managed semantic equivalent | 574 |
+| Explained DOM-composition not applicable | 2 |
+| Unresolved | 0 |
+
+The explicit non-composition WebGPU semantic-equivalent cases remain the
+synchronous pipeline methods, raw queue exposure, mutable label, native error
+scope and uncaptured-error surfaces, five native error constructors,
+`GPUCommandBuffer` plus its descriptor, and the aggregate
+`GPUSupportedLimits` interface. The concrete limit properties retain their
+own first-class limit requirements.
+
+### Regression And Requirement Closure
+
+The six fixed attribution regressions now resolve as follows:
+
+| Normative entry | Exact managed proof |
+| --- | --- |
+| `GPUDevice.createRenderBundleEncoder` | `RenderBundle`, `RenderBundleDescriptor`, and `ScratchRuntime` in `render-bundle.ts`; native `createRenderBundleEncoder` |
+| `GPURenderPassEncoder.executeBundles` | `ExecuteRenderBundlesCommand` and `RenderBundle` in `render-bundle.ts`; native `executeBundles` |
+| `interface.GPUCommandBufferDescriptor` | `SubmissionBuilder` and `SubmittedWork` in `submission.ts`; native `GPUCommandEncoder.finish` |
+| `interface.GPUVertexBufferLayout` | render pipeline descriptor symbols in `pipeline-creation.ts`; native `createRenderPipelineAsync` |
+| `interface.GPUTexelCopyTextureInfo` | `CopyCommand` texture endpoints in `command.ts`; all three texture-involving GPU copy operations |
+| `interface.GPUSupportedLimits` | immutable adapter/device limit facts in `runtime.ts`; interface-level `limits: []` |
+
+Requirement validation rejects null, undefined, empty, duplicate, unsorted,
+or unknown names. The same checks apply inside conditional requirements.
+Dependency references are canonical IDs from the fixed dependency inventory;
+the WGSL enable-extension manifest therefore records
+`caller-companion.subgroup-size-control.subgroups` instead of duplicating a
+loosely shaped feature pair.
+
+Two consecutive generations from the same source produced byte-identical
+coverage and enable-extension manifests. No runtime or example file changed.
+
+### Review And Final Gate
+
+The single fresh-context review result and the one final full-gate result are
+recorded here after they run. This follow-up does not claim terminal `clean`
+until both bounded steps are complete.

@@ -427,6 +427,26 @@ const entryProofProfiles = Object.freeze({
             ),
         ]
     ),
+    'runtime-request-adapter': proofProfile(
+        'ScratchRuntimeCreateOptions preserves explicit adapter acquisition inputs.',
+        [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions' ],
+        [
+            operationProof(
+                'requestAdapter',
+                'packages/geoscratch/src/scratch/runtime.ts'
+            ),
+        ]
+    ),
+    'runtime-request-device': proofProfile(
+        'ScratchRuntimeCreateOptions preserves explicit device acquisition inputs.',
+        [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions' ],
+        [
+            operationProof(
+                'requestDevice',
+                'packages/geoscratch/src/scratch/runtime.ts'
+            ),
+        ]
+    ),
     'runtime-capabilities': proofProfile(
         'ScratchRuntime exposes immutable adapter and device capability facts.',
         [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts' ],
@@ -437,6 +457,26 @@ const entryProofProfiles = Object.freeze({
             ),
             operationProof(
                 'deviceFeatures',
+                'packages/geoscratch/src/scratch/runtime.ts'
+            ),
+        ]
+    ),
+    'runtime-adapter-info': proofProfile(
+        'ScratchRuntime exposes an immutable adapter information snapshot.',
+        [ 'ScratchAdapterInfoSnapshot', 'ScratchRuntime' ],
+        [
+            operationProof(
+                'adapterInfo',
+                'packages/geoscratch/src/scratch/runtime.ts'
+            ),
+        ]
+    ),
+    'runtime-wgsl-features': proofProfile(
+        'ScratchRuntime exposes immutable WGSL language-feature facts.',
+        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts' ],
+        [
+            operationProof(
+                'wgslLanguageFeatures',
                 'packages/geoscratch/src/scratch/runtime.ts'
             ),
         ]
@@ -493,6 +533,16 @@ const entryProofProfiles = Object.freeze({
             ),
         ]
     ),
+    'surface-configuration': proofProfile(
+        'SurfaceOptions preserves explicit native canvas configuration.',
+        [ 'Surface', 'SurfaceOptions' ],
+        [
+            operationProof(
+                'GPUCanvasContext.configure',
+                'packages/geoscratch/src/scratch/surface.ts'
+            ),
+        ]
+    ),
     'resource-lifetime': proofProfile(
         'Resource identity and native allocation disposal are explicit.',
         [ 'Resource', 'ResourceState' ],
@@ -539,6 +589,26 @@ const entryProofProfiles = Object.freeze({
                 'createTexture',
                 'packages/geoscratch/src/scratch/texture.ts'
             ),
+            operationProof(
+                'GPUTexture.createView',
+                'packages/geoscratch/src/scratch/texture.ts'
+            ),
+        ]
+    ),
+    'texture-allocation': proofProfile(
+        'TextureResource preserves explicit native texture allocation facts.',
+        [ 'TextureResource' ],
+        [
+            operationProof(
+                'createTexture',
+                'packages/geoscratch/src/scratch/texture.ts'
+            ),
+        ]
+    ),
+    'texture-view': proofProfile(
+        'TextureViewSpec preserves explicit native texture-view selection.',
+        [ 'TextureResource', 'TextureViewSpec' ],
+        [
             operationProof(
                 'GPUTexture.createView',
                 'packages/geoscratch/src/scratch/texture.ts'
@@ -599,6 +669,26 @@ const entryProofProfiles = Object.freeze({
             ),
         ]
     ),
+    'shader-module-create': proofProfile(
+        'ShaderModule preserves caller-authored WGSL and explicit compilation inputs.',
+        [ 'Program', 'ShaderModule', 'ShaderModuleSourcePart' ],
+        [
+            operationProof(
+                'createShaderModule',
+                'packages/geoscratch/src/scratch/shader-module.ts'
+            ),
+        ]
+    ),
+    'shader-compilation-info': proofProfile(
+        'ShaderModuleCompilationReport preserves native compilation messages and locations.',
+        [ 'ShaderModule', 'ShaderModuleCompilationReport' ],
+        [
+            operationProof(
+                'getCompilationInfo',
+                'packages/geoscratch/src/scratch/shader-module.ts'
+            ),
+        ]
+    ),
     'pipeline-state': proofProfile(
         'Scratch render and compute pipelines preserve explicit stable pipeline state.',
         [
@@ -635,6 +725,25 @@ const entryProofProfiles = Object.freeze({
             operationProof(
                 'createComputePipelineAsync',
                 'packages/geoscratch/src/scratch/pipeline-creation.ts'
+            ),
+        ]
+    ),
+    'pipeline-compare-function': proofProfile(
+        'Scratch render pipelines and samplers preserve native comparison functions.',
+        [
+            'SamplerResource',
+            'SamplerResourceDescriptor',
+            'ScratchRenderPipeline',
+            'ScratchRenderPipelineDescriptor',
+        ],
+        [
+            operationProof(
+                'createRenderPipelineAsync',
+                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+            ),
+            operationProof(
+                'createSampler',
+                'packages/geoscratch/src/scratch/sampler.ts'
             ),
         ]
     ),
@@ -696,6 +805,16 @@ const entryProofProfiles = Object.freeze({
             ),
         ]
     ),
+    'command-encoder-create': proofProfile(
+        'SubmissionBuilder owns explicit native command encoder construction.',
+        [ 'SubmissionBuilder' ],
+        [
+            operationProof(
+                'createCommandEncoder',
+                'packages/geoscratch/src/scratch/submission.ts'
+            ),
+        ]
+    ),
     'submission-command-buffer': proofProfile(
         'SubmissionBuilder produces native command buffers and SubmittedWork retains their observation.',
         [ 'SubmissionBuilder', 'SubmittedWork' ],
@@ -742,6 +861,20 @@ const entryProofProfiles = Object.freeze({
             ),
             operationProof(
                 'copyTextureToTexture',
+                'packages/geoscratch/src/scratch/command.ts'
+            ),
+        ]
+    ),
+    'copy-buffer-info': proofProfile(
+        'CopyCommand buffer endpoints preserve native texel-copy buffer layout.',
+        [ 'BufferCopyCommandSourceDescriptor', 'CopyCommand' ],
+        [
+            operationProof(
+                'copyBufferToTexture',
+                'packages/geoscratch/src/scratch/command.ts'
+            ),
+            operationProof(
+                'copyTextureToBuffer',
                 'packages/geoscratch/src/scratch/command.ts'
             ),
         ]
@@ -798,6 +931,36 @@ const entryProofProfiles = Object.freeze({
             ),
         ]
     ),
+    'query-create': proofProfile(
+        'QuerySetResource preserves indexed native query allocation semantics.',
+        [ 'QuerySetResource' ],
+        [
+            operationProof(
+                'createQuerySet',
+                'packages/geoscratch/src/scratch/query-set.ts'
+            ),
+        ]
+    ),
+    'compute-pass-timestamp': proofProfile(
+        'ComputePassSpec preserves explicit timestamp writes against QuerySetResource slots.',
+        [ 'ComputePassSpec', 'QuerySetResource' ],
+        [
+            operationProof(
+                'beginComputePass',
+                'packages/geoscratch/src/scratch/submission.ts'
+            ),
+        ]
+    ),
+    'render-pass-timestamp': proofProfile(
+        'RenderPassSpec preserves explicit timestamp writes against QuerySetResource slots.',
+        [ 'QuerySetResource', 'RenderPassSpec' ],
+        [
+            operationProof(
+                'beginRenderPass',
+                'packages/geoscratch/src/scratch/submission.ts'
+            ),
+        ]
+    ),
     'external-texture': proofProfile(
         'ExternalTextureBinding preserves import, binding, expiry, and attempt-local realization.',
         [ 'ExternalTextureBinding', 'ExternalTextureBindLayoutEntry' ],
@@ -842,6 +1005,16 @@ const entryProofProfiles = Object.freeze({
             ),
         ]
     ),
+    'render-bundle-finish': proofProfile(
+        'RenderBundle preserves native render-bundle finish semantics.',
+        [ 'RenderBundle', 'RenderBundleDescriptor' ],
+        [
+            operationProof(
+                'GPURenderBundleEncoder.finish',
+                'packages/geoscratch/src/scratch/render-bundle.ts'
+            ),
+        ]
+    ),
     'debug-command': proofProfile(
         'DebugCommand preserves native debug groups and markers.',
         [ 'DebugCommand' ],
@@ -871,6 +1044,16 @@ const entryProofProfiles = Object.freeze({
             operationProof(
                 'popErrorScope',
                 'packages/geoscratch/src/scratch/supporting-object-creation.ts'
+            ),
+        ]
+    ),
+    'diagnostic-error-facts': proofProfile(
+        'ScratchDiagnostic preserves structured native GPU error facts.',
+        [ 'ScratchDiagnostic', 'ScratchDiagnosticError', 'ScratchRuntimeDiagnostics' ],
+        [
+            operationProof(
+                'serializeNativeGpuError',
+                'packages/geoscratch/src/scratch/gpu-operation.ts'
             ),
         ]
     ),
@@ -1161,10 +1344,7 @@ function currentWebGpuEntry({
     goalStart,
 }) {
 
-    const coverage = preserveHistoricalSemanticClassification(
-        webGpuCoverage(entry),
-        goalStart
-    )
+    const coverage = webGpuCoverage(entry)
     return currentEntry({
         domain: 'webgpu',
         entry,
@@ -1188,20 +1368,6 @@ function currentWebGpuEntry({
                 ? 'native-semantic-equivalence'
                 : 'native-call-or-descriptor',
     })
-}
-
-function preserveHistoricalSemanticClassification(coverage, goalStart) {
-
-    if (
-        coverage.classification === 'managed-first-class' &&
-        goalStart?.status === 'managed-semantic-equivalent'
-    ) {
-        return {
-            ...coverage,
-            classification: 'managed-semantic-equivalent',
-        }
-    }
-    return coverage
 }
 
 function currentWgslEntry({
@@ -1490,7 +1656,7 @@ const webGpuExactRules = Object.freeze({
     'GPU.wgslLanguageFeatures': webGpuRule(
         'webgpu:wgsl-language-features',
         'webgpu-runtime-capabilities',
-        'runtime-capabilities'
+        'runtime-wgsl-features'
     ),
     'GPUAdapter.requestDevice': webGpuOperationRule(
         'webgpu:adapter:requestDevice',
@@ -1517,7 +1683,18 @@ const webGpuExactRules = Object.freeze({
     'GPUAdapter.info': webGpuOperationRule(
         'webgpu:adapter:info',
         'webgpu-runtime-capabilities',
-        'runtime-capabilities',
+        'runtime-adapter-info',
+        [
+            operationProof(
+                'adapterInfo',
+                'packages/geoscratch/src/scratch/runtime.ts'
+            ),
+        ]
+    ),
+    'GPUAdapter.isFallbackAdapter': webGpuOperationRule(
+        'webgpu:adapter:isFallbackAdapter',
+        'webgpu-runtime-capabilities',
+        'runtime-adapter-info',
         [
             operationProof(
                 'adapterInfo',
@@ -1754,13 +1931,13 @@ const webGpuExactRules = Object.freeze({
     ),
     'GPUComputePassDescriptor.timestampWrites': webGpuRule(
         'webgpu:compute-pass:timestampWrites',
-        'webgpu-query',
-        'query'
+        [ 'webgpu-pass-state', 'webgpu-query' ],
+        'compute-pass-timestamp'
     ),
     'GPURenderPassDescriptor.timestampWrites': webGpuRule(
         'webgpu:render-pass:timestampWrites',
-        'webgpu-query',
-        'query'
+        [ 'webgpu-pass-state', 'webgpu-query' ],
+        'render-pass-timestamp'
     ),
     'GPURenderPassEncoder.executeBundles': webGpuRule(
         'webgpu:render-pass:executeBundles',
@@ -1867,7 +2044,7 @@ const webGpuExactRules = Object.freeze({
     'GPUDevice.adapterInfo': webGpuOperationRule(
         'webgpu:device:adapterInfo',
         'webgpu-runtime-capabilities',
-        'runtime-capabilities',
+        'runtime-adapter-info',
         [
             operationProof(
                 'adapterInfo',
@@ -2113,11 +2290,17 @@ const webGpuExactRules = Object.freeze({
         ],
         { publicSymbols: [ 'TextureUploadCommand' ] }
     ),
-    'GPUObjectBase.label': webGpuRule(
+    'GPUObjectBase.label': webGpuOperationRule(
         'webgpu:object:label',
         'webgpu-resource-lifetime',
         'resource-lifetime',
-        'managed-semantic-equivalent'
+        [
+            operationProof(
+                'createScratchNativeLabel',
+                'packages/geoscratch/src/scratch/native-allocation.ts'
+            ),
+        ],
+        { classification: 'managed-semantic-equivalent' }
     ),
     'GPUPipelineBase.getBindGroupLayout': webGpuOperationRule(
         'webgpu:pipeline:getBindGroupLayout',
@@ -2458,26 +2641,48 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
     webGpuOwnerRule(
         [
             'GPUAdapter',
-            'GPUAdapterInfo',
             'GPUFeatureName',
             'GPUSupportedFeatures',
-            'NavigatorGPU',
-            'WGSLLanguageFeatures',
         ],
         'webgpu:runtime-capability',
         'webgpu-runtime-capabilities',
         'runtime-capabilities'
     ),
     webGpuOwnerRule(
+        [ 'GPUAdapterInfo' ],
+        'webgpu:runtime-adapter-info',
+        'webgpu-runtime-capabilities',
+        'runtime-adapter-info'
+    ),
+    webGpuOwnerRule(
+        [ 'NavigatorGPU' ],
+        'webgpu:navigator-gpu',
+        'webgpu-runtime-capabilities',
+        'runtime-request-adapter'
+    ),
+    webGpuOwnerRule(
+        [ 'WGSLLanguageFeatures' ],
+        'webgpu:wgsl-language-features',
+        'webgpu-runtime-capabilities',
+        'runtime-wgsl-features'
+    ),
+    webGpuOwnerRule(
         [
             'GPUDeviceDescriptor',
-            'GPUPowerPreference',
             'GPUQueueDescriptor',
+        ],
+        'webgpu:runtime-device-request',
+        'webgpu-runtime-capabilities',
+        'runtime-request-device'
+    ),
+    webGpuOwnerRule(
+        [
+            'GPUPowerPreference',
             'GPURequestAdapterOptions',
         ],
-        'webgpu:runtime-request',
+        'webgpu:runtime-adapter-request',
         'webgpu-runtime-capabilities',
-        'runtime-adapter'
+        'runtime-request-adapter'
     ),
     webGpuOwnerRule(
         [ 'GPUDeviceLostInfo', 'GPUDeviceLostReason' ],
@@ -2495,11 +2700,16 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
         [
             'GPUCanvasAlphaMode',
             'GPUCanvasConfiguration',
-            'GPUCanvasContext',
             'GPUCanvasToneMapping',
             'GPUCanvasToneMappingMode',
         ],
-        'webgpu:surface-presentation',
+        'webgpu:surface-configuration',
+        'webgpu-surface-presentation',
+        'surface-configuration'
+    ),
+    webGpuOwnerRule(
+        [ 'GPUCanvasContext' ],
+        'webgpu:surface-context',
         'webgpu-surface-presentation',
         'surface-presentation'
     ),
@@ -2529,13 +2739,21 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
             'GPUBindGroup',
             'GPUBindGroupDescriptor',
             'GPUBindGroupEntry',
+            'GPUBindingResource',
+            'GPUBufferBinding',
+        ],
+        'webgpu:binding-set',
+        'webgpu-bindings',
+        'binding-set'
+    ),
+    webGpuOwnerRule(
+        [
             'GPUBindGroupLayout',
             'GPUBindGroupLayoutDescriptor',
             'GPUBindGroupLayoutEntry',
-            'GPUBindingResource',
-            'GPUBufferBinding',
             'GPUBufferBindingLayout',
             'GPUBufferBindingType',
+            'GPUExternalTextureBindingLayout',
             'GPUSamplerBindingLayout',
             'GPUSamplerBindingType',
             'GPUShaderStage',
@@ -2545,26 +2763,33 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
             'GPUTextureBindingLayout',
             'GPUTextureSampleType',
         ],
-        'webgpu:binding',
+        'webgpu:binding-layout',
         'webgpu-bindings',
         'binding-layout'
     ),
     webGpuOwnerRule(
         [
             'GPUTexture',
-            'GPUTextureAspect',
             'GPUTextureDescriptor',
             'GPUTextureDimension',
             'GPUTextureFormat',
             'GPUTextureUsage',
             'GPUTextureUsageFlags',
+        ],
+        'webgpu:texture-allocation',
+        'webgpu-texture-resource',
+        'texture-allocation'
+    ),
+    webGpuOwnerRule(
+        [
+            'GPUTextureAspect',
             'GPUTextureView',
             'GPUTextureViewDescriptor',
             'GPUTextureViewDimension',
         ],
-        'webgpu:texture-resource',
+        'webgpu:texture-view',
         'webgpu-texture-resource',
-        'texture-resource'
+        'texture-view'
     ),
     webGpuOwnerRule(
         [
@@ -2580,31 +2805,44 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
     ),
     webGpuOwnerRule(
         [
+            'GPUAutoLayoutMode',
+            'GPUPipelineBase',
+            'GPUPipelineConstantValue',
+            'GPUPipelineDescriptorBase',
+            'GPUPipelineLayout',
+            'GPUPipelineLayoutDescriptor',
+            'GPUProgrammableStage',
+        ],
+        'webgpu:pipeline-state',
+        'webgpu-pipelines',
+        'pipeline-state'
+    ),
+    webGpuOwnerRule(
+        [
+            'GPUComputePipeline',
+            'GPUComputePipelineDescriptor',
+        ],
+        'webgpu:compute-pipeline-state',
+        'webgpu-pipelines',
+        'pipeline-compute'
+    ),
+    webGpuOwnerRule(
+        [
             'GPUBlendComponent',
             'GPUBlendFactor',
             'GPUBlendOperation',
             'GPUBlendState',
-            'GPUAutoLayoutMode',
             'GPUColorTargetState',
             'GPUColorWrite',
             'GPUColorWriteFlags',
-            'GPUCompareFunction',
-            'GPUComputePipeline',
-            'GPUComputePipelineDescriptor',
             'GPUCullMode',
             'GPUDepthBias',
             'GPUDepthStencilState',
             'GPUFragmentState',
             'GPUFrontFace',
             'GPUMultisampleState',
-            'GPUPipelineBase',
-            'GPUPipelineConstantValue',
-            'GPUPipelineDescriptorBase',
-            'GPUPipelineLayout',
-            'GPUPipelineLayoutDescriptor',
             'GPUPrimitiveState',
             'GPUPrimitiveTopology',
-            'GPUProgrammableStage',
             'GPURenderPipeline',
             'GPURenderPipelineDescriptor',
             'GPUSampleMask',
@@ -2617,9 +2855,15 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
             'GPUVertexState',
             'GPUVertexStepMode',
         ],
-        'webgpu:pipeline-state',
+        'webgpu:render-pipeline-state',
         'webgpu-pipelines',
-        'pipeline-state'
+        'pipeline-render'
+    ),
+    webGpuOwnerRule(
+        [ 'GPUCompareFunction' ],
+        'webgpu:compare-function',
+        [ 'webgpu-pipelines', 'webgpu-sampler' ],
+        'pipeline-compare-function'
     ),
     webGpuOwnerRule(
         [
@@ -2647,39 +2891,63 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
     ),
     webGpuOwnerRule(
         [
-            'GPUComputePassTimestampWrites',
             'GPUQuerySet',
             'GPUQuerySetDescriptor',
             'GPUQueryType',
-            'GPURenderPassTimestampWrites',
         ],
-        'webgpu:query',
+        'webgpu:query-create',
         'webgpu-query',
-        'query'
+        'query-create'
+    ),
+    webGpuOwnerRule(
+        [ 'GPUComputePassTimestampWrites' ],
+        'webgpu:compute-pass-timestamp',
+        [ 'webgpu-pass-state', 'webgpu-query' ],
+        'compute-pass-timestamp'
+    ),
+    webGpuOwnerRule(
+        [ 'GPURenderPassTimestampWrites' ],
+        'webgpu:render-pass-timestamp',
+        [ 'webgpu-pass-state', 'webgpu-query' ],
+        'render-pass-timestamp'
+    ),
+    webGpuOwnerRule(
+        [
+            'GPUShaderModule',
+            'GPUShaderModuleCompilationHint',
+            'GPUShaderModuleDescriptor',
+        ],
+        'webgpu:shader-module-create',
+        'webgpu-shader-program',
+        'shader-module-create'
     ),
     webGpuOwnerRule(
         [
             'GPUCompilationInfo',
             'GPUCompilationMessage',
             'GPUCompilationMessageType',
-            'GPUShaderModule',
-            'GPUShaderModuleCompilationHint',
-            'GPUShaderModuleDescriptor',
         ],
-        'webgpu:shader-program',
+        'webgpu:shader-compilation-info',
         'webgpu-shader-program',
-        'shader-program'
+        'shader-compilation-info'
     ),
     webGpuOwnerRule(
         [
             'GPUCommandBuffer',
             'GPUCommandBufferDescriptor',
+        ],
+        'webgpu:command-buffer',
+        'webgpu-submission',
+        'submission-command-buffer'
+    ),
+    webGpuOwnerRule(
+        [
             'GPUCommandEncoder',
             'GPUCommandEncoderDescriptor',
         ],
-        'webgpu:command-encoding',
+        'webgpu:command-encoder-create',
         'webgpu-submission',
-        'command-encoding'
+        'command-encoder-create'
     ),
     webGpuOwnerRule(
         [
@@ -2689,13 +2957,20 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
             'GPUOrigin2DDict',
             'GPUOrigin3D',
             'GPUOrigin3DDict',
-            'GPUTexelCopyBufferInfo',
-            'GPUTexelCopyBufferLayout',
             'GPUTexelCopyTextureInfo',
         ],
-        'webgpu:copy-command',
+        'webgpu:copy-texture-info',
         'webgpu-copy-upload',
-        'copy-command'
+        'copy-texture-info'
+    ),
+    webGpuOwnerRule(
+        [
+            'GPUTexelCopyBufferInfo',
+            'GPUTexelCopyBufferLayout',
+        ],
+        'webgpu:copy-buffer-info',
+        'webgpu-copy-upload',
+        'copy-buffer-info'
     ),
     webGpuOwnerRule(
         [
@@ -2710,7 +2985,6 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
     webGpuOwnerRule(
         [
             'GPUExternalTexture',
-            'GPUExternalTextureBindingLayout',
             'GPUExternalTextureDescriptor',
         ],
         'webgpu:external-texture',
@@ -2721,12 +2995,19 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
         [
             'GPURenderBundle',
             'GPURenderBundleDescriptor',
+        ],
+        'webgpu:render-bundle-finish',
+        'webgpu-render-bundle-debug',
+        'render-bundle-finish'
+    ),
+    webGpuOwnerRule(
+        [
             'GPURenderBundleEncoder',
             'GPURenderBundleEncoderDescriptor',
         ],
-        'webgpu:render-bundle',
+        'webgpu:render-bundle-create',
         'webgpu-render-bundle-debug',
-        'render-bundle'
+        'render-bundle-create'
     ),
     webGpuOwnerRule(
         [ 'GPUCommandsMixin', 'GPUDebugCommandsMixin' ],
@@ -2753,9 +3034,14 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
         'submission'
     ),
     webGpuOwnerRule(
+        [ 'GPUErrorFilter' ],
+        'webgpu:error-scope-filter',
+        'webgpu-diagnostics',
+        'diagnostics'
+    ),
+    webGpuOwnerRule(
         [
             'GPUError',
-            'GPUErrorFilter',
             'GPUInternalError',
             'GPUOutOfMemoryError',
             'GPUPipelineError',
@@ -2765,9 +3051,9 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
             'GPUUncapturedErrorEventInit',
             'GPUValidationError',
         ],
-        'webgpu:diagnostics',
+        'webgpu:diagnostic-error-facts',
         'webgpu-diagnostics',
-        'diagnostics'
+        'diagnostic-error-facts'
     ),
     webGpuOwnerRule(
         [

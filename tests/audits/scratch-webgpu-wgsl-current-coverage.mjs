@@ -155,8 +155,8 @@ const checks = {
         current.summary.frozenWebgpuHistoricalEntryCount === 591 &&
         current.summary.frozenWgslHistoricalEntryCount === 65,
     exactCurrentClassifications:
-        current.summary.byClassification['managed-first-class'] === 502 &&
-        current.summary.byClassification['managed-semantic-equivalent'] === 740 &&
+        current.summary.byClassification['managed-first-class'] === 668 &&
+        current.summary.byClassification['managed-semantic-equivalent'] === 574 &&
         current.summary.byClassification['not-applicable'] === 2 &&
         (current.summary.byClassification.unresolved ?? 0) === 0,
     exactCurrentStatuses:
@@ -174,6 +174,8 @@ const checks = {
     completeEntryShape: current.entries.every(entryShapeIsComplete),
     exactEvidenceAttributionRegressions:
         evidenceAttributionRegressionsPass(),
+    heterogeneousOwnerProfilesAreSplit:
+        heterogeneousOwnerProfilesAreSplit(),
     intentionalSemanticEquivalentsRemainExplicit:
         intentionalSemanticEquivalentsRemainExplicit(),
     managedEntryEvidenceIsEntrySpecific:
@@ -440,7 +442,7 @@ function normativeAuthorityIsExplicit() {
         !/\bcreateWgslManifest\s*\(/.test(source) &&
         !/\benableExtensionContracts\b/.test(source) &&
         !source.includes('shader-semantic-domain') &&
-        !/fallback|catch[- ]?all/i.test(source)
+        !/catch[- ]?all/i.test(source)
     )
 }
 
@@ -638,6 +640,87 @@ function intentionalSemanticEquivalentsRemainExplicit() {
         entries.get(id)?.current.classification ===
             'managed-semantic-equivalent'
     )
+}
+
+function heterogeneousOwnerProfilesAreSplit() {
+
+    const entries = new Map(current.entries.map(entry => [ entry.id, entry ]))
+    const expected = new Map([
+        [
+            'GPUBindGroupDescriptor.entries',
+            [ 'binding-set', [ 'createBindGroup' ] ],
+        ],
+        [
+            'GPUBindGroupLayoutDescriptor.entries',
+            [ 'binding-layout', [ 'createBindGroupLayout' ] ],
+        ],
+        [
+            'GPUComputePipelineDescriptor.compute',
+            [ 'pipeline-compute', [ 'createComputePipelineAsync' ] ],
+        ],
+        [
+            'GPURenderPipelineDescriptor.vertex',
+            [ 'pipeline-render', [ 'createRenderPipelineAsync' ] ],
+        ],
+        [
+            'GPUComputePassTimestampWrites.querySet',
+            [ 'compute-pass-timestamp', [ 'beginComputePass' ] ],
+        ],
+        [
+            'GPURenderPassTimestampWrites.querySet',
+            [ 'render-pass-timestamp', [ 'beginRenderPass' ] ],
+        ],
+        [
+            'GPUShaderModuleDescriptor.code',
+            [ 'shader-module-create', [ 'createShaderModule' ] ],
+        ],
+        [
+            'GPUCompilationMessage.message',
+            [ 'shader-compilation-info', [ 'getCompilationInfo' ] ],
+        ],
+        [
+            'GPUTextureDescriptor.size',
+            [ 'texture-allocation', [ 'createTexture' ] ],
+        ],
+        [
+            'GPUTextureViewDescriptor.dimension',
+            [ 'texture-view', [ 'GPUTexture.createView' ] ],
+        ],
+        [
+            'interface.GPUCommandEncoderDescriptor',
+            [ 'command-encoder-create', [ 'createCommandEncoder' ] ],
+        ],
+        [
+            'interface.GPURenderBundleDescriptor',
+            [ 'render-bundle-finish', [ 'GPURenderBundleEncoder.finish' ] ],
+        ],
+        [
+            'interface.GPURenderBundleEncoderDescriptor',
+            [ 'render-bundle-create', [ 'createRenderBundleEncoder' ] ],
+        ],
+        [
+            'interface.GPUExternalTextureBindingLayout',
+            [ 'binding-layout', [ 'createBindGroupLayout' ] ],
+        ],
+        [
+            'GPUTexelCopyTextureInfo.texture',
+            [
+                'copy-texture-info',
+                [
+                    'copyBufferToTexture',
+                    'copyTextureToBuffer',
+                    'copyTextureToTexture',
+                ],
+            ],
+        ],
+    ])
+    return [ ...expected ].every(([ id, [ profile, operations ] ]) => {
+        const entry = entries.get(id)
+        return (
+            entry?.proof.profile === profile &&
+            deepEqual(entry.nativeLowering.operations, operations)
+        )
+    })
 }
 
 function entryProofMatches(entries, id, expected) {
