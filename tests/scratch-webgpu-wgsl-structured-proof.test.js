@@ -244,6 +244,79 @@ describe('Scratch structured WebGPU and WGSL normative proofs', () => {
             .to.throw('browser execution proof')
     })
 
+    it('requires executable browser proof for every managed WGSL entry', () => {
+
+        const manifest = createCurrentCoverageManifest()
+        const managedWgsl = manifest.entries.filter(entry =>
+            entry.domain === 'wgsl' &&
+            entry.current.status === 'managed'
+        )
+
+        expect(managedWgsl).to.have.length(662)
+        for (const entry of managedWgsl) {
+            expect(
+                entry.proof.evidence.some(item =>
+                    item.kind === 'browser-execution'
+                ),
+                entry.id
+            ).to.equal(true)
+        }
+
+        const unbound = structuredClone(manifest)
+        const generic = unbound.entries.find(entry =>
+            entry.domain === 'wgsl' &&
+            entry.proof.profile === 'wgsl-source' &&
+            entry.requirements.deviceFeatures.length === 0 &&
+            entry.requirements.enableExtensions.length === 0 &&
+            entry.requirements.languageFeatures.length === 0 &&
+            entry.requirements.limits.length === 0
+        )
+        generic.proof.evidence = generic.proof.evidence.filter(item =>
+            item.kind !== 'browser-execution'
+        )
+        expect(() => validateCoverageManifestV4(unbound))
+            .to.throw('browser execution proof')
+    })
+
+    it('binds browser execution results to the runner return value', () => {
+
+        const baseSelector = {
+            normativeId: 'semantic-section.types',
+            proofProfile: 'wgsl-source',
+            proofName: 'wgsl-source',
+            contractKey: 'name',
+            requiredConditions: [],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            runnerNames: [ 'runProfileFixture' ],
+        }
+
+        expect(() => assertStructuredEvidence(context, {
+            kind: 'browser-execution',
+            operation: 'correct browser dataflow',
+            sourcePath: fixturePath,
+            selector: {
+                ...baseSelector,
+                collection: 'correctProfileContracts',
+                resultCollection: 'correctProfileResults',
+            },
+        })).not.to.throw()
+
+        expect(() => assertStructuredEvidence(context, {
+            kind: 'browser-execution',
+            operation: 'wrong browser dataflow',
+            sourcePath: fixturePath,
+            selector: {
+                ...baseSelector,
+                collection: 'wrongProfileContracts',
+                resultCollection: 'wrongProfileResults',
+            },
+        })).to.throw('did not resolve')
+    })
+
     it('rejects WGSL payloads and capability results that are not bound', () => {
 
         expect(() => assertStructuredEvidence(context, {
@@ -300,6 +373,45 @@ describe('Scratch structured WebGPU and WGSL normative proofs', () => {
             root: process.cwd(),
         })).to.throw('WebGPU type proof does not match')
     }).timeout(10_000)
+
+    it('binds every adapter-info member to its exact native extraction', () => {
+
+        const manifest = createCurrentCoverageManifest()
+        const expectedKinds = new Map([
+            [ 'architecture', 'function-call' ],
+            [ 'description', 'function-call' ],
+            [ 'device', 'function-call' ],
+            [ 'isFallbackAdapter', 'property-read' ],
+            [ 'subgroupMaxSize', 'function-call' ],
+            [ 'subgroupMinSize', 'function-call' ],
+            [ 'vendor', 'function-call' ],
+        ])
+
+        for (const [ member, kind ] of expectedKinds) {
+            const entry = manifest.entries.find(candidate =>
+                candidate.id === `GPUAdapterInfo.${member}`
+            )
+            const exact = entry.nativeLowering.operationEvidence.find(item =>
+                item.operation === `adapterInfo.${member}`
+            )
+
+            expect(exact, entry.id).to.include({
+                kind,
+                sourcePath:
+                    'packages/geoscratch/src/scratch/runtime.ts',
+            })
+            if (kind === 'property-read') {
+                expect(exact.selector).to.deep.equal({
+                    member,
+                    receiverTypes: [ 'Partial<GPUAdapterInfo>' ],
+                })
+            } else {
+                expect(exact.selector.argumentLiterals).to.deep.equal([
+                    { index: 2, value: member },
+                ])
+            }
+        }
+    })
 
     it('rejects normative source and summary facts assigned to the wrong entry', () => {
 

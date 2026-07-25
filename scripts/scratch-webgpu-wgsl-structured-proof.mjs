@@ -367,6 +367,60 @@ const operationDefinitions = [
     ),
     propertyRead(
         'packages/geoscratch/src/scratch/runtime.ts',
+        'adapter.info',
+        'info',
+        [ 'GPUAdapter' ]
+    ),
+    call(
+        'packages/geoscratch/src/scratch/runtime.ts',
+        'adapterInfo.architecture',
+        'snapshotAdapterInfoString',
+        [],
+        [ { index: 2, value: 'architecture' } ]
+    ),
+    call(
+        'packages/geoscratch/src/scratch/runtime.ts',
+        'adapterInfo.description',
+        'snapshotAdapterInfoString',
+        [],
+        [ { index: 2, value: 'description' } ]
+    ),
+    call(
+        'packages/geoscratch/src/scratch/runtime.ts',
+        'adapterInfo.device',
+        'snapshotAdapterInfoString',
+        [],
+        [ { index: 2, value: 'device' } ]
+    ),
+    propertyRead(
+        'packages/geoscratch/src/scratch/runtime.ts',
+        'adapterInfo.isFallbackAdapter',
+        'isFallbackAdapter',
+        [ 'Partial<GPUAdapterInfo>' ]
+    ),
+    call(
+        'packages/geoscratch/src/scratch/runtime.ts',
+        'adapterInfo.subgroupMaxSize',
+        'snapshotAdapterInfoNumber',
+        [],
+        [ { index: 2, value: 'subgroupMaxSize' } ]
+    ),
+    call(
+        'packages/geoscratch/src/scratch/runtime.ts',
+        'adapterInfo.subgroupMinSize',
+        'snapshotAdapterInfoNumber',
+        [],
+        [ { index: 2, value: 'subgroupMinSize' } ]
+    ),
+    call(
+        'packages/geoscratch/src/scratch/runtime.ts',
+        'adapterInfo.vendor',
+        'snapshotAdapterInfoString',
+        [],
+        [ { index: 2, value: 'vendor' } ]
+    ),
+    propertyRead(
+        'packages/geoscratch/src/scratch/runtime.ts',
         'adapter.features',
         'features',
         [ 'GPUAdapter' ]
@@ -661,15 +715,11 @@ export function createEntryProofEvidence({
         if (proofProfile === 'wgsl-layout') {
             evidence.push(layoutContractEvidence(entry))
         }
-        if (
-            entry.kind === 'enable-extension' ||
-            entry.kind === 'language-extension'
-        ) {
-            evidence.push(browserExecutionEvidence(
-                entry,
-                requirements
-            ))
-        }
+        evidence.push(browserExecutionEvidence(
+            entry,
+            requirements,
+            proofProfile
+        ))
     }
     return sortEvidence(evidence)
 }
@@ -1194,8 +1244,25 @@ export const coverageManifestSchemaV4 = Object.freeze({
                 evidenceSchema('browser-execution', schemaObject({
                     collection: schemaString,
                     contractKey: schemaString,
+                    normativeId: schemaString,
                     proofName: schemaString,
+                    proofProfile: schemaString,
+                    requiredConditions: {
+                        $ref: '#/$defs/stringArray',
+                    },
+                    requiredDependencies: {
+                        $ref: '#/$defs/stringArray',
+                    },
+                    requiredEnableExtensions: {
+                        $ref: '#/$defs/stringArray',
+                    },
                     requiredFeatures: {
+                        $ref: '#/$defs/stringArray',
+                    },
+                    requiredLanguageFeatures: {
+                        $ref: '#/$defs/stringArray',
+                    },
+                    requiredLimits: {
                         $ref: '#/$defs/stringArray',
                     },
                     resultCollection: schemaString,
@@ -1380,7 +1447,11 @@ function findEvidenceMatches(context, sourceFile, evidence) {
         case 'layout-contract':
             return findLayoutContractMatches(sourceFile, evidence)
         case 'browser-execution':
-            return findBrowserExecutionMatches(sourceFile, evidence)
+            return findBrowserExecutionMatches(
+                context,
+                sourceFile,
+                evidence
+            )
         default:
             throw new TypeError(`unknown proof kind ${evidence.kind}`)
     }
@@ -1693,7 +1764,7 @@ function findLayoutContractMatches(sourceFile, evidence) {
     return matches
 }
 
-function findBrowserExecutionMatches(sourceFile, evidence) {
+function findBrowserExecutionMatches(context, sourceFile, evidence) {
 
     const selector = evidence.selector
     const contracts = findStaticContractCollection(
@@ -1705,10 +1776,9 @@ function findBrowserExecutionMatches(sourceFile, evidence) {
     )
     if (
         contract === undefined ||
-        !deepEqual(
-            contract.requiredFeatures,
-            selector.requiredFeatures
-        )
+        !Array.isArray(contract.proofProfiles) ||
+        !contract.proofProfiles.includes(selector.proofProfile) ||
+        !browserContractRequirementsMatch(contract, selector)
     ) {
         return []
     }
@@ -1721,34 +1791,148 @@ function findBrowserExecutionMatches(sourceFile, evidence) {
         ) {
             return
         }
-        const loopVariable = forOfVariableName(node)
+        const loopVariable = forOfVariableIdentifier(node)
         if (loopVariable === undefined) return
-        let runnerFound = false
+        const loopSymbol = context.checker.getSymbolAtLocation(loopVariable)
+        if (loopSymbol === undefined) return
+        const runnerResultSymbols = new Set()
+        const directRunnerCalls = new Set()
+        visit(node.statement, child => {
+            if (!ts.isCallExpression(child)) return
+            if (!isLoopRunnerCall(
+                context,
+                child,
+                selector.runnerNames,
+                loopSymbol
+            )) return
+            directRunnerCalls.add(child)
+            const resultIdentifier = assignedResultIdentifier(child)
+            if (resultIdentifier === undefined) return
+            const resultSymbol =
+                context.checker.getSymbolAtLocation(resultIdentifier)
+            if (resultSymbol !== undefined) {
+                runnerResultSymbols.add(resultSymbol)
+            }
+        })
         let resultFound = false
         visit(node.statement, child => {
             if (!ts.isCallExpression(child)) return
             const target = callTarget(child)
             if (
-                selector.runnerNames.includes(target.member) &&
-                child.arguments.some(argument =>
-                    ts.isIdentifier(argument) &&
-                    argument.text === loopVariable
-                )
-            ) {
-                runnerFound = true
-            }
-            if (
                 target.member === 'push' &&
                 target.receiver !== undefined &&
                 ts.isIdentifier(target.receiver) &&
-                target.receiver.text === selector.resultCollection
+                target.receiver.text === selector.resultCollection &&
+                child.arguments.some(argument =>
+                    browserResultArgumentMatches(
+                        context,
+                        argument,
+                        runnerResultSymbols,
+                        directRunnerCalls,
+                        selector.runnerNames,
+                        loopSymbol
+                    )
+                )
             ) {
                 resultFound = true
             }
         })
-        if (runnerFound && resultFound) loops.push(node)
+        if (directRunnerCalls.size > 0 && resultFound) loops.push(node)
     })
     return loops
+}
+
+function browserContractRequirementsMatch(contract, selector) {
+
+    return [
+        [ 'requiredConditions', 'requiredConditions' ],
+        [ 'requiredDependencies', 'requiredDependencies' ],
+        [ 'requiredEnableExtensions', 'requiredEnableExtensions' ],
+        [ 'requiredFeatures', 'requiredFeatures' ],
+        [ 'requiredLanguageFeatures', 'requiredLanguageFeatures' ],
+        [ 'requiredLimits', 'requiredLimits' ],
+    ].every(([ contractKey, selectorKey ]) =>
+        deepEqual(contract[contractKey], selector[selectorKey])
+    )
+}
+
+function isLoopRunnerCall(
+    context,
+    call,
+    runnerNames,
+    loopSymbol
+) {
+
+    const target = callTarget(call)
+    return (
+        runnerNames.includes(target.member) &&
+        call.arguments.some(argument => {
+            const expression = unwrapExpression(argument)
+            return (
+                ts.isIdentifier(expression) &&
+                context.checker.getSymbolAtLocation(expression) === loopSymbol
+            )
+        })
+    )
+}
+
+function assignedResultIdentifier(call) {
+
+    let current = call
+    while (
+        (
+            ts.isAwaitExpression(current.parent) ||
+            ts.isParenthesizedExpression(current.parent)
+        ) &&
+        current.parent.expression === current
+    ) {
+        current = current.parent
+    }
+    if (
+        ts.isVariableDeclaration(current.parent) &&
+        current.parent.initializer === current &&
+        ts.isIdentifier(current.parent.name)
+    ) {
+        return current.parent.name
+    }
+    if (
+        ts.isBinaryExpression(current.parent) &&
+        current.parent.right === current &&
+        current.parent.operatorToken.kind ===
+            ts.SyntaxKind.EqualsToken &&
+        ts.isIdentifier(current.parent.left)
+    ) {
+        return current.parent.left
+    }
+    return undefined
+}
+
+function browserResultArgumentMatches(
+    context,
+    argument,
+    runnerResultSymbols,
+    directRunnerCalls,
+    runnerNames,
+    loopSymbol
+) {
+
+    const expression = unwrapExpression(argument)
+    if (ts.isIdentifier(expression)) {
+        const symbol = context.checker.getSymbolAtLocation(expression)
+        return symbol !== undefined && runnerResultSymbols.has(symbol)
+    }
+    return (
+        ts.isCallExpression(expression) &&
+        (
+            directRunnerCalls.has(expression) ||
+            isLoopRunnerCall(
+                context,
+                expression,
+                runnerNames,
+                loopSymbol
+            )
+        )
+    )
 }
 
 function validateCoverageEntry(entry, location) {
@@ -2008,24 +2192,42 @@ function validateSelector(kind, selector, location) {
             assertExactKeys(selector, [
                 'collection',
                 'contractKey',
+                'normativeId',
                 'proofName',
+                'proofProfile',
+                'requiredConditions',
+                'requiredDependencies',
+                'requiredEnableExtensions',
                 'requiredFeatures',
+                'requiredLanguageFeatures',
+                'requiredLimits',
                 'resultCollection',
                 'runnerNames',
             ], location)
             for (const key of [
                 'collection',
                 'contractKey',
+                'normativeId',
                 'proofName',
+                'proofProfile',
                 'resultCollection',
             ]) {
                 assertNonEmptyString(selector[key], `${location}.${key}`)
             }
-            assertStringArray(
-                selector.requiredFeatures,
-                `${location}.requiredFeatures`,
-                { sorted: true, unique: true }
-            )
+            for (const key of [
+                'requiredConditions',
+                'requiredDependencies',
+                'requiredEnableExtensions',
+                'requiredFeatures',
+                'requiredLanguageFeatures',
+                'requiredLimits',
+            ]) {
+                assertStringArray(
+                    selector[key],
+                    `${location}.${key}`,
+                    { sorted: true, unique: true }
+                )
+            }
             assertStringArray(
                 selector.runnerNames,
                 `${location}.runnerNames`,
@@ -2101,10 +2303,6 @@ function validateManagedProofChain(entry, location) {
         }
         if (
             entry.domain === 'wgsl' &&
-            (
-                entry.kind === 'enable-extension' ||
-                entry.kind === 'language-extension'
-            ) &&
             !kinds.has('browser-execution')
         ) {
             throw new TypeError(
@@ -2287,9 +2485,33 @@ function verifyEntryProofBindings(entry, normative) {
     for (const proof of entry.proof.evidence) {
         if (
             proof.kind === 'browser-execution' &&
-            !deepEqual(
-                proof.selector.requiredFeatures,
-                entry.requirements.deviceFeatures
+            (
+                proof.selector.normativeId !== entry.id ||
+                proof.selector.proofProfile !== entry.proof.profile ||
+                !deepEqual(
+                    proof.selector.requiredConditions,
+                    entry.requirements.conditions
+                ) ||
+                !deepEqual(
+                    proof.selector.requiredDependencies,
+                    entry.requirements.dependencies
+                ) ||
+                !deepEqual(
+                    proof.selector.requiredEnableExtensions,
+                    entry.requirements.enableExtensions
+                ) ||
+                !deepEqual(
+                    proof.selector.requiredFeatures,
+                    entry.requirements.deviceFeatures
+                ) ||
+                !deepEqual(
+                    proof.selector.requiredLanguageFeatures,
+                    entry.requirements.languageFeatures
+                ) ||
+                !deepEqual(
+                    proof.selector.requiredLimits,
+                    entry.requirements.limits
+                )
             )
         ) {
             throw new Error(
@@ -2524,35 +2746,97 @@ function layoutContractEvidence(entry) {
     }
 }
 
-function browserExecutionEvidence(entry, requirements) {
+function browserExecutionEvidence(
+    entry,
+    requirements,
+    proofProfile
+) {
 
-    const enable = entry.kind === 'enable-extension'
+    const binding = browserExecutionBinding(
+        entry,
+        requirements,
+        proofProfile
+    )
     return {
         kind: 'browser-execution',
         operation: `${entry.id} browser execution`,
         sourcePath: wgslBrowserMatrixPath,
         selector: {
-            proofName: entry.name,
-            collection: enable
-                ? 'enableContracts'
-                : 'languageContracts',
-            contractKey: enable ? 'extension' : 'name',
+            ...binding,
+            normativeId: entry.id,
+            proofProfile,
+            requiredConditions: [ ...requirements.conditions ],
+            requiredDependencies: [ ...requirements.dependencies ],
+            requiredEnableExtensions:
+                [ ...requirements.enableExtensions ],
             requiredFeatures: [ ...requirements.deviceFeatures ],
-            runnerNames: enable
-                ? [
-                    'runF16LayoutProof',
-                    'runRenderEnableProof',
-                    'runSubgroupProof',
-                    'runSubgroupSizeProof',
-                ]
-                : [
-                    'runImmediateProof',
-                    'runLanguageSemanticProof',
-                ],
-            resultCollection: enable
-                ? 'enableResults'
-                : 'languageResults',
+            requiredLanguageFeatures:
+                [ ...requirements.languageFeatures ],
+            requiredLimits: [ ...requirements.limits ],
         },
+    }
+}
+
+function browserExecutionBinding(entry, requirements, proofProfile) {
+
+    if (entry.kind === 'enable-extension') {
+        return enableBrowserExecutionBinding(entry.name)
+    }
+    if (entry.kind === 'language-extension') {
+        return languageBrowserExecutionBinding(entry.name)
+    }
+    if (requirements.languageFeatures.length > 0) {
+        return languageBrowserExecutionBinding(
+            requirements.languageFeatures[0]
+        )
+    }
+    if (requirements.enableExtensions.length > 0) {
+        const extension = requirements.enableExtensions.includes(
+            'subgroup_size_control'
+        )
+            ? 'subgroup_size_control'
+            : requirements.enableExtensions[0]
+        return enableBrowserExecutionBinding(extension)
+    }
+    const proofName = requirements.limits.length === 0
+        ? proofProfile
+        : `${proofProfile}:${requirements.limits[0]}`
+    return {
+        collection: 'profileContracts',
+        contractKey: 'name',
+        proofName,
+        resultCollection: 'profileResults',
+        runnerNames: [ 'runNormativeProfileProof' ],
+    }
+}
+
+function enableBrowserExecutionBinding(proofName) {
+
+    return {
+        collection: 'enableContracts',
+        contractKey: 'extension',
+        proofName,
+        resultCollection: 'enableResults',
+        runnerNames: [
+            'runF16LayoutProof',
+            'runRenderEnableProof',
+            'runSubgroupProof',
+            'runSubgroupSizeProof',
+        ],
+    }
+}
+
+function languageBrowserExecutionBinding(proofName) {
+
+    return {
+        collection: 'languageContracts',
+        contractKey: 'name',
+        proofName,
+        resultCollection: 'languageResults',
+        runnerNames: [
+            'runImmediateProof',
+            'runLanguageSemanticProof',
+        ],
     }
 }
 
@@ -2990,6 +3274,22 @@ function staticExpressionName(expression) {
     return undefined
 }
 
+function unwrapExpression(expression) {
+
+    let current = expression
+    while (
+        ts.isAwaitExpression(current) ||
+        ts.isParenthesizedExpression(current) ||
+        ts.isAsExpression(current) ||
+        ts.isTypeAssertionExpression(current) ||
+        ts.isSatisfiesExpression(current) ||
+        ts.isNonNullExpression(current)
+    ) {
+        current = current.expression
+    }
+    return current
+}
+
 function isWriteAccess(node) {
 
     const parent = node.parent
@@ -3101,6 +3401,11 @@ function findStaticContractCollection(sourceFile, collectionName) {
 
 function forOfVariableName(statement) {
 
+    return forOfVariableIdentifier(statement)?.text
+}
+
+function forOfVariableIdentifier(statement) {
+
     const declarationList = statement.initializer
     if (
         !ts.isVariableDeclarationList(declarationList) ||
@@ -3110,7 +3415,7 @@ function forOfVariableName(statement) {
     }
     const declaration = declarationList.declarations[0]
     return ts.isIdentifier(declaration.name)
-        ? declaration.name.text
+        ? declaration.name
         : undefined
 }
 

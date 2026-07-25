@@ -32,6 +32,17 @@ const expectedLanguageProofNames = [
     'immediate_address_space',
     'buffer_view',
 ]
+const expectedProfileProofNames = [
+    'wgsl-binding',
+    'wgsl-capability',
+    'wgsl-capability:maxComputeWorkgroupStorageSize',
+    'wgsl-capability:maxImmediateSize',
+    'wgsl-diagnostics',
+    'wgsl-layout',
+    'wgsl-pipeline-interface',
+    'wgsl-source',
+    'wgsl-texture-binding',
+]
 const expectedDeviceFeaturesByProof = Object.freeze({
     clip_distances: [ 'clip-distances' ],
     dual_source_blending: [ 'dual-source-blending' ],
@@ -42,6 +53,35 @@ const expectedDeviceFeaturesByProof = Object.freeze({
     subgroup_id: [ 'subgroups' ],
     subgroup_uniformity: [ 'subgroups' ],
     texture_formats_tier1: [ 'texture-formats-tier1' ],
+})
+const expectedEnableExtensionsByProof = Object.freeze({
+    clip_distances: [ 'clip_distances' ],
+    dual_source_blending: [ 'dual_source_blending' ],
+    f16: [ 'f16' ],
+    primitive_index: [ 'primitive_index' ],
+    subgroup_size_control: [ 'subgroup_size_control', 'subgroups' ],
+    subgroups: [ 'subgroups' ],
+    subgroup_id: [ 'subgroups' ],
+    subgroup_uniformity: [ 'subgroups' ],
+})
+const expectedLimitsByProof = Object.freeze({
+    'wgsl-capability:maxComputeWorkgroupStorageSize': [
+        'maxComputeWorkgroupStorageSize',
+    ],
+    'wgsl-capability:maxImmediateSize': [ 'maxImmediateSize' ],
+})
+const expectedDependenciesByProof = Object.freeze({
+    subgroup_size_control: [
+        'caller-companion.subgroup-size-control.subgroups',
+    ],
+    subgroup_id: [
+        'language-to-device.subgroup_id.subgroups',
+        'language-to-enable.subgroup_id.subgroups',
+    ],
+    subgroup_uniformity: [
+        'language-to-device.subgroup_uniformity.subgroups',
+        'language-to-enable.subgroup_uniformity.subgroups',
+    ],
 })
 const timeout = positiveInteger(
     process.env.SCRATCH_WGSL_BROWSER_TIMEOUT_MS,
@@ -88,6 +128,7 @@ try {
         adapterPowerPreference,
         expectedEnableProofNames,
         expectedLanguageProofNames,
+        expectedProfileProofNames,
     })
     await context.close()
 } catch (error) {
@@ -137,6 +178,7 @@ const result = {
     capabilities: probe?.capabilities,
     enableExtensions: probe?.enableExtensions,
     languageExtensions: probe?.languageExtensions,
+    normativeProfiles: probe?.normativeProfiles,
     layoutProofs: probe?.layoutProofs,
     aggregateObservations: probe?.aggregateObservations,
     pageEvents,
@@ -153,108 +195,361 @@ async function runCapabilityMatrix({
     adapterPowerPreference,
     expectedEnableProofNames,
     expectedLanguageProofNames,
+    expectedProfileProofNames,
 }) {
 
     const scratch = await import(moduleUrl)
     const enableContracts = [
         {
             extension: 'clip_distances',
+            proofProfiles: [ 'wgsl-enable', 'wgsl-pipeline-interface' ],
+            requiredEnableExtensions: [ 'clip_distances' ],
             requiredFeatures: [ 'clip-distances' ],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
             kind: 'render',
         },
         {
             extension: 'dual_source_blending',
+            proofProfiles: [ 'wgsl-enable', 'wgsl-pipeline-interface' ],
+            requiredEnableExtensions: [ 'dual_source_blending' ],
             requiredFeatures: [ 'dual-source-blending' ],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
             kind: 'render',
         },
         {
             extension: 'f16',
+            proofProfiles: [ 'wgsl-enable', 'wgsl-source' ],
+            requiredEnableExtensions: [ 'f16' ],
             requiredFeatures: [ 'shader-f16' ],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
             kind: 'f16-layout',
         },
         {
             extension: 'primitive_index',
+            proofProfiles: [ 'wgsl-enable', 'wgsl-pipeline-interface' ],
+            requiredEnableExtensions: [ 'primitive_index' ],
             requiredFeatures: [ 'primitive-index' ],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
             kind: 'render',
         },
         {
             extension: 'subgroup_size_control',
+            proofProfiles: [ 'wgsl-enable', 'wgsl-pipeline-interface' ],
+            requiredEnableExtensions: [
+                'subgroup_size_control',
+                'subgroups',
+            ],
             requiredFeatures: [ 'subgroup-size-control', 'subgroups' ],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [
+                'caller-companion.subgroup-size-control.subgroups',
+            ],
+            requiredConditions: [],
             kind: 'subgroup-size',
         },
         {
             extension: 'subgroups',
+            proofProfiles: [
+                'wgsl-capability',
+                'wgsl-enable',
+                'wgsl-pipeline-interface',
+                'wgsl-source',
+            ],
+            requiredEnableExtensions: [ 'subgroups' ],
             requiredFeatures: [ 'subgroups' ],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
             kind: 'subgroup',
         },
     ]
     const languageContracts = [
         {
             name: 'readonly_and_readwrite_storage_textures',
+            proofProfiles: [
+                'wgsl-binding',
+                'wgsl-capability',
+                'wgsl-source',
+            ],
+            requiredEnableExtensions: [],
             kind: 'read-write-storage-texture',
             requiredFeatures: [],
+            requiredLanguageFeatures: [
+                'readonly_and_readwrite_storage_textures',
+            ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
         },
         {
             name: 'packed_4x8_integer_dot_product',
+            proofProfiles: [ 'wgsl-capability', 'wgsl-source' ],
+            requiredEnableExtensions: [],
             kind: 'packed-dot-product',
             requiredFeatures: [],
+            requiredLanguageFeatures: [
+                'packed_4x8_integer_dot_product',
+            ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
         },
         {
             name: 'unrestricted_pointer_parameters',
+            proofProfiles: [ 'wgsl-capability', 'wgsl-source' ],
+            requiredEnableExtensions: [],
             kind: 'unrestricted-pointer',
             requiredFeatures: [],
+            requiredLanguageFeatures: [
+                'unrestricted_pointer_parameters',
+            ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
         },
         {
             name: 'pointer_composite_access',
+            proofProfiles: [ 'wgsl-capability', 'wgsl-source' ],
+            requiredEnableExtensions: [],
             kind: 'pointer-composite',
             requiredFeatures: [],
+            requiredLanguageFeatures: [ 'pointer_composite_access' ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
         },
         {
             name: 'uniform_buffer_standard_layout',
+            proofProfiles: [
+                'wgsl-binding',
+                'wgsl-capability',
+                'wgsl-layout',
+            ],
+            requiredEnableExtensions: [],
             kind: 'uniform-layout',
             requiredFeatures: [],
+            requiredLanguageFeatures: [
+                'uniform_buffer_standard_layout',
+            ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
         },
         {
             name: 'subgroup_id',
+            proofProfiles: [
+                'wgsl-capability',
+                'wgsl-pipeline-interface',
+            ],
+            requiredEnableExtensions: [ 'subgroups' ],
             kind: 'subgroup-id',
             requiredFeatures: [ 'subgroups' ],
+            requiredLanguageFeatures: [ 'subgroup_id' ],
+            requiredLimits: [],
+            requiredDependencies: [
+                'language-to-device.subgroup_id.subgroups',
+                'language-to-enable.subgroup_id.subgroups',
+            ],
+            requiredConditions: [],
         },
         {
             name: 'subgroup_uniformity',
+            proofProfiles: [ 'wgsl-capability', 'wgsl-source' ],
+            requiredEnableExtensions: [ 'subgroups' ],
             kind: 'subgroup-uniformity',
             requiredFeatures: [ 'subgroups' ],
+            requiredLanguageFeatures: [ 'subgroup_uniformity' ],
+            requiredLimits: [],
+            requiredDependencies: [
+                'language-to-device.subgroup_uniformity.subgroups',
+                'language-to-enable.subgroup_uniformity.subgroups',
+            ],
+            requiredConditions: [],
         },
         {
             name: 'texture_and_sampler_let',
+            proofProfiles: [ 'wgsl-capability' ],
+            requiredEnableExtensions: [],
             kind: 'texture-sampler-let',
             requiredFeatures: [],
+            requiredLanguageFeatures: [ 'texture_and_sampler_let' ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
         },
         {
             name: 'texture_formats_tier1',
+            proofProfiles: [
+                'wgsl-capability',
+                'wgsl-texture-binding',
+            ],
+            requiredEnableExtensions: [],
             kind: 'tier1-storage-texture',
             requiredFeatures: [ 'texture-formats-tier1' ],
+            requiredLanguageFeatures: [ 'texture_formats_tier1' ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
         },
         {
             name: 'linear_indexing',
+            proofProfiles: [
+                'wgsl-capability',
+                'wgsl-pipeline-interface',
+            ],
+            requiredEnableExtensions: [],
             kind: 'linear-index',
             requiredFeatures: [],
+            requiredLanguageFeatures: [ 'linear_indexing' ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
         },
         {
             name: 'immediate_address_space',
+            proofProfiles: [ 'wgsl-immediate' ],
+            requiredEnableExtensions: [],
             kind: 'immediate-data',
             requiredFeatures: [],
+            requiredLanguageFeatures: [ 'immediate_address_space' ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
         },
         {
             name: 'buffer_view',
+            proofProfiles: [ 'wgsl-capability', 'wgsl-source' ],
+            requiredEnableExtensions: [],
             kind: 'buffer-view',
             requiredFeatures: [],
+            requiredLanguageFeatures: [ 'buffer_view' ],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
+        },
+    ]
+    const profileContracts = [
+        {
+            name: 'wgsl-binding',
+            proofProfiles: [ 'wgsl-binding' ],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
+            kind: 'compute',
+        },
+        {
+            name: 'wgsl-capability',
+            proofProfiles: [ 'wgsl-capability' ],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
+            kind: 'compute',
+        },
+        {
+            name: 'wgsl-capability:maxComputeWorkgroupStorageSize',
+            proofProfiles: [ 'wgsl-capability' ],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [ 'maxComputeWorkgroupStorageSize' ],
+            requiredDependencies: [],
+            requiredConditions: [],
+            kind: 'workgroup-storage',
+        },
+        {
+            name: 'wgsl-capability:maxImmediateSize',
+            proofProfiles: [ 'wgsl-capability' ],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [ 'maxImmediateSize' ],
+            requiredDependencies: [],
+            requiredConditions: [],
+            kind: 'compute',
+        },
+        {
+            name: 'wgsl-diagnostics',
+            proofProfiles: [ 'wgsl-diagnostics' ],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
+            kind: 'compute',
+        },
+        {
+            name: 'wgsl-layout',
+            proofProfiles: [ 'wgsl-layout' ],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
+            kind: 'layout',
+        },
+        {
+            name: 'wgsl-pipeline-interface',
+            proofProfiles: [ 'wgsl-pipeline-interface' ],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
+            kind: 'compute',
+        },
+        {
+            name: 'wgsl-source',
+            proofProfiles: [ 'wgsl-source' ],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
+            kind: 'compute',
+        },
+        {
+            name: 'wgsl-texture-binding',
+            proofProfiles: [ 'wgsl-texture-binding' ],
+            requiredEnableExtensions: [],
+            requiredFeatures: [],
+            requiredLanguageFeatures: [],
+            requiredLimits: [],
+            requiredDependencies: [],
+            requiredConditions: [],
+            kind: 'texture-binding',
         },
     ]
     if (
         JSON.stringify(enableContracts.map(contract => contract.extension)) !==
             JSON.stringify(expectedEnableProofNames) ||
         JSON.stringify(languageContracts.map(contract => contract.name)) !==
-            JSON.stringify(expectedLanguageProofNames)
+            JSON.stringify(expectedLanguageProofNames) ||
+        JSON.stringify(profileContracts.map(contract => contract.name)) !==
+            JSON.stringify(expectedProfileProofNames)
     ) {
         throw new Error('Capability matrix contract names drifted.')
     }
@@ -269,6 +564,7 @@ async function runCapabilityMatrix({
             },
             enableExtensions: [],
             languageExtensions: [],
+            normativeProfiles: [],
             layoutProofs: {},
             aggregateObservations: emptyAggregate(),
         }
@@ -297,6 +593,7 @@ async function runCapabilityMatrix({
             },
             enableExtensions: [],
             languageExtensions: [],
+            normativeProfiles: [],
             layoutProofs: {},
             aggregateObservations: emptyAggregate(),
         }
@@ -339,6 +636,8 @@ async function runCapabilityMatrix({
                 adapterLimits.maxStorageBufferBindingSize,
             maxComputeInvocationsPerWorkgroup:
                 adapterLimits.maxComputeInvocationsPerWorkgroup,
+            maxComputeWorkgroupStorageSize:
+                adapterLimits.maxComputeWorkgroupStorageSize,
             maxImmediateSize: numberOrUndefined(
                 adapterLimits.maxImmediateSize
             ),
@@ -356,10 +655,7 @@ async function runCapabilityMatrix({
                 kind: 'adapter-feature-missing',
                 adapterFeatures,
                 missingAdapterFeatures,
-            }, {
-                requestedDeviceFeatures: contract.requiredFeatures,
-                requiredLanguageFeatures: [],
-            })
+            }, contractResultFacts(contract))
             enableResults.push(skipped)
             if (contract.extension === 'f16') f16Proof = skipped
             continue
@@ -395,10 +691,7 @@ async function runCapabilityMatrix({
                 kind: 'adapter-feature-missing',
                 adapterFeatures,
                 missingAdapterFeatures,
-            }, {
-                requestedDeviceFeatures: contract.requiredFeatures,
-                requiredLanguageFeatures: [ languageFeature ],
-            })
+            }, contractResultFacts(contract))
             languageResults.push(skipped)
             if (languageFeature === 'buffer_view') bufferViewProof = skipped
             continue
@@ -408,10 +701,7 @@ async function runCapabilityMatrix({
                 kind: 'wgsl-language-feature-missing',
                 wgslLanguageFeatures: languageFeatureFacts,
                 missingLanguageFeature: languageFeature,
-            }, {
-                requestedDeviceFeatures: contract.requiredFeatures,
-                requiredLanguageFeatures: [ languageFeature ],
-            })
+            }, contractResultFacts(contract))
             languageResults.push(skipped)
             if (languageFeature === 'buffer_view') bufferViewProof = skipped
             continue
@@ -426,10 +716,7 @@ async function runCapabilityMatrix({
                     limit: 'maxImmediateSize',
                     required: 4,
                     actual: maxImmediateSize,
-                }, {
-                    requestedDeviceFeatures: contract.requiredFeatures,
-                    requiredLanguageFeatures: [ languageFeature ],
-                })
+                }, contractResultFacts(contract))
             } else {
                 proof = await runImmediateProof(scratch, contract)
             }
@@ -440,10 +727,38 @@ async function runCapabilityMatrix({
         if (languageFeature === 'buffer_view') bufferViewProof = proof
     }
 
-    const nestedMatrix = await runNestedMatrixProof(scratch)
+    const profileResults = []
+    for (const contract of profileContracts) {
+        const missingLimits = contract.requiredLimits.filter(limit =>
+            typeof capabilities.limits[limit] !== 'number'
+        )
+        let proof
+        if (missingLimits.length > 0) {
+            proof = skippedResult(contract.name, {
+                kind: 'limit-missing',
+                missingLimits,
+                availableLimits: capabilities.limits,
+            }, contractResultFacts(contract))
+        } else {
+            proof = await runNormativeProfileProof(scratch, contract)
+        }
+        profileResults.push(proof)
+    }
+
+    const nestedMatrix = await runNestedMatrixProof(scratch, {
+        name: 'nested-matrix',
+        proofProfiles: [ 'wgsl-layout' ],
+        requiredEnableExtensions: [],
+        requiredFeatures: [],
+        requiredLanguageFeatures: [],
+        requiredLimits: [],
+        requiredDependencies: [],
+        requiredConditions: [],
+    })
     const allProofs = [
         ...enableResults,
         ...languageResults,
+        ...profileResults,
         nestedMatrix,
     ]
 
@@ -451,6 +766,7 @@ async function runCapabilityMatrix({
         capabilities,
         enableExtensions: enableResults,
         languageExtensions: languageResults,
+        normativeProfiles: profileResults,
         layoutProofs: {
             nestedMatrix,
             f16: f16Proof,
@@ -459,7 +775,50 @@ async function runCapabilityMatrix({
         aggregateObservations: aggregateProofs(allProofs),
     }
 
-    async function runNestedMatrixProof(activeScratch) {
+    async function runNormativeProfileProof(activeScratch, contract) {
+
+        if (contract.kind === 'layout') {
+            return await runNestedMatrixProof(activeScratch, contract)
+        }
+        if (contract.kind === 'texture-binding') {
+            return await runTextureSamplerLetProof(activeScratch, contract)
+        }
+        const workgroupDeclaration = contract.kind === 'workgroup-storage'
+            ? 'var<workgroup> profileWorkgroupValue: u32;'
+            : ''
+        const workgroupStatements = contract.kind === 'workgroup-storage'
+            ? `
+    profileWorkgroupValue = 23u;
+    workgroupBarrier();
+    outputValues[0] = profileWorkgroupValue;`
+            : `
+    let invocation = invocationId.x;
+    outputValues[0] = profileValue(invocation);`
+        const source = `
+${workgroupDeclaration}
+
+@group(0) @binding(0)
+var<storage, read_write> outputValues: array<u32>;
+
+fn profileValue(value: u32) -> u32 {
+    return value + 23u;
+}
+
+@compute @workgroup_size(1)
+fn csMain(@builtin(global_invocation_id) invocationId: vec3u) {
+${workgroupStatements}
+}
+`
+        return await runComputeProbe(activeScratch, {
+            contract,
+            name: contract.name,
+            source,
+            expected: 23,
+            proofKind: 'normative-profile-execution',
+        })
+    }
+
+    async function runNestedMatrixProof(activeScratch, contract) {
 
         const codec = activeScratch.layoutCodec({
             name: 'NestedMatrixProbe',
@@ -494,9 +853,11 @@ fn csMain() {
 }
 `
         return await runComputeProbe(activeScratch, {
-            name: 'nested-matrix',
+            contract,
+            name: contract.name,
             source,
             expected: 6,
+            proofKind: 'normative-layout-profile-execution',
             input: {
                 codec,
                 value: {
@@ -543,6 +904,7 @@ fn csMain() {
 }
 `
         return await runComputeProbe(activeScratch, {
+            contract,
             name: contract.extension,
             source,
             expected: 6,
@@ -581,6 +943,7 @@ fn csMain(
 }
 `
         return await runComputeProbe(activeScratch, {
+            contract,
             name: contract.extension,
             source,
             expectedPredicate: value => value > 0,
@@ -604,10 +967,7 @@ fn csMain(
                 kind: 'adapter-info-invalid',
                 requiredFact: 'positive power-of-two subgroupMinSize',
                 subgroupMinSize: subgroupSize,
-            }, {
-                requestedDeviceFeatures: contract.requiredFeatures,
-                requiredLanguageFeatures: [],
-            })
+            }, contractResultFacts(contract))
         }
         const source = `
 enable subgroups;
@@ -627,6 +987,7 @@ fn csMain(
 }
 `
         return await runComputeProbe(activeScratch, {
+            contract,
             name: contract.extension,
             source,
             expected: subgroupSize,
@@ -766,12 +1127,13 @@ fn csMain(@builtin(global_invocation_index) linearIndex: u32) {
             throw new Error(`Unknown language proof kind: ${contract.kind}`)
         }
         return await runComputeProbe(activeScratch, {
+            contract,
             name: contract.name,
             source: semantic.source,
             expected: semantic.expected,
             expectedPredicate: semantic.expectedPredicate,
             requiredFeatures: contract.requiredFeatures,
-            requiredLanguageFeatures: [ contract.name ],
+            requiredLanguageFeatures: contract.requiredLanguageFeatures,
             proofKind: 'language-semantic-execution',
         })
     }
@@ -793,11 +1155,12 @@ fn csMain() {
 }
 `
         return await runComputeProbe(activeScratch, {
+            contract,
             name: contract.name,
             source,
             expected,
             requiredFeatures: contract.requiredFeatures,
-            requiredLanguageFeatures: [ contract.name ],
+            requiredLanguageFeatures: contract.requiredLanguageFeatures,
             immediateData: new Uint32Array([ expected ]),
             immediateSize: 4,
             proofKind: 'immediate-data-execution',
@@ -840,11 +1203,12 @@ fn csMain() {
 }
 `
         return await runComputeProbe(activeScratch, {
+            contract,
             name: contract.name,
             source,
             expected: 4,
             requiredFeatures: contract.requiredFeatures,
-            requiredLanguageFeatures: [ contract.name ],
+            requiredLanguageFeatures: contract.requiredLanguageFeatures,
             input: {
                 codec,
                 value: { values: [ 1, 2, 3, 4 ] },
@@ -895,11 +1259,12 @@ fn csMain() {
 }
 `
         return await runComputeProbe(activeScratch, {
+            contract,
             name: contract.name,
             source,
             expected: 6,
             requiredFeatures: contract.requiredFeatures,
-            requiredLanguageFeatures: [ contract.name ],
+            requiredLanguageFeatures: contract.requiredLanguageFeatures,
             input: {
                 codec: raw,
                 bytes: inputBytes,
@@ -930,9 +1295,8 @@ fn csMain() {
 }
 `
         return await withRuntime(activeScratch, {
+            ...contract,
             name: contract.name,
-            requiredFeatures: contract.requiredFeatures,
-            requiredLanguageFeatures: [ contract.name ],
             proofKind: 'read-write-storage-texture-execution',
         }, async runtime => {
             const image = await runtime.createTexture({
@@ -985,7 +1349,8 @@ fn csMain() {
                 label: `${contract.name} program`,
                 compute: { module, entryPoint: 'csMain' },
                 requiredFeatures: contract.requiredFeatures,
-                requiredLanguageFeatures: [ contract.name ],
+                requiredLanguageFeatures:
+                    contract.requiredLanguageFeatures,
             })
             const pipeline = await runtime.createComputePipeline({
                 label: `${contract.name} pipeline`,
@@ -1051,8 +1416,26 @@ fn csMain() {
 
     async function runTextureSamplerLetProof(activeScratch, contract) {
 
+        const usesTextureSamplerLet =
+            contract.requiredLanguageFeatures.includes(
+                'texture_and_sampler_let'
+            )
+        const requirement = usesTextureSamplerLet
+            ? 'requires texture_and_sampler_let;'
+            : ''
+        const localBindings = usesTextureSamplerLet
+            ? `
+    let localTexture = sourceTexture;
+    let localSampler = sourceSampler;`
+            : ''
+        const textureExpression = usesTextureSamplerLet
+            ? 'localTexture'
+            : 'sourceTexture'
+        const samplerExpression = usesTextureSamplerLet
+            ? 'localSampler'
+            : 'sourceSampler'
         const source = `
-requires texture_and_sampler_let;
+${requirement}
 
 @group(0) @binding(0)
 var<storage, read_write> outputValues: array<u32>;
@@ -1065,11 +1448,10 @@ var sourceSampler: sampler;
 
 @compute @workgroup_size(1)
 fn csMain() {
-    let localTexture = sourceTexture;
-    let localSampler = sourceSampler;
+${localBindings}
     let sampled = textureSampleLevel(
-        localTexture,
-        localSampler,
+        ${textureExpression},
+        ${samplerExpression},
         vec2f(0.5, 0.5),
         0.0
     );
@@ -1077,10 +1459,11 @@ fn csMain() {
 }
 `
         return await withRuntime(activeScratch, {
+            ...contract,
             name: contract.name,
-            requiredFeatures: contract.requiredFeatures,
-            requiredLanguageFeatures: [ contract.name ],
-            proofKind: 'texture-sampler-let-execution',
+            proofKind: usesTextureSamplerLet
+                ? 'texture-sampler-let-execution'
+                : 'normative-texture-binding-profile-execution',
         }, async runtime => {
             const texture = await runtime.createTexture({
                 label: `${contract.name} texture`,
@@ -1144,7 +1527,8 @@ fn csMain() {
                 label: `${contract.name} program`,
                 compute: { module, entryPoint: 'csMain' },
                 requiredFeatures: contract.requiredFeatures,
-                requiredLanguageFeatures: [ contract.name ],
+                requiredLanguageFeatures:
+                    contract.requiredLanguageFeatures,
             })
             const pipeline = await runtime.createComputePipeline({
                 label: `${contract.name} pipeline`,
@@ -1222,9 +1606,8 @@ fn csMain() {
 }
 `
         return await withRuntime(activeScratch, {
+            ...contract,
             name: contract.name,
-            requiredFeatures: contract.requiredFeatures,
-            requiredLanguageFeatures: [ contract.name ],
             proofKind: 'tier1-storage-texture-execution',
         }, async runtime => {
             const texture = await runtime.createTexture({
@@ -1261,7 +1644,8 @@ fn csMain() {
                 label: `${contract.name} program`,
                 compute: { module, entryPoint: 'csMain' },
                 requiredFeatures: contract.requiredFeatures,
-                requiredLanguageFeatures: [ contract.name ],
+                requiredLanguageFeatures:
+                    contract.requiredLanguageFeatures,
             })
             const pipeline = await runtime.createComputePipeline({
                 label: `${contract.name} pipeline`,
@@ -1422,9 +1806,8 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
         }
         const shader = shaders[contract.extension]
         return await withRuntime(activeScratch, {
+            ...contract,
             name: contract.extension,
-            requiredFeatures: contract.requiredFeatures,
-            requiredLanguageFeatures: [],
             proofKind: 'enable-render-readback',
         }, async runtime => {
             const texture = await runtime.createTexture({
@@ -1509,11 +1892,18 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
 
     async function runComputeProbe(activeScratch, options) {
 
+        const contract = options.contract ?? {}
         return await withRuntime(activeScratch, {
+            ...contract,
             name: options.name,
-            requiredFeatures: options.requiredFeatures ?? [],
+            requiredFeatures:
+                options.requiredFeatures ??
+                contract.requiredFeatures ??
+                [],
             requiredLanguageFeatures:
-                options.requiredLanguageFeatures ?? [],
+                options.requiredLanguageFeatures ??
+                contract.requiredLanguageFeatures ??
+                [],
             proofKind: options.proofKind ?? 'compute-readback',
         }, async runtime => {
             const output = await runtime.createBuffer({
@@ -1735,7 +2125,7 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
             runtime = await activeScratch.ScratchRuntime.create({
                 label: `WGSL matrix ${contract.name}`,
                 powerPreference: adapterPowerPreference,
-                requiredFeatures: contract.requiredFeatures,
+                requiredFeatures: contract.requiredFeatures ?? [],
                 diagnostics: {
                     stackCapture: 'errors',
                 },
@@ -1777,9 +2167,7 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
                     ? 'passed'
                     : 'failed',
             proofKind: contract.proofKind,
-            requestedDeviceFeatures: contract.requiredFeatures,
-            requiredLanguageFeatures:
-                contract.requiredLanguageFeatures,
+            ...contractResultFacts(contract),
             runtimeRequestFacts: runtime?.requestFacts,
             runtimeCapabilities: runtime === undefined
                 ? undefined
@@ -1794,6 +2182,8 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
                             runtime.adapterLimits.maxStorageBufferBindingSize,
                         maxComputeInvocationsPerWorkgroup:
                             runtime.adapterLimits.maxComputeInvocationsPerWorkgroup,
+                        maxComputeWorkgroupStorageSize:
+                            runtime.adapterLimits.maxComputeWorkgroupStorageSize,
                         maxImmediateSize: numberOrUndefined(
                             runtime.adapterLimits.maxImmediateSize
                         ),
@@ -1891,6 +2281,20 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
             status: 'skipped',
             capabilityFact,
             ...contracts,
+        }
+    }
+
+    function contractResultFacts(contract) {
+
+        return {
+            requiredEnableExtensions:
+                contract.requiredEnableExtensions ?? [],
+            requestedDeviceFeatures: contract.requiredFeatures ?? [],
+            requiredLanguageFeatures:
+                contract.requiredLanguageFeatures ?? [],
+            requiredLimits: contract.requiredLimits ?? [],
+            requiredDependencies: contract.requiredDependencies ?? [],
+            requiredConditions: contract.requiredConditions ?? [],
         }
     }
 
@@ -2046,6 +2450,9 @@ function validateResult({
     const languageProofs = Array.isArray(current.languageExtensions)
         ? current.languageExtensions
         : []
+    const profileProofs = Array.isArray(current.normativeProfiles)
+        ? current.normativeProfiles
+        : []
     if (!sameStrings(
         enableProofs.map(proof => proof.name),
         expectedEnableProofNames
@@ -2058,26 +2465,44 @@ function validateResult({
     )) {
         failures.push('language-extension proof set is incomplete or reordered')
     }
+    if (!sameStrings(
+        profileProofs.map(proof => proof.name),
+        expectedProfileProofNames
+    )) {
+        failures.push('normative profile proof set is incomplete or reordered')
+    }
     const nestedMatrix = current.layoutProofs?.nestedMatrix
     const proofs = [
         ...enableProofs,
         ...languageProofs,
+        ...profileProofs,
         nestedMatrix,
     ].filter(proof => proof !== undefined)
     if (
-        proofs.length !== 19 ||
-        new Set(proofs.map(proof => proof.name)).size !== 19
+        proofs.length !== 28 ||
+        new Set(proofs.map(proof => proof.name)).size !== 28
     ) {
-        failures.push('capability proof matrix must contain 19 unique proofs')
+        failures.push('capability proof matrix must contain 28 unique proofs')
     }
 
     for (const proof of proofs) {
         const expectedDeviceFeatures =
             expectedDeviceFeaturesByProof[proof.name] ?? []
+        const expectedEnableExtensions =
+            expectedEnableExtensionsByProof[proof.name] ?? []
         const expectedLanguageFeatures =
             expectedLanguageProofNames.includes(proof.name)
                 ? [ proof.name ]
                 : []
+        const expectedLimits = expectedLimitsByProof[proof.name] ?? []
+        const expectedDependencies =
+            expectedDependenciesByProof[proof.name] ?? []
+        if (!sameStrings(
+            proof.requiredEnableExtensions ?? [],
+            expectedEnableExtensions
+        )) {
+            failures.push(`${proof.name}: required enable extensions drifted`)
+        }
         if (!sameStrings(
             proof.requestedDeviceFeatures ?? [],
             expectedDeviceFeatures
@@ -2089,6 +2514,21 @@ function validateResult({
             expectedLanguageFeatures
         )) {
             failures.push(`${proof.name}: required language features drifted`)
+        }
+        if (!sameStrings(
+            proof.requiredLimits ?? [],
+            expectedLimits
+        )) {
+            failures.push(`${proof.name}: required limits drifted`)
+        }
+        if (!sameStrings(
+            proof.requiredDependencies ?? [],
+            expectedDependencies
+        )) {
+            failures.push(`${proof.name}: required dependencies drifted`)
+        }
+        if (!sameStrings(proof.requiredConditions ?? [], [])) {
+            failures.push(`${proof.name}: required conditions drifted`)
         }
         if (proof.status === 'failed') {
             failures.push(`${proof.name}: ${proof.failure?.message ?? 'failed'}`)
@@ -2107,6 +2547,7 @@ function validateResult({
                 proof,
                 expectedDeviceFeatures,
                 expectedLanguageFeatures,
+                expectedLimits,
                 failures
             )
             continue
@@ -2120,6 +2561,7 @@ function validateResult({
             current.capabilities,
             expectedDeviceFeatures,
             expectedLanguageFeatures,
+            expectedLimits,
             failures
         )
     }
@@ -2142,8 +2584,8 @@ function validateResult({
     ) {
         failures.push('buffer_view layout proof alias does not match the matrix row')
     }
-    if (current.aggregateObservations.proofCount !== 19) {
-        failures.push('aggregate proof count is not 19')
+    if (current.aggregateObservations.proofCount !== 28) {
+        failures.push('aggregate proof count is not 28')
     }
     if (current.aggregateObservations.failedCount !== 0) {
         failures.push(
@@ -2165,6 +2607,7 @@ function validateSkipFact(
     proof,
     expectedDeviceFeatures,
     expectedLanguageFeatures,
+    expectedLimits,
     failures
 ) {
 
@@ -2197,6 +2640,14 @@ function validateSkipFact(
     ) {
         return
     }
+    if (
+        fact?.kind === 'limit-missing' &&
+        Array.isArray(fact.missingLimits) &&
+        fact.missingLimits.length > 0 &&
+        fact.missingLimits.every(limit => expectedLimits.includes(limit))
+    ) {
+        return
+    }
     failures.push(`${proof.name}: unsupported skip fact ${fact?.kind}`)
 }
 
@@ -2205,6 +2656,7 @@ function validatePassedProof(
     capabilities,
     expectedDeviceFeatures,
     expectedLanguageFeatures,
+    expectedLimits,
     failures
 ) {
 
@@ -2263,6 +2715,11 @@ function validatePassedProof(
         !proof.runtimeCapabilities?.wgslLanguageFeatures?.includes(feature)
     )) {
         failures.push(`${proof.name}: Runtime omitted a required WGSL feature`)
+    }
+    if (expectedLimits.some(limit =>
+        typeof proof.runtimeCapabilities?.adapterLimits?.[limit] !== 'number'
+    )) {
+        failures.push(`${proof.name}: Runtime omitted a required limit`)
     }
     if (
         proof.observations?.capturedValidationErrors !== 0 ||

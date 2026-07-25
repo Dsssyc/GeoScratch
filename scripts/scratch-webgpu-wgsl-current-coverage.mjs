@@ -1779,7 +1779,7 @@ const webGpuExactRules = Object.freeze({
         'runtime-adapter-info',
         [
             operationProof(
-                'adapterInfo',
+                'adapter.info',
                 'packages/geoscratch/src/scratch/runtime.ts'
             ),
         ]
@@ -1790,11 +1790,32 @@ const webGpuExactRules = Object.freeze({
         'runtime-adapter-info',
         [
             operationProof(
-                'adapterInfo',
+                'adapter.info',
+                'packages/geoscratch/src/scratch/runtime.ts'
+            ),
+            operationProof(
+                'adapterInfo.isFallbackAdapter',
                 'packages/geoscratch/src/scratch/runtime.ts'
             ),
         ]
     ),
+    'GPUAdapterInfo.architecture': adapterInfoMemberRule(
+        'architecture'
+    ),
+    'GPUAdapterInfo.description': adapterInfoMemberRule(
+        'description'
+    ),
+    'GPUAdapterInfo.device': adapterInfoMemberRule('device'),
+    'GPUAdapterInfo.isFallbackAdapter': adapterInfoMemberRule(
+        'isFallbackAdapter'
+    ),
+    'GPUAdapterInfo.subgroupMaxSize': adapterInfoMemberRule(
+        'subgroupMaxSize'
+    ),
+    'GPUAdapterInfo.subgroupMinSize': adapterInfoMemberRule(
+        'subgroupMinSize'
+    ),
+    'GPUAdapterInfo.vendor': adapterInfoMemberRule('vendor'),
     'GPUAdapter.limits': webGpuOperationRule(
         'webgpu:adapter:limits',
         'webgpu-runtime-capabilities',
@@ -2140,7 +2161,7 @@ const webGpuExactRules = Object.freeze({
         'runtime-adapter-info',
         [
             operationProof(
-                'adapterInfo',
+                'adapter.info',
                 'packages/geoscratch/src/scratch/runtime.ts'
             ),
         ]
@@ -2711,6 +2732,17 @@ const webGpuExactRules = Object.freeze({
         'webgpu-submission',
         'submission-command-buffer',
         'managed-semantic-equivalent'
+    ),
+    'interface.GPUAdapterInfo': webGpuOperationRule(
+        'webgpu:runtime-adapter-info',
+        'webgpu-runtime-capabilities',
+        'runtime-adapter-info',
+        [
+            operationProof(
+                'adapter.info',
+                'packages/geoscratch/src/scratch/runtime.ts'
+            ),
+        ]
     ),
     'interface.GPUVertexBufferLayout': webGpuRule(
         'webgpu:pipeline:vertex-buffer-layout',
@@ -4181,6 +4213,25 @@ function webGpuOperationRule(
             options.publicSymbols ?? baseProfile.publicSymbols,
             operationEvidence
         )
+    )
+}
+
+function adapterInfoMemberRule(member) {
+
+    return webGpuOperationRule(
+        'webgpu:runtime-adapter-info',
+        'webgpu-runtime-capabilities',
+        'runtime-adapter-info',
+        [
+            operationProof(
+                'adapter.info',
+                'packages/geoscratch/src/scratch/runtime.ts'
+            ),
+            operationProof(
+                `adapterInfo.${member}`,
+                'packages/geoscratch/src/scratch/runtime.ts'
+            ),
+        ]
     )
 }
 

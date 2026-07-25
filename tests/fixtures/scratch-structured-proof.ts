@@ -38,3 +38,47 @@ export function rawDeviceCreateBuffer(device: GPUDevice): GPUBuffer {
         usage: GPUBufferUsage.COPY_DST,
     })
 }
+
+const correctProfileContracts = [
+    {
+        name: 'wgsl-source',
+        proofProfiles: [ 'wgsl-source' ],
+        requiredEnableExtensions: [],
+        requiredFeatures: [],
+        requiredLanguageFeatures: [],
+        requiredLimits: [],
+        requiredDependencies: [],
+        requiredConditions: [],
+    },
+]
+const correctProfileResults = []
+for (const contract of correctProfileContracts) {
+    const proof = runProfileFixture(contract)
+    correctProfileResults.push(proof)
+}
+
+const wrongProfileContracts = [
+    {
+        name: 'wgsl-source',
+        proofProfiles: [ 'wgsl-source' ],
+        requiredEnableExtensions: [],
+        requiredFeatures: [],
+        requiredLanguageFeatures: [],
+        requiredLimits: [],
+        requiredDependencies: [],
+        requiredConditions: [],
+    },
+]
+const wrongProfileResults = []
+for (const contract of wrongProfileContracts) {
+    runProfileFixture(contract)
+    const unrelated = { name: 'unrelated' }
+    wrongProfileResults.push(unrelated)
+}
+
+function runProfileFixture(
+    contract: { name: string }
+): { name: string } {
+
+    return { name: contract.name }
+}

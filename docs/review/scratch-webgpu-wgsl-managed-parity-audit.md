@@ -564,7 +564,7 @@ three material test-authority defects:
 | --- | --- |
 | AST extraction ignored outer spreads and non-property members, so later runtime members could override the audited cases | Reject non-static `semanticCases` members and require each selected case to contain exactly static `source` and `expected` properties |
 | TypeScript parse diagnostics were ignored, so a malformed source file could still yield a partial audit AST | Reject every parse diagnostic before extracting proof facts |
-| Token regular expressions could accept feature operations present only in comments | Compare normalized source against canonical complete WGSL programs and add commented-out-operation negative fixtures |
+| The former pointer-fixture check did not prove that feature operations were executable AST statements | Require canonical complete WGSL programs and reject commented-out-operation fixtures |
 
 The correction also rejects extra properties such as `expectedPredicate`,
 outer spreads, malformed JavaScript, and direct constant writes disguised by
@@ -644,10 +644,11 @@ dependencies, and proposals.
 
 ### Fixed Source Observation
 
-The single allowed online refresh reached the official publication and
-repository metadata, then the raw `gpuweb/types` declaration request timed
-out. It was not retried. The checked baseline records `status: partial`,
-`retryCount: 0`, and `failedSource: gpuweb/types raw declaration`.
+The single allowed online observation reached the WGSL publication plus the
+pinned GPUWeb editor, `gpuweb/types`, and proposal metadata. The WebGPU
+publication request returned a fetch error and was not retried. The checked
+baseline records `status: partial`, `retryCount: 0`, and
+`failedSource: W3C WebGPU publication page`.
 
 The generated inventories were subsequently reproduced offline from the
 already available GPUWeb checkout at
@@ -750,13 +751,17 @@ baseline, so no specification drift widened this Goal:
 | GPUWeb repository | `b33e6efb182d11156851271586563cc77575059c` |
 | `gpuweb/types` repository | `9ba8a0618e1efad8e1ee444ef6ecfae761b2bc30` |
 
-### Entry-Proof Schema
+### Historical Entry-Proof Schema (Superseded)
 
-The living coverage manifest now uses schema version 3. Every WebGPU entry
-and every WGSL entry has entry granularity and its own ID selector. Reusable
-proof profiles are selected through explicit finite maps, but a profile never
-widens an entry's selector to an entire kind or semantic family. A managed
-entry contains:
+This section records the former schema-v3 state. It is retained as historical
+review evidence and no longer describes the living coverage authority. The
+current schema-v4 authority is defined by the Structured Normative Proof
+Closure section below.
+
+The former manifest gave every WebGPU and WGSL entry its own ID selector.
+Reusable proof profiles were selected through explicit finite maps, but a
+profile did not widen an entry's selector to an entire kind or semantic
+family. A managed entry contained:
 
 - a named proof profile and entry-specific rationale;
 - public Scratch symbols resolved through the package source export graph;
@@ -869,3 +874,128 @@ Mocha test pass after regeneration.
 The committed document does not preclaim the final full gate. That gate runs
 once against the final clean commit, and its result is reported in the
 terminal Goal report.
+
+## Structured Normative Proof Closure (2026-07-25)
+
+This section supersedes every earlier description of the living coverage
+proof system, including schema-v3 operation/source pairs and any historical
+token or regular-expression proof path. Those paths are not compatibility
+inputs and are not consulted by the current generator or audits.
+
+### Schema-V4 Authority
+
+The living manifest is
+`manifests/scratch-webgpu-wgsl-current-coverage.json`. Its external strict
+schema is
+`manifests/scratch-webgpu-wgsl-current-coverage.schema.json`, and its runtime
+validator and executable proof engine are implemented in
+`scripts/scratch-webgpu-wgsl-structured-proof.mjs`.
+
+Every one of the 1,244 formal inventory IDs occurs exactly once. Each entry
+binds its formal ID, domain, kind, source anchor, coverage rule, public
+Scratch expression, requirements, and structured proof. Managed native
+lowering is represented only by discriminated `operationEvidence`; the old
+evidence-record operation strings were removed rather than retained as a
+fallback.
+
+The current closure remains:
+
+| Result | Count |
+| --- | ---: |
+| WebGPU normative entries | 582 |
+| WGSL normative entries | 662 |
+| Managed first class | 637 |
+| Managed semantic equivalent | 605 |
+| Explained DOM-composition not applicable | 2 |
+| Unresolved | 0 |
+
+The only not-applicable IDs remain
+`includes.Navigator.NavigatorGPU` and
+`includes.WorkerNavigator.NavigatorGPU`. The N/A validator accepts no other
+composition.
+
+### Executable Proof Model
+
+The proof engine builds a TypeScript `Program` and `TypeChecker` from the
+package build tsconfig plus the declared proof sources. It resolves the real
+package export graph, declarations, calls, constructor calls, property
+reads/writes, contextual descriptor fields, receiver types, WGSL payload
+flow, layout contracts, browser fixture contracts, and N/A composition.
+
+Comments, ordinary strings, wrong receiver types, wrong source files,
+non-exported symbols, another entry's valid type member, mismatched WGSL
+contract IDs, wrong normative anchors, duplicate selectors, unknown proof
+kinds, and incomplete summary facts all fail closed. Native lowering for a
+managed entry must originate under `packages/geoscratch/src/scratch/`; a
+direct raw-device call in a test, example, or other package module cannot be
+counted as managed Scratch evidence.
+
+WGSL entries bind their exact formal ID to the caller-authored source snapshot
+that becomes `GPUShaderModuleDescriptor.code` and to the typed
+`GPUDevice.createShaderModule` call. Layout profiles additionally bind the
+`LayoutCodec` packing, accessor, and readback-view contract. Enable and
+language extensions bind their exact feature contracts, and every other
+managed WGSL entry binds an explicit executable proof profile. Browser
+selectors preserve the full entry requirements and prove by symbol identity
+that the runner result, rather than an unrelated value, reaches the matching
+result collection. A WGSL-looking string that is not carried into the native
+shader descriptor is not proof.
+
+### Requirements And Corrected Facts
+
+Requirements remain typed, sorted, unique, and restricted to fixed
+normative feature, language-feature, extension, limit, dependency, and
+condition inventories. Browser proof features must equal the entry's device
+requirements.
+
+The structural migration corrected two proof facts without changing a
+classification:
+
+| Entry or operation | Correction |
+| --- | --- |
+| texture readback `copyTextureToBuffer` | Native call evidence now points to `scratch/command.ts`, where the call exists, rather than the normalization-only `texture-readback.ts` module |
+| `language-extension.texture_formats_tier1` | Browser execution proof now retains the required `texture-formats-tier1` device feature |
+
+Two consecutive generations produced byte-identical current-coverage,
+enable-extension, and external-schema artifacts.
+
+### Fixed Source Observation
+
+The Goal performed one bounded observation only. The WGSL publication,
+GPUWeb editor commit
+`b33e6efb182d11156851271586563cc77575059c`, `gpuweb/types` commit
+`9ba8a0618e1efad8e1ee444ef6ecfae761b2bc30`, and proposal metadata were
+observed. The WebGPU publication request returned a fetch error and was not
+retried. The checked local WebGPU CRD hash remains
+`23b38cef5e23be710ef865b800f63e5874edd03bb08bbecfa8ac5b3020b47d30`;
+the checked WGSL CRD hash remains
+`2ae2de9464930086cb7c611951262bfd4c989a312802e30162cfd246567d66aa`.
+No formal inventory delta was introduced.
+
+### Scope
+
+This closure changes proof tooling, generated review artifacts, audits, and
+tests only. It does not change Scratch runtime behavior, public API behavior,
+examples, formal specification snapshots, or proposal implementation. It
+does not preclaim the final full gate.
+
+### Independent Structured-Proof Review
+
+The one permitted independent read-only review returned `issues-found` for
+three proof-chain weaknesses: generic WGSL entries lacked profile-bound
+execution, browser result collection was not tied to the runner return value,
+and adapter-info members shared only aggregate snapshot evidence.
+
+The single concentrated correction closed those findings. All 662 managed
+WGSL entries now have exactly one browser execution proof, distributed over
+6 enable contracts, 12 language contracts, and 9 normative profile
+contracts. The matcher follows TypeChecker symbols from runner assignment to
+the pushed result. `GPUAdapterInfo` now has exact native lowering for
+`architecture`, `description`, `device`, `isFallbackAdapter`,
+`subgroupMaxSize`, `subgroupMinSize`, and `vendor`, with `adapter.info`
+retained as the snapshot source.
+
+The focused headed browser matrix passed with 28 unique proofs: 25 executed
+and passed, 3 capability-specific skips, no failures or captured/uncaptured
+GPU errors, and clean terminal state for every executed runtime. No second
+review was performed.

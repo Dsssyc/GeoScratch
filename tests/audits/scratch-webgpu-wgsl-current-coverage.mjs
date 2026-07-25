@@ -1416,25 +1416,94 @@ function dependencyDiagnosticIsDocumented() {
 
 function browserMatrixProofsAreStructured() {
 
-    const browserProofs = current.entries.flatMap(entry =>
-        entry.proof.evidence
-            .filter(item => item.kind === 'browser-execution')
-            .map(item => ({
-                id: entry.id,
-                name: item.selector.proofName,
-                requirements: item.selector.requiredFeatures,
-            }))
+    const managedWgsl = current.entries.filter(entry =>
+        entry.domain === 'wgsl' &&
+        entry.current.status === 'managed'
     )
+    const browserProofs = managedWgsl.map(entry => ({
+        entry,
+        proofs: entry.proof.evidence.filter(
+            item => item.kind === 'browser-execution'
+        ),
+    }))
+    const expectedBindings = new Set([
+        'enableContracts:clip_distances',
+        'enableContracts:dual_source_blending',
+        'enableContracts:f16',
+        'enableContracts:primitive_index',
+        'enableContracts:subgroup_size_control',
+        'enableContracts:subgroups',
+        'languageContracts:buffer_view',
+        'languageContracts:immediate_address_space',
+        'languageContracts:linear_indexing',
+        'languageContracts:packed_4x8_integer_dot_product',
+        'languageContracts:pointer_composite_access',
+        'languageContracts:readonly_and_readwrite_storage_textures',
+        'languageContracts:subgroup_id',
+        'languageContracts:subgroup_uniformity',
+        'languageContracts:texture_and_sampler_let',
+        'languageContracts:texture_formats_tier1',
+        'languageContracts:uniform_buffer_standard_layout',
+        'languageContracts:unrestricted_pointer_parameters',
+        'profileContracts:wgsl-binding',
+        'profileContracts:wgsl-capability',
+        'profileContracts:wgsl-capability:maxComputeWorkgroupStorageSize',
+        'profileContracts:wgsl-capability:maxImmediateSize',
+        'profileContracts:wgsl-diagnostics',
+        'profileContracts:wgsl-layout',
+        'profileContracts:wgsl-pipeline-interface',
+        'profileContracts:wgsl-source',
+        'profileContracts:wgsl-texture-binding',
+    ])
+    const actualBindings = new Set(browserProofs.flatMap(({ proofs }) =>
+        proofs.map(proof =>
+            `${proof.selector.collection}:${proof.selector.proofName}`
+        )
+    ))
     return (
-        browserProofs.length === 18 &&
+        managedWgsl.length === 662 &&
         structuredProofVerification === undefined &&
-        browserProofs.every(proof => {
-            const entry = current.entries.find(
-                candidate => candidate.id === proof.id
-            )
-            return entry !== undefined && deepEqual(
-                proof.requirements,
-                entry.requirements.deviceFeatures
+        deepEqual(
+            [ ...actualBindings ].sort(),
+            [ ...expectedBindings ].sort()
+        ) &&
+        current.entries
+            .filter(entry => entry.domain !== 'wgsl')
+            .every(entry =>
+                entry.proof.evidence.every(
+                    item => item.kind !== 'browser-execution'
+                )
+            ) &&
+        browserProofs.every(({ entry, proofs }) => {
+            if (proofs.length !== 1) return false
+            const selector = proofs[0].selector
+            return (
+                selector.normativeId === entry.id &&
+                selector.proofProfile === entry.proof.profile &&
+                deepEqual(
+                    selector.requiredConditions,
+                    entry.requirements.conditions
+                ) &&
+                deepEqual(
+                    selector.requiredDependencies,
+                    entry.requirements.dependencies
+                ) &&
+                deepEqual(
+                    selector.requiredEnableExtensions,
+                    entry.requirements.enableExtensions
+                ) &&
+                deepEqual(
+                    selector.requiredFeatures,
+                    entry.requirements.deviceFeatures
+                ) &&
+                deepEqual(
+                    selector.requiredLanguageFeatures,
+                    entry.requirements.languageFeatures
+                ) &&
+                deepEqual(
+                    selector.requiredLimits,
+                    entry.requirements.limits
+                )
             )
         })
     )
