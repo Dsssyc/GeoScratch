@@ -2,12 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import ts from 'typescript'
-import {
-    createCurrentCoverageManifest,
-    createWgslEnableExtensionManifest,
-    currentCoverageManifestPath,
-    wgslEnableExtensionManifestPath,
-} from '../../scripts/scratch-webgpu-wgsl-current-coverage.mjs'
+import * as currentCoverageModule from '../../scripts/scratch-webgpu-wgsl-current-coverage.mjs'
 import {
     createWebGpuManifest,
     createWgslManifest,
@@ -22,6 +17,12 @@ const pointerProofCaseNames = [
     'unrestricted-pointer',
     'pointer-composite',
 ]
+const {
+    createCurrentCoverageManifest,
+    createWgslEnableExtensionManifest,
+    currentCoverageManifestPath,
+    wgslEnableExtensionManifestPath,
+} = currentCoverageModule
 
 const unrestrictedPointerProofSource = `
 requires unrestricted_pointer_parameters;
@@ -67,6 +68,31 @@ const normativeWebGpu = readJson(normativeArtifactPaths.webgpu)
 const normativeWgsl = readJson(normativeArtifactPaths.wgsl)
 const capabilityDependencies = readJson(normativeArtifactPaths.dependencies)
 const proposalWatchlist = readJson(normativeArtifactPaths.proposals)
+const knownDeviceFeatures = collectStringLiteralTypeMembers(
+    'node_modules/@webgpu/types/dist/index.d.ts',
+    'GPUFeatureName'
+)
+const knownEnableExtensions = new Set(
+    normativeWgsl.entries
+        .filter(entry => entry.kind === 'enable-extension')
+        .map(entry => entry.name)
+)
+const knownLanguageFeatures = new Set(
+    normativeWgsl.entries
+        .filter(entry => entry.kind === 'language-extension')
+        .map(entry => entry.name)
+)
+const knownLimits = new Set(
+    normativeWebGpu.entries
+        .filter(entry =>
+            entry.owner === 'GPUSupportedLimits' &&
+            entry.kind === 'property'
+        )
+        .map(entry => entry.member)
+)
+const knownDependencies = new Set(
+    capabilityDependencies.entries.map(entry => entry.id)
+)
 const generatedFrozenWebGpu = createWebGpuManifest()
 const generatedFrozenWgsl = createWgslManifest()
 const evidenceById = new Map(
@@ -112,6 +138,9 @@ const pointerProofCases = tryExtractSemanticCases(
 )
 
 const checks = {
+    currentManifestUsesEntryProofSchema:
+        current.schemaVersion === 3 &&
+        generatedCurrent.schemaVersion === 3,
     currentManifestReproducible: deepEqual(current, generatedCurrent),
     enableExtensionManifestReproducible:
         deepEqual(enableExtensions, generatedEnableExtensions),
@@ -126,8 +155,8 @@ const checks = {
         current.summary.frozenWebgpuHistoricalEntryCount === 591 &&
         current.summary.frozenWgslHistoricalEntryCount === 65,
     exactCurrentClassifications:
-        current.summary.byClassification['managed-first-class'] === 683 &&
-        current.summary.byClassification['managed-semantic-equivalent'] === 559 &&
+        current.summary.byClassification['managed-first-class'] === 502 &&
+        current.summary.byClassification['managed-semantic-equivalent'] === 740 &&
         current.summary.byClassification['not-applicable'] === 2 &&
         (current.summary.byClassification.unresolved ?? 0) === 0,
     exactCurrentStatuses:
@@ -143,6 +172,16 @@ const checks = {
         new Set(current.entries.map(entry => entry.id)).size ===
         current.entries.length,
     completeEntryShape: current.entries.every(entryShapeIsComplete),
+    exactEvidenceAttributionRegressions:
+        evidenceAttributionRegressionsPass(),
+    intentionalSemanticEquivalentsRemainExplicit:
+        intentionalSemanticEquivalentsRemainExplicit(),
+    managedEntryEvidenceIsEntrySpecific:
+        current.entries.every(entryEvidenceIsEntrySpecific),
+    webGpuMethodsHaveExactOperationEvidence:
+        webGpuMethodsHaveExactOperationEvidence(),
+    unknownDeviceMemberFailsClosed:
+        unknownDeviceMemberFailsClosed(),
     allEvidenceIdsResolve: current.entries.every(entry =>
         entry.evidenceIds.length > 0 &&
         entry.evidenceIds.every(id => evidenceById.has(id))
@@ -160,13 +199,29 @@ const checks = {
         !current.evidence.some(record =>
             record.id === 'webgpu-descriptor-values'
         ),
+    webGpuClassifierUsesFiniteMappings:
+        webGpuClassifierUsesFiniteMappings(),
+    allWebGpuMethodsUseExactRules:
+        normativeWebGpu.entries
+            .filter(entry => entry.kind === 'method')
+            .every(entry =>
+                currentCoverageModule.hasWebGpuExactRule?.(entry.id) === true
+            ),
     evidenceIsLocatedAndBounded:
         current.evidence.every(evidenceIsLocatedAndBounded),
     evidenceNativeOperationsResolve:
         current.evidence.every(evidenceNativeOperationsResolve),
+    entryNativeOperationsResolve:
+        current.entries.every(entryNativeOperationsResolve),
     evidencePublicSymbolsAreExported:
         current.evidence.every(record =>
             record.publicSymbols.every(symbol =>
+                packageSourceExportNames.has(symbol)
+            )
+        ),
+    entryPublicSymbolsAreExported:
+        current.entries.every(entry =>
+            entry.expression.publicSymbols.every(symbol =>
                 packageSourceExportNames.has(symbol)
             )
         ),
@@ -195,6 +250,10 @@ const checks = {
     capabilityRequirementsAreComplete:
         current.entries.every(requirementContractIsComplete) &&
         sensitiveCapabilityRequirementsArePresent(),
+    requirementValuesAreTypedKnownAndUnique:
+        current.entries.every(requirementValuesAreTypedKnownAndUnique),
+    invalidRequirementContractsFailClosed:
+        invalidRequirementContractsFailClosed(),
     exactEnableExtensionContracts:
         deepEqual(
             enableExtensions.entries.map(enableContractFact),
@@ -223,10 +282,7 @@ const checks = {
                     extension: 'subgroup_size_control',
                     requiredFeatures: [ 'subgroup-size-control', 'subgroups' ],
                     dependencies: [
-                        {
-                            feature: 'subgroup-size-control',
-                            requiredFeature: 'subgroups',
-                        },
+                        'caller-companion.subgroup-size-control.subgroups',
                     ],
                 },
                 {
@@ -388,6 +444,21 @@ function normativeAuthorityIsExplicit() {
     )
 }
 
+function webGpuClassifierUsesFiniteMappings() {
+
+    const source = readText(
+        'scripts/scratch-webgpu-wgsl-current-coverage.mjs'
+    )
+    return (
+        source.includes('webGpuOwnerRules') &&
+        source.includes('webGpuExactRules') &&
+        !source.includes('/Buffer/.test(owner)') &&
+        !source.includes('/Texture/.test(owner)') &&
+        !source.includes('/RenderPass|ComputePass/.test(owner)') &&
+        !source.includes("allocationEvidence ?? 'webgpu-runtime-capabilities'")
+    )
+}
+
 function enableAndLanguageRequirementsMatchInventory() {
 
     if (!enableExtensions.entries.every(entry =>
@@ -457,6 +528,240 @@ function proposalsRemainNonNormative() {
     )
 }
 
+function evidenceAttributionRegressionsPass() {
+
+    const entries = new Map(current.entries.map(entry => [ entry.id, entry ]))
+    return (
+        entryProofMatches(entries, 'GPUDevice.createRenderBundleEncoder', {
+            coverageRule: 'webgpu:device:createRenderBundleEncoder',
+            profile: 'render-bundle-create',
+            evidenceIds: [ 'webgpu-render-bundle-debug' ],
+            publicSymbols: [
+                'RenderBundle',
+                'RenderBundleDescriptor',
+                'ScratchRuntime',
+            ],
+            operations: [ 'createRenderBundleEncoder' ],
+            sourcePaths: [
+                'packages/geoscratch/src/scratch/render-bundle.ts',
+            ],
+        }) &&
+        entryProofMatches(entries, 'GPURenderPassEncoder.executeBundles', {
+            coverageRule: 'webgpu:render-pass:executeBundles',
+            profile: 'render-bundle-execute',
+            evidenceIds: [ 'webgpu-render-bundle-debug' ],
+            publicSymbols: [
+                'ExecuteRenderBundlesCommand',
+                'RenderBundle',
+            ],
+            operations: [ 'executeBundles' ],
+            sourcePaths: [
+                'packages/geoscratch/src/scratch/render-bundle.ts',
+            ],
+        }) &&
+        entryProofMatches(entries, 'interface.GPUCommandBufferDescriptor', {
+            coverageRule: 'webgpu:submission:command-buffer',
+            profile: 'submission-command-buffer',
+            evidenceIds: [ 'webgpu-submission' ],
+            publicSymbols: [ 'SubmissionBuilder', 'SubmittedWork' ],
+            operations: [ 'GPUCommandEncoder.finish' ],
+            sourcePaths: [
+                'packages/geoscratch/src/scratch/submission.ts',
+            ],
+        }) &&
+        entryProofMatches(entries, 'interface.GPUVertexBufferLayout', {
+            coverageRule: 'webgpu:pipeline:vertex-buffer-layout',
+            profile: 'pipeline-vertex-buffer-layout',
+            evidenceIds: [ 'webgpu-pipelines' ],
+            publicSymbols: [
+                'ScratchRenderPipeline',
+                'ScratchRenderPipelineDescriptor',
+            ],
+            operations: [ 'createRenderPipelineAsync' ],
+            sourcePaths: [
+                'packages/geoscratch/src/scratch/pipeline-creation.ts',
+            ],
+        }) &&
+        entryProofMatches(entries, 'interface.GPUTexelCopyTextureInfo', {
+            coverageRule: 'webgpu:copy:texture-info',
+            profile: 'copy-texture-info',
+            evidenceIds: [ 'webgpu-copy-upload' ],
+            publicSymbols: [ 'CopyCommand', 'TextureCopyCommandSourceDescriptor' ],
+            operations: [
+                'copyBufferToTexture',
+                'copyTextureToBuffer',
+                'copyTextureToTexture',
+            ],
+            sourcePaths: [
+                'packages/geoscratch/src/scratch/command.ts',
+            ],
+        }) &&
+        entryProofMatches(entries, 'interface.GPUSupportedLimits', {
+            coverageRule: 'webgpu:runtime:supported-limits',
+            profile: 'runtime-supported-limits',
+            evidenceIds: [ 'webgpu-runtime-capabilities' ],
+            publicSymbols: [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts' ],
+            operations: [ 'adapter.limits', 'device.limits' ],
+            sourcePaths: [
+                'packages/geoscratch/src/scratch/runtime.ts',
+            ],
+        }) &&
+        deepEqual(
+            entries.get('interface.GPUSupportedLimits')
+                ?.requirements.limits,
+            []
+        )
+    )
+}
+
+function intentionalSemanticEquivalentsRemainExplicit() {
+
+    const ids = [
+        'GPUDevice.createComputePipeline',
+        'GPUDevice.createRenderPipeline',
+        'GPUDevice.onuncapturederror',
+        'GPUDevice.popErrorScope',
+        'GPUDevice.pushErrorScope',
+        'GPUDevice.queue',
+        'GPUInternalError.constructor',
+        'GPUObjectBase.label',
+        'GPUOutOfMemoryError.constructor',
+        'GPUPipelineError.constructor',
+        'GPUUncapturedErrorEvent.constructor',
+        'GPUValidationError.constructor',
+        'interface.GPUCommandBuffer',
+        'interface.GPUCommandBufferDescriptor',
+        'interface.GPUSupportedLimits',
+    ]
+    const entries = new Map(current.entries.map(entry => [ entry.id, entry ]))
+    return ids.every(id =>
+        entries.get(id)?.current.classification ===
+            'managed-semantic-equivalent'
+    )
+}
+
+function entryProofMatches(entries, id, expected) {
+
+    const entry = entries.get(id)
+    return (
+        entry !== undefined &&
+        entry.proof !== undefined &&
+        entry.coverageRule === expected.coverageRule &&
+        entry.proof.granularity === 'entry' &&
+        entry.proof.profile === expected.profile &&
+        deepEqual(entry.proof.selector, { id }) &&
+        deepEqual(entry.evidenceIds, expected.evidenceIds) &&
+        deepEqual(entry.expression.publicSymbols, expected.publicSymbols) &&
+        deepEqual(entry.nativeLowering.operations, expected.operations) &&
+        deepEqual(entry.nativeLowering.sourcePaths, expected.sourcePaths)
+    )
+}
+
+function entryEvidenceIsEntrySpecific(entry) {
+
+    if (
+        entry.proof === undefined ||
+        !Array.isArray(entry.nativeLowering.operationEvidence)
+    ) {
+        return false
+    }
+    if (entry.domain === 'webgpu') {
+        if (
+            entry.proof.granularity !== 'entry' ||
+            !deepEqual(entry.proof.selector, { id: entry.id })
+        ) {
+            return false
+        }
+    } else if (entry.kind === 'semantic-section') {
+        if (
+            entry.proof.granularity !== 'normative-family' ||
+            !deepEqual(entry.proof.selector, {
+                kind: entry.kind,
+                family: normativeWgsl.entries.find(
+                    candidate => candidate.id === entry.id
+                )?.family,
+            })
+        ) {
+            return false
+        }
+    } else if (
+        entry.proof.granularity !== 'normative-kind' ||
+        !deepEqual(entry.proof.selector, { kind: entry.kind })
+    ) {
+        return false
+    }
+
+    if (entry.current.status !== 'managed') {
+        return (
+            entry.nativeLowering.operationEvidence.length === 0 &&
+            entry.nativeLowering.operations.length === 0 &&
+            entry.nativeLowering.sourcePaths.length === 0
+        )
+    }
+    const operationEvidence = entry.nativeLowering.operationEvidence
+    return (
+        entry.expression.contract.includes(entry.id) &&
+        operationEvidence.length > 0 &&
+        new Set(operationEvidence.map(item =>
+            `${item.operation}\0${item.sourcePath}`
+        )).size === operationEvidence.length &&
+        deepEqual(
+            entry.nativeLowering.operations,
+            uniqueSorted(operationEvidence.map(item => item.operation))
+        ) &&
+        deepEqual(
+            entry.nativeLowering.sourcePaths,
+            uniqueSorted(operationEvidence.map(item => item.sourcePath))
+        )
+    )
+}
+
+function unknownDeviceMemberFailsClosed() {
+
+    const classify = currentCoverageModule.classifyWebGpuEntry
+    return (
+        typeof classify === 'function' &&
+        currentCoverageModule.hasWebGpuOwnerRule?.('GPUDevice') ===
+            false &&
+        throws(() => classify({
+            id: 'GPUDevice.unknownFutureMember',
+            kind: 'method',
+            owner: 'GPUDevice',
+            member: 'unknownFutureMember',
+            sourceAnchor: 'device',
+        }))
+    )
+}
+
+function webGpuMethodsHaveExactOperationEvidence() {
+
+    const entries = new Map(current.entries.map(entry => [ entry.id, entry ]))
+    const semanticOperationOverrides = new Map([
+        [ 'GPUDevice.createComputePipeline', 'createComputePipelineAsync' ],
+        [ 'GPUDevice.createRenderPipeline', 'createRenderPipelineAsync' ],
+        [ 'GPUInternalError.constructor', 'serializeNativeGpuError' ],
+        [ 'GPUOutOfMemoryError.constructor', 'serializeNativeGpuError' ],
+        [ 'GPUPipelineError.constructor', 'serializeNativeGpuError' ],
+        [ 'GPUUncapturedErrorEvent.constructor', 'serializeNativeGpuError' ],
+        [ 'GPUValidationError.constructor', 'serializeNativeGpuError' ],
+    ])
+    return normativeWebGpu.entries
+        .filter(entry => entry.kind === 'method')
+        .every((entry) => {
+            const operationEvidence =
+                entries.get(entry.id)?.nativeLowering.operationEvidence
+            const expectedOperation =
+                semanticOperationOverrides.get(entry.id) ?? entry.member
+            return (
+                currentCoverageModule.hasWebGpuExactRule?.(entry.id) ===
+                    true &&
+                operationEvidence?.length === 1 &&
+                operationEvidence[0].operation
+                    .split('.').at(-1) === expectedOperation
+            )
+        })
+}
+
 function entryShapeIsComplete(entry) {
 
     return (
@@ -477,6 +782,12 @@ function entryShapeIsComplete(entry) {
         entry.goalStart.rationale.length > 0 &&
         typeof entry.coverageRule === 'string' &&
         entry.coverageRule.length > 0 &&
+        typeof entry.proof === 'object' &&
+        [ 'entry', 'normative-kind', 'normative-family' ]
+            .includes(entry.proof.granularity) &&
+        typeof entry.proof.profile === 'string' &&
+        entry.proof.profile.length > 0 &&
+        typeof entry.proof.selector === 'object' &&
         [ 'managed', 'not-applicable', 'unresolved' ]
             .includes(entry.current.status) &&
         typeof entry.current.rationale === 'string' &&
@@ -486,6 +797,7 @@ function entryShapeIsComplete(entry) {
         typeof entry.nativeLowering === 'object' &&
         Array.isArray(entry.nativeLowering.sourcePaths) &&
         Array.isArray(entry.nativeLowering.operations) &&
+        Array.isArray(entry.nativeLowering.operationEvidence) &&
         typeof entry.requirements === 'object' &&
         Array.isArray(entry.requirements.enableExtensions) &&
         Array.isArray(entry.requirements.deviceFeatures) &&
@@ -535,6 +847,29 @@ function evidenceNativeOperationsResolve(record) {
     })
 }
 
+function entryNativeOperationsResolve(entry) {
+
+    if (!Array.isArray(entry.nativeLowering.operationEvidence)) return false
+    return entry.nativeLowering.operationEvidence.every((item) => {
+        if (
+            typeof item.operation !== 'string' ||
+            item.operation.length === 0 ||
+            typeof item.sourcePath !== 'string' ||
+            item.sourcePath.length === 0 ||
+            !entry.nativeLowering.operations.includes(item.operation) ||
+            !entry.nativeLowering.sourcePaths.includes(item.sourcePath)
+        ) {
+            return false
+        }
+        const token = item.operation.split('.').at(-1)
+        return (
+            typeof token === 'string' &&
+            fs.existsSync(path.join(root, item.sourcePath)) &&
+            readText(item.sourcePath).includes(token)
+        )
+    })
+}
+
 function requirementContractIsComplete(entry) {
 
     return entry.requirements.conditions.every(condition => (
@@ -563,6 +898,118 @@ function requirementContractIsComplete(entry) {
             (condition.deviceFeatureAlternatives?.length ?? 0) > 0
         )
     ))
+}
+
+function requirementValuesAreTypedKnownAndUnique(entry) {
+
+    const direct = entry.requirements
+    return (
+        knownStringArray(direct.enableExtensions, knownEnableExtensions) &&
+        knownStringArray(direct.deviceFeatures, knownDeviceFeatures) &&
+        knownStringArray(direct.languageFeatures, knownLanguageFeatures) &&
+        knownStringArray(direct.limits, knownLimits) &&
+        knownStringArray(direct.dependencies, knownDependencies) &&
+        direct.conditions.every(condition =>
+            knownStringArray(
+                condition.deviceFeatures,
+                knownDeviceFeatures
+            ) &&
+            knownStringArray(
+                condition.languageFeatures,
+                knownLanguageFeatures
+            ) &&
+            knownStringArray(condition.limits, knownLimits) &&
+            knownStringArray(
+                condition.dependencies,
+                knownDependencies
+            ) &&
+            (
+                condition.deviceFeatureAlternatives === undefined ||
+                (
+                    Array.isArray(condition.deviceFeatureAlternatives) &&
+                    uniqueJsonValues(
+                        condition.deviceFeatureAlternatives
+                    ) &&
+                    condition.deviceFeatureAlternatives.every(
+                        alternative =>
+                            knownStringArray(
+                                alternative,
+                                knownDeviceFeatures
+                            )
+                    )
+                )
+            )
+        )
+    )
+}
+
+function invalidRequirementContractsFailClosed() {
+
+    const assertRequirements =
+        currentCoverageModule.assertCoverageRequirements
+    if (typeof assertRequirements !== 'function') return false
+    const valid = {
+        enableExtensions: [],
+        deviceFeatures: [],
+        languageFeatures: [],
+        limits: [],
+        dependencies: [],
+        conditions: [],
+        policy: 'test requirement contract',
+    }
+    return (
+        doesNotThrow(() => assertRequirements(valid, 'test.valid')) &&
+        throws(() => assertRequirements({
+            ...valid,
+            limits: [ null ],
+        }, 'test.null-limit')) &&
+        throws(() => assertRequirements({
+            ...valid,
+            limits: [ 'maxBufferSize', 'maxBufferSize' ],
+        }, 'test.duplicate-limit')) &&
+        throws(() => assertRequirements({
+            ...valid,
+            deviceFeatures: [ 'not-a-webgpu-feature' ],
+        }, 'test.unknown-feature')) &&
+        throws(() => assertRequirements({
+            ...valid,
+            limits: [ 'notAWebGpuLimit' ],
+        }, 'test.unknown-limit')) &&
+        throws(() => assertRequirements({
+            ...valid,
+            conditions: [
+                {
+                    when: 'invalid condition',
+                    deviceFeatures: [],
+                    languageFeatures: [],
+                    limits: [],
+                    dependencies: [ null ],
+                },
+            ],
+        }, 'test.null-condition-dependency'))
+    )
+}
+
+function knownStringArray(values, authority) {
+
+    return (
+        Array.isArray(values) &&
+        values.every(value =>
+            typeof value === 'string' &&
+            value.length > 0 &&
+            authority.has(value)
+        ) &&
+        new Set(values).size === values.length &&
+        deepEqual(values, [ ...values ].sort())
+    )
+}
+
+function uniqueJsonValues(values) {
+
+    return (
+        new Set(values.map(value => JSON.stringify(value))).size ===
+        values.length
+    )
 }
 
 function sensitiveCapabilityRequirementsArePresent() {
@@ -629,7 +1076,10 @@ function managedEntryUsesRawEscapeHatch(entry) {
         'raw escape',
         'escape hatch',
     ]
-    const expressionText = JSON.stringify(entry.expression).toLowerCase()
+    const expressionText = JSON.stringify({
+        ...entry.expression,
+        contract: entry.expression.contract.replaceAll(entry.id, ''),
+    }).toLowerCase()
     return forbidden.some(value => expressionText.includes(value.toLowerCase()))
 }
 
@@ -927,6 +1377,59 @@ function collectNamedExports(relativePath) {
         }
     }
     return names
+}
+
+function collectStringLiteralTypeMembers(relativePath, typeName) {
+
+    const source = readText(relativePath)
+    const file = ts.createSourceFile(
+        relativePath,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS
+    )
+    const declarations = file.statements.filter(statement =>
+        ts.isTypeAliasDeclaration(statement) &&
+        statement.name.text === typeName
+    )
+    if (declarations.length !== 1) {
+        throw new Error(
+            `Expected one ${typeName} declaration, found ${declarations.length}`
+        )
+    }
+    const type = declarations[0].type
+    const members = ts.isUnionTypeNode(type) ? type.types : [ type ]
+    const values = members.map((member) => {
+        if (
+            !ts.isLiteralTypeNode(member) ||
+            !ts.isStringLiteral(member.literal)
+        ) {
+            throw new Error(`${typeName} contains a non-string member`)
+        }
+        return member.literal.text
+    })
+    return new Set(values)
+}
+
+function throws(operation) {
+
+    try {
+        operation()
+        return false
+    } catch {
+        return true
+    }
+}
+
+function doesNotThrow(operation) {
+
+    try {
+        operation()
+        return true
+    } catch {
+        return false
+    }
 }
 
 function readJson(absolute) {
