@@ -708,6 +708,19 @@ const entryProofProfiles = Object.freeze({
             ),
         ]
     ),
+    'pipeline-layout': proofProfile(
+        'Scratch pipeline descriptors preserve explicit native pipeline layout construction.',
+        [
+            'ScratchComputePipelineDescriptor',
+            'ScratchRenderPipelineDescriptor',
+        ],
+        [
+            operationProof(
+                'createPipelineLayout',
+                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+            ),
+        ]
+    ),
     'pipeline-render': proofProfile(
         'ScratchRenderPipeline preserves render pipeline state through acknowledged async creation.',
         [ 'ScratchRenderPipeline', 'ScratchRenderPipelineDescriptor' ],
@@ -848,11 +861,20 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'copy-texture-info': proofProfile(
-        'CopyCommand texture endpoints preserve native texel-copy texture selection.',
-        [ 'CopyCommand', 'TextureCopyCommandSourceDescriptor' ],
+        'Copy and upload commands preserve native texel-copy texture selection for encoder and queue operations.',
+        [
+            'CopyCommand',
+            'ExternalImageUploadCommand',
+            'TextureCopyCommandSourceDescriptor',
+            'TextureUploadCommand',
+        ],
         [
             operationProof(
                 'copyBufferToTexture',
+                'packages/geoscratch/src/scratch/command.ts'
+            ),
+            operationProof(
+                'copyExternalImageToTexture',
                 'packages/geoscratch/src/scratch/command.ts'
             ),
             operationProof(
@@ -861,6 +883,10 @@ const entryProofProfiles = Object.freeze({
             ),
             operationProof(
                 'copyTextureToTexture',
+                'packages/geoscratch/src/scratch/command.ts'
+            ),
+            operationProof(
+                'writeTexture',
                 'packages/geoscratch/src/scratch/command.ts'
             ),
         ]
@@ -1509,7 +1535,7 @@ function resolveEntryProof({
         ? `${entry.id}: ${profile.claim} Scratch replaces the raw member shape with an explicit locally-verifiable contract while preserving the native GPU capability without hidden state or a CPU roundtrip.`
         : `${entry.id}: ${profile.claim} The managed path remains explicit and lowers directly to the listed native operation evidence.`
     return {
-        scope: proofScope(domain, entry, coverage.proofProfile),
+        scope: proofScope(entry, coverage.proofProfile),
         contract,
         publicSymbols: [ ...profile.publicSymbols ],
         operationEvidence: profile.operationEvidence.map(item => ({
@@ -1519,31 +1545,69 @@ function resolveEntryProof({
     }
 }
 
-function proofScope(domain, entry, profile) {
+function proofScope(entry, profile) {
 
-    if (domain === 'webgpu') {
-        return {
-            granularity: 'entry',
-            profile,
-            selector: { id: entry.id },
-        }
-    }
-    if (entry.kind === 'semantic-section') {
-        return {
-            granularity: 'normative-family',
-            profile,
-            selector: {
-                kind: entry.kind,
-                family: entry.family,
-            },
-        }
-    }
     return {
-        granularity: 'normative-kind',
+        granularity: 'entry',
         profile,
-        selector: { kind: entry.kind },
+        selector: { id: entry.id },
     }
 }
+
+const wgslAccessModeProofProfiles = Object.freeze({
+    'access-mode.read': 'wgsl-binding',
+    'access-mode.read_write': 'wgsl-binding',
+    'access-mode.write': 'wgsl-binding',
+})
+
+const wgslAddressSpaceProofProfiles = Object.freeze({
+    'address-space.function': 'wgsl-source',
+    'address-space.handle': 'wgsl-binding',
+    'address-space.immediate': 'wgsl-immediate',
+    'address-space.private': 'wgsl-source',
+    'address-space.storage': 'wgsl-binding',
+    'address-space.uniform': 'wgsl-binding',
+    'address-space.workgroup': 'wgsl-source',
+})
+
+const wgslAddressAndAccessSectionProofProfiles = Object.freeze({
+    'semantic-section.address-space': 'wgsl-source',
+    'semantic-section.memory-access-mode': 'wgsl-binding',
+})
+
+const wgslTypeSectionProofProfiles = Object.freeze({
+    'semantic-section.abstract-types': 'wgsl-source',
+    'semantic-section.alltypes-type': 'wgsl-source',
+    'semantic-section.array-types': 'wgsl-source',
+    'semantic-section.atomic-types': 'wgsl-source',
+    'semantic-section.bool-type': 'wgsl-source',
+    'semantic-section.buffer-types': 'wgsl-binding',
+    'semantic-section.component-reference-from-vector-memory-view':
+        'wgsl-source',
+    'semantic-section.composite-types': 'wgsl-source',
+    'semantic-section.constructible-types': 'wgsl-source',
+    'semantic-section.enumeration-types': 'wgsl-source',
+    'semantic-section.fixed-footprint-types': 'wgsl-source',
+    'semantic-section.floating-point-types': 'wgsl-source',
+    'semantic-section.host-shareable-types': 'wgsl-layout',
+    'semantic-section.integer-types': 'wgsl-source',
+    'semantic-section.matrix-types': 'wgsl-source',
+    'semantic-section.memory-views': 'wgsl-layout',
+    'semantic-section.plain-types-section': 'wgsl-source',
+    'semantic-section.predeclared-types': 'wgsl-source',
+    'semantic-section.ref-ptr-types': 'wgsl-source',
+    'semantic-section.scalar-types': 'wgsl-source',
+    'semantic-section.storable-types': 'wgsl-source',
+    'semantic-section.struct-types': 'wgsl-source',
+    'semantic-section.text-wgsl-media-type': 'wgsl-source',
+    'semantic-section.type-aliases': 'wgsl-source',
+    'semantic-section.type-checking-section': 'wgsl-source',
+    'semantic-section.type-expr': 'wgsl-source',
+    'semantic-section.type-specifiers': 'wgsl-source',
+    'semantic-section.types': 'wgsl-source',
+    'semantic-section.typing-tables-section': 'wgsl-source',
+    'semantic-section.vector-types': 'wgsl-source',
+})
 
 function wgslProofProfile(entry) {
 
@@ -1553,9 +1617,21 @@ function wgslProofProfile(entry) {
             ? 'wgsl-immediate'
             : 'wgsl-capability'
     }
+    if (entry.kind === 'access-mode') {
+        return finiteWgslProofProfile(
+            wgslAccessModeProofProfiles,
+            entry,
+            'access mode'
+        )
+    }
+    if (entry.kind === 'address-space') {
+        return finiteWgslProofProfile(
+            wgslAddressSpaceProofProfiles,
+            entry,
+            'address space'
+        )
+    }
     const kindProfiles = {
-        'access-mode': 'wgsl-layout',
-        'address-space': 'wgsl-layout',
         attribute: 'wgsl-pipeline-interface',
         'built-in-function': 'wgsl-source',
         'built-in-value': 'wgsl-pipeline-interface',
@@ -1572,9 +1648,24 @@ function wgslProofProfile(entry) {
     if (entry.kind !== 'semantic-section') {
         throw new Error(`Unresolved WGSL proof kind for ${entry.id}`)
     }
+    if (
+        entry.family === 'access-modes' ||
+        entry.family === 'address-spaces'
+    ) {
+        return finiteWgslProofProfile(
+            wgslAddressAndAccessSectionProofProfiles,
+            entry,
+            'address/access section'
+        )
+    }
+    if (entry.family === 'types') {
+        return finiteWgslProofProfile(
+            wgslTypeSectionProofProfiles,
+            entry,
+            'type section'
+        )
+    }
     const familyProfiles = {
-        'access-modes': 'wgsl-layout',
-        'address-spaces': 'wgsl-layout',
         attributes: 'wgsl-pipeline-interface',
         'built-in-functions': 'wgsl-source',
         'built-in-values': 'wgsl-pipeline-interface',
@@ -1592,12 +1683,22 @@ function wgslProofProfile(entry) {
         limits: 'wgsl-capability',
         'shader-interface': 'wgsl-pipeline-interface',
         'textures-formats': 'wgsl-texture-binding',
-        types: 'wgsl-layout',
     }
     const profile = familyProfiles[entry.family]
     if (profile === undefined) {
         throw new Error(
             `Unresolved WGSL proof family ${entry.family} for ${entry.id}`
+        )
+    }
+    return profile
+}
+
+function finiteWgslProofProfile(profiles, entry, family) {
+
+    const profile = profiles[entry.id]
+    if (profile === undefined) {
+        throw new Error(
+            `Unresolved WGSL ${family} proof profile for ${entry.id}`
         )
     }
     return profile
@@ -2723,16 +2824,24 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
         [
             'GPUBuffer',
             'GPUBufferDescriptor',
-            'GPUBufferDynamicOffset',
-            'GPUBufferMapState',
             'GPUBufferUsage',
             'GPUBufferUsageFlags',
-            'GPUMapMode',
-            'GPUMapModeFlags',
         ],
         'webgpu:buffer-resource',
         'webgpu-buffer-mapping',
         'buffer-resource'
+    ),
+    webGpuOwnerRule(
+        [ 'GPUBufferDynamicOffset' ],
+        'webgpu:binding-command:dynamic-offset',
+        'webgpu-bindings',
+        'binding-command'
+    ),
+    webGpuOwnerRule(
+        [ 'GPUBufferMapState', 'GPUMapMode', 'GPUMapModeFlags' ],
+        'webgpu:buffer-mapping',
+        'webgpu-buffer-mapping',
+        'buffer-mapping'
     ),
     webGpuOwnerRule(
         [
@@ -2809,13 +2918,17 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
             'GPUPipelineBase',
             'GPUPipelineConstantValue',
             'GPUPipelineDescriptorBase',
-            'GPUPipelineLayout',
-            'GPUPipelineLayoutDescriptor',
             'GPUProgrammableStage',
         ],
         'webgpu:pipeline-state',
         'webgpu-pipelines',
         'pipeline-state'
+    ),
+    webGpuOwnerRule(
+        [ 'GPUPipelineLayout', 'GPUPipelineLayoutDescriptor' ],
+        'webgpu:pipeline-layout',
+        'webgpu-pipelines',
+        'pipeline-layout'
     ),
     webGpuOwnerRule(
         [
@@ -3072,13 +3185,24 @@ const webGpuOwnerRules = createWebGpuOwnerRules([
     ),
 ])
 
-const normativeWebGpuEntryIds = new Set(
-    readJson(normativeArtifactPaths.webgpu).entries.map(entry => entry.id)
+const normativeWebGpuEntriesById = new Map(
+    readJson(normativeArtifactPaths.webgpu).entries.map(entry => [
+        entry.id,
+        entry,
+    ])
 )
 
 export function classifyWebGpuEntry(entry) {
 
     return webGpuCoverage(entry)
+}
+
+export function classifyWgslEntry(entry) {
+
+    return {
+        ...wgslCoverage(entry),
+        proofProfile: wgslProofProfile(entry),
+    }
 }
 
 export function hasWebGpuOwnerRule(owner) {
@@ -3093,9 +3217,18 @@ export function hasWebGpuExactRule(id) {
 
 function webGpuCoverage(entry) {
 
-    if (!normativeWebGpuEntryIds.has(entry.id)) {
-        throw new Error(`Unknown WebGPU normative entry ${entry.id}`)
+    const canonical = normativeWebGpuEntriesById.get(entry?.id)
+    if (canonical === undefined) {
+        throw new Error(`Unknown WebGPU normative entry ${entry?.id}`)
     }
+    for (const field of [ 'kind', 'owner', 'member' ]) {
+        if (entry[field] !== canonical[field]) {
+            throw new Error(
+                `${entry.id} ${field} does not match the normative inventory`
+            )
+        }
+    }
+    entry = canonical
     if (entry.kind === 'includes') {
         const includeRules = {
             GPUObjectBase: webGpuRule(
@@ -3175,6 +3308,56 @@ function webGpuCoverage(entry) {
     throw new Error(`Unresolved WebGPU coverage rule for ${entry.id}`)
 }
 
+const wgslProofProfileCoverage = Object.freeze({
+    'wgsl-binding': Object.freeze({
+        evidenceIds: Object.freeze([
+            'wgsl-caller-authored-source',
+            'webgpu-bindings',
+            'webgpu-shader-program',
+        ]),
+        classification: 'managed-first-class',
+    }),
+    'wgsl-immediate': Object.freeze({
+        evidenceIds: Object.freeze([
+            'wgsl-caller-authored-source',
+            'wgsl-immediate-data',
+            'webgpu-pipelines',
+        ]),
+        classification: 'managed-first-class',
+    }),
+    'wgsl-layout': Object.freeze({
+        evidenceIds: Object.freeze([
+            'wgsl-caller-authored-source',
+            'wgsl-recursive-layout',
+            'webgpu-bindings',
+        ]),
+        classification: 'managed-first-class',
+    }),
+    'wgsl-source': Object.freeze({
+        evidenceIds: Object.freeze([
+            'wgsl-caller-authored-source',
+            'webgpu-shader-program',
+        ]),
+        classification: 'managed-semantic-equivalent',
+    }),
+})
+
+function wgslCoverageFromProofProfile(entry, ruleId) {
+
+    const profile = wgslProofProfile(entry)
+    const coverage = wgslProofProfileCoverage[profile]
+    if (coverage === undefined) {
+        throw new Error(
+            `No WGSL coverage contract for proof profile ${profile}`
+        )
+    }
+    return coverageRule(
+        ruleId,
+        coverage.evidenceIds,
+        coverage.classification
+    )
+}
+
 function wgslCoverage(entry) {
 
     if (entry.kind === 'enable-extension') {
@@ -3210,34 +3393,17 @@ function wgslCoverage(entry) {
             'managed-semantic-equivalent'
         )
     }
+    if (
+        entry.kind === 'access-mode' ||
+        entry.kind === 'address-space'
+    ) {
+        return wgslCoverageFromProofProfile(
+            entry,
+            `wgsl:${entry.kind}:${entry.id}`
+        )
+    }
 
     const kindRules = {
-        'access-mode': [
-            'wgsl:access-mode',
-            [
-                'wgsl-caller-authored-source',
-                'wgsl-recursive-layout',
-                'webgpu-bindings',
-            ],
-            'managed-first-class',
-        ],
-        'address-space': [
-            entry.name === 'immediate'
-                ? 'wgsl:address-space:immediate'
-                : 'wgsl:address-space',
-            entry.name === 'immediate'
-                ? [
-                    'wgsl-caller-authored-source',
-                    'wgsl-recursive-layout',
-                    'wgsl-immediate-data',
-                ]
-                : [
-                    'wgsl-caller-authored-source',
-                    'wgsl-recursive-layout',
-                    'webgpu-bindings',
-                ],
-            'managed-first-class',
-        ],
         attribute: [
             'wgsl:attribute',
             [
@@ -3331,16 +3497,18 @@ function wgslCoverage(entry) {
     if (entry.kind !== 'semantic-section') {
         throw new Error(`Unresolved WGSL kind for ${entry.id}`)
     }
+    if (
+        entry.family === 'access-modes' ||
+        entry.family === 'address-spaces' ||
+        entry.family === 'types'
+    ) {
+        return wgslCoverageFromProofProfile(
+            entry,
+            `wgsl:semantic-section:${entry.id}`
+        )
+    }
 
     const familyRules = {
-        'access-modes': [
-            [ 'wgsl-caller-authored-source', 'wgsl-recursive-layout', 'webgpu-bindings' ],
-            'managed-first-class',
-        ],
-        'address-spaces': [
-            [ 'wgsl-caller-authored-source', 'wgsl-recursive-layout', 'webgpu-bindings' ],
-            'managed-first-class',
-        ],
         attributes: [
             [ 'wgsl-caller-authored-source', 'webgpu-shader-program', 'webgpu-bindings', 'webgpu-pipelines' ],
             'managed-semantic-equivalent',
@@ -3409,10 +3577,6 @@ function wgslCoverage(entry) {
             [ 'wgsl-caller-authored-source', 'webgpu-shader-program', 'webgpu-bindings', 'webgpu-texture-resource' ],
             'managed-first-class',
         ],
-        types: [
-            [ 'wgsl-caller-authored-source', 'wgsl-recursive-layout', 'webgpu-shader-program', 'webgpu-bindings' ],
-            'managed-first-class',
-        ],
     }[entry.family]
     if (familyRules === undefined) {
         throw new Error(
@@ -3426,12 +3590,81 @@ function wgslCoverage(entry) {
     )
 }
 
+const normalizedRequirementKeys = Object.freeze([
+    'conditions',
+    'dependencies',
+    'deviceFeatures',
+    'enableExtensions',
+    'languageFeatures',
+    'limits',
+    'policy',
+])
+
+const wgslRequirementSourceKeys = Object.freeze(
+    normalizedRequirementKeys.filter(key => key !== 'policy')
+)
+
+const requirementConditionKeys = Object.freeze([
+    'dependencies',
+    'deviceFeatureAlternatives',
+    'deviceFeatures',
+    'languageFeatures',
+    'limits',
+    'when',
+])
+
+export function assertWgslRequirementSource(source, entryId) {
+
+    if (
+        source === null ||
+        typeof source !== 'object' ||
+        Array.isArray(source)
+    ) {
+        throw new TypeError(`${entryId} WGSL requirements must be an object`)
+    }
+    assertExactObjectKeys(
+        source,
+        wgslRequirementSourceKeys,
+        `${entryId}.requirements`
+    )
+    for (const key of wgslRequirementSourceKeys) {
+        if (
+            source[key] !== undefined &&
+            !Array.isArray(source[key])
+        ) {
+            throw new TypeError(
+                `${entryId}.requirements.${key} must be an array`
+            )
+        }
+    }
+    for (
+        let conditionIndex = 0;
+        conditionIndex < (source.conditions?.length ?? 0);
+        conditionIndex += 1
+    ) {
+        const condition = source.conditions[conditionIndex]
+        const location =
+            `${entryId}.requirements.conditions[${conditionIndex}]`
+        if (
+            condition === null ||
+            typeof condition !== 'object' ||
+            Array.isArray(condition)
+        ) {
+            throw new TypeError(`${location} must be an object`)
+        }
+        assertExactObjectKeys(
+            condition,
+            requirementConditionKeys,
+            location
+        )
+    }
+    return source
+}
+
 function currentWgslRequirements(entry, dependencyManifest) {
 
     const source = entry.requirements
-    if (source === null || typeof source !== 'object') {
-        throw new Error(`Missing WGSL requirements for ${entry.id}`)
-    }
+    assertWgslRequirementSource(source, entry.id)
     const enableExtensions = [ ...(source.enableExtensions ?? []) ]
     const deviceFeatures = [ ...(source.deviceFeatures ?? []) ]
     const languageFeatures = [ ...(source.languageFeatures ?? []) ]
@@ -3746,6 +3979,11 @@ export function assertCoverageRequirements(requirements, entryId) {
     ) {
         throw new TypeError(`${entryId} requirements must be an object`)
     }
+    assertExactObjectKeys(
+        requirements,
+        normalizedRequirementKeys,
+        `${entryId}.requirements`
+    )
     const authorities = coverageRequirementAuthorities()
     assertKnownStringArray(
         requirements.enableExtensions,
@@ -3792,6 +4030,11 @@ export function assertCoverageRequirements(requirements, entryId) {
         ) {
             throw new TypeError(`${location} is invalid`)
         }
+        assertExactObjectKeys(
+            condition,
+            requirementConditionKeys,
+            location
+        )
         assertKnownStringArray(
             condition.deviceFeatures,
             authorities.deviceFeatures,
@@ -3848,6 +4091,19 @@ export function assertCoverageRequirements(requirements, entryId) {
         throw new TypeError(`${entryId}.policy must be a non-empty string`)
     }
     return requirements
+}
+
+function assertExactObjectKeys(value, allowedKeys, location) {
+
+    const allowed = new Set(allowedKeys)
+    const unknownKeys = Object.keys(value)
+        .filter(key => !allowed.has(key))
+        .sort()
+    if (unknownKeys.length > 0) {
+        throw new TypeError(
+            `${location} contains unknown keys: ${unknownKeys.join(', ')}`
+        )
+    }
 }
 
 function coverageRule(

@@ -76,10 +76,7 @@ const expectedEnableContracts = [
         extension: 'subgroup_size_control',
         requiredFeatures: [ 'subgroup-size-control', 'subgroups' ],
         dependencies: [
-            {
-                feature: 'subgroup-size-control',
-                requiredFeature: 'subgroups',
-            },
+            'caller-companion.subgroup-size-control.subgroups',
         ],
     },
     {
@@ -195,7 +192,7 @@ describe('Scratch current WebGPU and WGSL coverage manifests', () => {
         expect(entries.get('GPUTextureViewDescriptor.swizzle').evidenceIds)
             .to.deep.equal([ 'webgpu-texture-resource' ])
         expect(entries.get('GPUComputePassDescriptor.timestampWrites').evidenceIds)
-            .to.deep.equal([ 'webgpu-query' ])
+            .to.deep.equal([ 'webgpu-pass-state', 'webgpu-query' ])
     })
 
     it('retains value-dependent WebGPU feature, language, and limit contracts', () => {

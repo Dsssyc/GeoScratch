@@ -753,9 +753,10 @@ baseline, so no specification drift widened this Goal:
 ### Entry-Proof Schema
 
 The living coverage manifest now uses schema version 3. Every WebGPU entry
-has entry granularity and its own ID selector. WGSL proof sharing is limited
-to an explicit normative kind or an explicit semantic family. A managed entry
-contains:
+and every WGSL entry has entry granularity and its own ID selector. Reusable
+proof profiles are selected through explicit finite maps, but a profile never
+widens an entry's selector to an entire kind or semantic family. A managed
+entry contains:
 
 - a named proof profile and entry-specific rationale;
 - public Scratch symbols resolved through the package source export graph;
@@ -779,8 +780,18 @@ compute timestamp writes; shader creation is separated from compilation
 messages; texture allocation is separated from texture views; command
 encoder creation is separated from command-buffer finish; render-bundle
 encoder creation is separated from bundle finish; and texel-copy buffer and
-texture records carry only the copy quadrants that actually consume them.
-Regression assertions pin representative entries from every split.
+texture records carry only the encoder and queue operations that actually
+consume them. Dynamic buffer offsets are attributed to binding commands,
+buffer map state and map modes to mapping, and pipeline-layout records to
+native pipeline-layout creation. Regression assertions pin representative
+entries from every split.
+
+WGSL address spaces, access modes, and type sections no longer inherit one
+layout proof. Host-shareable types and memory views retain `LayoutCodec`
+proof; buffer types and resource-facing address/access modes use binding
+proof; the immediate address space uses immediate-data proof; and ordinary
+language-level types and function/private/workgroup spaces use lossless
+caller-authored WGSL proof. Unknown members of each finite map fail closed.
 
 Historical classifications remain visible in `goalStart`, but they do not
 control the current verdict. In particular, descriptor fields and constants
@@ -791,10 +802,14 @@ used that label. The current result is derived from the current finite rules:
 | --- | ---: |
 | WebGPU normative entries | 582 |
 | WGSL normative entries | 662 |
-| Managed first class | 668 |
-| Managed semantic equivalent | 574 |
+| Managed first class | 637 |
+| Managed semantic equivalent | 605 |
 | Explained DOM-composition not applicable | 2 |
 | Unresolved | 0 |
+
+The 31-entry shift from first class to semantic equivalent removes claims
+that `LayoutCodec` covers unrelated WGSL language semantics. It does not
+remove any Scratch or native WebGPU capability.
 
 The explicit non-composition WebGPU semantic-equivalent cases remain the
 synchronous pipeline methods, raw queue exposure, mutable label, native error
@@ -813,21 +828,44 @@ The six fixed attribution regressions now resolve as follows:
 | `GPURenderPassEncoder.executeBundles` | `ExecuteRenderBundlesCommand` and `RenderBundle` in `render-bundle.ts`; native `executeBundles` |
 | `interface.GPUCommandBufferDescriptor` | `SubmissionBuilder` and `SubmittedWork` in `submission.ts`; native `GPUCommandEncoder.finish` |
 | `interface.GPUVertexBufferLayout` | render pipeline descriptor symbols in `pipeline-creation.ts`; native `createRenderPipelineAsync` |
-| `interface.GPUTexelCopyTextureInfo` | `CopyCommand` texture endpoints in `command.ts`; all three texture-involving GPU copy operations |
+| `interface.GPUTexelCopyTextureInfo` | `CopyCommand`, `TextureUploadCommand`, and `ExternalImageUploadCommand` texture endpoints in `command.ts`; `copyBufferToTexture`, `copyExternalImageToTexture`, `copyTextureToBuffer`, `copyTextureToTexture`, and `writeTexture` |
 | `interface.GPUSupportedLimits` | immutable adapter/device limit facts in `runtime.ts`; interface-level `limits: []` |
 
 Requirement validation rejects null, undefined, empty, duplicate, unsorted,
-or unknown names. The same checks apply inside conditional requirements.
-Dependency references are canonical IDs from the fixed dependency inventory;
-the WGSL enable-extension manifest therefore records
+or unknown names, as well as unknown top-level and condition keys. Validation
+runs against raw WGSL requirements before normalization and against the
+normalized schema. The same value checks apply inside conditional
+requirements. Dependency references are canonical IDs from the fixed
+dependency inventory; the WGSL enable-extension manifest therefore records
 `caller-companion.subgroup-size-control.subgroups` instead of duplicating a
 loosely shaped feature pair.
 
 Two consecutive generations from the same source produced byte-identical
 coverage and enable-extension manifests. No runtime or example file changed.
 
-### Review And Final Gate
+### Adversarial Review And Bounded Correction
 
-The single fresh-context review result and the one final full-gate result are
-recorded here after they run. This follow-up does not claim terminal `clean`
-until both bounded steps are complete.
+The single fresh-context reviewer returned `issues-found`. One bounded fact
+check confirmed all six findings:
+
+1. WGSL address-space and type-section proof families overclaimed
+   `LayoutCodec` coverage.
+2. Dynamic offsets, buffer mapping types, and pipeline-layout descriptors
+   remained in heterogeneous WebGPU owner groups.
+3. `GPUTexelCopyTextureInfo` omitted `writeTexture` and
+   `copyExternalImageToTexture`.
+4. The classifier accepted a known WebGPU ID with forged kind, owner, or
+   member fields.
+5. Requirements schema version 3 accepted unknown object keys.
+6. The focused Mocha test retained a pre-v3 dependency object and stale
+   timestamp evidence.
+
+The one permitted correction addressed all six findings. Regression tests now
+mutate canonical WebGPU identities, inject unknown requirement and condition
+keys, exercise finite WGSL profile boundaries, and pin the additional owner
+splits and texture queue operations. The focused current-coverage audit and
+Mocha test pass after regeneration.
+
+The committed document does not preclaim the final full gate. That gate runs
+once against the final clean commit, and its result is reported in the
+terminal Goal report.

@@ -155,8 +155,8 @@ const checks = {
         current.summary.frozenWebgpuHistoricalEntryCount === 591 &&
         current.summary.frozenWgslHistoricalEntryCount === 65,
     exactCurrentClassifications:
-        current.summary.byClassification['managed-first-class'] === 668 &&
-        current.summary.byClassification['managed-semantic-equivalent'] === 574 &&
+        current.summary.byClassification['managed-first-class'] === 637 &&
+        current.summary.byClassification['managed-semantic-equivalent'] === 605 &&
         current.summary.byClassification['not-applicable'] === 2 &&
         (current.summary.byClassification.unresolved ?? 0) === 0,
     exactCurrentStatuses:
@@ -176,6 +176,8 @@ const checks = {
         evidenceAttributionRegressionsPass(),
     heterogeneousOwnerProfilesAreSplit:
         heterogeneousOwnerProfilesAreSplit(),
+    wgslHeterogeneousProofProfilesAreSplit:
+        wgslHeterogeneousProofProfilesAreSplit(),
     intentionalSemanticEquivalentsRemainExplicit:
         intentionalSemanticEquivalentsRemainExplicit(),
     managedEntryEvidenceIsEntrySpecific:
@@ -588,11 +590,18 @@ function evidenceAttributionRegressionsPass() {
             coverageRule: 'webgpu:copy:texture-info',
             profile: 'copy-texture-info',
             evidenceIds: [ 'webgpu-copy-upload' ],
-            publicSymbols: [ 'CopyCommand', 'TextureCopyCommandSourceDescriptor' ],
+            publicSymbols: [
+                'CopyCommand',
+                'ExternalImageUploadCommand',
+                'TextureCopyCommandSourceDescriptor',
+                'TextureUploadCommand',
+            ],
             operations: [
                 'copyBufferToTexture',
+                'copyExternalImageToTexture',
                 'copyTextureToBuffer',
                 'copyTextureToTexture',
+                'writeTexture',
             ],
             sourcePaths: [
                 'packages/geoscratch/src/scratch/command.ts',
@@ -651,6 +660,14 @@ function heterogeneousOwnerProfilesAreSplit() {
             [ 'binding-set', [ 'createBindGroup' ] ],
         ],
         [
+            'type.GPUBufferDynamicOffset',
+            [ 'binding-command', [ 'setBindGroup' ] ],
+        ],
+        [
+            'type.GPUMapModeFlags',
+            [ 'buffer-mapping', [ 'getMappedRange', 'mapAsync', 'unmap' ] ],
+        ],
+        [
             'GPUBindGroupLayoutDescriptor.entries',
             [ 'binding-layout', [ 'createBindGroupLayout' ] ],
         ],
@@ -661,6 +678,10 @@ function heterogeneousOwnerProfilesAreSplit() {
         [
             'GPURenderPipelineDescriptor.vertex',
             [ 'pipeline-render', [ 'createRenderPipelineAsync' ] ],
+        ],
+        [
+            'interface.GPUPipelineLayoutDescriptor',
+            [ 'pipeline-layout', [ 'createPipelineLayout' ] ],
         ],
         [
             'GPUComputePassTimestampWrites.querySet',
@@ -708,8 +729,10 @@ function heterogeneousOwnerProfilesAreSplit() {
                 'copy-texture-info',
                 [
                     'copyBufferToTexture',
+                    'copyExternalImageToTexture',
                     'copyTextureToBuffer',
                     'copyTextureToTexture',
+                    'writeTexture',
                 ],
             ],
         ],
@@ -721,6 +744,68 @@ function heterogeneousOwnerProfilesAreSplit() {
             deepEqual(entry.nativeLowering.operations, operations)
         )
     })
+}
+
+function wgslHeterogeneousProofProfilesAreSplit() {
+
+    const entries = new Map(current.entries.map(entry => [ entry.id, entry ]))
+    const expected = new Map([
+        [
+            'address-space.function',
+            [ 'wgsl-source', 'managed-semantic-equivalent' ],
+        ],
+        [
+            'address-space.immediate',
+            [ 'wgsl-immediate', 'managed-first-class' ],
+        ],
+        [
+            'address-space.storage',
+            [ 'wgsl-binding', 'managed-first-class' ],
+        ],
+        [
+            'semantic-section.address-space',
+            [ 'wgsl-source', 'managed-semantic-equivalent' ],
+        ],
+        [
+            'semantic-section.memory-access-mode',
+            [ 'wgsl-binding', 'managed-first-class' ],
+        ],
+        [
+            'semantic-section.buffer-types',
+            [ 'wgsl-binding', 'managed-first-class' ],
+        ],
+        [
+            'semantic-section.host-shareable-types',
+            [ 'wgsl-layout', 'managed-first-class' ],
+        ],
+        [
+            'semantic-section.ref-ptr-types',
+            [ 'wgsl-source', 'managed-semantic-equivalent' ],
+        ],
+    ])
+    return (
+        [ ...expected ].every(
+            ([ id, [ profile, classification ] ]) => {
+                const entry = entries.get(id)
+                return (
+                    entry?.proof.profile === profile &&
+                    entry.current.classification === classification &&
+                    entry.proof.granularity === 'entry' &&
+                    deepEqual(entry.proof.selector, { id })
+                )
+            }
+        ) &&
+        throws(() => currentCoverageModule.classifyWgslEntry?.({
+            id: 'address-space.unknown-future-space',
+            kind: 'address-space',
+            name: 'unknown-future-space',
+        })) &&
+        throws(() => currentCoverageModule.classifyWgslEntry?.({
+            id: 'semantic-section.unknown-future-type',
+            kind: 'semantic-section',
+            family: 'types',
+        }))
+    )
 }
 
 function entryProofMatches(entries, id, expected) {
@@ -748,28 +833,9 @@ function entryEvidenceIsEntrySpecific(entry) {
     ) {
         return false
     }
-    if (entry.domain === 'webgpu') {
-        if (
-            entry.proof.granularity !== 'entry' ||
-            !deepEqual(entry.proof.selector, { id: entry.id })
-        ) {
-            return false
-        }
-    } else if (entry.kind === 'semantic-section') {
-        if (
-            entry.proof.granularity !== 'normative-family' ||
-            !deepEqual(entry.proof.selector, {
-                kind: entry.kind,
-                family: normativeWgsl.entries.find(
-                    candidate => candidate.id === entry.id
-                )?.family,
-            })
-        ) {
-            return false
-        }
-    } else if (
-        entry.proof.granularity !== 'normative-kind' ||
-        !deepEqual(entry.proof.selector, { kind: entry.kind })
+    if (
+        entry.proof.granularity !== 'entry' ||
+        !deepEqual(entry.proof.selector, { id: entry.id })
     ) {
         return false
     }
@@ -802,10 +868,29 @@ function entryEvidenceIsEntrySpecific(entry) {
 function unknownDeviceMemberFailsClosed() {
 
     const classify = currentCoverageModule.classifyWebGpuEntry
+    const canonical = {
+        id: 'GPUDevice.createBuffer',
+        kind: 'method',
+        owner: 'GPUDevice',
+        member: 'createBuffer',
+    }
     return (
         typeof classify === 'function' &&
         currentCoverageModule.hasWebGpuOwnerRule?.('GPUDevice') ===
             false &&
+        doesNotThrow(() => classify(canonical)) &&
+        throws(() => classify({
+            ...canonical,
+            kind: 'property',
+        })) &&
+        throws(() => classify({
+            ...canonical,
+            owner: 'GPUQueue',
+        })) &&
+        throws(() => classify({
+            ...canonical,
+            member: 'createTexture',
+        })) &&
         throws(() => classify({
             id: 'GPUDevice.unknownFutureMember',
             kind: 'method',
@@ -1030,7 +1115,14 @@ function invalidRequirementContractsFailClosed() {
 
     const assertRequirements =
         currentCoverageModule.assertCoverageRequirements
-    if (typeof assertRequirements !== 'function') return false
+    const assertWgslSource =
+        currentCoverageModule.assertWgslRequirementSource
+    if (
+        typeof assertRequirements !== 'function' ||
+        typeof assertWgslSource !== 'function'
+    ) {
+        return false
+    }
     const valid = {
         enableExtensions: [],
         deviceFeatures: [],
@@ -1040,8 +1132,23 @@ function invalidRequirementContractsFailClosed() {
         conditions: [],
         policy: 'test requirement contract',
     }
+    const validSource = {
+        enableExtensions: [],
+        deviceFeatures: [],
+        languageFeatures: [],
+        limits: [],
+        dependencies: [],
+        conditions: [],
+    }
     return (
         doesNotThrow(() => assertRequirements(valid, 'test.valid')) &&
+        doesNotThrow(() =>
+            assertWgslSource(validSource, 'test.valid-wgsl-source')
+        ) &&
+        throws(() => assertRequirements({
+            ...valid,
+            deviceFeature: [],
+        }, 'test.unknown-requirement-key')) &&
         throws(() => assertRequirements({
             ...valid,
             limits: [ null ],
@@ -1069,7 +1176,37 @@ function invalidRequirementContractsFailClosed() {
                     dependencies: [ null ],
                 },
             ],
-        }, 'test.null-condition-dependency'))
+        }, 'test.null-condition-dependency')) &&
+        throws(() => assertRequirements({
+            ...valid,
+            conditions: [
+                {
+                    when: 'unknown condition key',
+                    deviceFeatures: [],
+                    languageFeatures: [],
+                    limits: [],
+                    dependencies: [],
+                    limit: [],
+                },
+            ],
+        }, 'test.unknown-condition-key')) &&
+        throws(() => assertWgslSource({
+            ...validSource,
+            deviceFeature: [],
+        }, 'test.unknown-wgsl-source-key')) &&
+        throws(() => assertWgslSource({
+            ...validSource,
+            conditions: [
+                {
+                    when: 'unknown raw condition key',
+                    deviceFeatures: [],
+                    languageFeatures: [],
+                    limits: [],
+                    dependencies: [],
+                    limit: [],
+                },
+            ],
+        }, 'test.unknown-wgsl-condition-key'))
     )
 }
 
