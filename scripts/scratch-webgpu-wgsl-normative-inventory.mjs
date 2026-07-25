@@ -9,9 +9,9 @@ export const normativeBaseline = Object.freeze({
     refreshAttempt: Object.freeze({
         status: 'partial',
         retryCount: 0,
-        failedSource: 'gpuweb/types raw declaration',
+        failedSource: 'W3C WebGPU publication page',
         reason:
-            'The single bounded refresh reached official publication and repository metadata, then the raw gpuweb/types request timed out. No network retry is permitted by the Goal.',
+            'The single bounded observation reached the WGSL publication and pinned GPUWeb editor, gpuweb/types, and proposal metadata, while the WebGPU publication request returned a fetch error. No network retry is permitted by the Goal; the pinned local publication hash remains authoritative.',
     }),
     webgpu: Object.freeze({
         publication:

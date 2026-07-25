@@ -10,6 +10,14 @@ import {
 import {
     normativeArtifactPaths,
 } from './refresh-scratch-webgpu-wgsl-baseline.mjs'
+import {
+    STRUCTURED_PROOF_SCHEMA_VERSION,
+    coverageManifestSchemaPath,
+    coverageManifestSchemaV4,
+    createEntryProofEvidence,
+    structuredOperationProof,
+    structuredProofKinds,
+} from './scratch-webgpu-wgsl-structured-proof.mjs'
 
 const root = process.cwd()
 const manifestRoot = path.join(root, 'docs', 'review', 'manifests')
@@ -21,6 +29,10 @@ export const wgslEnableExtensionManifestPath = path.join(
 export const currentCoverageManifestPath = path.join(
     manifestRoot,
     'scratch-webgpu-wgsl-current-coverage.json'
+)
+export const currentCoverageSchemaPath = path.join(
+    root,
+    coverageManifestSchemaPath
 )
 
 export const currentSpecRefresh = Object.freeze({
@@ -81,24 +93,21 @@ const evidence = Object.freeze([
         'Explicit adapter/device requests, immutable capability facts, queue ownership, and device-loss lifecycle.',
         [ 'packages/geoscratch/src/scratch/runtime.ts', 'packages/geoscratch/src/scratch/runtime-authority.ts' ],
         [ 'tests/scratch-runtime.test.js', 'tests/scratch-closed-brand-authority.test.js' ],
-        [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions', 'ScratchRuntimeRequestFacts' ],
-        [ 'requestAdapter', 'requestDevice', 'device.lost' ]
+        [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions', 'ScratchRuntimeRequestFacts' ]
     ),
     evidenceRecord(
         'webgpu-surface-presentation',
         'Explicit Surface configuration and attempt-local current-texture leases preserve presentation semantics.',
         [ 'packages/geoscratch/src/scratch/surface.ts', 'packages/geoscratch/src/scratch/temporal-texture.ts' ],
         [ 'tests/scratch-surface.test.js', 'tests/scratch-temporal-texture.test.js' ],
-        [ 'Surface', 'SurfaceOptions', 'SurfaceTextureLease', 'SurfaceTextureView' ],
-        [ 'GPUCanvasContext.configure', 'GPUCanvasContext.getCurrentTexture', 'GPUTexture.createView' ]
+        [ 'Surface', 'SurfaceOptions', 'SurfaceTextureLease', 'SurfaceTextureView' ]
     ),
     evidenceRecord(
         'webgpu-resource-lifetime',
         'Logical resource identity, runtime ownership, allocation versions, content epochs, and disposal are explicit.',
         [ 'packages/geoscratch/src/scratch/resource.ts', 'packages/geoscratch/src/scratch/native-allocation.ts' ],
         [ 'tests/scratch-resource.test.js', 'tests/scratch-resource-views.test.js' ],
-        [ 'Resource', 'ResourceState' ],
-        [ 'GPUObjectBase.label', 'GPUBuffer.destroy', 'GPUTexture.destroy' ]
+        [ 'Resource', 'ResourceState' ]
     ),
     evidenceRecord(
         'webgpu-buffer-mapping',
@@ -113,24 +122,21 @@ const evidence = Object.freeze([
             'tests/scratch-buffer-mapping-contract.test.js',
             'tests/scratch-binding-upload.test.js',
         ],
-        [ 'BufferResource', 'BufferRegion', 'MappedBufferLease', 'UploadCommand' ],
-        [ 'createBuffer', 'mapAsync', 'getMappedRange', 'unmap', 'writeBuffer' ]
+        [ 'BufferResource', 'BufferRegion', 'MappedBufferLease', 'UploadCommand' ]
     ),
     evidenceRecord(
         'webgpu-texture-resource',
         'Texture allocation, replacement, view descriptors, formats, sizes, usages, and subresource identity are explicit.',
         [ 'packages/geoscratch/src/scratch/texture.ts', 'packages/geoscratch/src/scratch/texture-format-capabilities.ts' ],
         [ 'tests/scratch-texture-resize.test.js', 'tests/scratch-texture-sampler.test.js' ],
-        [ 'TextureResource', 'TextureViewSpec', 'TextureResourceDescriptor' ],
-        [ 'createTexture', 'GPUTexture.createView', 'GPUTexture.destroy' ]
+        [ 'TextureResource', 'TextureViewSpec', 'TextureResourceDescriptor' ]
     ),
     evidenceRecord(
         'webgpu-sampler',
         'Sampler descriptors and allocation failures are represented by a runtime-owned SamplerResource.',
         [ 'packages/geoscratch/src/scratch/sampler.ts', 'packages/geoscratch/src/scratch/supporting-object-creation.ts' ],
         [ 'tests/scratch-texture-sampler.test.js', 'tests/scratch-supporting-object-acknowledgement.test.js' ],
-        [ 'SamplerResource', 'SamplerResourceDescriptor' ],
-        [ 'createSampler' ]
+        [ 'SamplerResource', 'SamplerResourceDescriptor' ]
     ),
     evidenceRecord(
         'webgpu-bindings',
@@ -145,8 +151,7 @@ const evidence = Object.freeze([
             'tests/scratch-bind-set-preparation.test.js',
             'tests/scratch-command-binding-access.test.js',
         ],
-        [ 'BindLayout', 'BindSet', 'BindLayoutDescriptor', 'BindSetBindings' ],
-        [ 'createBindGroupLayout', 'createBindGroup', 'setBindGroup' ]
+        [ 'BindLayout', 'BindSet', 'BindLayoutDescriptor', 'BindSetBindings' ]
     ),
     evidenceRecord(
         'webgpu-shader-program',
@@ -161,8 +166,7 @@ const evidence = Object.freeze([
             'tests/scratch-program.test.js',
             'tests/scratch-shader-inspection.test.js',
         ],
-        [ 'ShaderModule', 'Program', 'ProgramDescriptor', 'inspectShader' ],
-        [ 'createShaderModule', 'getCompilationInfo' ]
+        [ 'ShaderModule', 'Program', 'ProgramDescriptor', 'inspectShader' ]
     ),
     evidenceRecord(
         'webgpu-pipelines',
@@ -177,14 +181,7 @@ const evidence = Object.freeze([
             'tests/scratch-render-pipeline-async.test.js',
             'tests/scratch-compute-pipeline-async.test.js',
         ],
-        [ 'ScratchRenderPipeline', 'ScratchComputePipeline', 'ScratchRenderPipelineDescriptor', 'ScratchComputePipelineDescriptor' ],
-        [
-            'createRenderPipeline',
-            'createRenderPipelineAsync',
-            'createComputePipeline',
-            'createComputePipelineAsync',
-            'createPipelineLayout',
-        ]
+        [ 'ScratchRenderPipeline', 'ScratchComputePipeline', 'ScratchRenderPipelineDescriptor', 'ScratchComputePipelineDescriptor' ]
     ),
     evidenceRecord(
         'webgpu-pass-state',
@@ -199,16 +196,14 @@ const evidence = Object.freeze([
             'tests/scratch-depth-stencil-attachments.test.js',
             'tests/scratch-render-state-clear.test.js',
         ],
-        [ 'RenderPassSpec', 'ComputePassSpec', 'DrawCommand', 'DispatchCommand' ],
-        [ 'beginRenderPass', 'beginComputePass', 'draw', 'drawIndexed', 'dispatchWorkgroups' ]
+        [ 'RenderPassSpec', 'ComputePassSpec', 'DrawCommand', 'DispatchCommand' ]
     ),
     evidenceRecord(
         'webgpu-command-encoding',
         'Standalone command-encoder operations are explicit immutable Commands selected by SubmissionBuilder.',
         [ 'packages/geoscratch/src/scratch/command.ts', 'packages/geoscratch/src/scratch/submission.ts' ],
         [ 'tests/scratch-render-state-clear.test.js', 'tests/scratch-pass-submission.test.js' ],
-        [ 'ClearBufferCommand', 'SubmissionBuilder' ],
-        [ 'clearBuffer', 'createCommandEncoder', 'finish' ]
+        [ 'ClearBufferCommand', 'SubmissionBuilder' ]
     ),
     evidenceRecord(
         'webgpu-copy-upload',
@@ -219,23 +214,14 @@ const evidence = Object.freeze([
             'tests/scratch-binding-upload.test.js',
             'tests/scratch-texture-transfer-readback.test.js',
         ],
-        [ 'CopyCommand', 'UploadCommand', 'TextureUploadCommand' ],
-        [
-            'copyBufferToBuffer',
-            'copyBufferToTexture',
-            'copyTextureToBuffer',
-            'copyTextureToTexture',
-            'writeBuffer',
-            'writeTexture',
-        ]
+        [ 'CopyCommand', 'UploadCommand', 'TextureUploadCommand' ]
     ),
     evidenceRecord(
         'webgpu-external-image-upload',
         'External image uploads preserve native source, origin, color-space, alpha, flip, destination, and extent contracts.',
         [ 'packages/geoscratch/src/scratch/command.ts' ],
         [ 'tests/scratch-external-image-upload.test.js', 'tests/scratch-external-image-upload-docs.test.js' ],
-        [ 'ExternalImageUploadCommand', 'ExternalImageUploadCommandDescriptor' ],
-        [ 'copyExternalImageToTexture' ]
+        [ 'ExternalImageUploadCommand', 'ExternalImageUploadCommandDescriptor' ]
     ),
     evidenceRecord(
         'webgpu-submission',
@@ -249,8 +235,7 @@ const evidence = Object.freeze([
             'tests/scratch-submission-queue-order.test.js',
             'tests/scratch-submission-native-observation.test.js',
         ],
-        [ 'SubmissionBuilder', 'SubmittedWork', 'SubmissionStepKind' ],
-        [ 'createCommandEncoder', 'GPUCommandEncoder.finish', 'queue.submit', 'onSubmittedWorkDone' ]
+        [ 'SubmissionBuilder', 'SubmittedWork', 'SubmissionStepKind' ]
     ),
     evidenceRecord(
         'webgpu-readback',
@@ -266,24 +251,21 @@ const evidence = Object.freeze([
             'tests/scratch-readback-mapping.test.js',
             'tests/scratch-texture-transfer-readback.test.js',
         ],
-        [ 'ReadbackOperation', 'ReadbackCommand', 'MappedReadbackLease', 'TextureReadbackSource' ],
-        [ 'copyBufferToBuffer', 'copyTextureToBuffer', 'mapAsync', 'getMappedRange', 'unmap' ]
+        [ 'ReadbackOperation', 'ReadbackCommand', 'MappedReadbackLease', 'TextureReadbackSource' ]
     ),
     evidenceRecord(
         'webgpu-query',
         'Indexed timestamp/occlusion QuerySetResource slots and resolve commands retain native query lifecycle and availability.',
         [ 'packages/geoscratch/src/scratch/query-set.ts', 'packages/geoscratch/src/scratch/command.ts' ],
         [ 'tests/scratch-query-set.test.js', 'tests/scratch-occlusion-query.test.js' ],
-        [ 'QuerySetResource', 'ResolveQuerySetCommand', 'BeginOcclusionQueryCommand', 'EndOcclusionQueryCommand' ],
-        [ 'createQuerySet', 'beginOcclusionQuery', 'endOcclusionQuery', 'resolveQuerySet' ]
+        [ 'QuerySetResource', 'ResolveQuerySetCommand', 'BeginOcclusionQueryCommand', 'EndOcclusionQueryCommand' ]
     ),
     evidenceRecord(
         'webgpu-external-texture',
         'External texture import, binding, expiry, runtime provenance, and attempt-local realization are managed explicitly.',
         [ 'packages/geoscratch/src/scratch/temporal-texture.ts', 'packages/geoscratch/src/scratch/binding.ts' ],
         [ 'tests/scratch-temporal-texture.test.js', 'tests/scratch-command-binding-access.test.js' ],
-        [ 'ExternalTextureBinding', 'ExternalTextureBindingDescriptor', 'ExternalTextureBindLayoutEntry' ],
-        [ 'importExternalTexture', 'createBindGroup' ]
+        [ 'ExternalTextureBinding', 'ExternalTextureBindingDescriptor', 'ExternalTextureBindLayoutEntry' ]
     ),
     evidenceRecord(
         'webgpu-render-bundle-debug',
@@ -293,15 +275,7 @@ const evidence = Object.freeze([
             'packages/geoscratch/src/scratch/debug-command.ts',
         ],
         [ 'tests/scratch-render-bundle-debug.test.js' ],
-        [ 'RenderBundle', 'BundleDrawCommand', 'ExecuteRenderBundlesCommand', 'DebugCommand' ],
-        [
-            'createRenderBundleEncoder',
-            'GPURenderBundleEncoder.finish',
-            'executeBundles',
-            'pushDebugGroup',
-            'popDebugGroup',
-            'insertDebugMarker',
-        ]
+        [ 'RenderBundle', 'BundleDrawCommand', 'ExecuteRenderBundlesCommand', 'DebugCommand' ]
     ),
     evidenceRecord(
         'webgpu-diagnostics',
@@ -317,8 +291,7 @@ const evidence = Object.freeze([
             'tests/scratch-gpu-operation-provenance.test.js',
             'tests/scratch-submission-native-observation.test.js',
         ],
-        [ 'ScratchDiagnostic', 'ScratchDiagnosticError', 'ScratchRuntimeDiagnostics' ],
-        [ 'pushErrorScope', 'popErrorScope', 'uncapturederror', 'device.lost' ]
+        [ 'ScratchDiagnostic', 'ScratchDiagnosticError', 'ScratchRuntimeDiagnostics' ]
     ),
     evidenceRecord(
         'webgpu-numeric-domains',
@@ -334,15 +307,13 @@ const evidence = Object.freeze([
             'tests/scratch-pipeline-command.test.js',
             'tests/scratch-render-pass-native-parity.test.js',
         ],
-        [ 'BufferRegionDescriptor', 'CopyCommandDescriptor', 'DrawCommandDescriptor', 'TextureResourceDescriptor' ],
-        [ 'createRenderPipeline', 'beginRenderPass', 'copyBufferToTexture', 'copyTextureToBuffer' ]
+        [ 'BufferRegionDescriptor', 'CopyCommandDescriptor', 'DrawCommandDescriptor', 'TextureResourceDescriptor' ]
     ),
     evidenceRecord(
         'webidl-non-capability',
         'Nominal brands and declaration-only helpers are frozen as not-applicable rather than counted as workload capabilities.',
         [ 'scripts/scratch-webgpu-wgsl-parity-manifest.mjs' ],
         [ 'tests/audits/scratch-webgpu-wgsl-managed-parity.mjs' ],
-        [],
         []
     ),
     evidenceRecord(
@@ -360,8 +331,7 @@ const evidence = Object.freeze([
             'tests/scratch-program-layout-requirements.test.js',
             'tests/scratch-layout-readback-operation.test.js',
         ],
-        [ 'LayoutCodec', 'LayoutArtifact', 'LayoutBufferViewContract', 'Program' ],
-        [ 'LayoutCodec.pack', 'LayoutCodec.wgsl', 'createShaderModule', 'createRenderPipeline', 'createComputePipeline' ]
+        [ 'LayoutCodec', 'LayoutArtifact', 'LayoutBufferViewContract', 'Program' ]
     ),
     evidenceRecord(
         'wgsl-caller-authored-source',
@@ -372,16 +342,14 @@ const evidence = Object.freeze([
             'packages/geoscratch/src/scratch/pipeline-creation.ts',
         ],
         [ 'tests/scratch-shader-module.test.js', 'tests/scratch-program.test.js' ],
-        [ 'ShaderModule', 'ShaderModuleSourcePart', 'Program', 'ProgramDescriptor' ],
-        [ 'createShaderModule', 'getCompilationInfo', 'createRenderPipeline', 'createComputePipeline' ]
+        [ 'ShaderModule', 'ShaderModuleSourcePart', 'Program', 'ProgramDescriptor' ]
     ),
     evidenceRecord(
         'wgsl-language-contract',
         'WGSL language extensions are declared separately through Program.requiredLanguageFeatures and checked against an immutable Runtime language-feature snapshot.',
         [ 'packages/geoscratch/src/scratch/runtime.ts', 'packages/geoscratch/src/scratch/program.ts' ],
         [ 'tests/scratch-program-layout-requirements.test.js', 'tests/scratch-immediate-data.test.js' ],
-        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts', 'Program', 'ProgramDescriptor' ],
-        [ 'createShaderModule', 'createRenderPipeline', 'createComputePipeline' ]
+        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts', 'Program', 'ProgramDescriptor' ]
     ),
     evidenceRecord(
         'wgsl-enable-contract',
@@ -397,7 +365,6 @@ const evidence = Object.freeze([
             'tests/scratch-webgpu-wgsl-current-coverage.test.js',
         ],
         [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts', 'Program', 'ShaderModuleSourcePart' ],
-        [ 'requestDevice', 'createShaderModule', 'createRenderPipeline', 'createComputePipeline' ],
         [ 'tests/browser/scratch-wgsl-capability-matrix.mjs' ]
     ),
     evidenceRecord(
@@ -405,8 +372,7 @@ const evidence = Object.freeze([
         'The immediate_address_space language contract is coupled to explicit pipeline byte size and per-command submission snapshots.',
         [ 'packages/geoscratch/src/scratch/pipeline.ts', 'packages/geoscratch/src/scratch/command.ts' ],
         [ 'tests/scratch-immediate-data.test.js' ],
-        [ 'Program', 'CommandImmediateData', 'ScratchRenderPipelineDescriptor' ],
-        [ 'setImmediates' ]
+        [ 'Program', 'CommandImmediateData', 'ScratchRenderPipelineDescriptor' ]
     ),
 ])
 
@@ -935,7 +901,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'copyTextureToBuffer',
-                'packages/geoscratch/src/scratch/texture-readback.ts'
+                'packages/geoscratch/src/scratch/command.ts'
             ),
             operationProof(
                 'mapAsync',
@@ -1120,7 +1086,7 @@ const entryProofProfiles = Object.freeze({
                 'packages/geoscratch/src/scratch/layout-codec.ts'
             ),
             operationProof(
-                'LayoutCodec.wgsl',
+                'LayoutCodec.wgslAccessors',
                 'packages/geoscratch/src/scratch/layout-codec.ts'
             ),
         ]
@@ -1221,6 +1187,8 @@ export function createWgslEnableExtensionManifest() {
 
     const wgsl = readJson(normativeArtifactPaths.wgsl)
     const dependencies = readJson(normativeArtifactPaths.dependencies)
+    const operationEvidence =
+        entryProofProfiles['wgsl-enable'].operationEvidence
     const entries = wgsl.entries
         .filter(entry => entry.kind === 'enable-extension')
         .map((entry) => {
@@ -1261,17 +1229,20 @@ export function createWgslEnableExtensionManifest() {
                 },
                 nativeLowering: {
                     kind: 'wgsl-compilation',
-                    sourcePaths:
-                        evidenceById.get('wgsl-enable-contract').sourcePaths,
-                    operations:
-                        evidenceById.get('wgsl-enable-contract').nativeOperations,
+                    sourcePaths: uniqueSorted(
+                        operationEvidence.map(item => item.sourcePath)
+                    ),
+                    operations: uniqueSorted(
+                        operationEvidence.map(item => item.operation)
+                    ),
+                    operationEvidence,
                 },
                 evidenceIds: [ 'wgsl-enable-contract' ],
             }
         })
 
     return {
-        schemaVersion: 3,
+        schemaVersion: STRUCTURED_PROOF_SCHEMA_VERSION,
         purpose:
             'Current formal WGSL enable-extension to WebGPU feature contracts derived from the normative inventory',
         baseline: currentSpecRefresh,
@@ -1326,7 +1297,8 @@ export function createCurrentCoverageManifest() {
     const byStatus = countBy(entries, entry => entry.current.status)
 
     return {
-        schemaVersion: 3,
+        schemaVersion: STRUCTURED_PROOF_SCHEMA_VERSION,
+        schema: coverageManifestSchemaPath,
         purpose:
             'Current managed WebGPU and WGSL expression and evidence closure sourced from fixed normative inventories',
         baseline: currentSpecRefresh,
@@ -1347,6 +1319,11 @@ export function createCurrentCoverageManifest() {
             'unresolved',
         ],
         statusValues: [ 'managed', 'not-applicable', 'unresolved' ],
+        proofSystem: {
+            engine: 'typescript-ast-type-aware',
+            rawNativeHandlesManaged: false,
+            selectorKinds: structuredProofKinds,
+        },
         evidence,
         entries,
         summary: {
@@ -1470,7 +1447,7 @@ function currentEntry({
     const sourcePaths = uniqueSorted(
         operationEvidence.map(item => item.sourcePath)
     )
-    const nativeOperations = uniqueSorted(
+    const operations = uniqueSorted(
         operationEvidence.map(item => item.operation)
     )
 
@@ -1481,7 +1458,18 @@ function currentEntry({
         source,
         goalStart,
         coverageRule: coverage.ruleId,
-        proof: proof.scope,
+        proof: {
+            ...proof.scope,
+            evidence: createEntryProofEvidence({
+                domain,
+                entry,
+                publicSymbols,
+                proofProfile: coverage.proofProfile,
+                status,
+                requirements,
+                normativeManifest: source.normativeManifest,
+            }),
+        },
         current: {
             status,
             classification,
@@ -1505,7 +1493,7 @@ function currentEntry({
             sourcePaths:
                 notApplicable || unresolved ? [] : sourcePaths,
             operations:
-                notApplicable || unresolved ? [] : nativeOperations,
+                notApplicable || unresolved ? [] : operations,
             operationEvidence:
                 notApplicable || unresolved ? [] : operationEvidence,
         },
@@ -1535,22 +1523,27 @@ function resolveEntryProof({
         ? `${entry.id}: ${profile.claim} Scratch replaces the raw member shape with an explicit locally-verifiable contract while preserving the native GPU capability without hidden state or a CPU roundtrip.`
         : `${entry.id}: ${profile.claim} The managed path remains explicit and lowers directly to the listed native operation evidence.`
     return {
-        scope: proofScope(entry, coverage.proofProfile),
+        scope: proofScope(entry, coverage.proofProfile, domain),
         contract,
         publicSymbols: [ ...profile.publicSymbols ],
         operationEvidence: profile.operationEvidence.map(item => ({
-            operation: item.operation,
-            sourcePath: item.sourcePath,
+            ...item,
+            selector: { ...item.selector },
         })),
     }
 }
 
-function proofScope(entry, profile) {
+function proofScope(entry, profile, domain) {
 
     return {
         granularity: 'entry',
         profile,
-        selector: { id: entry.id },
+        selector: {
+            kind: 'normative-entry',
+            id: entry.id,
+            domain,
+            entryKind: entry.kind,
+        },
     }
 }
 
@@ -1714,9 +1707,8 @@ function historicalGoalStart(entry, historical, domain) {
     const exact = historical.get(entry.id)
     if (exact !== undefined) return exact.classification
 
-    const declarationMatch = entry.id.match(/^interface\.([A-Za-z_]\w*)$/)
-    if (declarationMatch !== null) {
-        const alias = historical.get(`type.${declarationMatch[1]}`)
+    if (entry.kind === 'interface') {
+        const alias = historical.get(`type.${entry.owner}`)
         if (alias !== undefined) return alias.classification
     }
     return {
@@ -3604,6 +3596,10 @@ const wgslRequirementSourceKeys = Object.freeze(
     normalizedRequirementKeys.filter(key => key !== 'policy')
 )
 
+const wgslLanguageDeviceFeatureProofRequirements = Object.freeze({
+    texture_formats_tier1: 'texture-formats-tier1',
+})
+
 const requirementConditionKeys = Object.freeze([
     'dependencies',
     'deviceFeatureAlternatives',
@@ -3673,6 +3669,14 @@ function currentWgslRequirements(entry, dependencyManifest) {
         resolveDependencyId(dependency, dependencyManifest, entry.id)
     )
     const conditions = [ ...(source.conditions ?? []) ]
+
+    for (const languageFeature of languageFeatures) {
+        const requiredFeature =
+            wgslLanguageDeviceFeatureProofRequirements[languageFeature]
+        if (requiredFeature !== undefined) {
+            deviceFeatures.push(requiredFeature)
+        }
+    }
 
     for (const dependency of dependencyManifest.entries) {
         if (
@@ -4359,7 +4363,7 @@ function proofProfile(claim, publicSymbols, operationEvidence) {
 
 function operationProof(operation, sourcePath) {
 
-    return Object.freeze({ operation, sourcePath })
+    return Object.freeze(structuredOperationProof(operation, sourcePath))
 }
 
 function uniqueSorted(values) {
@@ -4383,18 +4387,16 @@ function evidenceRecord(
     sourcePaths,
     testPaths,
     publicSymbols,
-    nativeOperations,
     browserPaths = []
 ) {
 
     return Object.freeze({
         id,
         claim,
-        sourcePaths: Object.freeze(sourcePaths),
-        testPaths: Object.freeze(testPaths),
-        browserPaths: Object.freeze(browserPaths),
-        publicSymbols: Object.freeze(publicSymbols),
-        nativeOperations: Object.freeze(nativeOperations),
+        sourcePaths: Object.freeze(uniqueSorted(sourcePaths)),
+        testPaths: Object.freeze(uniqueSorted(testPaths)),
+        browserPaths: Object.freeze(uniqueSorted(browserPaths)),
+        publicSymbols: Object.freeze(uniqueSorted(publicSymbols)),
     })
 }
 
@@ -4425,6 +4427,7 @@ function writeManifest(targetPath, manifest) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    writeManifest(currentCoverageSchemaPath, coverageManifestSchemaV4)
     writeManifest(
         wgslEnableExtensionManifestPath,
         createWgslEnableExtensionManifest()

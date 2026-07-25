@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
+import ts from 'typescript'
 import {
     canonicalManifestJson,
     normativeBaseline,
@@ -9,10 +10,16 @@ import {
 } from '../../scripts/scratch-webgpu-wgsl-normative-inventory.mjs'
 import {
     normativeArtifactPaths,
+    readPinnedNormativeSources,
 } from '../../scripts/refresh-scratch-webgpu-wgsl-baseline.mjs'
 import {
     currentCoverageManifestPath,
 } from '../../scripts/scratch-webgpu-wgsl-current-coverage.mjs'
+import {
+    structuredProofKinds,
+    validateCoverageManifestV4,
+    verifyCoverageManifestProofs,
+} from '../../scripts/scratch-webgpu-wgsl-structured-proof.mjs'
 
 const root = process.cwd()
 const webgpu = readJson(normativeArtifactPaths.webgpu)
@@ -20,6 +27,11 @@ const wgsl = readJson(normativeArtifactPaths.wgsl)
 const dependencies = readJson(normativeArtifactPaths.dependencies)
 const proposals = readJson(normativeArtifactPaths.proposals)
 const current = readJson(currentCoverageManifestPath)
+const structuredCoverageFailure = captureFailure(() => {
+
+    validateCoverageManifestV4(current)
+    verifyCoverageManifestProofs(current, { root })
+})
 
 const checks = {
     pinnedSourceFactsMatch:
@@ -48,8 +60,8 @@ const checks = {
         proposalWatchlistIsNonNormative(),
     ordinaryAuditPathIsOffline:
         ordinaryAuditPathIsOffline(),
-    livingAuthorityHasNoHistoricalCatchAll:
-        livingAuthorityHasNoHistoricalCatchAll(),
+    structuredRegistryAndEntryBindingsAreClosed:
+        structuredRegistryAndEntryBindingsAreClosed(),
 }
 
 const failures = Object.entries(checks)
@@ -124,9 +136,9 @@ function partialOneShotRefreshIsRecorded() {
     return deepEqual(normativeBaseline.refreshAttempt, {
         status: 'partial',
         retryCount: 0,
-        failedSource: 'gpuweb/types raw declaration',
+        failedSource: 'W3C WebGPU publication page',
         reason:
-            'The single bounded refresh reached official publication and repository metadata, then the raw gpuweb/types request timed out. No network retry is permitted by the Goal.',
+            'The single bounded observation reached the WGSL publication and pinned GPUWeb editor, gpuweb/types, and proposal metadata, while the WebGPU publication request returned a fetch error. No network retry is permitted by the Goal; the pinned local publication hash remains authoritative.',
     })
 }
 
@@ -319,15 +331,13 @@ function runtimePreflightMatchesCallerCompanions() {
             feature: entry.feature,
             requiredFeature: entry.requiredFeature,
         }))
-    const source = readText(
+    const sourceFile = parseTypeScriptSource(
         'packages/geoscratch/src/scratch/feature-contract.ts'
     )
-    const actual = [ ...source.matchAll(
-        /feature:\s*'([^']+)'[\s\S]*?requiredFeature:\s*'([^']+)'/g
-    ) ].map(match => ({
-        feature: match[1],
-        requiredFeature: match[2],
-    }))
+    const actual = staticFrozenObjectArray(
+        sourceFile,
+        'featureDependencies'
+    )
     return deepEqual(actual, expected)
 }
 
@@ -335,7 +345,8 @@ function proposalWatchlistIsNonNormative() {
 
     return (
         proposals.normative === false &&
-        proposals.boundary.includes('never contribute') &&
+        proposals.boundary ===
+            'Proposal entries are non-normative observations and never contribute to Scratch coverage.' &&
         deepEqual(proposals.summary.byStatus, {
             draft: 11,
             inactive: 2,
@@ -358,31 +369,174 @@ function ordinaryAuditPathIsOffline() {
         'scripts/scratch-webgpu-wgsl-normative-inventory.mjs',
         'scripts/refresh-scratch-webgpu-wgsl-baseline.mjs',
         'scripts/scratch-webgpu-wgsl-current-coverage.mjs',
-    ].map(readText).join('\n')
-    const refreshSource = readText(
-        'scripts/refresh-scratch-webgpu-wgsl-baseline.mjs'
+    ].map(parseTypeScriptSource)
+    return (
+        auditedSources.every(sourceFile =>
+            !importsNetworkModule(sourceFile) &&
+            !callsIdentifier(sourceFile, 'fetch')
+        ) &&
+        captureFailure(() => readPinnedNormativeSources({}))
+            ?.message === 'A local --gpuweb-root is required'
+    )
+}
+
+function structuredRegistryAndEntryBindingsAreClosed() {
+
+    const forbiddenCoverageRuleIds = new Set([
+        'webgpu:descriptor-values',
+        'wgsl:shader-semantic-domain',
+    ])
+    const forbiddenEvidenceIds = new Set([
+        'webgpu-descriptor-values',
+        'wgsl-shader-semantic-domain',
+    ])
+    const fallbackAdapter = current.entries.find(entry =>
+        entry.id === 'GPUAdapterInfo.isFallbackAdapter'
     )
     return (
-        !/node:https|node:http|\bfetch\s*\(/.test(auditedSources) &&
-        refreshSource.includes(
-            'A local --gpuweb-root is required'
+        structuredCoverageFailure === undefined &&
+        current.schemaVersion === 4 &&
+        deepEqual(
+            current.proofSystem.selectorKinds,
+            structuredProofKinds
+        ) &&
+        current.entries.every(entry =>
+            !forbiddenCoverageRuleIds.has(entry.coverageRule)
+        ) &&
+        current.evidence.every(record =>
+            !forbiddenEvidenceIds.has(record.id)
+        ) &&
+        fallbackAdapter?.current.status === 'managed' &&
+        fallbackAdapter.current.classification ===
+            'managed-first-class' &&
+        Object.keys(current.normativeManifests).length === 4 &&
+        Object.keys(current.frozenManifests).length === 2
+    )
+}
+
+function parseTypeScriptSource(relativePath) {
+
+    const source = readText(relativePath)
+    const file = ts.createSourceFile(
+        relativePath,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.JS
+    )
+    if (file.parseDiagnostics.length > 0) {
+        throw new Error(`${relativePath} has parse diagnostics`)
+    }
+    return file
+}
+
+function staticFrozenObjectArray(sourceFile, variableName) {
+
+    const declarations = []
+    visitTypeScript(sourceFile, node => {
+        if (
+            ts.isVariableDeclaration(node) &&
+            ts.isIdentifier(node.name) &&
+            node.name.text === variableName &&
+            node.initializer !== undefined
+        ) {
+            declarations.push(node.initializer)
+        }
+    })
+    if (declarations.length !== 1) return []
+    const array = unwrapObjectFreeze(declarations[0])
+    if (!ts.isArrayLiteralExpression(array)) return []
+    const values = []
+    for (const element of array.elements) {
+        const object = unwrapObjectFreeze(element)
+        if (!ts.isObjectLiteralExpression(object)) return []
+        const value = {}
+        for (const property of object.properties) {
+            if (
+                !ts.isPropertyAssignment(property) ||
+                !ts.isStringLiteral(property.initializer)
+            ) {
+                return []
+            }
+            const name = staticPropertyName(property.name)
+            if (name === undefined) return []
+            value[name] = property.initializer.text
+        }
+        values.push(value)
+    }
+    return values
+}
+
+function unwrapObjectFreeze(expression) {
+
+    if (
+        ts.isCallExpression(expression) &&
+        expression.arguments.length === 1 &&
+        ts.isPropertyAccessExpression(expression.expression) &&
+        ts.isIdentifier(expression.expression.expression) &&
+        expression.expression.expression.text === 'Object' &&
+        expression.expression.name.text === 'freeze'
+    ) {
+        return expression.arguments[0]
+    }
+    return expression
+}
+
+function staticPropertyName(name) {
+
+    if (
+        ts.isIdentifier(name) ||
+        ts.isStringLiteral(name) ||
+        ts.isNoSubstitutionTemplateLiteral(name)
+    ) {
+        return name.text
+    }
+    return undefined
+}
+
+function importsNetworkModule(sourceFile) {
+
+    return sourceFile.statements.some(statement =>
+        ts.isImportDeclaration(statement) &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        (
+            statement.moduleSpecifier.text === 'node:http' ||
+            statement.moduleSpecifier.text === 'node:https'
         )
     )
 }
 
-function livingAuthorityHasNoHistoricalCatchAll() {
+function callsIdentifier(sourceFile, name) {
 
-    const source = readText(
-        'scripts/scratch-webgpu-wgsl-current-coverage.mjs'
+    let found = false
+    visitTypeScript(sourceFile, node => {
+        if (
+            ts.isCallExpression(node) &&
+            ts.isIdentifier(node.expression) &&
+            node.expression.text === name
+        ) {
+            found = true
+        }
+    })
+    return found
+}
+
+function visitTypeScript(node, callback) {
+
+    callback(node)
+    ts.forEachChild(node, child =>
+        visitTypeScript(child, callback)
     )
-    return (
-        !/\bcreateWgslManifest\s*\(/.test(source) &&
-        !/\benableExtensionContracts\b/.test(source) &&
-        !source.includes('shader-semantic-domain') &&
-        !/fallback|catch[- ]?all/i.test(source) &&
-        Object.keys(current.normativeManifests).length === 4 &&
-        Object.keys(current.frozenManifests).length === 2
-    )
+}
+
+function captureFailure(operation) {
+
+    try {
+        operation()
+        return undefined
+    } catch (error) {
+        return error
+    }
 }
 
 function readJson(file) {

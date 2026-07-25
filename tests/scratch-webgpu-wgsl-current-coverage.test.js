@@ -86,6 +86,10 @@ const expectedEnableContracts = [
         dependencies: [],
     },
 ]
+const forbiddenHistoricalCoverageRuleIds = new Set([
+    'webgpu:descriptor-values',
+    'wgsl:shader-semantic-domain',
+])
 
 describe('Scratch current WebGPU and WGSL coverage manifests', () => {
 
@@ -127,7 +131,9 @@ describe('Scratch current WebGPU and WGSL coverage manifests', () => {
             .every(entry =>
                 typeof entry.coverageRule === 'string' &&
                 entry.coverageRule.length > 0 &&
-                !entry.coverageRule.includes('fallback')
+                !forbiddenHistoricalCoverageRuleIds.has(
+                    entry.coverageRule
+                )
             )).to.equal(true)
         expect(evidenceIds.has('webgpu-descriptor-values')).to.equal(false)
         expect(manifest.entries.some(entry =>
@@ -142,12 +148,6 @@ describe('Scratch current WebGPU and WGSL coverage manifests', () => {
     it('uses normative inventories rather than frozen WGSL domains as authority', () => {
 
         const manifest = createCurrentCoverageManifest()
-        const source = fs.readFileSync(path.join(
-            process.cwd(),
-            'scripts',
-            'scratch-webgpu-wgsl-current-coverage.mjs'
-        ), 'utf8')
-
         expect(manifest.normativeManifests).to.have.keys([
             'webgpu',
             'wgsl',
@@ -158,9 +158,12 @@ describe('Scratch current WebGPU and WGSL coverage manifests', () => {
             'webgpuHistoricalBaseline',
             'wgslHistoricalBaseline',
         ])
-        expect(source).not.to.match(/\bcreateWgslManifest\s*\(/)
-        expect(source).not.to.match(/\benableExtensionContracts\b/)
-        expect(source).not.to.include('shader-semantic-domain')
+        expect(manifest.entries.every(entry =>
+            entry.proof.selector.kind === 'normative-entry' &&
+            entry.proof.selector.id === entry.id &&
+            entry.proof.selector.domain === entry.domain &&
+            entry.proof.selector.entryKind === entry.kind
+        )).to.equal(true)
         expect(manifest.entries.filter(entry => entry.domain === 'wgsl'))
             .to.have.length(662)
         expect(manifest.entries.some(

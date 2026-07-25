@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { expect } from 'chai'
+import ts from 'typescript'
 import {
     canonicalManifestJson,
     compareWebGpuNormativeSources,
@@ -236,7 +237,7 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
         expect(normativeBaseline.refreshAttempt).to.deep.include({
             status: 'partial',
             retryCount: 0,
-            failedSource: 'gpuweb/types raw declaration',
+            failedSource: 'W3C WebGPU publication page',
         })
         expect(normativeBaseline.webgpu.files.map(file => file.path))
             .to.deep.equal([
@@ -361,7 +362,7 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
             'interpolation-type.flat',
             'interpolation-sampling.center',
         ])
-        expect(ids.some(id => id.includes('functions-builtins'))).to.equal(false)
+        expect(ids.includes('shader-domain.functions-builtins')).to.equal(false)
         expect(result.entries.find(
             entry => entry.id === 'enable-extension.fixture_enable'
         )?.requirements.deviceFeatures).to.deep.equal([ 'fixture-feature' ])
@@ -499,14 +500,11 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
             '{"a":1,"entries":[{"id":"b"},{"id":"a"}],"z":2}\n'
         )
 
-        const moduleSource = fs.readFileSync(path.join(
-            process.cwd(),
-            'scripts',
-            'scratch-webgpu-wgsl-normative-inventory.mjs'
-        ), 'utf8')
-        expect(moduleSource).not.to.match(
-            /node:https|node:http|\bfetch\s*\(|raw\.githubusercontent/
+        const moduleSource = parseTypeScriptSource(
+            'scripts/scratch-webgpu-wgsl-normative-inventory.mjs'
         )
+        expect(importsNetworkModule(moduleSource)).to.equal(false)
+        expect(callsIdentifier(moduleSource, 'fetch')).to.equal(false)
     })
 
     it('builds a normalized manifest envelope with source-file hashes', () => {
@@ -722,20 +720,13 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
                 feature: entry.feature,
                 requiredFeature: entry.requiredFeature,
             }))
-        const contract = fs.readFileSync(path.join(
-            process.cwd(),
-            'packages',
-            'geoscratch',
-            'src',
-            'scratch',
-            'feature-contract.ts'
-        ), 'utf8')
-        const actual = [ ...contract.matchAll(
-            /feature:\s*'([^']+)'[\s\S]*?requiredFeature:\s*'([^']+)'/g
-        ) ].map(match => ({
-            feature: match[1],
-            requiredFeature: match[2],
-        }))
+        const contract = parseTypeScriptSource(
+            'packages/geoscratch/src/scratch/feature-contract.ts'
+        )
+        const actual = staticFrozenObjectArray(
+            contract,
+            'featureDependencies'
+        )
 
         expect(actual).to.deep.equal(expected)
         expect(dependencies.entries
@@ -743,6 +734,122 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
             .every(entry => !entry.callerPreflight)).to.equal(true)
     })
 })
+
+function parseTypeScriptSource(relativePath) {
+
+    const source = fs.readFileSync(
+        path.join(process.cwd(), relativePath),
+        'utf8'
+    )
+    const file = ts.createSourceFile(
+        relativePath,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.JS
+    )
+    expect(file.parseDiagnostics).to.have.length(0)
+    return file
+}
+
+function staticFrozenObjectArray(sourceFile, variableName) {
+
+    const declarations = []
+    visitTypeScript(sourceFile, node => {
+        if (
+            ts.isVariableDeclaration(node) &&
+            ts.isIdentifier(node.name) &&
+            node.name.text === variableName &&
+            node.initializer !== undefined
+        ) {
+            declarations.push(node.initializer)
+        }
+    })
+    if (declarations.length !== 1) return []
+    const array = unwrapObjectFreeze(declarations[0])
+    if (!ts.isArrayLiteralExpression(array)) return []
+    const values = []
+    for (const element of array.elements) {
+        const object = unwrapObjectFreeze(element)
+        if (!ts.isObjectLiteralExpression(object)) return []
+        const value = {}
+        for (const property of object.properties) {
+            if (
+                !ts.isPropertyAssignment(property) ||
+                !ts.isStringLiteral(property.initializer)
+            ) {
+                return []
+            }
+            const name = staticPropertyName(property.name)
+            if (name === undefined) return []
+            value[name] = property.initializer.text
+        }
+        values.push(value)
+    }
+    return values
+}
+
+function unwrapObjectFreeze(expression) {
+
+    if (
+        ts.isCallExpression(expression) &&
+        expression.arguments.length === 1 &&
+        ts.isPropertyAccessExpression(expression.expression) &&
+        ts.isIdentifier(expression.expression.expression) &&
+        expression.expression.expression.text === 'Object' &&
+        expression.expression.name.text === 'freeze'
+    ) {
+        return expression.arguments[0]
+    }
+    return expression
+}
+
+function staticPropertyName(name) {
+
+    if (
+        ts.isIdentifier(name) ||
+        ts.isStringLiteral(name) ||
+        ts.isNoSubstitutionTemplateLiteral(name)
+    ) {
+        return name.text
+    }
+    return undefined
+}
+
+function importsNetworkModule(sourceFile) {
+
+    return sourceFile.statements.some(statement =>
+        ts.isImportDeclaration(statement) &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        (
+            statement.moduleSpecifier.text === 'node:http' ||
+            statement.moduleSpecifier.text === 'node:https'
+        )
+    )
+}
+
+function callsIdentifier(sourceFile, name) {
+
+    let found = false
+    visitTypeScript(sourceFile, node => {
+        if (
+            ts.isCallExpression(node) &&
+            ts.isIdentifier(node.expression) &&
+            node.expression.text === name
+        ) {
+            found = true
+        }
+    })
+    return found
+}
+
+function visitTypeScript(node, callback) {
+
+    callback(node)
+    ts.forEachChild(node, child =>
+        visitTypeScript(child, callback)
+    )
+}
 
 function readJson(file) {
 

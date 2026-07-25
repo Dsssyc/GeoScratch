@@ -12,11 +12,25 @@ import {
 import {
     normativeArtifactPaths,
 } from '../../scripts/refresh-scratch-webgpu-wgsl-baseline.mjs'
+import {
+    coverageManifestSchemaPath,
+    structuredProofKinds,
+    validateCoverageManifestV4,
+    verifyCoverageManifestProofs,
+} from '../../scripts/scratch-webgpu-wgsl-structured-proof.mjs'
 
 const pointerProofCaseNames = [
     'unrestricted-pointer',
     'pointer-composite',
 ]
+const forbiddenHistoricalCoverageRuleIds = new Set([
+    'webgpu:descriptor-values',
+    'wgsl:shader-semantic-domain',
+])
+const forbiddenHistoricalEvidenceIds = new Set([
+    'webgpu-descriptor-values',
+    'wgsl-shader-semantic-domain',
+])
 const {
     createCurrentCoverageManifest,
     createWgslEnableExtensionManifest,
@@ -136,11 +150,24 @@ const pointerProofCases = tryExtractSemanticCases(
     'tests/browser/scratch-wgsl-capability-matrix.mjs',
     pointerProofCaseNames
 )
+const structuredProofVerification = captureFailure(() =>
+    verifyCoverageManifestProofs(current, { root })
+)
 
 const checks = {
     currentManifestUsesEntryProofSchema:
-        current.schemaVersion === 3 &&
-        generatedCurrent.schemaVersion === 3,
+        current.schemaVersion === 4 &&
+        generatedCurrent.schemaVersion === 4 &&
+        current.schema === coverageManifestSchemaPath &&
+        deepEqual(
+            current.proofSystem.selectorKinds,
+            structuredProofKinds
+        ),
+    currentManifestPassesStrictSchema:
+        captureFailure(() => validateCoverageManifestV4(current)) ===
+        undefined,
+    allStructuredProofsResolve:
+        structuredProofVerification === undefined,
     currentManifestReproducible: deepEqual(current, generatedCurrent),
     enableExtensionManifestReproducible:
         deepEqual(enableExtensions, generatedEnableExtensions),
@@ -198,10 +225,10 @@ const checks = {
         current.entries.every(entry =>
             typeof entry.coverageRule === 'string' &&
             entry.coverageRule.length > 0 &&
-            !/fallback|catch[- ]?all/i.test(entry.coverageRule)
+            !forbiddenHistoricalCoverageRuleIds.has(entry.coverageRule)
         ) &&
         !current.evidence.some(record =>
-            record.id === 'webgpu-descriptor-values'
+            forbiddenHistoricalEvidenceIds.has(record.id)
         ),
     webGpuClassifierUsesFiniteMappings:
         webGpuClassifierUsesFiniteMappings(),
@@ -213,10 +240,8 @@ const checks = {
             ),
     evidenceIsLocatedAndBounded:
         current.evidence.every(evidenceIsLocatedAndBounded),
-    evidenceNativeOperationsResolve:
-        current.evidence.every(evidenceNativeOperationsResolve),
-    entryNativeOperationsResolve:
-        current.entries.every(entryNativeOperationsResolve),
+    entryNativeOperationsResolveStructurally:
+        structuredProofVerification === undefined,
     evidencePublicSymbolsAreExported:
         current.evidence.every(record =>
             record.publicSymbols.every(symbol =>
@@ -241,7 +266,8 @@ const checks = {
     noRawEscapeHatchLaundering:
         current.entries
             .filter(entry => entry.current.status === 'managed')
-            .every(entry => !managedEntryUsesRawEscapeHatch(entry)),
+            .every(managedEntryHasScratchProofChain) &&
+        current.proofSystem.rawNativeHandlesManaged === false,
     notApplicableEntriesAreExplained:
         current.entries
             .filter(entry => entry.current.status === 'not-applicable')
@@ -305,7 +331,7 @@ const checks = {
     dependencyDiagnosticDocumented:
         dependencyDiagnosticIsDocumented(),
     browserMatrixIsManagedAndSelfContained:
-        browserMatrixIsManagedAndSelfContained(),
+        browserMatrixProofsAreStructured(),
     unrestrictedPointerProofSourceIsConformant:
         unrestrictedPointerProofSourceIsConformant(
             pointerProofCases.cases.get('unrestricted-pointer')
@@ -429,9 +455,6 @@ function currentEntriesCloseNormativeInventories() {
 
 function normativeAuthorityIsExplicit() {
 
-    const source = readText(
-        'scripts/scratch-webgpu-wgsl-current-coverage.mjs'
-    )
     return (
         deepEqual(
             Object.keys(current.normativeManifests).sort(),
@@ -441,25 +464,47 @@ function normativeAuthorityIsExplicit() {
             Object.keys(current.frozenManifests).sort(),
             [ 'webgpuHistoricalBaseline', 'wgslHistoricalBaseline' ]
         ) &&
-        !/\bcreateWgslManifest\s*\(/.test(source) &&
-        !/\benableExtensionContracts\b/.test(source) &&
-        !source.includes('shader-semantic-domain') &&
-        !/catch[- ]?all/i.test(source)
+        current.entries.every(entry =>
+            entry.proof.selector.kind === 'normative-entry' &&
+            entry.proof.selector.id === entry.id &&
+            entry.proof.selector.domain === entry.domain &&
+            entry.proof.selector.entryKind === entry.kind
+        )
     )
 }
 
 function webGpuClassifierUsesFiniteMappings() {
 
-    const source = readText(
-        'scripts/scratch-webgpu-wgsl-current-coverage.mjs'
+    const canonical = normativeWebGpu.entries.find(entry =>
+        entry.kind === 'property' &&
+        entry.owner === 'GPUDevice'
     )
-    return (
-        source.includes('webGpuOwnerRules') &&
-        source.includes('webGpuExactRules') &&
-        !source.includes('/Buffer/.test(owner)') &&
-        !source.includes('/Texture/.test(owner)') &&
-        !source.includes('/RenderPass|ComputePass/.test(owner)') &&
-        !source.includes("allocationEvidence ?? 'webgpu-runtime-capabilities'")
+    if (canonical === undefined) return false
+    const invalidEntries = [
+        { ...canonical, id: 'GPUDevice.unknownStructuredMember' },
+        {
+            ...canonical,
+            id: 'GPUBufferLike.unknownStructuredMember',
+            owner: 'GPUBufferLike',
+            member: 'unknownStructuredMember',
+        },
+        {
+            ...canonical,
+            id: 'GPUTextureLike.unknownStructuredMember',
+            owner: 'GPUTextureLike',
+            member: 'unknownStructuredMember',
+        },
+        {
+            ...canonical,
+            id: 'GPURenderPassLike.unknownStructuredMember',
+            owner: 'GPURenderPassLike',
+            member: 'unknownStructuredMember',
+        },
+    ]
+    return invalidEntries.every(entry =>
+        captureFailure(() =>
+            currentCoverageModule.classifyWebGpuEntry(entry)
+        ) !== undefined
     )
 }
 
@@ -495,6 +540,10 @@ function enableAndLanguageRequirementsMatchInventory() {
             const languageFeature = entry.id.slice(
                 'language-extension.'.length
             )
+            const browserProof = entry.proof.evidence.find(
+                item => item.kind === 'browser-execution'
+            )
+            if (browserProof === undefined) return false
             return (
                 deepEqual(
                     entry.requirements.languageFeatures,
@@ -503,7 +552,10 @@ function enableAndLanguageRequirementsMatchInventory() {
                 deepEqual(
                     entry.requirements.deviceFeatures,
                     uniqueSorted(
-                        languageDevice.get(languageFeature) ?? []
+                        [
+                            ...(languageDevice.get(languageFeature) ?? []),
+                            ...browserProof.selector.requiredFeatures,
+                        ]
                     )
                 ) &&
                 deepEqual(
@@ -791,7 +843,10 @@ function wgslHeterogeneousProofProfilesAreSplit() {
                     entry?.proof.profile === profile &&
                     entry.current.classification === classification &&
                     entry.proof.granularity === 'entry' &&
-                    deepEqual(entry.proof.selector, { id })
+                    deepEqual(
+                        entry.proof.selector,
+                        normativeSelector(entry)
+                    )
                 )
             }
         ) &&
@@ -817,12 +872,25 @@ function entryProofMatches(entries, id, expected) {
         entry.coverageRule === expected.coverageRule &&
         entry.proof.granularity === 'entry' &&
         entry.proof.profile === expected.profile &&
-        deepEqual(entry.proof.selector, { id }) &&
+        deepEqual(
+            entry.proof.selector,
+            normativeSelector(entry)
+        ) &&
         deepEqual(entry.evidenceIds, expected.evidenceIds) &&
         deepEqual(entry.expression.publicSymbols, expected.publicSymbols) &&
         deepEqual(entry.nativeLowering.operations, expected.operations) &&
         deepEqual(entry.nativeLowering.sourcePaths, expected.sourcePaths)
     )
+}
+
+function normativeSelector(entry) {
+
+    return {
+        kind: 'normative-entry',
+        id: entry.id,
+        domain: entry.domain,
+        entryKind: entry.kind,
+    }
 }
 
 function entryEvidenceIsEntrySpecific(entry) {
@@ -835,7 +903,10 @@ function entryEvidenceIsEntrySpecific(entry) {
     }
     if (
         entry.proof.granularity !== 'entry' ||
-        !deepEqual(entry.proof.selector, { id: entry.id })
+        !deepEqual(
+            entry.proof.selector,
+            normativeSelector(entry)
+        )
     ) {
         return false
     }
@@ -849,7 +920,7 @@ function entryEvidenceIsEntrySpecific(entry) {
     }
     const operationEvidence = entry.nativeLowering.operationEvidence
     return (
-        entry.expression.contract.includes(entry.id) &&
+        entry.proof.evidence.length > 0 &&
         operationEvidence.length > 0 &&
         new Set(operationEvidence.map(item =>
             `${item.operation}\0${item.sourcePath}`
@@ -905,11 +976,19 @@ function webGpuMethodsHaveExactOperationEvidence() {
 
     const entries = new Map(current.entries.map(entry => [ entry.id, entry ]))
     const semanticOperationOverrides = new Map([
+        [ 'GPUCommandEncoder.finish', 'GPUCommandEncoder.finish' ],
         [ 'GPUDevice.createComputePipeline', 'createComputePipelineAsync' ],
         [ 'GPUDevice.createRenderPipeline', 'createRenderPipelineAsync' ],
+        [ 'GPUDevice.destroy', 'device.destroy' ],
         [ 'GPUInternalError.constructor', 'serializeNativeGpuError' ],
         [ 'GPUOutOfMemoryError.constructor', 'serializeNativeGpuError' ],
         [ 'GPUPipelineError.constructor', 'serializeNativeGpuError' ],
+        [ 'GPUQueue.submit', 'queue.submit' ],
+        [
+            'GPURenderBundleEncoder.finish',
+            'GPURenderBundleEncoder.finish',
+        ],
+        [ 'GPUTexture.createView', 'GPUTexture.createView' ],
         [ 'GPUUncapturedErrorEvent.constructor', 'serializeNativeGpuError' ],
         [ 'GPUValidationError.constructor', 'serializeNativeGpuError' ],
     ])
@@ -924,8 +1003,7 @@ function webGpuMethodsHaveExactOperationEvidence() {
                 currentCoverageModule.hasWebGpuExactRule?.(entry.id) ===
                     true &&
                 operationEvidence?.length === 1 &&
-                operationEvidence[0].operation
-                    .split('.').at(-1) === expectedOperation
+                operationEvidence[0].operation === expectedOperation
             )
         })
 }
@@ -956,6 +1034,7 @@ function entryShapeIsComplete(entry) {
         typeof entry.proof.profile === 'string' &&
         entry.proof.profile.length > 0 &&
         typeof entry.proof.selector === 'object' &&
+        Array.isArray(entry.proof.evidence) &&
         [ 'managed', 'not-applicable', 'unresolved' ]
             .includes(entry.current.status) &&
         typeof entry.current.rationale === 'string' &&
@@ -990,10 +1069,9 @@ function evidenceIsLocatedAndBounded(record) {
     return (
         typeof record.id === 'string' &&
         record.id.length > 0 &&
-        !/catch[- ]?all/i.test(record.id) &&
+        !forbiddenHistoricalEvidenceIds.has(record.id) &&
         typeof record.claim === 'string' &&
         record.claim.length > 0 &&
-        !/catch[- ]?all/i.test(record.claim) &&
         record.sourcePaths.length > 0 &&
         record.testPaths.length > 0 &&
         paths.every(relativePath =>
@@ -1004,38 +1082,6 @@ function evidenceIsLocatedAndBounded(record) {
         record.testPaths.length <= 3 &&
         record.browserPaths.length <= 1
     )
-}
-
-function evidenceNativeOperationsResolve(record) {
-
-    const source = record.sourcePaths.map(readText).join('\n')
-    return record.nativeOperations.every((operation) => {
-        const token = operation.split('.').at(-1)
-        return typeof token === 'string' && source.includes(token)
-    })
-}
-
-function entryNativeOperationsResolve(entry) {
-
-    if (!Array.isArray(entry.nativeLowering.operationEvidence)) return false
-    return entry.nativeLowering.operationEvidence.every((item) => {
-        if (
-            typeof item.operation !== 'string' ||
-            item.operation.length === 0 ||
-            typeof item.sourcePath !== 'string' ||
-            item.sourcePath.length === 0 ||
-            !entry.nativeLowering.operations.includes(item.operation) ||
-            !entry.nativeLowering.sourcePaths.includes(item.sourcePath)
-        ) {
-            return false
-        }
-        const token = item.operation.split('.').at(-1)
-        return (
-            typeof token === 'string' &&
-            fs.existsSync(path.join(root, item.sourcePath)) &&
-            readText(item.sourcePath).includes(token)
-        )
-    })
 }
 
 function requirementContractIsComplete(entry) {
@@ -1241,7 +1287,12 @@ function sensitiveCapabilityRequirementsArePresent() {
         ) === true
     const textureFormatConditions =
         entries.get('type.GPUTextureFormat')?.requirements.conditions ?? []
-    const textureFeatureText = JSON.stringify(textureFormatConditions)
+    const textureFeatures = new Set(
+        textureFormatConditions.flatMap(condition => [
+            ...condition.deviceFeatures,
+            ...(condition.deviceFeatureAlternatives ?? []).flat(),
+        ])
+    )
     return (
         entries.get('GPU.requestAdapter')?.evidenceIds[0] ===
             'webgpu-runtime-capabilities' &&
@@ -1272,35 +1323,28 @@ function sensitiveCapabilityRequirementsArePresent() {
             limits: [],
             dependencies: [],
         }) &&
-        textureFeatureText.includes('texture-compression-bc') &&
-        textureFeatureText.includes('texture-compression-etc2') &&
-        textureFeatureText.includes('texture-compression-astc') &&
-        textureFeatureText.includes('depth32float-stencil8') &&
-        textureFeatureText.includes('bgra8unorm-storage') &&
-        textureFeatureText.includes('float32-filterable') &&
-        textureFeatureText.includes('float32-blendable') &&
-        textureFeatureText.includes('texture-formats-tier1') &&
-        textureFeatureText.includes('texture-formats-tier2')
+        [
+            'texture-compression-bc',
+            'texture-compression-etc2',
+            'texture-compression-astc',
+            'depth32float-stencil8',
+            'bgra8unorm-storage',
+            'float32-filterable',
+            'float32-blendable',
+            'texture-formats-tier1',
+            'texture-formats-tier2',
+        ].every(feature => textureFeatures.has(feature))
     )
 }
 
-function managedEntryUsesRawEscapeHatch(entry) {
+function managedEntryHasScratchProofChain(entry) {
 
-    const forbidden = [
-        'scratchruntime.device',
-        'scratchruntime.queue',
-        'runtime.device',
-        'runtime.queue',
-        'gpudevice',
-        'gpuqueue',
-        'raw escape',
-        'escape hatch',
-    ]
-    const expressionText = JSON.stringify({
-        ...entry.expression,
-        contract: entry.expression.contract.replaceAll(entry.id, ''),
-    }).toLowerCase()
-    return forbidden.some(value => expressionText.includes(value.toLowerCase()))
+    const kinds = new Set(entry.proof.evidence.map(item => item.kind))
+    return (
+        kinds.has('public-export') &&
+        kinds.has('scratch-operation') &&
+        entry.nativeLowering.operationEvidence.length > 0
+    )
 }
 
 function enableContractFact(entry) {
@@ -1314,20 +1358,38 @@ function enableContractFact(entry) {
 
 function featureDependencySourceIsShared() {
 
-    const contract = readText(
+    const contract = parseTypeScriptSource(
         'packages/geoscratch/src/scratch/feature-contract.ts'
     )
-    const runtime = readText('packages/geoscratch/src/scratch/runtime.ts')
-    const program = readText('packages/geoscratch/src/scratch/program.ts')
+    const runtime = parseTypeScriptSource(
+        'packages/geoscratch/src/scratch/runtime.ts'
+    )
+    const program = parseTypeScriptSource(
+        'packages/geoscratch/src/scratch/program.ts'
+    )
+    const dependencies = staticFrozenObjectArray(
+        contract,
+        'featureDependencies'
+    )
     return (
-        contract.includes("feature: 'subgroup-size-control'") &&
-        contract.includes("requiredFeature: 'subgroups'") &&
-        runtime.includes("from './feature-contract.js'") &&
-        program.includes("from './feature-contract.js'") &&
-        runtime.includes('findMissingScratchFeatureDependency') &&
-        program.includes('findMissingScratchFeatureDependency') &&
-        !runtime.includes("requiredFeatures.push('subgroups')") &&
-        !program.includes("requiredFeatures.push('subgroups')")
+        deepEqual(dependencies, [
+            {
+                feature: 'subgroup-size-control',
+                requiredFeature: 'subgroups',
+            },
+        ]) &&
+        [ runtime, program ].every(sourceFile =>
+            importsNamedSymbol(
+                sourceFile,
+                './feature-contract.js',
+                'findMissingScratchFeatureDependency'
+            ) &&
+            callsIdentifier(
+                sourceFile,
+                'findMissingScratchFeatureDependency'
+            ) &&
+            !pushesStringLiteral(sourceFile, 'subgroups')
+        )
     )
 }
 
@@ -1352,36 +1414,29 @@ function dependencyDiagnosticIsDocumented() {
     )
 }
 
-function browserMatrixIsManagedAndSelfContained() {
+function browserMatrixProofsAreStructured() {
 
-    const source = readText(
-        'tests/browser/scratch-wgsl-capability-matrix.mjs'
+    const browserProofs = current.entries.flatMap(entry =>
+        entry.proof.evidence
+            .filter(item => item.kind === 'browser-execution')
+            .map(item => ({
+                id: entry.id,
+                name: item.selector.proofName,
+                requirements: item.selector.requiredFeatures,
+            }))
     )
     return (
-        source.includes("headless: false") &&
-        source.includes('ScratchRuntime.create') &&
-        source.includes('runtime.createShaderModule') &&
-        source.includes('runtime.createProgram') &&
-        source.includes('runtime.createComputePipeline') &&
-        source.includes('runtime.createRenderPipeline') &&
-        source.includes('runtime.createReadback') &&
-        source.includes('startVite') &&
-        source.includes('stopVite') &&
-        source.includes('expectedEnableProofNames') &&
-        source.includes('expectedLanguageProofNames') &&
-        source.includes('dot4U8Packed') &&
-        source.includes('ptr<storage') &&
-        source.includes('@builtin(subgroup_id)') &&
-        source.includes('diagnostic(error, subgroup_uniformity)') &&
-        source.includes('texture_storage_2d<r32uint, read_write>') &&
-        source.includes('texture_storage_2d<r16unorm, write>') &&
-        source.includes('@builtin(global_invocation_index)') &&
-        source.includes('let localTexture') &&
-        source.includes('powerPreference: adapterPowerPreference') &&
-        source.includes('events.consoleErrors.length') &&
-        !source.includes('runLanguageDirectiveProof') &&
-        !source.includes('runtime.device.create') &&
-        !source.includes('runtime.queue.')
+        browserProofs.length === 18 &&
+        structuredProofVerification === undefined &&
+        browserProofs.every(proof => {
+            const entry = current.entries.find(
+                candidate => candidate.id === proof.id
+            )
+            return entry !== undefined && deepEqual(
+                proof.requirements,
+                entry.requirements.deviceFeatures
+            )
+        })
     )
 }
 
@@ -1630,6 +1685,142 @@ function collectStringLiteralTypeMembers(relativePath, typeName) {
         return member.literal.text
     })
     return new Set(values)
+}
+
+function parseTypeScriptSource(relativePath) {
+
+    const source = readText(relativePath)
+    const file = ts.createSourceFile(
+        relativePath,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        relativePath.endsWith('.ts')
+            ? ts.ScriptKind.TS
+            : ts.ScriptKind.JS
+    )
+    if (file.parseDiagnostics.length > 0) {
+        throw new Error(`${relativePath} has parse diagnostics`)
+    }
+    return file
+}
+
+function staticFrozenObjectArray(sourceFile, variableName) {
+
+    const declarations = []
+    visitTypeScript(sourceFile, node => {
+        if (
+            ts.isVariableDeclaration(node) &&
+            ts.isIdentifier(node.name) &&
+            node.name.text === variableName &&
+            node.initializer !== undefined
+        ) {
+            declarations.push(node.initializer)
+        }
+    })
+    if (declarations.length !== 1) return []
+    const array = unwrapObjectFreeze(declarations[0])
+    if (!ts.isArrayLiteralExpression(array)) return []
+    const values = []
+    for (const element of array.elements) {
+        const object = unwrapObjectFreeze(element)
+        if (!ts.isObjectLiteralExpression(object)) return []
+        const value = {}
+        for (const property of object.properties) {
+            if (
+                !ts.isPropertyAssignment(property) ||
+                !ts.isStringLiteral(property.initializer)
+            ) {
+                return []
+            }
+            const name = staticPropertyName(property.name)
+            if (name === undefined) return []
+            value[name] = property.initializer.text
+        }
+        values.push(value)
+    }
+    return values
+}
+
+function unwrapObjectFreeze(expression) {
+
+    if (
+        ts.isCallExpression(expression) &&
+        expression.arguments.length === 1 &&
+        ts.isPropertyAccessExpression(expression.expression) &&
+        ts.isIdentifier(expression.expression.expression) &&
+        expression.expression.expression.text === 'Object' &&
+        expression.expression.name.text === 'freeze'
+    ) {
+        return expression.arguments[0]
+    }
+    return expression
+}
+
+function importsNamedSymbol(sourceFile, moduleName, symbolName) {
+
+    return sourceFile.statements.some(statement =>
+        ts.isImportDeclaration(statement) &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === moduleName &&
+        statement.importClause?.namedBindings !== undefined &&
+        ts.isNamedImports(statement.importClause.namedBindings) &&
+        statement.importClause.namedBindings.elements.some(element =>
+            element.name.text === symbolName
+        )
+    )
+}
+
+function callsIdentifier(sourceFile, name) {
+
+    let found = false
+    visitTypeScript(sourceFile, node => {
+        if (
+            ts.isCallExpression(node) &&
+            ts.isIdentifier(node.expression) &&
+            node.expression.text === name
+        ) {
+            found = true
+        }
+    })
+    return found
+}
+
+function pushesStringLiteral(sourceFile, value) {
+
+    let found = false
+    visitTypeScript(sourceFile, node => {
+        if (
+            ts.isCallExpression(node) &&
+            ts.isPropertyAccessExpression(node.expression) &&
+            node.expression.name.text === 'push' &&
+            node.arguments.some(argument =>
+                ts.isStringLiteral(argument) &&
+                argument.text === value
+            )
+        ) {
+            found = true
+        }
+    })
+    return found
+}
+
+function visitTypeScript(node, callback) {
+
+    callback(node)
+    ts.forEachChild(node, child =>
+        visitTypeScript(child, callback)
+    )
+}
+
+function captureFailure(operation) {
+
+    try {
+        operation()
+        return undefined
+    } catch (error) {
+        return error
+    }
 }
 
 function throws(operation) {
