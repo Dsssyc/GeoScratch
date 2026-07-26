@@ -16,6 +16,12 @@ describe('type contracts', () => {
         expect(exists('tsconfig.webgpu-types.json')).to.equal(true)
     })
 
+    it('uses the dedicated WebGPU declaration compiler for examples', () => {
+
+        expect(readJson('examples', 'package.json').scripts.typecheck)
+            .to.equal('node ../node_modules/typescript-webgpu/bin/tsc -p tsconfig.json')
+    })
+
     it('builds the package through TypeScript into dist outputs', () => {
 
         const tsconfig = readJson('tsconfig.types.json')

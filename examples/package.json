@@ -6,7 +6,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "serve": "vite preview",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "node ../node_modules/typescript-webgpu/bin/tsc -p tsconfig.json"
   },
   "dependencies": {
     "@mapbox/tilebelt": "^1.0.2",
