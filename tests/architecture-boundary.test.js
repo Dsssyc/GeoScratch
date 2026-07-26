@@ -5,6 +5,7 @@ import path from 'node:path'
 const root = process.cwd()
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
 const readJson = (...parts) => JSON.parse(read(...parts))
+const exists = (...parts) => fs.existsSync(path.join(root, ...parts))
 
 describe('architecture boundaries', () => {
 
@@ -25,5 +26,20 @@ describe('architecture boundaries', () => {
         expect(pkg.exports).to.include.keys([ '.', './scratch', './geo', './geometry', './package.json' ])
         expect(pkg.exports).to.not.have.property('./src/*')
         expect(adr).to.include('dist outputs')
+    })
+
+    it('records the Geo TypeScript source-first boundary', () => {
+
+        expect(exists(
+            'docs',
+            'decisions',
+            'ADR-054-geo-typescript-source-dist-boundary.md',
+        )).to.equal(true)
+
+        const adr = read('docs', 'decisions', 'ADR-054-geo-typescript-source-dist-boundary.md')
+
+        expect(adr).to.include('TypeScript source-first')
+        expect(adr).to.include('projection')
+        expect(adr).to.include('dist/geo')
     })
 })

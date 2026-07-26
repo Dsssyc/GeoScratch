@@ -38,7 +38,7 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 | `src/scratch/` | TypeScript source-first Scratch API core. |
 | `dist/` | Generated package JavaScript and declaration output. |
 | `src/core/` | Shared data references, math, object, and bounding box primitives. |
-| `src/geo/` | Geospatial helpers and geographic tiling structures. |
+| `src/geo/` | TypeScript source-first geospatial helpers and geographic tiling structures. |
 | `src/geometry/` | Reusable geometry generators such as sphere and plane meshes. |
 | `src/gpu/` | WebGPU device, buffers, bindings, passes, pipelines, shaders, textures, samplers, and director. |
 | `src/loaders/` | Image and shader loading helpers. |

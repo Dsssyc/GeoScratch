@@ -9,12 +9,38 @@ describe('module layout', () => {
 
     it('exposes geo and geometry as top-level library modules', async () => {
 
-        expect(exists('packages', 'geoscratch', 'src', 'geo', 'index.js')).to.equal(true)
-        expect(exists('packages', 'geoscratch', 'src', 'geo', 'mercatorCoordinate.js')).to.equal(true)
-        expect(exists('packages', 'geoscratch', 'src', 'geo', 'tiling', 'geoQuadNode2D.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'geo', 'index.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'geo', 'mercatorCoordinate.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'geo', 'tiling', 'geoQuadNode2D.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'core', 'geo', 'mercatorCoordinate.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'src', 'core', 'quadTree', 'node2D.ts')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'geometry', 'index.js')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'geometry', 'sphere', 'sphere.js')).to.equal(true)
         expect(exists('packages', 'geoscratch', 'src', 'geometry', 'plane', 'plane.js')).to.equal(true)
+
+        const removedGeoSources = [
+            [ 'geo', 'index.js' ],
+            [ 'geo', 'index.d.ts' ],
+            [ 'geo', 'mercatorCoordinate.js' ],
+            [ 'geo', 'mercatorCoordinate.d.ts' ],
+            [ 'geo', 'tiling', 'geoQuadNode2D.js' ],
+            [ 'geo', 'tiling', 'geoQuadNode2D.d.ts' ],
+            [ 'core', 'geo', 'mercatorCoordinate.js' ],
+            [ 'core', 'geo', 'mercatorCoordinate.d.ts' ],
+            [ 'core', 'quadTree', 'node2D.js' ],
+            [ 'core', 'quadTree', 'node2D.d.ts' ],
+        ]
+        for (const sourcePath of removedGeoSources) {
+            expect(exists('packages', 'geoscratch', 'src', ...sourcePath), sourcePath.join('/'))
+                .to.equal(false)
+        }
+
+        expect(exists('packages', 'geoscratch', 'dist', 'geo', 'index.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'dist', 'geo', 'index.d.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'dist', 'geo', 'mercatorCoordinate.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'dist', 'geo', 'mercatorCoordinate.d.ts')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'dist', 'geo', 'tiling', 'geoQuadNode2D.js')).to.equal(true)
+        expect(exists('packages', 'geoscratch', 'dist', 'geo', 'tiling', 'geoQuadNode2D.d.ts')).to.equal(true)
 
         const entry = await import('geoscratch')
         const geo = await import('geoscratch/geo')
@@ -29,10 +55,10 @@ describe('module layout', () => {
 
     it('keeps compatibility re-exports for legacy core paths', async () => {
 
-        const geo = await import('../packages/geoscratch/src/geo/index.js')
+        const geo = await import('../packages/geoscratch/dist/geo/index.js')
         const geometry = await import('../packages/geoscratch/src/geometry/index.js')
-        const legacyMercator = await import('../packages/geoscratch/src/core/geo/mercatorCoordinate.js')
-        const legacyNode = await import('../packages/geoscratch/src/core/quadTree/node2D.js')
+        const legacyMercator = await import('../packages/geoscratch/dist/core/geo/mercatorCoordinate.js')
+        const legacyNode = await import('../packages/geoscratch/dist/core/quadTree/node2D.js')
         const legacySphere = await import('../packages/geoscratch/src/core/geometry/sphere/sphere.js')
         const legacyPlane = await import('../packages/geoscratch/src/core/geometry/plane/plane.js')
 

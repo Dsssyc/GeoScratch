@@ -39,7 +39,7 @@ npm run dev
 | `packages/geoscratch/src/scratch/` | TypeScript source-first 的 Scratch API 核心。 |
 | `packages/geoscratch/dist/` | 生成的包 JavaScript 和声明文件输出。 |
 | `packages/geoscratch/src/core/` | 共享数据引用、数学、对象和包围盒基础类型。 |
-| `packages/geoscratch/src/geo/` | 地理坐标辅助工具和地理瓦片结构。 |
+| `packages/geoscratch/src/geo/` | TypeScript source-first 的地理坐标辅助工具和地理瓦片结构。 |
 | `packages/geoscratch/src/geometry/` | sphere、plane 等可复用几何生成器。 |
 | `packages/geoscratch/src/gpu/` | WebGPU device、buffer、binding、pass、pipeline、shader、texture、sampler 和 director。 |
 | `packages/geoscratch/src/loaders/` | 图片和 shader 加载工具。 |

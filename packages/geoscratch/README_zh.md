@@ -38,7 +38,7 @@ npm run dev
 | `src/scratch/` | TypeScript source-first 的 Scratch API 核心。 |
 | `dist/` | 生成的包 JavaScript 和声明文件输出。 |
 | `src/core/` | 共享数据引用、数学、对象和包围盒基础类型。 |
-| `src/geo/` | 地理坐标辅助工具和地理瓦片结构。 |
+| `src/geo/` | TypeScript source-first 的地理坐标辅助工具和地理瓦片结构。 |
 | `src/geometry/` | sphere、plane 等可复用几何生成器。 |
 | `src/gpu/` | WebGPU device、buffer、binding、pass、pipeline、shader、texture、sampler 和 director。 |
 | `src/loaders/` | 图片和 shader 加载工具。 |

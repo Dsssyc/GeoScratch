@@ -1,6 +1,11 @@
 import * as scr from 'geoscratch'
 import * as scratchCompat from 'geoscratch/scratch'
-import { MercatorCoordinate } from 'geoscratch/geo'
+import {
+    GeoQuadNode2D,
+    MercatorCoordinate,
+    Node2D,
+    type MapOptions,
+} from 'geoscratch/geo'
 import { plane, sphere } from 'geoscratch/geometry'
 
 declare const typedImageBitmap: ImageBitmap
@@ -87,7 +92,37 @@ const binding = scr.binding({
 
 pass.add(pipeline, binding)
 
-const mercator = MercatorCoordinate.fromLonLat([ 0, 0 ])
+const readonlyLonLat = [ 0, 0 ] as const
+const mercator: [number, number] = MercatorCoordinate.fromLonLat(readonlyLonLat)
+const mercatorNdc: [number, number] = MercatorCoordinate.toNDC(mercator)
+const restoredLonLat: [number, number] = MercatorCoordinate.fromNDC(mercatorNdc)
+const geoNode = new GeoQuadNode2D()
+const aliasGeoNode: GeoQuadNode2D = new Node2D()
+const geoNodeLevel: number | null = geoNode.level
+const geoNodeParent: GeoQuadNode2D | null | undefined = geoNode.parent
+const geoNodeChildren: GeoQuadNode2D[] | null = geoNode.children
+const mapOptions: MapOptions = {
+    cameraBounds: scr.BoundingBox2D.create(0, 0, 1, 1),
+    cameraPos: [ 0, 0 ],
+    zoomLevel: 0,
+}
+// @ts-expect-error Mercator coordinate inputs require two components
+MercatorCoordinate.fromLonLat([ 0 ])
+const invalidMapOptions: MapOptions = {
+    cameraBounds: scr.BoundingBox2D.create(0, 0, 1, 1),
+    // @ts-expect-error Camera positions require two components
+    cameraPos: [ 0 ],
+    zoomLevel: 0,
+}
+// @ts-expect-error Geo node levels are numeric
+new GeoQuadNode2D('0')
+void restoredLonLat
+void aliasGeoNode
+void geoNodeLevel
+void geoNodeParent
+void geoNodeChildren
+void mapOptions
+void invalidMapOptions
 const planeGeometry = plane(2)
 const sphereGeometry = sphere(1, 8, 4)
 
