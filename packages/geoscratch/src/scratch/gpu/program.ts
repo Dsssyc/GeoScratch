@@ -9,11 +9,11 @@ import {
     isLayoutBufferViewContract,
 } from './layout-codec.js'
 import {
-    assertScratchRuntimeActive,
-    assertScratchRuntimeAuthority,
-    captureScratchRuntimeAuthority,
-    observeScratchRuntimeAuthority,
-    scratchRuntimeAuthoritySubject,
+    assertGPURuntimeActive,
+    assertGPURuntimeAuthority,
+    captureGPURuntimeAuthority,
+    observeGPURuntimeAuthority,
+    gpuRuntimeAuthoritySubject,
 } from './runtime-authority.js'
 import { isShaderModule } from './shader-module.js'
 import { describeValue, isRecord } from './type-utils.js'
@@ -119,11 +119,11 @@ export class Program {
 
     constructor(runtime: GPURuntime, descriptor: ProgramDescriptor) {
 
-        const runtimeAuthority = captureScratchRuntimeAuthority(runtime)
+        const runtimeAuthority = captureGPURuntimeAuthority(runtime)
         const id = `scratch-program-${UUID()}`
         const subject = programSubjectFrom(id, descriptor?.label)
         const normalized = normalizeProgramDescriptor(runtime, subject, descriptor)
-        assertScratchRuntimeAuthority(runtimeAuthority)
+        assertGPURuntimeAuthority(runtimeAuthority)
 
         programStates.set(this, { runtime, isDisposed: false, lifecycleEpoch: 0 })
         Object.defineProperties(this, {
@@ -223,7 +223,7 @@ export function assertProgramUsableAuthority(program: Program): void {
 
     const state = programStateFor(program)
     assertProgramNotDisposed(program, state)
-    assertScratchRuntimeActive(state.runtime)
+    assertGPURuntimeActive(state.runtime)
 }
 
 export function assertProgramPipelineAuthority(stamp: ProgramPipelineAuthorityStamp): void {
@@ -242,7 +242,7 @@ export function assertProgramPipelineAuthority(stamp: ProgramPipelineAuthoritySt
             hints: [ 'Create a new pipeline candidate from a current Program.' ],
         })
     }
-    assertScratchRuntimeAuthority(stamp.runtimeAuthority)
+    assertGPURuntimeAuthority(stamp.runtimeAuthority)
 }
 
 export function observeProgramPipelineAuthority(
@@ -254,7 +254,7 @@ export function observeProgramPipelineAuthority(
         isProgramCurrent: state.lifecycleEpoch === stamp.lifecycleEpoch,
         isProgramDisposed: state.isDisposed,
         programLifecycleEpoch: state.lifecycleEpoch,
-        runtime: observeScratchRuntimeAuthority(stamp.runtimeAuthority),
+        runtime: observeGPURuntimeAuthority(stamp.runtimeAuthority),
     })
 }
 
@@ -963,7 +963,7 @@ function captureProgramPipelineAuthority(
     return Object.freeze({
         program,
         lifecycleEpoch: state.lifecycleEpoch,
-        runtimeAuthority: captureScratchRuntimeAuthority(state.runtime),
+        runtimeAuthority: captureGPURuntimeAuthority(state.runtime),
     })
 }
 
@@ -978,7 +978,7 @@ function assertProgramRuntimeAuthority(program: Program, runtime: GPURuntime): v
         phase: 'program',
         subject: programAuthoritySubject(program),
         related: [
-            scratchRuntimeAuthoritySubject(state.runtime),
+            gpuRuntimeAuthoritySubject(state.runtime),
             relatedRuntimeSubject(runtime),
         ].filter((value): value is ScratchDiagnosticSubject => value !== undefined),
         message: 'Program belongs to a different GPURuntime.',
@@ -1037,7 +1037,7 @@ function relatedRuntimeSubject(runtime: GPURuntime | undefined): ScratchDiagnost
 
     if (runtime === undefined || runtime === null) return undefined
     try {
-        return scratchRuntimeAuthoritySubject(runtime)
+        return gpuRuntimeAuthoritySubject(runtime)
     } catch {
         return undefined
     }

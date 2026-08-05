@@ -317,7 +317,12 @@ describe('Scratch persistent binding final parity', () => {
             status: 'passed',
         })
         expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(23)
-        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(22)
+        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(23)
+        expect(result.publicSurface.publicMemberParity.goalStartChangedReplacements)
+            .to.have.property(
+                'GPURuntimeDiagnosticsController.constructor:constructor',
+                'internal normalized diagnostics options follow the GPURuntime naming clean cut'
+            )
         expect(result.publicSurface.programReadonlyPublicContracts.map(
             contract => contract.id
         )).to.deep.equal([ 'Program.runtime', 'Program.id', 'Program.isDisposed' ])

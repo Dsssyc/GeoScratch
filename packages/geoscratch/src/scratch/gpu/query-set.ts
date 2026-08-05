@@ -5,7 +5,7 @@ import {
 } from './resource.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
 import { createScratchNativeLabel } from './native-allocation.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { updateRuntimeResourceFact } from './runtime-diagnostics.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { throwSupportingObjectCreationFailure } from './supporting-object-failure.js'
@@ -198,7 +198,7 @@ export async function createQuerySetResource(
     descriptor: QuerySetResourceDescriptor
 ): Promise<QuerySetResource> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const normalizedDescriptor = normalizeQuerySetDescriptor(runtime, descriptor)
     const identity = createScratchResourceIdentity()
     const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, identity.id)

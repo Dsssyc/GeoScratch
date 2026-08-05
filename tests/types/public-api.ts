@@ -103,9 +103,9 @@ scr.snapshotProgramPipelineFacts
 // @ts-expect-error Compatibility entrypoints do not expose internal Program snapshot transactions
 scratchCompat.snapshotProgramPipelineFacts
 // @ts-expect-error Runtime lifecycle authority is package-internal
-scr.captureScratchRuntimeAuthority
+scr.captureGPURuntimeAuthority
 // @ts-expect-error Compatibility entrypoints do not expose Runtime lifecycle authority
-scratchCompat.captureScratchRuntimeAuthority
+scratchCompat.captureGPURuntimeAuthority
 // @ts-expect-error Program lifecycle authority stamps are package-internal
 scr.assertProgramPipelineAuthority
 // @ts-expect-error Compatibility entrypoints do not expose Program lifecycle authority stamps

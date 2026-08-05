@@ -26,7 +26,7 @@ import {
     readbackStagingBuffer,
     releaseReadbackStaging,
 } from './readback-staging.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { beginReadbackNativeObservation } from './submission-native-observation.js'
 import {
@@ -192,7 +192,7 @@ export class ReadbackOperation {
             })
         }
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
         const label = descriptor.label
         const source = descriptor.source
         const afterInput = descriptor.after
@@ -884,7 +884,7 @@ export class ReadbackOperation {
 
     _assertReadableLifecycle() {
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
 
         if (this.isDisposed || this.state === 'disposed') {
             throwGPUDiagnostic({

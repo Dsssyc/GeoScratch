@@ -2,7 +2,7 @@ import { UUID } from '../internal/uuid.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createScratchNativeLabel } from './native-allocation.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import {
     assertPreparedSurfaceFactsCurrent,
     isSurfaceReceiver,
@@ -73,7 +73,7 @@ export class ExternalTextureBinding {
                 'ExternalTextureBinding must be created by GPURuntime.createExternalTextureBinding().'
             )
         }
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
         const normalized = normalizeExternalTextureBindingDescriptor(runtime, descriptor)
         const state = Object.freeze({
             runtime,
@@ -108,7 +108,7 @@ export class ExternalTextureBinding {
     assertRuntime(runtime: GPURuntime): void {
 
         const state = externalTextureBindingStateFor(this)
-        assertScratchRuntimeActive(state.runtime)
+        assertGPURuntimeActive(state.runtime)
         if (runtime === state.runtime) return
         throwGPUDiagnostic({
             code: 'SCRATCH_EXTERNAL_TEXTURE_WRONG_RUNTIME',
@@ -192,7 +192,7 @@ export class SurfaceTextureLease {
                 'SurfaceTextureLease must be created by SubmissionBuilder.surfaceTexture().'
             )
         }
-        assertScratchRuntimeActive(owner.runtime)
+        assertGPURuntimeActive(owner.runtime)
         const facts = surfaceFactsFor(surface)
         if (facts.runtime !== owner.runtime) {
             throwGPUDiagnostic({
@@ -354,7 +354,7 @@ export function assertSurfaceTextureLeaseForSubmission(
 ): void {
 
     const state = surfaceTextureLeaseStateFor(lease)
-    assertScratchRuntimeActive(state.runtime)
+    assertGPURuntimeActive(state.runtime)
     if (state.owner !== owner) {
         throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_TEXTURE_LEASE_WRONG_SUBMISSION',
@@ -403,7 +403,7 @@ export function assertSurfaceTextureViewForSubmission(
 export function assertSurfaceTextureLeaseUsable(lease: SurfaceTextureLease): void {
 
     const state = surfaceTextureLeaseStateFor(lease)
-    assertScratchRuntimeActive(state.runtime)
+    assertGPURuntimeActive(state.runtime)
     if (state.state === 'expired') throwStaleSurfaceTextureLease(lease, state, 'expired')
     const facts = surfaceFactsForState(state)
     if (facts.configurationVersion !== state.configurationVersion) {
@@ -425,7 +425,7 @@ function activateSurfaceTextureLeaseForOwner(
 ): void {
 
     const state = surfaceTextureLeaseStateFor(lease)
-    assertScratchRuntimeActive(state.runtime)
+    assertGPURuntimeActive(state.runtime)
     if (state.owner !== owner) {
         throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_TEXTURE_LEASE_WRONG_SUBMISSION',
@@ -884,7 +884,7 @@ function assertSurfaceTextureLeasePending(
 ): SurfaceTextureLeaseInternalState {
 
     const state = surfaceTextureLeaseStateFor(lease)
-    assertScratchRuntimeActive(state.runtime)
+    assertGPURuntimeActive(state.runtime)
     if (state.state !== 'pending') throwStaleSurfaceTextureLease(lease, state, state.state)
     const facts = surfaceFactsForState(state)
     if (facts.configurationVersion !== state.configurationVersion) {

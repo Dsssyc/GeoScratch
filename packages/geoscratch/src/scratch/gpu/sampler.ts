@@ -5,7 +5,7 @@ import {
     registerResource,
     Resource,
 } from './resource.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { throwSupportingObjectCreationFailure } from './supporting-object-failure.js'
 import {
@@ -101,7 +101,7 @@ export async function createSamplerResource(
     descriptor: SamplerResourceDescriptor = {}
 ): Promise<SamplerResource> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const normalizedDescriptor = normalizeSamplerDescriptor(runtime, descriptor)
     const identity = createScratchResourceIdentity()
     const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, identity.id)

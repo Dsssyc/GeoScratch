@@ -61,7 +61,7 @@ import {
     snapshotAttemptRenderBundleImmediates,
 } from './render-bundle.js'
 import { advanceResourceContentEpoch, setResourceContentState } from './resource.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import {
     advanceQuerySlotContentEpoch,
@@ -571,7 +571,7 @@ export class SubmissionBuilder {
 
     constructor(runtime: GPURuntime, options: SubmissionBuilderOptions = {}) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         this.runtime = runtime
         this.id = `scratch-submission-builder-${UUID()}`
@@ -669,7 +669,7 @@ export class SubmissionBuilder {
 
     submit() {
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
 
         if (this.isSubmitted) {
             throwGPUDiagnostic({

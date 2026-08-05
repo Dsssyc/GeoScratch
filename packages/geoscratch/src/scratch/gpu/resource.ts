@@ -1,6 +1,6 @@
 import { UUID } from '../internal/uuid.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { updateRuntimeResourceFact } from './runtime-diagnostics.js'
 import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 import type { GPURuntime } from './runtime.js'
@@ -162,7 +162,7 @@ export abstract class Resource {
             })
         }
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         this.#runtime = runtime
         this.#id = options.identity?.token === resourceIdentityToken
@@ -274,7 +274,7 @@ export abstract class Resource {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
     }
 
     dispose(): void {

@@ -1,6 +1,6 @@
 import { UUID } from '../internal/uuid.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { getGlobalConstant } from './type-utils.js'
 import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 import type { GPURuntime } from './runtime.js'
@@ -126,7 +126,7 @@ export class Surface {
 
     constructor(runtime: GPURuntime, canvas: GPUCanvas, options: SurfaceOptions = {}) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const id = `scratch-surface-${UUID()}`
         const subject = surfaceSubjectFromValues(id, options.label)
@@ -182,7 +182,7 @@ export class Surface {
     configure(options: SurfaceOptions = {}): void {
 
         const state = assertSurfaceAliveOwner(this)
-        assertScratchRuntimeActive(state.runtime)
+        assertGPURuntimeActive(state.runtime)
 
         const previousConfiguration = state.configuration
         const previousConfigurationVersion = state.configurationVersion
@@ -359,7 +359,7 @@ export function assertPreparedSurfaceFactsCurrent(
 ): void {
 
     const state = assertSurfaceAliveOwner(surface)
-    assertScratchRuntimeActive(state.runtime)
+    assertGPURuntimeActive(state.runtime)
     if (
         state.runtime === facts.runtime &&
         state.id === facts.id &&
@@ -444,7 +444,7 @@ function assertSurfaceAliveOwner(surface: Surface): SurfaceState {
 function assertSurfaceUsable(surface: Surface): SurfaceState {
 
     const state = assertSurfaceAliveOwner(surface)
-    assertScratchRuntimeActive(state.runtime)
+    assertGPURuntimeActive(state.runtime)
     assertSurfaceConfigurationCurrent(surface, state)
     return state
 }
@@ -456,7 +456,7 @@ function assertSurfaceConfigurationCandidateCurrent(
 ): void {
 
     const currentState = assertSurfaceAliveOwner(surface)
-    assertScratchRuntimeActive(currentState.runtime)
+    assertGPURuntimeActive(currentState.runtime)
     if (currentState === state && currentState.configurationVersion === configurationVersion) return
 
     throwGPUDiagnostic({

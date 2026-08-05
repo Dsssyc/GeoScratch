@@ -28,7 +28,7 @@ import {
     resourceContentEpoch,
     resourceContentState,
 } from './resource.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
@@ -564,7 +564,7 @@ async function createBufferResourceAllocation(
     mappedAtCreation: boolean
 ): Promise<BufferResource> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const normalizedDescriptor = normalizeBufferDescriptor(runtime, descriptor)
     if (mappedAtCreation && normalizedDescriptor.size % 4 !== 0) {
         throwGPUDiagnostic({

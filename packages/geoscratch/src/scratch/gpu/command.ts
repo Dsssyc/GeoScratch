@@ -41,7 +41,7 @@ import {
 } from './readback-staging.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import { advanceResourceContentEpoch, isContentResource } from './resource.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import {
     TextureResource,
     isTextureResource,
@@ -718,7 +718,7 @@ export class DrawCommand {
 
     constructor(runtime: GPURuntime, descriptor: DrawCommandDescriptor = {} as DrawCommandDescriptor) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const pipeline: unknown = descriptor.pipeline
         if (!isRenderPipeline(pipeline)) {
@@ -824,7 +824,7 @@ export class DrawCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.pipeline.assertUsable()
         for (const invocation of this.bindSets) {
             invocation.set.assertUsable()
@@ -1007,7 +1007,7 @@ export class BeginOcclusionQueryCommand {
 
     constructor(runtime: GPURuntime, descriptor: BeginOcclusionQueryCommandDescriptor = {} as BeginOcclusionQueryCommandDescriptor) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const querySet = descriptor.querySet
         if (!isQuerySetResource(querySet)) {
@@ -1092,7 +1092,7 @@ export class BeginOcclusionQueryCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.querySet.assertUsable()
     }
 
@@ -1156,7 +1156,7 @@ export class EndOcclusionQueryCommand {
 
     constructor(runtime: GPURuntime, descriptor: EndOcclusionQueryCommandDescriptor = {}) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const mutable = this as Mutable<EndOcclusionQueryCommand>
         mutable.runtime = runtime
@@ -1218,7 +1218,7 @@ export class EndOcclusionQueryCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
     }
 
     validateForPass(passSpec: RenderPassSpec) {
@@ -1288,7 +1288,7 @@ export class DispatchCommand {
 
     constructor(runtime: GPURuntime, descriptor: DispatchCommandDescriptor = {} as DispatchCommandDescriptor) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const pipeline: unknown = descriptor.pipeline
         if (!isComputePipeline(pipeline)) {
@@ -1387,7 +1387,7 @@ export class DispatchCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.pipeline.assertUsable()
         for (const invocation of this.bindSets) {
             invocation.set.assertUsable()
@@ -2448,7 +2448,7 @@ export class UploadCommand {
 
     constructor(runtime: GPURuntime, descriptor: UploadCommandDescriptor = {} as UploadCommandDescriptor) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const target = descriptor.target
         if (!isBufferRegion(target)) {
@@ -2539,7 +2539,7 @@ export class UploadCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.target.assertUsable()
     }
 
@@ -2573,7 +2573,7 @@ export class ClearBufferCommand {
         descriptor: ClearBufferCommandDescriptor = {} as ClearBufferCommandDescriptor
     ) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         if (!isRecord(descriptor) || Array.isArray(descriptor)) {
             throwClearBufferDiagnostic(runtime, descriptor, 'descriptor')
@@ -2658,7 +2658,7 @@ export class ClearBufferCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.target.buffer.assertUsable()
         validateClearBufferTarget(this)
     }
@@ -2727,7 +2727,7 @@ export class CopyCommand {
 
     constructor(runtime: GPURuntime, descriptor: CopyCommandDescriptor = {} as CopyCommandDescriptor) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const source = normalizeCopySource(runtime, descriptor)
         assertCopySourceRuntime(runtime, source)
@@ -2892,7 +2892,7 @@ export class CopyCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         if (isBufferRegionSource(this.source)) {
             this.source.region.assertUsable()
         } else {
@@ -3184,13 +3184,13 @@ export class ReadbackCommand {
     assertUsable(): void {
 
         this._assertNotDisposed()
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         validateCurrentReadbackCommandSource(this.runtime, this.subject, this.source)
     }
 
     result(options: ReadbackCommandResultOptions): ReadbackOperation {
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         const after = options?.after
         if (!after || after.runtime !== this.runtime || typeof after.done?.then !== 'function') {
             throwGPUDiagnostic({
@@ -3279,7 +3279,7 @@ export async function createReadbackCommand(
     descriptor: ReadbackCommandDescriptor
 ): Promise<ReadbackCommand> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const id = `scratch-command-${UUID()}`
     const normalized = normalizeReadbackCommandDescriptor(runtime, id, descriptor)
     const stagingLabel = normalized.label === undefined ? undefined : `${normalized.label} staging`
@@ -3291,7 +3291,7 @@ export async function createReadbackCommand(
         ...(stagingLabel !== undefined ? { label: stagingLabel } : {}),
     })
     try {
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
         normalized.source.region.assertUsable()
         const command = constructReadbackCommand(runtime, id, normalized, slot)
         registerRuntimeReadbackCommand(runtime, command, readbackCommandFact(command))
@@ -3787,7 +3787,7 @@ export class ResolveQuerySetCommand {
 
     constructor(runtime: GPURuntime, descriptor: ResolveQuerySetCommandDescriptor = {} as ResolveQuerySetCommandDescriptor) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const normalizedDescriptor = normalizeResolveDescriptor(runtime, descriptor)
         const source = normalizeResolveSource(runtime, normalizedDescriptor.source)
@@ -3899,7 +3899,7 @@ export class ResolveQuerySetCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.querySet.assertUsable()
         this.destination.assertUsable()
         validateResolveDestinationUsage(this.runtime, this.destination.buffer)
@@ -3961,7 +3961,7 @@ export class TextureUploadCommand {
 
     constructor(runtime: GPURuntime, descriptor: TextureUploadCommandDescriptor = {} as TextureUploadCommandDescriptor) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const target = descriptor.target
         if (!isTextureResource(target)) {
@@ -4079,7 +4079,7 @@ export class TextureUploadCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.target.assertUsable()
     }
 
@@ -4122,7 +4122,7 @@ export class ExternalImageUploadCommand {
         descriptor: ExternalImageUploadCommandDescriptor
     ) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         if (!isRecord(descriptor)) {
             throwExternalImageUploadInvalid({ runtime, reason: 'descriptor' })
@@ -4213,7 +4213,7 @@ export class ExternalImageUploadCommand {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.target.assertRuntime(this.runtime)
     }
 

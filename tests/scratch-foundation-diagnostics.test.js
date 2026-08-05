@@ -144,6 +144,30 @@ describe('Scratch foundation diagnostics', () => {
         expect(Object.isFrozen(report.diagnostics)).to.equal(true)
     })
 
+    it('normalizes mutable report inputs into immutable diagnostic entries', () => {
+
+        const mutableDiagnostic = {
+            version: 1,
+            domain: 'gpu',
+            code: 'MUTABLE_REPORT_INPUT',
+            severity: 'warn',
+            phase: 'runtime',
+            subject: { kind: 'GPURuntime', id: 'runtime-a' },
+            message: 'Mutable report input.',
+            hints: [ 'original' ],
+        }
+        const report = createScratchDiagnosticReport([ mutableDiagnostic ])
+
+        mutableDiagnostic.subject.id = 'mutated'
+        mutableDiagnostic.hints.push('mutated')
+
+        expect(report.diagnostics[0].subject.id).to.equal('runtime-a')
+        expect(report.diagnostics[0].hints).to.deep.equal([ 'original' ])
+        expect(Object.isFrozen(report.diagnostics[0])).to.equal(true)
+        expect(Object.isFrozen(report.diagnostics[0].subject)).to.equal(true)
+        expect(Object.isFrozen(report.diagnostics[0].hints)).to.equal(true)
+    })
+
     it('normalizes mutable constructor inputs into immutable public facts', () => {
 
         const expected = { retained: true }

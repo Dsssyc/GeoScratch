@@ -30,8 +30,8 @@ import {
 import { shaderModuleSourceSnapshot } from './shader-module.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
 import {
-    assertScratchRuntimeActive,
-    scratchRuntimeAuthoritySubject,
+    assertGPURuntimeActive,
+    gpuRuntimeAuthoritySubject,
 } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type {
@@ -224,7 +224,7 @@ export class RenderPipeline {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         assertProgramUsableAuthority(this.program)
         for (const layout of this.bindLayouts) {
             layout.assertUsable()
@@ -412,7 +412,7 @@ function prepareRenderPipeline(
     descriptor: RenderPipelineDescriptor
 ): RenderPipelinePlan {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const input = descriptor ?? {} as RenderPipelineDescriptor
     const program = input.program
     if (!isProgram(program)) {
@@ -624,7 +624,7 @@ function pipelineLifecycleFailures(
         failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED',
             'none',
-            scratchRuntimeAuthoritySubject(plan.runtime)
+            gpuRuntimeAuthoritySubject(plan.runtime)
         ))
     }
 
@@ -632,7 +632,7 @@ function pipelineLifecycleFailures(
         failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_DEVICE_LOST',
             'device-lost',
-            scratchRuntimeAuthoritySubject(plan.runtime),
+            gpuRuntimeAuthoritySubject(plan.runtime),
             observedDeviceLostInfo ?? authority.runtime.deviceLostInfo
         ))
     }
@@ -640,7 +640,7 @@ function pipelineLifecycleFailures(
         failures.push(lifecycleFailure(serializeNativeError,
             'SCRATCH_PIPELINE_CREATION_RUNTIME_LIFECYCLE_CHANGED',
             'none',
-            scratchRuntimeAuthoritySubject(plan.runtime)
+            gpuRuntimeAuthoritySubject(plan.runtime)
         ))
     }
     if (authority.isProgramDisposed) {
@@ -754,7 +754,7 @@ function throwPipelineCreationFailure(
     const controller = diagnosticsControllerFor(plan.runtime)
     const record = controller.completeOperation(operation, completion)
     const related = [
-        scratchRuntimeAuthoritySubject(plan.runtime),
+        gpuRuntimeAuthoritySubject(plan.runtime),
         programAuthoritySubject(plan.program),
         { kind: 'GPUOperation', id: operation.id, operationKind: operation.kind },
         ...plan.bindLayouts.map(layout => layout.subject),
@@ -1014,7 +1014,7 @@ export class ComputePipeline {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         assertProgramUsableAuthority(this.program)
         for (const layout of this.bindLayouts) {
             layout.assertUsable()
@@ -1156,7 +1156,7 @@ function prepareComputePipeline(
     descriptor: ComputePipelineDescriptor
 ): ComputePipelinePlan {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const input = descriptor ?? {} as ComputePipelineDescriptor
     const program = input.program
     if (!isProgram(program)) {

@@ -9,7 +9,7 @@ import { BufferRegion, isBufferRegion } from './buffer.js'
 import { ScratchDiagnosticError, isScratchDiagnosticError, throwGPUDiagnostic, type GPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createScratchNativeLabel } from './native-allocation.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { SamplerResource, isSamplerResource } from './sampler.js'
 import { throwSupportingObjectCreationFailure } from './supporting-object-failure.js'
@@ -523,7 +523,7 @@ export class BindLayout {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
     }
 
     entrySubject(entry: unknown) {
@@ -545,7 +545,7 @@ export async function createBindLayout(
     descriptor: BindLayoutDescriptor
 ): Promise<BindLayout> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const id = `scratch-bind-layout-${UUID()}`
     const normalizedDescriptor = normalizeBindLayoutDescriptor(runtime, id, descriptor)
     const ownedDescriptor = Object.freeze({
@@ -648,7 +648,7 @@ export async function createNativeDerivedBindLayout(
     descriptor: BindLayoutDescriptor
 ): Promise<BindLayout> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const id = `scratch-bind-layout-${UUID()}`
     const normalizedDescriptor = normalizeBindLayoutDescriptor(runtime, id, descriptor)
     const ownedDescriptor = Object.freeze({
@@ -759,7 +759,7 @@ export class BindSet {
             throw new TypeError('BindSet must be created by GPURuntime.createBindSet().')
         }
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         if (!isBindLayout(layout)) {
             throwGPUDiagnostic({
@@ -906,7 +906,7 @@ export class BindSet {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.layout.assertUsable()
         if (this.isAttemptLocal) {
             for (const binding of bindingsInNativeOrder(this)) {
@@ -1035,7 +1035,7 @@ export async function createBindSet(
     options: BindSetOptions = {}
 ): Promise<BindSet> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const bindSet = constructBindSet(
         runtime,
         `scratch-bind-set-${UUID()}`,
@@ -1285,7 +1285,7 @@ async function executeBindSetPreparation(
 ): Promise<void> {
 
     try {
-        assertScratchRuntimeActive(bindSet.runtime)
+        assertGPURuntimeActive(bindSet.runtime)
         bindSet.layout.assertUsable()
         for (const binding of bindingsInNativeOrder(bindSet)) {
             validateBindingResource(bindSet, binding.entry, binding.resource)

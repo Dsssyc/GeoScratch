@@ -1,6 +1,6 @@
 import { UUID } from '../internal/uuid.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { ScratchDiagnosticSubject } from './diagnostics.js'
 import type { GPURuntime } from './runtime.js'
@@ -46,7 +46,7 @@ export class DebugCommand {
         if (token !== debugCommandToken || new.target !== DebugCommand) {
             throw new TypeError('DebugCommand must be created by GPURuntime.createDebugCommand().')
         }
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
         const normalized = normalizeDebugCommandDescriptor(runtime, descriptor)
         debugCommandStates.set(this, { isDisposed: false })
         Object.defineProperties(this, {
@@ -106,7 +106,7 @@ export class DebugCommand {
                 message: 'DebugCommand has been disposed.',
             })
         }
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
     }
 
     encode(encoder: DebugCommandEncoder): void {

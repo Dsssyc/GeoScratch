@@ -9,9 +9,9 @@ import {
 } from './pipeline-compilation.js'
 import { createPipelineNativeErrorSerializer } from './pipeline-native-error.js'
 import {
-    assertScratchRuntimeActive,
-    assertScratchRuntimeAuthority,
-    captureScratchRuntimeAuthority,
+    assertGPURuntimeActive,
+    assertGPURuntimeAuthority,
+    captureGPURuntimeAuthority,
 } from './runtime-authority.js'
 import {
     registerShaderModuleOwnership,
@@ -178,7 +178,7 @@ export class ShaderModule {
                 message: 'ShaderModule has been disposed.',
             })
         }
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
     }
 
     dispose(): void {
@@ -210,10 +210,10 @@ export async function createShaderModule(
     descriptor: ShaderModuleDescriptor
 ): Promise<ShaderModule> {
 
-    const runtimeAuthority = captureScratchRuntimeAuthority(runtime)
+    const runtimeAuthority = captureGPURuntimeAuthority(runtime)
     const id = `scratch-shader-module-${UUID()}`
     const normalized = normalizeShaderModuleDescriptor(runtime, id, descriptor)
-    assertScratchRuntimeAuthority(runtimeAuthority)
+    assertGPURuntimeAuthority(runtimeAuthority)
     const sourceSnapshot = snapshotShaderModuleSource({
         id,
         sourceParts: normalized.sourceParts,

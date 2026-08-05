@@ -117,6 +117,36 @@
       "reason": "Accepted topology ADR names the deleted predecessor while explaining the clean cut."
     },
     {
+      "path": "docs/review/scratch-foundation-public-topology-final-audit.md",
+      "symbol": "ScratchComputePipeline",
+      "reason": "Final audit records the exact historical-name hygiene command and its result."
+    },
+    {
+      "path": "docs/review/scratch-foundation-public-topology-final-audit.md",
+      "symbol": "ScratchDiagnosticCapture",
+      "reason": "Final audit records the exact historical-name hygiene command and its result."
+    },
+    {
+      "path": "docs/review/scratch-foundation-public-topology-final-audit.md",
+      "symbol": "ScratchRenderPipeline",
+      "reason": "Final audit records the exact historical-name hygiene command and its result."
+    },
+    {
+      "path": "docs/review/scratch-foundation-public-topology-final-audit.md",
+      "symbol": "ScratchRuntime",
+      "reason": "Final audit records the exact historical-name hygiene command and its result."
+    },
+    {
+      "path": "docs/review/scratch-foundation-public-topology-final-audit.md",
+      "symbol": "WorkerDiagnosticError",
+      "reason": "Final audit records the exact historical-name hygiene command and its result."
+    },
+    {
+      "path": "docs/review/scratch-foundation-public-topology-final-audit.md",
+      "symbol": "createWorkerDiagnostic",
+      "reason": "Final audit records the exact historical-name hygiene command and its result."
+    },
+    {
       "path": "docs/review/manifests/scratch-foundation-public-symbols.json",
       "symbol": "DiagnosticSubject",
       "reason": "Baseline disposition manifest must retain the exact predecessor symbol."

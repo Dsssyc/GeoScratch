@@ -86,7 +86,7 @@ describe('Scratch foundation source topology', () => {
 
         for (const basename of gpuBasenames) {
             const source = fs.readFileSync(path.join(gpuRoot, basename), 'utf8')
-            expect(source, basename).not.to.match(/from ['"][^'"]*(?:worker|geo)[^'"]*['"]/) 
+            expect(source, basename).not.to.match(/from ['"][^'"]*(?:worker|geo)[^'"]*['"]/)
         }
     })
 

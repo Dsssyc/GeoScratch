@@ -15,7 +15,7 @@ import {
     advanceResourceContentEpoch,
     setResourceContentState,
 } from './resource.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { isRecord } from './type-utils.js'
 import type {
@@ -213,10 +213,10 @@ export async function createMappedBufferResource(
     descriptor: MappedBufferResourceDescriptor
 ): Promise<MappedBufferCreation> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const buffer = await createMappedBufferResourceAllocation(runtime, descriptor)
     try {
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
         const region = buffer.region()
         const id = `${buffer.id}/buffer-mapping-${++mappingSequence}`
         const controller = diagnosticsControllerFor(runtime)
@@ -306,7 +306,7 @@ export async function mapBufferResource(
     descriptor: BufferMappingDescriptor
 ): Promise<MappedBufferLease> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const normalized = normalizeBufferMappingDescriptor(runtime, descriptor)
     const { buffer } = normalized.region
     const id = `${buffer.id}/buffer-mapping-${++mappingSequence}`

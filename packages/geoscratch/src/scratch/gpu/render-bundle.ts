@@ -19,7 +19,7 @@ import {
     registerRenderBundleOwnership,
     unregisterRenderBundleOwnership,
 } from './render-bundle-ownership.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { throwSupportingObjectCreationFailure } from './supporting-object-failure.js'
 import {
@@ -116,7 +116,7 @@ export class BundleDrawCommand {
                 'BundleDrawCommand must be created by GPURuntime.createBundleDrawCommand().'
             )
         }
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
         normalizeBundleDrawDescriptor(runtime, descriptor)
         const draw = new DrawCommand(runtime, descriptor)
         bundleDrawCommandStates.set(this, Object.freeze({ draw }))
@@ -344,7 +344,7 @@ export class RenderBundle {
                 message: 'RenderBundle has been disposed.',
             })
         }
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         if (this.realization === 'persistent') {
             assertPersistentRenderBundleSnapshotCurrent(this, state)
             return
@@ -370,7 +370,7 @@ export async function createRenderBundle(
     descriptor: RenderBundleDescriptor
 ): Promise<RenderBundle> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const normalized = normalizeRenderBundleDescriptor(runtime, descriptor)
     const id = `scratch-render-bundle-${UUID()}`
     let gpuRenderBundle: GPURenderBundle | undefined
@@ -520,7 +520,7 @@ export class ExecuteRenderBundlesCommand {
                 'ExecuteRenderBundlesCommand must be created by GPURuntime.createExecuteRenderBundlesCommand().'
             )
         }
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
         const normalized = normalizeExecuteRenderBundlesDescriptor(runtime, descriptor)
         executeRenderBundlesCommandStates.set(this, { isDisposed: false })
         Object.defineProperties(this, {
@@ -577,7 +577,7 @@ export class ExecuteRenderBundlesCommand {
                 message: 'ExecuteRenderBundlesCommand has been disposed.',
             })
         }
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         for (const bundle of this.bundles) bundle.assertRuntime(this.runtime)
     }
 

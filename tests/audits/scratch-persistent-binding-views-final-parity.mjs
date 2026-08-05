@@ -417,8 +417,8 @@ const finalDocs = loadCurrentSources({
     finalAudit: 'docs/review/scratch-persistent-binding-views-final-audit.md',
 })
 const lifecycleAuthorityInternalNames = Object.freeze([
-    'captureScratchRuntimeAuthority',
-    'assertScratchRuntimeAuthority',
+    'captureGPURuntimeAuthority',
+    'assertGPURuntimeAuthority',
     'assertProgramPipelineAuthority',
     'observeProgramPipelineAuthority',
 ])
@@ -426,21 +426,21 @@ const runtimeProgramLifecycleAuthorityFacts = {
     runtimePrivateCell: hasAll(current.runtimeAuthority, [
         'const runtimeAuthorityStates = new WeakMap<GPURuntime, GPURuntimeAuthorityState>()',
         'lifecycleEpoch: number',
-        'export function assertScratchRuntimeActive(',
-        'export function captureScratchRuntimeAuthority(',
-        'export function assertScratchRuntimeAuthority(',
-        'export function observeScratchRuntimeAuthority(',
+        'export function assertGPURuntimeActive(',
+        'export function captureGPURuntimeAuthority(',
+        'export function assertGPURuntimeAuthority(',
+        'export function observeGPURuntimeAuthority(',
     ]),
     runtimeInternalDispatchClosed:
         !current.runtime.includes('this.assertActive()') &&
-        current.runtime.split('assertScratchRuntimeActive(this)').length >= 20,
+        current.runtime.split('assertGPURuntimeActive(this)').length >= 20,
     runtimeInternalCallSitesClosed: !currentScratchSource.includes('.assertActive()'),
     programPrivateEpoch: hasAll(current.program, [
         'lifecycleEpoch: number',
         'state.lifecycleEpoch += 1',
         'assertProgramUsableAuthority(this)',
         'assertProgramRuntimeAuthority(this, runtime)',
-        'runtimeAuthority: captureScratchRuntimeAuthority(state.runtime)',
+        'runtimeAuthority: captureGPURuntimeAuthority(state.runtime)',
         'assertProgramPipelineAuthority(authority)',
     ]) &&
         !current.program.includes('program.assertUsable()') &&
@@ -879,6 +879,8 @@ const goalStartChangedPublicMemberReplacements = Object.freeze({
     'GPURuntime.createSampler:method': 'Promise-only acknowledged SamplerResource factory',
     'GPURuntime.querySet:method': 'Promise-only acknowledged QuerySetResource factory',
     'GPURuntime.sampler:method': 'Promise-only acknowledged SamplerResource factory',
+    'GPURuntimeDiagnosticsController.constructor:constructor':
+        'internal normalized diagnostics options follow the GPURuntime naming clean cut',
     'GPURuntimeDiagnosticsController.recordDeviceLoss:method':
         'native device-loss input remains distinct from the retained GPUDeviceLostInfo snapshot',
     'SubmissionBuilder.compute:method': 'compute passes accept DispatchCommand and native DebugCommand entries',

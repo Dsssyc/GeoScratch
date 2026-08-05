@@ -362,8 +362,8 @@ export { geo, scratch }
 - Create: `docs/review/scratch-foundation-public-topology-final-audit.md`
 - Modify: only Goal 1 files required by deterministic gate failures or the single bounded diff review
 
-- [ ] Start from a clean worktree and record `git rev-parse HEAD`, Node/npm versions, browser version, adapter/device facts emitted by browser probes, and the exact command list in the final audit.
-- [ ] Run this full gate exactly once in the listed order:
+- [x] Start from a clean worktree and record `git rev-parse HEAD`, Node/npm versions, browser version, adapter/device facts emitted by browser probes, and the exact command list in the final audit.
+- [x] Run this full gate exactly once in the listed order:
 
 ```bash
 npm run typecheck
@@ -376,11 +376,11 @@ node tests/browser/scratch-dem-layer.mjs
 node tests/browser/scratch-flow-layer.mjs
 ```
 
-- [ ] For browser gates, require zero uncaptured WebGPU errors, zero device loss, zero leaked Worker, and the currently accepted visible Hello GAW, DEM Layer, and Flow Layer results. Do not reinterpret an infrastructure interruption as a product failure.
-- [ ] If a gate has a deterministic Goal 1 failure, record command/error/root cause, fix only that cause, and rerun only the failed gate plus directly affected gates. Do not restart the entire review loop.
-- [ ] Perform one final review limited to `git diff 063b543..HEAD` across correctness, public-contract completeness, architecture direction, accidental deletion, TypeScript declaration output, diagnostics immutability, Worker semantic parity, and browser-visible regressions.
-- [ ] Reconcile the manifest against final exports and record a preserved/renamed/moved/removed matrix. Explicitly confirm that every pre-goal GPU and Worker behavior has a current implementation and test owner.
-- [ ] Run final hygiene commands:
+- [x] For browser gates, require zero uncaptured WebGPU errors, zero device loss, zero leaked Worker, and the currently accepted visible Hello GAW, DEM Layer, and Flow Layer results. Do not reinterpret an infrastructure interruption as a product failure.
+- [x] If a gate has a deterministic Goal 1 failure, record command/error/root cause, fix only that cause, and rerun only the failed gate plus directly affected gates. Do not restart the entire review loop.
+- [x] Perform one final review limited to `git diff 063b543..HEAD` across correctness, public-contract completeness, architecture direction, accidental deletion, TypeScript declaration output, diagnostics immutability, Worker semantic parity, and browser-visible regressions.
+- [x] Reconcile the manifest against final exports and record a preserved/renamed/moved/removed matrix. Explicitly confirm that every pre-goal GPU and Worker behavior has a current implementation and test owner.
+- [x] Run final hygiene commands:
 
 ```bash
 git diff --check 063b543..HEAD
@@ -389,9 +389,9 @@ rg -n "geoscratch/(worker|geometry)" packages examples tests README.md README_zh
 rg -n "ScratchRuntime|ScratchDiagnosticCapture|ScratchRenderPipeline|ScratchComputePipeline|WorkerDiagnosticError|createWorkerDiagnostic" packages examples tests README.md README_zh.md docs/vision docs/review
 ```
 
-- [ ] Interpret expected `rg` matches only through the exact historical allowlist; any unlisted match is a finding, not an excuse to broaden the allowlist.
-- [ ] Commit the final audit and any in-scope corrections as `Audit Scratch foundation topology migration`.
-- [ ] Stop the Goal. Report `confirmed-clean` when all required gates and review rows pass; otherwise report `completed-with-findings` and list each failed command, root cause, impact, retained evidence, and recommended next action. Do not mark blocked and do not begin Goal 2.
+- [x] Interpret expected `rg` matches only through the exact historical allowlist; any unlisted match is a finding, not an excuse to broaden the allowlist.
+- [x] Commit the final audit and any in-scope corrections as `Audit Scratch foundation topology migration`.
+- [x] Stop the Goal. Report `confirmed-clean` when all required gates and review rows pass; otherwise report `completed-with-findings` and list each failed command, root cause, impact, retained evidence, and recommended next action. Do not mark blocked and do not begin Goal 2.
 
 ---
 

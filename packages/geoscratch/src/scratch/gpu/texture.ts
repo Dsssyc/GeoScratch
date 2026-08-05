@@ -15,7 +15,7 @@ import {
     resourceContentEpoch,
     resourceContentState,
 } from './resource.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import {
     diagnosticsControllerFor,
     logicalTextureDescriptorFootprint,
@@ -514,7 +514,7 @@ export async function createTextureResource(
     descriptor: TextureResourceDescriptor
 ): Promise<TextureResource> {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     const normalizedDescriptor = normalizeTextureDescriptor(runtime, descriptor)
     const identity = createScratchResourceIdentity()
     const nativeLabel = createScratchNativeLabel(normalizedDescriptor.label, identity.id)

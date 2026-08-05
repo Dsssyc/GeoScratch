@@ -1,7 +1,7 @@
 import { UUID } from '../internal/uuid.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
 import { advanceQuerySlotContentEpoch, isQuerySetResource, QuerySetResource } from './query-set.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { isSurfaceReceiver, surfaceFactsFor } from './surface.js'
 import {
     assertSurfaceTextureLeaseForSubmission,
@@ -157,7 +157,7 @@ export class RenderPassSpec {
 
     constructor(runtime: GPURuntime, descriptor: RenderPassSpecDescriptor) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const state = { isDisposed: false }
         renderPassStates.set(this, state)
@@ -228,7 +228,7 @@ export class RenderPassSpec {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.timestampWrites?.querySet.assertUsable()
         this.occlusionQuerySet?.assertUsable()
     }
@@ -310,7 +310,7 @@ export class ComputePassSpec {
 
     constructor(runtime: GPURuntime, descriptor: ComputePassSpecDescriptor = {}) {
 
-        assertScratchRuntimeActive(runtime)
+        assertGPURuntimeActive(runtime)
 
         const state = { isDisposed: false }
         computePassStates.set(this, state)
@@ -372,7 +372,7 @@ export class ComputePassSpec {
             })
         }
 
-        assertScratchRuntimeActive(this.runtime)
+        assertGPURuntimeActive(this.runtime)
         this.timestampWrites?.querySet.assertUsable()
     }
 

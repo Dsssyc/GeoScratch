@@ -87,7 +87,7 @@ export type GPURuntimeDiagnosticsOptions = Readonly<{
     maxPendingNativeObservations?: number
 }>
 
-export type NormalizedScratchRuntimeDiagnosticsOptions = Readonly<{
+export type NormalizedGPURuntimeDiagnosticsOptions = Readonly<{
     operationCapacity: number
     incidentCapacity: number
     evidenceByteCapacity: number
@@ -392,7 +392,7 @@ export type GPUDiagnosticCaptureOptions = Readonly<{
     nativeSubmissionDetail?: 'step'
 }>
 
-type NormalizedScratchDiagnosticCaptureOptions = Readonly<{
+type NormalizedGPUDiagnosticCaptureOptions = Readonly<{
     maxOperations: number
     maxDurationMs: number
     maxEvidenceBytes: number
@@ -523,7 +523,7 @@ type CaptureState = {
     id: string
     runtimeId: string
     controller: GPURuntimeDiagnosticsController | undefined
-    options: NormalizedScratchDiagnosticCaptureOptions
+    options: NormalizedGPUDiagnosticCaptureOptions
     operations: GPUOperationRecord[]
     retainedEvidenceBytes: number
     budgetedEvidenceBytes: number
@@ -612,7 +612,7 @@ export class GPURuntimeDiagnosticsController {
 
     #owner: RuntimeDiagnosticsOwner
     #device: GPUDevice
-    #options: NormalizedScratchRuntimeDiagnosticsOptions
+    #options: NormalizedGPURuntimeDiagnosticsOptions
     #readbackPolicy: GPUReadbackPolicy
     #facade: GPURuntimeDiagnostics
     #resourceFacts = new Map<string, GPURuntimeResourceFact>()
@@ -681,7 +681,7 @@ export class GPURuntimeDiagnosticsController {
     constructor(
         owner: RuntimeDiagnosticsOwner,
         device: GPUDevice,
-        options: NormalizedScratchRuntimeDiagnosticsOptions,
+        options: NormalizedGPURuntimeDiagnosticsOptions,
         readbackPolicy: GPUReadbackPolicy
     ) {
 
@@ -2113,7 +2113,7 @@ function createDiagnosticCapture(input: {
     id: string
     runtimeId: string
     controller: GPURuntimeDiagnosticsController
-    options: NormalizedScratchDiagnosticCaptureOptions
+    options: NormalizedGPUDiagnosticCaptureOptions
 }): GPUDiagnosticCapture {
 
     const Constructor = GPUDiagnosticCapture as unknown as new (token: symbol) => GPUDiagnosticCapture
@@ -2281,10 +2281,10 @@ function captureStateFor(capture: GPUDiagnosticCapture): CaptureState {
     return state
 }
 
-export function normalizeScratchRuntimeDiagnosticsOptions(
+export function normalizeGPURuntimeDiagnosticsOptions(
     options: GPURuntimeDiagnosticsOptions = {},
     label?: string
-): NormalizedScratchRuntimeDiagnosticsOptions {
+): NormalizedGPURuntimeDiagnosticsOptions {
 
     const owner: DiagnosticsOptionOwner = {
         ...(label !== undefined ? { label } : {}),
@@ -2336,7 +2336,7 @@ function submissionNativeIntegerOption(
 function normalizeCaptureOptions(
     owner: DiagnosticsOptionOwner,
     options: GPUDiagnosticCaptureOptions
-): NormalizedScratchDiagnosticCaptureOptions {
+): NormalizedGPUDiagnosticCaptureOptions {
 
     return Object.freeze({
         maxOperations: finiteIntegerOption(owner, options.maxOperations, 'maxOperations', 1, DEFAULT_CAPTURE_MAX_OPERATIONS),

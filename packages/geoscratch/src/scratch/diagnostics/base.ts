@@ -148,17 +148,18 @@ export function createScratchDiagnosticReport<
     const Diagnostic extends AnyScratchDiagnostic,
 >(diagnostics: readonly Diagnostic[] = []): ScratchDiagnosticReport<Diagnostic> {
 
+    const immutableDiagnostics = diagnostics.map(freezeDiagnosticEnvelope)
     let errorCount = 0
     let warningCount = 0
 
-    for (const diagnostic of diagnostics) {
+    for (const diagnostic of immutableDiagnostics) {
         if (diagnostic.severity === 'error') errorCount++
         if (diagnostic.severity === 'warn') warningCount++
     }
 
     return Object.freeze({
         version: 1 as const,
-        diagnostics: Object.freeze([ ...diagnostics ]),
+        diagnostics: Object.freeze(immutableDiagnostics),
         hasErrors: errorCount > 0,
         errorCount,
         warningCount,

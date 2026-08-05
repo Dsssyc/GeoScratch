@@ -25,7 +25,7 @@ export type GPURuntimeAuthorityObservation = Readonly<{
 
 const runtimeAuthorityStates = new WeakMap<GPURuntime, GPURuntimeAuthorityState>()
 
-export function initializeScratchRuntimeAuthority(runtime: GPURuntime): void {
+export function initializeGPURuntimeAuthority(runtime: GPURuntime): void {
 
     if (runtimeAuthorityStates.has(runtime)) {
         throw new TypeError('GPURuntime authority is already initialized.')
@@ -37,24 +37,24 @@ export function initializeScratchRuntimeAuthority(runtime: GPURuntime): void {
     })
 }
 
-export function scratchRuntimeIsDisposed(runtime: GPURuntime): boolean {
+export function gpuRuntimeIsDisposed(runtime: GPURuntime): boolean {
 
     return runtimeAuthorityStateFor(runtime).isDisposed
 }
 
-export function scratchRuntimeIsDeviceLost(runtime: GPURuntime): boolean {
+export function gpuRuntimeIsDeviceLost(runtime: GPURuntime): boolean {
 
     return runtimeAuthorityStateFor(runtime).isDeviceLost
 }
 
-export function scratchRuntimeDeviceLostInfo(
+export function gpuRuntimeDeviceLostInfo(
     runtime: GPURuntime
 ): GPUDeviceLostInfo | undefined {
 
     return runtimeAuthorityStateFor(runtime).deviceLostInfo
 }
 
-export function disposeScratchRuntimeAuthority(runtime: GPURuntime): boolean {
+export function disposeGPURuntimeAuthority(runtime: GPURuntime): boolean {
 
     const state = runtimeAuthorityStateFor(runtime)
     if (state.isDisposed) return false
@@ -63,7 +63,7 @@ export function disposeScratchRuntimeAuthority(runtime: GPURuntime): boolean {
     return true
 }
 
-export function loseScratchRuntimeAuthority(
+export function loseGPURuntimeAuthority(
     runtime: GPURuntime,
     info: GPUDeviceLostInfo
 ): boolean {
@@ -76,7 +76,7 @@ export function loseScratchRuntimeAuthority(
     return true
 }
 
-export function assertScratchRuntimeActive(runtime: GPURuntime): void {
+export function assertGPURuntimeActive(runtime: GPURuntime): void {
 
     const state = runtimeAuthorityStateFor(runtime)
     if (state.isDisposed) {
@@ -84,7 +84,7 @@ export function assertScratchRuntimeActive(runtime: GPURuntime): void {
             code: 'SCRATCH_RUNTIME_DISPOSED',
             severity: 'error',
             phase: 'runtime',
-            subject: scratchRuntimeAuthoritySubject(runtime),
+            subject: gpuRuntimeAuthoritySubject(runtime),
             message: 'GPURuntime has been disposed.',
             hints: [ 'Create a new GPURuntime before creating resources or surfaces.' ],
         })
@@ -95,7 +95,7 @@ export function assertScratchRuntimeActive(runtime: GPURuntime): void {
             code: 'SCRATCH_RUNTIME_DEVICE_LOST',
             severity: 'error',
             phase: 'runtime',
-            subject: scratchRuntimeAuthoritySubject(runtime),
+            subject: gpuRuntimeAuthoritySubject(runtime),
             message: 'GPURuntime device has been lost.',
             actual: state.deviceLostInfo,
             hints: [ 'Create a replacement runtime or wait for a future rehydration API.' ],
@@ -103,28 +103,28 @@ export function assertScratchRuntimeActive(runtime: GPURuntime): void {
     }
 }
 
-export function captureScratchRuntimeAuthority(
+export function captureGPURuntimeAuthority(
     runtime: GPURuntime
 ): GPURuntimeAuthorityStamp {
 
-    assertScratchRuntimeActive(runtime)
+    assertGPURuntimeActive(runtime)
     return Object.freeze({
         runtime,
         lifecycleEpoch: runtimeAuthorityStateFor(runtime).lifecycleEpoch,
     })
 }
 
-export function assertScratchRuntimeAuthority(stamp: GPURuntimeAuthorityStamp): void {
+export function assertGPURuntimeAuthority(stamp: GPURuntimeAuthorityStamp): void {
 
-    const observation = observeScratchRuntimeAuthority(stamp)
-    assertScratchRuntimeActive(stamp.runtime)
+    const observation = observeGPURuntimeAuthority(stamp)
+    assertGPURuntimeActive(stamp.runtime)
     if (observation.isCurrent) return
 
     throwGPUDiagnostic({
         code: 'SCRATCH_RUNTIME_LIFECYCLE_CHANGED',
         severity: 'error',
         phase: 'runtime',
-        subject: scratchRuntimeAuthoritySubject(stamp.runtime),
+        subject: gpuRuntimeAuthoritySubject(stamp.runtime),
         message: 'GPURuntime lifecycle changed after operation preparation.',
         expected: { lifecycleEpoch: stamp.lifecycleEpoch },
         actual: { lifecycleEpoch: observation.lifecycleEpoch },
@@ -132,7 +132,7 @@ export function assertScratchRuntimeAuthority(stamp: GPURuntimeAuthorityStamp): 
     })
 }
 
-export function observeScratchRuntimeAuthority(
+export function observeGPURuntimeAuthority(
     stamp: GPURuntimeAuthorityStamp
 ): GPURuntimeAuthorityObservation {
 
@@ -146,7 +146,7 @@ export function observeScratchRuntimeAuthority(
     })
 }
 
-export function scratchRuntimeAuthoritySubject(runtime: GPURuntime): ScratchDiagnosticSubject {
+export function gpuRuntimeAuthoritySubject(runtime: GPURuntime): ScratchDiagnosticSubject {
 
     const subject: GPUDiagnosticSubjectDraft = {
         kind: 'GPURuntime',

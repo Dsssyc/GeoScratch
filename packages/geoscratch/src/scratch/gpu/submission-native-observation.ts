@@ -3,7 +3,7 @@ import {
     createSubmissionNativeOutcome,
     serializeNativeGpuError,
 } from './gpu-operation.js'
-import { assertScratchRuntimeActive } from './runtime-authority.js'
+import { assertGPURuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type {
     GPUAttributionConfidence,
@@ -161,7 +161,7 @@ export function beginSubmissionNativeObservation(
     input: BeginSubmissionNativeObservationInput
 ): SubmissionNativeObservation {
 
-    assertScratchRuntimeActive(input.runtime)
+    assertGPURuntimeActive(input.runtime)
     assertObservationInput(input)
     const controller = diagnosticsControllerFor(input.runtime)
     const mode = controller.submissionNativeObservationMode()
@@ -309,7 +309,7 @@ export function beginReadbackNativeObservation(
     input: BeginReadbackNativeObservationInput
 ): ReadbackNativeObservation {
 
-    assertScratchRuntimeActive(input.runtime)
+    assertGPURuntimeActive(input.runtime)
     assertReadbackObservationInput(input)
     const controller = diagnosticsControllerFor(input.runtime)
     const mode = controller.submissionNativeObservationMode()

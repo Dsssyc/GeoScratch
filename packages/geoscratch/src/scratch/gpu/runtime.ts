@@ -33,8 +33,8 @@ import {
 } from './feature-contract.js'
 import { ComputePassSpec, RenderPassSpec } from './pass.js'
 import {
-    createComputePipeline as createScratchComputePipeline,
-    createRenderPipeline as createScratchRenderPipeline,
+    createComputePipeline as createGPUComputePipeline,
+    createRenderPipeline as createGPURenderPipeline,
 } from './pipeline.js'
 import { runtimePipelineSnapshot } from './pipeline-ownership.js'
 import { Program } from './program.js'
@@ -52,20 +52,20 @@ import {
     runtimeReadbackOperationSnapshot,
 } from './readback-ownership.js'
 import {
-    normalizeScratchRuntimeDiagnosticsOptions,
+    normalizeGPURuntimeDiagnosticsOptions,
     registerRuntimeDiagnostics,
     retainDeviceLostInfo,
     GPURuntimeDiagnosticsController,
 } from './runtime-diagnostics.js'
 import {
-    assertScratchRuntimeActive,
-    disposeScratchRuntimeAuthority,
-    initializeScratchRuntimeAuthority,
-    loseScratchRuntimeAuthority,
-    scratchRuntimeAuthoritySubject,
-    scratchRuntimeDeviceLostInfo,
-    scratchRuntimeIsDeviceLost,
-    scratchRuntimeIsDisposed,
+    assertGPURuntimeActive,
+    disposeGPURuntimeAuthority,
+    initializeGPURuntimeAuthority,
+    loseGPURuntimeAuthority,
+    gpuRuntimeAuthoritySubject,
+    gpuRuntimeDeviceLostInfo,
+    gpuRuntimeIsDeviceLost,
+    gpuRuntimeIsDisposed,
 } from './runtime-authority.js'
 import { createSamplerResource, SamplerResource } from './sampler.js'
 import { createShaderModule as createScratchShaderModule, ShaderModule } from './shader-module.js'
@@ -107,7 +107,7 @@ import type {
     GPURuntimeDiagnostics,
     GPURuntimeDiagnosticsOptions,
     GPUDeviceLostInfo,
-    NormalizedScratchRuntimeDiagnosticsOptions,
+    NormalizedGPURuntimeDiagnosticsOptions,
 } from './runtime-diagnostics.js'
 import type { SamplerResourceDescriptor } from './sampler.js'
 import type { ShaderModuleDescriptor } from './shader-module.js'
@@ -172,7 +172,7 @@ type GPURuntimeConstructorOptions = {
     requestFacts: GPURuntimeRequestFacts
     adapterInfo: GPUAdapterInfoSnapshot
     readbackPolicy: GPUReadbackPolicy
-    diagnosticsPolicy: NormalizedScratchRuntimeDiagnosticsOptions
+    diagnosticsPolicy: NormalizedGPURuntimeDiagnosticsOptions
 }
 
 type GPUNativeRequestAdapterOptions = GPURequestAdapterOptions & {
@@ -217,7 +217,7 @@ export class GPURuntime {
             })
         }
 
-        initializeScratchRuntimeAuthority(this)
+        initializeGPURuntimeAuthority(this)
         Object.defineProperties(this, {
             id: immutableRuntimeProperty(`scratch-runtime-${UUID()}`),
             label: immutableRuntimeProperty(options.label),
@@ -235,9 +235,9 @@ export class GPURuntime {
             requestFacts: immutableRuntimeProperty(options.requestFacts),
             adapterInfo: immutableRuntimeProperty(options.adapterInfo),
             readbackPolicy: immutableRuntimeProperty(options.readbackPolicy),
-            isDisposed: immutableRuntimeGetter(() => scratchRuntimeIsDisposed(this)),
-            isDeviceLost: immutableRuntimeGetter(() => scratchRuntimeIsDeviceLost(this)),
-            deviceLostInfo: immutableRuntimeGetter(() => scratchRuntimeDeviceLostInfo(this)),
+            isDisposed: immutableRuntimeGetter(() => gpuRuntimeIsDisposed(this)),
+            isDeviceLost: immutableRuntimeGetter(() => gpuRuntimeIsDeviceLost(this)),
+            deviceLostInfo: immutableRuntimeGetter(() => gpuRuntimeDeviceLostInfo(this)),
         })
         this._resources = new Set()
         this._surfaces = new Set()
@@ -257,7 +257,7 @@ export class GPURuntime {
 
         if (options.device.lost && typeof options.device.lost.then === 'function') {
             options.device.lost.then((info) => {
-                loseScratchRuntimeAuthority(this, retainDeviceLostInfo(info))
+                loseGPURuntimeAuthority(this, retainDeviceLostInfo(info))
                 markHostWrittenBuffersIndeterminateOnDeviceLoss(this)
                 this.#diagnosticsController.recordDeviceLoss(info)
                 for (const readback of runtimeReadbackOperationSnapshot(this)) {
@@ -272,24 +272,24 @@ export class GPURuntime {
 
     get isDisposed(): boolean {
 
-        return scratchRuntimeIsDisposed(this)
+        return gpuRuntimeIsDisposed(this)
     }
 
     get isDeviceLost(): boolean {
 
-        return scratchRuntimeIsDeviceLost(this)
+        return gpuRuntimeIsDeviceLost(this)
     }
 
     get deviceLostInfo(): GPUDeviceLostInfo | undefined {
 
-        return scratchRuntimeDeviceLostInfo(this)
+        return gpuRuntimeDeviceLostInfo(this)
     }
 
     static async create(options: GPURuntimeCreateOptions = {}) {
 
         const request = snapshotRuntimeRequest(options)
         const readbackPolicy = normalizeScratchReadbackPolicy(options.readback, request.label)
-        const diagnosticsPolicy = normalizeScratchRuntimeDiagnosticsOptions(
+        const diagnosticsPolicy = normalizeGPURuntimeDiagnosticsOptions(
             options.diagnostics,
             request.label
         )
@@ -351,17 +351,17 @@ export class GPURuntime {
 
     get subject(): ScratchDiagnosticSubject {
 
-        return scratchRuntimeAuthoritySubject(this)
+        return gpuRuntimeAuthoritySubject(this)
     }
 
     assertActive() {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
     }
 
     createSurface(canvas: HTMLCanvasElement | OffscreenCanvas, options: SurfaceOptions = {}) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new Surface(this, canvas, options)
     }
 
@@ -374,7 +374,7 @@ export class GPURuntime {
         descriptor: ExternalTextureBindingDescriptor
     ): ExternalTextureBinding {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createExternalTextureBinding(this, descriptor)
     }
 
@@ -385,7 +385,7 @@ export class GPURuntime {
 
     async createBuffer(descriptor: BufferResourceDescriptor): Promise<BufferResource> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createBufferResource(this, descriptor)
     }
 
@@ -398,19 +398,19 @@ export class GPURuntime {
         descriptor: MappedBufferResourceDescriptor
     ): Promise<MappedBufferCreation> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createMappedBufferResource(this, descriptor)
     }
 
     async mapBuffer(descriptor: BufferMappingDescriptor): Promise<MappedBufferLease> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return mapBufferResource(this, descriptor)
     }
 
     async createTexture(descriptor: TextureResourceDescriptor): Promise<TextureResource> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createTextureResource(this, descriptor)
     }
 
@@ -421,7 +421,7 @@ export class GPURuntime {
 
     async createSampler(descriptor?: SamplerResourceDescriptor): Promise<SamplerResource> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createSamplerResource(this, descriptor)
     }
 
@@ -432,7 +432,7 @@ export class GPURuntime {
 
     async createShaderModule(descriptor: ShaderModuleDescriptor): Promise<ShaderModule> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createScratchShaderModule(this, descriptor)
     }
 
@@ -443,7 +443,7 @@ export class GPURuntime {
 
     async createQuerySet(descriptor: QuerySetResourceDescriptor): Promise<QuerySetResource> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createQuerySetResource(this, descriptor)
     }
 
@@ -454,7 +454,7 @@ export class GPURuntime {
 
     async createBindLayout(descriptor: BindLayoutDescriptor): Promise<BindLayout> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createScratchBindLayout(this, descriptor)
     }
 
@@ -469,7 +469,7 @@ export class GPURuntime {
         options?: BindSetOptions
     ): Promise<import('./binding.js').BindSet> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createScratchBindSet(this, layout, bindings, options)
     }
 
@@ -484,7 +484,7 @@ export class GPURuntime {
 
     createProgram(descriptor: ProgramDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new Program(this, descriptor)
     }
 
@@ -495,8 +495,8 @@ export class GPURuntime {
 
     async createRenderPipeline(descriptor: RenderPipelineDescriptor): Promise<RenderPipeline> {
 
-        assertScratchRuntimeActive(this)
-        return createScratchRenderPipeline(this, descriptor)
+        assertGPURuntimeActive(this)
+        return createGPURenderPipeline(this, descriptor)
     }
 
     renderPipeline(descriptor: RenderPipelineDescriptor): Promise<RenderPipeline> {
@@ -506,8 +506,8 @@ export class GPURuntime {
 
     async createComputePipeline(descriptor: ComputePipelineDescriptor): Promise<ComputePipeline> {
 
-        assertScratchRuntimeActive(this)
-        return createScratchComputePipeline(this, descriptor)
+        assertGPURuntimeActive(this)
+        return createGPUComputePipeline(this, descriptor)
     }
 
     computePipeline(descriptor: ComputePipelineDescriptor): Promise<ComputePipeline> {
@@ -517,7 +517,7 @@ export class GPURuntime {
 
     createDrawCommand(descriptor: DrawCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new DrawCommand(this, descriptor)
     }
 
@@ -528,7 +528,7 @@ export class GPURuntime {
 
     createBundleDrawCommand(descriptor: BundleDrawCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createScratchBundleDrawCommand(this, descriptor)
     }
 
@@ -539,7 +539,7 @@ export class GPURuntime {
 
     async createRenderBundle(descriptor: RenderBundleDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createScratchRenderBundle(this, descriptor)
     }
 
@@ -550,7 +550,7 @@ export class GPURuntime {
 
     createExecuteRenderBundlesCommand(descriptor: ExecuteRenderBundlesCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createScratchExecuteRenderBundlesCommand(this, descriptor)
     }
 
@@ -561,7 +561,7 @@ export class GPURuntime {
 
     createDebugCommand(descriptor: DebugCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createScratchDebugCommand(this, descriptor)
     }
 
@@ -572,7 +572,7 @@ export class GPURuntime {
 
     createBeginOcclusionQueryCommand(descriptor: BeginOcclusionQueryCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new BeginOcclusionQueryCommand(this, descriptor)
     }
 
@@ -583,7 +583,7 @@ export class GPURuntime {
 
     createEndOcclusionQueryCommand(descriptor?: EndOcclusionQueryCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new EndOcclusionQueryCommand(this, descriptor)
     }
 
@@ -594,7 +594,7 @@ export class GPURuntime {
 
     createDispatchCommand(descriptor: DispatchCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new DispatchCommand(this, descriptor)
     }
 
@@ -605,7 +605,7 @@ export class GPURuntime {
 
     createUploadCommand(descriptor: UploadCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new UploadCommand(this, descriptor)
     }
 
@@ -616,7 +616,7 @@ export class GPURuntime {
 
     createClearBufferCommand(descriptor: ClearBufferCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new ClearBufferCommand(this, descriptor)
     }
 
@@ -627,7 +627,7 @@ export class GPURuntime {
 
     createCopyCommand(descriptor: CopyCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new CopyCommand(this, descriptor)
     }
 
@@ -638,7 +638,7 @@ export class GPURuntime {
 
     async createReadbackCommand(descriptor: ReadbackCommandDescriptor): Promise<ReadbackCommand> {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createScratchReadbackCommand(this, descriptor)
     }
 
@@ -649,7 +649,7 @@ export class GPURuntime {
 
     createResolveQuerySetCommand(descriptor: ResolveQuerySetCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new ResolveQuerySetCommand(this, descriptor)
     }
 
@@ -660,7 +660,7 @@ export class GPURuntime {
 
     createTextureUploadCommand(descriptor: TextureUploadCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new TextureUploadCommand(this, descriptor)
     }
 
@@ -671,7 +671,7 @@ export class GPURuntime {
 
     createExternalImageUploadCommand(descriptor: ExternalImageUploadCommandDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new ExternalImageUploadCommand(this, descriptor)
     }
 
@@ -682,7 +682,7 @@ export class GPURuntime {
 
     createRenderPass(descriptor: RenderPassSpecDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new RenderPassSpec(this, descriptor)
     }
 
@@ -693,7 +693,7 @@ export class GPURuntime {
 
     createComputePass(descriptor?: ComputePassSpecDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new ComputePassSpec(this, descriptor)
     }
 
@@ -704,7 +704,7 @@ export class GPURuntime {
 
     createReadback(descriptor: ReadbackOperationDescriptor) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return createReadbackOperation(this, descriptor)
     }
 
@@ -715,7 +715,7 @@ export class GPURuntime {
 
     createSubmission(options: SubmissionBuilderOptions = {}) {
 
-        assertScratchRuntimeActive(this)
+        assertGPURuntimeActive(this)
         return new SubmissionBuilder(this, options)
     }
 
@@ -726,7 +726,7 @@ export class GPURuntime {
 
     dispose() {
 
-        if (!disposeScratchRuntimeAuthority(this)) return
+        if (!disposeGPURuntimeAuthority(this)) return
 
         const failures: unknown[] = []
         const dispose = (action: () => void) => {
