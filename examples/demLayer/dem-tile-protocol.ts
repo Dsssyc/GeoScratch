@@ -1,20 +1,38 @@
 import type {
-    VirtualRasterCacheFacts,
-    VirtualRasterCacheKey,
-    VirtualRasterCachePolicy,
+    VirtualRasterCacheAddress,
+    VirtualRasterCacheMetadata,
     VirtualRasterPageIdentity,
     VirtualRasterPageTransfer,
 } from 'geoscratch/geo'
+import type {
+    PersistentCacheDescriptor,
+    PersistentCacheFacts,
+} from 'geoscratch/scratch'
+
+export type DemCachePolicy =
+    | Readonly<{ mode: 'none' }>
+    | Readonly<{
+        mode: 'persistent'
+        namespace: string
+        maxPayloadBytes: number
+        maxEntries: number
+    }>
+
+export type DemTileCacheConfiguration =
+    | Readonly<{ mode: 'none' }>
+    | Readonly<{
+        mode: 'persistent'
+        descriptor: PersistentCacheDescriptor
+    }>
 
 export type DemTileWorkerInit = Readonly<{
-    cachePolicy: VirtualRasterCachePolicy
-    requestPersistence: boolean
+    cache: DemTileCacheConfiguration
 }>
 
 export type DemTileCandidateDescriptor = Readonly<{
     candidateId: string
     page: VirtualRasterPageIdentity
-    cacheKey: VirtualRasterCacheKey
+    cacheAddress: VirtualRasterCacheAddress
     url: string
     contentVersion: string
 }>
@@ -31,7 +49,7 @@ export type DemTileFetchResult = Readonly<{
 }>
 
 export type DemTileWorkerFacts = Readonly<{
-    cache: VirtualRasterCacheFacts
+    cache: DemTileCacheFacts
     pendingCandidateCount: number
     networkRequestCount: number
     decodedPageCount: number
@@ -42,3 +60,25 @@ export type DemTileWorkerFacts = Readonly<{
 }>
 
 export type DemTileDecodeResult = VirtualRasterPageTransfer
+
+export type DemRawTileCacheMetadata = VirtualRasterCacheMetadata & Readonly<{
+    width: 256
+    height: 256
+    channels: 1
+    dataType: 'uint8'
+    contentVersion: string
+}>
+
+export type DemTileCacheFacts =
+    | Readonly<{
+        mode: 'none'
+        state: 'disabled'
+        entryCount: 0
+        payloadBytes: 0
+        hitCount: 0
+        missCount: 0
+        putCount: 0
+        evictionCount: 0
+        quotaFailureCount: 0
+    }>
+    | (PersistentCacheFacts & Readonly<{ mode: 'persistent' }>)

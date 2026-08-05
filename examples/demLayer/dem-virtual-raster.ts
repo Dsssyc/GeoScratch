@@ -15,7 +15,6 @@ import {
     webMercatorQuadAddressCodec,
 } from 'geoscratch/geo'
 import type {
-    VirtualRasterCachePolicy,
     VirtualRasterGpuState,
     VirtualRasterGpuUpdate,
     VirtualRasterPageDemand,
@@ -28,6 +27,7 @@ import {
     createDemWorkerRequestExecutor,
 } from './dem-worker-source.ts'
 import type { DemWorkerRequestExecutor } from './dem-worker-source.ts'
+import type { DemCachePolicy } from './dem-tile-protocol.ts'
 import { MAX_TERRAIN_NODES } from './terrain-selection.ts'
 
 type NumberSequence = ArrayLike<number> & Iterable<number>
@@ -123,7 +123,7 @@ export type DemVirtualRasterRuntimeOptions = Readonly<{
     runtime: GPURuntime
     manifest: DemVirtualRasterManifest
     tileServerUrl: string
-    cachePolicy: VirtualRasterCachePolicy
+    cachePolicy: DemCachePolicy
     requestPersistence?: boolean
     workerCount?: number
     maxNetworkRequests?: number
@@ -150,7 +150,7 @@ export const DEM_DEFAULT_MAX_REQUESTS = 24
 const DEM_FINEST_HEIGHT_GEOMETRY_LEVEL = 12
 const DEM_MAX_HEIGHT_LEVEL = 3
 const DEM_TILE_SIZE = 256
-const DEM_CACHE_SCHEMA_VERSION = 1
+const DEM_CACHE_SCHEMA_VERSION = 2
 
 export function parseDemVirtualRasterManifest(value: unknown): DemVirtualRasterManifest {
 
@@ -483,7 +483,7 @@ export async function createDemVirtualRasterRuntime({
             tileMatrixSetId: model.manifest.tileMatrixSet.id,
             tileOrientation: model.manifest.pixelOrientation.tile,
             sourceOrientation: model.manifest.pixelOrientation.source,
-            cachePolicy: cachePolicy.tier,
+            cachePolicy: cachePolicy.mode,
             demandStopped,
             stopped,
             residency: residency.inspect(),

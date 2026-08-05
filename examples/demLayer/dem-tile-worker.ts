@@ -1,13 +1,9 @@
 import {
-    createVirtualRasterCache,
     prepareVirtualRasterPageTransfer,
-} from 'geoscratch/geo'
-import type {
-    VirtualRasterCache,
-    VirtualRasterCacheRecord,
 } from 'geoscratch/geo'
 import {
     defineWorkerModule,
+    PersistentCache,
     transferWorkerResult,
 } from 'geoscratch/scratch'
 import type { WorkerOperationContext } from 'geoscratch/scratch'
@@ -18,18 +14,19 @@ import type {
     DemTileLookupResult,
     DemTileWorkerFacts,
     DemTileWorkerInit,
+    DemRawTileCacheMetadata,
 } from './dem-tile-protocol.ts'
 
 type DemTileCandidate = DemTileCandidateDescriptor & Readonly<{
-    source: 'cache' | 'network'
-    encoded: ArrayBuffer
-    contentType: string
-    validator?: string
-    lastModified?: string
+    source: 'cache' | 'network' | 'decoded'
+    encoded?: ArrayBuffer
+    raw?: Uint8Array<ArrayBuffer>
+    cachePayload?: ArrayBuffer
+    contentType?: string
 }>
 
 type DemTileWorkerState = {
-    cache: VirtualRasterCache
+    cache?: PersistentCache<DemRawTileCacheMetadata>
     candidates: Map<string, DemTileCandidate>
     lastDecoded?: Uint8Array<ArrayBuffer>
     networkRequestCount: number
@@ -43,16 +40,17 @@ const TILE_SIZE = 256
 
 export default defineWorkerModule({
     id: 'geoscratch-dem-tile',
-    version: '1',
+    version: '2',
     operations: {},
     context: {
         async create(init: DemTileWorkerInit) {
 
             return {
-                cache: await createVirtualRasterCache({
-                    policy: init.cachePolicy,
-                    requestPersistence: init.requestPersistence,
-                }),
+                ...(init.cache.mode === 'persistent' ? {
+                    cache: await PersistentCache.open<DemRawTileCacheMetadata>(
+                        init.cache.descriptor
+                    ),
+                } : {}),
                 candidates: new Map(),
                 networkRequestCount: 0,
                 decodedPageCount: 0,
@@ -69,10 +67,15 @@ export default defineWorkerModule({
             ): Promise<DemTileLookupResult> {
 
                 throwIfAborted(context.signal)
-                const record = await state.cache.get(descriptor.cacheKey)
+                if (state.cache === undefined) return Object.freeze({ status: 'miss' })
+                const outcome = await state.cache.get(descriptor.cacheAddress.key)
                 throwIfAborted(context.signal)
-                if (record === undefined) return Object.freeze({ status: 'miss' })
-                retainCandidate(state, descriptor, record, 'cache')
+                if (outcome.status === 'miss') return Object.freeze({ status: 'miss' })
+                if (!validCachedTile(outcome.record, descriptor)) {
+                    await state.cache.delete(descriptor.cacheAddress.key)
+                    return Object.freeze({ status: 'miss' })
+                }
+                retainCachedCandidate(state, descriptor, outcome.record.payload!)
                 return Object.freeze({ status: 'hit', candidateId: descriptor.candidateId })
             },
             async fetch(
@@ -96,12 +99,6 @@ export default defineWorkerModule({
                     source: 'network',
                     encoded,
                     contentType,
-                    ...(response.headers.get('etag') === null ? {} : {
-                        validator: response.headers.get('etag')!,
-                    }),
-                    ...(response.headers.get('last-modified') === null ? {} : {
-                        lastModified: response.headers.get('last-modified')!,
-                    }),
                 }))
                 updatePendingMaximum(state)
                 return Object.freeze({
@@ -118,9 +115,20 @@ export default defineWorkerModule({
 
                 throwIfAborted(context.signal)
                 const candidate = requireCandidate(state, input.candidateId)
+                if (candidate.source !== 'network' || candidate.encoded === undefined ||
+                    candidate.contentType === undefined) {
+                    throw candidateStateError(candidate.candidateId, 'network')
+                }
                 const data = await decodeTile(candidate.encoded, candidate.contentType, context.signal)
                 state.decodedPageCount++
                 state.lastDecoded = data
+                const { encoded: _encoded, raw: _raw, cachePayload: _cachePayload, ...retained } =
+                    candidate
+                state.candidates.set(candidate.candidateId, Object.freeze({
+                    ...retained,
+                    source: 'decoded',
+                    ...(state.cache === undefined ? {} : { cachePayload: data.slice().buffer }),
+                }))
                 const prepared = prepareVirtualRasterPageTransfer({
                     page: candidate.page,
                     width: TILE_SIZE,
@@ -134,22 +142,49 @@ export default defineWorkerModule({
                     prepared.transferables
                 )
             },
+            transfer(
+                state: DemTileWorkerState,
+                input: Readonly<{ candidateId: string }>,
+                context: WorkerOperationContext
+            ) {
+
+                throwIfAborted(context.signal)
+                const candidate = requireCandidate(state, input.candidateId)
+                if (candidate.source !== 'cache' || candidate.raw === undefined) {
+                    throw candidateStateError(candidate.candidateId, 'cache')
+                }
+                state.lastDecoded = candidate.raw
+                const prepared = prepareVirtualRasterPageTransfer({
+                    page: candidate.page,
+                    width: TILE_SIZE,
+                    height: TILE_SIZE,
+                    channels: 1,
+                    data: candidate.raw,
+                    contentVersion: candidate.contentVersion,
+                })
+                return transferWorkerResult<DemTileDecodeResult>(
+                    prepared.value,
+                    prepared.transferables
+                )
+            },
             async accept(
                 state: DemTileWorkerState,
                 input: Readonly<{ candidateId: string }>
             ): Promise<DemTileWorkerFacts> {
 
                 const candidate = requireCandidate(state, input.candidateId)
-                if (candidate.source === 'network') {
-                    await state.cache.put(candidate.cacheKey, {
-                        data: candidate.encoded,
-                        contentType: candidate.contentType,
-                        ...(candidate.validator === undefined ? {} : {
-                            validator: candidate.validator,
+                if (candidate.source === 'decoded' && state.cache !== undefined &&
+                    candidate.cachePayload !== undefined) {
+                    await state.cache.put(candidate.cacheAddress.key, {
+                        metadata: Object.freeze({
+                            ...candidate.cacheAddress.metadata,
+                            width: TILE_SIZE,
+                            height: TILE_SIZE,
+                            channels: 1,
+                            dataType: 'uint8',
+                            contentVersion: candidate.contentVersion,
                         }),
-                        ...(candidate.lastModified === undefined ? {} : {
-                            lastModified: candidate.lastModified,
-                        }),
+                        payload: candidate.cachePayload,
                     })
                 }
                 state.candidates.delete(candidate.candidateId)
@@ -172,7 +207,7 @@ export default defineWorkerModule({
             },
             async clear(state: DemTileWorkerState): Promise<DemTileWorkerFacts> {
 
-                await state.cache.clear()
+                await state.cache?.clear()
                 return facts(state)
             },
         },
@@ -183,25 +218,21 @@ export default defineWorkerModule({
         async dispose(state: DemTileWorkerState) {
 
             state.candidates.clear()
-            await state.cache.dispose()
+            await state.cache?.dispose()
         },
     },
 })
 
-function retainCandidate(
+function retainCachedCandidate(
     state: DemTileWorkerState,
     descriptor: DemTileCandidateDescriptor,
-    record: VirtualRasterCacheRecord,
-    source: 'cache'
+    payload: ArrayBuffer
 ): void {
 
     state.candidates.set(descriptor.candidateId, Object.freeze({
         ...descriptor,
-        source,
-        encoded: record.data,
-        contentType: record.contentType,
-        ...(record.validator === undefined ? {} : { validator: record.validator }),
-        ...(record.lastModified === undefined ? {} : { lastModified: record.lastModified }),
+        source: 'cache',
+        raw: new Uint8Array(payload),
     }))
     updatePendingMaximum(state)
 }
@@ -252,7 +283,19 @@ async function decodeTile(
 function facts(state: DemTileWorkerState): DemTileWorkerFacts {
 
     return Object.freeze({
-        cache: state.cache.inspect(),
+        cache: state.cache === undefined
+            ? Object.freeze({
+                mode: 'none',
+                state: 'disabled',
+                entryCount: 0,
+                payloadBytes: 0,
+                hitCount: 0,
+                missCount: 0,
+                putCount: 0,
+                evictionCount: 0,
+                quotaFailureCount: 0,
+            })
+            : Object.freeze({ mode: 'persistent', ...state.cache.inspect() }),
         pendingCandidateCount: state.candidates.size,
         networkRequestCount: state.networkRequestCount,
         decodedPageCount: state.decodedPageCount,
@@ -261,6 +304,34 @@ function facts(state: DemTileWorkerState): DemTileWorkerFacts {
         senderDecodedByteLength: state.lastDecoded?.byteLength ?? 0,
         maxPendingCandidateCount: state.maxPendingCandidateCount,
     })
+}
+
+function validCachedTile(
+    record: Readonly<{
+        metadata: DemRawTileCacheMetadata
+        payload?: ArrayBuffer
+        byteLength: number
+    }>,
+    descriptor: DemTileCandidateDescriptor
+): boolean {
+
+    const metadata = record.metadata
+    return record.payload instanceof ArrayBuffer &&
+        record.byteLength === TILE_SIZE * TILE_SIZE &&
+        metadata.domain === 'geo.virtual-raster' &&
+        metadata.width === TILE_SIZE && metadata.height === TILE_SIZE &&
+        metadata.channels === 1 && metadata.dataType === 'uint8' &&
+        metadata.contentVersion === descriptor.contentVersion &&
+        metadata.payloadRepresentation === 'raw/uint8'
+}
+
+function candidateStateError(candidateId: string, expected: 'cache' | 'network'): Error {
+
+    const error = new Error(
+        `DEM tile candidate ${candidateId} is not a ${expected} candidate`
+    ) as Error & { code: string }
+    error.code = 'DEM_TILE_CANDIDATE_STATE_INVALID'
+    return error
 }
 
 function updatePendingMaximum(state: DemTileWorkerState): void {

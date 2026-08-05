@@ -24,6 +24,7 @@ const vitePort = await findAvailablePort()
 const tilePort = await findAvailablePort()
 const baseUrl = `http://127.0.0.1:${vitePort}`
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
+const cacheNamespace = `geoscratch-dem-proof-${vitePort}-${Date.now()}`
 const defaultCamera = Object.freeze({ center: [ 120.980697, 31.684162 ], zoom: 10 })
 const pageBoundaryCamera = Object.freeze({
     center: [ 120.9375, 31.684162 ],
@@ -134,7 +135,8 @@ async function runProof(activeBrowser) {
     const events = observePage(page)
     try {
         const url = `${baseUrl}/demLayer/index.html?proof=1&atlasPages=2` +
-            `&cache=memory&tileServer=${encodeURIComponent(tileBaseUrl)}`
+            `&cache=persistent&cacheNamespace=${encodeURIComponent(cacheNamespace)}` +
+            `&tileServer=${encodeURIComponent(tileBaseUrl)}`
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
         const initial = await waitForStableFacts(page)
         const initialCapture = await capture(page, 'initial')
@@ -184,11 +186,23 @@ async function runProof(activeBrowser) {
         const resizedCapture = await capture(page, 'resized')
 
         const statsResponse = await fetch(`${tileBaseUrl}/stats`)
-        const tileStats = await statsResponse.json()
+        const tileStatsBeforeReload = await statsResponse.json()
         const drained = await page.evaluate(async() => (
             await window.__DEM_LAYER_PROOF__.pauseAndDrain()
         ))
         const cleanupPair = await page.evaluate(async() => {
+            const first = window.__DEM_LAYER_PROOF__.dispose()
+            const second = window.__DEM_LAYER_PROOF__.dispose()
+            const reports = await Promise.all([ first, second ])
+            return {
+                reports,
+                equivalent: JSON.stringify(reports[0]) === JSON.stringify(reports[1]),
+            }
+        })
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout })
+        const reload = await waitForStableFacts(page)
+        const tileStatsAfterReload = await (await fetch(`${tileBaseUrl}/stats`)).json()
+        const reloadCleanupPair = await page.evaluate(async() => {
             const first = window.__DEM_LAYER_PROOF__.dispose()
             const second = window.__DEM_LAYER_PROOF__.dispose()
             const reports = await Promise.all([ first, second ])
@@ -212,6 +226,7 @@ async function runProof(activeBrowser) {
                 resized,
                 drained,
             },
+            reload,
             captures: {
                 initial: initialCapture,
                 detailed: detailedCapture,
@@ -225,8 +240,10 @@ async function runProof(activeBrowser) {
                 repeated: repeatedCapture,
                 resized: resizedCapture,
             },
-            tileStats,
+            tileStats: tileStatsAfterReload,
+            tileStatsBeforeReload,
             cleanupPair,
+            reloadCleanupPair,
             terminalStatus: await page.locator('#GPUFrame').getAttribute('data-status'),
             events,
         }
@@ -398,7 +415,7 @@ function validateProof(value, processState) {
             virtualRaster?.tileMatrixSetId !== 'WebMercatorQuad' ||
             virtualRaster?.sourceOrientation !== 'north-up-row-major' ||
             virtualRaster?.tileOrientation !== 'north-up-row-major' ||
-            virtualRaster?.cachePolicy !== 'memory' ||
+            virtualRaster?.cachePolicy !== 'persistent' ||
             virtualRaster?.demandStopped !== false || virtualRaster?.stopped !== false ||
             residency?.pinnedCount !== 1 ||
             residency?.residentCount < 1 || residency?.residentCount > 2 ||
@@ -412,8 +429,9 @@ function validateProof(value, processState) {
             scheduler?.activeNetworkCount !== 0 || scheduler?.activeDecodeCount !== 0 ||
             scheduler?.failedRequestCount !== 0 || scheduler?.history?.length > 64 ||
             worker?.pendingCandidateCount !== 0 || worker?.senderDecodedByteLength !== 0 ||
-            worker?.cache?.tier !== 'memory' || worker?.cache?.persistentBytes !== 0 ||
-            worker?.cache?.memoryBytes > 16 * 1024 * 1024 ||
+            worker?.cache?.mode !== 'persistent' ||
+            worker?.cache?.payloadBytes > 128 * 1024 * 1024 ||
+            worker?.cache?.entryCount > 2048 ||
             phaseBudget?.network?.limit !== 2 || phaseBudget?.decode?.limit !== 1 ||
             phaseBudget?.network?.activeCount !== 0 ||
             phaseBudget?.network?.queuedCount !== 0 ||
@@ -483,11 +501,13 @@ function validateProof(value, processState) {
         value.captures.returned.hash !== value.captures.repeated.hash) {
         failures.push('camera roundtrip or repeated static frame changed terrain pixels')
     }
-    if (returnedVirtual?.worker?.cache?.memoryHitCount <=
-            zoomedOutVirtual?.worker?.cache?.memoryHitCount ||
+    if (returnedVirtual?.worker?.cache?.hitCount <=
+            zoomedOutVirtual?.worker?.cache?.hitCount ||
         returnedVirtual?.worker?.networkRequestCount !==
-            zoomedOutVirtual?.worker?.networkRequestCount) {
-        failures.push('camera return did not reuse the accepted memory-cache payload')
+            zoomedOutVirtual?.worker?.networkRequestCount ||
+        returnedVirtual?.worker?.decodedPageCount !==
+            zoomedOutVirtual?.worker?.decodedPageCount) {
+        failures.push('camera return did not reuse accepted persistent raw payloads without decode')
     }
     for (const [ name, captureFacts ] of Object.entries(value.captures)) {
         if (captureFacts.pixels.nonBackground < 5_000 ||
@@ -509,6 +529,16 @@ function validateProof(value, processState) {
         value.tileStats?.tileFailures !== 0 || value.tileStats?.tileNotFound !== 0) {
         failures.push('COG tile service did not provide multiple clean window reads')
     }
+    const reloadVirtual = parseJson(value.reload?.virtualRaster)
+    if (value.reload?.status !== 'ready' || reloadVirtual?.worker?.cache?.mode !== 'persistent' ||
+        reloadVirtual?.worker?.cache?.hitCount < 1 ||
+        reloadVirtual?.worker?.networkRequestCount !== 0 ||
+        reloadVirtual?.worker?.decodedPageCount !== 0 ||
+        reloadVirtual?.worker?.pendingCandidateCount !== 0 ||
+        value.tileStats?.tileRequests !== value.tileStatsBeforeReload?.tileRequests ||
+        value.tileStats?.cogWindowReads !== value.tileStatsBeforeReload?.cogWindowReads) {
+        failures.push('new DEM Worker lifecycle did not restore raw pages without network or image decode')
+    }
     const standardTiles = new Set(value.events.tileRequests.filter(url => (
         /^\/tiles\/WebMercatorQuad\/\d+\/\d+\/\d+\.png$/.test(new URL(url).pathname)
     )))
@@ -527,7 +557,8 @@ function validateProof(value, processState) {
         value.facts.drained.currentEffectfulSubmittedWork !== '0') {
         failures.push('DEM page did not drain all tracked and native work')
     }
-    if (!value.cleanupPair.equivalent || value.terminalStatus !== 'disposed') {
+    if (!value.cleanupPair.equivalent || !value.reloadCleanupPair?.equivalent ||
+        value.terminalStatus !== 'disposed') {
         failures.push('DEM lifecycle disposal was not idempotent and terminal')
     }
     const cleanup = value.cleanupPair.reports?.[0]
@@ -544,17 +575,15 @@ function validateProof(value, processState) {
         terminalVirtual?.worker?.disposed !== true ||
         terminalVirtual?.worker?.pendingCandidateCount !== 0 ||
         terminalVirtual?.worker?.senderDecodedByteLength !== 0 ||
-        terminalVirtual?.worker?.cache?.memoryBytes !== 0 ||
-        terminalVirtual?.worker?.cache?.persistentBytes !== 0 ||
+        terminalVirtual?.worker?.cache?.mode !== 'persistent' ||
         terminalVirtual?.worker?.phaseBudget?.disposed !== true ||
         terminalVirtual?.worker?.phaseBudget?.network?.activeCount !== 0 ||
         terminalVirtual?.worker?.phaseBudget?.network?.queuedCount !== 0 ||
         terminalVirtual?.worker?.phaseBudget?.decode?.activeCount !== 0 ||
         terminalVirtual?.worker?.phaseBudget?.decode?.queuedCount !== 0 ||
         terminalVirtual?.worker?.workers?.some(worker => (
-            worker.cache.disposed !== true || worker.cache.memoryEntryCount !== 0 ||
-            worker.cache.memoryBytes !== 0 || worker.cache.persistentEntryCount !== 0 ||
-            worker.cache.persistentBytes !== 0 || worker.pendingCandidateCount !== 0 ||
+            worker.cache.mode !== 'persistent' || worker.cache.state !== 'disposed' ||
+            worker.cache.activeOperationCount !== 0 || worker.pendingCandidateCount !== 0 ||
             worker.senderDecodedByteLength !== 0
         )) !== false ||
         terminalVirtual?.worker?.system?.disposed !== true ||
@@ -568,6 +597,13 @@ function validateProof(value, processState) {
         terminalVirtual?.worker?.group?.activeTaskCount !== 0 ||
         terminalVirtual?.worker?.group?.contextCount !== 0) {
         failures.push('DEM cleanup retained Worker, request, staging, or residency ownership')
+    }
+    const reloadCleanup = value.reloadCleanupPair?.reports?.[0]
+    if (reloadCleanup?.report?.cleanupInvocationCount !== 1 ||
+        reloadCleanup?.report?.cleanupFailures?.length !== 0 ||
+        reloadCleanup?.lifecycle?.state !== 'disposed' ||
+        reloadCleanup?.virtualRaster?.worker?.disposed !== true) {
+        failures.push('reloaded DEM lifecycle did not dispose cleanly')
     }
     const cleanupActions = cleanup?.report?.cleanupActions ?? []
     const demandStop = cleanupActions.findIndex(action => (
@@ -610,7 +646,8 @@ function summarizeProof(value) {
             stagingBytes: virtualRaster?.residency?.stagingBytes,
             cancellationCount: virtualRaster?.scheduler?.cancellationCount,
             staleResultCount: virtualRaster?.scheduler?.staleResultCount,
-            memoryHitCount: virtualRaster?.worker?.cache?.memoryHitCount,
+            cacheHitCount: virtualRaster?.worker?.cache?.hitCount,
+            decodedPageCount: virtualRaster?.worker?.decodedPageCount,
             networkRequestCount: virtualRaster?.worker?.networkRequestCount,
             pendingCandidateCount: virtualRaster?.worker?.pendingCandidateCount,
             senderDecodedByteLength: virtualRaster?.worker?.senderDecodedByteLength,
@@ -629,7 +666,10 @@ function summarizeProof(value) {
         ])),
         captures: value.captures,
         tileStats: value.tileStats,
+        tileStatsBeforeReload: value.tileStatsBeforeReload,
+        reload: summarizeFacts(value.reload),
         cleanupEquivalent: value.cleanupPair.equivalent,
+        reloadCleanupEquivalent: value.reloadCleanupPair.equivalent,
         cleanupTerminalVirtualRaster: terminal === undefined ? undefined : {
             demandStopped: terminal.demandStopped,
             stopped: terminal.stopped,
@@ -648,11 +688,10 @@ function summarizeProof(value) {
                 disposed: terminal.worker.disposed,
                 pendingCandidateCount: terminal.worker.pendingCandidateCount,
                 senderDecodedByteLength: terminal.worker.senderDecodedByteLength,
-                cacheBytes: terminal.worker.cache.memoryBytes +
-                    terminal.worker.cache.persistentBytes,
+                cacheBytes: terminal.worker.cache.payloadBytes,
                 phaseBudget: terminal.worker.phaseBudget,
                 disposedCacheCount: terminal.worker.workers.filter(worker => (
-                    worker.cache.disposed
+                    worker.cache.state === 'disposed'
                 )).length,
                 system: {
                     disposed: terminal.worker.system.disposed,
@@ -794,13 +833,21 @@ async function waitForExit(child, milliseconds) {
     await new Promise((resolvePromise, rejectPromise) => {
         const timer = setTimeout(() => {
             child.off('exit', onExit)
+            child.off('error', onError)
             rejectPromise(new Error(`Process ${child.pid} did not exit within ${milliseconds} ms`))
         }, milliseconds)
         const onExit = () => {
             clearTimeout(timer)
+            child.off('error', onError)
+            resolvePromise()
+        }
+        const onError = () => {
+            clearTimeout(timer)
+            child.off('exit', onExit)
             resolvePromise()
         }
         child.once('exit', onExit)
+        child.once('error', onError)
     })
 }
 

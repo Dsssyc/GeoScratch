@@ -1,9 +1,7 @@
 import {
-    virtualRasterCacheKey,
+    virtualRasterCacheAddress,
 } from 'geoscratch/geo'
 import type {
-    VirtualRasterCacheFacts,
-    VirtualRasterCachePolicy,
     VirtualRasterPageDemand,
     VirtualRasterPageTransfer,
     VirtualRasterRequestExecution,
@@ -23,11 +21,13 @@ import type {
 } from 'geoscratch/scratch'
 import type {
     DemTileCandidateDescriptor,
+    DemCachePolicy,
     DemTileDecodeResult,
     DemTileFetchResult,
     DemTileLookupResult,
     DemTileWorkerFacts,
     DemTileWorkerInit,
+    DemTileCacheFacts,
 } from './dem-tile-protocol.ts'
 import {
     DemPhaseBudget,
@@ -50,7 +50,7 @@ export type DemWorkerTileSourceDescriptor = Readonly<{
     decoderVersion: string
     sampleType: 'uint8'
     cacheSchemaVersion: number
-    cachePolicy: VirtualRasterCachePolicy
+    cachePolicy: DemCachePolicy
     requestPersistence?: boolean
     workerCount?: number
     maxNetworkRequests?: number
@@ -65,12 +65,10 @@ export type DemWorkerRequestExecutorFacts = Readonly<{
     group: WorkerGroupFacts
     workers: readonly DemTileWorkerFacts[]
     cache: Readonly<{
-        tier: VirtualRasterCachePolicy['tier']
-        memoryBytes: number
-        persistentBytes: number
+        mode: DemCachePolicy['mode']
+        entryCount: number
+        payloadBytes: number
         hitCount: number
-        memoryHitCount: number
-        persistentHitCount: number
         missCount: number
         putCount: number
         evictionCount: number
@@ -96,7 +94,7 @@ export type DemWorkerRequestExecutor = VirtualRasterRequestExecutor & Readonly<{
 type DemContext = WorkerContextHandle<DemTileWorkerFacts>
 
 const MODULE_ID = 'geoscratch-dem-tile'
-const MODULE_VERSION = '1'
+const MODULE_VERSION = '2'
 let executorSequence = 0
 
 export async function createDemWorkerRequestExecutor(
@@ -149,8 +147,12 @@ export async function createDemWorkerRequestExecutor(
                 module: MODULE_ID,
                 key: `dem-cache-shard-${index}`,
                 init: {
-                    cachePolicy: shardCachePolicy(descriptor.cachePolicy, index, workerCount),
-                    requestPersistence: descriptor.requestPersistence ?? false,
+                    cache: shardCacheConfiguration(
+                        descriptor.cachePolicy,
+                        index,
+                        workerCount,
+                        descriptor.requestPersistence ?? false
+                    ),
                 },
             }))
         }
@@ -162,7 +164,7 @@ export async function createDemWorkerRequestExecutor(
     let requestSequence = 0
     let disposed = false
     let disposePromise: Promise<void> | undefined
-    let workerFacts = contexts.map(() => emptyWorkerFacts(descriptor.cachePolicy.tier))
+    let workerFacts = contexts.map(() => emptyWorkerFacts(descriptor.cachePolicy.mode))
 
     const source: DemWorkerRequestExecutor = Object.freeze({
         request(demand) {
@@ -177,7 +179,7 @@ export async function createDemWorkerRequestExecutor(
             const candidate: DemTileCandidateDescriptor = Object.freeze({
                 candidateId: `${id}:${++requestSequence}:${demand.generation}:${demand.page.key}`,
                 page: demand.page,
-                cacheKey: virtualRasterCacheKey({
+                cacheAddress: virtualRasterCacheAddress({
                     sourceId: descriptor.sourceId,
                     tileMatrixSetId: descriptor.tileMatrixSetId,
                     tileMatrixSetUri: descriptor.tileMatrixSetUri,
@@ -189,7 +191,8 @@ export async function createDemWorkerRequestExecutor(
                         mode: 'immutable',
                         contentVersion: descriptor.contentVersion,
                     },
-                    encodedRepresentation: descriptor.encodedRepresentation,
+                    sourceRepresentation: descriptor.encodedRepresentation,
+                    payloadRepresentation: 'raw/uint8',
                     decoderVersion: descriptor.decoderVersion,
                     sampleType: descriptor.sampleType,
                     schemaVersion: descriptor.cacheSchemaVersion,
@@ -241,7 +244,7 @@ export async function createDemWorkerRequestExecutor(
             system.inspect(),
             group.inspect(),
             workerFacts,
-            descriptor.cachePolicy.tier,
+            descriptor.cachePolicy.mode,
             phaseBudget.inspect()
         )
     }
@@ -305,7 +308,7 @@ function createExecution(
             priority,
             cancellation: 'cooperative',
             generation: demand.generation,
-            staleKey: `${candidate.cacheKey.sourceId}:${candidate.page.key}`,
+            staleKey: `${candidate.cacheAddress.metadata.sourceId}:${candidate.page.key}`,
             ...(demand.deadlineMs === undefined ? {} : { deadlineMs: demand.deadlineMs }),
         })
         currentTask = task as WorkerTaskHandle<unknown>
@@ -351,10 +354,19 @@ function createExecution(
                     'fetch',
                     candidate
                 )
+                const transfer = await runPhase<
+                    Readonly<{ candidateId: string }>,
+                    DemTileDecodeResult
+                >(
+                    'decode',
+                    'decode',
+                    { candidateId: candidate.candidateId }
+                )
+                terminalState = 'succeeded'
+                return transfer
             }
-            const transfer = await runPhase<Readonly<{ candidateId: string }>, DemTileDecodeResult>(
-                'decode',
-                'decode',
+            const transfer = await run<Readonly<{ candidateId: string }>, DemTileDecodeResult>(
+                'transfer',
                 { candidateId: candidate.candidateId }
             )
             terminalState = 'succeeded'
@@ -430,11 +442,11 @@ function aggregateFacts(
     system: WorkerSystemFacts,
     group: WorkerGroupFacts,
     workers: readonly DemTileWorkerFacts[],
-    tier: VirtualRasterCachePolicy['tier'],
+    mode: DemCachePolicy['mode'],
     phaseBudget: DemPhaseBudgetFacts
 ): DemWorkerRequestExecutorFacts {
 
-    const sumCache = (read: (facts: VirtualRasterCacheFacts) => number) =>
+    const sumCache = (read: (facts: DemTileCacheFacts) => number) =>
         workers.reduce((sum, worker) => sum + read(worker.cache), 0)
     const sum = (read: (facts: DemTileWorkerFacts) => number) =>
         workers.reduce((total, worker) => total + read(worker), 0)
@@ -444,12 +456,10 @@ function aggregateFacts(
         group,
         workers: Object.freeze([ ...workers ]),
         cache: Object.freeze({
-            tier,
-            memoryBytes: sumCache(facts => facts.memoryBytes),
-            persistentBytes: sumCache(facts => facts.persistentBytes),
+            mode,
+            entryCount: sumCache(facts => facts.entryCount),
+            payloadBytes: sumCache(facts => facts.payloadBytes),
             hitCount: sumCache(facts => facts.hitCount),
-            memoryHitCount: sumCache(facts => facts.memoryHitCount),
-            persistentHitCount: sumCache(facts => facts.persistentHitCount),
             missCount: sumCache(facts => facts.missCount),
             putCount: sumCache(facts => facts.putCount),
             evictionCount: sumCache(facts => facts.evictionCount),
@@ -466,25 +476,23 @@ function aggregateFacts(
     })
 }
 
-function shardCachePolicy(
-    policy: VirtualRasterCachePolicy,
+function shardCacheConfiguration(
+    policy: DemCachePolicy,
     shard: number,
-    count: number
-): VirtualRasterCachePolicy {
+    count: number,
+    requestPersistence: boolean
+): DemTileWorkerInit['cache'] {
 
-    if (policy.tier === 'none') return policy
-    if (policy.tier === 'memory') {
-        return Object.freeze({
-            tier: 'memory',
-            maxBytes: dividedBudget(policy.maxBytes, count),
-        })
-    }
+    if (policy.mode === 'none') return Object.freeze({ mode: 'none' })
     return Object.freeze({
-        tier: 'persistent',
-        memoryMaxBytes: dividedBudget(policy.memoryMaxBytes, count),
-        persistentMaxBytes: dividedBudget(policy.persistentMaxBytes, count),
-        backend: 'indexeddb',
-        namespace: `${policy.namespace}.shard-${shard}`,
+        mode: 'persistent',
+        descriptor: Object.freeze({
+            namespace: `${policy.namespace}.shard-${shard}`,
+            maxPayloadBytes: dividedBudget(policy.maxPayloadBytes, count),
+            maxEntries: dividedBudget(policy.maxEntries, count),
+            maxHistory: 64,
+            requestPersistence: requestPersistence && shard === 0,
+        }),
     })
 }
 
@@ -509,26 +517,12 @@ function defaultWorkerCount(): number {
     return Math.max(1, Math.min(4, hardware - 1))
 }
 
-function emptyWorkerFacts(tier: VirtualRasterCachePolicy['tier']): DemTileWorkerFacts {
+function emptyWorkerFacts(mode: DemCachePolicy['mode']): DemTileWorkerFacts {
 
     return Object.freeze({
-        cache: Object.freeze({
-            tier,
-            disposed: false,
-            memoryEntryCount: 0,
-            memoryBytes: 0,
-            persistentEntryCount: 0,
-            persistentBytes: 0,
-            hitCount: 0,
-            memoryHitCount: 0,
-            persistentHitCount: 0,
-            missCount: 0,
-            putCount: 0,
-            evictionCount: 0,
-            invalidationCount: 0,
-            quotaFailureCount: 0,
-            persistenceRequested: false,
-        }),
+        cache: mode === 'none'
+            ? emptyDisabledCacheFacts()
+            : emptyPersistentCacheFacts(),
         pendingCandidateCount: 0,
         networkRequestCount: 0,
         decodedPageCount: 0,
@@ -543,16 +537,54 @@ function disposedWorkerFacts(facts: DemTileWorkerFacts): DemTileWorkerFacts {
 
     return Object.freeze({
         ...facts,
-        cache: Object.freeze({
-            ...facts.cache,
-            disposed: true,
-            memoryEntryCount: 0,
-            memoryBytes: 0,
-            persistentEntryCount: 0,
-            persistentBytes: 0,
-        }),
+        cache: facts.cache.mode === 'none'
+            ? facts.cache
+            : Object.freeze({ ...facts.cache, state: 'disposed', activeOperationCount: 0 }),
         pendingCandidateCount: 0,
         senderDecodedByteLength: 0,
+    })
+}
+
+function emptyDisabledCacheFacts(): Extract<DemTileCacheFacts, { mode: 'none' }> {
+
+    return Object.freeze({
+        mode: 'none',
+        state: 'disabled',
+        entryCount: 0,
+        payloadBytes: 0,
+        hitCount: 0,
+        missCount: 0,
+        putCount: 0,
+        evictionCount: 0,
+        quotaFailureCount: 0,
+    })
+}
+
+function emptyPersistentCacheFacts(): Extract<DemTileCacheFacts, { mode: 'persistent' }> {
+
+    return Object.freeze({
+        mode: 'persistent',
+        namespace: 'pending',
+        state: 'active',
+        maxPayloadBytes: 0,
+        maxEntries: 0,
+        maxHistory: 0,
+        activeOperationCount: 0,
+        entryCount: 0,
+        metadataOnlyEntryCount: 0,
+        payloadBytes: 0,
+        hitCount: 0,
+        missCount: 0,
+        recoveredMissCount: 0,
+        putCount: 0,
+        alreadyPresentCount: 0,
+        evictionCount: 0,
+        deletionCount: 0,
+        garbageCollectionCount: 0,
+        cleanupFailureCount: 0,
+        quotaFailureCount: 0,
+        persistenceRequested: false,
+        history: Object.freeze([]),
     })
 }
 
