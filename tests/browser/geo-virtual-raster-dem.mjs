@@ -262,7 +262,6 @@ async function waitForStableFacts(page, additional = () => true) {
         if (facts.status === 'error') throw new Error(facts.error ?? 'DEM page failed')
         const virtualRaster = parseJson(facts.virtualRaster)
         if (facts.status === 'ready' && Number(facts.frames) === Number(facts.observedFrames) &&
-            virtualRaster?.residency?.pendingCount === 0 &&
             virtualRaster?.residency?.stagedCount === 0 &&
             virtualRaster?.residency?.stagingBytes === 0 &&
             virtualRaster?.scheduler?.activeRequestCount === 0 &&

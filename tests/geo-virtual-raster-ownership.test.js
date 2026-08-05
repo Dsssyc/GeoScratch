@@ -79,13 +79,19 @@ describe('virtual raster payload ownership contract', () => {
             stagingBytes: 4,
             uploadPageCount: 1,
         })
-        expect(residency.inspect()).to.deep.include({
-            pendingBytes: 0,
-            decodeBytes: 0,
-            stagingBytes: 4,
-            memoryCacheBytes: 0,
-            persistentMetadataBytes: 0,
-        })
+        const residencyFacts = residency.inspect()
+        expect(residencyFacts).to.deep.include({ stagingBytes: 4 })
+        for (const foreignFact of [
+            'pendingCount',
+            'pendingBytes',
+            'activeNetworkCount',
+            'activeDecodeCount',
+            'decodeBytes',
+            'memoryCacheBytes',
+            'persistentMetadataBytes',
+        ]) {
+            expect(residencyFacts).not.to.have.property(foreignFact)
+        }
 
         await publication.acknowledge()
 

@@ -55,18 +55,11 @@ export type VirtualRasterResidencyFacts = Readonly<{
     disposed: boolean
     demandGeneration: number
     snapshotEpoch: number
-    pendingCount: number
-    pendingBytes: number
-    activeNetworkCount: number
-    activeDecodeCount: number
-    decodeBytes: number
     stagedCount: number
     stagingBytes: number
     residentCount: number
     residentGpuBytes: number
     pinnedCount: number
-    memoryCacheBytes: number
-    persistentMetadataBytes: number
     maxStagingBytes: number
     maxPhysicalPages: number
     fallbackCount: number
@@ -474,18 +467,11 @@ export class VirtualRasterResidency {
             disposed: this.#disposed,
             demandGeneration: this.#demandGeneration,
             snapshotEpoch: this.#snapshotEpoch,
-            pendingCount: 0,
-            pendingBytes: 0,
-            activeNetworkCount: 0,
-            activeDecodeCount: 0,
-            decodeBytes: 0,
             stagedCount: this.#staged.size,
             stagingBytes: this.#stagingBytes(),
             residentCount: this.#resident.size,
             residentGpuBytes: this.#residentGpuBytes(),
             pinnedCount: this.#pinned.size,
-            memoryCacheBytes: 0,
-            persistentMetadataBytes: 0,
             maxStagingBytes: this.maxStagingBytes,
             maxPhysicalPages: this.maxPhysicalPages,
             fallbackCount: this.#fallbackCount,
