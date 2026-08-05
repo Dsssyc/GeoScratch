@@ -229,7 +229,6 @@ describe('Geo virtual raster', () => {
 
         expect(outcome).to.deep.include({ status: 'stale', page })
         expect(residency.inspect()).to.deep.include({
-            pendingCount: 0,
             stagedCount: 0,
             staleResponseCount: 1,
         })
@@ -382,7 +381,6 @@ describe('Geo virtual raster', () => {
         expect(stagedPayload.data.byteLength).to.equal(0)
         expect(residency.inspect()).to.deep.include({
             disposed: true,
-            pendingCount: 0,
             stagedCount: 0,
             residentCount: 0,
             stagingBytes: 0,

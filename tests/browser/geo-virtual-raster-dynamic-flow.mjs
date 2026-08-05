@@ -147,7 +147,7 @@ function validate(value) {
     }
     if (proof.pageRequestCount !== 3 || proof.fallbackCount <= 0 ||
         proof.residency?.residentCount !== 3 || proof.residency?.pinnedCount !== 1 ||
-        proof.residency?.pendingCount !== 0 || proof.residency?.stagedCount !== 0 ||
+        proof.residency?.stagedCount !== 0 ||
         proof.residency?.history?.length > 48 || proof.residency?.failedCount !== 0 ||
         proof.residency?.staleResponseCount !== 0 ||
         proof.residency?.stagingBytes !== 0 ||

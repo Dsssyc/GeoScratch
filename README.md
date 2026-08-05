@@ -37,6 +37,7 @@ Open the Vite URL to browse examples. A WebGPU-capable browser is required for r
 | `packages/geoscratch/src/index.ts` | TypeScript source for the main public package entrypoint. |
 | `packages/geoscratch/src/scratch.ts` | TypeScript source for the `geoscratch/scratch` compatibility entrypoint. |
 | `packages/geoscratch/src/scratch/` | TypeScript source-first Scratch API core. |
+| `packages/geoscratch/src/worker/` | Generic TypeScript WorkerSystem, module, task, context, transfer, and diagnostic contracts. |
 | `packages/geoscratch/dist/` | Generated package JavaScript and declaration output. |
 | `packages/geoscratch/src/core/` | Shared data references, math, object, and bounding box primitives. |
 | `packages/geoscratch/src/geo/` | TypeScript source-first geospatial helpers and geographic tiling structures. |
@@ -62,12 +63,32 @@ The package also keeps a compatibility entrypoint:
 import * as scr from 'geoscratch/scratch'
 ```
 
-Focused subpaths are available for geospatial and geometry helpers:
+Focused subpaths are available for geospatial, worker, and geometry helpers:
 
 ```js
 import { MercatorCoordinate } from 'geoscratch/geo'
+import { WorkerSystem } from 'geoscratch/worker'
 import { sphere } from 'geoscratch/geometry'
 ```
+
+## Geo Streaming And Workers
+
+`geoscratch/geo` exposes OGC `WebMercatorQuad`, finite `TileMatrixLimits`,
+high-precision canonical coordinates, virtual-raster demand and residency, explicit
+`none`/memory/IndexedDB cache policies, owned page transfer, and Scratch GPU
+publication. Global tile identity is mapped through compact source coverage rather
+than a dense world page table.
+
+`geoscratch/worker` is an independent, explicitly constructed thread abstraction.
+It accepts URL-loaded custom modules, bounded priority groups, cooperative and hard
+cancellation, stale-result rejection, stateful contexts, Transferable ownership, and
+structured remote diagnostics. It has no Geo, tile, DEM, Scratch, or GPU dependency.
+
+The DEM Layer is the executable reference path: terrain demand resolves standard
+WebMercatorQuad tiles in Workers, transfers decoded pages into a finite atlas, and
+samples them logically in the vertex shader with cross-page filtering and parent
+fallback. The source PNG is only an offline COG build input; the browser has no
+full-image or legacy-tile fallback.
 
 ## Scratch Async Resource Allocation
 

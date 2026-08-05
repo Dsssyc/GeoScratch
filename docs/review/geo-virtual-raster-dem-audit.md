@@ -2,66 +2,84 @@
 
 ## Audit Status
 
-The DEM example is the first complete consumer of the high-precision coordinate and
-Geo-owned virtual-raster contracts accepted by ADR-055. Its normal browser path uses
-COG-backed HTTP pages, a finite physical atlas, an immutable page-table snapshot, and
-logical cross-page sampling. It no longer downloads or uploads the complete source
-PNG. The source PNG remains only as deterministic backend input.
+The DEM example is the first visible consumer of the high-precision coordinate,
+standard TileMatrixSet, generic Worker, explicit cache, owned-transfer, finite
+residency, and Scratch publication contracts accepted by ADR-055 and ADR-056. Its
+single normal path uses OGC `WebMercatorQuad`; the earlier local raster pyramid is
+not retained as a fallback or feature flag.
 
-This audit compares the behavior present at goal start with the implementation on
-`socu/geo-typescript-clean-cut`. It does not treat the old complete-texture path as a
-supported fallback.
+The broader Worker/cache/deletion audit is recorded in
+`geo-virtual-raster-worker-cache-dem-audit.md`. This document keeps the DEM rendering
+and source-parity facts explicit.
 
 ## Source And Data Facts
 
-- Source: `examples/demLayer/assets/dem.png`, 1024 by 558, 8-bit grayscale.
+- Offline source: `examples/demLayer/assets/dem.png`, 1024 by 558, uint8 grayscale.
 - Source SHA-256: `aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1`.
-- Bounds: `[120.04373606134682, 31.173901952209487, 121.96623240116922, 32.08401085804678]`.
-- Elevation mapping: `[-80.06899999999999, 4.3745]`; no precision beyond the 8-bit source is claimed.
-- The source rows and COG are standard north-up `EPSG:4326`. The HTTP adapter flips
-  each selected geospatial window once into the southwest-origin logical raster
-  convention, preserving the old full-image upload's `flipY: true` behavior.
-- The generated COG uses 256 by 256 internal blocks, DEFLATE compression, nearest
-  overviews at factors 2, 4, and 8, and no NoData sentinel because every uint8 value,
-  including 255, is valid source data.
-- `/health`, `/manifest.json`, `/tiles/{z}/{x}/{y}.png`, and `/stats` are the complete
-  temporary example-owned HTTP surface. Tile reads use rio-tiler/Rasterio COG windows
-  and overviews; `/stats` retains aggregate counters only.
+- Geographic bounds: `[120.04373606134682, 31.173901952209487,
+  121.96623240116922, 32.08401085804678]` in EPSG:4326.
+- Elevation mapping: `[-80.06899999999999, 4.3745]`; no precision beyond the
+  8-bit source is claimed and 255 remains valid data rather than NoData.
+- Source, COG, HTTP tile, and shader addressing are all north-up row-major.
+  WebMercatorQuad rows grow from north to south; no client-side second flip exists.
+- The generated COG uses 256 by 256 blocks, DEFLATE compression, deterministic
+  overviews, and no NoData sentinel. It and the local Python environment remain
+  ignored build artifacts.
+- Browser-visible HTTP is `/manifest.json` plus
+  `/tiles/WebMercatorQuad/{tileMatrix}/{tileRow}/{tileCol}.png`; `/health` and
+  bounded aggregate `/stats` support the managed proof. There is no complete-image
+  response and no old route alias.
 
 ## One-To-One Fact Matrix
 
-| Current behavior | New owner | Implementation evidence | Unit test | Browser evidence | Status | Remaining limitation |
-| --- | --- | --- | --- | --- | --- | --- |
-| CPU terrain selection starts from two level-zero roots, subdivides by camera distance, stops at zoom/max level, keeps the five-level visible window, and caps output at 5,000 nodes. | DEM example | `terrain-selection.ts` retains `TERRAIN_BOUNDARY`, two roots, `maxLevel = 14`, five-level filtering, and `MAX_TERRAIN_NODES = 5000`. | `scratch-dem-layer-clean-cut.test.js` verifies selection counts, filtering, detached facts, and cap behavior. | Both DEM browser gates publish camera and selection facts across pan and zoom. | Preserved | Selection remains synchronous and fixed-capacity by example policy. |
-| Every terrain patch uses a 64-sector indexed plane mesh. | Geometry helper plus DEM example | `dem-layer.ts` calls `plane(log2(64))`, converts the generated grid to integer sector coordinates, and keeps one persistent vertex/index resource pair. | The DEM clean-cut graph test verifies generated data, persistent identities, and indirect draw use. | Headed captures are nonblank and change across geometry LoD transitions. | Preserved | The mesh topology remains DEM-example policy, not public Geo API. |
-| Neighboring geometry LoDs stitch shared edges. | DEM example topology | `resolveDemStitchedGrid()` and `terrain-mesh.wgsl` use integer grid edge identity and neighbor levels before constructing the final canonical coordinate; no float `coord == nodeBox` test remains. | `geo-virtual-raster-dem.test.js` proves shared coordinates and coarser compatible height intent. | Page-boundary, return-camera, and repeated-static captures have stable hashes and no transparent/invalid pixels. | Corrected | Normals are not generated by this example, so no normal-neighborhood contract is exercised. |
-| Grayscale values decode into the accepted elevation range and use 50x terrain exaggeration. | Backend manifest plus DEM shader | The manifest publishes uint8 scale/offset; `DemHeight_sample_vertex` returns the logical sample and `terrain-mesh.wgsl` applies the accepted elevation and exaggeration constants. | Manifest, sampling, NoData/fallback, and shader contract tests verify the decode path. | Both normal and two-page-atlas browser gates render the streamed elevation field. | Preserved | The source itself contains only 256 distinct values. |
-| Projection uses MapLibre camera facts and split high/low center values. | DEM map host plus Geo coordinate codec | `dem-map.ts` publishes camera high/low facts; canonical node positions use `cell-local-f32`; shader camera-relative subtraction occurs before local f32 projection. | Coordinate parity tests cover cross-cell difference and 2D/3D codecs; DEM tests cover packed canonical nodes. | Pan, zoom, camera return, and static repeat prove camera changes do not rewrite canonical terrain selection. | Strengthened | MapLibre still supplies camera/projection policy; GeoScratch does not claim a CRS engine here. |
-| LoD-map rendering precedes terrain rendering. | DEM Scratch graph | `DEM_STAGE_ORDER` is `lod-map, terrain`; one submission declares exact current-at-step producer/consumer reads. | Persistent graph tests verify stage order and provenance epochs. | Normal regression publishes matching LoD-map-to-terrain provenance. | Preserved | No implicit scheduler was added. |
-| Draw counts are uploaded and consumed indirectly for LoD map and terrain passes. | DEM example lowered through Scratch | `lodArguments` and `terrainArguments` are stable buffers; both draw commands use their regions as indirect counts. | DEM graph tests verify `uploaded-indirect-arguments`, exact counts, and stable identities. | Browser graph facts expose the same persistent count path during camera changes. | Preserved | The 5,000-node capacity remains fixed. |
-| Resize replaces only size-dependent physical allocations and keeps logical graph identities stable. | Surface, DEM depth texture, and BindSet lifecycle | `dem-layer.ts` resizes Surface/depth, prepares only stale BindSets, and checks the persistent identity snapshot. | DEM graph tests verify one resize generation, zero stale sets, and no identity/count growth. | Both DEM browser gates exercise resize and verify a nonblank resized capture. | Strengthened | Native VRAM reclamation timing remains implementation-defined. |
-| Page ownership stops scheduling, drains issued work, then releases MapLibre and Scratch exactly once. | DEM lifecycle authority | `dem-lifecycle.ts` and `main.ts` own stop, settle, release, late-runtime handling, and primary/secondary failure ordering. | Lifecycle tests cover concurrent disposal, late acquisition, tracked work, and cleanup failure preservation. | Browser gates call pause-and-drain and dispose twice, then prove zero pending observations and closed browser, Vite, tile server, and ports. | Strengthened | Device-loss recovery is not claimed; loss is diagnosed and teardown converges. |
-| Runtime failures are finite, structured, and attributable. | Scratch diagnostics plus DEM failure controller | The runtime uses bounded operation/incident/evidence capacities; initialization fault injection preserves Scratch diagnostics without source retention. Geo residency exposes bounded history and failed/stale counters. | Clean-cut and virtual-raster tests cover failure provenance, stale responses, bounded history, and disposal. | Existing DEM regression exercises initialization failures; normal proofs require zero incidents, uncaptured errors, device losses, warnings, and failed requests. | Strengthened | Physical OOM causality cannot be made synchronously exact by WebGPU. |
-| The terrain remains restricted to the accepted Yangtze DEM bounds and normal default camera. | DEM example | `TERRAIN_BOUNDARY`, manifest bounds, and `DEM_MAP_DEFAULTS` remain unchanged; page planning intersects selection with the same bounds. | Selection and manifest tests freeze the exact bounds/default facts. | Initial, pan, zoom, and page-boundary captures remain inside the accepted data extent. | Preserved | Very deep underwater geometry can still be clipped at close zoom because the inherited far-plane floor models 30x minimum elevation while rendering uses 50x exaggeration. This is not a missing virtual page or seam. |
-| The old browser path uploads one complete DEM texture. | Replaced by Geo virtual raster plus example COG source | `createDemVirtualRasterRuntime()` maps camera-selected pages into `VirtualRasterResidency`; `VirtualRasterGpuState` publishes a finite atlas/page table only at submission boundaries. `main.ts` has no PNG import and the terrain shader has no `demTexture`. | Asset and clean-cut tests forbid the old import/upload/helper; virtual-raster tests cover finite LRU, pinned parent, stale rejection, immutable snapshots, and upload disposal. | Network observation requires multiple `/tiles/` responses and zero `/assets/dem.png` requests. | Replaced | The local Python adapter must be running for the example; it is deliberately not a package dependency. |
-| Texture filtering could clamp at one physical image edge. | Geo virtual-raster accessor | Logical nearest/manual bilinear resolve each footprint texel through the page table, then apply parent fallback, boundary policy, NoData, and scale/offset. The same generated accessor is valid in vertex, fragment, and compute stages. | Virtual-raster tests cross a physical page boundary and verify fallback without NaN propagation. | A two-page atlas forces fallback and eviction while page-boundary captures remain nonblank and repeatable. | Replaced | Manual cross-page bilinear performs multiple page-table and atlas loads by design. |
-| COG orientation and source equivalence were previously implicit because the browser read the PNG directly. | Temporary DEM tile backend | `build.py` records source hash/orientation and writes a north-up COG; `service.py` serves southwest-origin logical pages from COG windows. | Python tests compare southwest, northwest, southeast, northeast, center, and seeded random samples across PNG, COG, and HTTP output and test deterministic rebuilds/errors. | The managed DEM proof observes successful COG window reads and no full-image request. | Verified | Generated COG/cache/venv remain ignored local artifacts and are not distributable library assets. |
+| Required behavior | Current owner and implementation | Automated evidence | Status | Remaining limitation |
+| --- | --- | --- | --- | --- |
+| Terrain selection starts from two roots, subdivides by camera distance, retains the five-level window, and caps output at 5,000 nodes. | DEM `terrain-selection.ts`; planning then intersects final node boxes with source coverage. | Selection unit tests and headed pan/zoom facts. | Preserved | Selection remains synchronous example policy. |
+| Each patch uses the accepted 64-sector indexed plane and indirect draw counts. | Persistent DEM geometry, node, and indirect Scratch resources in `dem-layer.ts`. | Graph tests and stable browser identity facts. | Preserved | The 5,000-node capacity is fixed. |
+| Neighboring geometry LoDs stitch shared edges before height lookup. | Integer edge resolution produces one final wide-fixed canonical coordinate; `terrain-mesh.wgsl` samples only that result. | `geo-virtual-raster-dem.test.js` proves shared edge quanta and mixed-LoD intent. | Strengthened | Normals are not generated by this example. |
+| Canonical position remains stable under camera, tile, cache, residency, and atlas changes. | A 40-bit WebMercator wide-fixed codec stores two canonical endpoints per node; tile/texel/sub-texel addresses are transient WGSL values. | Coordinate quantum is below 1 mm; camera return, eviction, and repeated-frame identities remain stable. | Strengthened | MapLibre still supplies camera/projection policy. |
+| Projection remains camera-relative and high precision. | Camera and canonical endpoints are wide-fixed; signed fixed differences are converted to f32 only after cancellation near the camera. | CPU/WGSL boundary tests and nonblank east/west/north/south captures. | Strengthened | This is not a general CRS engine. |
+| LoD-map pass precedes terrain pass and both use explicit Scratch dependencies. | Two persistent PassSpecs and commands are submitted in `lod-map, terrain` order. | Unit provenance checks and browser frame facts. | Preserved | No scene scheduler is introduced. |
+| Resizing changes only size-dependent allocations. | Surface/depth replacement and stale BindSet preparation retain graph identities. | Resize tests and a nonblank 800 by 600 capture. | Preserved | Native VRAM reclamation timing remains implementation-defined. |
+| The accepted Yangtze source bounds and default camera remain unchanged. | Source bounds stay in manifest and DEM policy; global tile identity is clipped by compact limits. | Manifest/selection tests and all directional captures. | Preserved | The inherited far-plane floor can still clip very deep exaggerated terrain at close zoom. |
+| The browser does not upload the complete PNG. | Terrain demand enters a Worker-backed standard tile executor and finite atlas/page table. | Network proof observes multiple standard tiles and zero `/assets/dem.png` requests. | Replaced | The example-owned Python server must be running. |
+| Tile fetch and image decode do not block the main thread. | `dem-tile-worker.ts` performs cache lookup, fetch, `createImageBitmap`, OffscreenCanvas extraction, and candidate acceptance/discard; `dem-phase-budget.ts` gives network and decode independent limits. | Source scan finds the only decode site in the Worker; unit proof reaches network/decode limits 2/1 and real Worker/browser facts remain within them. | Replaced | A synchronous extraction loop can observe cancellation only after it yields. |
+| Decoded payload is not cloned into residency. | One ArrayBuffer is transferred, adopted once, moved into publication staging, and released after acknowledgement. | Detachment, second-owner rejection, no-clone source scan, and zero terminal staging bytes. | Replaced | WebGPU upload still performs the required host-to-device transfer. |
+| Bilinear samples cross logical page boundaries and resolve parents. | Generated accessor resolves each footprint texel through compact coverage and immutable page-table entries. Mixed parent fallback recomputes weights at the resolved level; a residency-aware guard band smooths LoD transitions. | Cross-page/fallback unit tests and page-boundary pixel contrast limits. | Strengthened | Manual logical bilinear requires multiple table/atlas loads. |
+| COG output is source-equivalent and correctly oriented. | `build.py` records source facts and standard matrix limits; `service.py` uses morecantile/rio-tiler semantics and top-left rows. | 11 Python tests cover corners, center, random samples, edge/error routes, validators, and orientation; rio-cogeo validates the result. | Verified | Backend is an example adapter, not full OGC API Tiles. |
+| Camera churn cannot publish obsolete pages. | Generation reconciliation aborts obsolete requests and rejects late results before cache commit or residency stage. | Constrained browser proof observes four cancellations and four stale results while final camera facts match the newest demand. | Strengthened | Synchronous Worker code is only rejectable after it yields. |
+| Cache behavior is explicit and bounded. | DEM selects `none`, byte-bounded `memory`, or IndexedDB `persistent`; encoded bytes are cache records while decoded bytes remain staging. | DEM memory return increases hits without a new network request; the dedicated cache proof covers all tiers, reload, revision, quota, clear, and persistence facts. | Partial (F-1) | Memory hits still repeat image decode; an ownership-moving decoded L1 is not implemented. OPFS remains a non-goal. |
+| Lifecycle teardown is singular and ordered. | DEM lifecycle stops demand, settles/cancels requests, releases Worker contexts/system/cache/residency/GPU state, then releases Scratch and MapLibre. | Pause-and-drain, double-dispose equivalence, zero terminal tasks/contexts/cache/staging/native observations, and closed owned processes/ports. | Strengthened | Device-loss recovery is not claimed. |
 
-## Virtual Residency Evidence
+## Constrained Browser Evidence
 
-The constrained headed proof runs with `maxPhysicalPages = 2`. The latest successful
-run observed five page requests, three deterministic evictions, 81 fallback
-resolutions, two resident pages, one pinned parent, four clean COG window reads, no
-failed tile request, and no full-image request. Camera return and a repeated static
-frame produced the same PNG hash. Every published frame used one immutable residency
-snapshot, and staged atlas upload commands were disposed after acknowledgement while
-the stable page-table upload command remained owned by the GPU state.
+The headed Chrome proof uses `maxPhysicalPages = 2`, forcing real fallback and
+eviction. Both Vite development mode and the production `dist/examples` preview
+passed with the same source hash and deterministic return-camera screenshot.
+
+The observed run included:
+
+- 11 standard tile request attempts, of which four obsolete fetches were cancelled;
+- seven successful COG window reads, zero tile failures, zero old/full-image request;
+- four scheduler cancellations and four stale results rejected before publication;
+- independent network/decode limits of two/one, with observed maxima inside each limit
+  and zero queued/active phase work after settlement;
+- two resident physical pages, repeated eviction/fallback, and zero staging bytes
+  after each acknowledgement;
+- a memory-cache return hit without increasing the network-request counter;
+- page-boundary contrast runs of 1 vertical pixel and 25 horizontal pixels, below
+  the proof threshold, with zero transparent pixels;
+- identical page-boundary, return-camera, and repeated-static screenshot hashes;
+- zero console warnings/errors, page errors, required request failures, uncaptured
+  WebGPU errors, device losses, or pending native observations;
+- terminal Worker system/group/context counts, cache bytes, residency entries,
+  staging bytes, browser, Vite, tile server, and owned ports all at zero/closed.
 
 ## Known Depth Limitation
 
-At close zoom, some deep underwater geometry can lie beyond the existing camera far
-plane: `dem-map.ts` uses a 30x minimum-elevation floor while the terrain shader retains
-50x exaggeration. This behavior predates the virtual-raster path and can clip otherwise
-resident geometry. It is recorded rather than disguised as fallback, a missing tile,
-or a relaxed browser assertion. Correcting the camera/depth policy requires a separate
-visible-behavior decision.
+At close zoom, some deep underwater geometry can lie beyond the inherited camera far
+plane: `dem-map.ts` uses a 30x minimum-elevation floor while the shader retains 50x
+terrain exaggeration. This predates the standard virtual-raster path and can clip
+otherwise resident geometry. It is not disguised as fallback, a missing tile, or a
+relaxed browser assertion. Changing that visible depth policy requires a separate
+decision.

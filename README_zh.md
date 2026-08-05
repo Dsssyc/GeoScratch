@@ -37,6 +37,7 @@ npm run dev
 | `packages/geoscratch/src/index.ts` | 包主要公开入口的 TypeScript 源文件。 |
 | `packages/geoscratch/src/scratch.ts` | `geoscratch/scratch` 兼容入口的 TypeScript 源文件。 |
 | `packages/geoscratch/src/scratch/` | TypeScript source-first 的 Scratch API 核心。 |
+| `packages/geoscratch/src/worker/` | 通用 TypeScript WorkerSystem、module、task、context、transfer 与诊断契约。 |
 | `packages/geoscratch/dist/` | 生成的包 JavaScript 和声明文件输出。 |
 | `packages/geoscratch/src/core/` | 共享数据引用、数学、对象和包围盒基础类型。 |
 | `packages/geoscratch/src/geo/` | TypeScript source-first 的地理坐标辅助工具和地理瓦片结构。 |
@@ -62,12 +63,30 @@ import * as scr from 'geoscratch'
 import * as scr from 'geoscratch/scratch'
 ```
 
-地理和几何辅助模块也提供独立子入口：
+地理、Worker 和几何辅助模块也提供独立子入口：
 
 ```js
 import { MercatorCoordinate } from 'geoscratch/geo'
+import { WorkerSystem } from 'geoscratch/worker'
 import { sphere } from 'geoscratch/geometry'
 ```
+
+## Geo Streaming 与 Worker
+
+`geoscratch/geo` 公开 OGC `WebMercatorQuad`、有限 `TileMatrixLimits`、高精度
+canonical coordinate、虚拟栅格 demand/residency、显式 `none`/memory/IndexedDB
+缓存策略、owned page transfer 与 Scratch GPU publication。全局瓦片身份通过数据源
+的 compact coverage 映射，不会创建覆盖整个世界的 dense page table。
+
+`geoscratch/worker` 是独立且需要显式构造的线程抽象。它支持 URL module、自定义
+operation、有界优先级 group、cooperative/hard cancellation、stale-result rejection、
+stateful context、Transferable 所有权和结构化远端诊断，并且不依赖 Geo、tile、DEM、
+Scratch 或 GPU。
+
+DEM Layer 是这条路径的可执行参考：terrain demand 在 Worker 中获取和解码标准
+WebMercatorQuad tile，将 decoded page 转移到有限 atlas，并在 vertex shader 中进行
+跨页逻辑过滤和 parent fallback。源 PNG 只用于离线构建 COG；浏览器没有完整图片或
+旧瓦片路径回退。
 
 ## Scratch 异步资源分配
 

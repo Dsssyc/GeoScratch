@@ -3,11 +3,16 @@ import fs from 'node:fs'
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { ScratchRuntime } from 'geoscratch'
-import { virtualRasterSource } from 'geoscratch/geo'
+import {
+    VirtualRasterResidency,
+    createVirtualRasterGpuState,
+    ownedVirtualRasterPagePayload,
+} from 'geoscratch/geo'
 import { createDemLayer } from '../examples/demLayer/dem-layer.ts'
 import {
-    createDemVirtualRasterRuntime,
+    createDemVirtualRasterModel,
     parseDemVirtualRasterManifest,
+    planDemVirtualPages,
 } from '../examples/demLayer/dem-virtual-raster.ts'
 import { createDemLifecycle } from '../examples/demLayer/dem-lifecycle.ts'
 import { selectTerrainNodes } from '../examples/demLayer/terrain-selection.ts'
@@ -15,42 +20,11 @@ import {
     createFakeCanvas,
     createFakeGpu,
 } from './scratch-test-utils.js'
+import { demWebMercatorManifest } from './fixtures/dem-webmercator-manifest.js'
 
 const root = process.cwd()
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
-const demManifest = parseDemVirtualRasterManifest({
-    schemaVersion: 1,
-    sourceHash: 'aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1',
-    contentVersion: 'dem-aa7a584830f19877-cog-v2',
-    crs: 'EPSG:4326',
-    bounds: [ 120.04373606134682, 31.173901952209487, 121.96623240116922, 32.08401085804678 ],
-    rasterDimensions: { width: 1024, height: 558 },
-    tileMatrixSet: {
-        id: 'GeoScratchLocalRasterQuad',
-        origin: 'southwest',
-        axisOrder: [ 'east', 'north' ],
-    },
-    tileSize: 256,
-    minZoom: 0,
-    maxZoom: 3,
-    nodata: null,
-    sampleType: 'uint8',
-    scale: 0.3311509803921568,
-    offset: -80.06899999999999,
-    overviewLevels: [ 2, 4, 8 ],
-    pixelOrientation: {
-        source: 'north-up-row-major',
-        cog: 'north-up-row-major',
-        tile: 'south-up-row-major',
-    },
-    outerBoundary: 'clamp',
-    levels: [
-        { zoom: 0, decimation: 8, width: 128, height: 70, pagesX: 1, pagesY: 1 },
-        { zoom: 1, decimation: 4, width: 256, height: 140, pagesX: 1, pagesY: 1 },
-        { zoom: 2, decimation: 2, width: 512, height: 279, pagesX: 2, pagesY: 2 },
-        { zoom: 3, decimation: 1, width: 1024, height: 558, pagesX: 4, pagesY: 3 },
-    ],
-})
+const demManifest = parseDemVirtualRasterManifest(demWebMercatorManifest)
 
 function sha256(value) {
 
@@ -81,29 +55,105 @@ function leadingFacts(plan) {
 
 async function createTestVirtualRaster(runtime) {
 
-    let addressSpace
-    const source = virtualRasterSource({
-        id: 'test.dem.virtual-source',
-        async loadPage(page) {
-            return Object.freeze({
-                page,
+    const model = createDemVirtualRasterModel(demManifest)
+    const residency = new VirtualRasterResidency({
+        addressSpace: model.addressSpace,
+        plane: model.plane,
+        maxPhysicalPages: 18,
+        maxStagingBytes: 18 * 256 * 256,
+        maxHistory: 8,
+    })
+    residency.pin(model.rootPage)
+    const gpu = await createVirtualRasterGpuState(runtime, {
+        addressSpace: model.addressSpace,
+        plane: model.plane,
+        maxPhysicalPages: 18,
+    })
+    let generation = 0
+    let activePublication
+    let stopped = false
+
+    function publish() {
+
+        const publication = residency.publish()
+        const update = gpu.stage(publication)
+        activePublication = publication
+        return Object.freeze({
+            snapshotEpoch: publication.snapshot.epoch,
+            changed: update.commands.length > 0,
+            update,
+            publication,
+        })
+    }
+
+    expect(model.addressSpace.levelCount).to.equal(7)
+    return Object.freeze({
+        ...model,
+        model,
+        manifest: demManifest,
+        residency,
+        gpu,
+        async initialize() {
+
+            generation++
+            residency.reconcileGeneration(generation, [ model.rootPage ])
+            residency.stage(ownedVirtualRasterPagePayload({
+                page: model.rootPage,
                 width: 256,
                 height: 256,
                 channels: 1,
                 data: new Uint8Array(256 * 256).fill(128),
                 contentVersion: demManifest.contentVersion,
+            }), { generation })
+            return publish()
+        },
+        prepare(selection) {
+
+            const plan = planDemVirtualPages(model, selection)
+            generation++
+            residency.reconcileGeneration(generation, [ model.rootPage ])
+            return Object.freeze({
+                plan,
+                activePages: Object.freeze([ model.rootPage ]),
+                requestedCount: 0,
+                settlement: Promise.resolve(Object.freeze({
+                    generation,
+                    stagedCount: 0,
+                    residentCount: 1,
+                    staleCount: 0,
+                    failedCount: 0,
+                })),
+                generation,
             })
         },
+        publish,
+        async acknowledge(wrapped, submitted) {
+
+            if (activePublication !== wrapped.publication) {
+                throw new Error('Test DEM publication authority mismatch')
+            }
+            await gpu.acknowledge(wrapped.publication, submitted)
+            activePublication = undefined
+        },
+        async stopStreaming() {
+
+            if (stopped) return
+            stopped = true
+            if (activePublication !== undefined) {
+                await gpu.abandon(activePublication)
+                activePublication = undefined
+            }
+            residency.dispose()
+            gpu.dispose()
+        },
+        inspect: () => Object.freeze({
+            contentVersion: demManifest.contentVersion,
+            tileMatrixSetId: demManifest.tileMatrixSet.id,
+            stopped,
+            residency: residency.inspect(),
+            gpu: gpu.facts(),
+        }),
     })
-    const virtualRaster = await createDemVirtualRasterRuntime({
-        runtime,
-        manifest: demManifest,
-        source,
-        maxPhysicalPages: 18,
-    })
-    addressSpace = virtualRaster.addressSpace
-    expect(addressSpace.levelCount).to.equal(4)
-    return virtualRaster
 }
 
 describe('DEM Layer clean cut', () => {
@@ -430,7 +480,7 @@ describe('DEM Layer clean cut', () => {
         expect(sha256(lodShader.replaceAll('var<storage, read>', 'var<storage>')))
             .to.equal('ba2a35ab1aac1d9cc08f30be3eaaf88fba856629859cc4ce316c626619540bdc')
         expect(sha256(terrainShader.replaceAll('var<storage, read>', 'var<storage>')))
-            .to.equal('5732022f4b7b3e70100843edbda385700e7fbc8e6012eb941d9480a2c48db141')
+            .to.equal('7f0c8a0ba9d45dd2159e3324112f192efca629a15bb03f469dbf0983b96114ad')
         expect(lodShader.match(/var<storage, read>/g)).to.have.length(2)
         expect(terrainShader.match(/var<storage, read>/g)).to.have.length(6)
         expect(terrainShader).not.to.match(/\b(lSampler|palette|colorMap)\b/)

@@ -122,10 +122,13 @@ type WorkerGroupOptions = {
 
 `shared` hosts may run trusted stateless cooperative work. `group` is the default
 for stateful contexts and never shares module state across groups. `task` gives one
-task an exclusive host so hard cancellation has a known blast radius. A host can be
-reused only for the same trusted module fingerprint after a successful reset.
-Module or global-state removal requires worker termination; module unloading is not
-invented.
+task an exclusive host so hard cancellation has a known blast radius. In the current
+implementation every host remains owned by one group and its frozen module set for
+its full lifetime. Idle reclamation, cross-group capacity reclamation, group disposal,
+and module/global-state removal terminate the host; there is no cross-group warm
+reuse or invented module unloading. Any future cross-group warm reuse requires an
+explicit trusted content fingerprint and a successful reset contract before it can
+be accepted by a new group.
 
 Worker modules are loaded from analyzable URLs and expose namespaced operations:
 
@@ -139,7 +142,8 @@ type WorkerModuleDescriptor = {
 
 Arbitrary closures, `eval`, `new Function`, default data-URL execution, and binding
 module exports onto an unnamespaced worker global are rejected. Module identity is
-the stable id, version, URL, and derived fingerprint.
+the stable id, publisher-controlled version, and canonical URL. The version is the
+current coherence identity; no cryptographic content fingerprint is claimed.
 
 Every `WorkerTaskHandle<T>` has a stable identity and exposes `result`, `cancel`,
 `reprioritize`, and `inspect`. Priority consists of at least three ordered classes,
@@ -219,10 +223,17 @@ worker-owned decoded result
 
 `VirtualRasterSnapshot` contains only page identity, slot, generation, content epoch,
 fallback, and compact table facts. An upload batch, not the snapshot, owns staging
-bytes. Acknowledgement releases those bytes for `none`; `memory` may adopt immutable
-bytes within its independent byte budget; `persistent` does not retain unlimited
-decoded memory merely because an encoded L2 entry exists. GPU residency does not
-depend on a decoded JS payload after upload.
+bytes. Acknowledgement releases those bytes for `none`; a decoded `memory` L1 may
+reclaim the same payload through an explicit ownership lease after the relevant
+`SubmittedWork` settles. `persistent` retains bounded source-neutral encoded bytes and
+does not retain unlimited decoded memory merely because an encoded L2 entry exists.
+At every transition the decoded payload has exactly one owner, and GPU residency does
+not depend on a JS payload after upload.
+
+The current DEM executor retains encoded bytes for both completed cache tiers and
+therefore repeats image decode after GPU eviction. This is an implementation deviation,
+not a change to the decision; the final audit records the missing ownership-moving
+decoded L1 as Finding F-1.
 
 ### Cache Tier And Coherence
 
@@ -246,11 +257,13 @@ type VirtualRasterCacheCoherence =
     | { mode: 'editable', baseRevision: string }
 ```
 
-All tiers retain in-flight de-duplication and short-lived upload staging. `none`
-retains no completed CPU result. `memory` is a deterministic byte-weighted cache.
-`persistent` uses IndexedDB as a bounded L2 with optional bounded L1, schema and
-namespace identity, explicit clear/invalidation, transaction results, quota facts,
-and honest persistence-permission facts.
+In-flight de-duplication belongs to the request scheduler and short-lived upload
+staging belongs to publication, so both remain active independently of cache tier.
+`none` retains no completed CPU result. `memory` is a deterministic byte-weighted
+decoded L1 with explicit ownership leases. `persistent` uses IndexedDB as a bounded
+encoded L2 with an optional bounded decoded L1, schema and namespace identity,
+explicit clear/invalidation, transaction results, quota facts, and honest
+persistence-permission facts.
 
 A cache key includes source, tile matrix set, matrix, row, column, plane/band,
 content revision, encoded representation, decoder version, sample type, and schema
@@ -268,8 +281,10 @@ Terrain selection publishes idempotent `VirtualRasterDemandSet` generations rath
 than calling request methods as an external state machine. The scheduler diffs each
 generation, removes obsolete queued work, cooperatively aborts obsolete active work,
 rejects late results as stale, reprioritizes retained work, and keeps root fallback
-ahead of detail and prefetch. Network and decode limits and counters are separate.
-Queue, active work, completion history, and diagnostics are bounded.
+ahead of detail and prefetch. The DEM executor places network and decode operations
+behind separate priority-aware concurrency budgets with independent configuration,
+active/queued counts, and observed maxima; both still lower into the generic Worker
+task scheduler. Queue, active work, completion history, and diagnostics are bounded.
 
 ### DEM Clean Cut
 
@@ -310,7 +325,7 @@ declarations are added.
 | main-thread `fetch` plus `createImageBitmap` decode | generic worker module operation | real Worker browser proof |
 | `clonePayload()` and typed-array copies | transferred unique ownership | detachment and source scan |
 | snapshot-held payload | finite upload publication batch | acknowledgement release proof |
-| mixed `cpuBytes` accounting | decode, staging, memory-cache, persistent metadata facts | bounded accounting tests |
+| mixed `cpuBytes` accounting | network/decode phase budgets, staging, memory-cache, persistent metadata facts | bounded accounting tests |
 | direct `prepare()` page request fan-out | demand generation reconciliation | churn/cancel/stale proof |
 | implicit completed-result retention | explicit none/memory/persistent policy | cache browser proof |
 
