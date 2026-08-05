@@ -29,6 +29,15 @@ import type {
     DemTileWorkerFacts,
     DemTileWorkerInit,
 } from './dem-tile-protocol.ts'
+import {
+    DemPhaseBudget,
+} from './dem-phase-budget.ts'
+import type {
+    DemPhaseBudgetFacts,
+    DemPhasePermit,
+    DemPhasePermitRequest,
+    DemWorkerPhase,
+} from './dem-phase-budget.ts'
 import demTileWorkerUrl from './dem-tile-worker-url.ts'
 
 export type DemWorkerTileSourceDescriptor = Readonly<{
@@ -44,6 +53,8 @@ export type DemWorkerTileSourceDescriptor = Readonly<{
     cachePolicy: VirtualRasterCachePolicy
     requestPersistence?: boolean
     workerCount?: number
+    maxNetworkRequests?: number
+    maxDecodeTasks?: number
     maxRequests: number
     tileUrl(page: VirtualRasterPageDemand['page']): string
 }>
@@ -72,6 +83,7 @@ export type DemWorkerRequestExecutorFacts = Readonly<{
     pendingCandidateCount: number
     maxPendingCandidateCount: number
     senderDecodedByteLength: number
+    phaseBudget: DemPhaseBudgetFacts
 }>
 
 export type DemWorkerRequestExecutor = VirtualRasterRequestExecutor & Readonly<{
@@ -92,8 +104,12 @@ export async function createDemWorkerRequestExecutor(
 ): Promise<DemWorkerRequestExecutor> {
 
     const workerCount = descriptor.workerCount ?? defaultWorkerCount()
+    const maxNetworkRequests = descriptor.maxNetworkRequests ?? workerCount
+    const maxDecodeTasks = descriptor.maxDecodeTasks ?? Math.max(1, Math.ceil(workerCount / 2))
     if (!Number.isSafeInteger(workerCount) || workerCount < 1 || workerCount > 8 ||
-        !Number.isSafeInteger(descriptor.maxRequests) || descriptor.maxRequests < 1) {
+        !Number.isSafeInteger(descriptor.maxRequests) || descriptor.maxRequests < 1 ||
+        !Number.isSafeInteger(maxNetworkRequests) || maxNetworkRequests < 1 ||
+        !Number.isSafeInteger(maxDecodeTasks) || maxDecodeTasks < 1) {
         throw new TypeError('DEM worker executor requires finite worker and request budgets')
     }
     const id = ++executorSequence
@@ -122,6 +138,11 @@ export async function createDemWorkerRequestExecutor(
         throw error
     }
     const contexts: DemContext[] = []
+    const phaseBudget = new DemPhaseBudget({
+        maxNetworkRequests,
+        maxDecodeTasks,
+        maxQueuedTasks: descriptor.maxRequests,
+    })
     try {
         for (let index = 0; index < workerCount; index++) {
             contexts.push(await group.openContext<DemTileWorkerInit, DemTileWorkerFacts>({
@@ -176,7 +197,7 @@ export async function createDemWorkerRequestExecutor(
                 url: descriptor.tileUrl(demand.page),
                 contentVersion: descriptor.contentVersion,
             })
-            return createExecution(context, contextIndex, demand, candidate, facts => {
+            return createExecution(context, contextIndex, demand, candidate, phaseBudget, facts => {
                 workerFacts[contextIndex] = facts
             })
         },
@@ -220,7 +241,8 @@ export async function createDemWorkerRequestExecutor(
             system.inspect(),
             group.inspect(),
             workerFacts,
-            descriptor.cachePolicy.tier
+            descriptor.cachePolicy.tier,
+            phaseBudget.inspect()
         )
     }
 
@@ -229,6 +251,7 @@ export async function createDemWorkerRequestExecutor(
         if (disposed) return
         disposed = true
         const failures: unknown[] = []
+        const phaseBudgetDisposal = phaseBudget.dispose()
         const contextSettlements = await Promise.allSettled(
             contexts.map(context => context.dispose())
         )
@@ -245,6 +268,11 @@ export async function createDemWorkerRequestExecutor(
         } catch (error) {
             failures.push(error)
         }
+        try {
+            await phaseBudgetDisposal
+        } catch (error) {
+            failures.push(error)
+        }
         workerFacts = workerFacts.map(disposedWorkerFacts)
         if (failures.length > 0) {
             throw new AggregateError(failures, 'DEM Worker executor disposal failed')
@@ -257,12 +285,16 @@ function createExecution(
     contextIndex: number,
     demand: VirtualRasterPageDemand,
     candidate: DemTileCandidateDescriptor,
+    phaseBudget: DemPhaseBudget,
     updateFacts: (facts: DemTileWorkerFacts) => void
 ): VirtualRasterRequestExecution {
 
     let currentTask: WorkerTaskHandle<unknown> | undefined
+    let phaseRequest: DemPhasePermitRequest | undefined
+    let phasePermit: DemPhasePermit | undefined
     let phase: 'cache' | 'network' | 'decode' = 'cache'
     let terminalState: WorkerTaskState = 'queued'
+    let priority = demand.priority
     let cancelled = false
     let settlement: 'accept' | 'discard' | undefined
     let settlementPromise: Promise<void> | undefined
@@ -270,7 +302,7 @@ function createExecution(
     const run = async<Input, Output>(operation: string, input: Input): Promise<Output> => {
         if (cancelled) throw cancelledError(candidate.page.key)
         const task = context.run<Input, Output>(operation, input, {
-            priority: demand.priority,
+            priority,
             cancellation: 'cooperative',
             generation: demand.generation,
             staleKey: `${candidate.cacheKey.sourceId}:${candidate.page.key}`,
@@ -278,6 +310,32 @@ function createExecution(
         })
         currentTask = task as WorkerTaskHandle<unknown>
         return await task.result
+    }
+
+    const runPhase = async<Input, Output>(
+        nextPhase: DemWorkerPhase,
+        operation: string,
+        input: Input
+    ): Promise<Output> => {
+
+        phase = nextPhase
+        currentTask = undefined
+        const request = phaseBudget.acquire(nextPhase, priority)
+        phaseRequest = request
+        const permit = await request.result
+        phasePermit = permit
+        if (cancelled) {
+            permit.release()
+            phasePermit = undefined
+            throw cancelledError(candidate.page.key)
+        }
+        try {
+            return await run<Input, Output>(operation, input)
+        } finally {
+            permit.release()
+            phasePermit = undefined
+            phaseRequest = undefined
+        }
     }
 
     const result = (async(): Promise<VirtualRasterPageTransfer> => {
@@ -288,11 +346,14 @@ function createExecution(
                 candidate
             )
             if (lookup.status === 'miss') {
-                phase = 'network'
-                await run<DemTileCandidateDescriptor, DemTileFetchResult>('fetch', candidate)
+                await runPhase<DemTileCandidateDescriptor, DemTileFetchResult>(
+                    'network',
+                    'fetch',
+                    candidate
+                )
             }
-            phase = 'decode'
-            const transfer = await run<Readonly<{ candidateId: string }>, DemTileDecodeResult>(
+            const transfer = await runPhase<Readonly<{ candidateId: string }>, DemTileDecodeResult>(
+                'decode',
                 'decode',
                 { candidateId: candidate.candidateId }
             )
@@ -330,20 +391,38 @@ function createExecution(
         cancel(reason?: unknown) {
 
             cancelled = true
-            return currentTask?.cancel(reason) ?? 'none'
+            const phaseCancelled = phaseRequest?.cancel(reason) ?? false
+            const taskCancellation = currentTask?.cancel(reason) ?? 'none'
+            if (taskCancellation !== 'none') return taskCancellation
+            return phaseCancelled ? 'queued' : 'none'
         },
         reprioritize(priority: Partial<WorkerTaskPriority>) {
 
-            return currentTask?.reprioritize(priority) ?? false
+            const phaseReprioritized = phaseRequest?.reprioritize(priority) ?? false
+            const taskReprioritized = currentTask?.reprioritize(priority) ?? false
+            updatePriority(priority)
+            return phaseReprioritized || taskReprioritized
         },
         accept: () => settle('accept'),
         discard: () => settle('discard'),
         inspect: () => Object.freeze({
-            state: currentTask?.inspect().state ?? terminalState,
+            state: phaseRequest?.inspect().state === 'queued'
+                ? 'queued'
+                : currentTask?.inspect().state ?? (phasePermit === undefined
+                    ? terminalState
+                    : 'running'),
             phase,
             contextIndex,
         }),
     })
+
+    function updatePriority(next: Partial<WorkerTaskPriority>): void {
+
+        priority = Object.freeze({
+            class: next.class ?? priority.class,
+            score: next.score ?? priority.score,
+        })
+    }
 }
 
 function aggregateFacts(
@@ -351,7 +430,8 @@ function aggregateFacts(
     system: WorkerSystemFacts,
     group: WorkerGroupFacts,
     workers: readonly DemTileWorkerFacts[],
-    tier: VirtualRasterCachePolicy['tier']
+    tier: VirtualRasterCachePolicy['tier'],
+    phaseBudget: DemPhaseBudgetFacts
 ): DemWorkerRequestExecutorFacts {
 
     const sumCache = (read: (facts: VirtualRasterCacheFacts) => number) =>
@@ -382,6 +462,7 @@ function aggregateFacts(
         pendingCandidateCount: sum(facts => facts.pendingCandidateCount),
         maxPendingCandidateCount: Math.max(0, ...workers.map(facts => facts.maxPendingCandidateCount)),
         senderDecodedByteLength: sum(facts => facts.senderDecodedByteLength),
+        phaseBudget,
     })
 }
 

@@ -392,6 +392,7 @@ function validateProof(value, processState) {
         const residency = virtualRaster?.residency
         const scheduler = virtualRaster?.scheduler
         const worker = virtualRaster?.worker
+        const phaseBudget = worker?.phaseBudget
         const gpu = virtualRaster?.gpu
         if (virtualRaster?.coordinateEncoding !== 'wide-fixed' ||
             virtualRaster?.coordinateBits !== 40 ||
@@ -414,6 +415,16 @@ function validateProof(value, processState) {
             worker?.pendingCandidateCount !== 0 || worker?.senderDecodedByteLength !== 0 ||
             worker?.cache?.tier !== 'memory' || worker?.cache?.persistentBytes !== 0 ||
             worker?.cache?.memoryBytes > 16 * 1024 * 1024 ||
+            phaseBudget?.network?.limit !== 2 || phaseBudget?.decode?.limit !== 1 ||
+            phaseBudget?.network?.activeCount !== 0 ||
+            phaseBudget?.network?.queuedCount !== 0 ||
+            phaseBudget?.decode?.activeCount !== 0 || phaseBudget?.decode?.queuedCount !== 0 ||
+            phaseBudget?.network?.maxActiveCount < 1 ||
+            phaseBudget?.network?.maxActiveCount > phaseBudget?.network?.limit ||
+            phaseBudget?.decode?.maxActiveCount < 1 ||
+            phaseBudget?.decode?.maxActiveCount > phaseBudget?.decode?.limit ||
+            phaseBudget?.network?.maxQueuedCount > 24 ||
+            phaseBudget?.decode?.maxQueuedCount > 24 ||
             worker?.group?.queuedTaskCount !== 0 || worker?.group?.activeTaskCount !== 0 ||
             worker?.group?.failedTaskCount !== 0 ||
             worker?.group?.history?.length > 64 || worker?.system?.queuedTaskCount !== 0 ||
@@ -536,6 +547,11 @@ function validateProof(value, processState) {
         terminalVirtual?.worker?.senderDecodedByteLength !== 0 ||
         terminalVirtual?.worker?.cache?.memoryBytes !== 0 ||
         terminalVirtual?.worker?.cache?.persistentBytes !== 0 ||
+        terminalVirtual?.worker?.phaseBudget?.disposed !== true ||
+        terminalVirtual?.worker?.phaseBudget?.network?.activeCount !== 0 ||
+        terminalVirtual?.worker?.phaseBudget?.network?.queuedCount !== 0 ||
+        terminalVirtual?.worker?.phaseBudget?.decode?.activeCount !== 0 ||
+        terminalVirtual?.worker?.phaseBudget?.decode?.queuedCount !== 0 ||
         terminalVirtual?.worker?.workers?.some(worker => (
             worker.cache.disposed !== true || worker.cache.memoryEntryCount !== 0 ||
             worker.cache.memoryBytes !== 0 || worker.cache.persistentEntryCount !== 0 ||
@@ -599,6 +615,7 @@ function summarizeProof(value) {
             networkRequestCount: virtualRaster?.worker?.networkRequestCount,
             pendingCandidateCount: virtualRaster?.worker?.pendingCandidateCount,
             senderDecodedByteLength: virtualRaster?.worker?.senderDecodedByteLength,
+            phaseBudget: virtualRaster?.worker?.phaseBudget,
         }
     }
     return {
@@ -634,6 +651,7 @@ function summarizeProof(value) {
                 senderDecodedByteLength: terminal.worker.senderDecodedByteLength,
                 cacheBytes: terminal.worker.cache.memoryBytes +
                     terminal.worker.cache.persistentBytes,
+                phaseBudget: terminal.worker.phaseBudget,
                 disposedCacheCount: terminal.worker.workers.filter(worker => (
                     worker.cache.disposed
                 )).length,

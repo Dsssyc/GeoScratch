@@ -161,6 +161,9 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
         tileServerUrl,
         cachePolicy,
         requestPersistence: cachePolicy.tier === 'persistent',
+        workerCount: 3,
+        maxNetworkRequests: 2,
+        maxDecodeTasks: 1,
         maxPhysicalPages,
     })
     proof.rasterAcquired()

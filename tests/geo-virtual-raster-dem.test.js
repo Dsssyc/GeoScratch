@@ -14,6 +14,7 @@ import {
     resolveDemStitchedGrid,
 } from '../examples/demLayer/dem-virtual-raster.ts'
 import { selectTerrainNodes } from '../examples/demLayer/terrain-selection.ts'
+import { DemPhaseBudget } from '../examples/demLayer/dem-phase-budget.ts'
 
 const bounds = [ 120.04373606134682, 31.173901952209487, 121.96623240116922, 32.08401085804678 ]
 const limits = [
@@ -80,6 +81,89 @@ const manifest = Object.freeze({
 })
 
 describe('DEM WebMercator virtual raster', () => {
+
+    it('configures and enforces independent network and decode concurrency budgets', async() => {
+
+        const budget = new DemPhaseBudget({
+            maxNetworkRequests: 2,
+            maxDecodeTasks: 1,
+            maxQueuedTasks: 4,
+        })
+        const firstNetwork = budget.acquire('network', {
+            class: 'user-visible',
+            score: 0,
+        })
+        const secondNetwork = budget.acquire('network', {
+            class: 'user-visible',
+            score: 0,
+        })
+        const queuedNetwork = budget.acquire('network', {
+            class: 'background',
+            score: 0,
+        })
+        const firstDecode = budget.acquire('decode', {
+            class: 'user-visible',
+            score: 0,
+        })
+        const queuedDecode = budget.acquire('decode', {
+            class: 'background',
+            score: 0,
+        })
+
+        const [ firstNetworkPermit, secondNetworkPermit, firstDecodePermit ] = await Promise.all([
+            firstNetwork.result,
+            secondNetwork.result,
+            firstDecode.result,
+        ])
+        expect(queuedNetwork.inspect().state).to.equal('queued')
+        expect(queuedDecode.inspect().state).to.equal('queued')
+        expect(budget.inspect()).to.deep.include({
+            disposed: false,
+            network: {
+                limit: 2,
+                activeCount: 2,
+                queuedCount: 1,
+                maxActiveCount: 2,
+                maxQueuedCount: 1,
+            },
+            decode: {
+                limit: 1,
+                activeCount: 1,
+                queuedCount: 1,
+                maxActiveCount: 1,
+                maxQueuedCount: 1,
+            },
+        })
+
+        expect(queuedNetwork.cancel('obsolete')).to.equal(true)
+        await expectRejectedName(queuedNetwork.result, 'AbortError')
+        expect(queuedDecode.reprioritize({ class: 'critical', score: 9 })).to.equal(true)
+        firstDecodePermit.release()
+        const secondDecodePermit = await queuedDecode.result
+        expect(queuedDecode.inspect().state).to.equal('active')
+
+        firstNetworkPermit.release()
+        secondNetworkPermit.release()
+        secondDecodePermit.release()
+        await budget.dispose()
+        expect(budget.inspect()).to.deep.include({
+            disposed: true,
+            network: {
+                limit: 2,
+                activeCount: 0,
+                queuedCount: 0,
+                maxActiveCount: 2,
+                maxQueuedCount: 1,
+            },
+            decode: {
+                limit: 1,
+                activeCount: 0,
+                queuedCount: 0,
+                maxActiveCount: 1,
+                maxQueuedCount: 1,
+            },
+        })
+    })
 
     it('validates standard manifest facts and builds a compact tile address space', () => {
 
@@ -248,3 +332,15 @@ describe('DEM WebMercator virtual raster', () => {
         expect(wgsl).to.not.include('f64')
     })
 })
+
+async function expectRejectedName(promise, name) {
+
+    let failure
+    try {
+        await promise
+    } catch (error) {
+        failure = error
+    }
+    expect(failure).to.be.instanceOf(Error)
+    expect(failure.name).to.equal(name)
+}

@@ -126,6 +126,8 @@ export type DemVirtualRasterRuntimeOptions = Readonly<{
     cachePolicy: VirtualRasterCachePolicy
     requestPersistence?: boolean
     workerCount?: number
+    maxNetworkRequests?: number
+    maxDecodeTasks?: number
     maxRequests?: number
     maxPhysicalPages?: number
     maxStagingBytes?: number
@@ -286,6 +288,8 @@ export async function createDemVirtualRasterRuntime({
     cachePolicy,
     requestPersistence = false,
     workerCount,
+    maxNetworkRequests,
+    maxDecodeTasks,
     maxRequests = DEM_DEFAULT_MAX_REQUESTS,
     maxPhysicalPages = DEM_DEFAULT_PHYSICAL_PAGES,
     maxStagingBytes = maxPhysicalPages * DEM_TILE_SIZE * DEM_TILE_SIZE,
@@ -317,6 +321,8 @@ export async function createDemVirtualRasterRuntime({
             cachePolicy,
             requestPersistence,
             ...(workerCount === undefined ? {} : { workerCount }),
+            ...(maxNetworkRequests === undefined ? {} : { maxNetworkRequests }),
+            ...(maxDecodeTasks === undefined ? {} : { maxDecodeTasks }),
             maxRequests,
             tileUrl: page => demTileUrl(manifest, tileServerUrl, page),
         })

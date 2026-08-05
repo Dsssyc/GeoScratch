@@ -284,8 +284,8 @@ export class VirtualRasterRequestScheduler {
         for (const record of this.#active.values()) {
             const facts = record.execution.inspect?.()
             if (facts?.state === 'queued') queuedRequestCount++
-            if (facts?.phase === 'network') activeNetworkCount++
-            if (facts?.phase === 'decode') activeDecodeCount++
+            if (facts?.state === 'running' && facts.phase === 'network') activeNetworkCount++
+            if (facts?.state === 'running' && facts.phase === 'decode') activeDecodeCount++
         }
         return Object.freeze({
             disposed: this.#disposed,
