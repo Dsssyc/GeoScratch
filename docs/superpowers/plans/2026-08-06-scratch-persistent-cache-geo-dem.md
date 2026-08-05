@@ -50,20 +50,20 @@
 - [x] 标记 ADR-056 的 encoded/memory cache 决策被取代；
 - [x] 更新 Scratch/Geo vision、README、living review 与 public manifests；
 - [x] 扫描活跃源码/测试/用户文档，确认旧 API 只存在于历史 allowlist；
-- [ ] 提交 docs/audit checkpoint。
+- [x] 提交 docs/audit checkpoint。
 
 ## 固定门禁
 
-- [ ] `npm run typecheck`
-- [ ] `npm test`
-- [ ] `npm run build`
-- [ ] `node tests/browser/scratch-persistent-cache.mjs`
-- [ ] `node tests/browser/geo-virtual-raster-dem.mjs`
-- [ ] `node tests/browser/scratch-hello-gaw.mjs`
-- [ ] `node tests/browser/scratch-flow-layer.mjs`
-- [ ] Git diff bounded review：只审 Goal 2/3 改动一次
-- [ ] `git status --short --branch` 干净且只在 `dev-feature`
-- [ ] 不 push
+- [x] `npm run typecheck`
+- [x] `npm test`
+- [x] `npm run build`
+- [x] `node tests/browser/scratch-persistent-cache.mjs`
+- [x] `node tests/browser/geo-virtual-raster-dem.mjs`
+- [x] `node tests/browser/scratch-hello-gaw.mjs`
+- [x] `node tests/browser/scratch-flow-layer.mjs`
+- [x] Git diff bounded review：只审 Goal 2/3 改动一次
+- [x] `git status --short --branch` 干净且只在 `dev-feature`
+- [x] 不 push
 
 ## 终止条件
 
