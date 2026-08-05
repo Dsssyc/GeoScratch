@@ -109,10 +109,13 @@ describe('workspace layout', () => {
 
             expect(packageImports, file).to.not.be.empty
             for (const packageImport of packageImports) {
+                const dependencyName = packageImport.startsWith('@')
+                    ? packageImport.split('/').slice(0, 2).join('/')
+                    : packageImport.split('/')[0]
                 expect({
                     ...examplesPkg.dependencies,
                     ...examplesPkg.devDependencies,
-                }, `${file}: ${packageImport}`).to.have.property(packageImport)
+                }, `${file}: ${packageImport}`).to.have.property(dependencyName)
             }
             expect(source, file).to.not.include('../../src/')
             expect(source, file).to.not.include('../src/')
