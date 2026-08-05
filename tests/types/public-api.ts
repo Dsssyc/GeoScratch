@@ -1,10 +1,22 @@
 import * as scr from 'geoscratch'
 import * as scratchCompat from 'geoscratch/scratch'
 import {
+    CellLocalF32Codec,
+    GeoDiagnosticError,
     GeoQuadNode2D,
     MercatorCoordinate,
     Node2D,
+    WideFixedCodec,
+    cellLocalF32Codec,
+    coordinateDomain,
+    localVector,
+    surfaceDomain,
+    wideFixedCodec,
+    type CellLocalPosition,
+    type CoordinateDomain,
     type MapOptions,
+    type PositionPrecisionFacts,
+    type WideFixedPosition,
 } from 'geoscratch/geo'
 import { plane, sphere } from 'geoscratch/geometry'
 
@@ -106,6 +118,53 @@ const mapOptions: MapOptions = {
     cameraPos: [ 0, 0 ],
     zoomLevel: 0,
 }
+const typedSurfaceDomain: CoordinateDomain = surfaceDomain({
+    id: 'typed-surface',
+    axes: [
+        { name: 'u', unit: 'm' },
+        { name: 'v', unit: 'm' },
+    ],
+    embeddingAxes: [
+        { name: 'x', unit: 'm' },
+        { name: 'y', unit: 'm' },
+        { name: 'z', unit: 'm' },
+    ],
+})
+const typedVolumeDomain: CoordinateDomain = coordinateDomain({
+    id: 'typed-volume',
+    intrinsicDimensions: 3,
+    embeddingDimensions: 3,
+    axes: [
+        { name: 'x', unit: 'm' },
+        { name: 'y', unit: 'm' },
+        { name: 'z', unit: 'm' },
+    ],
+})
+const typedCellCodec: CellLocalF32Codec = cellLocalF32Codec({
+    domain: typedVolumeDomain,
+    cellExtent: [ 1024, 1024, 512 ],
+})
+const typedCellPosition: CellLocalPosition = typedCellCodec.normalize({
+    cells: [ 0, 0, 0 ],
+    local: [ 1, 2, 3 ],
+})
+const typedDisplacement = localVector(typedVolumeDomain, [ 1, 2, 3 ], {
+    unit: 'm',
+    basis: typedVolumeDomain.id,
+})
+const typedAdvancedPosition: CellLocalPosition = typedCellCodec.advance(
+    typedCellPosition,
+    typedDisplacement,
+)
+const typedFixedCodec: WideFixedCodec = wideFixedCodec({
+    domain: typedSurfaceDomain,
+    quantum: 0.001,
+})
+const typedFixedPosition: WideFixedPosition = typedFixedCodec.fromQuanta([ 1n, -1n ])
+const typedPrecisionFacts: PositionPrecisionFacts = typedFixedCodec.facts
+const typedGeoError: GeoDiagnosticError | undefined = undefined
+// @ts-expect-error Coordinate dimensions are limited to one, two, or three
+coordinateDomain({ id: 'typed-invalid', intrinsicDimensions: 4, embeddingDimensions: 3, axes: [] })
 // @ts-expect-error Mercator coordinate inputs require two components
 MercatorCoordinate.fromLonLat([ 0 ])
 const invalidMapOptions: MapOptions = {
@@ -123,6 +182,10 @@ void geoNodeParent
 void geoNodeChildren
 void mapOptions
 void invalidMapOptions
+void typedAdvancedPosition
+void typedFixedPosition
+void typedPrecisionFacts
+void typedGeoError
 const planeGeometry = plane(2)
 const sphereGeometry = sphere(1, 8, 4)
 
