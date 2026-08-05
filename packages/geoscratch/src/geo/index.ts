@@ -84,30 +84,14 @@ export type {
     WebMercatorQuadTileBounds,
     WebMercatorTileSampleAddress,
 } from './web-mercator-quad.js'
-export {
-    VirtualRasterCache,
-    createVirtualRasterCache,
-    openIndexedDbVirtualRasterPersistentStore,
-    virtualRasterCacheKey,
-} from './virtual-raster-cache.js'
+export { virtualRasterCacheAddress } from './virtual-raster-cache-address.js'
 export type {
-    IndexedDbVirtualRasterPersistentStoreDescriptor,
+    VirtualRasterCacheAddress,
+    VirtualRasterCacheAddressDescriptor,
     VirtualRasterCacheCoherence,
-    VirtualRasterCacheDeleteOutcome,
-    VirtualRasterCacheDescriptor,
-    VirtualRasterCacheFacts,
-    VirtualRasterCacheInvalidation,
-    VirtualRasterCacheKey,
-    VirtualRasterCacheKeyDescriptor,
-    VirtualRasterCachePolicy,
-    VirtualRasterCachePutOutcome,
-    VirtualRasterCachePutStatus,
-    VirtualRasterCacheRecord,
-    VirtualRasterCacheRecordDescriptor,
-    VirtualRasterPersistentEntry,
-    VirtualRasterPersistentStorageFacts,
-    VirtualRasterPersistentStore,
-} from './virtual-raster-cache.js'
+    VirtualRasterCacheInvalidationPrefixes,
+    VirtualRasterCacheMetadata,
+} from './virtual-raster-cache-address.js'
 export {
     VirtualRasterRequestScheduler,
     virtualRasterDemandSet,

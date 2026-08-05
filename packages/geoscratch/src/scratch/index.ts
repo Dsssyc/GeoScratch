@@ -18,6 +18,37 @@ export type {
     ScratchDiagnosticSuggestion,
 } from './diagnostics/index.js'
 export type { GPUDiagnostic, GPUDiagnosticPhase } from './gpu/diagnostics.js'
+export {
+    PersistentCache,
+    createCacheDiagnostic,
+    persistentCacheKey,
+} from './cache/index.js'
+export type {
+    CacheDeleteOutcome,
+    CacheDiagnostic,
+    CacheDiagnosticCode,
+    CacheDiagnosticInput,
+    CacheDiagnosticPhase,
+    CacheDiagnosticSubject,
+    CacheEntryDescriptor,
+    CacheGarbageCollectionOptions,
+    CacheGarbageCollectionOutcome,
+    CacheHistoryEntry,
+    CacheHistoryKind,
+    CacheInvalidation,
+    CacheMissReason,
+    CachePutOutcome,
+    CachePutStatus,
+    CacheReadOutcome,
+    CacheRecord,
+    CacheStorageErrorFacts,
+    CacheStorageFacts,
+    PersistentCacheDescriptor,
+    PersistentCacheFacts,
+    PersistentCacheKey,
+    PersistentCacheKeyDescriptor,
+    PersistentCacheState,
+} from './cache/index.js'
 export { plane, sphere } from './geometry/index.js'
 export type { PlaneGeometry, SphereGeometry } from './geometry/index.js'
 export type {

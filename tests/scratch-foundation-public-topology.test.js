@@ -54,6 +54,7 @@ const scratchValues = [
     'WorkerGroup',
     'WorkerSystem',
     'WorkerTaskHandle',
+    'createCacheDiagnostic',
     'createLayoutReadbackView',
     'createScratchDiagnostic',
     'createScratchDiagnosticReport',
@@ -72,8 +73,8 @@ const scratchValues = [
     'layoutArtifactsAbiCompatible',
     'layoutArtifactsSchemaCompatible',
     'layoutCodec',
-    'plane',
     'persistentCacheKey',
+    'plane',
     'sphere',
     'transferWorkerResult',
 ]

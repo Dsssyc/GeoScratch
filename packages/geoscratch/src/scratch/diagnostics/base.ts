@@ -1,7 +1,8 @@
 import type { GPUIncidentReport } from '../gpu/gpu-operation.js'
 import type { WorkerRemoteErrorFacts } from '../worker/worker-system.js'
+import type { CacheStorageErrorFacts } from '../cache/diagnostics.js'
 
-export type ScratchDiagnosticDomain = 'gpu' | 'worker'
+export type ScratchDiagnosticDomain = 'gpu' | 'worker' | 'cache'
 export type ScratchDiagnosticSeverity = 'info' | 'warn' | 'error'
 
 export type ScratchDiagnosticSubject = Readonly<{
@@ -88,6 +89,7 @@ export type ScratchDiagnosticReport<
 export type ScratchDiagnosticErrorContext =
     | Readonly<{ domain: 'gpu', incident?: GPUIncidentReport }>
     | Readonly<{ domain: 'worker', remote?: WorkerRemoteErrorFacts }>
+    | Readonly<{ domain: 'cache', storage?: CacheStorageErrorFacts }>
 
 type DiagnosticContext<Diagnostic extends AnyScratchDiagnostic> = Extract<
     ScratchDiagnosticErrorContext,
@@ -112,8 +114,8 @@ export function createScratchDiagnostic<
     Subject
 > {
 
-    if (input.domain !== 'gpu' && input.domain !== 'worker') {
-        throw new TypeError('Scratch diagnostics require an explicit gpu or worker domain.')
+    if (input.domain !== 'gpu' && input.domain !== 'worker' && input.domain !== 'cache') {
+        throw new TypeError('Scratch diagnostics require an explicit gpu, worker, or cache domain.')
     }
     const hints = normalizeHints(input.hints ?? input.hint)
     const diagnostic = {

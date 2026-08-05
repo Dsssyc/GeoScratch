@@ -7,9 +7,9 @@ import { chromium } from 'playwright'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const examplesRoot = resolve(repositoryRoot, 'examples')
-const fixturePath = resolve(repositoryRoot, 'tests/fixtures/geo-virtual-raster-cache.ts')
+const fixturePath = resolve(repositoryRoot, 'tests/fixtures/scratch-persistent-cache.ts')
 const viteEntry = resolve(repositoryRoot, 'node_modules/vite/bin/vite.js')
-const timeout = positiveInteger(process.env.GEO_VIRTUAL_RASTER_CACHE_TIMEOUT_MS, 60_000)
+const timeout = positiveInteger(process.env.SCRATCH_PERSISTENT_CACHE_TIMEOUT_MS, 60_000)
 const port = await findAvailablePort()
 const baseUrl = `http://127.0.0.1:${port}`
 const fixtureUrl = `${baseUrl}/@fs${fixturePath}`
@@ -35,12 +35,12 @@ try {
         })
         const first = await page.evaluate(async({ url, cacheNamespace }) => {
             const fixture = await import(url)
-            return await fixture.prepareGeoVirtualRasterCacheProof(cacheNamespace)
+            return await fixture.prepareScratchPersistentCacheProof(cacheNamespace)
         }, { url: fixtureUrl, cacheNamespace: namespace })
         await page.reload({ waitUntil: 'domcontentloaded', timeout })
         const second = await page.evaluate(async({ url, cacheNamespace }) => {
             const fixture = await import(url)
-            return await fixture.finishGeoVirtualRasterCacheProof(cacheNamespace)
+            return await fixture.finishScratchPersistentCacheProof(cacheNamespace)
         }, { url: fixtureUrl, cacheNamespace: namespace })
         proof = { first, second, events }
     } finally {
@@ -98,39 +98,50 @@ function validate(value) {
         failures.push('managed Chrome or Vite remained reachable')
     }
     if (value.proof === undefined) {
-        failures.push('virtual raster cache browser proof was not produced')
+        failures.push('Scratch persistent cache browser proof was not produced')
         return failures
     }
     const { first, second, events } = value.proof
-    if (first.none?.facts?.tier !== 'none' || first.none.facts.memoryEntryCount !== 0 ||
-        first.none.facts.missCount !== 2) {
-        failures.push('none cache retained a completed result or failed to miss twice')
+    if (first.stored?.status !== 'stored' || first.immutable?.status !== 'already-present' ||
+        first.metadataOnly?.status !== 'stored' || first.oversize?.status !== 'too-large') {
+        failures.push('write outcomes did not preserve immutable entries or hard budgets')
     }
-    if (first.memory?.secondLoad !== 'cache' || first.memory.facts.memoryBytes > 8 ||
-        first.memory.facts.memoryEntryCount !== 2 || first.memory.facts.evictionCount !== 1) {
-        failures.push('memory cache did not hit or enforce its byte budget')
+    if (first.immediate?.status !== 'hit' || first.immediate.byteLength !== 4 ||
+        JSON.stringify(first.immediate.payload) !== JSON.stringify([ 1, 2, 3, 4 ])) {
+        failures.push('put did not snapshot raw caller bytes before persistence')
     }
-    if (first.persistent?.firstLoad !== 'network' ||
-        first.persistent.facts.persistentEntryCount !== 1 ||
-        first.persistent.facts.persistenceRequested !== true ||
-        typeof first.persistent.facts.persisted !== 'boolean') {
-        failures.push('persistent cache did not write or report persistence honestly')
+    if (first.beforeDispose?.entryCount !== 2 || first.beforeDispose.payloadBytes !== 4 ||
+        first.beforeDispose.metadataOnlyEntryCount !== 1 ||
+        first.beforeDispose.persistenceRequested !== true ||
+        typeof first.beforeDispose.persisted !== 'boolean' ||
+        first.beforeDispose.history?.length > 32 || first.disposeIdentity !== true ||
+        first.afterDispose?.state !== 'disposed' || first.afterDispose.activeOperationCount !== 0) {
+        failures.push('persistent facts or idempotent terminal lifecycle did not converge')
     }
-    if (second.cachedLoad !== 'cache' || second.networkCountAfterHit !== second.before ||
-        second.revisedLoad !== 'network' ||
-        second.networkCountAfterRevision !== second.before + 1) {
-        failures.push('reload hit or content-version isolation performed a wrong source load')
+    if (first.budget?.first?.status !== 'hit' || first.budget?.second?.status !== 'miss' ||
+        first.budget?.third?.status !== 'hit' ||
+        first.budget?.thirdWrite?.evictedCount !== 1 ||
+        first.budget?.facts?.entryCount !== 2 || first.budget.facts.payloadBytes !== 8 ||
+        first.budget.facts.evictionCount !== 1) {
+        failures.push('byte and entry budgets did not apply deterministic LRU eviction')
     }
-    if (second.beforeClear?.persistentHitCount < 1 || second.cleared?.deletedCount !== 2 ||
-        second.afterClear?.persistentEntryCount !== 0 || second.afterClear?.persistentBytes !== 0) {
-        failures.push('persistent cache hit facts or explicit cleanup did not converge')
+    if (second.rawReload?.status !== 'hit' || second.rawReload.byteLength !== 4 ||
+        JSON.stringify(second.rawReload.payload) !== JSON.stringify([ 1, 2, 3, 4 ]) ||
+        second.metadataReload?.status !== 'hit' || second.metadataReload.payload !== undefined ||
+        second.revisionMiss?.status !== 'miss' || second.revisionMiss.reason !== 'absent') {
+        failures.push('reload, metadata-only, or immutable revision reads were incorrect')
     }
-    if (second.quota?.status !== 'quota-exceeded' ||
-        second.quotaFacts?.quotaFailureCount !== 1) {
-        failures.push('quota failure was not returned as a structured cache outcome')
+    if (second.invalidated?.deletedCount !== 2 || second.invalidated.releasedBytes !== 8 ||
+        second.garbage?.removedPayloadCount !== 1 ||
+        second.garbage.removedPendingCount !== 0 ||
+        second.garbage.cleanupFailureCount !== 0) {
+        failures.push('prefix invalidation or explicit OPFS garbage collection was incorrect')
     }
-    if (second.storageFailure?.code !== 'GEO_VIRTUAL_RASTER_CACHE_STORAGE_FAILED') {
-        failures.push('storage failure was not wrapped in a structured Geo diagnostic')
+    if (second.beforeClear?.entryCount !== 3 || second.beforeClear.payloadBytes !== 8 ||
+        second.cleared?.deletedCount !== 3 || second.cleared.releasedBytes !== 8 ||
+        second.afterClear?.entryCount !== 0 || second.afterClear.payloadBytes !== 0 ||
+        second.disposedCode !== 'CACHE_DISPOSED') {
+        failures.push('clear or post-dispose diagnostic behavior did not converge')
     }
     if (events.consoleFailures.length !== 0 || events.consoleWarnings.length !== 0 ||
         events.pageErrors.length !== 0 || events.requestFailures.length !== 0 ||
