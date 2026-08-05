@@ -14,7 +14,7 @@ import type {
     ScratchDiagnosticSubject,
     ScratchDiagnosticSuggestion,
 } from '../diagnostics/base.js'
-import type { ScratchGpuIncidentReport } from './gpu-operation.js'
+import type { GPUIncidentReport } from './gpu-operation.js'
 
 export {
     ScratchDiagnosticError,
@@ -28,9 +28,7 @@ export type {
     ScratchDiagnosticSuggestion,
 }
 
-export type DiagnosticSeverity = ScratchDiagnosticSeverity
-
-export type DiagnosticPhase =
+export type GPUDiagnosticPhase =
     | 'runtime'
     | 'resource'
     | 'layout-codec'
@@ -43,46 +41,30 @@ export type DiagnosticPhase =
     | 'readback'
     | 'buffer-mapping'
 
-export type DiagnosticSubject = {
-    kind: string
-    id?: string
-    label?: string
-    [key: string]: unknown
-}
-export type DiagnosticSuggestion = {
-    kind: string
-    confidence: 'low' | 'medium' | 'high'
-    target: DiagnosticSubject
-    action?: 'edit' | 'add' | 'remove' | 'reorder' | 'declare' | 'dispose'
-    set?: unknown
-    note?: string
-}
-export type DiagnosticEvidence = {
-    kind: string
-    value?: unknown
-    note?: string
+export type GPUDiagnosticSubjectDraft = {
+    -readonly [Key in keyof ScratchDiagnosticSubject]: ScratchDiagnosticSubject[Key]
 }
 
 export type GPUDiagnostic = ScratchDiagnosticBase<
     'gpu',
     string,
-    DiagnosticPhase,
+    GPUDiagnosticPhase,
     ScratchDiagnosticSubject
 >
 export type ScratchDiagnostic = GPUDiagnostic
 export type ScratchDiagnosticReport = SharedDiagnosticReport<GPUDiagnostic>
 
 export type ScratchDiagnosticInput = Omit<
-    SharedDiagnosticInput<'gpu', string, DiagnosticPhase, ScratchDiagnosticSubject>,
+    SharedDiagnosticInput<'gpu', string, GPUDiagnosticPhase, ScratchDiagnosticSubject>,
     'domain' | 'subject' | 'suggestions' | 'evidence'
 > & Readonly<{
-    subject: DiagnosticSubject
-    suggestions?: readonly DiagnosticSuggestion[]
-    evidence?: readonly DiagnosticEvidence[]
+    subject: ScratchDiagnosticSubject
+    suggestions?: readonly ScratchDiagnosticSuggestion[]
+    evidence?: readonly ScratchDiagnosticEvidence[]
 }>
 
 export type ScratchDiagnosticErrorOptions = ErrorOptions & Readonly<{
-    incident?: ScratchGpuIncidentReport
+    incident?: GPUIncidentReport
 }>
 
 export function createGPUDiagnostic(input: ScratchDiagnosticInput): GPUDiagnostic {

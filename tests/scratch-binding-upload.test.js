@@ -4,7 +4,7 @@ import {
     BindLayout,
     BindSet,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     UploadCommand,
 } from 'geoscratch'
 import {
@@ -57,7 +57,7 @@ async function createUniformFixture(format = 'bgra8unorm') {
 
     const fake = createFakeGpu()
     const canvas = createFakeCanvas()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const surface = runtime.createSurface(canvas.canvas, {
         format,
         size: { width: 64, height: 64 },
@@ -532,7 +532,7 @@ describe('scratch BindLayout, BindSet, and UploadCommand', () => {
     it('requires COPY_DST and revalidates replacement usage before upload queue effects', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const invalidTarget = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_UNIFORM,

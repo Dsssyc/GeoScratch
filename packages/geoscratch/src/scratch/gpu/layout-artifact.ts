@@ -1,6 +1,6 @@
 import { throwGPUDiagnostic } from './diagnostics.js'
 import { describeValue, isRecord } from './type-utils.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 
 export type LayoutScalarType = 'i32' | 'u32' | 'f32' | 'f16'
 export type LayoutVectorLength = 2 | 3 | 4
@@ -662,9 +662,9 @@ export function describeLayoutCompatibilityDifference(
     ))
 }
 
-export function layoutArtifactSubject(artifact: LayoutArtifact): DiagnosticSubject {
+export function layoutArtifactSubject(artifact: LayoutArtifact): ScratchDiagnosticSubject {
 
-    const subject: DiagnosticSubject = {
+    const subject: GPUDiagnosticSubjectDraft = {
         kind: 'LayoutArtifact',
         abiHash: artifact.abiHash,
         schemaHash: artifact.schemaHash,
@@ -2525,7 +2525,7 @@ function throwBufferViewDiagnostic(
 
 function throwLayoutDiagnostic(
     code: string,
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     message: string,
     expected: unknown,
     actual: unknown
@@ -2557,14 +2557,14 @@ function classifyUnsupportedType(value: string): string {
     return 'unknown'
 }
 
-function artifactSubject(spec: Pick<LayoutCanonicalSpec, 'label'>): DiagnosticSubject {
+function artifactSubject(spec: Pick<LayoutCanonicalSpec, 'label'>): ScratchDiagnosticSubject {
 
     return unresolvedArtifactSubject(spec.label)
 }
 
-function unresolvedArtifactSubject(label: string | undefined): DiagnosticSubject {
+function unresolvedArtifactSubject(label: string | undefined): ScratchDiagnosticSubject {
 
-    const subject: DiagnosticSubject = {
+    const subject: GPUDiagnosticSubjectDraft = {
         kind: 'LayoutArtifact',
         abiHash: 'unresolved',
         schemaHash: 'unresolved',
@@ -2573,7 +2573,7 @@ function unresolvedArtifactSubject(label: string | undefined): DiagnosticSubject
     return subject
 }
 
-function fieldSubject(path: string): DiagnosticSubject {
+function fieldSubject(path: string): ScratchDiagnosticSubject {
 
     return {
         kind: 'LayoutField',
@@ -2595,7 +2595,7 @@ function requireTypeByteLength(type: LayoutTypeArtifact): number {
 }
 
 function checkedAddLayoutSize(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     left: number,
     right: number,
     reason: string
@@ -2610,7 +2610,7 @@ function checkedAddLayoutSize(
 }
 
 function checkedMultiplyLayoutSize(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     left: number,
     right: number,
     reason: string
@@ -2625,7 +2625,7 @@ function checkedMultiplyLayoutSize(
 }
 
 function checkedRoundUp(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     alignment: number,
     value: number,
     reason: string
@@ -2644,7 +2644,7 @@ function checkedRoundUp(
 }
 
 function requireSafeLayoutSize(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     result: number,
     actual: Record<string, unknown>
 ): number {

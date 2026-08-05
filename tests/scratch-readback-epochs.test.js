@@ -2,7 +2,7 @@ import { expect } from 'chai'
 import {
     ReadbackOperation,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     layoutCodec,
 } from 'geoscratch'
 import { createFakeGpu, replaceResourceAllocationForTest } from './scratch-test-utils.js'
@@ -16,7 +16,7 @@ const GPU_TEXTURE_USAGE_COPY_DST = 0x2
 async function createRuntimeFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
 
     return { ...fake, runtime }
 }

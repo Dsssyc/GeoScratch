@@ -1,7 +1,7 @@
 import os from 'node:os'
 import process from 'node:process'
 import { performance } from 'node:perf_hooks'
-import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
+import { GPURuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
 import { diagnosticsControllerFor } from '../../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
 import { runtimePipelineCount } from '../../packages/geoscratch/dist/scratch/gpu/pipeline-ownership.js'
 import { createFakeGpu, triangleWgsl } from '../scratch-test-utils.js'
@@ -97,7 +97,7 @@ async function benchmarkProfile(definition) {
                 ? populatedMessages
                 : [],
         })
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu: fake.gpu,
             ...(diagnosticsOptions(definition.recorderKind) !== undefined
                 ? { diagnostics: diagnosticsOptions(definition.recorderKind) }
@@ -254,7 +254,7 @@ function diagnosticsOptions(recorderKind) {
 async function benchmarkLongRun(count) {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         gpu: fake.gpu,
         diagnostics: {
             operationCapacity: 64,

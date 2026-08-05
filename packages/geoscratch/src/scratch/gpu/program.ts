@@ -18,16 +18,16 @@ import {
 import { isShaderModule } from './shader-module.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { BindVisibility } from './binding.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 import type {
     LayoutArtifact,
     LayoutBufferViewContract,
     LayoutUsageCompatibilityFact,
 } from './layout-codec.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 import type {
-    ScratchRuntimeAuthorityObservation,
-    ScratchRuntimeAuthorityStamp,
+    GPURuntimeAuthorityObservation,
+    GPURuntimeAuthorityStamp,
 } from './runtime-authority.js'
 import type { ShaderModule } from './shader-module.js'
 
@@ -65,7 +65,7 @@ export type ProgramDescriptor = Readonly<{
 }>
 
 type ProgramState = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     isDisposed: boolean
     lifecycleEpoch: number
 }
@@ -89,20 +89,20 @@ type ProgramPipelineFactsSnapshot = Readonly<{
 export type ProgramPipelineAuthorityStamp = Readonly<{
     program: Program
     lifecycleEpoch: number
-    runtimeAuthority: ScratchRuntimeAuthorityStamp
+    runtimeAuthority: GPURuntimeAuthorityStamp
 }>
 
 export type ProgramPipelineAuthorityObservation = Readonly<{
     isProgramCurrent: boolean
     isProgramDisposed: boolean
     programLifecycleEpoch: number
-    runtime: ScratchRuntimeAuthorityObservation
+    runtime: GPURuntimeAuthorityObservation
 }>
 
 const programStates = new WeakMap<Program, ProgramState>()
 
 export interface Program {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly vertex?: ProgramStage
@@ -117,7 +117,7 @@ export interface Program {
 
 export class Program {
 
-    constructor(runtime: ScratchRuntime, descriptor: ProgramDescriptor) {
+    constructor(runtime: GPURuntime, descriptor: ProgramDescriptor) {
 
         const runtimeAuthority = captureScratchRuntimeAuthority(runtime)
         const id = `scratch-program-${UUID()}`
@@ -159,12 +159,12 @@ export class Program {
         return programStateFor(this).isDisposed
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return programAuthoritySubject(this)
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         assertProgramRuntimeAuthority(this, runtime)
     }
@@ -192,7 +192,7 @@ export function isProgram(value: unknown): value is Program {
 
 export function snapshotProgramPipelineFacts(
     program: Program,
-    runtime: ScratchRuntime
+    runtime: GPURuntime
 ): ProgramPipelineFactsSnapshot {
 
     const authority = captureProgramPipelineAuthority(program, runtime)
@@ -258,7 +258,7 @@ export function observeProgramPipelineAuthority(
     })
 }
 
-export function programAuthoritySubject(program: Program): DiagnosticSubject {
+export function programAuthoritySubject(program: Program): ScratchDiagnosticSubject {
 
     return programSubjectFrom(program.id, program.label)
 }
@@ -267,9 +267,9 @@ export function programLayoutRequirementSubject(
     requirement: Pick<ProgramBufferLayoutRequirement, 'group' | 'binding'> & {
         name?: unknown
     }
-): DiagnosticSubject {
+): ScratchDiagnosticSubject {
 
-    const subject: DiagnosticSubject = {
+    const subject: GPUDiagnosticSubjectDraft = {
         kind: 'ShaderBinding',
         group: requirement.group,
         binding: requirement.binding,
@@ -335,8 +335,8 @@ export function programLayoutRequirementRequiredBindingSize(
 }
 
 function normalizeProgramDescriptor(
-    runtime: ScratchRuntime,
-    subject: DiagnosticSubject,
+    runtime: GPURuntime,
+    subject: ScratchDiagnosticSubject,
     descriptor: unknown
 ): ProgramPipelineFacts & Readonly<{ label?: string }> {
 
@@ -424,8 +424,8 @@ function normalizeProgramDescriptor(
 }
 
 function normalizeProgramStage(
-    runtime: ScratchRuntime,
-    subject: DiagnosticSubject,
+    runtime: GPURuntime,
+    subject: ScratchDiagnosticSubject,
     stageName: 'vertex' | 'fragment' | 'compute',
     value: unknown
 ): ProgramStage | undefined {
@@ -480,7 +480,7 @@ function normalizeProgramStage(
 }
 
 function normalizeStageConstants(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     stage: string,
     value: unknown
 ): Readonly<Record<string, GPUPipelineConstantValue>> | undefined {
@@ -518,7 +518,7 @@ function snapshotProgramStage(stage: ProgramStage): ProgramStage {
 }
 
 function normalizeStringIterable<T extends string>(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     field: string,
     value: unknown
 ): T[] {
@@ -547,7 +547,7 @@ function normalizeStringIterable<T extends string>(
 }
 
 function normalizeRequiredLimits(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     value: unknown
 ): Readonly<Record<string, GPUSize64 | undefined>> {
 
@@ -573,7 +573,7 @@ function normalizeRequiredLimits(
 }
 
 function normalizeLayoutRequirements(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     value: unknown
 ): readonly ProgramBufferLayoutRequirement[] {
 
@@ -601,7 +601,7 @@ function normalizeLayoutRequirements(
 }
 
 function normalizeLayoutRequirement(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     requirement: unknown
 ): ProgramBufferLayoutRequirement {
 
@@ -701,7 +701,7 @@ function normalizeLayoutRequirement(
 }
 
 function normalizeBufferViewRequirements(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     requirement: Record<string, unknown>,
     layout: LayoutArtifact,
     type: ProgramBufferLayoutRequirement['type'],
@@ -808,7 +808,7 @@ function uniqueStrings<T extends string>(values: readonly T[]): T[] {
 }
 
 function normalizeVisibility(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     requirement: Record<string, unknown>,
     value: unknown
 ): readonly BindVisibility[] | undefined {
@@ -849,7 +849,7 @@ function collectSourcePartDependencies(
 
 function validateRequiredFeatures(
     program: Program,
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     requiredFeatures: readonly GPUFeatureName[]
 ): void {
 
@@ -891,7 +891,7 @@ function validateRequiredFeatureDependencies(
 
 function validateRequiredLimits(
     program: Program,
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     requiredLimits: Readonly<Record<string, GPUSize64 | undefined>>
 ): void {
 
@@ -934,7 +934,7 @@ function validateRequiredLimits(
 
 function validateRequiredLanguageFeatures(
     program: Program,
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     features: readonly string[]
 ): void {
 
@@ -955,7 +955,7 @@ function validateRequiredLanguageFeatures(
 
 function captureProgramPipelineAuthority(
     program: Program,
-    runtime: ScratchRuntime
+    runtime: GPURuntime
 ): ProgramPipelineAuthorityStamp {
 
     assertProgramRuntimeAuthority(program, runtime)
@@ -967,7 +967,7 @@ function captureProgramPipelineAuthority(
     })
 }
 
-function assertProgramRuntimeAuthority(program: Program, runtime: ScratchRuntime): void {
+function assertProgramRuntimeAuthority(program: Program, runtime: GPURuntime): void {
 
     const state = programStateFor(program)
     assertProgramUsableAuthority(program)
@@ -980,8 +980,8 @@ function assertProgramRuntimeAuthority(program: Program, runtime: ScratchRuntime
         related: [
             scratchRuntimeAuthoritySubject(state.runtime),
             relatedRuntimeSubject(runtime),
-        ].filter((value): value is DiagnosticSubject => value !== undefined),
-        message: 'Program belongs to a different ScratchRuntime.',
+        ].filter((value): value is ScratchDiagnosticSubject => value !== undefined),
+        message: 'Program belongs to a different GPURuntime.',
         expected: { runtimeId: state.runtime.id },
         actual: { runtimeId: runtime?.id },
     })
@@ -1006,7 +1006,7 @@ function programStateFor(program: Program): ProgramState {
     return state
 }
 
-function programSubjectForValidation(program: Program): DiagnosticSubject {
+function programSubjectForValidation(program: Program): ScratchDiagnosticSubject {
 
     try {
         return program.subject
@@ -1016,7 +1016,7 @@ function programSubjectForValidation(program: Program): DiagnosticSubject {
             label?: unknown
             subject?: unknown
         }
-        if (isRecord(candidate.subject)) return candidate.subject as DiagnosticSubject
+        if (isRecord(candidate.subject)) return candidate.subject as ScratchDiagnosticSubject
         return programSubjectFrom(
             typeof candidate.id === 'string' ? candidate.id : 'scratch-program-pending',
             typeof candidate.label === 'string' ? candidate.label : undefined
@@ -1024,7 +1024,7 @@ function programSubjectForValidation(program: Program): DiagnosticSubject {
     }
 }
 
-function programSubjectFrom(id: string, label?: unknown): DiagnosticSubject {
+function programSubjectFrom(id: string, label?: unknown): ScratchDiagnosticSubject {
 
     return {
         kind: 'Program',
@@ -1033,7 +1033,7 @@ function programSubjectFrom(id: string, label?: unknown): DiagnosticSubject {
     }
 }
 
-function relatedRuntimeSubject(runtime: ScratchRuntime | undefined): DiagnosticSubject | undefined {
+function relatedRuntimeSubject(runtime: GPURuntime | undefined): ScratchDiagnosticSubject | undefined {
 
     if (runtime === undefined || runtime === null) return undefined
     try {
@@ -1044,7 +1044,7 @@ function relatedRuntimeSubject(runtime: ScratchRuntime | undefined): DiagnosticS
 }
 
 function throwProgramDescriptorInvalid(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     field: string,
     actual: unknown,
     reason?: string
@@ -1066,7 +1066,7 @@ function throwProgramDescriptorInvalid(
 }
 
 function throwLayoutRequirementDiagnostic(
-    programSubject: DiagnosticSubject,
+    programSubject: ScratchDiagnosticSubject,
     requirement: Record<string, unknown>,
     details: { expected: unknown, actual: unknown }
 ): never {

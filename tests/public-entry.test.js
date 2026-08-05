@@ -1,6 +1,7 @@
 import { expect } from 'chai'
 import * as scr from 'geoscratch'
 import * as scratchCompat from 'geoscratch/scratch'
+import * as scratchInternal from '../packages/geoscratch/dist/scratch/index.js'
 
 describe('public entrypoints', () => {
 
@@ -12,8 +13,8 @@ describe('public entrypoints', () => {
         expect(scr).to.have.property('Program').that.is.a('function')
         expect(scr).to.have.property('BindLayout').that.is.a('function')
         expect(scr).to.have.property('BindSet').that.is.a('function')
-        expect(scr).to.have.property('ScratchRenderPipeline').that.is.a('function')
-        expect(scr).to.have.property('ScratchComputePipeline').that.is.a('function')
+        expect(scr).to.have.property('RenderPipeline').that.is.a('function')
+        expect(scr).to.have.property('ComputePipeline').that.is.a('function')
         expect(scr).to.have.property('BeginOcclusionQueryCommand').that.is.a('function')
         expect(scr).to.have.property('EndOcclusionQueryCommand').that.is.a('function')
         expect(scr).to.have.property('DrawCommand').that.is.a('function')
@@ -42,7 +43,7 @@ describe('public entrypoints', () => {
         expect(scratchCompat).to.have.property('Program').that.equals(scr.Program)
         expect(scratchCompat).to.have.property('BindLayout').that.equals(scr.BindLayout)
         expect(scratchCompat).to.have.property('BindSet').that.equals(scr.BindSet)
-        expect(scratchCompat).to.have.property('ScratchComputePipeline').that.equals(scr.ScratchComputePipeline)
+        expect(scratchCompat).to.have.property('ComputePipeline').that.equals(scr.ComputePipeline)
         expect(scratchCompat).to.have.property('BeginOcclusionQueryCommand').that.equals(scr.BeginOcclusionQueryCommand)
         expect(scratchCompat).to.have.property('EndOcclusionQueryCommand').that.equals(scr.EndOcclusionQueryCommand)
         expect(scratchCompat).to.have.property('DrawCommand').that.equals(scr.DrawCommand)
@@ -65,10 +66,12 @@ describe('public entrypoints', () => {
 
     it('exposes package-level entrypoints', () => {
 
-        expect(scr).to.have.property('ScratchRuntime').that.is.a('function')
-        expect(scr).to.have.property('ScratchRenderPipeline').that.is.a('function')
-        expect(scr).to.have.property('ScratchComputePipeline').that.is.a('function')
-        expect(scratchCompat).to.have.property('ScratchRuntime').that.equals(scr.ScratchRuntime)
+        expect(scr).to.have.property('GPURuntime').that.is.a('function')
+        expect(scr).to.have.property('RenderPipeline').that.is.a('function')
+        expect(scr).to.have.property('ComputePipeline').that.is.a('function')
+        expect(scr.RenderPipeline).to.equal(scratchInternal.RenderPipeline)
+        expect(scr.ComputePipeline).to.equal(scratchInternal.ComputePipeline)
+        expect(scratchCompat).to.have.property('GPURuntime').that.equals(scr.GPURuntime)
         expect(scratchCompat).to.have.property('RenderPassSpec').that.equals(scr.RenderPassSpec)
         expect(scratchCompat).to.have.property('ComputePassSpec').that.equals(scr.ComputePassSpec)
         expect(scratchCompat).to.have.property('SubmittedWork').that.equals(scr.SubmittedWork)

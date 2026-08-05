@@ -55,7 +55,7 @@ describe('scratch acknowledged readback staging', () => {
     it('acknowledges direct staging before encoder or queue use', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await createSourceWithDeferredScopes(fake, runtime)
         const readback = runtime.createReadback({ source: source.region() })
         const bufferCount = fake.calls.buffers.length
@@ -134,7 +134,7 @@ describe('scratch acknowledged readback staging', () => {
         it(`rolls back direct staging after ${failure.name}`, async () => {
 
             const fake = createFakeGpu()
-            const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+            const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
             const source = await createSource(runtime)
             const readback = runtime.createReadback({ source: source.region() })
             const nativeError = Object.assign(new Error(`fake ${failure.name}`), {
@@ -175,7 +175,7 @@ describe('scratch acknowledged readback staging', () => {
     it('reports scope settlement failure and destroys the candidate once', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await createSourceWithDeferredScopes(fake, runtime)
         const readback = runtime.createReadback({ source: source.region() })
         const materialization = readback.toBytes()
@@ -199,7 +199,7 @@ describe('scratch acknowledged readback staging', () => {
     it('fails staging budget before a native allocation or encoder effect', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({
+        const runtime = await scr.GPURuntime.create({
             gpu: fake.gpu,
             readback: { maxPendingOperations: 1, maxStagingBytes: 8 },
         })
@@ -226,7 +226,7 @@ describe('scratch acknowledged readback staging', () => {
     it('fails direct pending-operation budget before staging allocation', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({
+        const runtime = await scr.GPURuntime.create({
             gpu: fake.gpu,
             readback: { maxPendingOperations: 1, maxStagingBytes: 64 },
         })
@@ -261,7 +261,7 @@ describe('scratch acknowledged readback staging', () => {
     it('fails ordered pending-operation budget before encoder or queue effects', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({
+        const runtime = await scr.GPURuntime.create({
             gpu: fake.gpu,
             readback: { maxPendingOperations: 1, maxStagingBytes: 64 },
         })
@@ -306,7 +306,7 @@ describe('scratch acknowledged readback staging', () => {
     it('rejects ordered staging budget with source provenance before factory visibility', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({
+        const runtime = await scr.GPURuntime.create({
             gpu: fake.gpu,
             readback: { maxPendingOperations: 1, maxStagingBytes: 8 },
         })
@@ -342,7 +342,7 @@ describe('scratch acknowledged readback staging', () => {
     it('rechecks source epoch after staging acknowledgement and before copy issue', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await createSourceWithDeferredScopes(fake, runtime)
         const readback = runtime.createReadback({ source: source.region() })
         const encoderCount = fake.calls.commandEncoders.length
@@ -366,7 +366,7 @@ describe('scratch acknowledged readback staging', () => {
     it('cancels pending allocation when the source is disposed and releases every owner', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await createSourceWithDeferredScopes(fake, runtime)
         const controller = diagnosticsControllerFor(runtime)
         const readback = runtime.createReadback({ source: source.region() })
@@ -396,7 +396,7 @@ describe('scratch acknowledged readback staging', () => {
     it('submits a direct copy without waiting for broad submitted-work completion', async () => {
 
         const fake = createFakeGpu({ deferSubmittedWorkDone: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await createSource(runtime)
         const upload = runtime.createUploadCommand({
             target: (source).region(),
@@ -435,7 +435,7 @@ describe('scratch acknowledged readback staging', () => {
     it('acknowledges one ordered slot before exposure and reuses it only sequentially', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await createSourceWithDeferredScopes(fake, runtime)
         advanceResourceContentEpochForTest(source)
         const bufferCount = fake.calls.buffers.length
@@ -510,7 +510,7 @@ describe('scratch acknowledged readback staging', () => {
     it('rejects ordered allocation before command registration and submission effects', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await createSource(runtime)
         const nativeError = Object.assign(new Error('ordered staging validation'), {
             name: 'GPUValidationError',
@@ -534,7 +534,7 @@ describe('scratch acknowledged readback staging', () => {
     it('defers busy command disposal until its submitted operation releases the slot', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await createSource(runtime)
         advanceResourceContentEpochForTest(source)
         const command = await runtime.createReadbackCommand({

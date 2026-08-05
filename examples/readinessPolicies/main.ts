@@ -1,5 +1,5 @@
 import {
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import type {
     DrawCommand,
@@ -106,7 +106,7 @@ async function main() {
 
     canvas.dataset.status = 'loading'
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'readiness policies runtime',
     })
     const surface = runtime.createSurface(canvas, {
@@ -338,7 +338,7 @@ async function main() {
 }
 
 async function createSolidProgram(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     { label, bounds, color }: {
         label: string
         bounds: readonly [ number, number, number, number ]

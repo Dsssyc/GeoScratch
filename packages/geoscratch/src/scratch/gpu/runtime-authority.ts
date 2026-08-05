@@ -1,34 +1,34 @@
 import { throwGPUDiagnostic } from './diagnostics.js'
-import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
-import type { ScratchDeviceLostInfo } from './runtime-diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
+import type { GPURuntime } from './runtime.js'
+import type { GPUDeviceLostInfo } from './runtime-diagnostics.js'
 
-type ScratchRuntimeAuthorityState = {
+type GPURuntimeAuthorityState = {
     isDisposed: boolean
     isDeviceLost: boolean
     lifecycleEpoch: number
-    deviceLostInfo?: ScratchDeviceLostInfo
+    deviceLostInfo?: GPUDeviceLostInfo
 }
 
-export type ScratchRuntimeAuthorityStamp = Readonly<{
-    runtime: ScratchRuntime
+export type GPURuntimeAuthorityStamp = Readonly<{
+    runtime: GPURuntime
     lifecycleEpoch: number
 }>
 
-export type ScratchRuntimeAuthorityObservation = Readonly<{
+export type GPURuntimeAuthorityObservation = Readonly<{
     isCurrent: boolean
     isDisposed: boolean
     isDeviceLost: boolean
     lifecycleEpoch: number
-    deviceLostInfo?: ScratchDeviceLostInfo
+    deviceLostInfo?: GPUDeviceLostInfo
 }>
 
-const runtimeAuthorityStates = new WeakMap<ScratchRuntime, ScratchRuntimeAuthorityState>()
+const runtimeAuthorityStates = new WeakMap<GPURuntime, GPURuntimeAuthorityState>()
 
-export function initializeScratchRuntimeAuthority(runtime: ScratchRuntime): void {
+export function initializeScratchRuntimeAuthority(runtime: GPURuntime): void {
 
     if (runtimeAuthorityStates.has(runtime)) {
-        throw new TypeError('ScratchRuntime authority is already initialized.')
+        throw new TypeError('GPURuntime authority is already initialized.')
     }
     runtimeAuthorityStates.set(runtime, {
         isDisposed: false,
@@ -37,24 +37,24 @@ export function initializeScratchRuntimeAuthority(runtime: ScratchRuntime): void
     })
 }
 
-export function scratchRuntimeIsDisposed(runtime: ScratchRuntime): boolean {
+export function scratchRuntimeIsDisposed(runtime: GPURuntime): boolean {
 
     return runtimeAuthorityStateFor(runtime).isDisposed
 }
 
-export function scratchRuntimeIsDeviceLost(runtime: ScratchRuntime): boolean {
+export function scratchRuntimeIsDeviceLost(runtime: GPURuntime): boolean {
 
     return runtimeAuthorityStateFor(runtime).isDeviceLost
 }
 
 export function scratchRuntimeDeviceLostInfo(
-    runtime: ScratchRuntime
-): ScratchDeviceLostInfo | undefined {
+    runtime: GPURuntime
+): GPUDeviceLostInfo | undefined {
 
     return runtimeAuthorityStateFor(runtime).deviceLostInfo
 }
 
-export function disposeScratchRuntimeAuthority(runtime: ScratchRuntime): boolean {
+export function disposeScratchRuntimeAuthority(runtime: GPURuntime): boolean {
 
     const state = runtimeAuthorityStateFor(runtime)
     if (state.isDisposed) return false
@@ -64,8 +64,8 @@ export function disposeScratchRuntimeAuthority(runtime: ScratchRuntime): boolean
 }
 
 export function loseScratchRuntimeAuthority(
-    runtime: ScratchRuntime,
-    info: ScratchDeviceLostInfo
+    runtime: GPURuntime,
+    info: GPUDeviceLostInfo
 ): boolean {
 
     const state = runtimeAuthorityStateFor(runtime)
@@ -76,7 +76,7 @@ export function loseScratchRuntimeAuthority(
     return true
 }
 
-export function assertScratchRuntimeActive(runtime: ScratchRuntime): void {
+export function assertScratchRuntimeActive(runtime: GPURuntime): void {
 
     const state = runtimeAuthorityStateFor(runtime)
     if (state.isDisposed) {
@@ -85,8 +85,8 @@ export function assertScratchRuntimeActive(runtime: ScratchRuntime): void {
             severity: 'error',
             phase: 'runtime',
             subject: scratchRuntimeAuthoritySubject(runtime),
-            message: 'ScratchRuntime has been disposed.',
-            hints: [ 'Create a new ScratchRuntime before creating resources or surfaces.' ],
+            message: 'GPURuntime has been disposed.',
+            hints: [ 'Create a new GPURuntime before creating resources or surfaces.' ],
         })
     }
 
@@ -96,7 +96,7 @@ export function assertScratchRuntimeActive(runtime: ScratchRuntime): void {
             severity: 'error',
             phase: 'runtime',
             subject: scratchRuntimeAuthoritySubject(runtime),
-            message: 'ScratchRuntime device has been lost.',
+            message: 'GPURuntime device has been lost.',
             actual: state.deviceLostInfo,
             hints: [ 'Create a replacement runtime or wait for a future rehydration API.' ],
         })
@@ -104,8 +104,8 @@ export function assertScratchRuntimeActive(runtime: ScratchRuntime): void {
 }
 
 export function captureScratchRuntimeAuthority(
-    runtime: ScratchRuntime
-): ScratchRuntimeAuthorityStamp {
+    runtime: GPURuntime
+): GPURuntimeAuthorityStamp {
 
     assertScratchRuntimeActive(runtime)
     return Object.freeze({
@@ -114,7 +114,7 @@ export function captureScratchRuntimeAuthority(
     })
 }
 
-export function assertScratchRuntimeAuthority(stamp: ScratchRuntimeAuthorityStamp): void {
+export function assertScratchRuntimeAuthority(stamp: GPURuntimeAuthorityStamp): void {
 
     const observation = observeScratchRuntimeAuthority(stamp)
     assertScratchRuntimeActive(stamp.runtime)
@@ -125,7 +125,7 @@ export function assertScratchRuntimeAuthority(stamp: ScratchRuntimeAuthorityStam
         severity: 'error',
         phase: 'runtime',
         subject: scratchRuntimeAuthoritySubject(stamp.runtime),
-        message: 'ScratchRuntime lifecycle changed after operation preparation.',
+        message: 'GPURuntime lifecycle changed after operation preparation.',
         expected: { lifecycleEpoch: stamp.lifecycleEpoch },
         actual: { lifecycleEpoch: observation.lifecycleEpoch },
         hints: [ 'Prepare a new operation against the current runtime lifecycle.' ],
@@ -133,8 +133,8 @@ export function assertScratchRuntimeAuthority(stamp: ScratchRuntimeAuthorityStam
 }
 
 export function observeScratchRuntimeAuthority(
-    stamp: ScratchRuntimeAuthorityStamp
-): ScratchRuntimeAuthorityObservation {
+    stamp: GPURuntimeAuthorityStamp
+): GPURuntimeAuthorityObservation {
 
     const state = runtimeAuthorityStateFor(stamp.runtime)
     return Object.freeze({
@@ -146,19 +146,19 @@ export function observeScratchRuntimeAuthority(
     })
 }
 
-export function scratchRuntimeAuthoritySubject(runtime: ScratchRuntime): DiagnosticSubject {
+export function scratchRuntimeAuthoritySubject(runtime: GPURuntime): ScratchDiagnosticSubject {
 
-    const subject: DiagnosticSubject = {
-        kind: 'ScratchRuntime',
+    const subject: GPUDiagnosticSubjectDraft = {
+        kind: 'GPURuntime',
         id: runtime.id,
     }
     if (runtime.label !== undefined) subject.label = runtime.label
     return subject
 }
 
-function runtimeAuthorityStateFor(runtime: ScratchRuntime): ScratchRuntimeAuthorityState {
+function runtimeAuthorityStateFor(runtime: GPURuntime): GPURuntimeAuthorityState {
 
     const state = runtimeAuthorityStates.get(runtime)
-    if (state === undefined) throw new TypeError('ScratchRuntime authority is unavailable.')
+    if (state === undefined) throw new TypeError('GPURuntime authority is unavailable.')
     return state
 }

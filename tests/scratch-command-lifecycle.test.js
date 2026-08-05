@@ -11,7 +11,7 @@ import {
     ReadbackCommand,
     ResolveQuerySetCommand,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     TextureUploadCommand,
     UploadCommand,
 } from 'geoscratch'
@@ -27,7 +27,7 @@ describe('scratch executable command lifecycle', () => {
     it('keeps construction facts and disposal immutable for every command family', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -112,7 +112,7 @@ describe('scratch executable command lifecycle', () => {
     it('shadows absent normalized facts against inherited command mutation', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -217,7 +217,7 @@ describe('scratch executable command lifecycle', () => {
 async function createDrawDispatchCommands() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const renderProgram = await createTestProgram(runtime, {
         sourceParts: [ triangleWgsl ],
         vertex: 'vsMain',

@@ -2,7 +2,7 @@ import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import { setResourceContentState } from '../packages/geoscratch/dist/scratch/gpu/resource.js'
 import {
@@ -85,7 +85,7 @@ async function expectScratchDiagnostic(action, expected) {
 async function createRuntime(options = {}) {
 
     const fake = createFakeGpu(options)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     return { ...fake, runtime }
 }
 

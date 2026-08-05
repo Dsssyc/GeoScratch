@@ -2,7 +2,7 @@ import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     advanceQuerySlotContentEpochForTest,
@@ -23,7 +23,7 @@ const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 async function createRuntimeFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
 
     return { ...fake, runtime }
 }

@@ -2,16 +2,16 @@ import { throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { destroySupportingObjectCandidate } from './supporting-object-creation.js'
-import type { DiagnosticPhase, DiagnosticSubject } from './diagnostics.js'
+import type { GPUDiagnosticPhase, ScratchDiagnosticSubject } from './diagnostics.js'
 import type {
-    GpuNativeErrorCategory,
-    ScratchGpuIncidentOutcome,
-    ScratchNativeGpuErrorFacts,
-    ScratchSupportingObjectFailureStage,
+    GPUNativeErrorCategory,
+    GPUIncidentOutcome,
+    GPUNativeErrorFacts,
+    GPUSupportingObjectFailureStage,
 } from './gpu-operation.js'
 import type { ShaderModuleCompilationReport } from './pipeline-compilation.js'
-import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPUPendingOperation } from './runtime-diagnostics.js'
+import type { GPURuntime } from './runtime.js'
 import type {
     SupportingObjectCreationOutcome,
     SupportingObjectFailureKind,
@@ -26,17 +26,17 @@ export type SupportingObjectDiagnosticCodes = Readonly<{
 }>
 
 export function throwSupportingObjectCreationFailure<T>(
-    runtime: ScratchRuntime,
-    operation: ScratchPendingGpuOperation,
+    runtime: GPURuntime,
+    operation: GPUPendingOperation,
     outcome: SupportingObjectCreationOutcome<T>,
     codes: SupportingObjectDiagnosticCodes,
     input: Readonly<{
         operationName: string
-        phase: DiagnosticPhase
-        subject: DiagnosticSubject
-        related?: readonly DiagnosticSubject[]
-        failureStage?: ScratchSupportingObjectFailureStage
-        serializeNativeError?: (error: unknown) => ScratchNativeGpuErrorFacts
+        phase: GPUDiagnosticPhase
+        subject: ScratchDiagnosticSubject
+        related?: readonly ScratchDiagnosticSubject[]
+        failureStage?: GPUSupportingObjectFailureStage
+        serializeNativeError?: (error: unknown) => GPUNativeErrorFacts
         shaderModuleCompilationReport?: ShaderModuleCompilationReport
     }>
 ): never {
@@ -131,7 +131,7 @@ export function throwSupportingObjectCreationFailure<T>(
             code: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             severity: 'error',
             phase: 'runtime',
-            subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+            subject: { kind: 'GPUOperation', id: operation.id, operationKind: operation.kind },
             related: [
                 runtime.subject,
                 input.subject,
@@ -149,9 +149,9 @@ export function throwSupportingObjectCreationFailure<T>(
             code: 'SCRATCH_RUNTIME_DISPOSED',
             severity: 'error',
             phase: 'runtime',
-            subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+            subject: { kind: 'GPUOperation', id: operation.id, operationKind: operation.kind },
             related: [ runtime.subject, input.subject, ...(input.related ?? []), incident.subject ],
-            message: `ScratchRuntime was disposed while ${input.operationName} was pending.`,
+            message: `GPURuntime was disposed while ${input.operationName} was pending.`,
             actual: { operationId: operation.id, failures: incidentOutcomes },
         }, { incident })
     }
@@ -160,7 +160,7 @@ export function throwSupportingObjectCreationFailure<T>(
         code,
         severity: 'error',
         phase: input.phase,
-        subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+        subject: { kind: 'GPUOperation', id: operation.id, operationKind: operation.kind },
         related: [ runtime.subject, input.subject, ...(input.related ?? []), incident.subject ],
         message: failureMessage(primary.kind, input.operationName),
         actual: {
@@ -192,10 +192,10 @@ function selectPrimaryFailure(
 function incidentOutcome(
     failure: SupportingObjectObservedFailure,
     codes: SupportingObjectDiagnosticCodes,
-    subject: DiagnosticSubject,
-    serializeNativeError: (error: unknown) => ScratchNativeGpuErrorFacts,
-    stage?: ScratchSupportingObjectFailureStage
-): ScratchGpuIncidentOutcome {
+    subject: ScratchDiagnosticSubject,
+    serializeNativeError: (error: unknown) => GPUNativeErrorFacts,
+    stage?: GPUSupportingObjectFailureStage
+): GPUIncidentOutcome {
 
     return Object.freeze({
         stage: stage ?? failureStage(failure.kind),
@@ -208,7 +208,7 @@ function incidentOutcome(
     })
 }
 
-function failureStage(kind: SupportingObjectFailureKind): ScratchSupportingObjectFailureStage {
+function failureStage(kind: SupportingObjectFailureKind): GPUSupportingObjectFailureStage {
 
     if (kind === 'device-lost' || kind === 'runtime-disposed') return 'lifecycle-recheck'
     if (kind === 'native-exception') return 'native-issue'
@@ -229,7 +229,7 @@ function failureCode(
     return codes.nativeException
 }
 
-function failureNativeCategory(kind: SupportingObjectFailureKind): GpuNativeErrorCategory {
+function failureNativeCategory(kind: SupportingObjectFailureKind): GPUNativeErrorCategory {
 
     if (
         kind === 'validation' ||
@@ -248,7 +248,7 @@ function failureMessage(kind: SupportingObjectFailureKind, operationName: string
     if (kind === 'internal') return `${operationName} observed a native internal error.`
     if (kind === 'out-of-memory') return `${operationName} observed native out-of-memory.`
     if (kind === 'scope-failure') return `${operationName} error scopes failed to settle structurally.`
-    if (kind === 'runtime-disposed') return `ScratchRuntime was disposed while ${operationName} was pending.`
+    if (kind === 'runtime-disposed') return `GPURuntime was disposed while ${operationName} was pending.`
     if (kind === 'device-lost') return `GPU device was lost while ${operationName} was pending.`
     return `${operationName} failed with a synchronous native exception.`
 }

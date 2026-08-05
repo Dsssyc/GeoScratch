@@ -93,7 +93,7 @@ const evidence = Object.freeze([
         'Explicit adapter/device requests, immutable capability facts, queue ownership, and device-loss lifecycle.',
         [ 'packages/geoscratch/src/scratch/gpu/runtime.ts', 'packages/geoscratch/src/scratch/gpu/runtime-authority.ts' ],
         [ 'tests/scratch-runtime.test.js', 'tests/scratch-closed-brand-authority.test.js' ],
-        [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions', 'ScratchRuntimeRequestFacts' ]
+        [ 'GPURuntime', 'GPURuntimeCreateOptions', 'GPURuntimeRequestFacts' ]
     ),
     evidenceRecord(
         'webgpu-surface-presentation',
@@ -181,7 +181,7 @@ const evidence = Object.freeze([
             'tests/scratch-render-pipeline-async.test.js',
             'tests/scratch-compute-pipeline-async.test.js',
         ],
-        [ 'ScratchRenderPipeline', 'ScratchComputePipeline', 'ScratchRenderPipelineDescriptor', 'ScratchComputePipelineDescriptor' ]
+        [ 'RenderPipeline', 'ComputePipeline', 'RenderPipelineDescriptor', 'ComputePipelineDescriptor' ]
     ),
     evidenceRecord(
         'webgpu-pass-state',
@@ -291,7 +291,7 @@ const evidence = Object.freeze([
             'tests/scratch-gpu-operation-provenance.test.js',
             'tests/scratch-submission-native-observation.test.js',
         ],
-        [ 'ScratchDiagnostic', 'ScratchDiagnosticError', 'ScratchRuntimeDiagnostics' ]
+        [ 'ScratchDiagnostic', 'ScratchDiagnosticError', 'GPURuntimeDiagnostics' ]
     ),
     evidenceRecord(
         'webgpu-numeric-domains',
@@ -349,7 +349,7 @@ const evidence = Object.freeze([
         'WGSL language extensions are declared separately through Program.requiredLanguageFeatures and checked against an immutable Runtime language-feature snapshot.',
         [ 'packages/geoscratch/src/scratch/gpu/runtime.ts', 'packages/geoscratch/src/scratch/gpu/program.ts' ],
         [ 'tests/scratch-program-layout-requirements.test.js', 'tests/scratch-immediate-data.test.js' ],
-        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts', 'Program', 'ProgramDescriptor' ]
+        [ 'GPURuntime', 'GPURuntimeRequestFacts', 'Program', 'ProgramDescriptor' ]
     ),
     evidenceRecord(
         'wgsl-enable-contract',
@@ -364,7 +364,7 @@ const evidence = Object.freeze([
             'tests/scratch-program.test.js',
             'tests/scratch-webgpu-wgsl-current-coverage.test.js',
         ],
-        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts', 'Program', 'ShaderModuleSourcePart' ],
+        [ 'GPURuntime', 'GPURuntimeRequestFacts', 'Program', 'ShaderModuleSourcePart' ],
         [ 'tests/browser/scratch-wgsl-capability-matrix.mjs' ]
     ),
     evidenceRecord(
@@ -372,7 +372,7 @@ const evidence = Object.freeze([
         'The immediate_address_space language contract is coupled to explicit pipeline byte size and per-command submission snapshots.',
         [ 'packages/geoscratch/src/scratch/gpu/pipeline.ts', 'packages/geoscratch/src/scratch/gpu/command.ts' ],
         [ 'tests/scratch-immediate-data.test.js' ],
-        [ 'Program', 'CommandImmediateData', 'ScratchRenderPipelineDescriptor' ]
+        [ 'Program', 'CommandImmediateData', 'RenderPipelineDescriptor' ]
     ),
 ])
 
@@ -380,8 +380,8 @@ const evidenceById = new Map(evidence.map(record => [ record.id, record ]))
 
 const entryProofProfiles = Object.freeze({
     'runtime-adapter': proofProfile(
-        'ScratchRuntime performs explicit adapter and device acquisition.',
-        [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions' ],
+        'GPURuntime performs explicit adapter and device acquisition.',
+        [ 'GPURuntime', 'GPURuntimeCreateOptions' ],
         [
             operationProof(
                 'requestAdapter',
@@ -394,8 +394,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'runtime-request-adapter': proofProfile(
-        'ScratchRuntimeCreateOptions preserves explicit adapter acquisition inputs.',
-        [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions' ],
+        'GPURuntimeCreateOptions preserves explicit adapter acquisition inputs.',
+        [ 'GPURuntime', 'GPURuntimeCreateOptions' ],
         [
             operationProof(
                 'requestAdapter',
@@ -404,8 +404,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'runtime-request-device': proofProfile(
-        'ScratchRuntimeCreateOptions preserves explicit device acquisition inputs.',
-        [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions' ],
+        'GPURuntimeCreateOptions preserves explicit device acquisition inputs.',
+        [ 'GPURuntime', 'GPURuntimeCreateOptions' ],
         [
             operationProof(
                 'requestDevice',
@@ -414,8 +414,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'runtime-capabilities': proofProfile(
-        'ScratchRuntime exposes immutable adapter and device capability facts.',
-        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts' ],
+        'GPURuntime exposes immutable adapter and device capability facts.',
+        [ 'GPURuntime', 'GPURuntimeRequestFacts' ],
         [
             operationProof(
                 'adapterFeatures',
@@ -428,8 +428,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'runtime-adapter-info': proofProfile(
-        'ScratchRuntime exposes an immutable adapter information snapshot.',
-        [ 'ScratchAdapterInfoSnapshot', 'ScratchRuntime' ],
+        'GPURuntime exposes an immutable adapter information snapshot.',
+        [ 'GPUAdapterInfoSnapshot', 'GPURuntime' ],
         [
             operationProof(
                 'adapterInfo',
@@ -438,8 +438,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'runtime-wgsl-features': proofProfile(
-        'ScratchRuntime exposes immutable WGSL language-feature facts.',
-        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts' ],
+        'GPURuntime exposes immutable WGSL language-feature facts.',
+        [ 'GPURuntime', 'GPURuntimeRequestFacts' ],
         [
             operationProof(
                 'wgslLanguageFeatures',
@@ -448,8 +448,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'runtime-supported-limits': proofProfile(
-        'ScratchRuntime exposes immutable adapter and device limit facts.',
-        [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts' ],
+        'GPURuntime exposes immutable adapter and device limit facts.',
+        [ 'GPURuntime', 'GPURuntimeRequestFacts' ],
         [
             operationProof(
                 'adapter.limits',
@@ -462,8 +462,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'runtime-device-loss': proofProfile(
-        'ScratchRuntime owns the device-loss lifecycle and its structured facts.',
-        [ 'ScratchDeviceLostInfo', 'ScratchRuntime' ],
+        'GPURuntime owns the device-loss lifecycle and its structured facts.',
+        [ 'GPUDeviceLostInfo', 'GPURuntime' ],
         [
             operationProof(
                 'device.lost',
@@ -472,8 +472,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'runtime-device-lifecycle': proofProfile(
-        'ScratchRuntime owns explicit native device disposal and device-loss observation.',
-        [ 'ScratchDeviceLostInfo', 'ScratchRuntime' ],
+        'GPURuntime owns explicit native device disposal and device-loss observation.',
+        [ 'GPUDeviceLostInfo', 'GPURuntime' ],
         [
             operationProof(
                 'device.destroy',
@@ -658,10 +658,10 @@ const entryProofProfiles = Object.freeze({
     'pipeline-state': proofProfile(
         'Scratch render and compute pipelines preserve explicit stable pipeline state.',
         [
-            'ScratchComputePipeline',
-            'ScratchComputePipelineDescriptor',
-            'ScratchRenderPipeline',
-            'ScratchRenderPipelineDescriptor',
+            'ComputePipeline',
+            'ComputePipelineDescriptor',
+            'RenderPipeline',
+            'RenderPipelineDescriptor',
         ],
         [
             operationProof(
@@ -677,8 +677,8 @@ const entryProofProfiles = Object.freeze({
     'pipeline-layout': proofProfile(
         'Scratch pipeline descriptors preserve explicit native pipeline layout construction.',
         [
-            'ScratchComputePipelineDescriptor',
-            'ScratchRenderPipelineDescriptor',
+            'ComputePipelineDescriptor',
+            'RenderPipelineDescriptor',
         ],
         [
             operationProof(
@@ -688,8 +688,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'pipeline-render': proofProfile(
-        'ScratchRenderPipeline preserves render pipeline state through acknowledged async creation.',
-        [ 'ScratchRenderPipeline', 'ScratchRenderPipelineDescriptor' ],
+        'RenderPipeline preserves render pipeline state through acknowledged async creation.',
+        [ 'RenderPipeline', 'RenderPipelineDescriptor' ],
         [
             operationProof(
                 'createRenderPipelineAsync',
@@ -698,8 +698,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'pipeline-compute': proofProfile(
-        'ScratchComputePipeline preserves compute pipeline state through acknowledged async creation.',
-        [ 'ScratchComputePipeline', 'ScratchComputePipelineDescriptor' ],
+        'ComputePipeline preserves compute pipeline state through acknowledged async creation.',
+        [ 'ComputePipeline', 'ComputePipelineDescriptor' ],
         [
             operationProof(
                 'createComputePipelineAsync',
@@ -712,8 +712,8 @@ const entryProofProfiles = Object.freeze({
         [
             'SamplerResource',
             'SamplerResourceDescriptor',
-            'ScratchRenderPipeline',
-            'ScratchRenderPipelineDescriptor',
+            'RenderPipeline',
+            'RenderPipelineDescriptor',
         ],
         [
             operationProof(
@@ -727,8 +727,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'pipeline-vertex-buffer-layout': proofProfile(
-        'ScratchRenderPipelineDescriptor preserves native vertex buffer layouts.',
-        [ 'ScratchRenderPipeline', 'ScratchRenderPipelineDescriptor' ],
+        'RenderPipelineDescriptor preserves native vertex buffer layouts.',
+        [ 'RenderPipeline', 'RenderPipelineDescriptor' ],
         [
             operationProof(
                 'createRenderPipelineAsync',
@@ -964,8 +964,8 @@ const entryProofProfiles = Object.freeze({
         ]
     ),
     'render-bundle-create': proofProfile(
-        'ScratchRuntime and RenderBundle preserve native render bundle construction.',
-        [ 'RenderBundle', 'RenderBundleDescriptor', 'ScratchRuntime' ],
+        'GPURuntime and RenderBundle preserve native render bundle construction.',
+        [ 'RenderBundle', 'RenderBundleDescriptor', 'GPURuntime' ],
         [
             operationProof(
                 'createRenderBundleEncoder',
@@ -1027,7 +1027,7 @@ const entryProofProfiles = Object.freeze({
     ),
     diagnostics: proofProfile(
         'ScratchDiagnostic preserves validation, internal, OOM, uncaptured, and device-loss evidence.',
-        [ 'ScratchDiagnostic', 'ScratchDiagnosticError', 'ScratchRuntimeDiagnostics' ],
+        [ 'ScratchDiagnostic', 'ScratchDiagnosticError', 'GPURuntimeDiagnostics' ],
         [
             operationProof(
                 'pushErrorScope',
@@ -1041,7 +1041,7 @@ const entryProofProfiles = Object.freeze({
     ),
     'diagnostic-error-facts': proofProfile(
         'ScratchDiagnostic preserves structured native GPU error facts.',
-        [ 'ScratchDiagnostic', 'ScratchDiagnosticError', 'ScratchRuntimeDiagnostics' ],
+        [ 'ScratchDiagnostic', 'ScratchDiagnosticError', 'GPURuntimeDiagnostics' ],
         [
             operationProof(
                 'serializeNativeGpuError',
@@ -1093,7 +1093,7 @@ const entryProofProfiles = Object.freeze({
     ),
     'wgsl-pipeline-interface': proofProfile(
         'Program and Scratch pipelines preserve WGSL entry-point and pipeline interface semantics.',
-        [ 'Program', 'ScratchComputePipeline', 'ScratchRenderPipeline' ],
+        [ 'Program', 'ComputePipeline', 'RenderPipeline' ],
         [
             operationProof(
                 'createRenderPipelineAsync',
@@ -1145,7 +1145,7 @@ const entryProofProfiles = Object.freeze({
     ),
     'wgsl-capability': proofProfile(
         'Program declares WGSL language requirements against immutable Runtime capabilities.',
-        [ 'Program', 'ScratchRuntime', 'ScratchRuntimeRequestFacts' ],
+        [ 'Program', 'GPURuntime', 'GPURuntimeRequestFacts' ],
         [
             operationProof(
                 'createShaderModule',
@@ -1159,7 +1159,7 @@ const entryProofProfiles = Object.freeze({
     ),
     'wgsl-enable': proofProfile(
         'Caller-authored WGSL enable directives retain explicit Program and Runtime feature contracts.',
-        [ 'Program', 'ScratchRuntime', 'ShaderModuleSourcePart' ],
+        [ 'Program', 'GPURuntime', 'ShaderModuleSourcePart' ],
         [
             operationProof(
                 'requestDevice',
@@ -1173,7 +1173,7 @@ const entryProofProfiles = Object.freeze({
     ),
     'wgsl-immediate': proofProfile(
         'Program, Pipeline, and CommandImmediateData preserve immediate-address-space semantics.',
-        [ 'CommandImmediateData', 'Program', 'ScratchRenderPipelineDescriptor' ],
+        [ 'CommandImmediateData', 'Program', 'RenderPipelineDescriptor' ],
         [
             operationProof(
                 'setImmediates',
@@ -2107,7 +2107,7 @@ const webGpuExactRules = Object.freeze({
         {
             publicSymbols: [
                 'DispatchCommand',
-                'ScratchComputePipeline',
+                'ComputePipeline',
             ],
         }
     ),
@@ -2429,8 +2429,8 @@ const webGpuExactRules = Object.freeze({
         {
             publicSymbols: [
                 'BindLayout',
-                'ScratchComputePipeline',
-                'ScratchRenderPipeline',
+                'ComputePipeline',
+                'RenderPipeline',
             ],
         }
     ),
@@ -2526,7 +2526,7 @@ const webGpuExactRules = Object.freeze({
         {
             publicSymbols: [
                 'DrawCommand',
-                'ScratchRenderPipeline',
+                'RenderPipeline',
             ],
         }
     ),
@@ -3300,7 +3300,7 @@ function webGpuCoverage(entry) {
                 'webgpu:include:navigator-integration',
                 'webidl-non-capability',
                 'not-applicable',
-                'Navigator and WorkerNavigator mixin composition is host DOM integration; ScratchRuntime owns adapter acquisition without exposing DOM composition as a workload capability.',
+                'Navigator and WorkerNavigator mixin composition is host DOM integration; GPURuntime owns adapter acquisition without exposing DOM composition as a workload capability.',
                 'runtime-adapter'
             )
         }

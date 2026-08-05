@@ -2,7 +2,7 @@ import { expect } from 'chai'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import path from 'node:path'
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import {
     VirtualRasterResidency,
     createVirtualRasterGpuState,
@@ -504,7 +504,7 @@ describe('DEM Layer clean cut', () => {
     it('observes issued native work before surfacing a provenance failure', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const fakeCanvas = createFakeCanvas()
         const surface = runtime.createSurface(fakeCanvas.canvas, {
             label: 'DEM provenance-failure surface',
@@ -548,7 +548,7 @@ describe('DEM Layer clean cut', () => {
     it('keeps one persistent DEM graph across camera changes and resize', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const fakeCanvas = createFakeCanvas()
         const surface = runtime.createSurface(fakeCanvas.canvas, {
             label: 'DEM test surface',

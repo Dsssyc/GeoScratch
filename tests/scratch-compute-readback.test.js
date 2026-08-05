@@ -4,9 +4,9 @@ import {
     ComputePassSpec,
     DispatchCommand,
     ReadbackOperation,
-    ScratchComputePipeline,
+    ComputePipeline,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
@@ -36,7 +36,7 @@ fn csMain(@builtin(global_invocation_id) id: vec3u) {
 async function createComputeFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const input = await runtime.createBuffer({
         label: 'compute input',
         size: 16,
@@ -188,7 +188,7 @@ describe('scratch ComputePipeline, DispatchCommand, and ReadbackOperation', () =
 
         const fixture = await createComputeFixture()
 
-        expect(fixture.pipeline).to.be.instanceOf(ScratchComputePipeline)
+        expect(fixture.pipeline).to.be.instanceOf(ComputePipeline)
         expect(fixture.pipeline.pipelineKind).to.equal('compute')
         expect(fixture.pipeline.compute.entryPoint).to.equal('csMain')
         expect(fixture.calls.computePipelines[0].descriptor).to.deep.include({

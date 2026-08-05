@@ -7,7 +7,7 @@ import {
     ReadbackOperation,
     ResolveQuerySetCommand,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     advanceQuerySlotContentEpochForTest,
@@ -39,7 +39,7 @@ function currentQuerySlotContentEpochs(querySet) {
 async function createQueryFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const querySet = await runtime.createQuerySet({
         label: 'timing queries',
         type: 'timestamp',
@@ -92,7 +92,7 @@ async function createQueryFixture() {
 async function createRenderTimestampFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const querySet = await runtime.createQuerySet({
         label: 'render timestamps',
         type: 'timestamp',
@@ -555,7 +555,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
         ]) {
             for (const validation of [ 'throw', 'warn', 'off' ]) {
                 const fake = createFakeGpu()
-                const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+                const runtime = await GPURuntime.create({ gpu: fake.gpu })
                 const querySet = await runtime.createQuerySet({
                     label: `${scenario} timing queries ${validation}`,
                     type: 'timestamp',
@@ -659,7 +659,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
 
         const missingFeature = createFakeGpu()
         missingFeature.device.features.delete('timestamp-query')
-        const runtimeWithoutTimestamp = await ScratchRuntime.create({ gpu: missingFeature.gpu })
+        const runtimeWithoutTimestamp = await GPURuntime.create({ gpu: missingFeature.gpu })
 
         await expectScratchDiagnostic(() => runtimeWithoutTimestamp.createQuerySet({
             type: 'timestamp',
@@ -672,7 +672,7 @@ describe('scratch QuerySetResource and ResolveQuerySetCommand', () => {
 
         const missingCreateQuerySet = createFakeGpu()
         delete missingCreateQuerySet.device.createQuerySet
-        const runtimeWithoutQuerySet = await ScratchRuntime.create({ gpu: missingCreateQuerySet.gpu })
+        const runtimeWithoutQuerySet = await GPURuntime.create({ gpu: missingCreateQuerySet.gpu })
 
         await expectScratchDiagnostic(() => runtimeWithoutQuerySet.createQuerySet({
             type: 'occlusion',

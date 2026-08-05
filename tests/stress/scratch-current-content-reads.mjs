@@ -1,7 +1,7 @@
 import os from 'node:os'
 import process from 'node:process'
 import { performance } from 'node:perf_hooks'
-import { ScratchRuntime } from '../../packages/geoscratch/dist/index.js'
+import { GPURuntime } from '../../packages/geoscratch/dist/index.js'
 import { createFakeGpu, createTestProgram } from '../scratch-test-utils.js'
 
 const iterations = positiveInteger(
@@ -23,7 +23,7 @@ process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 async function stressCurrentContentReads(submissionCount) {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         gpu: fake.gpu,
         label: 'current-content stress runtime',
         diagnostics: {

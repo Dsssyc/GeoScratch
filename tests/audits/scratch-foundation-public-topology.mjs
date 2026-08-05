@@ -127,6 +127,9 @@ function classify(surface, symbol, gpuNames, renames) {
         if (removedGeoNames.has(symbol.name)) return disposition('remove', symbol)
         return disposition(targetName === symbol.name ? 'preserve' : 'rename', symbol, 'geo', targetName)
     }
+    if (renames.has(symbol.name)) {
+        return disposition('rename', symbol, 'scratch', targetName)
+    }
     if (gpuNames.has(symbol.name)) {
         return disposition(targetName === symbol.name ? 'move' : 'rename', symbol, 'scratch', targetName)
     }
@@ -206,15 +209,73 @@ function groupEntries(entries) {
         ))
 }
 
-function verifyBaseline(manifest) {
+function verifyManifest(manifest) {
 
-    const current = buildBaselineManifest()
-    assertEqual(current.baselineCommit, manifest.baselineCommit, 'baseline commit')
-    assertEqual(current.entryCount, manifest.entryCount, 'baseline entry count')
-    assertEqual(current.facetCount, manifest.facetCount, 'baseline facet count')
-    assertEqual(current.inventoryHash, manifest.inventoryHash, 'baseline inventory hash')
-    assertEqual(JSON.stringify(current.entries), JSON.stringify(manifest.entries), 'baseline entries')
-    return Object.freeze({ mode: 'baseline', status: 'passed', ...summary(manifest) })
+    assertEqual(manifest.baselineCommit, baselineCommit, 'baseline commit')
+    assertEqual(
+        manifest.entries.reduce((count, entry) => count + entry.surfaces.length, 0),
+        manifest.entryCount,
+        'baseline entry count'
+    )
+    assertEqual(
+        manifest.entries.reduce(
+            (count, entry) => count + entry.kinds.length * entry.surfaces.length,
+            0
+        ),
+        manifest.facetCount,
+        'baseline facet count'
+    )
+    assertEqual(sha256(JSON.stringify(manifest.entries)), manifest.inventoryHash, 'baseline inventory hash')
+
+    const renames = renameMapFromPlan()
+    const baselineFacets = new Set()
+    for (const entry of manifest.entries) {
+        if (![ 'preserve', 'rename', 'move', 'remove' ].includes(entry.disposition)) {
+            throw new Error(`Unknown disposition for ${entry.name}: ${entry.disposition}`)
+        }
+        for (const surface of entry.surfaces) {
+            for (const kind of entry.kinds) {
+                const facet = `${surface}:${entry.name}:${kind}`
+                if (baselineFacets.has(facet)) throw new Error(`Duplicate baseline facet: ${facet}`)
+                baselineFacets.add(facet)
+            }
+        }
+        const renamed = renames.get(entry.name)
+        if (renamed !== undefined) {
+            assertEqual(entry.disposition, 'rename', `${entry.name} disposition`)
+            assertEqual(entry.targetName, renamed, `${entry.name} target name`)
+        }
+    }
+    return Object.freeze({ mode: 'manifest', status: 'passed', ...summary(manifest) })
+}
+
+function verifyRenamed(manifest) {
+
+    verifyManifest(manifest)
+    const program = createPackageProgram()
+    const current = {
+        scratch: new Map(collectExports(program, gpuFacade).map(symbol => [ symbol.name, symbol.kinds ])),
+        geo: new Map(collectExports(program, 'packages/geoscratch/src/geo/index.ts')
+            .map(symbol => [ symbol.name, symbol.kinds ])),
+    }
+    for (const entry of manifest.entries) {
+        if (entry.disposition !== 'rename') continue
+        const target = current[entry.targetSurface]
+        if (target === undefined) throw new Error(`Unknown target surface: ${entry.targetSurface}`)
+        const actualKinds = target.get(entry.targetName)
+        if (actualKinds === undefined) {
+            throw new Error(`Missing renamed target: ${entry.targetSurface}:${entry.targetName}`)
+        }
+        for (const kind of entry.kinds) {
+            if (!actualKinds.includes(kind)) {
+                throw new Error(`Missing renamed target facet: ${entry.targetSurface}:${entry.targetName}:${kind}`)
+            }
+        }
+        if (entry.name !== entry.targetName && target.has(entry.name)) {
+            throw new Error(`Old renamed symbol remains: ${entry.targetSurface}:${entry.name}`)
+        }
+    }
+    return Object.freeze({ mode: 'renamed', status: 'passed', ...summary(manifest) })
 }
 
 function verifyTarget(manifest) {
@@ -288,7 +349,7 @@ function assertEqual(actual, expected, label) {
     }
 }
 
-const mode = process.argv[2] ?? '--baseline'
+const mode = process.argv[2] ?? '--renamed'
 if (mode === '--write-baseline') {
     const manifest = buildBaselineManifest()
     fs.mkdirSync(path.dirname(manifestPath), { recursive: true })
@@ -296,6 +357,10 @@ if (mode === '--write-baseline') {
     process.stdout.write(`${stableJson({ mode: 'write-baseline', status: 'passed', ...summary(manifest) })}\n`)
 } else {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-    const result = mode === '--target' ? verifyTarget(manifest) : verifyBaseline(manifest)
+    const result = mode === '--target'
+        ? verifyTarget(manifest)
+        : mode === '--renamed'
+            ? verifyRenamed(manifest)
+            : verifyManifest(manifest)
     process.stdout.write(`${stableJson(result)}\n`)
 }

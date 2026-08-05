@@ -131,7 +131,7 @@ const requiredRuntimeExports = [
     'Program',
     'ReadbackOperation',
     'RenderBundle',
-    'ScratchRuntime',
+    'GPURuntime',
     'ShaderModule',
     'SubmissionBuilder',
     'Surface',
@@ -595,7 +595,7 @@ function evidenceAttributionRegressionsPass() {
             publicSymbols: [
                 'RenderBundle',
                 'RenderBundleDescriptor',
-                'ScratchRuntime',
+                'GPURuntime',
             ],
             operations: [ 'createRenderBundleEncoder' ],
             sourcePaths: [
@@ -630,8 +630,8 @@ function evidenceAttributionRegressionsPass() {
             profile: 'pipeline-vertex-buffer-layout',
             evidenceIds: [ 'webgpu-pipelines' ],
             publicSymbols: [
-                'ScratchRenderPipeline',
-                'ScratchRenderPipelineDescriptor',
+                'RenderPipeline',
+                'RenderPipelineDescriptor',
             ],
             operations: [ 'createRenderPipelineAsync' ],
             sourcePaths: [
@@ -663,7 +663,7 @@ function evidenceAttributionRegressionsPass() {
             coverageRule: 'webgpu:runtime:supported-limits',
             profile: 'runtime-supported-limits',
             evidenceIds: [ 'webgpu-runtime-capabilities' ],
-            publicSymbols: [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts' ],
+            publicSymbols: [ 'GPURuntime', 'GPURuntimeRequestFacts' ],
             operations: [ 'adapter.limits', 'device.limits' ],
             sourcePaths: [
                 'packages/geoscratch/src/scratch/gpu/runtime.ts',

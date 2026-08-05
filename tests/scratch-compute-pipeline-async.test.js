@@ -1,8 +1,8 @@
 import { expect } from 'chai'
 import {
-    ScratchComputePipeline,
+    ComputePipeline,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     createFakeGpu,
@@ -20,12 +20,12 @@ fn csMain() {
 }
 `
 
-describe('ScratchRuntime async compute pipeline creation', () => {
+describe('GPURuntime async compute pipeline creation', () => {
 
     it('rejects local validation through a Promise before pipeline-native effects', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const invalidProgram = runtime.createComputePipeline({ program: null })
 
         expect(invalidProgram).to.be.instanceOf(Promise)
@@ -55,7 +55,7 @@ describe('ScratchRuntime async compute pipeline creation', () => {
         const fixture = await createComputeFixture()
         const pipeline = await fixture.runtime.createComputePipeline(fixture.descriptor)
 
-        expect(pipeline).to.be.instanceOf(ScratchComputePipeline)
+        expect(pipeline).to.be.instanceOf(ComputePipeline)
         expect(pipeline.pipelineKind).to.equal('compute')
         expect(pipeline.compute).to.deep.equal(fixture.program.compute)
         expect(pipeline.compute.entryPoint).to.equal('csMain')
@@ -194,7 +194,7 @@ describe('ScratchRuntime async compute pipeline creation', () => {
 
         const controls = { deferAsyncPipelines: false }
         const fake = createFakeGpu(controls)
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const renderProgram = await createTestProgram(runtime, {
             sourceParts: [ triangleWgsl ],
             vertex: 'vsMain',
@@ -258,7 +258,7 @@ async function createComputeFixture(deferred = {}) {
         deferErrorScopePops: false,
     }
     const fake = createFakeGpu(controls)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const shaderModule = await runtime.createShaderModule({
         label: 'async compute module',
         sourceParts: [ { code: computeWgsl } ],

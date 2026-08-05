@@ -237,14 +237,14 @@ export type ScratchDiagnosticErrorContext =
 - Modify: `docs/review/manifests/scratch-foundation-public-symbols.json`
 - Modify: `tests/audits/scratch-foundation-public-topology.mjs`
 
-- [ ] Add RED type/runtime contract assertions for `GPURuntime`, `GPURuntimeDiagnostics`, `GPUDiagnosticCapture`, `GPUIncidentReport`, `GPUOperationRecord`, `RenderPipeline`, and `ComputePipeline`, plus negative assertions that old names are absent.
-- [ ] Apply every mapping in Appendix A mechanically across production source, examples, active tests, type fixtures, audit code, runtime subject kinds, constructor names, error messages that identify API names, and manifest entries.
-- [ ] Do not GPU-prefix the cross-domain diagnostic names listed after Appendix A; all other GPU-only `Scratch*`/`Gpu*` identifiers and the `'GpuOperation'` subject kind follow the public and internal rename maps.
-- [ ] Rename `ScratchRenderPipeline`/`ScratchComputePipeline` exports to `RenderPipeline`/`ComputePipeline`; do not retain aliases because the legacy classes with those names are removed in Task 6.
-- [ ] Prove `GPURuntime.create()` remains the sole construction path, remains async, and retains runtime-authority, device-loss, dispose, capture, resource ownership, and submitted-work behavior.
-- [ ] Run `npm test -- --grep "scratch runtime|scratch diagnostics|GPU operation|pipeline|submission|readback"`, `npm run typecheck`, and `npm run build`.
-- [ ] Run `rg -n` for every Appendix A old name over `packages/geoscratch/src`, `examples`, and active tests; expected result is zero except the migration manifest/audit assertions.
-- [ ] Commit as `Rename Scratch GPU public contracts`.
+- [x] Add RED type/runtime contract assertions for `GPURuntime`, `GPURuntimeDiagnostics`, `GPUDiagnosticCapture`, `GPUIncidentReport`, `GPUOperationRecord`, `RenderPipeline`, and `ComputePipeline`, plus negative assertions that old names are absent.
+- [x] Apply every mapping in Appendix A mechanically across production source, examples, active tests, type fixtures, audit code, runtime subject kinds, constructor names, error messages that identify API names, and manifest entries.
+- [x] Do not GPU-prefix the cross-domain diagnostic names listed after Appendix A; all other GPU-only `Scratch*`/`Gpu*` identifiers and the `'GpuOperation'` subject kind follow the public and internal rename maps.
+- [x] Rename `ScratchRenderPipeline`/`ScratchComputePipeline` exports to `RenderPipeline`/`ComputePipeline`; do not retain aliases because the legacy classes with those names are removed in Task 6.
+- [x] Prove `GPURuntime.create()` remains the sole construction path, remains async, and retains runtime-authority, device-loss, dispose, capture, resource ownership, and submitted-work behavior.
+- [x] Run `npm test -- --grep "scratch runtime|scratch diagnostics|GPU operation|pipeline|submission|readback"`, `npm run typecheck`, and `npm run build`.
+- [x] Run `rg -n` for every Appendix A old name over `packages/geoscratch/src`, `examples`, and active tests; expected result is zero except the migration manifest/audit assertions.
+- [x] Commit as `Rename Scratch GPU public contracts`.
 
 ### Task 5: Migrate Geometry And UUID To TypeScript With Fact Parity
 

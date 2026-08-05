@@ -1,4 +1,4 @@
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import type { SubmittedWork, Surface } from 'geoscratch'
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
@@ -65,7 +65,7 @@ void main().catch((error) => {
 
 async function main() {
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'external image upload example runtime',
     })
     const surface = runtime.createSurface(canvas, {

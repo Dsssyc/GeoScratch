@@ -1,4 +1,4 @@
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import type { BufferResource, SubmittedWork, UploadCommand } from 'geoscratch'
 import {
     VirtualRasterResidency,
@@ -61,7 +61,7 @@ const positionCodec = cellLocalF32Codec({
 
 export async function runGeoVirtualRasterDynamicFlowProof() {
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'Geo virtual raster dynamic Flow proof',
         powerPreference: 'high-performance',
         diagnostics: {
@@ -74,7 +74,7 @@ export async function runGeoVirtualRasterDynamicFlowProof() {
     })
     let residency: VirtualRasterResidency | undefined
     let gpu: VirtualRasterGpuState | undefined
-    let readback: ReturnType<ScratchRuntime['createReadback']> | undefined
+    let readback: ReturnType<GPURuntime['createReadback']> | undefined
     try {
         const addressSpace = virtualRasterAddressSpace({
             id: 'geoscratch.proof.dynamic-vector-field',
@@ -397,7 +397,7 @@ export async function runGeoVirtualRasterDynamicFlowProof() {
 }
 
 async function publishCameraRequest(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     residency: VirtualRasterResidency,
     gpu: VirtualRasterGpuState,
     page: VirtualRasterPageIdentity,
@@ -442,7 +442,7 @@ function stageGeneratedPage(
 }
 
 function submitUploads(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     uploads: readonly (UploadCommand | VirtualRasterGpuUpdate['commands'][number])[]
 ) {
 

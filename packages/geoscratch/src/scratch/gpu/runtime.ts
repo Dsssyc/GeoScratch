@@ -55,7 +55,7 @@ import {
     normalizeScratchRuntimeDiagnosticsOptions,
     registerRuntimeDiagnostics,
     retainDeviceLostInfo,
-    ScratchRuntimeDiagnosticsController,
+    GPURuntimeDiagnosticsController,
 } from './runtime-diagnostics.js'
 import {
     assertScratchRuntimeActive,
@@ -84,7 +84,7 @@ import type {
     MappedBufferCreation,
 } from './buffer-mapping.js'
 import type { BeginOcclusionQueryCommandDescriptor, ClearBufferCommandDescriptor, CopyCommandDescriptor, DispatchCommandDescriptor, DrawCommandDescriptor, EndOcclusionQueryCommandDescriptor, ExternalImageUploadCommandDescriptor, ReadbackCommandDescriptor, ResolveQuerySetCommandDescriptor, TextureUploadCommandDescriptor, UploadCommandDescriptor } from './command.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchDiagnosticSubject } from './diagnostics.js'
 import type { DebugCommandDescriptor } from './debug-command.js'
 import type { ComputePassSpecDescriptor, RenderPassSpecDescriptor } from './pass.js'
 import type {
@@ -101,12 +101,12 @@ import type {
     ExecuteRenderBundlesCommandDescriptor,
     RenderBundleDescriptor,
 } from './render-bundle.js'
-import type { ScratchReadbackOptions, ScratchReadbackPolicy } from './readback-ownership.js'
+import type { GPUReadbackOptions, GPUReadbackPolicy } from './readback-ownership.js'
 import type { Resource } from './resource.js'
 import type {
-    ScratchRuntimeDiagnostics,
-    ScratchRuntimeDiagnosticsOptions,
-    ScratchDeviceLostInfo,
+    GPURuntimeDiagnostics,
+    GPURuntimeDiagnosticsOptions,
+    GPUDeviceLostInfo,
     NormalizedScratchRuntimeDiagnosticsOptions,
 } from './runtime-diagnostics.js'
 import type { SamplerResourceDescriptor } from './sampler.js'
@@ -116,44 +116,44 @@ import type { SurfaceOptions } from './surface.js'
 import type { ExternalTextureBindingDescriptor } from './temporal-texture.js'
 import type { TextureResourceDescriptor } from './texture.js'
 
-const runtimeToken = Symbol('ScratchRuntime')
+const runtimeToken = Symbol('GPURuntime')
 
-export type ScratchFeatureLevel = 'core' | 'compatibility'
+export type GPUFeatureLevel = 'core' | 'compatibility'
 
-export type ScratchRuntimeCreateOptions = {
+export type GPURuntimeCreateOptions = {
     gpu?: GPU
     label?: string
-    featureLevel?: ScratchFeatureLevel
+    featureLevel?: GPUFeatureLevel
     powerPreference?: GPUPowerPreference
     forceFallbackAdapter?: boolean
     xrCompatible?: boolean
     requiredFeatures?: Iterable<GPUFeatureName>
     requiredLimits?: Record<string, GPUSize64 | undefined>
     defaultQueue?: GPUQueueDescriptor
-    diagnostics?: ScratchRuntimeDiagnosticsOptions
-    readback?: ScratchReadbackOptions
+    diagnostics?: GPURuntimeDiagnosticsOptions
+    readback?: GPUReadbackOptions
 }
 
-export type ScratchRuntimeAdapterRequestFacts = Readonly<{
-    featureLevel: ScratchFeatureLevel
+export type GPURuntimeAdapterRequestFacts = Readonly<{
+    featureLevel: GPUFeatureLevel
     powerPreference?: GPUPowerPreference
     forceFallbackAdapter?: boolean
     xrCompatible?: boolean
 }>
 
-export type ScratchRuntimeDeviceRequestFacts = Readonly<{
+export type GPURuntimeDeviceRequestFacts = Readonly<{
     label?: string
     requiredFeatures?: readonly GPUFeatureName[]
     requiredLimits?: Readonly<Record<string, GPUSize64 | undefined>>
     defaultQueue?: Readonly<GPUQueueDescriptor>
 }>
 
-export type ScratchRuntimeRequestFacts = Readonly<{
-    adapter: ScratchRuntimeAdapterRequestFacts
-    device: ScratchRuntimeDeviceRequestFacts
+export type GPURuntimeRequestFacts = Readonly<{
+    adapter: GPURuntimeAdapterRequestFacts
+    device: GPURuntimeDeviceRequestFacts
 }>
 
-export type ScratchAdapterInfoSnapshot = Readonly<{
+export type GPUAdapterInfoSnapshot = Readonly<{
     available: boolean
     vendor?: string
     architecture?: string
@@ -164,23 +164,23 @@ export type ScratchAdapterInfoSnapshot = Readonly<{
     isFallbackAdapter?: boolean
 }>
 
-type ScratchRuntimeConstructorOptions = {
+type GPURuntimeConstructorOptions = {
     gpu: GPU
     adapter: GPUAdapter
     device: GPUDevice
     label?: string
-    requestFacts: ScratchRuntimeRequestFacts
-    adapterInfo: ScratchAdapterInfoSnapshot
-    readbackPolicy: ScratchReadbackPolicy
+    requestFacts: GPURuntimeRequestFacts
+    adapterInfo: GPUAdapterInfoSnapshot
+    readbackPolicy: GPUReadbackPolicy
     diagnosticsPolicy: NormalizedScratchRuntimeDiagnosticsOptions
 }
 
-type ScratchNativeRequestAdapterOptions = GPURequestAdapterOptions & {
-    featureLevel?: ScratchFeatureLevel
+type GPUNativeRequestAdapterOptions = GPURequestAdapterOptions & {
+    featureLevel?: GPUFeatureLevel
     xrCompatible?: boolean
 }
 
-export interface ScratchRuntime {
+export interface GPURuntime {
     readonly id: string
     readonly label?: string
     readonly gpu: GPU
@@ -192,28 +192,28 @@ export interface ScratchRuntime {
     readonly deviceFeatures: GPUSupportedFeatures
     readonly deviceLimits: GPUSupportedLimits
     readonly wgslLanguageFeatures: readonly string[]
-    readonly requestFacts: ScratchRuntimeRequestFacts
-    readonly adapterInfo: ScratchAdapterInfoSnapshot
-    readonly diagnostics: ScratchRuntimeDiagnostics
-    readonly readbackPolicy: ScratchReadbackPolicy
+    readonly requestFacts: GPURuntimeRequestFacts
+    readonly adapterInfo: GPUAdapterInfoSnapshot
+    readonly diagnostics: GPURuntimeDiagnostics
+    readonly readbackPolicy: GPUReadbackPolicy
     _resources: Set<Resource>
     _surfaces: Set<Surface>
 }
 
-export class ScratchRuntime {
+export class GPURuntime {
 
-    #diagnosticsController: ScratchRuntimeDiagnosticsController
+    #diagnosticsController: GPURuntimeDiagnosticsController
 
-    private constructor(token: symbol, options: ScratchRuntimeConstructorOptions) {
+    private constructor(token: symbol, options: GPURuntimeConstructorOptions) {
 
         if (token !== runtimeToken) {
             throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_CONSTRUCTOR_PRIVATE',
                 severity: 'error',
                 phase: 'runtime',
-                subject: { kind: 'ScratchRuntime' },
-                message: 'ScratchRuntime must be created with ScratchRuntime.create().',
-                hints: [ 'Use await ScratchRuntime.create(options).' ],
+                subject: { kind: 'GPURuntime' },
+                message: 'GPURuntime must be created with GPURuntime.create().',
+                hints: [ 'Use await GPURuntime.create(options).' ],
             })
         }
 
@@ -241,7 +241,7 @@ export class ScratchRuntime {
         })
         this._resources = new Set()
         this._surfaces = new Set()
-        this.#diagnosticsController = new ScratchRuntimeDiagnosticsController(
+        this.#diagnosticsController = new GPURuntimeDiagnosticsController(
             this,
             options.device,
             options.diagnosticsPolicy,
@@ -280,12 +280,12 @@ export class ScratchRuntime {
         return scratchRuntimeIsDeviceLost(this)
     }
 
-    get deviceLostInfo(): ScratchDeviceLostInfo | undefined {
+    get deviceLostInfo(): GPUDeviceLostInfo | undefined {
 
         return scratchRuntimeDeviceLostInfo(this)
     }
 
-    static async create(options: ScratchRuntimeCreateOptions = {}) {
+    static async create(options: GPURuntimeCreateOptions = {}) {
 
         const request = snapshotRuntimeRequest(options)
         const readbackPolicy = normalizeScratchReadbackPolicy(options.readback, request.label)
@@ -300,8 +300,8 @@ export class ScratchRuntime {
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
-                subject: { kind: 'ScratchRuntime' },
-                message: 'WebGPU is unavailable for ScratchRuntime creation.',
+                subject: { kind: 'GPURuntime' },
+                message: 'WebGPU is unavailable for GPURuntime creation.',
                 expected: { gpu: 'GPU with requestAdapter()' },
                 actual: { gpu: gpu === undefined ? 'undefined' : typeof gpu },
                 hints: [ 'Pass an explicit GPU object or run in a WebGPU-capable environment.' ],
@@ -315,8 +315,8 @@ export class ScratchRuntime {
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
-                subject: { kind: 'ScratchRuntime' },
-                message: 'WebGPU adapter is unavailable for ScratchRuntime creation.',
+                subject: { kind: 'GPURuntime' },
+                message: 'WebGPU adapter is unavailable for GPURuntime creation.',
                 expected: { adapter: 'GPUAdapter with requestDevice()' },
                 actual: { adapter: adapter === undefined || adapter === null ? String(adapter) : typeof adapter },
             })
@@ -330,14 +330,14 @@ export class ScratchRuntime {
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
-                subject: { kind: 'ScratchRuntime' },
-                message: 'WebGPU device is unavailable for ScratchRuntime creation.',
+                subject: { kind: 'GPURuntime' },
+                message: 'WebGPU device is unavailable for GPURuntime creation.',
                 expected: { device: 'GPUDevice' },
                 actual: { device: String(device) },
             })
         }
 
-        return new ScratchRuntime(runtimeToken, {
+        return new GPURuntime(runtimeToken, {
             gpu,
             adapter,
             device,
@@ -349,7 +349,7 @@ export class ScratchRuntime {
         })
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return scratchRuntimeAuthoritySubject(this)
     }
@@ -809,12 +809,12 @@ export class ScratchRuntime {
 
 type RuntimeRequestSnapshot = Readonly<{
     label?: string
-    adapterDescriptor: Readonly<ScratchNativeRequestAdapterOptions>
+    adapterDescriptor: Readonly<GPUNativeRequestAdapterOptions>
     deviceDescriptor: Readonly<GPUDeviceDescriptor>
-    facts: ScratchRuntimeRequestFacts
+    facts: GPURuntimeRequestFacts
 }>
 
-function snapshotRuntimeRequest(options: ScratchRuntimeCreateOptions): RuntimeRequestSnapshot {
+function snapshotRuntimeRequest(options: GPURuntimeCreateOptions): RuntimeRequestSnapshot {
 
     const label = options.label
     if (label !== undefined && typeof label !== 'string') {
@@ -829,7 +829,7 @@ function snapshotRuntimeRequest(options: ScratchRuntimeCreateOptions): RuntimeRe
         )
     }
 
-    const adapterDescriptor: ScratchNativeRequestAdapterOptions = { featureLevel }
+    const adapterDescriptor: GPUNativeRequestAdapterOptions = { featureLevel }
     if (options.powerPreference !== undefined) {
         if (
             options.powerPreference !== 'low-power' &&
@@ -897,8 +897,8 @@ function snapshotRuntimeRequest(options: ScratchRuntimeCreateOptions): RuntimeRe
                 code: 'SCRATCH_RUNTIME_REQUEST_INVALID',
                 severity: 'error',
                 phase: 'runtime',
-                subject: { kind: 'ScratchRuntime' },
-                message: 'ScratchRuntime requiredFeatures omit a WebGPU feature dependency.',
+                subject: { kind: 'GPURuntime' },
+                message: 'GPURuntime requiredFeatures omit a WebGPU feature dependency.',
                 expected: missingDependency,
                 actual: { requiredFeatures: normalizedFeatures },
                 hints: [
@@ -920,7 +920,7 @@ function snapshotRuntimeRequest(options: ScratchRuntimeCreateOptions): RuntimeRe
     Object.freeze(adapterDescriptor)
     Object.freeze(deviceDescriptor)
     const facts = Object.freeze({
-        adapter: Object.freeze({ ...adapterDescriptor }) as ScratchRuntimeAdapterRequestFacts,
+        adapter: Object.freeze({ ...adapterDescriptor }) as GPURuntimeAdapterRequestFacts,
         device: Object.freeze({
             ...(deviceDescriptor.label !== undefined ? { label: deviceDescriptor.label } : {}),
             ...(deviceDescriptor.requiredFeatures !== undefined
@@ -932,7 +932,7 @@ function snapshotRuntimeRequest(options: ScratchRuntimeCreateOptions): RuntimeRe
             ...(deviceDescriptor.defaultQueue !== undefined
                 ? { defaultQueue: deviceDescriptor.defaultQueue }
                 : {}),
-        }) as ScratchRuntimeDeviceRequestFacts,
+        }) as GPURuntimeDeviceRequestFacts,
     })
 
     return Object.freeze({
@@ -1027,8 +1027,8 @@ function throwRuntimeRequestInvalid(
         code: 'SCRATCH_RUNTIME_REQUEST_INVALID',
         severity: 'error',
         phase: 'runtime',
-        subject: { kind: 'ScratchRuntime' },
-        message: 'ScratchRuntime request options are invalid.',
+        subject: { kind: 'GPURuntime' },
+        message: 'GPURuntime request options are invalid.',
         expected: { field, value: expected },
         actual: {
             field,
@@ -1064,7 +1064,7 @@ function snapshotWgslLanguageFeatures(gpu: GPU): readonly string[] {
     return Object.freeze([ ...names ].sort())
 }
 
-function snapshotAdapterInfo(adapter: GPUAdapter): ScratchAdapterInfoSnapshot {
+function snapshotAdapterInfo(adapter: GPUAdapter): GPUAdapterInfoSnapshot {
 
     let info: Partial<GPUAdapterInfo> | undefined
     try {

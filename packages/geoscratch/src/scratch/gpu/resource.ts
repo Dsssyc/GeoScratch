@@ -2,17 +2,17 @@ import { UUID } from '../../core/utils/uuid.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { updateRuntimeResourceFact } from './runtime-diagnostics.js'
-import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
+import type { GPURuntime } from './runtime.js'
 
 export type ResourceOptions = {
     label?: string
     resourceKind?: string
     descriptor?: object
-    identity?: ScratchResourceIdentity
+    identity?: GPUResourceIdentity
 }
 
-export type ScratchResourceIdentity = Readonly<{
+export type GPUResourceIdentity = Readonly<{
     token: symbol
     id: string
 }>
@@ -39,7 +39,7 @@ const contentBearingOptions = new WeakSet<ResourceOptions>()
 const resourceContentFacts = new WeakMap<Resource, MutableResourceContentFacts>()
 const resourceDisposalSubscribers = new WeakMap<Resource, Set<() => void>>()
 const registeredResources = new WeakSet<Resource>()
-const resourceIdentityToken = Symbol('ScratchResourceIdentity')
+const resourceIdentityToken = Symbol('GPUResourceIdentity')
 
 export function subscribeResourceDisposal(resource: Resource, subscriber: () => void): () => void {
 
@@ -59,7 +59,7 @@ export function resourceDisposalSubscriberCount(resource: Resource): number {
     return resourceDisposalSubscribers.get(resource)?.size ?? 0
 }
 
-export function createScratchResourceIdentity(): ScratchResourceIdentity {
+export function createScratchResourceIdentity(): GPUResourceIdentity {
 
     return Object.freeze({
         token: resourceIdentityToken,
@@ -136,7 +136,7 @@ export function setResourceContentState(
 
 export abstract class Resource {
 
-    #runtime: ScratchRuntime
+    #runtime: GPURuntime
     #id: string
     #label: string | undefined
     #resourceKind: string
@@ -144,7 +144,7 @@ export abstract class Resource {
     #isDisposed = false
     #allocationVersion = 1
 
-    protected constructor(runtime: ScratchRuntime, options: ResourceOptions = {}) {
+    protected constructor(runtime: GPURuntime, options: ResourceOptions = {}) {
 
         if (new.target === Resource) {
             throw new TypeError('Resource is abstract and cannot be constructed directly.')
@@ -156,8 +156,8 @@ export abstract class Resource {
                 severity: 'error',
                 phase: 'resource',
                 subject: { kind: 'Resource', resourceKind: options.resourceKind ?? 'Resource' },
-                message: 'Resource requires a valid ScratchRuntime owner.',
-                expected: { runtime: 'ScratchRuntime' },
+                message: 'Resource requires a valid GPURuntime owner.',
+                expected: { runtime: 'GPURuntime' },
                 actual: { runtime: runtime === undefined || runtime === null ? String(runtime) : typeof runtime },
             })
         }
@@ -192,7 +192,7 @@ export abstract class Resource {
 
     }
 
-    get runtime(): ScratchRuntime {
+    get runtime(): GPURuntime {
 
         return this.#runtime
     }
@@ -227,9 +227,9 @@ export abstract class Resource {
         return this.#allocationVersion
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Resource',
             id: this.id,
         }
@@ -239,7 +239,7 @@ export abstract class Resource {
         return subject
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         this.assertUsable()
 
@@ -253,7 +253,7 @@ export abstract class Resource {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Resource belongs to a different ScratchRuntime.',
+                message: 'Resource belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
                 hints: [ 'Use resources with the runtime that created them.' ],

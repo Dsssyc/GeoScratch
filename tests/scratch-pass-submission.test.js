@@ -4,7 +4,7 @@ import {
     BindSet,
     RenderPassSpec,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     SubmissionBuilder,
     SubmittedWork,
     TextureResource,
@@ -24,7 +24,7 @@ async function createTriangleScene(format = 'bgra8unorm') {
 
     const fake = createFakeGpu()
     const canvas = createFakeCanvas()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const surface = runtime.createSurface(canvas.canvas, {
         format,
         size: { width: 64, height: 64 },
@@ -66,7 +66,7 @@ async function createRenderTargetScene(format = 'rgba8unorm', features = []) {
 
     const fake = createFakeGpu()
     for (const feature of features) fake.device.features.add(feature)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const renderTarget = await runtime.createTexture({
         label: 'offscreen color target',
         size: { width: 64, height: 64 },
@@ -244,7 +244,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('supports native-renderable 2d-array and 3d attachment views', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const arrayTexture = await runtime.createTexture({
             size: [ 8, 8, 2 ],
             format: 'rgba8unorm',
@@ -299,7 +299,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('requires a current in-range depthSlice only for 3d color attachments', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const volumeTexture = await runtime.createTexture({
             dimension: '3d',
             size: [ 8, 8, 4 ],
@@ -333,7 +333,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
     it('revalidates a persistent 3d attachment depthSlice after allocation replacement', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const volumeTexture = await runtime.createTexture({
             dimension: '3d',
             size: [ 8, 8, 4 ],
@@ -368,7 +368,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         const fake = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
             size: [ 8, 8 ],
             format: 'rgba8unorm',
@@ -426,7 +426,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         const fake = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const owner = runtime.createSurface(canvas.canvas, {
             format: 'bgra8unorm',
             size: { width: 8, height: 8 },
@@ -457,7 +457,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         const fake = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const owner = runtime.createSurface(canvas.canvas, {
             format: 'bgra8unorm',
             size: { width: 8, height: 8 },
@@ -634,7 +634,7 @@ describe('scratch RenderPassSpec and SubmissionBuilder', () => {
 
         const fake = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const depthTexture = await runtime.createTexture({
             size: [ 8, 8 ],
             format: 'depth32float',

@@ -3,8 +3,8 @@ import { expect } from 'chai'
 import {
     DrawCommand,
     ScratchDiagnosticError,
-    ScratchRuntime,
-    ScratchRenderPipeline,
+    GPURuntime,
+    RenderPipeline,
 } from 'geoscratch'
 import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
@@ -31,7 +31,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('builds a real render pipeline with an explicit empty layout', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
 
         const pipeline = await runtime.createRenderPipeline({
@@ -42,7 +42,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
             targets: [ { format: 'bgra8unorm' } ],
         })
 
-        expect(pipeline).to.be.instanceOf(ScratchRenderPipeline)
+        expect(pipeline).to.be.instanceOf(RenderPipeline)
         expect(pipeline.runtime).to.equal(runtime)
         expect(pipeline.program).to.equal(program)
         expect(pipeline.pipelineKind).to.equal('render')
@@ -65,7 +65,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('passes explicit vertex buffer layouts to render pipeline creation', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const vertexBuffers = [
             {
@@ -99,7 +99,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('preserves explicit null pipeline slots without renumbering', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const layout = {
             arrayStride: 8,
@@ -155,7 +155,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
 
         for (const scenario of cases) {
             const { gpu, calls } = createFakeGpu()
-            const runtime = await ScratchRuntime.create({ gpu })
+            const runtime = await GPURuntime.create({ gpu })
             const program = await createProgram(runtime)
 
             try {
@@ -186,7 +186,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('requires only non-null vertex slots and rejects bindings to null slots', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -251,7 +251,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects invalid vertex buffer layouts with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
 
         try {
@@ -283,8 +283,8 @@ describe('scratch RenderPipeline and DrawCommand', () => {
 
     it('rejects wrong-runtime programs with structured diagnostics', async() => {
 
-        const runtimeA = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
-        const runtimeB = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const runtimeA = await GPURuntime.create({ gpu: createFakeGpu().gpu })
+        const runtimeB = await GPURuntime.create({ gpu: createFakeGpu().gpu })
         const program = await createProgram(runtimeA)
 
         try {
@@ -308,7 +308,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('creates a static draw command that encodes setPipeline and draw', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -366,7 +366,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('encodes vertex buffers before draw', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -469,7 +469,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects missing draw resource declarations with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -500,7 +500,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects malformed draw resource declarations with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -534,7 +534,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects bare draw read resources with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -579,7 +579,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects incomplete or invalid draw read descriptors with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -645,8 +645,8 @@ describe('scratch RenderPipeline and DrawCommand', () => {
 
     it('rejects wrong-runtime draw resources with structured diagnostics', async() => {
 
-        const runtimeA = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
-        const runtimeB = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const runtimeA = await GPURuntime.create({ gpu: createFakeGpu().gpu })
+        const runtimeB = await GPURuntime.create({ gpu: createFakeGpu().gpu })
         const program = await createProgram(runtimeA)
         const pipeline = await runtimeA.createRenderPipeline({
             program,
@@ -683,7 +683,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects disposed draw resources with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -719,8 +719,8 @@ describe('scratch RenderPipeline and DrawCommand', () => {
 
     it('rejects wrong-runtime vertex buffers with structured diagnostics', async() => {
 
-        const runtimeA = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
-        const runtimeB = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const runtimeA = await GPURuntime.create({ gpu: createFakeGpu().gpu })
+        const runtimeB = await GPURuntime.create({ gpu: createFakeGpu().gpu })
         const program = await createProgram(runtimeA)
         const pipeline = await runtimeA.createRenderPipeline({
             program,
@@ -768,7 +768,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects disposed vertex buffers with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -817,7 +817,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects invalid and unaligned vertex buffer bindings with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -896,7 +896,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects invalid draw counts with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             program,
@@ -930,7 +930,7 @@ describe('scratch RenderPipeline and DrawCommand', () => {
     it('rejects disposed pipelines with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
         const pipeline = await runtime.createRenderPipeline({
             label: 'temporary pipeline',

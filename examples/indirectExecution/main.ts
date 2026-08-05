@@ -1,4 +1,4 @@
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import type { SubmittedWork, Surface } from 'geoscratch'
 
 const GPU_BUFFER_USAGE_COPY_DST = 0x08
@@ -69,7 +69,7 @@ void main().catch((error) => {
 
 async function main() {
 
-    const runtime = await ScratchRuntime.create({ label: 'indirect execution runtime' })
+    const runtime = await GPURuntime.create({ label: 'indirect execution runtime' })
     const surface = runtime.createSurface(canvas, {
         label: 'indirect execution surface',
         format: 'preferred',

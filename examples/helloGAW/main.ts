@@ -1,5 +1,5 @@
 import {
-    ScratchRuntime,
+    GPURuntime,
     layoutCodec,
     sphere,
 } from 'geoscratch'
@@ -18,10 +18,10 @@ import type {
     LayoutFixedFieldDescriptor,
     Program,
     ProgramBufferLayoutRequirement,
-    ScratchDiagnosticCapture,
-    ScratchDiagnosticCaptureReport,
-    ScratchComputePipeline,
-    ScratchRuntimeDiagnosticsEvidence,
+    GPUDiagnosticCapture,
+    GPUDiagnosticCaptureReport,
+    ComputePipeline,
+    GPURuntimeDiagnosticsEvidence,
     SubmittedWork,
     Surface,
     SurfaceSize,
@@ -70,12 +70,12 @@ type DisposalReport = Awaited<ReturnType<PageLifetime['dispose']>>
 type FailureProofReport = Readonly<{ scenario: string }>
 type FailureProofController = Readonly<{
     assertConfiguration(): void
-    ownRuntime(value: ScratchRuntime, lifetime: PageLifetime): void
+    ownRuntime(value: GPURuntime, lifetime: PageLifetime): void
     observeSurface(value: Surface): void
     ownBitmap(name: string, bitmap: ImageBitmap, lifetime: PageLifetime): ReturnType<PageLifetime['defer']>
     reach(scenario: string): void
     bloomCombineShader(source: string): string
-    beforeBloomCombineShaderModule(value: ScratchRuntime): void
+    beforeBloomCombineShaderModule(value: GPURuntime): void
     captureBeforeDisposal(): void
     finalize(primaryFailure: unknown, cleanupReport: DisposalReport): FailureProofReport | undefined
     listenerRegistered(): void
@@ -163,7 +163,7 @@ async function main(lifetime: PageLifetime, proof: FailureProofController) {
     proof.assertConfiguration()
     assertPresentationShaderContract()
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'Hello GAW runtime',
         powerPreference: 'high-performance',
         diagnostics: {
@@ -371,7 +371,7 @@ async function main(lifetime: PageLifetime, proof: FailureProofController) {
 }
 
 async function createRenderGraph(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     surface: Surface,
     size: SurfaceSize,
     deterministic: boolean,
@@ -591,7 +591,7 @@ function createCodecs() {
 }
 
 async function createUniformResources(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     codecs: Codecs,
     matrices: SceneMatrices
 ) {
@@ -696,7 +696,7 @@ async function createUniformResources(
 }
 
 async function createUniform(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     label: string,
     codec: LayoutCodec,
     values: Record<string, unknown>
@@ -727,7 +727,7 @@ async function createUniform(
     }
 }
 
-async function createGeometryResources(runtime: ScratchRuntime) {
+async function createGeometryResources(runtime: GPURuntime) {
 
     const generated = sphere(EARTH_RADIUS, 64, 32)
 
@@ -794,7 +794,7 @@ function createParticleData(deterministic: boolean) {
     return { positions, velocities, colors }
 }
 
-async function createParticleResources(runtime: ScratchRuntime, data: ParticleData) {
+async function createParticleResources(runtime: GPURuntime, data: ParticleData) {
 
     const connectionData = new Uint32Array(PARTICLE_COUNT)
     const linkIndirectData = new Uint32Array([ LINK_NODE_COUNT, 0, 0, 0 ])
@@ -840,7 +840,7 @@ async function createParticleResources(runtime: ScratchRuntime, data: ParticleDa
 }
 
 async function createBufferWithUpload<T extends ArrayBufferView<ArrayBuffer>>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     label: string,
     data: T,
     usage: GPUBufferUsageFlags
@@ -861,7 +861,7 @@ async function createBufferWithUpload<T extends ArrayBufferView<ArrayBuffer>>(
     return { buffer, region, data, upload }
 }
 
-async function createRenderTextures(runtime: ScratchRuntime, size: SurfaceSize) {
+async function createRenderTextures(runtime: GPURuntime, size: SurfaceSize) {
 
     const sampledStorageUsage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING
     const scene = await runtime.createTexture({
@@ -942,7 +942,7 @@ async function createRenderTextures(runtime: ScratchRuntime, size: SurfaceSize) 
 }
 
 async function createImageResources(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     lifetime: PageLifetime,
     proof: FailureProofController
 ) {
@@ -985,7 +985,7 @@ async function createImageResources(
     return { textures, bitmaps, ownerships, uploads }
 }
 
-async function createSamplers(runtime: ScratchRuntime) {
+async function createSamplers(runtime: GPURuntime) {
 
     const linear = await runtime.createSampler({
         label: 'Hello GAW linear repeating sampler',
@@ -999,7 +999,7 @@ async function createSamplers(runtime: ScratchRuntime) {
     return { earth: linear, output: linear }
 }
 
-async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
+async function createBindLayouts(runtime: GPURuntime, codecs: Codecs) {
 
     const uniformEntry = (
         binding: number,
@@ -1223,7 +1223,7 @@ async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
 }
 
 async function createBindSets({ runtime, layouts, uniforms, geometry, particles, post, images, samplers }: {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     layouts: BindLayouts
     uniforms: UniformResources
     geometry: GeometryResources
@@ -1312,7 +1312,7 @@ async function createBindSets({ runtime, layouts, uniforms, geometry, particles,
     }
 }
 
-async function createPrograms(runtime: ScratchRuntime, codecs: Codecs, proof: FailureProofController) {
+async function createPrograms(runtime: GPURuntime, codecs: Codecs, proof: FailureProofController) {
 
     const requirement = (
         group: number,
@@ -1442,7 +1442,7 @@ async function createPrograms(runtime: ScratchRuntime, codecs: Codecs, proof: Fa
 }
 
 async function createPipelines(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     surface: Surface,
     post: RenderTextures,
     layouts: BindLayouts,
@@ -1484,7 +1484,7 @@ async function createPipelines(
         label: string,
         program: Program,
         bindLayouts: BindLayout[]
-    ): Promise<ScratchComputePipeline> => {
+    ): Promise<ComputePipeline> => {
         return await runtime.createComputePipeline({
             label,
             program,
@@ -1614,7 +1614,7 @@ async function createPipelines(
     }
 }
 
-function createPasses(runtime: ScratchRuntime, surface: Surface, post: RenderTextures) {
+function createPasses(runtime: GPURuntime, surface: Surface, post: RenderTextures) {
 
     return {
         simulation: runtime.createComputePass({ label: 'Hello GAW simulation and indexing stage' }),
@@ -1656,7 +1656,7 @@ function createPersistentCommands({
     bindSets,
     pipelines,
 }: {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     uniforms: UniformResources
     geometry: GeometryResources
     particles: ParticleResources
@@ -1818,7 +1818,7 @@ function createPersistentCommands({
 }
 
 async function createPostBindSets({ runtime, layouts, uniforms, post, bindSets }: {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     layouts: BindLayouts
     uniforms: UniformResources
     post: RenderTextures
@@ -1885,7 +1885,7 @@ async function createPostBindSets({ runtime, layouts, uniforms, post, bindSets }
 }
 
 function createPersistentPostCommands({ runtime, uniforms, post, bindSets, pipelines }: {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     uniforms: UniformResources
     post: RenderTextures
     bindSets: BindSets
@@ -2021,7 +2021,7 @@ function createSizeDependentCommands(graph: RenderGraph) {
 }
 
 async function initializeGraph(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     graph: RenderGraph,
     lifetime: PageLifetime,
     proof: FailureProofController
@@ -2233,7 +2233,7 @@ function publishGraphFacts(
 }
 
 function publishFrameFacts(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     submittedFrames: number,
     observedFrames: number,
     resizeGeneration: number,
@@ -2386,11 +2386,11 @@ function assertPresentationShaderContract() {
 
 function createFailureProofController(configuration: FailureConfiguration): FailureProofController {
 
-    let runtime: ScratchRuntime | undefined
+    let runtime: GPURuntime | undefined
     let surface: Surface | undefined
-    let capture: ScratchDiagnosticCapture | undefined
-    let captureReport: ScratchDiagnosticCaptureReport | undefined
-    let runtimeEvidence: ScratchRuntimeDiagnosticsEvidence | undefined
+    let capture: GPUDiagnosticCapture | undefined
+    let captureReport: GPUDiagnosticCaptureReport | undefined
+    let runtimeEvidence: GPURuntimeDiagnosticsEvidence | undefined
     let runtimeEvidenceByteLength: number | undefined
     let evidenceFailure: unknown
     let reachedCount = 0
@@ -2418,7 +2418,7 @@ function createFailureProofController(configuration: FailureConfiguration): Fail
         }
     }
 
-    function ownRuntime(value: ScratchRuntime, lifetime: PageLifetime) {
+    function ownRuntime(value: GPURuntime, lifetime: PageLifetime) {
 
         runtime = value
         lifetime.defer({
@@ -2479,7 +2479,7 @@ function createFailureProofController(configuration: FailureConfiguration): Fail
         return `${source}\n@compute fn helloGawInjectedFailure( {`
     }
 
-    function beforeBloomCombineShaderModule(value: ScratchRuntime) {
+    function beforeBloomCombineShaderModule(value: GPURuntime) {
 
         if (configuration.scenario !== 'invalid-bloom-shader-wgsl') return
         reachedCount += 1

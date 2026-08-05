@@ -59,7 +59,7 @@ import {
 } from './temporal-texture.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
 import type { BindSet, NormalizedBindLayoutEntry } from './binding.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassSpec } from './pass.js'
 import type { ComputePipeline, RenderPipeline } from './pipeline.js'
 import type { LayoutArtifact, LayoutUploadView } from './layout-codec.js'
@@ -70,8 +70,8 @@ import type {
     ReadbackStagingCleanupResult,
     ReadbackStagingSlot,
 } from './readback-staging.js'
-import type { ScratchRuntime } from './runtime.js'
-import type { ScratchReadbackCommandState } from './runtime-diagnostics.js'
+import type { GPURuntime } from './runtime.js'
+import type { GPUReadbackCommandState } from './runtime-diagnostics.js'
 import type { SubmittedWork } from './submission.js'
 import type {
     AttemptTextureAuthority,
@@ -517,18 +517,18 @@ type StaticIndexedDrawCountOptionalKey = Exclude<keyof StaticIndexedDrawCount, '
 type IndirectBufferDiagnosticDetails = {
     expected: unknown
     actual: Record<string, unknown>
-    related?: DiagnosticSubject[]
+    related?: ScratchDiagnosticSubject[]
 }
 
 type OcclusionQueryCommandDiagnosticInput = {
-    runtime?: ScratchRuntime
+    runtime?: GPURuntime
     querySet?: unknown
     index?: unknown
     reason: string
 }
 
 type CopyDiagnosticInput = {
-    runtime?: ScratchRuntime
+    runtime?: GPURuntime
     source?: unknown
     target?: unknown
     sourceLayout?: unknown
@@ -544,7 +544,7 @@ type CopyDiagnosticInput = {
 }
 
 type CopySourceDiagnosticInput = {
-    runtime?: ScratchRuntime
+    runtime?: GPURuntime
     source?: unknown
     target?: unknown
     sourceLayout?: unknown
@@ -560,7 +560,7 @@ type CopySourceDiagnosticInput = {
 }
 
 type ResolveQuerySetDiagnosticInput = {
-    runtime?: ScratchRuntime
+    runtime?: GPURuntime
     source?: unknown
     querySet?: unknown
     slots?: unknown
@@ -574,7 +574,7 @@ type ResolveQuerySetDiagnosticInput = {
 }
 
 type UploadDiagnosticInput = {
-    runtime?: ScratchRuntime
+    runtime?: GPURuntime
     target?: unknown
     data?: unknown
     offset?: unknown
@@ -585,7 +585,7 @@ type UploadDiagnosticInput = {
 }
 
 type TextureUploadDiagnosticInput = {
-    runtime?: ScratchRuntime
+    runtime?: GPURuntime
     target?: unknown
     data?: unknown
     layout?: unknown
@@ -598,7 +598,7 @@ type TextureUploadDiagnosticInput = {
 
 type ExternalImageUploadDiagnosticInput = {
     command?: ExternalImageUploadCommand
-    runtime?: ScratchRuntime
+    runtime?: GPURuntime
     source?: unknown
     sourceOrigin?: unknown
     sourceDimensions?: unknown
@@ -631,7 +631,7 @@ type ExternalImageSourceInspection = {
 type VertexBufferDiagnosticDetails = {
     expected: unknown
     actual: unknown
-    related?: DiagnosticSubject[]
+    related?: ScratchDiagnosticSubject[]
 }
 
 type NormalizedUploadSource = {
@@ -695,7 +695,7 @@ export type ResolvedCommandImmediateData = Readonly<{
 const commandImmediateDataStates = new WeakMap<object, CommandImmediateDataState>()
 
 export interface DrawCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'draw'
@@ -716,7 +716,7 @@ export class DrawCommand {
     readonly #producesDeclaredWrites: boolean
     #isDisposed = false
 
-    constructor(runtime: ScratchRuntime, descriptor: DrawCommandDescriptor = {} as DrawCommandDescriptor) {
+    constructor(runtime: GPURuntime, descriptor: DrawCommandDescriptor = {} as DrawCommandDescriptor) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -769,9 +769,9 @@ export class DrawCommand {
         lockDrawCommandContract(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'draw',
@@ -791,7 +791,7 @@ export class DrawCommand {
         return this.#isDisposed
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -805,7 +805,7 @@ export class DrawCommand {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -993,7 +993,7 @@ function encodeDrawBuffersBindingsAndCall(
 }
 
 export interface BeginOcclusionQueryCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'begin-occlusion-query'
@@ -1005,7 +1005,7 @@ export class BeginOcclusionQueryCommand {
 
     #isDisposed = false
 
-    constructor(runtime: ScratchRuntime, descriptor: BeginOcclusionQueryCommandDescriptor = {} as BeginOcclusionQueryCommandDescriptor) {
+    constructor(runtime: GPURuntime, descriptor: BeginOcclusionQueryCommandDescriptor = {} as BeginOcclusionQueryCommandDescriptor) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -1042,9 +1042,9 @@ export class BeginOcclusionQueryCommand {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'begin-occlusion-query',
@@ -1059,7 +1059,7 @@ export class BeginOcclusionQueryCommand {
         return this.#isDisposed
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -1073,7 +1073,7 @@ export class BeginOcclusionQueryCommand {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -1128,7 +1128,7 @@ export class BeginOcclusionQueryCommand {
                 phase: 'runtime',
                 subject: this.runtime.subject,
                 related: [ this.subject ],
-                message: 'ScratchRuntime render pass encoder cannot begin occlusion queries.',
+                message: 'GPURuntime render pass encoder cannot begin occlusion queries.',
                 expected: { passEncoder: 'GPURenderPassEncoder with beginOcclusionQuery()' },
                 actual: { beginOcclusionQuery: typeof passEncoder?.beginOcclusionQuery },
             })
@@ -1144,7 +1144,7 @@ export class BeginOcclusionQueryCommand {
 }
 
 export interface EndOcclusionQueryCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'end-occlusion-query'
@@ -1154,7 +1154,7 @@ export class EndOcclusionQueryCommand {
 
     #isDisposed = false
 
-    constructor(runtime: ScratchRuntime, descriptor: EndOcclusionQueryCommandDescriptor = {}) {
+    constructor(runtime: GPURuntime, descriptor: EndOcclusionQueryCommandDescriptor = {}) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -1168,9 +1168,9 @@ export class EndOcclusionQueryCommand {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'end-occlusion-query',
@@ -1185,7 +1185,7 @@ export class EndOcclusionQueryCommand {
         return this.#isDisposed
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -1199,7 +1199,7 @@ export class EndOcclusionQueryCommand {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -1252,7 +1252,7 @@ export class EndOcclusionQueryCommand {
                 phase: 'runtime',
                 subject: this.runtime.subject,
                 related: [ this.subject ],
-                message: 'ScratchRuntime render pass encoder cannot end occlusion queries.',
+                message: 'GPURuntime render pass encoder cannot end occlusion queries.',
                 expected: { passEncoder: 'GPURenderPassEncoder with endOcclusionQuery()' },
                 actual: { endOcclusionQuery: typeof passEncoder?.endOcclusionQuery },
             })
@@ -1268,7 +1268,7 @@ export class EndOcclusionQueryCommand {
 }
 
 export interface DispatchCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'dispatch'
@@ -1286,7 +1286,7 @@ export class DispatchCommand {
     readonly #producesDeclaredWrites: boolean
     #isDisposed = false
 
-    constructor(runtime: ScratchRuntime, descriptor: DispatchCommandDescriptor = {} as DispatchCommandDescriptor) {
+    constructor(runtime: GPURuntime, descriptor: DispatchCommandDescriptor = {} as DispatchCommandDescriptor) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -1332,9 +1332,9 @@ export class DispatchCommand {
         lockDispatchCommandContract(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'dispatch',
@@ -1354,7 +1354,7 @@ export class DispatchCommand {
         return this.#isDisposed
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -1368,7 +1368,7 @@ export class DispatchCommand {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -2430,7 +2430,7 @@ function lockExternalImageUploadCommandContract(command: ExternalImageUploadComm
 }
 
 export interface UploadCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'upload'
@@ -2446,7 +2446,7 @@ export class UploadCommand {
 
     #isDisposed = false
 
-    constructor(runtime: ScratchRuntime, descriptor: UploadCommandDescriptor = {} as UploadCommandDescriptor) {
+    constructor(runtime: GPURuntime, descriptor: UploadCommandDescriptor = {} as UploadCommandDescriptor) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -2488,9 +2488,9 @@ export class UploadCommand {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'upload',
@@ -2506,7 +2506,7 @@ export class UploadCommand {
         return this.#isDisposed
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -2520,7 +2520,7 @@ export class UploadCommand {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -2557,7 +2557,7 @@ export class UploadCommand {
 }
 
 export interface ClearBufferCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'clear'
@@ -2569,7 +2569,7 @@ export class ClearBufferCommand {
     #isDisposed = false
 
     constructor(
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: ClearBufferCommandDescriptor = {} as ClearBufferCommandDescriptor
     ) {
 
@@ -2603,9 +2603,9 @@ export class ClearBufferCommand {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'clear',
@@ -2625,7 +2625,7 @@ export class ClearBufferCommand {
         return this.target.size > 0
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         this.assertUsable()
 
@@ -2639,7 +2639,7 @@ export class ClearBufferCommand {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -2681,7 +2681,7 @@ export class ClearBufferCommand {
                 phase: 'runtime',
                 subject: this.runtime.subject,
                 related: [ this.subject, this.target.buffer.subject ],
-                message: 'ScratchRuntime command encoder cannot clear GPU buffers.',
+                message: 'GPURuntime command encoder cannot clear GPU buffers.',
                 expected: { commandEncoder: 'GPUCommandEncoder with clearBuffer()' },
                 actual: { clearBuffer: typeof commandEncoder?.clearBuffer },
             })
@@ -2702,7 +2702,7 @@ export class ClearBufferCommand {
 }
 
 export interface CopyCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'copy'
@@ -2725,7 +2725,7 @@ export class CopyCommand {
 
     #isDisposed = false
 
-    constructor(runtime: ScratchRuntime, descriptor: CopyCommandDescriptor = {} as CopyCommandDescriptor) {
+    constructor(runtime: GPURuntime, descriptor: CopyCommandDescriptor = {} as CopyCommandDescriptor) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -2842,9 +2842,9 @@ export class CopyCommand {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'copy',
@@ -2859,7 +2859,7 @@ export class CopyCommand {
         return this.#isDisposed
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -2873,7 +2873,7 @@ export class CopyCommand {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -2948,7 +2948,7 @@ export class CopyCommand {
                     phase: 'runtime',
                     subject: this.runtime.subject,
                     related: [ this.subject ],
-                    message: 'ScratchRuntime command encoder cannot copy GPU buffers.',
+                    message: 'GPURuntime command encoder cannot copy GPU buffers.',
                     expected: { commandEncoder: 'GPUCommandEncoder with copyBufferToBuffer()' },
                     actual: { copyBufferToBuffer: typeof commandEncoder?.copyBufferToBuffer },
                 })
@@ -2969,7 +2969,7 @@ export class CopyCommand {
                     phase: 'runtime',
                     subject: this.runtime.subject,
                     related: [ this.subject ],
-                    message: 'ScratchRuntime command encoder cannot copy GPU textures.',
+                    message: 'GPURuntime command encoder cannot copy GPU textures.',
                     expected: { commandEncoder: 'GPUCommandEncoder with copyTextureToTexture()' },
                     actual: { copyTextureToTexture: typeof commandEncoder?.copyTextureToTexture },
                 })
@@ -3001,7 +3001,7 @@ export class CopyCommand {
                     phase: 'runtime',
                     subject: this.runtime.subject,
                     related: [ this.subject ],
-                    message: 'ScratchRuntime command encoder cannot copy GPU buffers to textures.',
+                    message: 'GPURuntime command encoder cannot copy GPU buffers to textures.',
                     expected: { commandEncoder: 'GPUCommandEncoder with copyBufferToTexture()' },
                     actual: { copyBufferToTexture: typeof commandEncoder?.copyBufferToTexture },
                 })
@@ -3032,7 +3032,7 @@ export class CopyCommand {
                     phase: 'runtime',
                     subject: this.runtime.subject,
                     related: [ this.subject ],
-                    message: 'ScratchRuntime command encoder cannot copy GPU textures to buffers.',
+                    message: 'GPURuntime command encoder cannot copy GPU textures to buffers.',
                     expected: { commandEncoder: 'GPUCommandEncoder with copyTextureToBuffer()' },
                     actual: { copyTextureToBuffer: typeof commandEncoder?.copyTextureToBuffer },
                 })
@@ -3075,14 +3075,14 @@ type NormalizedReadbackCommandDescriptor = Readonly<{
 }>
 
 type ReadbackCommandPrivateState = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     label: string | undefined
     source: BufferCopyCommandSourceDescriptor
     retain: ReadbackRetentionPolicy
     whenMissing: 'throw'
     slot: ReadbackStagingSlot
-    state: ScratchReadbackCommandState
+    state: GPUReadbackCommandState
     isDisposed: boolean
     disposeRequested: boolean
     activeClaim: ReadbackCommandClaim | undefined
@@ -3115,7 +3115,7 @@ export class ReadbackCommand {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         id: string,
         descriptor: NormalizedReadbackCommandDescriptor,
         slot: ReadbackStagingSlot
@@ -3127,7 +3127,7 @@ export class ReadbackCommand {
                 severity: 'error',
                 phase: 'readback',
                 subject: { kind: 'Command', commandKind: 'readback' },
-                message: 'ReadbackCommand must be created by ScratchRuntime.',
+                message: 'ReadbackCommand must be created by GPURuntime.',
                 hints: [ 'Use await runtime.createReadbackCommand(descriptor).' ],
             })
         }
@@ -3149,22 +3149,22 @@ export class ReadbackCommand {
         Object.preventExtensions(this)
     }
 
-    get runtime(): ScratchRuntime { return readbackCommandStateFor(this).runtime }
+    get runtime(): GPURuntime { return readbackCommandStateFor(this).runtime }
     get id(): string { return readbackCommandStateFor(this).id }
     get label(): string | undefined { return readbackCommandStateFor(this).label }
     get commandKind(): 'readback' { return 'readback' }
     get source(): BufferCopyCommandSourceDescriptor { return readbackCommandStateFor(this).source }
     get retain(): ReadbackRetentionPolicy { return readbackCommandStateFor(this).retain }
     get whenMissing(): 'throw' { return readbackCommandStateFor(this).whenMissing }
-    get state(): ScratchReadbackCommandState { return readbackCommandStateFor(this).state }
+    get state(): GPUReadbackCommandState { return readbackCommandStateFor(this).state }
     get isDisposed(): boolean { return readbackCommandStateFor(this).isDisposed }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return readbackCommandSubject(this.runtime, this.id, this.label)
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         this.assertUsable()
         if (runtime === this.runtime) return
@@ -3174,8 +3174,8 @@ export class ReadbackCommand {
             phase: 'command',
             subject: this.subject,
             related: [ this.runtime.subject, runtime?.subject ]
-                .filter((subject): subject is DiagnosticSubject => subject !== undefined),
-            message: 'Command belongs to a different ScratchRuntime.',
+                .filter((subject): subject is ScratchDiagnosticSubject => subject !== undefined),
+            message: 'Command belongs to a different GPURuntime.',
             expected: { runtimeId: this.runtime.id },
             actual: { runtimeId: runtime?.id },
         })
@@ -3199,8 +3199,8 @@ export class ReadbackCommand {
                 phase: 'readback',
                 subject: this.subject,
                 related: [ this.runtime.subject, after?.subject ]
-                    .filter((subject): subject is DiagnosticSubject => subject !== undefined),
-                message: 'ReadbackCommand result requires SubmittedWork from the same ScratchRuntime.',
+                    .filter((subject): subject is ScratchDiagnosticSubject => subject !== undefined),
+                message: 'ReadbackCommand result requires SubmittedWork from the same GPURuntime.',
                 expected: { after: 'SubmittedWork from the command runtime' },
                 actual: { after: describeValue(after), runtimeId: after?.runtime?.id },
             })
@@ -3275,7 +3275,7 @@ export class ReadbackCommandClaim {
 }
 
 export async function createReadbackCommand(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ReadbackCommandDescriptor
 ): Promise<ReadbackCommand> {
 
@@ -3451,7 +3451,7 @@ export function registerReadbackCommandResult(
 }
 
 function constructReadbackCommand(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     id: string,
     descriptor: NormalizedReadbackCommandDescriptor,
     slot: ReadbackStagingSlot
@@ -3459,7 +3459,7 @@ function constructReadbackCommand(
 
     const Constructor = ReadbackCommand as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         id: string,
         descriptor: NormalizedReadbackCommandDescriptor,
         slot: ReadbackStagingSlot
@@ -3618,7 +3618,7 @@ function readbackCommandClaimFact(claim: ReadbackCommandClaim) {
 }
 
 function normalizeReadbackCommandDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     id: string,
     descriptor: unknown
 ): NormalizedReadbackCommandDescriptor {
@@ -3636,8 +3636,8 @@ function normalizeReadbackCommandDescriptor(
 }
 
 function normalizeReadbackCommandSource(
-    runtime: ScratchRuntime,
-    subject: DiagnosticSubject,
+    runtime: GPURuntime,
+    subject: ScratchDiagnosticSubject,
     source: unknown
 ): BufferCopyCommandSourceDescriptor {
 
@@ -3658,8 +3658,8 @@ function normalizeReadbackCommandSource(
 }
 
 function validateCurrentReadbackCommandSource(
-    runtime: ScratchRuntime,
-    subject: DiagnosticSubject,
+    runtime: GPURuntime,
+    subject: ScratchDiagnosticSubject,
     source: BufferCopyCommandSourceDescriptor
 ): void {
 
@@ -3685,8 +3685,8 @@ function validateCurrentReadbackCommandSource(
 }
 
 function throwReadbackCommandSourceDiagnostic(
-    runtime: ScratchRuntime,
-    subject: DiagnosticSubject,
+    runtime: GPURuntime,
+    subject: ScratchDiagnosticSubject,
     source: unknown,
     reason = 'source'
 ): never {
@@ -3718,7 +3718,7 @@ function throwReadbackCommandSourceDiagnostic(
 }
 
 function normalizeReadbackCommandRetention(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     source: BufferCopyCommandSourceDescriptor,
     retain: unknown
 ): ReadbackRetentionPolicy {
@@ -3738,7 +3738,7 @@ function normalizeReadbackCommandRetention(
 }
 
 function normalizeReadbackCommandReadinessPolicy(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     source: BufferCopyCommandSourceDescriptor,
     whenMissing: unknown
 ): 'throw' {
@@ -3757,10 +3757,10 @@ function normalizeReadbackCommandReadinessPolicy(
 }
 
 function readbackCommandSubject(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     id: string,
     label?: string
-): DiagnosticSubject {
+): ScratchDiagnosticSubject {
 
     return {
         kind: 'Command',
@@ -3772,7 +3772,7 @@ function readbackCommandSubject(
 }
 
 export interface ResolveQuerySetCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'resolve-query-set'
@@ -3785,7 +3785,7 @@ export class ResolveQuerySetCommand {
     readonly #source: ResolveQuerySetSourceDescriptor
     #isDisposed = false
 
-    constructor(runtime: ScratchRuntime, descriptor: ResolveQuerySetCommandDescriptor = {} as ResolveQuerySetCommandDescriptor) {
+    constructor(runtime: GPURuntime, descriptor: ResolveQuerySetCommandDescriptor = {} as ResolveQuerySetCommandDescriptor) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -3849,9 +3849,9 @@ export class ResolveQuerySetCommand {
         return this.#source.slots.length
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'resolve-query-set',
@@ -3866,7 +3866,7 @@ export class ResolveQuerySetCommand {
         return this.#isDisposed
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -3880,7 +3880,7 @@ export class ResolveQuerySetCommand {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -3918,7 +3918,7 @@ export class ResolveQuerySetCommand {
                 phase: 'runtime',
                 subject: this.runtime.subject,
                 related: [ this.subject ],
-                message: 'ScratchRuntime command encoder cannot resolve GPU query sets.',
+                message: 'GPURuntime command encoder cannot resolve GPU query sets.',
                 expected: { commandEncoder: 'GPUCommandEncoder with resolveQuerySet()' },
                 actual: { resolveQuerySet: typeof commandEncoder?.resolveQuerySet },
             })
@@ -3941,7 +3941,7 @@ export class ResolveQuerySetCommand {
 }
 
 export interface TextureUploadCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'upload'
@@ -3959,7 +3959,7 @@ export class TextureUploadCommand {
 
     #isDisposed = false
 
-    constructor(runtime: ScratchRuntime, descriptor: TextureUploadCommandDescriptor = {} as TextureUploadCommandDescriptor) {
+    constructor(runtime: GPURuntime, descriptor: TextureUploadCommandDescriptor = {} as TextureUploadCommandDescriptor) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -4028,9 +4028,9 @@ export class TextureUploadCommand {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'upload',
@@ -4046,7 +4046,7 @@ export class TextureUploadCommand {
         return this.#isDisposed
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -4060,7 +4060,7 @@ export class TextureUploadCommand {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -4097,7 +4097,7 @@ export class TextureUploadCommand {
 }
 
 export interface ExternalImageUploadCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'upload'
@@ -4118,7 +4118,7 @@ export class ExternalImageUploadCommand {
     #isDisposed = false
 
     constructor(
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: ExternalImageUploadCommandDescriptor
     ) {
 
@@ -4165,9 +4165,9 @@ export class ExternalImageUploadCommand {
         lockExternalImageUploadCommandContract(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Command',
             id: this.id,
             commandKind: 'upload',
@@ -4183,7 +4183,7 @@ export class ExternalImageUploadCommand {
         return this.#isDisposed
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         this.assertUsable()
 
@@ -4194,7 +4194,7 @@ export class ExternalImageUploadCommand {
                 phase: 'command',
                 subject: this.subject,
                 related: [ this.runtime.subject, runtime?.subject ].filter(Boolean),
-                message: 'Command belongs to a different ScratchRuntime.',
+                message: 'Command belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -4248,7 +4248,7 @@ export function validateUploadCommandQueueAction(
                     phase: 'runtime',
                     subject: command.runtime.subject,
                     related: [ command.subject ],
-                    message: 'ScratchRuntime queue cannot write GPU buffers.',
+                    message: 'GPURuntime queue cannot write GPU buffers.',
                     expected: { queue: 'GPUQueue with writeBuffer()' },
                     actual: { writeBuffer: typeof queue?.writeBuffer },
                 })
@@ -4264,7 +4264,7 @@ export function validateUploadCommandQueueAction(
                     phase: 'runtime',
                     subject: command.runtime.subject,
                     related: [ command.subject ],
-                    message: 'ScratchRuntime queue cannot write GPU textures.',
+                    message: 'GPURuntime queue cannot write GPU textures.',
                     expected: { queue: 'GPUQueue with writeTexture()' },
                     actual: { writeTexture: typeof queue?.writeTexture },
                 })
@@ -4340,7 +4340,7 @@ function validateUploadCommandQueueOwner(
         phase: 'command',
         subject: command.subject,
         related: [ command.runtime.subject ],
-        message: 'Upload command queue is not owned by its ScratchRuntime.',
+        message: 'Upload command queue is not owned by its GPURuntime.',
         expected: {
             queueOwnedByRuntime: true,
             runtimeId: command.runtime.id,
@@ -4406,7 +4406,7 @@ function assertNeverUploadCommand(command: never): never {
     throw new TypeError(`Unsupported upload command: ${describeValue(command)}`)
 }
 
-function normalizeOcclusionQueryIndex(runtime: ScratchRuntime, querySet: QuerySetResource, index: number): number {
+function normalizeOcclusionQueryIndex(runtime: GPURuntime, querySet: QuerySetResource, index: number): number {
 
     if (!Number.isInteger(index) || index < 0 || index >= querySet.count) {
         throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason: 'index' })
@@ -4428,7 +4428,7 @@ function throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason
         ].filter(isDefined),
         message: 'BeginOcclusionQueryCommand requires an occlusion QuerySetResource and a valid query slot index.',
         expected: {
-            querySet: 'occlusion QuerySetResource owned by this ScratchRuntime',
+            querySet: 'occlusion QuerySetResource owned by this GPURuntime',
             index: 'integer query index within querySet.count',
         },
         actual: {
@@ -4798,7 +4798,7 @@ function dynamicOffsetRelatedSubjects(
     command: DynamicOffsetCommand,
     bindSet: BindSet,
     entry?: DynamicBufferBindLayoutEntry
-): DiagnosticSubject[] {
+): ScratchDiagnosticSubject[] {
 
     const binding = entry === undefined ? undefined : bindSet.bindings.get(entry.name)
 
@@ -4939,12 +4939,12 @@ function throwCommandProgramLayoutMismatch(
         actual: unknown
         bindSet?: BindSet
         entry?: NormalizedBindLayoutEntry
-        resource?: DiagnosticSubject | undefined
-        actualLayout?: DiagnosticSubject | undefined
+        resource?: ScratchDiagnosticSubject | undefined
+        actualLayout?: ScratchDiagnosticSubject | undefined
     }
 ): never {
 
-    const related: Array<DiagnosticSubject | undefined> = [
+    const related: Array<ScratchDiagnosticSubject | undefined> = [
         command.pipeline.program.subject,
         command.pipeline.subject,
         command.subject,
@@ -5720,7 +5720,7 @@ function validateCurrentIndirectCommandRegion(
 
 }
 
-function normalizeUploadSource(runtime: ScratchRuntime, descriptor: UploadCommandDescriptor): NormalizedUploadSource {
+function normalizeUploadSource(runtime: GPURuntime, descriptor: UploadCommandDescriptor): NormalizedUploadSource {
 
     const data = descriptor.data
     if (isLayoutUploadView(data)) {
@@ -5750,7 +5750,7 @@ function normalizeUploadSource(runtime: ScratchRuntime, descriptor: UploadComman
     })
 }
 
-function createLayoutUploadBytes(runtime: ScratchRuntime, uploadView: LayoutUploadView): Uint8Array {
+function createLayoutUploadBytes(runtime: GPURuntime, uploadView: LayoutUploadView): Uint8Array {
 
     if (
         !Number.isInteger(uploadView.byteOffset) ||
@@ -5783,7 +5783,7 @@ function createLayoutUploadBytes(runtime: ScratchRuntime, uploadView: LayoutUplo
 }
 
 function normalizeUploadLayout(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     layout: unknown,
     descriptor: UploadCommandDescriptor
 ): LayoutArtifact | undefined {
@@ -5803,7 +5803,7 @@ function normalizeUploadLayout(
     })
 }
 
-function normalizeUploadOffset(runtime: ScratchRuntime, value: number): number {
+function normalizeUploadOffset(runtime: GPURuntime, value: number): number {
 
     if (!Number.isInteger(value) || value < 0) {
         throwUploadDiagnostic({ runtime, offset: value, reason: 'offset' })
@@ -5813,7 +5813,7 @@ function normalizeUploadOffset(runtime: ScratchRuntime, value: number): number {
 }
 
 function normalizeUploadByteLength(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     data: ArrayBuffer | ArrayBufferView,
     dataOffset: number,
     descriptor: UploadCommandDescriptor,
@@ -5876,7 +5876,7 @@ function validateUploadRange(command: UploadCommand) {
     validateUploadLayout(command)
 }
 
-function validateBufferUploadUsage(runtime: ScratchRuntime, target: BufferRegion): void {
+function validateBufferUploadUsage(runtime: GPURuntime, target: BufferRegion): void {
 
     if ((target.buffer.usage & GPU_BUFFER_USAGE_COPY_DST) !== 0) return
 
@@ -5911,7 +5911,7 @@ function validateClearBufferTarget(command: ClearBufferCommand): void {
 }
 
 function throwClearBufferDiagnostic(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     target: unknown,
     reason: 'descriptor' | 'target' | 'usage' | 'alignment' | 'range',
     command?: ClearBufferCommand
@@ -6011,7 +6011,7 @@ function createUploadSource(data: ArrayBuffer | ArrayBufferView, byteOffset: num
 }
 
 function validateBufferCopyUsage(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     buffer: BufferResource,
     requiredUsage: GPUBufferUsageFlags,
     role: string,
@@ -6033,7 +6033,7 @@ function validateBufferCopyUsage(
 }
 
 function validateTextureCopyUsage(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     texture: TextureCopyEndpoint,
     requiredUsage: GPUTextureUsageFlags,
     role: string,
@@ -6135,7 +6135,7 @@ function validateCurrentCopyUsage(command: CopyCommand): void {
     )
 }
 
-function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDescriptor): CopyCommandSourceDescriptor {
+function normalizeCopySource(runtime: GPURuntime, descriptor: CopyCommandDescriptor): CopyCommandSourceDescriptor {
 
     const source = descriptor.source
     if (!isRecord(source)) {
@@ -6183,7 +6183,7 @@ function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDes
                 phase: 'command',
                 subject: { kind: 'Command', commandKind: 'copy' },
                 related: [ surface.subject, runtime.subject ],
-                message: 'Surface texture copy source belongs to a different ScratchRuntime.',
+                message: 'Surface texture copy source belongs to a different GPURuntime.',
                 expected: { runtimeId: runtime.id },
                 actual: { runtimeId: facts.runtime.id },
             })
@@ -6239,7 +6239,7 @@ function copySourceDiagnosticValue(
 }
 
 function assertCopySourceRuntime(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     source: CopyCommandSourceDescriptor
 ): void {
 
@@ -6251,7 +6251,7 @@ function assertCopySourceRuntime(
 }
 
 type TextureCopyEndpointFacts = Readonly<{
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
     format: GPUTextureFormat
     usage: GPUTextureUsageFlags
     dimension: GPUTextureDimension
@@ -6308,7 +6308,7 @@ function sameTextureCopyEndpoint(
 }
 
 function assertTextureCopyEndpointRuntime(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     endpoint: TextureCopyEndpoint
 ): void {
 
@@ -6324,7 +6324,7 @@ function assertTextureCopyEndpointRuntime(
         phase: 'command',
         subject: endpoint.subject,
         related: [ facts.runtime.subject, runtime.subject ],
-        message: 'Surface texture copy endpoint belongs to a different ScratchRuntime.',
+        message: 'Surface texture copy endpoint belongs to a different GPURuntime.',
         expected: { runtimeId: runtime.id },
         actual: { runtimeId: facts.runtime.id },
     })
@@ -6448,7 +6448,7 @@ function normalizeCopyReadinessPolicy(command: CopyCommand, whenMissing: Resourc
     return 'throw'
 }
 
-function normalizeBufferCopyTarget(runtime: ScratchRuntime, descriptor: BufferToBufferCopyCommandDescriptor, source: BufferRegion): BufferRegion {
+function normalizeBufferCopyTarget(runtime: GPURuntime, descriptor: BufferToBufferCopyCommandDescriptor, source: BufferRegion): BufferRegion {
 
     const target = descriptor.target
     if (!isBufferRegion(target)) {
@@ -6466,7 +6466,7 @@ function normalizeBufferCopyTarget(runtime: ScratchRuntime, descriptor: BufferTo
 }
 
 function normalizeTextureCopyTarget(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: TextureToTextureCopyCommandDescriptor,
     source: TextureCopyEndpoint
 ): TextureCopyEndpoint {
@@ -6489,7 +6489,7 @@ function normalizeTextureCopyTarget(
 }
 
 function normalizeBufferToTextureCopyTarget(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: BufferToTextureCopyCommandDescriptor,
     source: BufferResource
 ): TextureCopyEndpoint {
@@ -6514,7 +6514,7 @@ function normalizeBufferToTextureCopyTarget(
 }
 
 function normalizeTextureToBufferCopyTarget(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: TextureToBufferCopyCommandDescriptor,
     source: TextureCopyEndpoint
 ): BufferRegion {
@@ -6540,7 +6540,7 @@ function normalizeTextureToBufferCopyTarget(
 }
 
 function normalizeTextureCopyOrigin(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     origin: TextureCopyOrigin | undefined = { x: 0, y: 0, z: 0 },
     key: 'sourceOrigin' | 'targetOrigin'
 ): { x: number, y: number, z: number } {
@@ -6571,7 +6571,7 @@ function normalizeTextureCopyOrigin(
 }
 
 function normalizeTextureCopyMipLevel(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     texture: TextureCopyEndpoint,
     mipLevel: number,
     key: 'sourceMipLevel' | 'targetMipLevel'
@@ -6589,7 +6589,7 @@ function normalizeTextureCopyMipLevel(
 }
 
 function normalizeTextureCopyAspect(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     aspect: GPUTextureAspect,
     key: 'sourceAspect' | 'targetAspect'
 ): GPUTextureAspect {
@@ -6602,7 +6602,7 @@ function normalizeTextureCopyAspect(
 }
 
 function normalizeTextureCopySize(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     source: unknown,
     target: unknown,
     size: TextureCopySize,
@@ -6636,7 +6636,7 @@ function normalizeTextureCopySize(
 }
 
 function normalizeTexelCopyBufferLayout(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     region: BufferRegion,
     texture: TextureCopyEndpoint,
     aspect: GPUTextureAspect,
@@ -7095,7 +7095,7 @@ function throwCopyDiagnostic({
     })
 }
 
-function validateResolveDestinationUsage(runtime: ScratchRuntime, destination: BufferResource) {
+function validateResolveDestinationUsage(runtime: GPURuntime, destination: BufferResource) {
 
     if ((destination.usage & GPU_BUFFER_USAGE_QUERY_RESOLVE) !== 0) return
 
@@ -7111,7 +7111,7 @@ function validateResolveDestinationUsage(runtime: ScratchRuntime, destination: B
     })
 }
 
-function normalizeResolveDescriptor(runtime: ScratchRuntime, descriptor: unknown): ResolveQuerySetCommandDescriptor {
+function normalizeResolveDescriptor(runtime: GPURuntime, descriptor: unknown): ResolveQuerySetCommandDescriptor {
 
     if (!isRecord(descriptor)) {
         throwResolveQuerySetDiagnostic({ runtime, reason: 'descriptor' })
@@ -7138,7 +7138,7 @@ function normalizeResolveDescriptor(runtime: ScratchRuntime, descriptor: unknown
     return descriptor as ResolveQuerySetCommandDescriptor
 }
 
-function normalizeResolveSource(runtime: ScratchRuntime, source: unknown): ResolveQuerySetSourceDescriptor {
+function normalizeResolveSource(runtime: GPURuntime, source: unknown): ResolveQuerySetSourceDescriptor {
 
     if (!isRecord(source)) {
         throwResolveQuerySetDiagnostic({ runtime, source, reason: 'source' })
@@ -7166,7 +7166,7 @@ function normalizeResolveSource(runtime: ScratchRuntime, source: unknown): Resol
 }
 
 function normalizeResolveQuerySlots(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     querySet: QuerySetResource,
     slots: unknown,
     source: unknown
@@ -7207,7 +7207,7 @@ function normalizeResolveQuerySlots(
 }
 
 function validateResolveReadinessPolicy(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     whenMissing: unknown,
     source: ResolveQuerySetSourceDescriptor,
     destination: BufferRegion
@@ -7348,7 +7348,7 @@ function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size
 }
 
 function normalizeTextureUploadOrigin(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     origin: TextureUploadOrigin = { x: 0, y: 0, z: 0 }
 ): { x: number, y: number, z: number } {
 
@@ -7377,7 +7377,7 @@ function normalizeTextureUploadOrigin(
     return { x, y, z }
 }
 
-function normalizeTextureUploadMipLevel(runtime: ScratchRuntime, target: TextureResource, mipLevel: number): number {
+function normalizeTextureUploadMipLevel(runtime: GPURuntime, target: TextureResource, mipLevel: number): number {
 
     if (!Number.isInteger(mipLevel) || mipLevel < 0 || mipLevel >= target.mipLevelCount) {
         throwTextureUploadDiagnostic({
@@ -7392,7 +7392,7 @@ function normalizeTextureUploadMipLevel(runtime: ScratchRuntime, target: Texture
 }
 
 function normalizeTextureUploadAspect(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     target: TextureResource,
     aspect: GPUTextureAspect
 ): GPUTextureAspect {
@@ -7413,7 +7413,7 @@ function normalizeTextureUploadAspect(
 }
 
 function normalizeTextureUploadSize(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     target: TextureResource,
     size: TextureUploadSize,
     origin: { x: number, y: number, z: number },
@@ -7461,7 +7461,7 @@ function normalizeTextureUploadSize(
 }
 
 function normalizeTextureUploadLayout(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     target: TextureResource,
     layout: TextureUploadLayout = {},
     size: { width: number, height: number, depthOrArrayLayers: number },
@@ -7688,7 +7688,7 @@ function throwTextureUploadDiagnostic({
 }
 
 function normalizeExternalImageUploadSource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     source: GPUCopyExternalImageSource
 ): GPUCopyExternalImageSource {
 
@@ -7700,7 +7700,7 @@ function normalizeExternalImageUploadSource(
 }
 
 function normalizeExternalImageUploadSourceOrigin(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     origin: ExternalImageUploadSourceOrigin = { x: 0, y: 0 }
 ): { x: number, y: number } {
 
@@ -7728,7 +7728,7 @@ function normalizeExternalImageUploadSourceOrigin(
 }
 
 function normalizeExternalImageUploadTargetOrigin(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     origin: TextureUploadOrigin = { x: 0, y: 0, z: 0 }
 ): { x: number, y: number, z: number } {
 
@@ -7759,7 +7759,7 @@ function normalizeExternalImageUploadTargetOrigin(
 }
 
 function normalizeExternalImageUploadMipLevel(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     target: TextureResource,
     mipLevel: number
 ): number {
@@ -7772,7 +7772,7 @@ function normalizeExternalImageUploadMipLevel(
 }
 
 function normalizeExternalImageUploadColorSpace(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     colorSpace: PredefinedColorSpace
 ): PredefinedColorSpace {
 
@@ -7784,7 +7784,7 @@ function normalizeExternalImageUploadColorSpace(
 }
 
 function normalizeExternalImageUploadBoolean(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     value: unknown,
     reason: 'flipY' | 'premultiplied-alpha'
 ): boolean {
@@ -7801,7 +7801,7 @@ function normalizeExternalImageUploadBoolean(
 }
 
 function normalizeExternalImageUploadSize(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     size: ExternalImageUploadSize
 ): { width: number, height: number, depthOrArrayLayers: 1 } {
 
@@ -8008,7 +8008,7 @@ function getPlatformPropertyGetter(kind: ExternalImageSourceKind, property: stri
     return undefined
 }
 
-function runtimeHasFeature(runtime: ScratchRuntime, requiredFeature: string): boolean {
+function runtimeHasFeature(runtime: GPURuntime, requiredFeature: string): boolean {
 
     for (const enabledFeature of runtime.deviceFeatures) {
         if (String(enabledFeature) === requiredFeature) return true

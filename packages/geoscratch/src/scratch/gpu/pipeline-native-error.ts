@@ -3,10 +3,10 @@ import {
     createPipelineSourceRedactionIndex,
     sanitizePipelineEvidenceText,
 } from './pipeline-compilation.js'
-import type { ScratchNativeGpuErrorFacts } from './gpu-operation.js'
+import type { GPUNativeErrorFacts } from './gpu-operation.js'
 import type { PipelineSourceSnapshot } from './pipeline-compilation.js'
 
-export type PipelineNativeErrorSerializer = (error: unknown) => ScratchNativeGpuErrorFacts
+export type PipelineNativeErrorSerializer = (error: unknown) => GPUNativeErrorFacts
 
 export function createPipelineNativeErrorSerializer(
     sourceSnapshot: Pick<PipelineSourceSnapshot, 'combinedSource'>

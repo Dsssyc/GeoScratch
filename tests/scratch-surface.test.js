@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     Surface,
 } from 'geoscratch'
 
@@ -94,7 +94,7 @@ describe('Surface', () => {
 
         const { gpu, device } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         const surface = runtime.createSurface(canvas, {
             label: 'main surface',
@@ -130,7 +130,7 @@ describe('Surface', () => {
 
         const { gpu, device } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             size: { width: 320, height: 180 },
@@ -162,7 +162,7 @@ describe('Surface', () => {
 
         const { gpu, device } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const viewFormats = [ 'rgba8unorm-srgb' ]
         const toneMapping = { mode: 'extended' }
         const surface = runtime.createSurface(canvas, {
@@ -208,7 +208,7 @@ describe('Surface', () => {
         ]) {
             const { gpu } = createFakeGpu()
             const { canvas, context } = createFakeCanvas()
-            const runtime = await ScratchRuntime.create({ gpu })
+            const runtime = await GPURuntime.create({ gpu })
 
             try {
                 runtime.createSurface(canvas, options)
@@ -231,7 +231,7 @@ describe('Surface', () => {
 
         const transientUsage = 0x20 | 0x10
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const rejectedCanvas = createFakeCanvas()
 
         try {
@@ -270,10 +270,10 @@ describe('Surface', () => {
         for (const contenderKind of [ 'same-runtime', 'different-runtime' ]) {
             const { gpu } = createFakeGpu()
             const { canvas, context } = createFakeCanvas()
-            const ownerRuntime = await ScratchRuntime.create({ gpu })
+            const ownerRuntime = await GPURuntime.create({ gpu })
             const contenderRuntime = contenderKind === 'same-runtime'
                 ? ownerRuntime
-                : await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+                : await GPURuntime.create({ gpu: createFakeGpu().gpu })
             const owner = ownerRuntime.createSurface(canvas, {
                 label: 'owner',
                 format: 'rgba8unorm',
@@ -321,7 +321,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const configure = context.configure.bind(context)
         let shouldFail = true
         context.configure = descriptor => {
@@ -359,7 +359,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             alphaMode: 'opaque',
@@ -404,7 +404,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             size: { width: 4, height: 4 },
@@ -456,7 +456,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             size: { width: 4, height: 4 },
@@ -498,7 +498,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             size: { width: 4, height: 4 },
@@ -537,7 +537,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             size: { width: 4, height: 4 },
@@ -584,7 +584,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             size: { width: 4, height: 4 },
@@ -627,7 +627,7 @@ describe('Surface', () => {
 
         const { gpu, device } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             size: { width: 4, height: 4 },
@@ -667,7 +667,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const owner = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             size: { width: 4, height: 4 },
@@ -716,7 +716,7 @@ describe('Surface', () => {
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
         const drifted = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, {
             format: 'rgba8unorm',
             size: { width: 4, height: 4 },
@@ -755,7 +755,7 @@ describe('Surface', () => {
         for (const drift of [ 'configure', 'unconfigure', 'canvas-size' ]) {
             const { gpu, device } = createFakeGpu()
             const { canvas, context } = createFakeCanvas()
-            const runtime = await ScratchRuntime.create({ gpu })
+            const runtime = await GPURuntime.create({ gpu })
             const surface = runtime.createSurface(canvas, {
                 format: 'rgba8unorm',
                 size: { width: 4, height: 4 },
@@ -799,7 +799,7 @@ describe('Surface', () => {
         ]) {
             const { gpu, device } = createFakeGpu()
             const { canvas, context } = createFakeCanvas()
-            const runtime = await ScratchRuntime.create({ gpu })
+            const runtime = await GPURuntime.create({ gpu })
             const surface = runtime.createSurface(canvas, {
                 format: 'rgba8unorm',
                 size: { width: 4, height: 4 },
@@ -835,7 +835,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, { format: 'rgba8unorm' })
         Object.freeze(surface)
 
@@ -852,7 +852,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, { format: 'rgba8unorm' })
         context.unconfigure = () => {
             context.unconfigureCalls++
@@ -876,7 +876,7 @@ describe('Surface', () => {
         expect(runtime.isDisposed).to.equal(false)
         expect(context.unconfigureCalls).to.equal(1)
 
-        const replacementRuntime = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const replacementRuntime = await GPURuntime.create({ gpu: createFakeGpu().gpu })
         const replacement = replacementRuntime.createSurface(canvas, { format: 'bgra8unorm' })
         expect(replacement.context).to.equal(context)
     })
@@ -885,7 +885,7 @@ describe('Surface', () => {
 
         const { gpu, device } = createFakeGpu()
         const { canvas, context } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, { format: 'rgba8unorm' })
         const buffer = await runtime.createBuffer({ size: 4, usage: 0x8 })
         let bufferDestroyCalls = 0
@@ -911,7 +911,7 @@ describe('Surface', () => {
         expect(bufferDestroyCalls).to.equal(1)
         expect(deviceDestroyCalls).to.equal(1)
 
-        const replacementRuntime = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const replacementRuntime = await GPURuntime.create({ gpu: createFakeGpu().gpu })
         const replacement = replacementRuntime.createSurface(canvas, { format: 'bgra8unorm' })
         expect(replacement.context).to.equal(context)
     })
@@ -920,7 +920,7 @@ describe('Surface', () => {
 
         const { gpu } = createFakeGpu()
         const { canvas } = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const surface = runtime.createSurface(canvas, { format: 'rgba8unorm' })
 
         surface.dispose()

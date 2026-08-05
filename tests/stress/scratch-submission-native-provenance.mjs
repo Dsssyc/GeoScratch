@@ -2,7 +2,7 @@ import os from 'node:os'
 import process from 'node:process'
 import { performance } from 'node:perf_hooks'
 import { ScratchDiagnosticError } from '../../packages/geoscratch/dist/scratch/gpu/diagnostics.js'
-import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
+import { GPURuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
 import { diagnosticsControllerFor } from '../../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
 import { createFakeGpu } from '../scratch-test-utils.js'
 
@@ -345,7 +345,7 @@ async function stressFiniteDetailedCapture() {
 
 async function createStressRuntime(fake, diagnostics = {}) {
 
-    return ScratchRuntime.create({
+    return GPURuntime.create({
         gpu: fake.gpu,
         diagnostics: {
             operationCapacity,

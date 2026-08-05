@@ -10,7 +10,7 @@ import {
     Program,
     SamplerResource,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     TextureResource,
     inspectShader,
 } from 'geoscratch'
@@ -24,7 +24,7 @@ describe('scratch closed brand authority', () => {
     it('rejects a forged sampler after constructor Symbol.hasInstance replacement', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const nativeOwner = await runtime.createSampler()
         const layout = await runtime.createBindLayout({
             group: 0,
@@ -84,7 +84,7 @@ describe('scratch closed brand authority', () => {
     it('rejects a forged texture before native copy encoding after constructor replacement', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const nativeOwner = await runtime.createTexture({
             size: [ 1, 1 ],
             format: 'rgba8unorm',
@@ -152,7 +152,7 @@ describe('scratch closed brand authority', () => {
     it('rejects prototype-derived BindLayout identities before native binding creation', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const owner = await runtime.createBindLayout({ group: 0, entries: [] })
         const lookalike = prototypeLookalike(BindLayout, {
             runtime,
@@ -190,7 +190,7 @@ describe('scratch closed brand authority', () => {
     it('rejects prototype-derived Program identities before native pipeline creation', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const lookalike = prototypeLookalike(Program, {
             runtime,
             id: 'lookalike-program',
@@ -237,8 +237,8 @@ describe('scratch closed brand authority', () => {
 
         const fakeA = createFakeGpu()
         const fakeB = createFakeGpu()
-        const runtimeA = await ScratchRuntime.create({ gpu: fakeA.gpu })
-        const runtimeB = await ScratchRuntime.create({ gpu: fakeB.gpu })
+        const runtimeA = await GPURuntime.create({ gpu: fakeA.gpu })
+        const runtimeB = await GPURuntime.create({ gpu: fakeB.gpu })
         const program = await createTestProgram(runtimeA, {
             sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
             compute: 'csMain',
@@ -268,7 +268,7 @@ describe('scratch closed brand authority', () => {
     it('keeps Program disposal authoritative after public mutation attempts', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const program = await createTestProgram(runtime, {
             sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
             compute: 'csMain',
@@ -295,7 +295,7 @@ describe('scratch closed brand authority', () => {
     it('freezes Program required features before future native pipeline work', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const program = await createTestProgram(runtime, {
             sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
             compute: 'csMain',
@@ -345,7 +345,7 @@ describe('scratch closed brand authority', () => {
     it('rejects prototype-derived Pipeline and BindSet identities before command creation', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const layout = await runtime.createBindLayout({ group: 0, entries: [] })
         const program = await createTestProgram(runtime, {
             sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
@@ -408,7 +408,7 @@ describe('scratch closed brand authority', () => {
     it('rejects prototype-derived pass and command identities before native submission effects', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const lookalike = prototypeLookalike(ComputePassSpec, {
             runtime,
             id: 'lookalike-compute-pass',
@@ -528,7 +528,7 @@ function restoreHasInstance(Constructor, descriptor) {
 async function expectProgramFactImmutability(pipelineKind) {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const program = await createPipelineProgram(runtime)
     const facts = [
         'vertex',
@@ -565,7 +565,7 @@ async function expectProgramFactImmutability(pipelineKind) {
 async function expectProgramDescriptorSnapshotDisposal(pipelineKind) {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const program = await createPipelineProgram(runtime)
     const descriptor = { program }
     const fact = pipelineKind === 'render' ? 'targets' : 'immediateSize'
@@ -602,7 +602,7 @@ async function expectProgramDescriptorSnapshotDisposal(pipelineKind) {
 async function expectExistingPipelineProgramAuthority(pipelineKind) {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const program = await createPipelineProgram(runtime)
     const pipeline = await createPipeline(pipelineKind, runtime, program)
     program.dispose()

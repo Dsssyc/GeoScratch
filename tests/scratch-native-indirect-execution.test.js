@@ -4,7 +4,7 @@ import {
     DispatchCommand,
     DrawCommand,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     createFakeGpu,
@@ -28,7 +28,7 @@ function readResource(resource, contentEpoch = resource.contentEpoch) {
 async function createRenderFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const program = await createTestProgram(runtime, {
         sourceParts: [ triangleWgsl ],
         vertex: 'vsMain',
@@ -58,7 +58,7 @@ async function createRenderFixture() {
 async function createComputeFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const program = await createTestProgram(runtime, {
         sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
         compute: 'csMain',
@@ -466,7 +466,7 @@ describe('scratch native indexed and indirect execution', () => {
             whenMissing: 'throw',
         }), 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID')
 
-        const foreignRuntime = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const foreignRuntime = await GPURuntime.create({ gpu: createFakeGpu().gpu })
         const foreign = await foreignRuntime.createBuffer({ size: 8, usage: GPU_BUFFER_USAGE_INDEX })
         await expectDiagnostic(() => fixture.runtime.createDrawCommand({
             pipeline: fixture.pipeline,
@@ -913,7 +913,7 @@ describe('scratch native indexed and indirect execution', () => {
             whenMissing: 'throw',
         }), 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID')
 
-        const foreignRuntime = await ScratchRuntime.create({ gpu: createFakeGpu().gpu })
+        const foreignRuntime = await GPURuntime.create({ gpu: createFakeGpu().gpu })
         const foreign = await foreignRuntime.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE_INDIRECT })
         await expectDiagnostic(() => render.runtime.createDrawCommand({
             pipeline: render.pipeline,

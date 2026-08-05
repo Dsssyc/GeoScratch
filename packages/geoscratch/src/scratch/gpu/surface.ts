@@ -2,8 +2,8 @@ import { UUID } from '../../core/utils/uuid.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { getGlobalConstant } from './type-utils.js'
-import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
+import type { GPURuntime } from './runtime.js'
 
 export type SurfaceSize = {
     width: number
@@ -23,7 +23,7 @@ export type SurfaceOptions = {
     size?: SurfaceSize
 }
 
-type ScratchCanvas = HTMLCanvasElement | OffscreenCanvas
+type GPUCanvas = HTMLCanvasElement | OffscreenCanvas
 
 type SurfaceToneMapping = Readonly<{
     mode: GPUCanvasToneMappingMode
@@ -50,9 +50,9 @@ type SurfaceOptionsSnapshot = Readonly<{
 }>
 
 type SurfaceState = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
-    canvas: ScratchCanvas
+    canvas: GPUCanvas
     context: GPUCanvasContext
     configuration: SurfaceConfigurationSnapshot
     configurationVersion: number
@@ -62,10 +62,10 @@ type SurfaceState = {
 }
 
 export type SurfaceFacts = Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     context: GPUCanvasContext
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
     format: GPUTextureFormat
     usage: GPUTextureUsageFlags
     viewFormats: readonly GPUTextureFormat[]
@@ -106,10 +106,10 @@ const surfaceStates = new WeakMap<Surface, SurfaceState>()
 const preparedSurfaceAttachments = new WeakMap<PreparedSurfaceAttachment, PreparedSurfaceAttachmentState>()
 
 export interface Surface {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     label?: string
-    readonly canvas: ScratchCanvas
+    readonly canvas: GPUCanvas
     readonly context: GPUCanvasContext
     readonly format: GPUTextureFormat
     readonly usage: GPUTextureUsageFlags
@@ -124,7 +124,7 @@ export interface Surface {
 
 export class Surface {
 
-    constructor(runtime: ScratchRuntime, canvas: ScratchCanvas, options: SurfaceOptions = {}) {
+    constructor(runtime: GPURuntime, canvas: GPUCanvas, options: SurfaceOptions = {}) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -169,7 +169,7 @@ export class Surface {
         }
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return surfaceSubject(this, surfaceStates.get(this))
     }
@@ -434,7 +434,7 @@ function assertSurfaceAliveOwner(surface: Surface): SurfaceState {
             phase: 'runtime',
             subject: surfaceSubject(surface, state),
             message: 'Surface has been disposed.',
-            hints: [ 'Create a replacement Surface from an active ScratchRuntime.' ],
+            hints: [ 'Create a replacement Surface from an active GPURuntime.' ],
         })
     }
 
@@ -905,7 +905,7 @@ function assertSurfaceConfigurationAccepted(
     throw new TypeError('GPUCanvasContext did not retain the requested configuration.')
 }
 
-function assertSurfaceSizeAccepted(canvas: ScratchCanvas, candidate: Readonly<SurfaceSize>): void {
+function assertSurfaceSizeAccepted(canvas: GPUCanvas, candidate: Readonly<SurfaceSize>): void {
 
     const observed = currentCanvasSize(canvas)
     if (observed.width === candidate.width && observed.height === candidate.height) return
@@ -1013,7 +1013,7 @@ function freezeSurfaceConfiguration(
     })
 }
 
-function createCanvasContext(subject: DiagnosticSubject, canvas: ScratchCanvas): GPUCanvasContext {
+function createCanvasContext(subject: ScratchDiagnosticSubject, canvas: GPUCanvas): GPUCanvasContext {
 
     if (!canvas || typeof canvas.getContext !== 'function') {
         throwGPUDiagnostic({
@@ -1057,7 +1057,7 @@ function createCanvasContext(subject: DiagnosticSubject, canvas: ScratchCanvas):
     return context
 }
 
-function resolveSurfaceFormat(runtime: ScratchRuntime, format: SurfaceFormat): GPUTextureFormat {
+function resolveSurfaceFormat(runtime: GPURuntime, format: SurfaceFormat): GPUTextureFormat {
 
     if (format !== 'preferred') return format
     if (runtime.gpu && typeof runtime.gpu.getPreferredCanvasFormat === 'function') {
@@ -1066,7 +1066,7 @@ function resolveSurfaceFormat(runtime: ScratchRuntime, format: SurfaceFormat): G
     return 'bgra8unorm'
 }
 
-function normalizeSurfaceSize(size: SurfaceSize | undefined, canvas: ScratchCanvas): SurfaceSize {
+function normalizeSurfaceSize(size: SurfaceSize | undefined, canvas: GPUCanvas): SurfaceSize {
 
     if (size === undefined) {
         return {
@@ -1085,7 +1085,7 @@ function freezeSurfaceSize(size: SurfaceSize): Readonly<SurfaceSize> {
     return Object.freeze({ width: size.width, height: size.height })
 }
 
-function currentCanvasSize(canvas: ScratchCanvas): SurfaceSize {
+function currentCanvasSize(canvas: GPUCanvas): SurfaceSize {
 
     return {
         width: Number(canvas.width),
@@ -1093,13 +1093,13 @@ function currentCanvasSize(canvas: ScratchCanvas): SurfaceSize {
     }
 }
 
-function applyCanvasSize(canvas: ScratchCanvas, size: Readonly<SurfaceSize>): void {
+function applyCanvasSize(canvas: GPUCanvas, size: Readonly<SurfaceSize>): void {
 
     if ('width' in canvas) canvas.width = size.width
     if ('height' in canvas) canvas.height = size.height
 }
 
-function restoreCanvasSize(canvas: ScratchCanvas, size: Readonly<SurfaceSize>): boolean {
+function restoreCanvasSize(canvas: GPUCanvas, size: Readonly<SurfaceSize>): boolean {
 
     try {
         applyCanvasSize(canvas, size)
@@ -1114,7 +1114,7 @@ function surfaceSubject(
     surface: Surface,
     exactState: SurfaceState | undefined,
     inheritedState: SurfaceState | undefined = undefined
-): DiagnosticSubject {
+): ScratchDiagnosticSubject {
 
     const state = exactState ?? inheritedState
     const ownId = ownDataValue(surface, 'id')
@@ -1125,9 +1125,9 @@ function surfaceSubject(
     )
 }
 
-function surfaceSubjectFromValues(id: string, label: unknown): DiagnosticSubject {
+function surfaceSubjectFromValues(id: string, label: unknown): ScratchDiagnosticSubject {
 
-    const subject: DiagnosticSubject = { kind: 'Surface', id }
+    const subject: GPUDiagnosticSubjectDraft = { kind: 'Surface', id }
     if (typeof label === 'string') subject.label = label
     return subject
 }

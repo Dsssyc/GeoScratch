@@ -188,7 +188,7 @@ describe('examples structure', () => {
         const layer = read('examples', 'demLayer', 'dem-layer.ts')
         const mapRuntime = read('examples', 'demLayer', 'dem-map.ts')
 
-        expect(source).to.include('ScratchRuntime')
+        expect(source).to.include('GPURuntime')
         expect(source).to.include('createDemLayer')
         expect(source).to.include('createDemMap')
         expect(layer).to.include('runtime.createSubmission(')
@@ -218,7 +218,7 @@ describe('examples structure', () => {
         const layer = read('examples', 'flowLayer', 'flow-layer.ts')
         const mapRuntime = read('examples', 'flowLayer', 'flow-map.ts')
 
-        expect(source).to.include('ScratchRuntime')
+        expect(source).to.include('GPURuntime')
         expect(source).to.include('createFlowLayer')
         expect(source).to.include('createFlowMap')
         expect(layer).to.include('runtime.createSubmission(')

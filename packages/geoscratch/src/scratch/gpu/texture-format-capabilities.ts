@@ -1,4 +1,4 @@
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 
 export type TextureFormatFeatureRequirement =
     | 'base'
@@ -156,7 +156,7 @@ const RENDERABLE_FORMAT_REQUIREMENTS = createRenderableFormatRequirements()
 const STORAGE_TEXTURE_FORMAT_CAPABILITIES = createStorageTextureFormatCapabilities()
 
 export function textureFormatIsRenderable(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     format: GPUTextureFormat
 ): boolean {
 
@@ -166,7 +166,7 @@ export function textureFormatIsRenderable(
 }
 
 export function textureFormatIsColorRenderable(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     format: GPUTextureFormat
 ): boolean {
 
@@ -174,7 +174,7 @@ export function textureFormatIsColorRenderable(
 }
 
 export function textureFormatSupportsResolve(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     format: GPUTextureFormat
 ): boolean {
 
@@ -185,7 +185,7 @@ export function textureFormatSupportsResolve(
 }
 
 export function textureFormatSupportsStorageBinding(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     format: GPUTextureFormat
 ): boolean {
 
@@ -204,7 +204,7 @@ export function storageTextureFormatCapabilities(
 }
 
 export function runtimeSupportsTextureFormatRequirement(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     requirement: TextureFormatFeatureRequirement
 ): boolean {
 
@@ -280,7 +280,7 @@ function createStorageTextureFormatCapabilities(): ReadonlyMap<
     ]))
 }
 
-function runtimeHasFeature(runtime: ScratchRuntime, feature: string): boolean {
+function runtimeHasFeature(runtime: GPURuntime, feature: string): boolean {
 
     return runtime.deviceFeatures.has(feature as GPUFeatureName)
 }

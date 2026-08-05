@@ -1,5 +1,5 @@
-import { ScratchRuntime } from 'geoscratch'
-import type { ScratchGpuOperationRecord, SubmittedWork, SurfaceSize, TextureResource } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
+import type { GPUOperationRecord, SubmittedWork, SurfaceSize, TextureResource } from 'geoscratch'
 
 const canvas = document.getElementById('GPUFrame') as HTMLCanvasElement
 const statusElement = document.getElementById('proof-status') as HTMLElement
@@ -68,7 +68,7 @@ void main().catch((error) => {
 
 async function main() {
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'texture resize example runtime',
     })
     const surface = runtime.createSurface(canvas, {
@@ -256,7 +256,7 @@ async function main() {
     const evidence = runtime.diagnostics.exportEvidence()
     const serializedEvidence = JSON.stringify(evidence)
     const textureOperations = evidence.operations
-        .filter((operation): operation is Extract<ScratchGpuOperationRecord, {
+        .filter((operation): operation is Extract<GPUOperationRecord, {
             target: { kind: 'resource' }
         }> => (
             operation.target.kind === 'resource' &&
@@ -267,7 +267,7 @@ async function main() {
     const replacementOperation = textureOperations
         .find(operation => operation.kind === 'texture-replacement')
     const bindSetOperations = evidence.operations
-        .filter((operation): operation is Extract<ScratchGpuOperationRecord, {
+        .filter((operation): operation is Extract<GPUOperationRecord, {
             target: { kind: 'bind-set' }
         }> => (
             operation.kind === 'bind-set-preparation' &&

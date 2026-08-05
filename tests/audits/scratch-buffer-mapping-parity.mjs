@@ -99,7 +99,7 @@ const checks = Object.freeze({
             'assertBufferAvailableForGpuUse(this.source.buffer, this.subject)',
         ]),
     boundedDiagnostics: hasAll(diagnostics, [
-        'bufferMappings: readonly ScratchRuntimeBufferMappingFact[]',
+        'bufferMappings: readonly GPURuntimeBufferMappingFact[]',
         'currentMappings: number',
         'peakMappings: number',
         'currentSelectedBytes: number',

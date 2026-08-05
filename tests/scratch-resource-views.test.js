@@ -3,7 +3,7 @@ import {
     BufferRegion,
     BufferResource,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     TextureViewSpec,
     layoutCodec,
 } from 'geoscratch'
@@ -28,7 +28,7 @@ function particleCodec(name = 'Particle', positionName = 'position', massName = 
 async function createRuntimeFixture(options) {
 
     const fake = createFakeGpu(options)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     return { ...fake, runtime }
 }
 

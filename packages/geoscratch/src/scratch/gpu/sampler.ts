@@ -13,9 +13,9 @@ import {
     recheckSupportingObjectLifecycle,
 } from './supporting-object-creation.js'
 import { isRecord } from './type-utils.js'
-import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchResourceIdentity } from './resource.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { ScratchDiagnosticSubject } from './diagnostics.js'
+import type { GPUResourceIdentity } from './resource.js'
+import type { GPURuntime } from './runtime.js'
 
 const ADDRESS_MODES = new Set<GPUAddressMode>([ 'clamp-to-edge', 'repeat', 'mirror-repeat' ])
 const FILTER_MODES = new Set<GPUFilterMode | GPUMipmapFilterMode>([ 'nearest', 'linear' ])
@@ -60,14 +60,14 @@ export class SamplerResource extends Resource {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: NormalizedSamplerResourceDescriptor,
-        identity: ScratchResourceIdentity,
+        identity: GPUResourceIdentity,
         gpuSampler: GPUSampler
     ) {
 
         if (token !== samplerResourceToken || new.target !== SamplerResource) {
-            throw new TypeError('SamplerResource must be created by ScratchRuntime.createSampler().')
+            throw new TypeError('SamplerResource must be created by GPURuntime.createSampler().')
         }
 
         super(runtime, {
@@ -97,7 +97,7 @@ export function isSamplerResource(value: unknown): value is SamplerResource {
 }
 
 export async function createSamplerResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: SamplerResourceDescriptor = {}
 ): Promise<SamplerResource> {
 
@@ -194,28 +194,28 @@ export async function createSamplerResource(
 }
 
 function constructSamplerResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: NormalizedSamplerResourceDescriptor,
-    identity: ScratchResourceIdentity,
+    identity: GPUResourceIdentity,
     gpuSampler: GPUSampler
 ): SamplerResource {
 
     const Constructor = SamplerResource as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: NormalizedSamplerResourceDescriptor,
-        identity: ScratchResourceIdentity,
+        identity: GPUResourceIdentity,
         gpuSampler: GPUSampler
     ) => SamplerResource
     return new Constructor(samplerResourceToken, runtime, descriptor, identity, gpuSampler)
 }
 
 function normalizeSamplerDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: unknown
 ): NormalizedSamplerResourceDescriptor {
 
-    const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
+    const subject = runtime?.subject ?? { kind: 'GPURuntime' }
 
     if (runtime?.device && typeof runtime.device.createSampler !== 'function') {
         throwGPUDiagnostic({
@@ -223,7 +223,7 @@ function normalizeSamplerDescriptor(
             severity: 'error',
             phase: 'runtime',
             subject,
-            message: 'ScratchRuntime device cannot create GPU samplers.',
+            message: 'GPURuntime device cannot create GPU samplers.',
             expected: { device: 'GPUDevice with createSampler()' },
             actual: { createSampler: typeof runtime.device.createSampler },
         })
@@ -325,7 +325,7 @@ function normalizeSamplerDescriptor(
 }
 
 function normalizeFiniteNumber(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     value: unknown,
     key: string
 ): number {
@@ -336,7 +336,7 @@ function normalizeFiniteNumber(
     return value
 }
 
-function normalizeMaxAnisotropy(subject: DiagnosticSubject, value: unknown): number {
+function normalizeMaxAnisotropy(subject: ScratchDiagnosticSubject, value: unknown): number {
 
     if (typeof value !== 'number') {
         throwSamplerDescriptorDiagnostic(subject, { maxAnisotropy: value }, {
@@ -368,7 +368,7 @@ function nearestEvenInteger(value: number): number {
 }
 
 function normalizeEnum<T extends string>(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     value: unknown,
     allowed: ReadonlySet<T>,
     key: string
@@ -381,7 +381,7 @@ function normalizeEnum<T extends string>(
 }
 
 function throwSamplerDescriptorDiagnostic(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     actual: unknown,
     expected: unknown
 ): never {

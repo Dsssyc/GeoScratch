@@ -20,7 +20,7 @@ describe('scratch submission native contract', () => {
     it('publishes finite default summary observation policy', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const snapshot = runtime.diagnostics.snapshot()
 
         expect(snapshot.submissionNative).to.deep.include({
@@ -38,7 +38,7 @@ describe('scratch submission native contract', () => {
     it('accepts explicit off policy and rejects invalid policy before adapter request', async () => {
 
         const offFake = createFakeGpu()
-        const offRuntime = await scr.ScratchRuntime.create({
+        const offRuntime = await scr.GPURuntime.create({
             gpu: offFake.gpu,
             diagnostics: {
                 submissionScopes: 'off',
@@ -68,7 +68,7 @@ describe('scratch submission native contract', () => {
             }
 
             await expectScratchDiagnostic(
-                () => scr.ScratchRuntime.create({ gpu, diagnostics }),
+                () => scr.GPURuntime.create({ gpu, diagnostics }),
                 {
                     code: 'SCRATCH_SUBMISSION_NATIVE_POLICY_INVALID',
                     severity: 'error',
@@ -82,7 +82,7 @@ describe('scratch submission native contract', () => {
     it('keeps effect-free submit synchronous and publishes no-native-work', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const submitted = runtime.submission().submit()
 
         expect(submitted).to.be.instanceOf(scr.SubmittedWork)
@@ -107,7 +107,7 @@ describe('scratch submission native contract', () => {
     it('closes SubmittedWork construction and makes every public fact read-only', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
 
         for (const Candidate of [ scr.SubmittedWork, class extends scr.SubmittedWork {} ]) {
             await expectScratchDiagnostic(
@@ -401,7 +401,7 @@ describe('scratch submission native contract', () => {
     it('versions runtime snapshots and exported evidence together', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const snapshot = runtime.diagnostics.snapshot()
         const evidence = runtime.diagnostics.exportEvidence()
 

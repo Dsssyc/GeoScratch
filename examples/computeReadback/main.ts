@@ -1,5 +1,5 @@
 import {
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import type { SubmittedWork } from 'geoscratch'
 
@@ -28,7 +28,7 @@ void main().catch((error) => {
 
 async function main() {
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'scratch compute readback runtime',
     })
     const input = await runtime.createBuffer({

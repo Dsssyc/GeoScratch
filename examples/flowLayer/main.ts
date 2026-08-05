@@ -1,10 +1,10 @@
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import type {
     ScratchDiagnostic,
-    ScratchDiagnosticCapture,
-    ScratchDiagnosticCaptureReport,
-    ScratchGpuIncidentReport,
-    ScratchRuntimeDiagnosticsEvidence,
+    GPUDiagnosticCapture,
+    GPUDiagnosticCaptureReport,
+    GPUIncidentReport,
+    GPURuntimeDiagnosticsEvidence,
     Surface,
     SurfaceSize,
 } from 'geoscratch'
@@ -114,12 +114,12 @@ type FailureProofRecord = Readonly<{
     workerAcquiredCount: number
     primaryFailure: SerializedFailure
     diagnostic?: ScratchDiagnostic
-    incident?: ScratchGpuIncidentReport
-    runtimeEvidence?: ScratchRuntimeDiagnosticsEvidence
+    incident?: GPUIncidentReport
+    runtimeEvidence?: GPURuntimeDiagnosticsEvidence
     runtimeEvidenceByteLength?: number
     runtimeEvidenceMaxBytes: number
     captureBounds?: typeof FAILURE_CAPTURE_BOUNDS
-    captureReport?: ScratchDiagnosticCaptureReport
+    captureReport?: GPUDiagnosticCaptureReport
     evidenceFailure?: SerializedFailure
     cleanup: SerializedCleanupReport
 }>
@@ -141,7 +141,7 @@ type FlowError = Error & {
     code?: string
     scenario?: string
     diagnostic?: ScratchDiagnostic
-    context?: { domain: 'gpu', incident?: ScratchGpuIncidentReport }
+    context?: { domain: 'gpu', incident?: GPUIncidentReport }
 }
 
 type FlowFailureProofController = FlowFailureProof & Readonly<{
@@ -152,7 +152,7 @@ type FlowFailureProofController = FlowFailureProof & Readonly<{
         primaryFailure: unknown,
         cleanupReport: FlowCleanupReport
     ): FailureProofRecord | undefined
-    observeRuntime(runtime: ScratchRuntime): void
+    observeRuntime(runtime: GPURuntime): void
     observeSurface(surface: Surface): void
     workerAcquired(): void
 }>
@@ -228,7 +228,7 @@ async function main(lifetime: FlowLifecycle, proof: FlowFailureProofController):
 
     const map = lifetime.ownMap(createFlowMap(canvas, { proof: proofMode, ...boundaryMapOptions }))
     const mapReady = waitForFlowMap(map, lifetime.signal)
-    const runtimeReady = lifetime.acquireRuntime(ScratchRuntime.create({
+    const runtimeReady = lifetime.acquireRuntime(GPURuntime.create({
         label: 'Flow Layer runtime',
         powerPreference: 'high-performance',
         diagnostics: {
@@ -500,7 +500,7 @@ function publishFrameFacts({
     latestProvenance,
     frameWork,
 }: Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     graph: FlowLayer
     fieldStream: FlowFieldStream
     lifetime: FlowLifecycle
@@ -561,11 +561,11 @@ function createFailureProofController(configuration: Readonly<{
     scenario?: string
 }>): FlowFailureProofController {
 
-    let runtime: ScratchRuntime | undefined
+    let runtime: GPURuntime | undefined
     let surface: Surface | undefined
-    let capture: ScratchDiagnosticCapture | undefined
-    let captureReport: ScratchDiagnosticCaptureReport | undefined
-    let runtimeEvidence: ScratchRuntimeDiagnosticsEvidence | undefined
+    let capture: GPUDiagnosticCapture | undefined
+    let captureReport: GPUDiagnosticCaptureReport | undefined
+    let runtimeEvidence: GPURuntimeDiagnosticsEvidence | undefined
     let runtimeEvidenceByteLength: number | undefined
     let evidenceFailure: unknown
     let reachedCount = 0
@@ -600,7 +600,7 @@ function createFailureProofController(configuration: Readonly<{
         return `${source}\n@compute fn flowInjectedFailure( {`
     }
 
-    function beforeSimulationShaderModule(value: ScratchRuntime): void {
+    function beforeSimulationShaderModule(value: GPURuntime): void {
 
         if (configuration.scenario !== FAILURE_SCENARIOS[1]) return
         reachedCount++
@@ -672,7 +672,7 @@ function createFailureProofController(configuration: Readonly<{
         beforeSimulationShaderModule,
         captureBeforeDisposal,
         finalize,
-        observeRuntime: (value: ScratchRuntime) => { runtime = value },
+        observeRuntime: (value: GPURuntime) => { runtime = value },
         observeSurface: (value: Surface) => { surface = value },
         workerAcquired: () => { workerAcquiredCount++ },
     })

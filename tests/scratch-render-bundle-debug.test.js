@@ -194,7 +194,7 @@ describe('scratch RenderBundle and public debug commands', () => {
 
         const fake = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'bgra8unorm',
             size: { width: 8, height: 8 },
@@ -274,7 +274,7 @@ describe('scratch RenderBundle and public debug commands', () => {
     it('executes a fragmentless bundle in a compatible read-only depth pass', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const depth = await runtime.createTexture({
             size: [ 8, 8 ],
             format: 'depth24plus',
@@ -1208,7 +1208,7 @@ async function createRenderFixture(options = {}) {
         fake.device.limits.maxImmediateSize = 64
         fake.adapter.limits.maxImmediateSize = 64
     }
-    const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
     const target = await runtime.createTexture({
         size: [ 16, 12 ],
         format: 'rgba8unorm',
@@ -1281,7 +1281,7 @@ async function createDepthFixture() {
 
     const fakeOptions = { deferErrorScopePops: false }
     const fake = createFakeGpu(fakeOptions)
-    const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
     const depth = await runtime.createTexture({
         size: [ 8, 8 ],
         format: 'depth24plus',

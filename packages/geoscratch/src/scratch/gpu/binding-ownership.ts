@@ -1,8 +1,8 @@
 import type { BindLayout, BindSet } from './binding.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 
-const runtimeBindLayouts = new WeakMap<ScratchRuntime, Set<BindLayout>>()
-const runtimeBindSets = new WeakMap<ScratchRuntime, Set<BindSet>>()
+const runtimeBindLayouts = new WeakMap<GPURuntime, Set<BindLayout>>()
+const runtimeBindSets = new WeakMap<GPURuntime, Set<BindSet>>()
 
 export function registerBindLayoutOwnership(layout: BindLayout): void {
 
@@ -20,7 +20,7 @@ export function unregisterBindLayoutOwnership(layout: BindLayout): void {
     runtimeBindLayouts.get(layout.runtime)?.delete(layout)
 }
 
-export function runtimeBindLayoutSnapshot(runtime: ScratchRuntime): readonly BindLayout[] {
+export function runtimeBindLayoutSnapshot(runtime: GPURuntime): readonly BindLayout[] {
 
     return Object.freeze([ ...(runtimeBindLayouts.get(runtime) ?? []) ])
 }
@@ -41,7 +41,7 @@ export function unregisterBindSetOwnership(bindSet: BindSet): void {
     runtimeBindSets.get(bindSet.runtime)?.delete(bindSet)
 }
 
-export function runtimeBindSetSnapshot(runtime: ScratchRuntime): readonly BindSet[] {
+export function runtimeBindSetSnapshot(runtime: GPURuntime): readonly BindSet[] {
 
     return Object.freeze([ ...(runtimeBindSets.get(runtime) ?? []) ])
 }

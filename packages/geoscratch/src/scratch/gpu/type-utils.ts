@@ -1,4 +1,4 @@
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchDiagnosticSubject } from './diagnostics.js'
 
 export type UnknownRecord = Record<string, unknown>
 
@@ -17,14 +17,14 @@ export function describeValue(value: unknown): string {
     return value === null ? 'null' : typeof value
 }
 
-export function diagnosticSubjectOf(value: unknown): DiagnosticSubject | undefined {
+export function diagnosticSubjectOf(value: unknown): ScratchDiagnosticSubject | undefined {
 
     if (!isRecord(value)) return undefined
 
     const subject = value.subject
     if (!isRecord(subject) || typeof subject.kind !== 'string') return undefined
 
-    return subject as DiagnosticSubject
+    return subject as ScratchDiagnosticSubject
 }
 
 export function getGlobalConstant(groupName: string, constantName: string, fallback: number): number {

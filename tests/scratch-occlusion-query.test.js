@@ -9,7 +9,7 @@ import {
     ReadbackOperation,
     ResolveQuerySetCommand,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     createFakeGpu,
@@ -30,7 +30,7 @@ function querySlots(indices, contentEpoch) {
 async function createOcclusionFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const querySet = await runtime.createQuerySet({
         label: 'visibility queries',
         type: 'occlusion',

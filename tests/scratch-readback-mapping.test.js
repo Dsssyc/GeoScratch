@@ -24,7 +24,7 @@ async function rejectedDiagnostic(promise) {
 async function createDirectReadback(fakeOptions = {}, retain = 'consume-on-read') {
 
     const fake = createFakeGpu(fakeOptions)
-    const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
     let source
     if (fakeOptions.deferErrorScopePops) {
         const creation = runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
@@ -41,7 +41,7 @@ async function createDirectReadback(fakeOptions = {}, retain = 'consume-on-read'
 async function createOrderedReadback(fakeOptions = {}) {
 
     const fake = createFakeGpu(fakeOptions)
-    const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
     const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
     const upload = runtime.createUploadCommand({
         target: (source).region(),

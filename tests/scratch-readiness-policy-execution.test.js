@@ -2,7 +2,7 @@ import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     advanceResourceContentEpochForTest,
@@ -17,7 +17,7 @@ const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10
 async function createRenderFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const program = await createTestProgram(runtime, {
         sourceParts: [ triangleWgsl ],
         vertex: 'vsMain',
@@ -34,7 +34,7 @@ async function createRenderFixture() {
 async function createComputeFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const program = await createTestProgram(runtime, {
         sourceParts: [ '@compute @workgroup_size(1) fn csMain() {}' ],
         compute: 'csMain',

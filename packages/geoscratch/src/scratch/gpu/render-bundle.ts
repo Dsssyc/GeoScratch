@@ -38,11 +38,11 @@ import type {
     DrawVertexBufferBinding,
     ResolvedCommandImmediateData,
 } from './command.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchDiagnosticSubject } from './diagnostics.js'
 import type { SurfaceTextureLeaseOwner, AttemptTextureAuthority } from './temporal-texture.js'
 import type { BufferResource } from './buffer.js'
-import type { ScratchRuntime } from './runtime.js'
-import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
+import type { GPURuntime } from './runtime.js'
+import type { GPUPendingOperation } from './runtime-diagnostics.js'
 import type { TextureResource } from './texture.js'
 
 const bundleDrawCommandToken = Symbol('BundleDrawCommand')
@@ -88,7 +88,7 @@ type BundleDrawCommandState = Readonly<{
 }>
 
 export interface BundleDrawCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'bundle-draw'
@@ -107,13 +107,13 @@ export class BundleDrawCommand {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: BundleDrawCommandDescriptor
     ) {
 
         if (token !== bundleDrawCommandToken || new.target !== BundleDrawCommand) {
             throw new TypeError(
-                'BundleDrawCommand must be created by ScratchRuntime.createBundleDrawCommand().'
+                'BundleDrawCommand must be created by GPURuntime.createBundleDrawCommand().'
             )
         }
         assertScratchRuntimeActive(runtime)
@@ -146,7 +146,7 @@ export class BundleDrawCommand {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return {
             kind: 'Command',
@@ -156,7 +156,7 @@ export class BundleDrawCommand {
         }
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         this.assertUsable()
         if (runtime === this.runtime) return
@@ -166,7 +166,7 @@ export class BundleDrawCommand {
             phase: 'command',
             subject: this.subject,
             related: [ this.runtime.subject, runtime.subject ],
-            message: 'BundleDrawCommand belongs to a different ScratchRuntime.',
+            message: 'BundleDrawCommand belongs to a different GPURuntime.',
             expected: { runtimeId: this.runtime.id },
             actual: { runtimeId: runtime.id },
         })
@@ -186,13 +186,13 @@ export class BundleDrawCommand {
 Object.freeze(BundleDrawCommand.prototype)
 
 export function createBundleDrawCommand(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: BundleDrawCommandDescriptor
 ): BundleDrawCommand {
 
     const Constructor = BundleDrawCommand as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: BundleDrawCommandDescriptor
     ) => BundleDrawCommand
     return new Constructor(bundleDrawCommandToken, runtime, descriptor)
@@ -249,7 +249,7 @@ type RenderBundleState = {
 }
 
 type RenderBundleConstruction = Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     label?: string
     realization: RenderBundleRealization
@@ -260,7 +260,7 @@ type RenderBundleConstruction = Readonly<{
 }>
 
 export interface RenderBundle {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly realization: RenderBundleRealization
@@ -278,7 +278,7 @@ export class RenderBundle {
     ) {
 
         if (token !== renderBundleToken || new.target !== RenderBundle) {
-            throw new TypeError('RenderBundle must be created by ScratchRuntime.createRenderBundle().')
+            throw new TypeError('RenderBundle must be created by GPURuntime.createRenderBundle().')
         }
         renderBundleStates.set(this, {
             isDisposed: false,
@@ -306,7 +306,7 @@ export class RenderBundle {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return {
             kind: 'RenderBundle',
@@ -316,7 +316,7 @@ export class RenderBundle {
         }
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         this.assertUsable()
         if (runtime === this.runtime) return
@@ -326,7 +326,7 @@ export class RenderBundle {
             phase: 'command',
             subject: this.subject,
             related: [ this.runtime.subject, runtime.subject ],
-            message: 'RenderBundle belongs to a different ScratchRuntime.',
+            message: 'RenderBundle belongs to a different GPURuntime.',
             expected: { runtimeId: this.runtime.id },
             actual: { runtimeId: runtime.id },
         })
@@ -366,7 +366,7 @@ export class RenderBundle {
 Object.freeze(RenderBundle.prototype)
 
 export async function createRenderBundle(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: RenderBundleDescriptor
 ): Promise<RenderBundle> {
 
@@ -375,7 +375,7 @@ export async function createRenderBundle(
     const id = `scratch-render-bundle-${UUID()}`
     let gpuRenderBundle: GPURenderBundle | undefined
     let dependencySnapshot: RenderBundleDependencySnapshot | undefined
-    let creationOperation: ScratchPendingGpuOperation | undefined
+    let creationOperation: GPUPendingOperation | undefined
 
     if (normalized.realization === 'persistent') {
         assertPersistentBundleHasNoTemporalDependencies(runtime, normalized.commands)
@@ -496,7 +496,7 @@ export type ExecuteRenderBundlesCommandDescriptor = Readonly<{
 }>
 
 export interface ExecuteRenderBundlesCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly commandKind: 'execute-render-bundles'
@@ -508,7 +508,7 @@ export class ExecuteRenderBundlesCommand {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: ExecuteRenderBundlesCommandDescriptor
     ) {
 
@@ -517,7 +517,7 @@ export class ExecuteRenderBundlesCommand {
             new.target !== ExecuteRenderBundlesCommand
         ) {
             throw new TypeError(
-                'ExecuteRenderBundlesCommand must be created by ScratchRuntime.createExecuteRenderBundlesCommand().'
+                'ExecuteRenderBundlesCommand must be created by GPURuntime.createExecuteRenderBundlesCommand().'
             )
         }
         assertScratchRuntimeActive(runtime)
@@ -540,7 +540,7 @@ export class ExecuteRenderBundlesCommand {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return {
             kind: 'Command',
@@ -550,7 +550,7 @@ export class ExecuteRenderBundlesCommand {
         }
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         this.assertUsable()
         if (runtime === this.runtime) return
@@ -560,7 +560,7 @@ export class ExecuteRenderBundlesCommand {
             phase: 'command',
             subject: this.subject,
             related: [ this.runtime.subject, runtime.subject ],
-            message: 'ExecuteRenderBundlesCommand belongs to a different ScratchRuntime.',
+            message: 'ExecuteRenderBundlesCommand belongs to a different GPURuntime.',
             expected: { runtimeId: this.runtime.id },
             actual: { runtimeId: runtime.id },
         })
@@ -642,13 +642,13 @@ export class ExecuteRenderBundlesCommand {
 Object.freeze(ExecuteRenderBundlesCommand.prototype)
 
 export function createExecuteRenderBundlesCommand(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ExecuteRenderBundlesCommandDescriptor
 ): ExecuteRenderBundlesCommand {
 
     const Constructor = ExecuteRenderBundlesCommand as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: ExecuteRenderBundlesCommandDescriptor
     ) => ExecuteRenderBundlesCommand
     return new Constructor(executeRenderBundlesCommandToken, runtime, descriptor)
@@ -760,7 +760,7 @@ function constructRenderBundle(
 }
 
 function normalizeBundleDrawDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: BundleDrawCommandDescriptor
 ): void {
 
@@ -793,7 +793,7 @@ function normalizeBundleDrawDescriptor(
 }
 
 function normalizeRenderBundleDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: RenderBundleDescriptor
 ): Readonly<{
     label?: string
@@ -885,7 +885,7 @@ function normalizeRenderBundleDescriptor(
 }
 
 function normalizeExecuteRenderBundlesDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ExecuteRenderBundlesCommandDescriptor
 ): Readonly<{ label?: string, bundles: readonly RenderBundle[] }> {
 
@@ -908,7 +908,7 @@ function normalizeExecuteRenderBundlesDescriptor(
                 phase: 'command',
                 subject: bundle.subject,
                 related: [ bundle.runtime.subject, runtime.subject ],
-                message: 'RenderBundle belongs to a different ScratchRuntime.',
+                message: 'RenderBundle belongs to a different GPURuntime.',
                 expected: { runtimeId: runtime.id },
                 actual: { runtimeId: bundle.runtime.id },
             })
@@ -952,7 +952,7 @@ function renderBundleDescriptorEvidence(
 }
 
 function encodeNativeRenderBundle(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     id: string,
     label: string | undefined,
     layout: RenderBundleLayout,
@@ -1047,7 +1047,7 @@ function bundleDrawAllocationDependencies(
 }
 
 function assertPersistentBundleHasNoTemporalDependencies(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     commands: readonly RenderBundleCommand[]
 ): void {
 
@@ -1111,7 +1111,7 @@ function assertPersistentRenderBundleSnapshotCurrent(
 }
 
 function assertDependencySnapshotCurrent(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     snapshot: RenderBundleDependencySnapshot
 ): void {
 
@@ -1353,7 +1353,7 @@ function isRenderBundle(value: unknown): value is RenderBundle {
 }
 
 function throwRenderBundleDescriptorInvalid(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: unknown,
     field: string
 ): never {
@@ -1379,7 +1379,7 @@ function throwRenderBundleDescriptorInvalid(
 }
 
 function throwExecuteRenderBundlesDescriptorInvalid(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: unknown
 ): never {
 
@@ -1396,7 +1396,7 @@ function throwExecuteRenderBundlesDescriptorInvalid(
 }
 
 function snapshotIterable<T>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     value: Iterable<T>,
     field: string
 ): T[] {
@@ -1420,7 +1420,7 @@ function renderBundleSubject(
     id: string | undefined,
     label: string | undefined,
     realization: RenderBundleRealization
-): DiagnosticSubject {
+): ScratchDiagnosticSubject {
 
     return {
         kind: 'RenderBundle',

@@ -1,9 +1,9 @@
-export type ScratchFeatureDependency = Readonly<{
+export type GPUFeatureDependency = Readonly<{
     feature: string
     requiredFeature: string
 }>
 
-const featureDependencies: readonly ScratchFeatureDependency[] = Object.freeze([
+const featureDependencies: readonly GPUFeatureDependency[] = Object.freeze([
     Object.freeze({
         feature: 'subgroup-size-control',
         requiredFeature: 'subgroups',
@@ -21,7 +21,7 @@ export function normalizeScratchRequiredFeatures(
 
 export function findMissingScratchFeatureDependency(
     features: readonly GPUFeatureName[]
-): ScratchFeatureDependency | undefined {
+): GPUFeatureDependency | undefined {
 
     const available = new Set<string>(features)
     return featureDependencies.find(dependency => (

@@ -31,10 +31,10 @@ import {
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { describeValue, isRecord } from './type-utils.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 import type { LayoutArtifact } from './layout-codec.js'
-import type { ResourceState, ScratchResourceIdentity } from './resource.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { ResourceState, GPUResourceIdentity } from './resource.js'
+import type { GPURuntime } from './runtime.js'
 
 export type BufferResourceDescriptor = Omit<GPUBufferDescriptor, 'mappedAtCreation'>
 
@@ -89,14 +89,14 @@ export class BufferResource extends Resource {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: NormalizedBufferResourceDescriptor,
-        identity: ScratchResourceIdentity,
+        identity: GPUResourceIdentity,
         gpuBuffer: GPUBuffer
     ) {
 
         if (token !== bufferResourceToken || new.target !== BufferResource) {
-            throw new TypeError('BufferResource must be created by ScratchRuntime.createBuffer().')
+            throw new TypeError('BufferResource must be created by GPURuntime.createBuffer().')
         }
 
         super(runtime, contentBearingResourceOptions({
@@ -218,7 +218,7 @@ export class BufferRegion {
         return layoutArtifactRuntimeElementCount(this.layout, this.size)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return bufferRegionSubject(this)
     }
@@ -378,9 +378,9 @@ export function commitBufferResourceAllocation(
     install(normalizedDescriptor, gpuBuffer)
 }
 
-export function bufferRegionSubject(region: BufferRegion): DiagnosticSubject {
+export function bufferRegionSubject(region: BufferRegion): ScratchDiagnosticSubject {
 
-    const subject: DiagnosticSubject = {
+    const subject: GPUDiagnosticSubjectDraft = {
         kind: 'BufferRegion',
         resourceId: region.buffer.id,
         offset: region.offset,
@@ -543,7 +543,7 @@ function throwBufferRegionRangeDiagnostic(
 }
 
 export async function createBufferResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: BufferResourceDescriptor
 ): Promise<BufferResource> {
 
@@ -551,7 +551,7 @@ export async function createBufferResource(
 }
 
 export async function createMappedBufferResourceAllocation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: MappedBufferResourceDescriptor
 ): Promise<BufferResource> {
 
@@ -559,7 +559,7 @@ export async function createMappedBufferResourceAllocation(
 }
 
 async function createBufferResourceAllocation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: BufferResourceDescriptor,
     mappedAtCreation: boolean
 ): Promise<BufferResource> {
@@ -641,25 +641,25 @@ async function createBufferResourceAllocation(
 }
 
 function constructBufferResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: NormalizedBufferResourceDescriptor,
-    identity: ScratchResourceIdentity,
+    identity: GPUResourceIdentity,
     gpuBuffer: GPUBuffer
 ): BufferResource {
 
     const Constructor = BufferResource as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: NormalizedBufferResourceDescriptor,
-        identity: ScratchResourceIdentity,
+        identity: GPUResourceIdentity,
         gpuBuffer: GPUBuffer
     ) => BufferResource
     return new Constructor(bufferResourceToken, runtime, descriptor, identity, gpuBuffer)
 }
 
-function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown): NormalizedBufferResourceDescriptor {
+function normalizeBufferDescriptor(runtime: GPURuntime, descriptor: unknown): NormalizedBufferResourceDescriptor {
 
-    const subject: DiagnosticSubject = runtime?.subject ?? { kind: 'ScratchRuntime' }
+    const subject: GPUDiagnosticSubjectDraft = runtime?.subject ?? { kind: 'GPURuntime' }
 
     if (runtime?.device && typeof runtime.device.createBuffer !== 'function') {
         throwGPUDiagnostic({
@@ -667,7 +667,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
             severity: 'error',
             phase: 'runtime',
             subject,
-            message: 'ScratchRuntime device cannot create GPU buffers.',
+            message: 'GPURuntime device cannot create GPU buffers.',
             expected: { device: 'GPUDevice with createBuffer()' },
             actual: { createBuffer: typeof runtime.device.createBuffer },
         })
@@ -710,7 +710,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
             subject,
             message: 'Ordinary buffer descriptors cannot expose unmanaged mapped-at-creation state.',
             expected: {
-                creation: 'ScratchRuntime.createMappedBuffer(descriptor)',
+                creation: 'GPURuntime.createMappedBuffer(descriptor)',
                 descriptor: 'without mappedAtCreation',
             },
             actual: {

@@ -2,8 +2,8 @@ import { UUID } from '../../core/utils/uuid.js'
 import { throwGPUDiagnostic } from './diagnostics.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { describeValue, isRecord } from './type-utils.js'
-import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { ScratchDiagnosticSubject } from './diagnostics.js'
+import type { GPURuntime } from './runtime.js'
 
 const debugCommandToken = Symbol('DebugCommand')
 const debugCommandStates = new WeakMap<DebugCommand, { isDisposed: boolean }>()
@@ -27,7 +27,7 @@ export type DebugCommandDescriptor =
 export type DebugCommandAction = DebugCommandDescriptor['action']
 
 export interface DebugCommand {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly commandKind: 'debug'
     readonly action: DebugCommandAction
@@ -39,12 +39,12 @@ export class DebugCommand {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: DebugCommandDescriptor
     ) {
 
         if (token !== debugCommandToken || new.target !== DebugCommand) {
-            throw new TypeError('DebugCommand must be created by ScratchRuntime.createDebugCommand().')
+            throw new TypeError('DebugCommand must be created by GPURuntime.createDebugCommand().')
         }
         assertScratchRuntimeActive(runtime)
         const normalized = normalizeDebugCommandDescriptor(runtime, descriptor)
@@ -66,7 +66,7 @@ export class DebugCommand {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return {
             kind: 'Command',
@@ -79,7 +79,7 @@ export class DebugCommand {
         }
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         this.assertUsable()
         if (runtime === this.runtime) return
@@ -89,7 +89,7 @@ export class DebugCommand {
             phase: 'command',
             subject: this.subject,
             related: [ this.runtime.subject, runtime.subject ],
-            message: 'DebugCommand belongs to a different ScratchRuntime.',
+            message: 'DebugCommand belongs to a different GPURuntime.',
             expected: { runtimeId: this.runtime.id },
             actual: { runtimeId: runtime.id },
         })
@@ -161,13 +161,13 @@ export type DebugCommandEncoder = Readonly<{
 }>
 
 export function createDebugCommand(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: DebugCommandDescriptor
 ): DebugCommand {
 
     const Constructor = DebugCommand as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: DebugCommandDescriptor
     ) => DebugCommand
     return new Constructor(debugCommandToken, runtime, descriptor)
@@ -182,7 +182,7 @@ export function isDebugCommand(value: unknown): value is DebugCommand {
 
 export function validateBalancedDebugCommands(
     commands: readonly unknown[],
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     context: 'command-encoder' | 'render-pass' | 'compute-pass' | 'render-bundle'
 ): void {
 
@@ -235,7 +235,7 @@ export function validateBalancedDebugCommands(
 }
 
 function normalizeDebugCommandDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: DebugCommandDescriptor
 ): DebugCommandDescriptor {
 
@@ -258,7 +258,7 @@ function normalizeDebugCommandDescriptor(
 }
 
 function throwDebugDescriptorInvalid(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: unknown
 ): never {
 

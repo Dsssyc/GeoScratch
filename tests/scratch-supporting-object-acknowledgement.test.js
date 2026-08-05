@@ -4,7 +4,7 @@ import {
     QuerySetResource,
     SamplerResource,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
@@ -798,7 +798,7 @@ describe('Scratch acknowledged supporting objects', () => {
 async function createFixture(options = {}) {
 
     const fake = createFakeGpu(options)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     return { ...fake, runtime }
 }
 

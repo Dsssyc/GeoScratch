@@ -25,13 +25,13 @@ import {
 import { describeValue, isRecord } from './type-utils.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type { BindLayout } from './binding.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchDiagnosticSubject } from './diagnostics.js'
 import type { LayoutArtifact } from './layout-codec.js'
 import type {
     ShaderModuleCompilationReport,
     ShaderModuleSourceSnapshot,
 } from './pipeline-compilation.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 
 const shaderModuleToken = Symbol('ShaderModule')
 const SHADER_MODULE_CREATION_CODES = Object.freeze({
@@ -89,7 +89,7 @@ export type ShaderModuleCompilationHintFact = Readonly<{
 }>
 
 export interface ShaderModule {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly sourceParts: readonly NormalizedShaderModuleSourcePart[]
@@ -101,7 +101,7 @@ export interface ShaderModule {
 export class ShaderModule {
 
     private constructor(token: symbol, state?: Readonly<{
-        runtime: ScratchRuntime
+        runtime: GPURuntime
         id: string
         label?: string
         sourceParts: readonly NormalizedShaderModuleSourcePart[]
@@ -117,7 +117,7 @@ export class ShaderModule {
                 severity: 'error',
                 phase: 'program',
                 subject: { kind: 'ShaderModule' },
-                message: 'ShaderModule is created only by ScratchRuntime.',
+                message: 'ShaderModule is created only by GPURuntime.',
                 hints: [ 'Use await runtime.createShaderModule(descriptor).' ],
             })
         }
@@ -145,12 +145,12 @@ export class ShaderModule {
         return shaderModuleStateFor(this).isDisposed
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return shaderModuleSubject(this)
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         this.assertUsable()
         if (runtime === this.runtime) return
@@ -161,7 +161,7 @@ export class ShaderModule {
             phase: 'program',
             subject: this.subject,
             related: [ this.runtime.subject, runtime?.subject ].filter(Boolean),
-            message: 'ShaderModule belongs to a different ScratchRuntime.',
+            message: 'ShaderModule belongs to a different GPURuntime.',
             expected: { runtimeId: this.runtime.id },
             actual: { runtimeId: runtime?.id },
         })
@@ -206,7 +206,7 @@ export function shaderModuleSourceSnapshot(
 }
 
 export async function createShaderModule(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ShaderModuleDescriptor
 ): Promise<ShaderModule> {
 
@@ -444,7 +444,7 @@ export async function createShaderModule(
     const Constructor = ShaderModule as unknown as new (
         token: symbol,
         state: Readonly<{
-            runtime: ScratchRuntime
+            runtime: GPURuntime
             id: string
             label?: string
             sourceParts: readonly NormalizedShaderModuleSourcePart[]
@@ -502,7 +502,7 @@ export async function createShaderModule(
 }
 
 function throwShaderModuleCreationFailure(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     operation: Parameters<typeof throwSupportingObjectCreationFailure>[1],
     outcome: Parameters<typeof throwSupportingObjectCreationFailure<GPUShaderModule>>[2],
     id: string,
@@ -525,7 +525,7 @@ function throwShaderModuleCreationFailure(
 }
 
 function normalizeShaderModuleDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     id: string,
     descriptor: unknown
 ): Readonly<{
@@ -606,8 +606,8 @@ function normalizeShaderModuleDescriptor(
 }
 
 function normalizeCompilationHints(
-    runtime: ScratchRuntime,
-    subject: DiagnosticSubject,
+    runtime: GPURuntime,
+    subject: ScratchDiagnosticSubject,
     value: unknown
 ): readonly Readonly<{
     entryPoint: string
@@ -704,7 +704,7 @@ function normalizeCompilationHints(
 }
 
 function assertUniqueLayoutGroups(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     layouts: readonly BindLayout[],
     field: string
 ): void {
@@ -759,7 +759,7 @@ async function observeCompilationInfo(shaderModule: GPUShaderModule): Promise<
 }
 
 function throwShaderModuleDescriptorInvalid(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     field: string,
     actual: unknown,
     reason?: string
@@ -780,12 +780,12 @@ function throwShaderModuleDescriptorInvalid(
     })
 }
 
-function shaderModuleSubject(shaderModule: ShaderModule): DiagnosticSubject {
+function shaderModuleSubject(shaderModule: ShaderModule): ScratchDiagnosticSubject {
 
     return shaderModuleSubjectFrom(shaderModule.id, shaderModule.label)
 }
 
-function shaderModuleSubjectFrom(id: string, label?: string): DiagnosticSubject {
+function shaderModuleSubjectFrom(id: string, label?: string): ScratchDiagnosticSubject {
 
     return {
         kind: 'ShaderModule',

@@ -1,6 +1,6 @@
 import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
-import { ScratchDiagnosticError, ScratchRuntime } from 'geoscratch'
+import { ScratchDiagnosticError, GPURuntime } from 'geoscratch'
 import { setResourceContentState } from '../packages/geoscratch/dist/scratch/gpu/resource.js'
 import { createFakeCanvas, createFakeGpu } from './scratch-test-utils.js'
 
@@ -18,7 +18,7 @@ async function createFixture() {
         deferSubmittedWorkDone: false,
     }
     const fake = createFakeGpu(fakeOptions)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     return { ...fake, fakeOptions, runtime }
 }
 

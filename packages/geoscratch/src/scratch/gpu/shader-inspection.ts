@@ -3,7 +3,7 @@ import { createGPUDiagnostic, createScratchDiagnosticReport, throwGPUDiagnostic 
 import { Program, isProgram } from './program.js'
 import { describeValue } from './type-utils.js'
 import type { BindLayout, BindLayoutEntry } from './binding.js'
-import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 
 export type ShaderBindingResourceType =
     | 'uniform'
@@ -453,18 +453,18 @@ function createBindTypeMismatchDiagnostic(record: BindLayoutEntryRecord, binding
     })
 }
 
-function relatedSubjects(binding: ShaderBinding | undefined, program: Program | undefined): DiagnosticSubject[] {
+function relatedSubjects(binding: ShaderBinding | undefined, program: Program | undefined): ScratchDiagnosticSubject[] {
 
-    const related: DiagnosticSubject[] = []
+    const related: ScratchDiagnosticSubject[] = []
     if (binding !== undefined) related.push(shaderBindingSubject(binding))
     if (program !== undefined) related.push(program.subject)
 
     return related
 }
 
-function shaderBindingSubject(binding: Pick<ShaderBinding, 'group' | 'binding'> & { name?: unknown }): DiagnosticSubject {
+function shaderBindingSubject(binding: Pick<ShaderBinding, 'group' | 'binding'> & { name?: unknown }): ScratchDiagnosticSubject {
 
-    const subject: DiagnosticSubject = {
+    const subject: GPUDiagnosticSubjectDraft = {
         kind: 'ShaderBinding',
         group: binding.group,
         binding: binding.binding,

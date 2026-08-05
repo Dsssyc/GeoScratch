@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     layoutCodec,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
@@ -350,7 +350,7 @@ describe('scratch recursive WGSL layout semantics', () => {
         expect(readback.toObject()).to.deep.equal(value)
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const buffer = await runtime.createBuffer({
             size: 64,
             usage: 0x80,

@@ -46,16 +46,16 @@ import {
 } from './texture-format-capabilities.js'
 import { describeValue, getGlobalConstant, isRecord } from './type-utils.js'
 import { readonlyMapSnapshot } from './readonly-map.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 import type {
-    GpuNativeErrorCategory,
-    ScratchGpuBindSetPreparationStage,
-    ScratchGpuIncidentOutcome,
+    GPUNativeErrorCategory,
+    GPUBindSetPreparationStage,
+    GPUIncidentOutcome,
 } from './gpu-operation.js'
 import type {
-    ScratchPendingGpuOperation,
+    GPUPendingOperation,
 } from './runtime-diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 import type {
     SupportingObjectCreationAttempt,
     SupportingObjectCreationOutcome,
@@ -367,7 +367,7 @@ type PreparedBindSetCandidate = Readonly<{
 
 type InFlightBindSetPreparation = Readonly<{
     snapshot: BindSetPreparationSnapshot
-    operation: ScratchPendingGpuOperation
+    operation: GPUPendingOperation
     promise: Promise<void>
 }>
 
@@ -385,7 +385,7 @@ type BindSetInternalState = {
 type NativePreparationIssue = Readonly<{
     sequence: number
     kind: 'texture-view' | 'bind-group'
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
     attempt: SupportingObjectCreationAttempt<GPUTextureView | GPUBindGroup>
 }>
 
@@ -396,18 +396,18 @@ type TextureViewPreparationCandidate = Readonly<{
 }>
 
 type BindSetPreparationFailure = Readonly<{
-    stage: ScratchGpuBindSetPreparationStage
+    stage: GPUBindSetPreparationStage
     issueSequence: number
     scopeOrder: number
     kind: SupportingObjectFailureKind | 'snapshot-drift' | 'bind-set-disposed' |
         'bind-layout-disposed' | 'bound-resource-disposed'
     code: string
-    nativeErrorCategory: GpuNativeErrorCategory
-    subject: DiagnosticSubject
+    nativeErrorCategory: GPUNativeErrorCategory
+    subject: ScratchDiagnosticSubject
     cause?: unknown
 }>
 
-type ScratchBindingSupportedLimits = GPUSupportedLimits & Readonly<{
+type GPUBindingSupportedLimits = GPUSupportedLimits & Readonly<{
     maxStorageBuffersInVertexStage?: number
     maxStorageBuffersInFragmentStage?: number
     maxStorageTexturesInVertexStage?: number
@@ -422,7 +422,7 @@ export type BindingLimitViolation = Readonly<{
 }>
 
 export interface BindLayout {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly group: number
@@ -437,7 +437,7 @@ export class BindLayout {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         id: string,
         descriptor: Readonly<{
             label?: string
@@ -451,7 +451,7 @@ export class BindLayout {
     ) {
 
         if (token !== bindLayoutToken || new.target !== BindLayout) {
-            throw new TypeError('BindLayout must be created by ScratchRuntime.createBindLayout().')
+            throw new TypeError('BindLayout must be created by GPURuntime.createBindLayout().')
         }
         bindLayoutStates.set(this, { isDisposed: false })
         Object.defineProperties(this, {
@@ -479,9 +479,9 @@ export class BindLayout {
         return bindLayoutStateFor(this).isDisposed
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'BindLayout',
             id: this.id,
         }
@@ -490,7 +490,7 @@ export class BindLayout {
         return subject
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -504,7 +504,7 @@ export class BindLayout {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'BindLayout belongs to a different ScratchRuntime.',
+                message: 'BindLayout belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -541,7 +541,7 @@ export class BindLayout {
 }
 
 export async function createBindLayout(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: BindLayoutDescriptor
 ): Promise<BindLayout> {
 
@@ -639,7 +639,7 @@ export async function createBindLayout(
 }
 
 export async function createNativeDerivedBindLayout(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     source: Readonly<{
         pipelineId: string
         pipelineKind: 'render' | 'compute'
@@ -737,7 +737,7 @@ export async function createNativeDerivedBindLayout(
 }
 
 export interface BindSet {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly layout: BindLayout
@@ -748,7 +748,7 @@ export class BindSet {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         id: string,
         layout: BindLayout,
         bindings: BindSetBindings,
@@ -756,7 +756,7 @@ export class BindSet {
     ) {
 
         if (token !== bindSetToken || new.target !== BindSet) {
-            throw new TypeError('BindSet must be created by ScratchRuntime.createBindSet().')
+            throw new TypeError('BindSet must be created by GPURuntime.createBindSet().')
         }
 
         assertScratchRuntimeActive(runtime)
@@ -862,9 +862,9 @@ export class BindSet {
         return bindSetStateFor(this).lastIncidentId
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'BindSet',
             id: this.id,
         }
@@ -873,7 +873,7 @@ export class BindSet {
         return subject
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -887,7 +887,7 @@ export class BindSet {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'BindSet belongs to a different ScratchRuntime.',
+                message: 'BindSet belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -1029,7 +1029,7 @@ export function isBindSet(value: unknown): value is BindSet {
 }
 
 export async function createBindSet(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     layout: BindLayout,
     bindings: BindSetBindings,
     options: BindSetOptions = {}
@@ -1190,7 +1190,7 @@ export function realizeAttemptBindGroup(
 }
 
 function constructBindSet(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     id: string,
     layout: BindLayout,
     bindings: BindSetBindings,
@@ -1199,7 +1199,7 @@ function constructBindSet(
 
     const Constructor = BindSet as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         id: string,
         layout: BindLayout,
         bindings: BindSetBindings,
@@ -1505,7 +1505,7 @@ function lifecyclePreparationFailure(
     bindSet: BindSet,
     kind: BindSetPreparationFailure['kind'],
     code: string,
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     scopeOrder = lifecycleFailureOrder(kind)
 ): BindSetPreparationFailure {
 
@@ -1609,7 +1609,7 @@ function failBindSetPreparation(
         code: primary.code,
         severity: 'error',
         phase: primary.stage === 'lifecycle-recheck' ? 'runtime' : 'binding',
-        subject: { kind: 'GpuOperation', id: record.id, operationKind: record.kind },
+        subject: { kind: 'GPUOperation', id: record.id, operationKind: record.kind },
         related: [
             bindSet.subject,
             bindSet.layout.subject,
@@ -1631,7 +1631,7 @@ function failBindSetPreparation(
 
 function preparationIncidentOutcome(
     failure: BindSetPreparationFailure
-): ScratchGpuIncidentOutcome {
+): GPUIncidentOutcome {
 
     return Object.freeze({
         stage: failure.stage,
@@ -1647,7 +1647,7 @@ function preparationIncidentOutcome(
 function bindSetOperationTarget(
     bindSet: BindSet,
     snapshot: BindSetPreparationSnapshot,
-    stage: ScratchGpuBindSetPreparationStage,
+    stage: GPUBindSetPreparationStage,
     preparationState: Exclude<BindSetPreparationState, 'attempt-local'>
 ) {
 
@@ -1861,7 +1861,7 @@ function textureViewPreparationCandidates(
 function bindSetTextureViewCandidateSubject(
     bindSet: BindSet,
     candidate: TextureViewPreparationCandidate
-): DiagnosticSubject {
+): ScratchDiagnosticSubject {
 
     const bindingLimit = 8
     const bindings = Object.freeze(candidate.bindings.slice(0, bindingLimit).map(binding => Object.freeze({
@@ -1943,7 +1943,7 @@ function bindingResourceDisposed(resource: BindSetBindingResource): boolean {
 
 function bindingResourceSubject(
     resource: BindSetBindingResource
-): DiagnosticSubject {
+): ScratchDiagnosticSubject {
 
     return resource.subject
 }
@@ -1953,7 +1953,7 @@ function comparePreparationFailures(
     right: BindSetPreparationFailure
 ): number {
 
-    const stageOrder: Record<ScratchGpuBindSetPreparationStage, number> = {
+    const stageOrder: Record<GPUBindSetPreparationStage, number> = {
         'descriptor-validation': 0,
         'native-issue': 1,
         'synchronous-native-throw': 1,
@@ -2002,7 +2002,7 @@ function bindSetPreparationFailureCode(kind: SupportingObjectFailureKind): strin
 
 function supportingFailureNativeCategory(
     kind: SupportingObjectFailureKind
-): GpuNativeErrorCategory {
+): GPUNativeErrorCategory {
 
     if (
         kind === 'validation' ||
@@ -2041,7 +2041,7 @@ function rejectedBindSetDiagnostic(
     }
 }
 
-function bindSetSubject(id: string, label?: string): DiagnosticSubject {
+function bindSetSubject(id: string, label?: string): ScratchDiagnosticSubject {
 
     return {
         kind: 'BindSet',
@@ -2069,12 +2069,12 @@ function lockNormalizedBindings(
 }
 
 type BindLayoutDiagnosticContext = Readonly<{
-    subject: DiagnosticSubject
-    entrySubject(entry: unknown): DiagnosticSubject
+    subject: ScratchDiagnosticSubject
+    entrySubject(entry: unknown): ScratchDiagnosticSubject
 }>
 
 function constructBindLayout(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     id: string,
     descriptor: Readonly<{
         label?: string
@@ -2089,7 +2089,7 @@ function constructBindLayout(
 
     const Constructor = BindLayout as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         id: string,
         descriptor: Readonly<{
             label?: string
@@ -2122,7 +2122,7 @@ function immutableEnumerableProperty<T>(value: T): PropertyDescriptor {
 }
 
 export function normalizeBindLayoutDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     id: string,
     descriptor: unknown
 ): NormalizedBindLayoutDescriptor {
@@ -2132,8 +2132,8 @@ export function normalizeBindLayoutDescriptor(
             code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',
-            subject: runtime?.subject ?? { kind: 'ScratchRuntime' },
-            message: 'ScratchRuntime device cannot create GPU bind-group layouts.',
+            subject: runtime?.subject ?? { kind: 'GPURuntime' },
+            message: 'GPURuntime device cannot create GPU bind-group layouts.',
             expected: { device: 'GPUDevice with createBindGroupLayout()' },
             actual: { createBindGroupLayout: typeof runtime?.device?.createBindGroupLayout },
         })
@@ -2175,7 +2175,7 @@ export function normalizeBindLayoutDescriptor(
 }
 
 function normalizeGroup(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     layout: BindLayoutDiagnosticContext,
     group: unknown
 ): number {
@@ -2202,7 +2202,7 @@ function normalizeGroup(
 }
 
 function normalizeEntries(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     layout: BindLayoutDiagnosticContext,
     entries: unknown
 ): readonly NormalizedBindLayoutEntry[] {
@@ -2819,7 +2819,7 @@ function validateExternalTextureResource(
 function validateExternalSurfaceTextureFacts(
     bindSet: BindSet,
     entry: NormalizedExternalTextureBindLayoutEntry,
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     lease: ReturnType<typeof surfaceTextureLeaseFacts>
 ): void {
 
@@ -2842,7 +2842,7 @@ function validateExternalSurfaceTextureFacts(
 function validateExternalTextureViewFacts(
     bindSet: BindSet,
     entry: NormalizedExternalTextureBindLayoutEntry,
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     facts: Readonly<{
         usage: GPUTextureUsageFlags
         dimension: GPUTextureViewDimension
@@ -2923,7 +2923,7 @@ function validateSamplerResource(
 }
 
 function textureSampleTypeCompatible(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     view: TextureViewSpec,
     sampleType: GPUTextureSampleType
 ): boolean {
@@ -2932,7 +2932,7 @@ function textureSampleTypeCompatible(
 }
 
 function textureViewSampleTypes(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     view: TextureViewSpec
 ): GPUTextureSampleType[] {
 
@@ -2940,7 +2940,7 @@ function textureViewSampleTypes(
 }
 
 function textureFormatSampleTypes(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     format: GPUTextureFormat,
     aspect: GPUTextureAspect
 ): GPUTextureSampleType[] {
@@ -2968,7 +2968,7 @@ function textureFormatSampleTypes(
 function throwBindingCompatibilityDiagnostic(
     bindSet: BindSet,
     entry: NormalizedBindLayoutEntry,
-    resourceSubject: DiagnosticSubject,
+    resourceSubject: ScratchDiagnosticSubject,
     input: Readonly<{
         code?: string
         expected: unknown
@@ -3037,7 +3037,7 @@ function lowerBindLayoutEntry(entry: NormalizedBindLayoutEntry): GPUBindGroupLay
     return lowered
 }
 
-function bindLayoutSubject(id: string, label?: string): DiagnosticSubject {
+function bindLayoutSubject(id: string, label?: string): ScratchDiagnosticSubject {
 
     return {
         kind: 'BindLayout',
@@ -3049,7 +3049,7 @@ function bindLayoutSubject(id: string, label?: string): DiagnosticSubject {
 function bindLayoutEntrySubject(
     group: number,
     entry: unknown
-): DiagnosticSubject {
+): ScratchDiagnosticSubject {
 
     const record = isRecord(entry) ? entry : {}
     return {
@@ -3061,7 +3061,7 @@ function bindLayoutEntrySubject(
 }
 
 function throwBindLayoutDescriptorDiagnostic(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     actual: unknown,
     expected: unknown
 ): never {
@@ -3090,7 +3090,7 @@ function normalizeStorageTextureAccess(
 }
 
 function normalizeStorageTextureFormat(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     layout: BindLayoutDiagnosticContext,
     entry: StorageTextureBindLayoutEntry,
     access: GPUStorageTextureAccess
@@ -3165,7 +3165,7 @@ function normalizeMinBindingSize(
 }
 
 function validateBindingLimits(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     layout: BindLayoutDiagnosticContext,
     entries: readonly NormalizedBindLayoutEntry[]
 ): void {
@@ -3191,7 +3191,7 @@ function validateBindingLimits(
 }
 
 export function firstBindingLimitViolation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     entries: readonly NormalizedBindLayoutEntry[]
 ): BindingLimitViolation | undefined {
 
@@ -3254,9 +3254,9 @@ export function firstBindingLimitViolation(
     return checks.find(check => check.actual > check.maximum)
 }
 
-function storageBufferLimit(runtime: ScratchRuntime, stage: BindVisibility): number {
+function storageBufferLimit(runtime: GPURuntime, stage: BindVisibility): number {
 
-    const limits = runtime.deviceLimits as ScratchBindingSupportedLimits
+    const limits = runtime.deviceLimits as GPUBindingSupportedLimits
     if (stage === 'vertex') {
         return limits.maxStorageBuffersInVertexStage ?? limits.maxStorageBuffersPerShaderStage
     }
@@ -3273,9 +3273,9 @@ function storageBufferLimitName(stage: BindVisibility): string {
     return 'maxStorageBuffersPerShaderStage'
 }
 
-function storageTextureLimit(runtime: ScratchRuntime, stage: BindVisibility): number {
+function storageTextureLimit(runtime: GPURuntime, stage: BindVisibility): number {
 
-    const limits = runtime.deviceLimits as ScratchBindingSupportedLimits
+    const limits = runtime.deviceLimits as GPUBindingSupportedLimits
     if (stage === 'vertex') {
         return limits.maxStorageTexturesInVertexStage ?? limits.maxStorageTexturesPerShaderStage
     }

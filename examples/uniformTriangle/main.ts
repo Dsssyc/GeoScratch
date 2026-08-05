@@ -1,5 +1,5 @@
 import {
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import type { SubmittedWork, Surface } from 'geoscratch'
 
@@ -39,7 +39,7 @@ void main().catch((error) => {
 async function main() {
 
     const proofFrameCount = 120
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'scratch uniform triangle runtime',
     })
     let failed = false

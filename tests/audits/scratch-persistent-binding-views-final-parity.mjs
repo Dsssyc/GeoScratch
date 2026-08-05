@@ -47,6 +47,24 @@ const webGpuTypesPath = 'node_modules/@webgpu/types/dist/index.d.ts'
 const webGpuTypesPackagePath = 'node_modules/@webgpu/types/package.json'
 const webGpuTypesSource = fs.readFileSync(webGpuTypesPath, 'utf8')
 const webGpuTypesPackage = JSON.parse(fs.readFileSync(webGpuTypesPackagePath, 'utf8'))
+const publicTopologyManifest = JSON.parse(fs.readFileSync(
+    'docs/review/manifests/scratch-foundation-public-symbols.json',
+    'utf8'
+))
+const gpuNamingCleanCutEntries = Object.freeze(publicTopologyManifest.entries.filter(entry =>
+    entry.disposition === 'rename'
+))
+const gpuNamingPlanSource = fs.readFileSync(
+    'docs/superpowers/plans/2026-08-05-scratch-foundation-public-topology.md',
+    'utf8'
+)
+const gpuNamingCleanCutMap = Object.freeze([
+    ...gpuNamingPlanSource.matchAll(
+        /^([^\s'][A-Za-z0-9_]*)\s+->\s+([^\s]+)$/gm
+    ),
+].map(match => Object.freeze([ match[1], match[2] ]))
+    .concat([ Object.freeze([ 'GpuOperation', 'GPUOperation' ]) ])
+    .sort((left, right) => right[0].length - left[0].length))
 
 const currentPaths = Object.freeze({
     packageIndex: 'packages/geoscratch/src/index.ts',
@@ -141,9 +159,9 @@ const historicalTypeInventory = Object.freeze([
     { name: 'QuerySetType', classification: 'restored', current: 'QuerySetType' },
     { name: 'ResourceOptions', classification: 'internal', current: null },
     { name: 'SamplerResourceDescriptor', classification: 'restored', current: 'SamplerResourceDescriptor' },
-    { name: 'ScratchComputePipelineDescriptor', classification: 'restored', current: 'ScratchComputePipelineDescriptor' },
+    { name: 'ScratchComputePipelineDescriptor', classification: 'renamed', current: 'ComputePipelineDescriptor' },
     { name: 'ScratchDiagnosticInput', classification: 'restored', current: 'ScratchDiagnosticInput' },
-    { name: 'ScratchRenderPipelineDescriptor', classification: 'restored', current: 'ScratchRenderPipelineDescriptor' },
+    { name: 'ScratchRenderPipelineDescriptor', classification: 'renamed', current: 'RenderPipelineDescriptor' },
     { name: 'SurfaceFormat', classification: 'restored', current: 'SurfaceFormat' },
     { name: 'SurfaceOptions', classification: 'restored', current: 'SurfaceOptions' },
     { name: 'SurfaceSize', classification: 'restored', current: 'SurfaceSize' },
@@ -271,7 +289,7 @@ const closedBrandGuards = Object.freeze({
         current.submission.includes('isExecuteRenderBundlesCommand(command)'),
     LayoutCodec: current.layoutCodec.includes('isLayoutCodec('),
     Program: current.program.includes('const programStates = new WeakMap<Program, ProgramState>()') &&
-        current.program.includes('readonly runtime: ScratchRuntime') &&
+        current.program.includes('readonly runtime: GPURuntime') &&
         current.program.includes('readonly id: string') &&
         current.program.includes('get isDisposed(): boolean') &&
         current.program.includes('Object.defineProperties(this, {') &&
@@ -325,8 +343,10 @@ const goalStartProductionDeclarations = emitProductionDeclarationsAt(goalBaselin
 const emittedProductionOutputs = emitCurrentProductionOutputs()
 const goalStartScratchDeclarations = scratchDeclarationTree(goalStartProductionDeclarations)
 const finalScratchDeclarations = scratchDeclarationTree(emittedProductionOutputs)
-const goalStartProgramDeclaration = Object.entries(goalStartScratchDeclarations)
-    .find(([ sourcePath ]) => sourcePath.endsWith('scratch/program.d.ts'))?.[1] ?? ''
+const goalStartProgramDeclaration = normalizeGPUContractSource(
+    Object.entries(goalStartScratchDeclarations)
+        .find(([ sourcePath ]) => sourcePath.endsWith('scratch/program.d.ts'))?.[1] ?? ''
+)
 const finalProgramDeclaration = Object.entries(finalScratchDeclarations)
     .find(([ sourcePath ]) => sourcePath.endsWith('scratch/gpu/program.d.ts'))?.[1] ?? ''
 const publicApiTypeSource = fs.readFileSync('tests/types/public-api.ts', 'utf8')
@@ -404,7 +424,7 @@ const lifecycleAuthorityInternalNames = Object.freeze([
 ])
 const runtimeProgramLifecycleAuthorityFacts = {
     runtimePrivateCell: hasAll(current.runtimeAuthority, [
-        'const runtimeAuthorityStates = new WeakMap<ScratchRuntime, ScratchRuntimeAuthorityState>()',
+        'const runtimeAuthorityStates = new WeakMap<GPURuntime, GPURuntimeAuthorityState>()',
         'lifecycleEpoch: number',
         'export function assertScratchRuntimeActive(',
         'export function captureScratchRuntimeAuthority(',
@@ -727,7 +747,7 @@ const capabilityRows = [
         target: 'Bounded schema v5 with discriminated resource/supporting-object targets and no v4 writer',
         final: /version: 5/.test(current.gpuOperation) && /version: 5/.test(current.runtimeDiagnostics) &&
             !/version:\s*4/.test(currentScratchSource) &&
-            hasAll(current.gpuOperation, [ "kind: 'bind-layout'", "kind: 'bind-set'", 'ScratchGpuQuerySetSlotFact' ]),
+            hasAll(current.gpuOperation, [ "kind: 'bind-layout'", "kind: 'bind-set'", 'GPUQuerySetSlotFact' ]),
         implementation: 'scratch/gpu-operation.ts and scratch/runtime-diagnostics.ts',
         tests: 'scratch-gpu-operation-provenance.test.js and scratch-supporting-object-acknowledgement.test.js',
         docs: 'scratch-api/09-diagnostics-validation and ADR-038',
@@ -739,10 +759,23 @@ const baselineValueExports = exportNames(baseline.scratchIndex, 'value')
 const currentValueExports = exportNames(current.scratchIndex, 'value')
 const historicalValueExports = exportNames(historical.scratchIndex, 'value')
 const baselineMissingValues = difference(baselineValueExports, currentValueExports)
-const expectedBaselineMissingValues = Object.freeze([ 'throwScratchDiagnostic' ])
+const renamedValueExports = gpuNamingCleanCutEntries
+    .filter(entry => entry.kinds.includes('value'))
+    .map(entry => entry.name)
+const expectedBaselineMissingValues = Object.freeze([
+    'throwScratchDiagnostic',
+    ...renamedValueExports.filter(name => baselineValueExports.includes(name)),
+].sort())
 const historicalMissingValues = difference(historicalValueExports, currentValueExports)
-const expectedHistoricalMissingValues = Object.freeze([ 'throwScratchDiagnostic' ])
+const expectedHistoricalMissingValues = Object.freeze([
+    'throwScratchDiagnostic',
+    ...renamedValueExports.filter(name => historicalValueExports.includes(name)),
+].sort())
 
+const baselineTypeExports = exportedTypeNames(baseline.scratchIndex)
+const gpuNamingCleanCutTypeReplacements = Object.fromEntries(gpuNamingCleanCutEntries
+    .filter(entry => entry.kinds.includes('type') && baselineTypeExports.includes(entry.name))
+    .map(entry => [ entry.name, entry.targetName ]))
 const baselineTypeReplacements = Object.freeze({
     CommandDynamicOffsets: 'CommandBindSetInvocation',
     LayoutPrimitiveType: 'LayoutTypeShorthand',
@@ -752,9 +785,10 @@ const baselineTypeReplacements = Object.freeze({
     PipelineCompilationNativeLocation: 'ShaderModuleCompilationNativeLocation',
     PipelineCompilationReport: 'ShaderModuleCompilationReport',
     ReadbackRange: 'BufferRegion',
+    ...gpuNamingCleanCutTypeReplacements,
 })
 const baselineMissingTypes = difference(
-    exportedTypeNames(baseline.scratchIndex),
+    baselineTypeExports,
     exportedTypeNames(current.scratchIndex)
 )
 const expectedBaselineMissingTypes = Object.keys(baselineTypeReplacements).sort()
@@ -774,8 +808,12 @@ const classifiedHistoricalTypes = historicalTypeInventory.map(entry => Object.fr
         : 'failed',
 }))
 
-const goalStartPublicMembers = publicClassMemberInventory(goalStartScratchDeclarations)
-const historicalPublicMethods = publicClassMemberInventory(historicalScratchTree)
+const goalStartPublicMembers = publicClassMemberInventory(
+    normalizeGPUDeclarationTree(goalStartScratchDeclarations)
+)
+const historicalPublicMethods = publicClassMemberInventory(
+    normalizeGPUDeclarationTree(historicalScratchTree)
+)
     .filter(entry => [ 'method', 'get', 'set' ].includes(entry.kind))
 const finalPublicMembers = publicClassMemberInventory(finalScratchDeclarations)
 const finalPublicMemberById = new Map(finalPublicMembers.map(entry => [ entry.id, entry ]))
@@ -796,8 +834,8 @@ const changedGoalStartPublicMembers = goalStartPublicMembers
 const missingHistoricalPublicMethods = historicalPublicMethods
     .filter(entry => !finalPublicMethodIds.includes(entry.id))
 const goalStartPublicMemberReplacements = Object.freeze({
-    'BindLayout.constructor:constructor': 'Promise-only ScratchRuntime.createBindLayout()',
-    'BindSet.constructor:constructor': 'Promise-only ScratchRuntime.createBindSet() with initial preparation',
+    'BindLayout.constructor:constructor': 'Promise-only GPURuntime.createBindLayout()',
+    'BindSet.constructor:constructor': 'Promise-only GPURuntime.createBindSet() with initial preparation',
     'BindSet.getBindGroup:method': 'explicit prepare() plus private preparedBindGroupFor()',
     'BindSet.hasStaleAllocationVersions:method': 'preparationState allocation-snapshot comparison',
     'BufferResource.elementCount:property': 'BufferRegion interpretation owns elementCount',
@@ -805,8 +843,8 @@ const goalStartPublicMemberReplacements = Object.freeze({
     'BufferResource.layoutByteLength:property': 'BufferRegion interpretation owns layout byte length',
     'BufferResource.layoutSubject:get': 'BufferRegion.subject and region-owned layout witness',
     'QuerySetResource._advanceSlotContentEpoch:method': 'module-private advanceQuerySetSlotEpoch()',
-    'QuerySetResource.constructor:constructor': 'Promise-only ScratchRuntime.createQuerySet()',
-    'QuerySetResource.static.create:method': 'Promise-only ScratchRuntime.createQuerySet()',
+    'QuerySetResource.constructor:constructor': 'Promise-only GPURuntime.createQuerySet()',
+    'QuerySetResource.static.create:method': 'Promise-only GPURuntime.createQuerySet()',
     'ReadbackCommand.range:get': 'ReadbackCommand.source.region BufferRegion',
     'ReadbackOperation.range:get': 'ReadbackOperation.source BufferRegion',
     'RenderPassSpec.createRenderPassDescriptor:method': 'submission-scoped lowerRenderPassDescriptor()',
@@ -814,8 +852,8 @@ const goalStartPublicMemberReplacements = Object.freeze({
     'Resource.contentEpoch:get': 'content-bearing BufferResource/TextureResource and indexed query slots',
     'Resource.isReady:get': 'content-bearing BufferResource/TextureResource only',
     'Resource.state:get': 'content-bearing BufferResource/TextureResource only',
-    'SamplerResource.constructor:constructor': 'Promise-only ScratchRuntime.createSampler()',
-    'SamplerResource.static.create:method': 'Promise-only ScratchRuntime.createSampler()',
+    'SamplerResource.constructor:constructor': 'Promise-only GPURuntime.createSampler()',
+    'SamplerResource.static.create:method': 'Promise-only GPURuntime.createSampler()',
     'ScratchDiagnosticError.incident:property': 'domain-matched ScratchDiagnosticError.context incident branch',
     'Surface.getCurrentTexture:method': 'SubmissionBuilder.surfaceTexture() attempt-local lease authority',
     'TextureResource.createView:method': 'logical TextureResource.view() returning TextureViewSpec',
@@ -833,34 +871,36 @@ const goalStartChangedPublicMemberReplacements = Object.freeze({
     'ScratchDiagnosticError.constructor:constructor': 'generic domain-matched diagnostic, report, and context contract',
     'ScratchDiagnosticError.diagnostic:property': 'immutable domain-discriminated diagnostic union',
     'ScratchDiagnosticError.report:property': 'immutable mixed-domain diagnostic report',
-    'ScratchRuntime.bindLayout:method': 'Promise-only acknowledged BindLayout factory',
-    'ScratchRuntime.bindSet:method': 'Promise-only initially prepared BindSet factory',
-    'ScratchRuntime.createBindLayout:method': 'Promise-only acknowledged BindLayout factory',
-    'ScratchRuntime.createBindSet:method': 'Promise-only initially prepared BindSet factory',
-    'ScratchRuntime.createQuerySet:method': 'Promise-only acknowledged QuerySetResource factory',
-    'ScratchRuntime.createSampler:method': 'Promise-only acknowledged SamplerResource factory',
-    'ScratchRuntime.querySet:method': 'Promise-only acknowledged QuerySetResource factory',
-    'ScratchRuntime.sampler:method': 'Promise-only acknowledged SamplerResource factory',
+    'GPURuntime.bindLayout:method': 'Promise-only acknowledged BindLayout factory',
+    'GPURuntime.bindSet:method': 'Promise-only initially prepared BindSet factory',
+    'GPURuntime.createBindLayout:method': 'Promise-only acknowledged BindLayout factory',
+    'GPURuntime.createBindSet:method': 'Promise-only initially prepared BindSet factory',
+    'GPURuntime.createQuerySet:method': 'Promise-only acknowledged QuerySetResource factory',
+    'GPURuntime.createSampler:method': 'Promise-only acknowledged SamplerResource factory',
+    'GPURuntime.querySet:method': 'Promise-only acknowledged QuerySetResource factory',
+    'GPURuntime.sampler:method': 'Promise-only acknowledged SamplerResource factory',
+    'GPURuntimeDiagnosticsController.recordDeviceLoss:method':
+        'native device-loss input remains distinct from the retained GPUDeviceLostInfo snapshot',
     'SubmissionBuilder.compute:method': 'compute passes accept DispatchCommand and native DebugCommand entries',
 })
 const historicalPublicMethodReplacements = Object.freeze({
     'BindSet.getBindGroup:method': 'explicit prepare() plus private preparedBindGroupFor()',
     'BindSet.hasStaleAllocationVersions:method': 'preparationState allocation-snapshot comparison',
-    'BufferResource.static.create:method': 'Promise-only ScratchRuntime.createBuffer()',
+    'BufferResource.static.create:method': 'Promise-only GPURuntime.createBuffer()',
     'QuerySetResource._advanceSlotContentEpoch:method': 'module-private advanceQuerySetSlotEpoch()',
     'QuerySetResource.assertRuntime:method': 'inherited Resource.assertRuntime()',
     'QuerySetResource.assertUsable:method': 'inherited Resource.assertUsable()',
-    'QuerySetResource.static.create:method': 'Promise-only ScratchRuntime.createQuerySet()',
+    'QuerySetResource.static.create:method': 'Promise-only GPURuntime.createQuerySet()',
     'ReadbackOperation._assertConsumable:method': 'module-private readback operation state validation',
     'ReadbackOperation._consumeBytes:method': 'module-private readback materialization transaction',
     'RenderPassSpec.createRenderPassDescriptor:method': 'submission-scoped lowerRenderPassDescriptor()',
     'Resource._advanceContentEpoch:method': 'module-private advanceResourceContentEpoch()',
     'Resource._replaceAllocation:method': 'module-private replaceResourceAllocation()',
-    'SamplerResource.static.create:method': 'Promise-only ScratchRuntime.createSampler()',
+    'SamplerResource.static.create:method': 'Promise-only GPURuntime.createSampler()',
     'Surface.getCurrentTexture:method': 'SubmissionBuilder.surfaceTexture() attempt-local lease authority',
     'TextureResource._replaceAllocation:method': 'module-private transactional replacement helper',
     'TextureResource.createView:method': 'logical TextureResource.view() returning TextureViewSpec',
-    'TextureResource.static.create:method': 'Promise-only ScratchRuntime.createTexture()',
+    'TextureResource.static.create:method': 'Promise-only GPURuntime.createTexture()',
 })
 const publicMemberParity = Object.freeze({
     compilerVersion: ts.version,
@@ -889,8 +929,8 @@ const publicMemberParity = Object.freeze({
 const programReadonlyPublicContracts = Object.freeze([
     {
         id: 'Program.runtime',
-        mutableDeclaration: 'runtime: ScratchRuntime;',
-        readonlyDeclaration: 'readonly runtime: ScratchRuntime;',
+        mutableDeclaration: 'runtime: GPURuntime;',
+        readonlyDeclaration: 'readonly runtime: GPURuntime;',
         typeTestMarkers: [
             '// @ts-expect-error Program runtime ownership is readonly',
             'program.runtime = runtime',
@@ -1386,7 +1426,7 @@ const documentationAudit = Object.freeze({
     ),
     uploadQueueOwnership: [ finalDocs.transfers, finalDocs.transfersZh ].every(source =>
         hasAll(source, [
-            '`ScratchRuntime.queue`',
+            '`GPURuntime.queue`',
             'foreign queue',
             '`writeBuffer()`',
             '`writeTexture()`',
@@ -3445,6 +3485,25 @@ function difference(left, right) {
 function equalSets(left, right) {
     return JSON.stringify([ ...new Set(left) ].sort()) ===
         JSON.stringify([ ...new Set(right) ].sort())
+}
+
+function normalizeGPUDeclarationTree(tree) {
+
+    return Object.fromEntries(Object.entries(tree).map(([ file, source ]) => [
+        file,
+        normalizeGPUContractSource(source),
+    ]))
+}
+
+function normalizeGPUContractSource(source) {
+
+    return gpuNamingCleanCutMap.reduce(
+        (current, [ oldName, newName ]) => current.replace(
+            new RegExp(`\\b${oldName}\\b`, 'g'),
+            () => newName
+        ),
+        source
+    )
 }
 
 function sha256(value) {

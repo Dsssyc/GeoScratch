@@ -1,4 +1,4 @@
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import type { SubmittedWork } from 'geoscratch'
 
 const expected = [ 3, 5, 8, 13 ]
@@ -18,7 +18,7 @@ void main().catch((error) => {
 
 async function main() {
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'buffer mapping example runtime',
     })
 

@@ -104,7 +104,7 @@ describe('scratch async pipeline creation documentation', () => {
 
         for (const readmeName of [ 'README.md', 'README_zh.md' ]) {
             const readme = read(readmeName)
-            expect(readme).to.include('const runtime = await ScratchRuntime.create(')
+            expect(readme).to.include('const runtime = await GPURuntime.create(')
             expect(readme).to.include('const pipeline = await runtime.createRenderPipeline(')
             expect(readme).not.to.include('scr.renderPipeline(')
         }

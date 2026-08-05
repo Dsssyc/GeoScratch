@@ -95,7 +95,7 @@ full-image or legacy-tile fallback.
 Persistent Scratch buffer and texture allocation is acknowledged asynchronously. A resource is returned only after its native validation and out-of-memory scopes settle successfully; texture replacement follows the same transaction boundary.
 
 ```js
-const runtime = await scr.ScratchRuntime.create()
+const runtime = await scr.GPURuntime.create()
 const vertices = await runtime.createBuffer({
     label: 'vertices',
     size: 4096,
@@ -157,7 +157,7 @@ application explicitly awaits `prepare()`. Submission never rebuilds bindings.
 asynchronous and is exposed explicitly:
 
 ```js
-const runtime = await scr.ScratchRuntime.create({
+const runtime = await scr.GPURuntime.create({
     diagnostics: {
         submissionScopes: 'summary',
         maxPendingNativeObservations: 64,
@@ -268,14 +268,14 @@ not the classifier.
 The example below renders a hard-coded triangle onto a canvas.
 
 ```js
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 
 const canvas = document.getElementById('GPUFrame')
 
 main().catch(console.error)
 
 async function main() {
-    const runtime = await ScratchRuntime.create({ label: 'triangle runtime' })
+    const runtime = await GPURuntime.create({ label: 'triangle runtime' })
     const surface = runtime.createSurface(canvas, { format: 'preferred' })
     const shaderModule = await runtime.createShaderModule({
         sourceParts: [ { code: `

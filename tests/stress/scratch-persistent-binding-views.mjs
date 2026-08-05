@@ -1,7 +1,7 @@
 import os from 'node:os'
 import process from 'node:process'
 import { performance } from 'node:perf_hooks'
-import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
+import { GPURuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
 import {
     advanceResourceContentEpochForTest,
     createFakeGpu,
@@ -26,7 +26,7 @@ process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 async function stressPersistentBindings(cycleCount) {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         gpu: fake.gpu,
         diagnostics: {
             submissionScopes: 'off',

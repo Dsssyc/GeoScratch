@@ -1,6 +1,6 @@
 import { expect } from 'chai'
 import {
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
@@ -18,7 +18,7 @@ describe('scratch ShaderModule', () => {
                 linePos: 2,
             } ],
         })
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const promise = runtime.createShaderModule({
             label: 'shared shader',
             sourceParts: [
@@ -76,7 +76,7 @@ describe('scratch ShaderModule', () => {
     it('lowers entry-specific auto and explicit compilation hints without validity claims', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const bindLayout = await runtime.createBindLayout({
             group: 0,
             entries: [],
@@ -149,7 +149,7 @@ describe('scratch ShaderModule', () => {
                 linePos: 1,
             } ],
         })
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         try {
             await runtime.createShaderModule({
@@ -193,7 +193,7 @@ describe('scratch ShaderModule', () => {
             } ],
         })
         errors.failNext('createShaderModule', 'validation', validationError)
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         try {
             await runtime.createShaderModule({

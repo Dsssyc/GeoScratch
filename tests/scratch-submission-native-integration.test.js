@@ -1,6 +1,6 @@
 import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
-import { ScratchDiagnosticError, ScratchRuntime } from 'geoscratch'
+import { ScratchDiagnosticError, GPURuntime } from 'geoscratch'
 import {
     createFakeExternalImageSource,
     createFakeGpu,
@@ -19,7 +19,7 @@ async function createCopyFixture(options = {}) {
     const deferSubmissionScopePops = fakeOptions.deferErrorScopePops === true
     fakeOptions.deferErrorScopePops = false
     const fake = createFakeGpu(fakeOptions)
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         gpu: fake.gpu,
         ...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
     })
@@ -87,7 +87,7 @@ async function expectScratchDiagnostic(action, expected) {
 async function createRenderFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const target = await runtime.createTexture({
         size: { width: 2, height: 2 },
         format: 'rgba8unorm',
@@ -153,7 +153,7 @@ async function createRenderFixture() {
 async function createComputeFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const output = await runtime.createBuffer({
         size: 16,
         usage: GPU_BUFFER_USAGE_STORAGE,
@@ -199,7 +199,7 @@ async function createComputeFixture() {
 async function createTextureUploadFixture(external = false) {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const target = await runtime.createTexture({
         size: { width: 2, height: 2 },
         format: 'rgba8unorm',
@@ -488,7 +488,7 @@ describe('scratch submission native integration', () => {
         })
 
         const emptyFake = createFakeGpu()
-        const emptyRuntime = await ScratchRuntime.create({ gpu: emptyFake.gpu })
+        const emptyRuntime = await GPURuntime.create({ gpu: emptyFake.gpu })
         emptyFake.calls.errorScopes.length = 0
         const emptySubmitted = emptyRuntime.submission().submit()
         await Promise.resolve()

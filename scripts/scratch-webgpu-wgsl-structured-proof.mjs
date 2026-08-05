@@ -434,13 +434,13 @@ const operationDefinitions = [
     scratchMember(
         'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterFeatures',
-        'ScratchRuntime',
+        'GPURuntime',
         'adapterFeatures'
     ),
     scratchMember(
         'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterInfo',
-        'ScratchRuntime',
+        'GPURuntime',
         'adapterInfo'
     ),
     call(
@@ -470,7 +470,7 @@ const operationDefinitions = [
     scratchMember(
         'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'deviceFeatures',
-        'ScratchRuntime',
+        'GPURuntime',
         'deviceFeatures'
     ),
     call(

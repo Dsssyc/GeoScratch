@@ -1,5 +1,5 @@
 import {
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import type { SubmittedWork, Surface } from 'geoscratch'
 
@@ -62,7 +62,7 @@ void main().catch((error) => {
 
 async function main() {
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'texture sampling runtime',
     })
     const surface = runtime.createSurface(canvas, {

@@ -235,7 +235,7 @@ async function verifySubmissionTransactions(browser) {
         diagnosticModuleUrl,
         diagnosticsModuleUrl,
     }) => {
-        const { ScratchRuntime } = await import(runtimeModuleUrl)
+        const { GPURuntime } = await import(runtimeModuleUrl)
         const { ScratchDiagnosticError } = await import(diagnosticModuleUrl)
         const { diagnosticsControllerFor } = await import(diagnosticsModuleUrl)
 
@@ -244,7 +244,7 @@ async function verifySubmissionTransactions(browser) {
         return { valid, delayedValidation }
 
         async function validSubmissionProbe() {
-            const runtime = await ScratchRuntime.create({
+            const runtime = await GPURuntime.create({
                 label: 'browser valid submission provenance',
                 diagnostics: {
                     submissionScopes: 'summary',
@@ -332,7 +332,7 @@ async function verifySubmissionTransactions(browser) {
         }
 
         async function delayedValidationProbe() {
-            const runtime = await ScratchRuntime.create({
+            const runtime = await GPURuntime.create({
                 label: 'browser delayed submission validation',
                 diagnostics: {
                     submissionScopes: 'summary',

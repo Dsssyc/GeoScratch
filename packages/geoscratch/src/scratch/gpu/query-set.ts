@@ -14,9 +14,9 @@ import {
     recheckSupportingObjectLifecycle,
 } from './supporting-object-creation.js'
 import { isRecord } from './type-utils.js'
-import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchResourceIdentity } from './resource.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
+import type { GPUResourceIdentity } from './resource.js'
+import type { GPURuntime } from './runtime.js'
 
 export type QuerySetType = 'timestamp' | 'occlusion'
 export type QuerySetSlotState = 'empty' | 'ready' | 'indeterminate'
@@ -101,14 +101,14 @@ export class QuerySetResource extends Resource {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: QuerySetResourceDescriptor,
-        identity: ScratchResourceIdentity,
+        identity: GPUResourceIdentity,
         gpuQuerySet: GPUQuerySet
     ) {
 
         if (token !== querySetResourceToken || new.target !== QuerySetResource) {
-            throw new TypeError('QuerySetResource must be created by ScratchRuntime.createQuerySet().')
+            throw new TypeError('QuerySetResource must be created by GPURuntime.createQuerySet().')
         }
 
         super(runtime, {
@@ -145,9 +145,9 @@ export class QuerySetResource extends Resource {
         return this.#gpuQuerySet
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'QuerySet',
             id: this.id,
             queryType: this.type,
@@ -194,7 +194,7 @@ export function isQuerySetResource(value: unknown): value is QuerySetResource {
 }
 
 export async function createQuerySetResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: QuerySetResourceDescriptor
 ): Promise<QuerySetResource> {
 
@@ -236,7 +236,7 @@ export async function createQuerySetResource(
             () => runtime.device.createQuerySet(nativeDescriptor)
         )
     )
-    const subject: DiagnosticSubject = {
+    const subject: GPUDiagnosticSubjectDraft = {
         kind: 'QuerySet',
         id: identity.id,
         queryType: normalizedDescriptor.type,
@@ -289,17 +289,17 @@ export async function createQuerySetResource(
 }
 
 function constructQuerySetResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: QuerySetResourceDescriptor,
-    identity: ScratchResourceIdentity,
+    identity: GPUResourceIdentity,
     gpuQuerySet: GPUQuerySet
 ): QuerySetResource {
 
     const Constructor = QuerySetResource as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: QuerySetResourceDescriptor,
-        identity: ScratchResourceIdentity,
+        identity: GPUResourceIdentity,
         gpuQuerySet: GPUQuerySet
     ) => QuerySetResource
     return new Constructor(querySetResourceToken, runtime, descriptor, identity, gpuQuerySet)
@@ -320,9 +320,9 @@ function assertQuerySlotIndex(querySet: QuerySetResource, index: number): void {
     })
 }
 
-function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: unknown): QuerySetResourceDescriptor {
+function normalizeQuerySetDescriptor(runtime: GPURuntime, descriptor: unknown): QuerySetResourceDescriptor {
 
-    const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
+    const subject = runtime?.subject ?? { kind: 'GPURuntime' }
 
     if (runtime?.device && typeof runtime.device.createQuerySet !== 'function') {
         throwGPUDiagnostic({
@@ -330,7 +330,7 @@ function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: unknow
             severity: 'error',
             phase: 'runtime',
             subject,
-            message: 'ScratchRuntime device cannot create GPU query sets.',
+            message: 'GPURuntime device cannot create GPU query sets.',
             expected: { device: 'GPUDevice with createQuerySet()' },
             actual: { createQuerySet: typeof runtime.device.createQuerySet },
         })
@@ -379,7 +379,7 @@ function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: unknow
     return Object.freeze(normalized)
 }
 
-function throwQuerySetDescriptorDiagnostic(subject: DiagnosticSubject, descriptor: unknown, reason: string): never {
+function throwQuerySetDescriptorDiagnostic(subject: ScratchDiagnosticSubject, descriptor: unknown, reason: string): never {
 
     const descriptorRecord = isRecord(descriptor) ? descriptor : {}
 

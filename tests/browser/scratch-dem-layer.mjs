@@ -522,7 +522,7 @@ function validateResult(result) {
     }
     if (result.adapter?.available !== true) failures.push('navigator.gpu was unavailable')
     if (result.adapter?.runtimeAdapterAcquired !== true) {
-        failures.push('ScratchRuntime did not acquire a WebGPU adapter')
+        failures.push('GPURuntime did not acquire a WebGPU adapter')
     }
     if (result.normalProof === undefined) {
         failures.push('normal DEM proof was not produced')

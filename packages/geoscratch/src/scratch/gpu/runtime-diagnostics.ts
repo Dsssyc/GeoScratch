@@ -9,37 +9,37 @@ import {
     serializeNativeGpuError,
     serializedEvidenceBytes,
 } from './gpu-operation.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 import type {
-    GpuAttributionConfidence,
-    GpuDescriptorEvidence,
-    GpuNativeErrorCategory,
-    GpuOperationKind,
-    GpuOperationStatus,
-    ScratchGpuIncidentKind,
-    ScratchGpuIncidentFailureStage,
-    ScratchGpuIncidentOutcome,
-    ScratchGpuIncidentReport,
-    ScratchGpuBindSetOperationTarget,
-    ScratchGpuBindLayoutOperationTarget,
-    ScratchGpuCommandOperationTarget,
-    ScratchGpuOperationRecord,
-    ScratchGpuOperationTarget,
-    ScratchGpuPipelineOperationRecord,
-    ScratchGpuPipelineOperationTarget,
-    ScratchGpuPressureEvidence,
-    ScratchGpuReadbackOperationTarget,
-    ScratchGpuResourceOperationTarget,
-    ScratchGpuShaderModuleOperationTarget,
-    ScratchGpuSubmissionOperationTarget,
-    ScratchPipelineNativeLabelEvidence,
-    ScratchNativeGpuErrorFacts,
-    ScratchSubmissionScopeMode,
-    ScratchSubmissionNativeLocation,
-    ScratchSubmissionNativeOutcomeInput,
-    ScratchSubmissionNativeOutcomeMode,
-    ScratchSubmissionNativeOutcomeStatus,
-    ScratchSubmissionNativeStage,
+    GPUAttributionConfidence,
+    GPUDescriptorEvidence,
+    GPUNativeErrorCategory,
+    GPUOperationKind,
+    GPUOperationStatus,
+    GPUIncidentKind,
+    GPUIncidentFailureStage,
+    GPUIncidentOutcome,
+    GPUIncidentReport,
+    GPUBindSetOperationTarget,
+    GPUBindLayoutOperationTarget,
+    GPUCommandOperationTarget,
+    GPUOperationRecord,
+    GPUOperationTarget,
+    GPUPipelineOperationRecord,
+    GPUPipelineOperationTarget,
+    GPUPressureEvidence,
+    GPUReadbackOperationTarget,
+    GPUResourceOperationTarget,
+    GPUShaderModuleOperationTarget,
+    GPUSubmissionOperationTarget,
+    GPUPipelineNativeLabelEvidence,
+    GPUNativeErrorFacts,
+    GPUSubmissionScopeMode,
+    GPUSubmissionNativeLocation,
+    GPUSubmissionNativeOutcomeInput,
+    GPUSubmissionNativeOutcomeMode,
+    GPUSubmissionNativeOutcomeStatus,
+    GPUSubmissionNativeStage,
 } from './gpu-operation.js'
 import type {
     BindLayout,
@@ -47,13 +47,13 @@ import type {
     BindSetPreparationState,
     NormalizedBindLayoutEntry,
 } from './binding.js'
-import type { ScratchReadbackNativeOutcomeInput } from './gpu-operation.js'
+import type { GPUReadbackNativeOutcomeInput } from './gpu-operation.js'
 import type {
     PipelineCreationReport,
     PipelineKind,
     ShaderModuleCompilationReport,
 } from './pipeline-compilation.js'
-import type { ScratchReadbackPolicy } from './readback-ownership.js'
+import type { GPUReadbackPolicy } from './readback-ownership.js'
 import type { QuerySetResource, QuerySetSlotSnapshot, QuerySetType } from './query-set.js'
 import type { Resource, ResourceState } from './resource.js'
 
@@ -68,22 +68,22 @@ const DEFAULT_CAPTURE_MAX_OPERATIONS = 128
 const DEFAULT_CAPTURE_MAX_DURATION_MS = 5_000
 const DEFAULT_CAPTURE_MAX_EVIDENCE_BYTES = 256 * 1024
 const CAPTURE_INCIDENT_LINK_RESERVE_BYTES = 256
-const diagnosticsFacadeToken = Symbol('ScratchRuntimeDiagnostics')
-const diagnosticCaptureToken = Symbol('ScratchDiagnosticCapture')
+const diagnosticsFacadeToken = Symbol('GPURuntimeDiagnostics')
+const diagnosticCaptureToken = Symbol('GPUDiagnosticCapture')
 
-export type ScratchPendingGpuOperationKind = Exclude<
-    GpuOperationKind,
+export type GPUPendingOperationKind = Exclude<
+    GPUOperationKind,
     'resource-disposal' | 'pipeline-disposal' | 'readback-staging-release'
 >
 
-export type ScratchRuntimeDiagnosticsOptions = Readonly<{
+export type GPURuntimeDiagnosticsOptions = Readonly<{
     operationCapacity?: number
     incidentCapacity?: number
     evidenceByteCapacity?: number
     recentOperationLimit?: number
     contributorLimit?: number
     maxActiveCaptures?: number
-    submissionScopes?: ScratchSubmissionScopeMode
+    submissionScopes?: GPUSubmissionScopeMode
     maxPendingNativeObservations?: number
 }>
 
@@ -94,11 +94,11 @@ export type NormalizedScratchRuntimeDiagnosticsOptions = Readonly<{
     recentOperationLimit: number
     contributorLimit: number
     maxActiveCaptures: number
-    submissionScopes: ScratchSubmissionScopeMode
+    submissionScopes: GPUSubmissionScopeMode
     maxPendingNativeObservations: number
 }>
 
-type ScratchRuntimeResourceFactBase = Readonly<{
+type GPURuntimeResourceFactBase = Readonly<{
     id: string
     label?: string
     descriptorHash: string
@@ -107,7 +107,7 @@ type ScratchRuntimeResourceFactBase = Readonly<{
     pendingReplacementOperationId?: string
 }>
 
-export type ScratchRuntimeContentResourceFact = ScratchRuntimeResourceFactBase & Readonly<{
+export type GPURuntimeContentResourceFact = GPURuntimeResourceFactBase & Readonly<{
     resourceKind: 'BufferResource' | 'TextureResource'
     contentEpoch: number
     state: ResourceState
@@ -115,32 +115,32 @@ export type ScratchRuntimeContentResourceFact = ScratchRuntimeResourceFactBase &
     logicalFootprintKnown: boolean
 }>
 
-export type ScratchRuntimeSamplerResourceFact = ScratchRuntimeResourceFactBase & Readonly<{
+export type GPURuntimeSamplerResourceFact = GPURuntimeResourceFactBase & Readonly<{
     resourceKind: 'SamplerResource'
 }>
 
-export type ScratchRuntimeQuerySetResourceFact = ScratchRuntimeResourceFactBase & Readonly<{
+export type GPURuntimeQuerySetResourceFact = GPURuntimeResourceFactBase & Readonly<{
     resourceKind: 'QuerySetResource'
     queryType: QuerySetType
     count: number
     slots: readonly QuerySetSlotSnapshot[]
 }>
 
-export type ScratchRuntimeResourceFact =
-    | ScratchRuntimeContentResourceFact
-    | ScratchRuntimeSamplerResourceFact
-    | ScratchRuntimeQuerySetResourceFact
+export type GPURuntimeResourceFact =
+    | GPURuntimeContentResourceFact
+    | GPURuntimeSamplerResourceFact
+    | GPURuntimeQuerySetResourceFact
 
-export type ScratchPendingGpuOperationFact = Readonly<{
+export type GPUPendingOperationFact = Readonly<{
     id: string
     sequence: number
-    kind: ScratchPendingGpuOperationKind
-    target: ScratchGpuOperationTarget
+    kind: GPUPendingOperationKind
+    target: GPUOperationTarget
     descriptorHash: string
     startedAtMs: number
 }>
 
-export type ScratchRuntimePipelineFact = Readonly<{
+export type GPURuntimePipelineFact = Readonly<{
     id: string
     label?: string
     pipelineKind: PipelineKind
@@ -152,12 +152,12 @@ export type ScratchRuntimePipelineFact = Readonly<{
     stages: PipelineCreationReport['stages']
 }>
 
-export type ScratchRuntimePipelineRegistration = Readonly<{
+export type GPURuntimePipelineRegistration = Readonly<{
     label?: string
-    creationOperation: ScratchGpuPipelineOperationRecord
+    creationOperation: GPUPipelineOperationRecord
 }>
 
-export type ScratchRuntimeBindLayoutFact = Readonly<{
+export type GPURuntimeBindLayoutFact = Readonly<{
     id: string
     label?: string
     group: number
@@ -169,7 +169,7 @@ export type ScratchRuntimeBindLayoutFact = Readonly<{
     lastAllocationOperationId: string
 }>
 
-export type ScratchRuntimeBindSetFact = Readonly<{
+export type GPURuntimeBindSetFact = Readonly<{
     id: string
     label?: string
     bindLayoutId: string
@@ -181,7 +181,7 @@ export type ScratchRuntimeBindSetFact = Readonly<{
     lastIncidentId?: string
 }>
 
-export type ScratchReadbackCommandState =
+export type GPUReadbackCommandState =
     | 'allocating'
     | 'idle'
     | 'claimed'
@@ -191,18 +191,18 @@ export type ScratchReadbackCommandState =
     | 'disposed'
     | 'failed'
 
-export type ScratchRuntimeReadbackCommandFact = Readonly<{
+export type GPURuntimeReadbackCommandFact = Readonly<{
     id: string
     label?: string
     sourceResourceId: string
     allocationVersion: number
     contentEpoch: number
     byteLength: number
-    state: ScratchReadbackCommandState
+    state: GPUReadbackCommandState
     stagingAllocationOperationId?: string
 }>
 
-export type ScratchRuntimeReadbackOperationFact = Readonly<{
+export type GPURuntimeReadbackOperationFact = Readonly<{
     id: string
     label?: string
     path: 'direct' | 'ordered'
@@ -231,7 +231,7 @@ export type ScratchRuntimeReadbackOperationFact = Readonly<{
     lastMappingOperationId?: string
 }>
 
-export type ScratchRuntimeBufferMappingFact = Readonly<{
+export type GPURuntimeBufferMappingFact = Readonly<{
     id: string
     resourceId: string
     offset: number
@@ -243,14 +243,14 @@ export type ScratchRuntimeBufferMappingFact = Readonly<{
     operationId: string
 }>
 
-export type ScratchReadbackStagingReservation = Readonly<{
+export type GPUReadbackStagingReservation = Readonly<{
     id: string
     byteLength: number
     readonly isReleased: boolean
     release(): void
 }>
 
-export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
+export type GPURuntimeDiagnosticsSnapshot = Readonly<{
     version: 5
     runtime: Readonly<{
         id: string
@@ -258,14 +258,14 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
         isDisposed: boolean
         isDeviceLost: boolean
     }>
-    resources: readonly ScratchRuntimeResourceFact[]
-    bindLayouts: readonly ScratchRuntimeBindLayoutFact[]
-    bindSets: readonly ScratchRuntimeBindSetFact[]
-    pipelines: readonly ScratchRuntimePipelineFact[]
-    readbackCommands: readonly ScratchRuntimeReadbackCommandFact[]
-    readbacks: readonly ScratchRuntimeReadbackOperationFact[]
-    bufferMappings: readonly ScratchRuntimeBufferMappingFact[]
-    pendingOperations: readonly ScratchPendingGpuOperationFact[]
+    resources: readonly GPURuntimeResourceFact[]
+    bindLayouts: readonly GPURuntimeBindLayoutFact[]
+    bindSets: readonly GPURuntimeBindSetFact[]
+    pipelines: readonly GPURuntimePipelineFact[]
+    readbackCommands: readonly GPURuntimeReadbackCommandFact[]
+    readbacks: readonly GPURuntimeReadbackOperationFact[]
+    bufferMappings: readonly GPURuntimeBufferMappingFact[]
+    pendingOperations: readonly GPUPendingOperationFact[]
     pressure: Readonly<{
         currentScratchLogicalFootprintBytes: number
         peakScratchLogicalFootprintBytes: number
@@ -288,7 +288,7 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
         peakSelectedBytes: number
     }>
     submissionNative: Readonly<{
-        submissionScopes: ScratchSubmissionScopeMode
+        submissionScopes: GPUSubmissionScopeMode
         maxPendingNativeObservations: number
         currentPendingNativeObservations: number
         peakPendingNativeObservations: number
@@ -331,59 +331,59 @@ export type ScratchRuntimeDiagnosticsSnapshot = Readonly<{
     }>
 }>
 
-export type ScratchRuntimeDiagnosticsEvidence = Readonly<{
+export type GPURuntimeDiagnosticsEvidence = Readonly<{
     version: 5
-    snapshot: ScratchRuntimeDiagnosticsSnapshot
-    operations: readonly ScratchGpuOperationRecord[]
-    incidents: readonly ScratchGpuIncidentReport[]
+    snapshot: GPURuntimeDiagnosticsSnapshot
+    operations: readonly GPUOperationRecord[]
+    incidents: readonly GPUIncidentReport[]
 }>
 
-export type ScratchGpuOperationQuery = Readonly<{
+export type GPUOperationQuery = Readonly<{
     operationId?: string
     resourceId?: string
-    resourceKind?: ScratchGpuResourceOperationTarget['resourceKind']
+    resourceKind?: GPUResourceOperationTarget['resourceKind']
     bindLayoutId?: string
     bindSetId?: string
     shaderModuleId?: string
     renderBundleId?: string
-    preparationStage?: import('./gpu-operation.js').ScratchGpuBindSetPreparationStage
+    preparationStage?: import('./gpu-operation.js').GPUBindSetPreparationStage
     pipelineId?: string
     commandId?: string
     readbackId?: string
     submissionId?: string
-    nativeLocationKind?: ScratchSubmissionNativeLocation['kind']
-    nativeStage?: ScratchSubmissionNativeStage
-    nativeOutcomeStatus?: ScratchSubmissionNativeOutcomeStatus
-    targetKind?: ScratchGpuOperationTarget['kind']
-    kind?: GpuOperationKind
-    status?: GpuOperationStatus
+    nativeLocationKind?: GPUSubmissionNativeLocation['kind']
+    nativeStage?: GPUSubmissionNativeStage
+    nativeOutcomeStatus?: GPUSubmissionNativeOutcomeStatus
+    targetKind?: GPUOperationTarget['kind']
+    kind?: GPUOperationKind
+    status?: GPUOperationStatus
     sequenceFrom?: number
     sequenceTo?: number
 }>
 
-export type ScratchGpuIncidentQuery = Readonly<{
+export type GPUIncidentQuery = Readonly<{
     incidentId?: string
     operationId?: string
     resourceId?: string
-    resourceKind?: ScratchGpuResourceOperationTarget['resourceKind']
+    resourceKind?: GPUResourceOperationTarget['resourceKind']
     bindLayoutId?: string
     bindSetId?: string
     shaderModuleId?: string
     renderBundleId?: string
-    preparationStage?: import('./gpu-operation.js').ScratchGpuBindSetPreparationStage
+    preparationStage?: import('./gpu-operation.js').GPUBindSetPreparationStage
     pipelineId?: string
     commandId?: string
     readbackId?: string
     submissionId?: string
-    nativeLocationKind?: ScratchSubmissionNativeLocation['kind']
-    nativeStage?: ScratchSubmissionNativeStage
-    targetKind?: ScratchGpuOperationTarget['kind'] | 'runtime'
-    kind?: ScratchGpuIncidentKind
+    nativeLocationKind?: GPUSubmissionNativeLocation['kind']
+    nativeStage?: GPUSubmissionNativeStage
+    targetKind?: GPUOperationTarget['kind'] | 'runtime'
+    kind?: GPUIncidentKind
     sequenceFrom?: number
     sequenceTo?: number
 }>
 
-export type ScratchDiagnosticCaptureOptions = Readonly<{
+export type GPUDiagnosticCaptureOptions = Readonly<{
     maxOperations?: number
     maxDurationMs?: number
     maxEvidenceBytes?: number
@@ -401,84 +401,84 @@ type NormalizedScratchDiagnosticCaptureOptions = Readonly<{
     nativeSubmissionDetail?: 'step'
 }>
 
-export type ScratchDiagnosticCaptureStopReason =
+export type GPUDiagnosticCaptureStopReason =
     | 'explicit'
     | 'operation-limit'
     | 'duration-limit'
     | 'evidence-limit'
     | 'runtime-disposed'
 
-export type ScratchDiagnosticCaptureReport = Readonly<{
+export type GPUDiagnosticCaptureReport = Readonly<{
     version: 5
     id: string
     runtimeId: string
-    stopReason: ScratchDiagnosticCaptureStopReason
-    operations: readonly ScratchGpuOperationRecord[]
+    stopReason: GPUDiagnosticCaptureStopReason
+    operations: readonly GPUOperationRecord[]
     retainedEvidenceBytes: number
     omittedOperations: number
     startedAtMs: number
     stoppedAtMs: number
 }>
 
-export type ScratchGpuOperationStart = Readonly<{
-    kind: ScratchPendingGpuOperationKind
-    target: ScratchGpuOperationTarget
+export type GPUOperationStart = Readonly<{
+    kind: GPUPendingOperationKind
+    target: GPUOperationTarget
     descriptorSummary: Record<string, unknown>
     fullDescriptor: Record<string, unknown>
     nativeLabel?: string
 }>
 
-export type ScratchPendingGpuOperation = Readonly<{
+export type GPUPendingOperation = Readonly<{
     id: string
     sequence: number
     runtimeId: string
-    kind: ScratchPendingGpuOperationKind
-    target: ScratchGpuOperationTarget
-    descriptor: GpuDescriptorEvidence
-    fullDescriptor?: GpuDescriptorEvidence
+    kind: GPUPendingOperationKind
+    target: GPUOperationTarget
+    descriptor: GPUDescriptorEvidence
+    fullDescriptor?: GPUDescriptorEvidence
     nativeLabel?: string
     startedAtMs: number
     stack?: string
 }>
 
-export type ScratchGpuOperationCompletion = Readonly<{
-    status: Exclude<GpuOperationStatus, 'pending'>
-    nativeErrorCategory?: GpuNativeErrorCategory
+export type GPUOperationCompletion = Readonly<{
+    status: Exclude<GPUOperationStatus, 'pending'>
+    nativeErrorCategory?: GPUNativeErrorCategory
     incidentId?: string
-    nativeLabels?: ScratchPipelineNativeLabelEvidence
+    nativeLabels?: GPUPipelineNativeLabelEvidence
     pipelineCreationReport?: PipelineCreationReport
-    nativeOutcome?: ScratchSubmissionNativeOutcomeInput | ScratchReadbackNativeOutcomeInput
-    bindSetTarget?: ScratchGpuBindSetOperationTarget
+    nativeOutcome?: GPUSubmissionNativeOutcomeInput | GPUReadbackNativeOutcomeInput
+    bindSetTarget?: GPUBindSetOperationTarget
 }>
 
-export type ScratchSubmissionNativeObservationReservation = Readonly<{
+export type GPUSubmissionNativeObservationReservation = Readonly<{
     id: string
     readonly isReleased: boolean
     release(): void
 }>
 
-export type ScratchEffectfulSubmittedWorkReservation = Readonly<{
+export type GPUEffectfulSubmittedWorkReservation = Readonly<{
     id: string
     readonly isReleased: boolean
     release(): void
 }>
 
-export type ScratchGpuIncidentInput = Readonly<{
-    kind: ScratchGpuIncidentKind
+export type GPUIncidentInput = Readonly<{
+    kind: GPUIncidentKind
     diagnosticCode: string
-    nativeErrorCategory: GpuNativeErrorCategory
-    attribution: GpuAttributionConfidence
-    target?: ScratchGpuOperationTarget
+    nativeErrorCategory: GPUNativeErrorCategory
+    attribution: GPUAttributionConfidence
+    target?: GPUOperationTarget
     operationId?: string
-    triggerOperation?: ScratchGpuOperationRecord
-    related?: readonly DiagnosticSubject[]
-    nativeError?: ScratchNativeGpuErrorFacts
+    triggerOperation?: GPUOperationRecord
+    related?: readonly ScratchDiagnosticSubject[]
+    nativeError?: GPUNativeErrorFacts
     triggerLogicalFootprintBytes?: number
-    failureStage?: ScratchGpuIncidentFailureStage
+    failureStage?: GPUIncidentFailureStage
     pipelineErrorReason?: GPUPipelineErrorReason
     pipelineCreationReport?: PipelineCreationReport
     shaderModuleCompilationReport?: ShaderModuleCompilationReport
-    outcomes?: readonly ScratchGpuIncidentOutcome[]
+    outcomes?: readonly GPUIncidentOutcome[]
     omittedOutcomeCount?: number
 }>
 
@@ -487,16 +487,18 @@ type RuntimeDiagnosticsOwner = {
     label?: string
     isDisposed: boolean
     isDeviceLost: boolean
-    deviceLostInfo: ScratchDeviceLostInfo | undefined
+    deviceLostInfo: GPUDeviceLostInfo | undefined
 }
 
-export type ScratchDeviceLostInfo = Readonly<{
+type NativeGPUDeviceLostInfo = Awaited<GPUDevice['lost']>
+
+export type GPUDeviceLostInfo = Readonly<{
     reason: GPUDeviceLostReason
     message: '[native device-loss message omitted]'
     nativeMessageOmitted: true
 }>
 
-export function retainDeviceLostInfo(info: GPUDeviceLostInfo): ScratchDeviceLostInfo {
+export function retainDeviceLostInfo(info: NativeGPUDeviceLostInfo): GPUDeviceLostInfo {
 
     const serialized = serializeNativeGpuError(info)
     return Object.freeze({
@@ -506,8 +508,8 @@ export function retainDeviceLostInfo(info: GPUDeviceLostInfo): ScratchDeviceLost
     })
 }
 
-export type ScratchRuntimeLifecycleChange =
-    | Readonly<{ kind: 'device-lost', info: GPUDeviceLostInfo }>
+export type GPURuntimeLifecycleChange =
+    | Readonly<{ kind: 'device-lost', info: NativeGPUDeviceLostInfo }>
     | Readonly<{ kind: 'runtime-disposed' }>
 
 type RetainedEvidence<T> = {
@@ -515,78 +517,78 @@ type RetainedEvidence<T> = {
     bytes: number
 }
 
-type AggregateFacts = ScratchRuntimeDiagnosticsSnapshot['aggregates']
+type AggregateFacts = GPURuntimeDiagnosticsSnapshot['aggregates']
 
 type CaptureState = {
     id: string
     runtimeId: string
-    controller: ScratchRuntimeDiagnosticsController | undefined
+    controller: GPURuntimeDiagnosticsController | undefined
     options: NormalizedScratchDiagnosticCaptureOptions
-    operations: ScratchGpuOperationRecord[]
+    operations: GPUOperationRecord[]
     retainedEvidenceBytes: number
     budgetedEvidenceBytes: number
     omittedOperations: number
     startedAtMs: number
     timer: ReturnType<typeof setTimeout> | undefined
     isActive: boolean
-    report?: ScratchDiagnosticCaptureReport
+    report?: GPUDiagnosticCaptureReport
 }
 
-const controllerByRuntime = new WeakMap<object, ScratchRuntimeDiagnosticsController>()
-const captureStates = new WeakMap<ScratchDiagnosticCapture, CaptureState>()
+const controllerByRuntime = new WeakMap<object, GPURuntimeDiagnosticsController>()
+const captureStates = new WeakMap<GPUDiagnosticCapture, CaptureState>()
 
-export class ScratchRuntimeDiagnostics {
+export class GPURuntimeDiagnostics {
 
-    #controller: ScratchRuntimeDiagnosticsController
+    #controller: GPURuntimeDiagnosticsController
 
-    private constructor(token: symbol, controller: ScratchRuntimeDiagnosticsController) {
+    private constructor(token: symbol, controller: GPURuntimeDiagnosticsController) {
 
-        if (token !== diagnosticsFacadeToken) throw new TypeError('ScratchRuntimeDiagnostics is runtime-owned.')
+        if (token !== diagnosticsFacadeToken) throw new TypeError('GPURuntimeDiagnostics is runtime-owned.')
         this.#controller = controller
         Object.freeze(this)
     }
 
-    snapshot(): ScratchRuntimeDiagnosticsSnapshot {
+    snapshot(): GPURuntimeDiagnosticsSnapshot {
 
         return this.#controller.snapshot()
     }
 
-    operations(query: ScratchGpuOperationQuery = {}): readonly ScratchGpuOperationRecord[] {
+    operations(query: GPUOperationQuery = {}): readonly GPUOperationRecord[] {
 
         return this.#controller.operations(query)
     }
 
-    incidents(query: ScratchGpuIncidentQuery = {}): readonly ScratchGpuIncidentReport[] {
+    incidents(query: GPUIncidentQuery = {}): readonly GPUIncidentReport[] {
 
         return this.#controller.incidents(query)
     }
 
-    operation(operationId: string): ScratchGpuOperationRecord | undefined {
+    operation(operationId: string): GPUOperationRecord | undefined {
 
         return this.#controller.operation(operationId)
     }
 
-    incident(incidentId: string): ScratchGpuIncidentReport | undefined {
+    incident(incidentId: string): GPUIncidentReport | undefined {
 
         return this.#controller.incident(incidentId)
     }
 
-    exportEvidence(): ScratchRuntimeDiagnosticsEvidence {
+    exportEvidence(): GPURuntimeDiagnosticsEvidence {
 
         return this.#controller.exportEvidence()
     }
 
-    capture(options: ScratchDiagnosticCaptureOptions = {}): ScratchDiagnosticCapture {
+    capture(options: GPUDiagnosticCaptureOptions = {}): GPUDiagnosticCapture {
 
         return this.#controller.capture(options)
     }
 }
 
-export class ScratchDiagnosticCapture {
+export class GPUDiagnosticCapture {
 
     private constructor(token: symbol) {
 
-        if (token !== diagnosticCaptureToken) throw new TypeError('ScratchDiagnosticCapture is runtime-owned.')
+        if (token !== diagnosticCaptureToken) throw new TypeError('GPUDiagnosticCapture is runtime-owned.')
         Object.preventExtensions(this)
     }
 
@@ -600,36 +602,36 @@ export class ScratchDiagnosticCapture {
         return captureStateFor(this).isActive
     }
 
-    stop(): ScratchDiagnosticCaptureReport {
+    stop(): GPUDiagnosticCaptureReport {
 
         return stopCapture(this, 'explicit')
     }
 }
 
-export class ScratchRuntimeDiagnosticsController {
+export class GPURuntimeDiagnosticsController {
 
     #owner: RuntimeDiagnosticsOwner
     #device: GPUDevice
     #options: NormalizedScratchRuntimeDiagnosticsOptions
-    #readbackPolicy: ScratchReadbackPolicy
-    #facade: ScratchRuntimeDiagnostics
-    #resourceFacts = new Map<string, ScratchRuntimeResourceFact>()
-    #bindLayoutFacts = new Map<string, ScratchRuntimeBindLayoutFact>()
+    #readbackPolicy: GPUReadbackPolicy
+    #facade: GPURuntimeDiagnostics
+    #resourceFacts = new Map<string, GPURuntimeResourceFact>()
+    #bindLayoutFacts = new Map<string, GPURuntimeBindLayoutFact>()
     #bindSets = new Map<string, BindSet>()
-    #pipelineFacts = new Map<string, ScratchRuntimePipelineFact>()
-    #readbackCommandFacts = new Map<string, ScratchRuntimeReadbackCommandFact>()
-    #readbackFacts = new Map<string, ScratchRuntimeReadbackOperationFact>()
-    #bufferMappingFacts = new Map<string, ScratchRuntimeBufferMappingFact>()
+    #pipelineFacts = new Map<string, GPURuntimePipelineFact>()
+    #readbackCommandFacts = new Map<string, GPURuntimeReadbackCommandFact>()
+    #readbackFacts = new Map<string, GPURuntimeReadbackOperationFact>()
+    #bufferMappingFacts = new Map<string, GPURuntimeBufferMappingFact>()
     #readbackStagingReservations = new Map<string, number>()
     #submissionNativeObservationReservations = new Set<string>()
     #effectfulSubmittedWorkReservations = new Set<string>()
-    #pendingOperations = new Map<string, ScratchPendingGpuOperation>()
-    #completedOperations = new WeakSet<ScratchGpuOperationRecord>()
-    #registeredPipelineCreations = new WeakSet<ScratchGpuPipelineOperationRecord>()
-    #operations: RetainedEvidence<ScratchGpuOperationRecord>[] = []
-    #incidents: RetainedEvidence<ScratchGpuIncidentReport>[] = []
-    #captures = new Set<ScratchDiagnosticCapture>()
-    #linkableStoppedCaptures = new Set<ScratchDiagnosticCapture>()
+    #pendingOperations = new Map<string, GPUPendingOperation>()
+    #completedOperations = new WeakSet<GPUOperationRecord>()
+    #registeredPipelineCreations = new WeakSet<GPUPipelineOperationRecord>()
+    #operations: RetainedEvidence<GPUOperationRecord>[] = []
+    #incidents: RetainedEvidence<GPUIncidentReport>[] = []
+    #captures = new Set<GPUDiagnosticCapture>()
+    #linkableStoppedCaptures = new Set<GPUDiagnosticCapture>()
     #operationSequence = 0
     #incidentSequence = 0
     #captureSequence = 0
@@ -672,15 +674,15 @@ export class ScratchRuntimeDiagnosticsController {
         deviceLosses: 0,
     }
     #uncapturedErrorListener: ((event: GPUUncapturedErrorEvent) => void) | undefined
-    #lifecycleSubscribers = new Set<(change: ScratchRuntimeLifecycleChange) => void>()
+    #lifecycleSubscribers = new Set<(change: GPURuntimeLifecycleChange) => void>()
     #isDisposed = false
-    #deviceLossIncident: ScratchGpuIncidentReport | undefined
+    #deviceLossIncident: GPUIncidentReport | undefined
 
     constructor(
         owner: RuntimeDiagnosticsOwner,
         device: GPUDevice,
         options: NormalizedScratchRuntimeDiagnosticsOptions,
-        readbackPolicy: ScratchReadbackPolicy
+        readbackPolicy: GPUReadbackPolicy
     ) {
 
         this.#owner = owner
@@ -691,7 +693,7 @@ export class ScratchRuntimeDiagnosticsController {
         this.#installUncapturedErrorListener()
     }
 
-    get facade(): ScratchRuntimeDiagnostics {
+    get facade(): GPURuntimeDiagnostics {
 
         return this.#facade
     }
@@ -701,7 +703,7 @@ export class ScratchRuntimeDiagnosticsController {
         return this.#lifecycleSubscribers.size
     }
 
-    submissionNativeObservationMode(): ScratchSubmissionNativeOutcomeMode {
+    submissionNativeObservationMode(): GPUSubmissionNativeOutcomeMode {
 
         const detailed = [ ...this.#captures ].some(capture => {
             const state = captureStateFor(capture)
@@ -711,8 +713,8 @@ export class ScratchRuntimeDiagnosticsController {
     }
 
     reserveSubmissionNativeObservation(
-        target: ScratchGpuSubmissionOperationTarget
-    ): ScratchSubmissionNativeObservationReservation {
+        target: GPUSubmissionOperationTarget
+    ): GPUSubmissionNativeObservationReservation {
 
         const reservationId = target.submissionId
         if (this.#submissionNativeObservationReservations.has(reservationId)) {
@@ -736,7 +738,7 @@ export class ScratchRuntimeDiagnosticsController {
                 phase: 'submission',
                 subject: { kind: 'Submission', id: target.submissionId },
                 related: [ this.#runtimeSubject(), incident.subject ],
-                message: 'ScratchRuntime submission native-observation budget is exhausted.',
+                message: 'GPURuntime submission native-observation budget is exhausted.',
                 expected: {
                     maxPendingNativeObservations: this.#options.maxPendingNativeObservations,
                 },
@@ -776,8 +778,8 @@ export class ScratchRuntimeDiagnosticsController {
     }
 
     reserveReadbackNativeObservation(
-        target: ScratchGpuReadbackOperationTarget
-    ): ScratchSubmissionNativeObservationReservation {
+        target: GPUReadbackOperationTarget
+    ): GPUSubmissionNativeObservationReservation {
 
         const reservationId = target.readbackId
         if (this.#submissionNativeObservationReservations.has(reservationId)) {
@@ -801,7 +803,7 @@ export class ScratchRuntimeDiagnosticsController {
                 phase: 'readback',
                 subject: { kind: 'ReadbackOperation', id: target.readbackId },
                 related: [ this.#runtimeSubject(), incident.subject ],
-                message: 'ScratchRuntime readback native-observation budget is exhausted.',
+                message: 'GPURuntime readback native-observation budget is exhausted.',
                 expected: {
                     maxPendingNativeObservations: this.#options.maxPendingNativeObservations,
                 },
@@ -842,7 +844,7 @@ export class ScratchRuntimeDiagnosticsController {
 
     retainEffectfulSubmittedWork(
         submissionId: string
-    ): ScratchEffectfulSubmittedWorkReservation {
+    ): GPUEffectfulSubmittedWorkReservation {
 
         if (submissionId.length === 0) {
             throw new TypeError('Effectful SubmittedWork requires a submissionId.')
@@ -873,7 +875,7 @@ export class ScratchRuntimeDiagnosticsController {
         })
     }
 
-    subscribeLifecycle(subscriber: (change: ScratchRuntimeLifecycleChange) => void): () => void {
+    subscribeLifecycle(subscriber: (change: GPURuntimeLifecycleChange) => void): () => void {
 
         if (this.#isDisposed || this.#owner.isDisposed) {
             subscriber(Object.freeze({ kind: 'runtime-disposed' }))
@@ -894,7 +896,7 @@ export class ScratchRuntimeDiagnosticsController {
         this.#publishLifecycleChange(Object.freeze({ kind: 'runtime-disposed' }))
     }
 
-    snapshot(): ScratchRuntimeDiagnosticsSnapshot {
+    snapshot(): GPURuntimeDiagnosticsSnapshot {
 
         const resources = [ ...this.#resourceFacts.values() ]
             .sort((left, right) => left.id.localeCompare(right.id))
@@ -978,31 +980,31 @@ export class ScratchRuntimeDiagnosticsController {
         })
     }
 
-    operations(query: ScratchGpuOperationQuery = {}): readonly ScratchGpuOperationRecord[] {
+    operations(query: GPUOperationQuery = {}): readonly GPUOperationRecord[] {
 
         return Object.freeze(this.#operations
             .map(entry => entry.value)
             .filter(record => matchesOperationQuery(record, query)))
     }
 
-    incidents(query: ScratchGpuIncidentQuery = {}): readonly ScratchGpuIncidentReport[] {
+    incidents(query: GPUIncidentQuery = {}): readonly GPUIncidentReport[] {
 
         return Object.freeze(this.#incidents
             .map(entry => entry.value)
             .filter(report => matchesIncidentQuery(report, query)))
     }
 
-    operation(operationId: string): ScratchGpuOperationRecord | undefined {
+    operation(operationId: string): GPUOperationRecord | undefined {
 
         return this.#operations.find(entry => entry.value.id === operationId)?.value
     }
 
-    incident(incidentId: string): ScratchGpuIncidentReport | undefined {
+    incident(incidentId: string): GPUIncidentReport | undefined {
 
         return this.#incidents.find(entry => entry.value.id === incidentId)?.value
     }
 
-    exportEvidence(): ScratchRuntimeDiagnosticsEvidence {
+    exportEvidence(): GPURuntimeDiagnosticsEvidence {
 
         return freezeEvidence({
             version: 5,
@@ -1012,7 +1014,7 @@ export class ScratchRuntimeDiagnosticsController {
         })
     }
 
-    beginOperation(input: ScratchGpuOperationStart): ScratchPendingGpuOperation {
+    beginOperation(input: GPUOperationStart): GPUPendingOperation {
 
         const kind: unknown = input.kind
         assertPendingGpuOperationKind(kind)
@@ -1027,7 +1029,7 @@ export class ScratchRuntimeDiagnosticsController {
         const target = freezeEvidence({ ...input.target })
         const targetId = operationTargetId(target)
         const nativeLabel = boundedGpuOperationNativeLabel(input.nativeLabel, targetId)
-        const operation: ScratchPendingGpuOperation = Object.freeze({
+        const operation: GPUPendingOperation = Object.freeze({
             id,
             sequence,
             runtimeId: this.#owner.id,
@@ -1074,9 +1076,9 @@ export class ScratchRuntimeDiagnosticsController {
     }
 
     completeOperation(
-        operation: ScratchPendingGpuOperation,
-        completion: ScratchGpuOperationCompletion
-    ): ScratchGpuOperationRecord {
+        operation: GPUPendingOperation,
+        completion: GPUOperationCompletion
+    ): GPUOperationRecord {
 
         if (this.#pendingOperations.get(operation.id) !== operation) {
             throw new TypeError(`GPU operation ${operation.id} is not pending on this runtime.`)
@@ -1133,11 +1135,11 @@ export class ScratchRuntimeDiagnosticsController {
     }
 
     recordReadbackStagingRelease(input: Readonly<{
-        target: ScratchGpuCommandOperationTarget | ScratchGpuReadbackOperationTarget
+        target: GPUCommandOperationTarget | GPUReadbackOperationTarget
         descriptorSummary: Record<string, unknown>
         status: 'succeeded' | 'failed'
-        nativeErrorCategory?: GpuNativeErrorCategory
-    }>): ScratchGpuOperationRecord {
+        nativeErrorCategory?: GPUNativeErrorCategory
+    }>): GPUOperationRecord {
 
         assertGpuOperationTarget('readback-staging-release', input.target)
         const sequence = ++this.#operationSequence
@@ -1202,7 +1204,7 @@ export class ScratchRuntimeDiagnosticsController {
         }
     }
 
-    recordIncident(input: ScratchGpuIncidentInput): ScratchGpuIncidentReport {
+    recordIncident(input: GPUIncidentInput): GPUIncidentReport {
 
         const sequence = ++this.#incidentSequence
         const id = `${this.#owner.id}/gpu-incident-${sequence}`
@@ -1282,7 +1284,7 @@ export class ScratchRuntimeDiagnosticsController {
         return report
     }
 
-    recordDeviceLoss(info: GPUDeviceLostInfo): ScratchGpuIncidentReport | undefined {
+    recordDeviceLoss(info: NativeGPUDeviceLostInfo): GPUIncidentReport | undefined {
 
         if (this.#isDisposed) return undefined
         this.#publishLifecycleChange(Object.freeze({ kind: 'device-lost', info }))
@@ -1311,7 +1313,7 @@ export class ScratchRuntimeDiagnosticsController {
         return this.#deviceLossIncident
     }
 
-    capture(options: ScratchDiagnosticCaptureOptions): ScratchDiagnosticCapture {
+    capture(options: GPUDiagnosticCaptureOptions): GPUDiagnosticCapture {
 
         if (this.#captures.size >= this.#options.maxActiveCaptures) {
             throwGPUDiagnostic({
@@ -1319,7 +1321,7 @@ export class ScratchRuntimeDiagnosticsController {
                 severity: 'error',
                 phase: 'runtime',
                 subject: this.#runtimeSubject(),
-                message: 'ScratchRuntime has reached its active diagnostic capture limit.',
+                message: 'GPURuntime has reached its active diagnostic capture limit.',
                 expected: { maxActiveCaptures: this.#options.maxActiveCaptures },
                 actual: { activeCaptures: this.#captures.size },
             })
@@ -1359,7 +1361,7 @@ export class ScratchRuntimeDiagnosticsController {
         if (fact !== undefined) this.#recordResourceDisposal(resource, fact)
     }
 
-    registerBufferMapping(fact: ScratchRuntimeBufferMappingFact): void {
+    registerBufferMapping(fact: GPURuntimeBufferMappingFact): void {
 
         if (this.#bufferMappingFacts.has(fact.id)) {
             throw new TypeError(`Buffer mapping ${fact.id} is already registered.`)
@@ -1377,7 +1379,7 @@ export class ScratchRuntimeDiagnosticsController {
         )
     }
 
-    updateBufferMapping(id: string, state: ScratchRuntimeBufferMappingFact['state']): void {
+    updateBufferMapping(id: string, state: GPURuntimeBufferMappingFact['state']): void {
 
         const fact = this.#bufferMappingFacts.get(id)
         if (fact === undefined) throw new TypeError(`Buffer mapping ${id} is not registered.`)
@@ -1395,7 +1397,7 @@ export class ScratchRuntimeDiagnosticsController {
         )
     }
 
-    registerPipeline(registration: ScratchRuntimePipelineRegistration): void {
+    registerPipeline(registration: GPURuntimePipelineRegistration): void {
 
         const operation = registration.creationOperation
         if (
@@ -1434,7 +1436,7 @@ export class ScratchRuntimeDiagnosticsController {
         }))
     }
 
-    registerReadbackCommand(fact: ScratchRuntimeReadbackCommandFact): void {
+    registerReadbackCommand(fact: GPURuntimeReadbackCommandFact): void {
 
         if (this.#readbackCommandFacts.has(fact.id)) {
             throw new TypeError(`Readback command ${fact.id} is already registered.`)
@@ -1444,7 +1446,7 @@ export class ScratchRuntimeDiagnosticsController {
 
     updateReadbackCommand(
         commandId: string,
-        update: Partial<Omit<ScratchRuntimeReadbackCommandFact, 'id'>>
+        update: Partial<Omit<GPURuntimeReadbackCommandFact, 'id'>>
     ): void {
 
         const previous = this.#readbackCommandFacts.get(commandId)
@@ -1457,7 +1459,7 @@ export class ScratchRuntimeDiagnosticsController {
         this.#readbackCommandFacts.delete(commandId)
     }
 
-    registerReadbackOperation(fact: ScratchRuntimeReadbackOperationFact): void {
+    registerReadbackOperation(fact: GPURuntimeReadbackOperationFact): void {
 
         if (this.#readbackFacts.has(fact.id)) {
             throw new TypeError(`Readback operation ${fact.id} is already registered.`)
@@ -1471,7 +1473,7 @@ export class ScratchRuntimeDiagnosticsController {
 
     updateReadbackOperation(
         readbackId: string,
-        update: Partial<Omit<ScratchRuntimeReadbackOperationFact, 'id'>>
+        update: Partial<Omit<GPURuntimeReadbackOperationFact, 'id'>>
     ): void {
 
         const previous = this.#readbackFacts.get(readbackId)
@@ -1486,7 +1488,7 @@ export class ScratchRuntimeDiagnosticsController {
         this.#recalculateReadbackOperationMemory()
     }
 
-    reserveReadbackStaging(reservationId: string, byteLength: number): ScratchReadbackStagingReservation {
+    reserveReadbackStaging(reservationId: string, byteLength: number): GPUReadbackStagingReservation {
 
         if (!Number.isSafeInteger(byteLength) || byteLength <= 0) {
             throw new TypeError('Readback staging byteLength must be a positive safe integer.')
@@ -1569,7 +1571,7 @@ export class ScratchRuntimeDiagnosticsController {
         }
     }
 
-    #recordResourceDisposal(resource: Resource, fact: ScratchRuntimeResourceFact): void {
+    #recordResourceDisposal(resource: Resource, fact: GPURuntimeResourceFact): void {
 
         if (fact.resourceKind !== 'BufferResource' && fact.resourceKind !== 'TextureResource') return
         const sequence = ++this.#operationSequence
@@ -1681,14 +1683,14 @@ export class ScratchRuntimeDiagnosticsController {
         this.#currentEffectfulSubmittedWork = 0
     }
 
-    #publishLifecycleChange(change: ScratchRuntimeLifecycleChange): void {
+    #publishLifecycleChange(change: GPURuntimeLifecycleChange): void {
 
         const subscribers = [ ...this.#lifecycleSubscribers ]
         this.#lifecycleSubscribers.clear()
         for (const subscriber of subscribers) subscriber(change)
     }
 
-    captureStopped(capture: ScratchDiagnosticCapture, reason: ScratchDiagnosticCaptureStopReason): void {
+    captureStopped(capture: GPUDiagnosticCapture, reason: GPUDiagnosticCaptureStopReason): void {
 
         this.#captures.delete(capture)
         if (reason === 'operation-limit') {
@@ -1730,7 +1732,7 @@ export class ScratchRuntimeDiagnosticsController {
         this.#device.addEventListener('uncapturederror', this.#uncapturedErrorListener)
     }
 
-    #recordOperation(record: ScratchGpuOperationRecord): void {
+    #recordOperation(record: GPUOperationRecord): void {
 
         if (this.#options.operationCapacity === 0) {
             this.#omittedRecords++
@@ -1761,7 +1763,7 @@ export class ScratchRuntimeDiagnosticsController {
         this.#retainedEvidenceBytes += bytes
     }
 
-    #recordIncident(report: ScratchGpuIncidentReport): void {
+    #recordIncident(report: GPUIncidentReport): void {
 
         if (this.#options.incidentCapacity === 0) {
             this.#omittedRecords++
@@ -1825,8 +1827,8 @@ export class ScratchRuntimeDiagnosticsController {
     }
 
     #recordCompletionAggregate(
-        operation: ScratchPendingGpuOperation,
-        completion: ScratchGpuOperationCompletion
+        operation: GPUPendingOperation,
+        completion: GPUOperationCompletion
     ): void {
 
         const next = { ...this.#aggregates }
@@ -1849,7 +1851,7 @@ export class ScratchRuntimeDiagnosticsController {
         this.#aggregates = next
     }
 
-    #recentOperations(operationId?: string): ScratchGpuOperationRecord[] {
+    #recentOperations(operationId?: string): GPUOperationRecord[] {
 
         const recent = this.#operations
             .slice(-this.#options.recentOperationLimit)
@@ -1860,7 +1862,7 @@ export class ScratchRuntimeDiagnosticsController {
         return [ trigger, ...recent ].slice(-this.#options.recentOperationLimit)
     }
 
-    #pressureEvidence(triggerLogicalFootprintBytes?: number): ScratchGpuPressureEvidence {
+    #pressureEvidence(triggerLogicalFootprintBytes?: number): GPUPressureEvidence {
 
         const largestContributors = this.#largestResourceFacts(this.#options.contributorLimit)
             .map(fact => ({
@@ -1905,7 +1907,7 @@ export class ScratchRuntimeDiagnosticsController {
         })
     }
 
-    #largestResourceFacts(limit: number): ScratchRuntimeContentResourceFact[] {
+    #largestResourceFacts(limit: number): GPURuntimeContentResourceFact[] {
 
         return [ ...this.#resourceFacts.values() ]
             .filter(isContentRuntimeResourceFact)
@@ -1952,7 +1954,7 @@ export class ScratchRuntimeDiagnosticsController {
     #throwReadbackBudget(
         kind: 'pending-operations' | 'staging-bytes',
         requested: number,
-        fact?: ScratchRuntimeReadbackOperationFact
+        fact?: GPURuntimeReadbackOperationFact
     ): never {
 
         const isPending = kind === 'pending-operations'
@@ -1969,14 +1971,14 @@ export class ScratchRuntimeDiagnosticsController {
                 target,
                 failureStage: 'budget',
             })
-        const subject: DiagnosticSubject = fact === undefined
+        const subject: GPUDiagnosticSubjectDraft = fact === undefined
             ? this.#runtimeSubject()
             : {
                 kind: 'ReadbackOperation',
                 id: fact.id,
                 ...(fact.label !== undefined ? { label: boundedLabel(fact.label) } : {}),
             }
-        const related: DiagnosticSubject[] = fact === undefined
+        const related: ScratchDiagnosticSubject[] = fact === undefined
             ? []
             : [
                 this.#runtimeSubject(),
@@ -1995,8 +1997,8 @@ export class ScratchRuntimeDiagnosticsController {
             subject,
             ...(related.length > 0 ? { related } : {}),
             message: isPending
-                ? 'ScratchRuntime readback pending-operation budget is exhausted.'
-                : 'ScratchRuntime readback staging-byte budget is exhausted.',
+                ? 'GPURuntime readback pending-operation budget is exhausted.'
+                : 'GPURuntime readback staging-byte budget is exhausted.',
             expected: isPending
                 ? { maxPendingOperations: this.#readbackPolicy.maxPendingOperations }
                 : { maxStagingBytes: this.#readbackPolicy.maxStagingBytes },
@@ -2028,10 +2030,10 @@ export class ScratchRuntimeDiagnosticsController {
         this.#resourceFacts.set(resourceId, Object.freeze(rest))
     }
 
-    #runtimeSubject(): DiagnosticSubject {
+    #runtimeSubject(): ScratchDiagnosticSubject {
 
         return {
-            kind: 'ScratchRuntime',
+            kind: 'GPURuntime',
             id: this.#owner.id,
             ...(this.#owner.label !== undefined ? { label: boundedLabel(this.#owner.label) } : {}),
         }
@@ -2039,8 +2041,8 @@ export class ScratchRuntimeDiagnosticsController {
 }
 
 function immutableTextureReadbackSubresource(
-    fact: NonNullable<ScratchRuntimeReadbackOperationFact['textureSubresource']>
-): NonNullable<ScratchRuntimeReadbackOperationFact['textureSubresource']> {
+    fact: NonNullable<GPURuntimeReadbackOperationFact['textureSubresource']>
+): NonNullable<GPURuntimeReadbackOperationFact['textureSubresource']> {
 
     return Object.freeze({
         format: fact.format,
@@ -2052,8 +2054,8 @@ function immutableTextureReadbackSubresource(
 }
 
 function readbackTargetFromFact(
-    fact: ScratchRuntimeReadbackOperationFact
-): ScratchGpuReadbackOperationTarget {
+    fact: GPURuntimeReadbackOperationFact
+): GPUReadbackOperationTarget {
 
     return Object.freeze({
         kind: 'readback',
@@ -2078,16 +2080,16 @@ function readbackTargetFromFact(
 
 export function registerRuntimeDiagnostics(
     runtime: object,
-    controller: ScratchRuntimeDiagnosticsController
+    controller: GPURuntimeDiagnosticsController
 ): void {
 
     controllerByRuntime.set(runtime, controller)
 }
 
-export function diagnosticsControllerFor(runtime: object): ScratchRuntimeDiagnosticsController {
+export function diagnosticsControllerFor(runtime: object): GPURuntimeDiagnosticsController {
 
     const controller = controllerByRuntime.get(runtime)
-    if (controller === undefined) throw new TypeError('ScratchRuntime diagnostics are unavailable.')
+    if (controller === undefined) throw new TypeError('GPURuntime diagnostics are unavailable.')
     return controller
 }
 
@@ -2097,24 +2099,24 @@ export function updateRuntimeResourceFact(runtime: object, resource: Resource): 
 }
 
 function createDiagnosticsFacade(
-    controller: ScratchRuntimeDiagnosticsController
-): ScratchRuntimeDiagnostics {
+    controller: GPURuntimeDiagnosticsController
+): GPURuntimeDiagnostics {
 
-    const Constructor = ScratchRuntimeDiagnostics as unknown as new (
+    const Constructor = GPURuntimeDiagnostics as unknown as new (
         token: symbol,
-        controller: ScratchRuntimeDiagnosticsController
-    ) => ScratchRuntimeDiagnostics
+        controller: GPURuntimeDiagnosticsController
+    ) => GPURuntimeDiagnostics
     return new Constructor(diagnosticsFacadeToken, controller)
 }
 
 function createDiagnosticCapture(input: {
     id: string
     runtimeId: string
-    controller: ScratchRuntimeDiagnosticsController
+    controller: GPURuntimeDiagnosticsController
     options: NormalizedScratchDiagnosticCaptureOptions
-}): ScratchDiagnosticCapture {
+}): GPUDiagnosticCapture {
 
-    const Constructor = ScratchDiagnosticCapture as unknown as new (token: symbol) => ScratchDiagnosticCapture
+    const Constructor = GPUDiagnosticCapture as unknown as new (token: symbol) => GPUDiagnosticCapture
     const capture = new Constructor(diagnosticCaptureToken)
     const state: CaptureState = {
         ...input,
@@ -2134,9 +2136,9 @@ function createDiagnosticCapture(input: {
 }
 
 function acceptCaptureOperation(
-    capture: ScratchDiagnosticCapture,
-    operation: ScratchPendingGpuOperation,
-    completion: ScratchGpuOperationCompletion
+    capture: GPUDiagnosticCapture,
+    operation: GPUPendingOperation,
+    completion: GPUOperationCompletion
 ): void {
 
     const state = captureStateFor(capture)
@@ -2172,8 +2174,8 @@ function acceptCaptureOperation(
 }
 
 function acceptCaptureInstantOperation(
-    capture: ScratchDiagnosticCapture,
-    record: ScratchGpuOperationRecord,
+    capture: GPUDiagnosticCapture,
+    record: GPUOperationRecord,
     stack?: string
 ): void {
 
@@ -2186,7 +2188,7 @@ function acceptCaptureInstantOperation(
 }
 
 function linkCaptureOperationIncident(
-    capture: ScratchDiagnosticCapture,
+    capture: GPUDiagnosticCapture,
     operationId: string,
     incidentId: string
 ): void {
@@ -2221,9 +2223,9 @@ function linkCaptureOperationIncident(
 }
 
 function retainCaptureRecord(
-    capture: ScratchDiagnosticCapture,
+    capture: GPUDiagnosticCapture,
     state: CaptureState,
-    record: ScratchGpuOperationRecord
+    record: GPUOperationRecord
 ): void {
 
     const bytes = serializedEvidenceBytes(record)
@@ -2244,9 +2246,9 @@ function retainCaptureRecord(
 }
 
 function stopCapture(
-    capture: ScratchDiagnosticCapture,
-    reason: ScratchDiagnosticCaptureStopReason
-): ScratchDiagnosticCaptureReport {
+    capture: GPUDiagnosticCapture,
+    reason: GPUDiagnosticCaptureStopReason
+): GPUDiagnosticCaptureReport {
 
     const state = captureStateFor(capture)
     if (state.report !== undefined) return state.report
@@ -2272,15 +2274,15 @@ function stopCapture(
     return state.report
 }
 
-function captureStateFor(capture: ScratchDiagnosticCapture): CaptureState {
+function captureStateFor(capture: GPUDiagnosticCapture): CaptureState {
 
     const state = captureStates.get(capture)
-    if (state === undefined) throw new TypeError('ScratchDiagnosticCapture state is unavailable.')
+    if (state === undefined) throw new TypeError('GPUDiagnosticCapture state is unavailable.')
     return state
 }
 
 export function normalizeScratchRuntimeDiagnosticsOptions(
-    options: ScratchRuntimeDiagnosticsOptions = {},
+    options: GPURuntimeDiagnosticsOptions = {},
     label?: string
 ): NormalizedScratchRuntimeDiagnosticsOptions {
 
@@ -2312,7 +2314,7 @@ type DiagnosticsOptionOwner = Readonly<{
 function submissionScopesOption(
     owner: DiagnosticsOptionOwner,
     value: unknown
-): ScratchSubmissionScopeMode {
+): GPUSubmissionScopeMode {
 
     if (value === undefined) return 'summary'
     if (value === 'summary' || value === 'off') return value
@@ -2333,7 +2335,7 @@ function submissionNativeIntegerOption(
 
 function normalizeCaptureOptions(
     owner: DiagnosticsOptionOwner,
-    options: ScratchDiagnosticCaptureOptions
+    options: GPUDiagnosticCaptureOptions
 ): NormalizedScratchDiagnosticCaptureOptions {
 
     return Object.freeze({
@@ -2394,11 +2396,11 @@ function throwDiagnosticsOption(
         severity: 'error',
         phase: 'runtime',
         subject: {
-            kind: 'ScratchRuntime',
+            kind: 'GPURuntime',
             ...(owner.id !== undefined ? { id: owner.id } : {}),
             ...(owner.label !== undefined ? { label: owner.label } : {}),
         },
-        message: `ScratchRuntime diagnostic option ${name} is invalid.`,
+        message: `GPURuntime diagnostic option ${name} is invalid.`,
         expected: { [name]: expected },
         actual: { [name]: value },
     })
@@ -2416,17 +2418,17 @@ function throwSubmissionNativePolicyOption(
         severity: 'error',
         phase: 'runtime',
         subject: {
-            kind: 'ScratchRuntime',
+            kind: 'GPURuntime',
             ...(owner.id !== undefined ? { id: owner.id } : {}),
             ...(owner.label !== undefined ? { label: owner.label } : {}),
         },
-        message: `ScratchRuntime submission native policy option ${name} is invalid.`,
+        message: `GPURuntime submission native policy option ${name} is invalid.`,
         expected: { [name]: expected },
         actual: { [name]: value },
     })
 }
 
-function bindSetRuntimeFact(bindSet: BindSet): ScratchRuntimeBindSetFact {
+function bindSetRuntimeFact(bindSet: BindSet): GPURuntimeBindSetFact {
 
     return Object.freeze({
         id: bindSet.id,
@@ -2449,7 +2451,7 @@ function bindSetRuntimeFact(bindSet: BindSet): ScratchRuntimeBindSetFact {
     })
 }
 
-function pendingFact(operation: ScratchPendingGpuOperation): ScratchPendingGpuOperationFact {
+function pendingFact(operation: GPUPendingOperation): GPUPendingOperationFact {
 
     return Object.freeze({
         id: operation.id,
@@ -2461,7 +2463,7 @@ function pendingFact(operation: ScratchPendingGpuOperation): ScratchPendingGpuOp
     })
 }
 
-function isResourceAllocationKind(kind: GpuOperationKind): boolean {
+function isResourceAllocationKind(kind: GPUOperationKind): boolean {
 
     return kind === 'buffer-allocation' ||
         kind === 'texture-allocation' ||
@@ -2470,33 +2472,33 @@ function isResourceAllocationKind(kind: GpuOperationKind): boolean {
         kind === 'query-set-allocation'
 }
 
-function isAllocationAttemptKind(kind: GpuOperationKind): boolean {
+function isAllocationAttemptKind(kind: GPUOperationKind): boolean {
 
     return isResourceAllocationKind(kind) ||
         kind === 'bind-layout-allocation' ||
         kind === 'bind-set-preparation'
 }
 
-function isPipelineCreationKind(kind: GpuOperationKind): boolean {
+function isPipelineCreationKind(kind: GPUOperationKind): boolean {
 
     return kind === 'render-pipeline-creation' || kind === 'compute-pipeline-creation'
 }
 
-function isReadbackAttemptKind(kind: GpuOperationKind): boolean {
+function isReadbackAttemptKind(kind: GPUOperationKind): boolean {
 
     return kind === 'readback-staging-allocation' ||
         kind === 'readback-mapping' ||
         kind === 'readback-native-observation'
 }
 
-function isResourceChurnKind(kind: GpuOperationKind): boolean {
+function isResourceChurnKind(kind: GPUOperationKind): boolean {
 
     return isResourceAllocationKind(kind) || kind === 'resource-disposal'
 }
 
 function assertPendingGpuOperationKind(
     kind: unknown
-): asserts kind is ScratchPendingGpuOperationKind {
+): asserts kind is GPUPendingOperationKind {
 
     if (
         kind === 'buffer-allocation' ||
@@ -2520,8 +2522,8 @@ function assertPendingGpuOperationKind(
 }
 
 function readbackCommandFact(
-    fact: ScratchRuntimeReadbackCommandFact
-): ScratchRuntimeReadbackCommandFact {
+    fact: GPURuntimeReadbackCommandFact
+): GPURuntimeReadbackCommandFact {
 
     return Object.freeze({
         id: fact.id,
@@ -2538,8 +2540,8 @@ function readbackCommandFact(
 }
 
 function readbackOperationFact(
-    fact: ScratchRuntimeReadbackOperationFact
-): ScratchRuntimeReadbackOperationFact {
+    fact: GPURuntimeReadbackOperationFact
+): GPURuntimeReadbackOperationFact {
 
     return Object.freeze({
         id: fact.id,
@@ -2575,8 +2577,8 @@ function readbackOperationFact(
 
 function resourceFact(
     resource: Resource,
-    previous?: ScratchRuntimeResourceFact
-): ScratchRuntimeResourceFact {
+    previous?: GPURuntimeResourceFact
+): GPURuntimeResourceFact {
 
     const descriptor = createGpuDescriptorEvidence(resourceDescriptorSummary(resource))
     const common = {
@@ -2692,8 +2694,8 @@ function logicalResourceFootprint(resource: Resource): { bytes: number, known: b
 }
 
 function isContentRuntimeResourceFact(
-    fact: ScratchRuntimeResourceFact
-): fact is ScratchRuntimeContentResourceFact {
+    fact: GPURuntimeResourceFact
+): fact is GPURuntimeContentResourceFact {
 
     return fact.resourceKind === 'BufferResource' || fact.resourceKind === 'TextureResource'
 }
@@ -2773,8 +2775,8 @@ function textureFormatBlock(format: string): { width: number, height: number, by
 }
 
 function matchesOperationQuery(
-    record: ScratchGpuOperationRecord,
-    query: ScratchGpuOperationQuery
+    record: GPUOperationRecord,
+    query: GPUOperationQuery
 ): boolean {
 
     return (query.operationId === undefined || record.id === query.operationId) &&
@@ -2844,8 +2846,8 @@ function matchesOperationQuery(
 }
 
 function matchesIncidentQuery(
-    report: ScratchGpuIncidentReport,
-    query: ScratchGpuIncidentQuery
+    report: GPUIncidentReport,
+    query: GPUIncidentQuery
 ): boolean {
 
     return (query.incidentId === undefined || report.id === query.incidentId) &&
@@ -2926,7 +2928,7 @@ function nowMs(): number {
     return globalThis.performance?.now() ?? Date.now()
 }
 
-function operationTargetId(target: ScratchGpuOperationTarget): string {
+function operationTargetId(target: GPUOperationTarget): string {
 
     switch (target.kind) {
         case 'resource': return target.resourceId
@@ -2942,9 +2944,9 @@ function operationTargetId(target: ScratchGpuOperationTarget): string {
 }
 
 function validatedCompletionTarget(
-    operation: ScratchPendingGpuOperation,
-    bindSetTarget: ScratchGpuBindSetOperationTarget | undefined
-): ScratchGpuOperationTarget {
+    operation: GPUPendingOperation,
+    bindSetTarget: GPUBindSetOperationTarget | undefined
+): GPUOperationTarget {
 
     if (bindSetTarget === undefined) return operation.target
     if (operation.kind !== 'bind-set-preparation' || operation.target.kind !== 'bind-set') {
@@ -2968,5 +2970,5 @@ function freezeEvidence<T>(value: T): T {
     return Object.freeze(value)
 }
 
-Object.freeze(ScratchRuntimeDiagnostics.prototype)
-Object.freeze(ScratchDiagnosticCapture.prototype)
+Object.freeze(GPURuntimeDiagnostics.prototype)
+Object.freeze(GPUDiagnosticCapture.prototype)

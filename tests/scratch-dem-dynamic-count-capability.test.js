@@ -1,6 +1,6 @@
 import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import {
     createFakeGpu,
     defaultRenderStateActions,
@@ -44,7 +44,7 @@ describe('scratch DEM CPU-dynamic count capability', () => {
     it('reuses stable uploads and indirect draws while payloads advance across submissions', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const program = await createTestProgram(runtime, {
             sourceParts: [ triangleWgsl ],
             vertex: 'vsMain',

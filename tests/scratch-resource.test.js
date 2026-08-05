@@ -3,7 +3,7 @@ import {
     BufferResource,
     Resource,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     TextureResource,
 } from 'geoscratch'
 import {
@@ -84,7 +84,7 @@ describe('scratch resources', () => {
     it('tracks logical resource identity and lifecycle state', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu, label: 'resource runtime' })
+        const runtime = await GPURuntime.create({ gpu, label: 'resource runtime' })
         expect(() => new Resource(runtime)).to.throw(TypeError, 'abstract')
         expect(Object.getOwnPropertyDescriptor(Resource.prototype, 'state')).to.equal(undefined)
         expect(Object.getOwnPropertyDescriptor(Resource.prototype, 'contentEpoch')).to.equal(undefined)
@@ -116,8 +116,8 @@ describe('scratch resources', () => {
 
     it('enforces resource ownership across runtimes with structured diagnostics', async() => {
 
-        const runtimeA = await ScratchRuntime.create({ gpu: createFakeGpu().gpu, label: 'runtime A' })
-        const runtimeB = await ScratchRuntime.create({ gpu: createFakeGpu().gpu, label: 'runtime B' })
+        const runtimeA = await GPURuntime.create({ gpu: createFakeGpu().gpu, label: 'runtime A' })
+        const runtimeB = await GPURuntime.create({ gpu: createFakeGpu().gpu, label: 'runtime B' })
         const resource = await runtimeA.createBuffer({
             label: 'owned resource',
             size: 16,
@@ -148,7 +148,7 @@ describe('scratch resources', () => {
     it('creates minimal BufferResource objects without implicit transfer helpers', async() => {
 
         const { gpu, buffers } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         const buffer = await runtime.createBuffer({
             label: 'positions',
@@ -186,7 +186,7 @@ describe('scratch resources', () => {
     it('tracks readiness separately from allocation and disposal', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const buffer = await runtime.createBuffer({
             label: 'readiness buffer',
             size: 64,
@@ -250,7 +250,7 @@ describe('scratch resources', () => {
     it('rejects noncanonical raw resource descriptor integers before native issue', async() => {
 
         const { gpu, buffers, textures } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         for (const descriptor of [
             { size: 4.5, usage: 1 },

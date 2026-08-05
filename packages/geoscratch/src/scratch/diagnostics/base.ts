@@ -1,4 +1,4 @@
-import type { ScratchGpuIncidentReport } from '../gpu/gpu-operation.js'
+import type { GPUIncidentReport } from '../gpu/gpu-operation.js'
 import type { WorkerRemoteErrorFacts } from '../worker/worker-system.js'
 
 export type ScratchDiagnosticDomain = 'gpu' | 'worker'
@@ -86,7 +86,7 @@ export type ScratchDiagnosticReport<
 }>
 
 export type ScratchDiagnosticErrorContext =
-    | Readonly<{ domain: 'gpu', incident?: ScratchGpuIncidentReport }>
+    | Readonly<{ domain: 'gpu', incident?: GPUIncidentReport }>
     | Readonly<{ domain: 'worker', remote?: WorkerRemoteErrorFacts }>
 
 type DiagnosticContext<Diagnostic extends AnyScratchDiagnostic> = Extract<

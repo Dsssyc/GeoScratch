@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     createFakeGpu,
@@ -13,7 +13,7 @@ describe('scratch ShaderModule and pipeline decomposition', () => {
     it('reuses acknowledged distinct stage modules without recreating them', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const vertexModule = await runtime.createShaderModule({
             label: 'vertex module',
             sourceParts: [ { code: triangleWgsl } ],
@@ -83,7 +83,7 @@ describe('scratch ShaderModule and pipeline decomposition', () => {
     it('omits native fragment and color targets for a fragmentless depth pipeline', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const vertexModule = await runtime.createShaderModule({
             sourceParts: [ { code: triangleWgsl } ],
         })
@@ -124,7 +124,7 @@ describe('scratch ShaderModule and pipeline decomposition', () => {
     it('wraps native auto layouts as cached native-authoritative BindLayouts', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const computeModule = await runtime.createShaderModule({
             sourceParts: [ {
                 code: '@compute @workgroup_size(1) fn main() {}',
@@ -195,7 +195,7 @@ describe('scratch ShaderModule and pipeline decomposition', () => {
     it('disposes a native-derived layout when its pipeline is disposed in flight', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const computeModule = await runtime.createShaderModule({
             sourceParts: [ {
                 code: '@compute @workgroup_size(1) fn main() {}',

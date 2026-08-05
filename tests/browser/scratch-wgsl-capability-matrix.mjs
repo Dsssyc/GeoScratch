@@ -572,7 +572,7 @@ async function runCapabilityMatrix({
 
     let discoveryRuntime
     try {
-        discoveryRuntime = await scratch.ScratchRuntime.create({
+        discoveryRuntime = await scratch.GPURuntime.create({
             label: 'WGSL matrix capability discovery',
             powerPreference: adapterPowerPreference,
             diagnostics: {
@@ -2122,7 +2122,7 @@ fn fsMain(@builtin(primitive_index) index: u32) -> @location(0) vec4f {
         let evidence
         let terminal
         try {
-            runtime = await activeScratch.ScratchRuntime.create({
+            runtime = await activeScratch.GPURuntime.create({
                 label: `WGSL matrix ${contract.name}`,
                 powerPreference: adapterPowerPreference,
                 requiredFeatures: contract.requiredFeatures ?? [],

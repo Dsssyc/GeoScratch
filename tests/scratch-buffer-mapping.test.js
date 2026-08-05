@@ -39,7 +39,7 @@ function thrownDiagnostic(action, code) {
 async function createMappedFixture(mode, fakeOptions = {}) {
 
     const fake = createFakeGpu(fakeOptions)
-    const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
     const usage = mode === 'read' ? MAP_READ | COPY_DST : MAP_WRITE | COPY_SRC
     const creation = runtime.createBuffer({ label: `${mode} mapping`, size: 32, usage })
     if (fakeOptions.deferErrorScopePops) {
@@ -55,7 +55,7 @@ describe('Scratch buffer host mapping', () => {
     it('creates mapped-at-creation buffers for arbitrary usage under an explicit WRITE lease', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const { buffer, lease } = await runtime.createMappedBuffer({
             label: 'initial uniforms',
             size: 16,
@@ -90,7 +90,7 @@ describe('Scratch buffer host mapping', () => {
     it('validates dedicated mapped creation before native allocation', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
 
         await rejectedDiagnostic(runtime.createMappedBuffer({
             size: 6,
@@ -108,7 +108,7 @@ describe('Scratch buffer host mapping', () => {
     it('keeps BufferRegion and BindSet preparation legal while mapped', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const { buffer, lease } = await runtime.createMappedBuffer({
             size: 256,
             usage: 0x40,
@@ -135,7 +135,7 @@ describe('Scratch buffer host mapping', () => {
     it('blocks direct queue writes and direct readback before native side effects', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const uploadTarget = await runtime.createBuffer({
             size: 16,
             usage: MAP_READ | COPY_DST,
@@ -177,7 +177,7 @@ describe('Scratch buffer host mapping', () => {
     it('preflights resolved submissions before command encoder creation', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({
             size: 16,
             usage: MAP_WRITE | COPY_SRC,
@@ -211,7 +211,7 @@ describe('Scratch buffer host mapping', () => {
     it('blocks GPU use of arbitrary-usage mapped-at-creation buffers', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const { buffer, lease } = await runtime.createMappedBuffer({
             size: 16,
             usage: COPY_DST,
@@ -366,11 +366,11 @@ describe('Scratch buffer host mapping', () => {
     it('rejects invalid descriptors before native mapping side effects', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const read = await runtime.createBuffer({ size: 32, usage: MAP_READ | COPY_DST })
         const write = await runtime.createBuffer({ size: 32, usage: MAP_WRITE | COPY_SRC })
         const otherFake = createFakeGpu()
-        const otherRuntime = await scr.ScratchRuntime.create({ gpu: otherFake.gpu })
+        const otherRuntime = await scr.GPURuntime.create({ gpu: otherFake.gpu })
         const other = await otherRuntime.createBuffer({ size: 32, usage: MAP_READ | COPY_DST })
         const before = fake.calls.maps.length
         const hostileSignal = {}
@@ -598,7 +598,7 @@ describe('Scratch buffer host mapping', () => {
             let assertGpuUseBlocked
             if (scenario.mappedCreation) {
                 fake = createFakeGpu()
-                runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+                runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
                 const creation = await runtime.createMappedBuffer({
                     size: 32,
                     usage: COPY_DST,

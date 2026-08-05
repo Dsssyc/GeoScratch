@@ -137,11 +137,11 @@ async function verifyPipelineTransactions(browser) {
         diagnosticsModuleUrl,
         pipelineOwnershipModuleUrl,
     }) => {
-        const { ScratchRuntime } = await import(runtimeModuleUrl)
+        const { GPURuntime } = await import(runtimeModuleUrl)
         const { ScratchDiagnosticError } = await import(diagnosticModuleUrl)
         const { diagnosticsControllerFor } = await import(diagnosticsModuleUrl)
         const { runtimePipelineCount } = await import(pipelineOwnershipModuleUrl)
-        const runtime = await ScratchRuntime.create({ label: 'browser async pipeline probe' })
+        const runtime = await GPURuntime.create({ label: 'browser async pipeline probe' })
         const uncaptured = []
         runtime.device.addEventListener('uncapturederror', event => {
             uncaptured.push({

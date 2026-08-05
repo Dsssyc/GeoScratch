@@ -1,8 +1,8 @@
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRenderPipeline,
-    ScratchRuntime,
+    RenderPipeline,
+    GPURuntime,
 } from 'geoscratch'
 import {
     createFakeGpu,
@@ -11,12 +11,12 @@ import {
     triangleWgsl,
 } from './scratch-test-utils.js'
 
-describe('ScratchRuntime async render pipeline creation', () => {
+describe('GPURuntime async render pipeline creation', () => {
 
     it('rejects local validation through a Promise before pipeline-native effects', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const invalidProgram = runtime.createRenderPipeline({ program: null })
 
         expect(invalidProgram).to.be.instanceOf(Promise)
@@ -48,7 +48,7 @@ describe('ScratchRuntime async render pipeline creation', () => {
         const fixture = await createRenderFixture()
         const pipeline = await fixture.runtime.createRenderPipeline(fixture.descriptor)
 
-        expect(pipeline).to.be.instanceOf(ScratchRenderPipeline)
+        expect(pipeline).to.be.instanceOf(RenderPipeline)
         expect(pipeline.pipelineKind).to.equal('render')
         expect(pipeline.vertex).to.deep.equal(fixture.program.vertex)
         expect(pipeline.fragment).to.deep.equal(fixture.program.fragment)
@@ -284,7 +284,7 @@ async function createRenderFixture(deferred = {}) {
         deferErrorScopePops: false,
     }
     const fake = createFakeGpu(controls)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const shaderModule = await runtime.createShaderModule({
         label: 'async render module',
         sourceParts: [ { code: triangleWgsl } ],

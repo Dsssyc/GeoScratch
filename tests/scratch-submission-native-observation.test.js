@@ -17,7 +17,7 @@ describe('scratch bounded submission native observation', () => {
     it('uses one constant summary scope bundle and preserves synchronous issue order', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const submissionId = 'submission-summary'
         const locations = Array.from({ length: 20 }, (_, index) =>
             commandLocation(submissionId, index, `command-${index}`)
@@ -63,7 +63,7 @@ describe('scratch bounded submission native observation', () => {
     it('opens no scopes for off mode or effect-free work', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({
+        const runtime = await scr.GPURuntime.create({
             gpu: fake.gpu,
             diagnostics: { submissionScopes: 'off' },
         })
@@ -100,7 +100,7 @@ describe('scratch bounded submission native observation', () => {
     it('snapshots one detailed plan across multiple requesting captures', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const firstCapture = runtime.diagnostics.capture({ nativeSubmissionDetail: 'step' })
         const secondCapture = runtime.diagnostics.capture({ nativeSubmissionDetail: 'step' })
         const submissionId = 'submission-detailed'
@@ -132,7 +132,7 @@ describe('scratch bounded submission native observation', () => {
     it('fails a full pending-observation budget before the next issue callback', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({
+        const runtime = await scr.GPURuntime.create({
             gpu: fake.gpu,
             diagnostics: { maxPendingNativeObservations: 1 },
         })
@@ -178,7 +178,7 @@ describe('scratch bounded submission native observation', () => {
     it('settles failures in fixed filter order and exposes queryable schema-v5 evidence', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const submissionId = 'submission-failed'
         const location = submissionLocation(submissionId)
         const validation = new Error('validation failure')
@@ -224,7 +224,7 @@ describe('scratch bounded submission native observation', () => {
     it('selects primary failure from complete issue facts beyond bounded public evidence', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const capture = runtime.diagnostics.capture({
             nativeSubmissionDetail: 'step',
             maxOperations: 100,
@@ -278,7 +278,7 @@ describe('scratch bounded submission native observation', () => {
     it('records lifecycle cancellation and releases the owner exactly once', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const submissionId = 'submission-lifecycle'
         const location = submissionLocation(submissionId)
         const observation = beginSubmissionNativeObservation({
@@ -304,7 +304,7 @@ describe('scratch bounded submission native observation', () => {
     it('keeps an application outer scope paired outside the summary owner', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const outerError = new Error('application outer validation')
         const submissionId = 'submission-outer-scope'
         const location = submissionLocation(submissionId)
@@ -328,7 +328,7 @@ describe('scratch bounded submission native observation', () => {
     it('classifies a rejected scope settlement and releases its reservation', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const submissionId = 'submission-pop-rejection'
         const location = submissionLocation(submissionId)
         const observation = beginSubmissionNativeObservation({
@@ -357,7 +357,7 @@ describe('scratch bounded submission native observation', () => {
     it('retains failure incidents when successful operation history is disabled', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({
+        const runtime = await scr.GPURuntime.create({
             gpu: fake.gpu,
             diagnostics: { operationCapacity: 0 },
         })
@@ -382,7 +382,7 @@ describe('scratch bounded submission native observation', () => {
     it('retains device-loss structure without unscoped native prose', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const submissionId = 'submission-device-loss'
         const location = submissionLocation(submissionId)
         const observation = beginSubmissionNativeObservation({

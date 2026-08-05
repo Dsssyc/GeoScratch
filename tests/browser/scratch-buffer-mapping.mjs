@@ -134,9 +134,9 @@ async function verifyMappingProbe(browser) {
     const facts = await page.evaluate(async ({ moduleUrl }) => {
         const {
             ScratchDiagnosticError,
-            ScratchRuntime,
+            GPURuntime,
         } = await import(moduleUrl)
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             label: 'browser buffer mapping probe',
             diagnostics: {
                 operationCapacity: 16,

@@ -213,7 +213,7 @@ their data offset and row stride are not forced to the encoder-only 256-byte
 row alignment.
 
 All three immediate upload variants execute only on their owning
-`ScratchRuntime.queue`. A foreign queue is rejected with
+`GPURuntime.queue`. A foreign queue is rejected with
 `SCRATCH_COMMAND_WRONG_RUNTIME` and `actual.queueOwnedByRuntime: false` before
 `writeBuffer()`, `writeTexture()`, `copyExternalImageToTexture()`, or any logical
 content-epoch effect. This preserves WebGPU's same-device object-validity rule even for
@@ -784,7 +784,7 @@ implemented runtime policy is finite and conservative:
 Example configuration shape:
 
 ```ts
-const runtime = await ScratchRuntime.create({
+const runtime = await GPURuntime.create({
     readback: {
         maxPendingOperations: 16,
         maxStagingBytes: 64 * 1024 * 1024,

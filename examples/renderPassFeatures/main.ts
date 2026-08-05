@@ -1,6 +1,6 @@
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import type {
-    ScratchRenderPipeline,
+    RenderPipeline,
     ShaderModule,
     SubmittedWork,
     Surface,
@@ -41,7 +41,7 @@ void main().catch(reportFailure)
 
 async function main() {
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'render pass features runtime',
     })
     const surface = runtime.createSurface(canvas, {
@@ -175,12 +175,12 @@ async function main() {
 }
 
 async function createPipeline(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     shaderModule: ShaderModule,
     surface: Surface,
     label: string,
     colorMode: number
-): Promise<ScratchRenderPipeline> {
+): Promise<RenderPipeline> {
 
     const program = runtime.createProgram({
         label: `${label} program`,

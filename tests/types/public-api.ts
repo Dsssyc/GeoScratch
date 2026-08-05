@@ -50,8 +50,8 @@ declare const typedBufferMappingDescriptor: scr.BufferMappingDescriptor
 declare const typedDiagnosticInput: scr.ScratchDiagnosticInput
 declare const typedProgramDescriptor: scr.ProgramDescriptor
 declare const typedProgramStage: scr.ProgramStage
-declare const typedRenderPipelineDescriptor: scr.ScratchRenderPipelineDescriptor
-declare const typedComputePipelineDescriptor: scr.ScratchComputePipelineDescriptor
+declare const typedRenderPipelineDescriptor: scr.RenderPipelineDescriptor
+declare const typedComputePipelineDescriptor: scr.ComputePipelineDescriptor
 declare const typedCommandImmediateData: scr.CommandImmediateData
 declare const typedSurfaceFormat: scr.SurfaceFormat
 declare const typedSurfaceOptions: scr.SurfaceOptions
@@ -89,8 +89,8 @@ scratchCompat.createScratchDiagnostic({
 })
 const compatProgramDescriptor: scratchCompat.ProgramDescriptor = typedProgramDescriptor
 const compatProgramStage: scratchCompat.ProgramStage = typedProgramStage
-const compatRenderPipelineDescriptor: scratchCompat.ScratchRenderPipelineDescriptor = typedRenderPipelineDescriptor
-const compatComputePipelineDescriptor: scratchCompat.ScratchComputePipelineDescriptor = typedComputePipelineDescriptor
+const compatRenderPipelineDescriptor: scratchCompat.RenderPipelineDescriptor = typedRenderPipelineDescriptor
+const compatComputePipelineDescriptor: scratchCompat.ComputePipelineDescriptor = typedComputePipelineDescriptor
 const compatCommandImmediateData: scratchCompat.CommandImmediateData = typedCommandImmediateData
 const compatSurfaceFormat: scratchCompat.SurfaceFormat = typedSurfaceFormat
 const compatSurfaceOptions: scratchCompat.SurfaceOptions = typedSurfaceOptions
@@ -98,9 +98,9 @@ const compatSurfaceSize: scratchCompat.SurfaceSize = typedSurfaceSize
 const compatTextureUploadLayout: scratchCompat.TextureUploadLayout = typedTextureUploadLayout
 const compatTextureUploadOrigin: scratchCompat.TextureUploadOrigin = typedTextureUploadOrigin
 const compatTextureUploadSize: scratchCompat.TextureUploadSize = typedTextureUploadSize
-const typedPendingOperationKind: scr.ScratchPendingGpuOperationFact['kind'] = 'buffer-allocation'
+const typedPendingOperationKind: scr.GPUPendingOperationFact['kind'] = 'buffer-allocation'
 // @ts-expect-error Disposal records are instantaneous and cannot be pending
-const invalidPendingOperationKind: scr.ScratchPendingGpuOperationFact['kind'] = 'resource-disposal'
+const invalidPendingOperationKind: scr.GPUPendingOperationFact['kind'] = 'resource-disposal'
 // @ts-expect-error Program Pipeline-fact snapshots are package-internal preparation artifacts
 scr.snapshotProgramPipelineFacts
 // @ts-expect-error Compatibility entrypoints do not expose internal Program snapshot transactions
@@ -384,7 +384,7 @@ void typedWorkerContext
 
 async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
 
-    const runtime: scr.ScratchRuntime = await scr.ScratchRuntime.create({
+    const runtime: scr.GPURuntime = await scr.GPURuntime.create({
         gpu,
         label: 'typed scratch runtime',
         featureLevel: 'compatibility',
@@ -397,35 +397,35 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
             maxPendingNativeObservations: 8,
         },
     })
-    const requestFacts: scr.ScratchRuntimeRequestFacts = runtime.requestFacts
-    const adapterInfo: scr.ScratchAdapterInfoSnapshot = runtime.adapterInfo
-    const requestedFeatureLevel: scr.ScratchFeatureLevel = requestFacts.adapter.featureLevel
+    const requestFacts: scr.GPURuntimeRequestFacts = runtime.requestFacts
+    const adapterInfo: scr.GPUAdapterInfoSnapshot = runtime.adapterInfo
+    const requestedFeatureLevel: scr.GPUFeatureLevel = requestFacts.adapter.featureLevel
     const adapterInfoAvailable: boolean = adapterInfo.available
     // @ts-expect-error Scratch only accepts the frozen WebGPU feature-level values
-    await scr.ScratchRuntime.create({ gpu, featureLevel: 'maximum' })
+    await scr.GPURuntime.create({ gpu, featureLevel: 'maximum' })
     // @ts-expect-error Runtime request facts are immutable
     requestFacts.adapter.featureLevel = 'core'
     // @ts-expect-error Adapter facts are immutable
     adapterInfo.vendor = 'changed'
     void requestedFeatureLevel
     void adapterInfoAvailable
-    const diagnostics: scr.ScratchRuntimeDiagnostics = runtime.diagnostics
-    const compatDiagnostics: scratchCompat.ScratchRuntimeDiagnostics = diagnostics
-    const diagnosticsSnapshot: scr.ScratchRuntimeDiagnosticsSnapshot = diagnostics.snapshot()
-    const compatDiagnosticsSnapshot: scratchCompat.ScratchRuntimeDiagnosticsSnapshot = diagnosticsSnapshot
-    const diagnosticsEvidence: scr.ScratchRuntimeDiagnosticsEvidence = diagnostics.exportEvidence()
-    const compatDiagnosticsEvidence: scratchCompat.ScratchRuntimeDiagnosticsEvidence = diagnosticsEvidence
-    const operationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+    const diagnostics: scr.GPURuntimeDiagnostics = runtime.diagnostics
+    const compatDiagnostics: scratchCompat.GPURuntimeDiagnostics = diagnostics
+    const diagnosticsSnapshot: scr.GPURuntimeDiagnosticsSnapshot = diagnostics.snapshot()
+    const compatDiagnosticsSnapshot: scratchCompat.GPURuntimeDiagnosticsSnapshot = diagnosticsSnapshot
+    const diagnosticsEvidence: scr.GPURuntimeDiagnosticsEvidence = diagnostics.exportEvidence()
+    const compatDiagnosticsEvidence: scratchCompat.GPURuntimeDiagnosticsEvidence = diagnosticsEvidence
+    const operationRecords: readonly scr.GPUOperationRecord[] = diagnostics.operations({
         kind: 'buffer-allocation',
         targetKind: 'resource',
         sequenceFrom: 1,
     })
-    const pipelineOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+    const pipelineOperationRecords: readonly scr.GPUOperationRecord[] = diagnostics.operations({
         kind: 'render-pipeline-creation',
         targetKind: 'pipeline',
         pipelineId: 'pipeline-id',
     })
-    const submissionOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+    const submissionOperationRecords: readonly scr.GPUOperationRecord[] = diagnostics.operations({
         kind: 'submission-native-observation',
         targetKind: 'submission',
         submissionId: 'submission-id',
@@ -433,27 +433,27 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         nativeStage: 'command-encode',
         nativeOutcomeStatus: 'observed-failed',
     })
-    const bindLayoutOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+    const bindLayoutOperationRecords: readonly scr.GPUOperationRecord[] = diagnostics.operations({
         kind: 'bind-layout-allocation',
         targetKind: 'bind-layout',
         bindLayoutId: 'bind-layout-id',
     })
-    const bindSetPreparationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+    const bindSetPreparationRecords: readonly scr.GPUOperationRecord[] = diagnostics.operations({
         kind: 'bind-set-preparation',
         targetKind: 'bind-set',
         bindSetId: 'bind-set-id',
         preparationStage: 'bind-group-acknowledgement',
     })
-    const renderBundleOperationRecords: readonly scr.ScratchGpuOperationRecord[] =
+    const renderBundleOperationRecords: readonly scr.GPUOperationRecord[] =
         diagnostics.operations({
             kind: 'render-bundle-creation',
             targetKind: 'render-bundle',
             renderBundleId: 'render-bundle-id',
         })
-    const querySetOperationRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+    const querySetOperationRecords: readonly scr.GPUOperationRecord[] = diagnostics.operations({
         resourceKind: 'QuerySetResource',
     })
-    const operationTarget: scr.ScratchGpuOperationTarget | undefined = operationRecords[0]?.target
+    const operationTarget: scr.GPUOperationTarget | undefined = operationRecords[0]?.target
     if (operationTarget?.kind === 'resource') {
         const operationResourceId: string = operationTarget.resourceId
         // @ts-expect-error Resource targets do not fabricate pipeline identity
@@ -464,24 +464,24 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         // @ts-expect-error Pipeline targets do not fabricate allocation versions
         pipelineOperationRecords[0].target.allocationVersion
     }
-    const disposalRecords: readonly scr.ScratchGpuOperationRecord[] = diagnostics.operations({
+    const disposalRecords: readonly scr.GPUOperationRecord[] = diagnostics.operations({
         kind: 'resource-disposal',
     })
-    const incidentRecords: readonly scr.ScratchGpuIncidentReport[] = diagnostics.incidents({
+    const incidentRecords: readonly scr.GPUIncidentReport[] = diagnostics.incidents({
         kind: 'allocation-failure',
         targetKind: 'resource',
         sequenceFrom: 1,
     })
-    const submissionIncidentRecords: readonly scr.ScratchGpuIncidentReport[] = diagnostics.incidents({
+    const submissionIncidentRecords: readonly scr.GPUIncidentReport[] = diagnostics.incidents({
         kind: 'submission-failure',
         targetKind: 'submission',
         submissionId: 'submission-id',
         nativeLocationKind: 'queue-action',
         nativeStage: 'queue-submit',
     })
-    const currentPipelineFacts: readonly scr.ScratchRuntimePipelineFact[] = diagnosticsSnapshot.pipelines
-    const currentBindLayoutFacts: readonly scr.ScratchRuntimeBindLayoutFact[] = diagnosticsSnapshot.bindLayouts
-    const currentResourceFacts: readonly scr.ScratchRuntimeResourceFact[] = diagnosticsSnapshot.resources
+    const currentPipelineFacts: readonly scr.GPURuntimePipelineFact[] = diagnosticsSnapshot.pipelines
+    const currentBindLayoutFacts: readonly scr.GPURuntimeBindLayoutFact[] = diagnosticsSnapshot.bindLayouts
+    const currentResourceFacts: readonly scr.GPURuntimeResourceFact[] = diagnosticsSnapshot.resources
     for (const fact of currentResourceFacts) {
         if (fact.resourceKind === 'SamplerResource') {
             // @ts-expect-error Sampler facts do not fabricate scalar content epochs
@@ -499,7 +499,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     }
     const evidenceSchemaVersion: 5 = diagnosticsEvidence.version
     const snapshotSchemaVersion: 5 = diagnosticsSnapshot.version
-    const submissionScopeMode: scr.ScratchSubmissionScopeMode =
+    const submissionScopeMode: scr.GPUSubmissionScopeMode =
         diagnosticsSnapshot.submissionNative.submissionScopes
     const pendingNativeObservationBudget: number =
         diagnosticsSnapshot.submissionNative.maxPendingNativeObservations
@@ -509,11 +509,11 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         typedPipelineCreationReport.stages[0]?.shaderModuleId
     const nativeErrorSourceRedacted: boolean | undefined =
         incidentRecords[0]?.nativeError?.sourceExcerptRedacted
-    const deviceLostInfo: scr.ScratchDeviceLostInfo | undefined = runtime.deviceLostInfo
-    const compatDeviceLostInfo: scratchCompat.ScratchDeviceLostInfo | undefined = deviceLostInfo
+    const deviceLostInfo: scr.GPUDeviceLostInfo | undefined = runtime.deviceLostInfo
+    const compatDeviceLostInfo: scratchCompat.GPUDeviceLostInfo | undefined = deviceLostInfo
     const nativeDeviceLossMessageOmitted: true | undefined =
         compatDeviceLostInfo?.nativeMessageOmitted
-    const diagnosticCapture: scr.ScratchDiagnosticCapture = diagnostics.capture({
+    const diagnosticCapture: scr.GPUDiagnosticCapture = diagnostics.capture({
         maxOperations: 8,
         maxDurationMs: 100,
         maxEvidenceBytes: 4096,
@@ -521,7 +521,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         includeDescriptors: true,
         nativeSubmissionDetail: 'step',
     })
-    const diagnosticCaptureReport: scr.ScratchDiagnosticCaptureReport = diagnosticCapture.stop()
+    const diagnosticCaptureReport: scr.GPUDiagnosticCaptureReport = diagnosticCapture.stop()
     // @ts-expect-error Runtime native device ownership is read-only
     runtime.device = runtime.device
     // @ts-expect-error Runtime queue ownership is read-only
@@ -541,9 +541,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     // @ts-expect-error Runtime pipeline unregistration is package-internal
     runtime._unregisterPipeline
     // @ts-expect-error Runtime diagnostics cannot be externally constructed
-    new scr.ScratchRuntimeDiagnostics()
+    new scr.GPURuntimeDiagnostics()
     // @ts-expect-error Capture sessions cannot be externally constructed
-    new scr.ScratchDiagnosticCapture()
+    new scr.GPUDiagnosticCapture()
 
     const surface: scr.Surface = runtime.createSurface(canvas, {
         format: 'preferred',
@@ -1217,7 +1217,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const shaderModuleCompilation: scr.ShaderModuleCompilationReport =
         shaderModule.compilationReport
-    const supportingIncident = {} as scr.ScratchGpuSupportingObjectIncidentReport
+    const supportingIncident = {} as scr.GPUSupportingObjectIncidentReport
     const failedShaderModuleCompilation: scr.ShaderModuleCompilationReport | undefined =
         supportingIncident.shaderModuleCompilationReport
     const shaderSourcePart: scr.NormalizedShaderModuleSourcePart =
@@ -1619,7 +1619,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     })
     const resolveSourceQuerySet: scr.QuerySetResource = resolveQueries.source.querySet
     const resolveSourceSlotEpoch: number = resolveQueries.source.slots[0].contentEpoch
-    const nativeParityPipelineDescriptor: scr.ScratchRenderPipelineDescriptor = {
+    const nativeParityPipelineDescriptor: scr.RenderPipelineDescriptor = {
         label: 'typed native parity render pipeline',
         program,
         vertexBuffers: [
@@ -1639,8 +1639,8 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         immediateSize: 16,
     }
     const compatNativeParityPipelineDescriptor:
-        scratchCompat.ScratchRenderPipelineDescriptor = nativeParityPipelineDescriptor
-    const scratchPipelinePromise: Promise<scr.ScratchRenderPipeline> = runtime.createRenderPipeline({
+        scratchCompat.RenderPipelineDescriptor = nativeParityPipelineDescriptor
+    const scratchPipelinePromise: Promise<scr.RenderPipeline> = runtime.createRenderPipeline({
         label: 'typed scratch pipeline',
         program,
         layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
@@ -1654,16 +1654,16 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         ],
         targets: [ { format: surface.format } ],
     })
-    const scratchPipeline: scr.ScratchRenderPipeline = await scratchPipelinePromise
+    const scratchPipeline: scr.RenderPipeline = await scratchPipelinePromise
     const renderStage: scr.ProgramStage = scratchPipeline.vertex
     const optionalFragmentStage: scr.ProgramStage | undefined = scratchPipeline.fragment
     const renderCreationReport: scr.PipelineCreationReport = scratchPipeline.creationReport
     const renderLayoutMode: 'explicit' | 'auto' = scratchPipeline.layoutMode
-    const scratchPipelineAlias: scr.ScratchRenderPipeline = await runtime.renderPipeline({
+    const scratchPipelineAlias: scr.RenderPipeline = await runtime.renderPipeline({
         program,
         targets: [ { format: surface.format } ],
     })
-    const autoRenderPipeline: scr.ScratchRenderPipeline = await runtime.createRenderPipeline({
+    const autoRenderPipeline: scr.RenderPipeline = await runtime.createRenderPipeline({
         program,
         layout: { mode: 'auto' },
         targets: [ { format: surface.format } ],
@@ -1687,7 +1687,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         vertexConstants: { vertexScale: 1 },
         targets: [ { format: surface.format } ],
     })
-    const compatRenderPipeline: scratchCompat.ScratchRenderPipeline = scratchPipelineAlias
+    const compatRenderPipeline: scratchCompat.RenderPipeline = scratchPipelineAlias
     const drawRenderState: scr.DrawRenderState = {
         viewport: {
             x: 0,
@@ -1703,7 +1703,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     }
     const compatDrawRenderState: scratchCompat.DrawRenderState = drawRenderState
     // @ts-expect-error Pipeline construction is runtime-owned and asynchronous
-    new scr.ScratchRenderPipeline(runtime, { program, targets: [ { format: surface.format } ] })
+    new scr.RenderPipeline(runtime, { program, targets: [ { format: surface.format } ] })
     const draw: scr.DrawCommand = runtime.createDrawCommand({
         pipeline: scratchPipeline,
         immediateData: immediateUpload,
@@ -2064,19 +2064,19 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     const compatShaderReport: scratchCompat.ScratchDiagnosticReport = scratchCompat.inspectShader([
         '@group(9) @binding(9) var<uniform> camera: Camera;',
     ]).compareBindLayouts([], compatShaderComparisonOptions)
-    const computePipelinePromise: Promise<scr.ScratchComputePipeline> = runtime.createComputePipeline({
+    const computePipelinePromise: Promise<scr.ComputePipeline> = runtime.createComputePipeline({
         program: computeProgram,
         layout: { mode: 'explicit', bindLayouts: [ storageLayout ] },
         immediateSize: 16,
     })
-    const computePipeline: scr.ScratchComputePipeline = await computePipelinePromise
-    const computePipelineAlias: scr.ScratchComputePipeline = await runtime.computePipeline({
+    const computePipeline: scr.ComputePipeline = await computePipelinePromise
+    const computePipelineAlias: scr.ComputePipeline = await runtime.computePipeline({
         program: computeProgram,
         layout: { mode: 'explicit', bindLayouts: [ storageLayout ] },
     })
-    const compatComputePipeline: scratchCompat.ScratchComputePipeline = computePipelineAlias
+    const compatComputePipeline: scratchCompat.ComputePipeline = computePipelineAlias
     // @ts-expect-error Pipeline construction is runtime-owned and asynchronous
-    new scr.ScratchComputePipeline(runtime, { program: computeProgram })
+    new scr.ComputePipeline(runtime, { program: computeProgram })
     runtime.createDispatchCommand({
         pipeline: computePipeline,
         // @ts-expect-error direct and indirect dispatch count fields are mutually exclusive
@@ -2084,7 +2084,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         resources: { read: [ indirectRead ], write: [] },
         whenMissing: 'throw',
     })
-    const dynamicComputePipeline: scr.ScratchComputePipeline = await runtime.createComputePipeline({
+    const dynamicComputePipeline: scr.ComputePipeline = await runtime.createComputePipeline({
         program: computeProgram,
         layout: { mode: 'explicit', bindLayouts: [ dynamicStorageLayout ] },
     })
@@ -2229,9 +2229,9 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         .resolve(resolveAlias)
         .render(passSpec, renderCommands)
         .submit()
-    const nativeOutcome: Promise<scr.ScratchSubmissionNativeOutcome> = submitted.nativeOutcome
-    const compatNativeOutcome: Promise<scratchCompat.ScratchSubmissionNativeOutcome> = nativeOutcome
-    const readbackNativeOutcome: scr.ScratchReadbackNativeOutcome = {
+    const nativeOutcome: Promise<scr.GPUSubmissionNativeOutcome> = submitted.nativeOutcome
+    const compatNativeOutcome: Promise<scratchCompat.GPUSubmissionNativeOutcome> = nativeOutcome
+    const readbackNativeOutcome: scr.GPUReadbackNativeOutcome = {
         version: 5,
         readbackId: 'readback-id',
         mode: 'off',
@@ -2241,7 +2241,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
         omittedLocationCount: 0,
         omittedOutcomeCount: 0,
     }
-    const compatReadbackNativeOutcome: scratchCompat.ScratchReadbackNativeOutcome = readbackNativeOutcome
+    const compatReadbackNativeOutcome: scratchCompat.GPUReadbackNativeOutcome = readbackNativeOutcome
     // @ts-expect-error direct readback native outcomes cannot fabricate submission locations
     readbackNativeOutcome.locations[0] = { kind: 'submission', submissionId: submitted.id }
     const indeterminateResourceState: scr.ResourceState = 'indeterminate'
@@ -2271,7 +2271,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     submitted.renderBundles[0]!.bundleId = 'forged'
     const resourceAccesses: readonly scr.SubmissionResourceAccess[] = submitted.resourceAccesses
     const producerEpochs: readonly scr.SubmittedResourceEpoch[] = submitted.producerEpochs
-    const diagnosticSubject: scr.DiagnosticSubject = storageInput.subject
+    const diagnosticSubject: scr.ScratchDiagnosticSubject = storageInput.subject
     const missingResource: scr.SubmissionMissingResource = {
         resourceId: storageInput.id,
         resourceKind: storageInput.resourceKind,
@@ -2309,7 +2309,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     }
     const executionOutcome: scr.SubmissionExecutionOutcome = commandExecutionOutcome
     const executionOutcomes: readonly scr.SubmissionExecutionOutcome[] = submitted.executionOutcomes
-    const compatDiagnosticSubject: scratchCompat.DiagnosticSubject = diagnosticSubject
+    const compatDiagnosticSubject: scratchCompat.ScratchDiagnosticSubject = diagnosticSubject
     const compatMissingResource: scratchCompat.SubmissionMissingResource = missingResource
     const compatReadinessAttempt: scratchCompat.SubmissionCommandReadinessAttempt = readinessAttempt
     const compatCommandExecutionOutcome: scratchCompat.SubmissionCommandExecutionOutcome = commandExecutionOutcome

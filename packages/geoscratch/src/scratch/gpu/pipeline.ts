@@ -39,12 +39,12 @@ import type {
     BindLayoutDescriptor,
     NormalizedBindLayoutDescriptor,
 } from './binding.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 import type {
-    GpuAttributionConfidence,
-    GpuNativeErrorCategory,
-    ScratchGpuIncidentOutcome,
-    ScratchPipelineNativeLabelEvidence,
+    GPUAttributionConfidence,
+    GPUNativeErrorCategory,
+    GPUIncidentOutcome,
+    GPUPipelineNativeLabelEvidence,
 } from './gpu-operation.js'
 import type {
     PipelineCreationIssueResult,
@@ -61,8 +61,8 @@ import type {
     ProgramPipelineAuthorityStamp,
     ProgramStage,
 } from './program.js'
-import type { ScratchGpuOperationCompletion, ScratchPendingGpuOperation } from './runtime-diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPUOperationCompletion, GPUPendingOperation } from './runtime-diagnostics.js'
+import type { GPURuntime } from './runtime.js'
 
 const renderPipelineToken = Symbol('RenderPipeline')
 type PipelineObjectState = {
@@ -116,7 +116,7 @@ export type PipelineLayoutDescriptor =
     }>
 
 export interface RenderPipeline {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly pipelineKind: 'render'
@@ -149,7 +149,7 @@ export class RenderPipeline {
                 severity: 'error',
                 phase: 'pipeline',
                 subject: { kind: 'Pipeline', pipelineKind: 'render' },
-                message: 'RenderPipeline is created only by ScratchRuntime.',
+                message: 'RenderPipeline is created only by GPURuntime.',
                 hints: [ 'Use await runtime.createRenderPipeline(descriptor).' ],
             })
         }
@@ -179,9 +179,9 @@ export class RenderPipeline {
         return renderPipelineStateFor(this).isDisposed
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Pipeline',
             id: this.id,
             pipelineKind: 'render',
@@ -191,7 +191,7 @@ export class RenderPipeline {
         return subject
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -205,7 +205,7 @@ export class RenderPipeline {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Pipeline belongs to a different ScratchRuntime.',
+                message: 'Pipeline belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -254,13 +254,13 @@ export function isRenderPipeline(value: unknown): value is RenderPipeline {
 }
 
 type PipelineValidationContext = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     label?: string
     pipelineKind: 'render' | 'compute'
     program: Program
     programAuthority: ProgramPipelineAuthorityStamp
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
     layoutMode: 'explicit' | 'auto'
     bindLayouts: readonly BindLayout[]
     bindLayoutsByGroup: ReadonlyMap<number, BindLayout>
@@ -295,7 +295,7 @@ type RenderPipelineState = RenderPipelinePlan & Readonly<{
 }>
 
 export async function createRenderPipeline(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: RenderPipelineDescriptor
 ): Promise<RenderPipeline> {
 
@@ -408,7 +408,7 @@ export async function createRenderPipeline(
 }
 
 function prepareRenderPipeline(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: RenderPipelineDescriptor
 ): RenderPipelinePlan {
 
@@ -525,7 +525,7 @@ function prepareRenderPipeline(
 function snapshotProgramSource(
     program: Program,
     stages: readonly ProgramStage[],
-    pipelineSubject: DiagnosticSubject
+    pipelineSubject: ScratchDiagnosticSubject
 ): PipelineSourceSnapshot {
 
     try {
@@ -604,7 +604,7 @@ function pipelineNativeLabels(label: string | undefined, pipelineId: string): Pi
     })
 }
 
-function nativeLabelEvidence(labels: PipelineNativeLabels): ScratchPipelineNativeLabelEvidence {
+function nativeLabelEvidence(labels: PipelineNativeLabels): GPUPipelineNativeLabelEvidence {
 
     return Object.freeze({
         pipeline: Object.freeze({ value: labels.pipeline, truncated: false }),
@@ -700,8 +700,8 @@ async function observePipelineDeviceLoss<T>(
 function lifecycleFailure(
     serializeNativeError: ReturnType<typeof createPipelineNativeErrorSerializer>,
     diagnosticCode: string,
-    nativeErrorCategory: GpuNativeErrorCategory,
-    subject: DiagnosticSubject,
+    nativeErrorCategory: GPUNativeErrorCategory,
+    subject: ScratchDiagnosticSubject,
     cause?: unknown
 ): PipelineCreationObservedFailure {
 
@@ -719,7 +719,7 @@ function lifecycleFailure(
 
 function throwPipelineCreationFailure(
     plan: PipelineCreationPlan,
-    operation: ScratchPendingGpuOperation,
+    operation: GPUPendingOperation,
     issue: PipelineCreationIssueResult,
     observedFailures: readonly PipelineCreationObservedFailure[],
     nativeLabels: PipelineNativeLabels
@@ -745,7 +745,7 @@ function throwPipelineCreationFailure(
     const diagnosticCode = single?.diagnosticCode ?? 'SCRATCH_PIPELINE_CREATION_MULTIPLE_FAILURES'
     const nativeErrorCategory = single?.nativeErrorCategory ?? 'none'
     const cancelled = failures.every(failure => isLifecycleCancellation(failure.outcome))
-    const completion: ScratchGpuOperationCompletion = {
+    const completion: GPUOperationCompletion = {
         status: cancelled ? 'cancelled' : 'failed',
         nativeErrorCategory,
         nativeLabels: nativeLabelEvidence(nativeLabels),
@@ -756,7 +756,7 @@ function throwPipelineCreationFailure(
     const related = [
         scratchRuntimeAuthoritySubject(plan.runtime),
         programAuthoritySubject(plan.program),
-        { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+        { kind: 'GPUOperation', id: operation.id, operationKind: operation.kind },
         ...plan.bindLayouts.map(layout => layout.subject),
     ]
     const incident = controller.recordIncident({
@@ -808,14 +808,14 @@ function throwPipelineCreationFailure(
     })
 }
 
-function isLifecycleCancellation(outcome: ScratchGpuIncidentOutcome): boolean {
+function isLifecycleCancellation(outcome: GPUIncidentOutcome): boolean {
 
     return outcome.stage === 'lifecycle-recheck'
 }
 
 function pipelineFailureAttribution(
-    outcomes: readonly ScratchGpuIncidentOutcome[]
-): GpuAttributionConfidence {
+    outcomes: readonly GPUIncidentOutcome[]
+): GPUAttributionConfidence {
 
     if (outcomes.length !== 1) return 'unknown'
     if (outcomes[0].diagnosticCode === 'SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED') {
@@ -921,7 +921,7 @@ function renderPipelineStateFor(pipeline: RenderPipeline): PipelineObjectState {
 }
 
 export interface ComputePipeline {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly pipelineKind: 'compute'
@@ -947,7 +947,7 @@ export class ComputePipeline {
                 severity: 'error',
                 phase: 'pipeline',
                 subject: { kind: 'Pipeline', pipelineKind: 'compute' },
-                message: 'ComputePipeline is created only by ScratchRuntime.',
+                message: 'ComputePipeline is created only by GPURuntime.',
                 hints: [ 'Use await runtime.createComputePipeline(descriptor).' ],
             })
         }
@@ -969,9 +969,9 @@ export class ComputePipeline {
         return computePipelineStateFor(this).isDisposed
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'Pipeline',
             id: this.id,
             pipelineKind: 'compute',
@@ -981,7 +981,7 @@ export class ComputePipeline {
         return subject
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -995,7 +995,7 @@ export class ComputePipeline {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'Pipeline belongs to a different ScratchRuntime.',
+                message: 'Pipeline belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -1055,7 +1055,7 @@ type ComputePipelineState = ComputePipelinePlan & Readonly<{
 }>
 
 export async function createComputePipeline(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ComputePipelineDescriptor
 ): Promise<ComputePipeline> {
 
@@ -1152,7 +1152,7 @@ export async function createComputePipeline(
 }
 
 function prepareComputePipeline(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ComputePipelineDescriptor
 ): ComputePipelinePlan {
 
@@ -2148,7 +2148,7 @@ function throwProgramLayoutMismatch(
     requirement: ProgramBufferLayoutRequirement,
     details: {
         actual: unknown
-        related: DiagnosticSubject[]
+        related: ScratchDiagnosticSubject[]
     }
 ): never {
 

@@ -9,7 +9,7 @@ const COPY_DST = 0x8
 async function createRuntimeAndSource() {
 
     const fake = createFakeGpu()
-    const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
     const source = await runtime.createBuffer({
         label: 'readback contract source',
         size: 16,

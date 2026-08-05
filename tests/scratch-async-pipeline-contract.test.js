@@ -1,10 +1,10 @@
 import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
-    ScratchComputePipeline,
+    ComputePipeline,
     ScratchDiagnosticError,
-    ScratchRenderPipeline,
-    ScratchRuntime,
+    RenderPipeline,
+    GPURuntime,
 } from 'geoscratch'
 import {
     createGpuIncidentReport,
@@ -32,7 +32,7 @@ describe('scratch async pipeline public contract', () => {
     it('returns ordinary Promises for both render factories', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
 
         const primary = runtime.createRenderPipeline({
@@ -46,14 +46,14 @@ describe('scratch async pipeline public contract', () => {
 
         expect(primary).to.be.instanceOf(Promise)
         expect(alias).to.be.instanceOf(Promise)
-        expect(await primary).to.be.instanceOf(ScratchRenderPipeline)
-        expect(await alias).to.be.instanceOf(ScratchRenderPipeline)
+        expect(await primary).to.be.instanceOf(RenderPipeline)
+        expect(await alias).to.be.instanceOf(RenderPipeline)
     })
 
     it('returns ordinary Promises for both compute factories', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
 
         const primary = runtime.createComputePipeline({ program })
@@ -61,23 +61,23 @@ describe('scratch async pipeline public contract', () => {
 
         expect(primary).to.be.instanceOf(Promise)
         expect(alias).to.be.instanceOf(Promise)
-        expect(await primary).to.be.instanceOf(ScratchComputePipeline)
-        expect(await alias).to.be.instanceOf(ScratchComputePipeline)
+        expect(await primary).to.be.instanceOf(ComputePipeline)
+        expect(await alias).to.be.instanceOf(ComputePipeline)
     })
 
     it('closes direct render and compute construction', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const program = await createProgram(runtime)
 
         const cases = [
             {
-                Pipeline: ScratchRenderPipeline,
+                Pipeline: RenderPipeline,
                 descriptor: { program, targets: [ { format: 'bgra8unorm' } ] },
             },
             {
-                Pipeline: ScratchComputePipeline,
+                Pipeline: ComputePipeline,
                 descriptor: { program },
             },
         ]
@@ -360,7 +360,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
     it('rejects mismatched pending targets before mutating controller state', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
         expect(() => controller.beginOperation({
             kind: 'buffer-allocation',
@@ -497,7 +497,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
     it('keeps pending state intact when completion evidence cannot be normalized', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
         const target = {
             kind: 'pipeline',
@@ -535,7 +535,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
     it('versions snapshots, captures, exports, queries, and current pipeline facts together', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
         const capture = runtime.diagnostics.capture({
             maxOperations: 8,
@@ -652,7 +652,7 @@ describe('scratch GPU provenance schema v5 contract', () => {
     it('keeps pipeline history out of allocation pressure churn', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
         const resourceTarget = {
             kind: 'resource',

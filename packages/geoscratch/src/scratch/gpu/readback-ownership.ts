@@ -2,31 +2,31 @@ import { throwGPUDiagnostic } from './diagnostics.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type { ReadbackCommand } from './command.js'
 import type { ReadbackOperation } from './readback.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 import type {
-    ScratchRuntimeReadbackCommandFact,
-    ScratchRuntimeReadbackOperationFact,
+    GPURuntimeReadbackCommandFact,
+    GPURuntimeReadbackOperationFact,
 } from './runtime-diagnostics.js'
 
-export type ScratchReadbackOptions = Readonly<{
+export type GPUReadbackOptions = Readonly<{
     maxPendingOperations?: number
     maxStagingBytes?: number
 }>
 
-export type ScratchReadbackPolicy = Readonly<{
+export type GPUReadbackPolicy = Readonly<{
     maxPendingOperations: number
     maxStagingBytes: number
 }>
 
 const DEFAULT_MAX_PENDING_OPERATIONS = 16
 const DEFAULT_MAX_STAGING_BYTES = 64 * 1024 * 1024
-const runtimeReadbackCommands = new WeakMap<ScratchRuntime, Set<ReadbackCommand>>()
-const runtimeReadbackOperations = new WeakMap<ScratchRuntime, Set<ReadbackOperation>>()
+const runtimeReadbackCommands = new WeakMap<GPURuntime, Set<ReadbackCommand>>()
+const runtimeReadbackOperations = new WeakMap<GPURuntime, Set<ReadbackOperation>>()
 
 export function registerRuntimeReadbackCommand(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     command: ReadbackCommand,
-    fact: ScratchRuntimeReadbackCommandFact
+    fact: GPURuntimeReadbackCommandFact
 ): void {
 
     const commands = runtimeReadbackCommandSet(runtime)
@@ -38,16 +38,16 @@ export function registerRuntimeReadbackCommand(
 }
 
 export function updateRuntimeReadbackCommand(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     commandId: string,
-    update: Partial<Omit<ScratchRuntimeReadbackCommandFact, 'id'>>
+    update: Partial<Omit<GPURuntimeReadbackCommandFact, 'id'>>
 ): void {
 
     diagnosticsControllerFor(runtime).updateReadbackCommand(commandId, update)
 }
 
 export function unregisterRuntimeReadbackCommand(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     command: ReadbackCommand
 ): void {
 
@@ -55,20 +55,20 @@ export function unregisterRuntimeReadbackCommand(
     diagnosticsControllerFor(runtime).unregisterReadbackCommand(command.id)
 }
 
-export function runtimeReadbackCommandSnapshot(runtime: ScratchRuntime): readonly ReadbackCommand[] {
+export function runtimeReadbackCommandSnapshot(runtime: GPURuntime): readonly ReadbackCommand[] {
 
     return Object.freeze([ ...(runtimeReadbackCommands.get(runtime) ?? []) ])
 }
 
-export function runtimeReadbackCommandCount(runtime: ScratchRuntime): number {
+export function runtimeReadbackCommandCount(runtime: GPURuntime): number {
 
     return runtimeReadbackCommands.get(runtime)?.size ?? 0
 }
 
 export function registerRuntimeReadbackOperation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     operation: ReadbackOperation,
-    fact: ScratchRuntimeReadbackOperationFact
+    fact: GPURuntimeReadbackOperationFact
 ): void {
 
     const operations = runtimeReadbackOperationSet(runtime)
@@ -80,24 +80,24 @@ export function registerRuntimeReadbackOperation(
 }
 
 export function reserveRuntimeReadbackOperationFact(
-    runtime: ScratchRuntime,
-    fact: ScratchRuntimeReadbackOperationFact
+    runtime: GPURuntime,
+    fact: GPURuntimeReadbackOperationFact
 ): void {
 
     diagnosticsControllerFor(runtime).registerReadbackOperation(fact)
 }
 
 export function updateReservedRuntimeReadbackOperationFact(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     readbackId: string,
-    update: Partial<Omit<ScratchRuntimeReadbackOperationFact, 'id'>>
+    update: Partial<Omit<GPURuntimeReadbackOperationFact, 'id'>>
 ): void {
 
     diagnosticsControllerFor(runtime).updateReadbackOperation(readbackId, update)
 }
 
 export function releaseReservedRuntimeReadbackOperationFact(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     readbackId: string
 ): void {
 
@@ -105,7 +105,7 @@ export function releaseReservedRuntimeReadbackOperationFact(
 }
 
 export function adoptRuntimeReadbackOperation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     operation: ReadbackOperation
 ): void {
 
@@ -117,16 +117,16 @@ export function adoptRuntimeReadbackOperation(
 }
 
 export function updateRuntimeReadbackOperation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     readbackId: string,
-    update: Partial<Omit<ScratchRuntimeReadbackOperationFact, 'id'>>
+    update: Partial<Omit<GPURuntimeReadbackOperationFact, 'id'>>
 ): void {
 
     diagnosticsControllerFor(runtime).updateReadbackOperation(readbackId, update)
 }
 
 export function unregisterRuntimeReadbackOperation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     operation: ReadbackOperation
 ): void {
 
@@ -135,21 +135,21 @@ export function unregisterRuntimeReadbackOperation(
 }
 
 export function runtimeReadbackOperationSnapshot(
-    runtime: ScratchRuntime
+    runtime: GPURuntime
 ): readonly ReadbackOperation[] {
 
     return Object.freeze([ ...(runtimeReadbackOperations.get(runtime) ?? []) ])
 }
 
-export function runtimeReadbackOperationCount(runtime: ScratchRuntime): number {
+export function runtimeReadbackOperationCount(runtime: GPURuntime): number {
 
     return runtimeReadbackOperations.get(runtime)?.size ?? 0
 }
 
 export function normalizeScratchReadbackPolicy(
-    options: ScratchReadbackOptions | undefined,
+    options: GPUReadbackOptions | undefined,
     runtimeLabel?: string
-): ScratchReadbackPolicy {
+): GPUReadbackPolicy {
 
     if (options !== undefined && (options === null || typeof options !== 'object')) {
         throwReadbackPolicyDiagnostic('readback', options, 'object')
@@ -195,16 +195,16 @@ function throwReadbackPolicyDiagnostic(
         severity: 'error',
         phase: 'runtime',
         subject: {
-            kind: 'ScratchRuntime',
+            kind: 'GPURuntime',
             ...(runtimeLabel !== undefined ? { label: runtimeLabel } : {}),
         },
-        message: `ScratchRuntime readback option ${name} is invalid.`,
+        message: `GPURuntime readback option ${name} is invalid.`,
         expected: { [name]: expected },
         actual: { [name]: value },
     })
 }
 
-function runtimeReadbackOperationSet(runtime: ScratchRuntime): Set<ReadbackOperation> {
+function runtimeReadbackOperationSet(runtime: GPURuntime): Set<ReadbackOperation> {
 
     let operations = runtimeReadbackOperations.get(runtime)
     if (operations === undefined) {
@@ -214,7 +214,7 @@ function runtimeReadbackOperationSet(runtime: ScratchRuntime): Set<ReadbackOpera
     return operations
 }
 
-function runtimeReadbackCommandSet(runtime: ScratchRuntime): Set<ReadbackCommand> {
+function runtimeReadbackCommandSet(runtime: GPURuntime): Set<ReadbackCommand> {
 
     let commands = runtimeReadbackCommands.get(runtime)
     if (commands === undefined) {

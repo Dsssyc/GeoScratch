@@ -138,10 +138,10 @@ describe('Scratch structured WebGPU and WGSL normative proofs', () => {
 
         expect(() => assertStructuredEvidence(context, {
             kind: 'public-export',
-            operation: 'ScratchRuntime export',
+            operation: 'GPURuntime export',
             sourcePath: entrypointPath,
             selector: {
-                exportName: 'ScratchRuntime',
+                exportName: 'GPURuntime',
             },
         })).not.to.throw()
         expect(() => assertStructuredEvidence(context, {

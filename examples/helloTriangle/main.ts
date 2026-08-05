@@ -1,5 +1,5 @@
 import {
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import type { SubmittedWork, Surface } from 'geoscratch'
 
@@ -31,7 +31,7 @@ main().catch((error) => {
 
 async function main() {
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'scratch hello triangle runtime',
     })
     const surface = runtime.createSurface(canvas, {

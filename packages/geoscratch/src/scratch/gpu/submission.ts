@@ -89,7 +89,7 @@ import { TextureResource, createNativeTextureView, isTextureResource, isTextureV
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, ClearBufferCommand, CommandResourceReadDescriptor, CommandResourceReadEpoch, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResolvedCommandImmediateData, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DebugCommand } from './debug-command.js'
-import type { DiagnosticSubject, GPUDiagnostic, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
+import type { ScratchDiagnosticSubject, GPUDiagnostic, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassNativeAttachments, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
 import type {
@@ -98,7 +98,7 @@ import type {
     RenderBundle,
 } from './render-bundle.js'
 import type { ContentResource, ResourceState } from './resource.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 import type { PreparedSurfaceAttachment, Surface } from './surface.js'
 import type { TextureViewSpec } from './texture.js'
 import type {
@@ -107,16 +107,16 @@ import type {
     SubmissionNativeSettlement,
 } from './submission-native-observation.js'
 import type {
-    GpuNativeErrorCategory,
-    ScratchGpuIncidentReport,
-    ScratchSubmissionNativeLocation,
-    ScratchSubmissionNativeOutcome,
-    ScratchSubmissionNativeStage,
-    ScratchSubmissionQueueActionKind,
+    GPUNativeErrorCategory,
+    GPUIncidentReport,
+    GPUSubmissionNativeLocation,
+    GPUSubmissionNativeOutcome,
+    GPUSubmissionNativeStage,
+    GPUSubmissionQueueActionKind,
 } from './gpu-operation.js'
 import type {
-    ScratchEffectfulSubmittedWorkReservation,
-    ScratchRuntimeLifecycleChange,
+    GPUEffectfulSubmittedWorkReservation,
+    GPURuntimeLifecycleChange,
 } from './runtime-diagnostics.js'
 
 const DEPTH_TEXTURE_FORMATS = new Set<GPUTextureFormat>([
@@ -150,7 +150,7 @@ export type SubmissionResourceAccess = SubmissionAccessOrigin & {
     resourceId: string
     resourceKind: string
     label?: string
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
     access: SubmissionResourceAccessKind
     declaredContentEpoch?: CommandResourceReadEpoch
     contentEpochBefore: number
@@ -162,7 +162,7 @@ export type SubmittedResourceEpoch = {
     resourceId: string
     resourceKind: string
     label?: string
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
     contentEpoch: number
     allocationVersion: number
     producedBy: SubmissionAccessOrigin
@@ -191,7 +191,7 @@ export type SubmittedPotentialWrite =
         resourceId: string
         resourceKind: string
         label?: string
-        subject: DiagnosticSubject
+        subject: ScratchDiagnosticSubject
         allocationVersion: number
         contentEpoch: number
     }>
@@ -200,7 +200,7 @@ export type SubmittedPotentialWrite =
         querySetId: string
         queryType: string
         label?: string
-        subject: DiagnosticSubject
+        subject: ScratchDiagnosticSubject
         index: number
         allocationVersion: number
         contentEpoch: number
@@ -210,7 +210,7 @@ export type SubmissionMissingResource = {
     resourceId: string
     resourceKind: string
     label?: string
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
     role?: string
     requiredContentEpoch: CommandResourceReadEpoch
     simulatedState: ResourceState
@@ -560,7 +560,7 @@ type RenderAttachmentFootprint = TextureSubresourceFootprint & {
 }
 
 export interface SubmissionBuilder {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     validation: SubmissionValidationMode
     steps: SubmissionStep[]
@@ -569,7 +569,7 @@ export interface SubmissionBuilder {
 
 export class SubmissionBuilder {
 
-    constructor(runtime: ScratchRuntime, options: SubmissionBuilderOptions = {}) {
+    constructor(runtime: GPURuntime, options: SubmissionBuilderOptions = {}) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -1441,7 +1441,7 @@ function createSubmissionNativeIssuePlan(
 ): SubmissionNativeIssue[] {
 
     const encoding: SubmissionNativeIssue[] = []
-    const queueActions: ScratchSubmissionQueueActionKind[] = []
+    const queueActions: GPUSubmissionQueueActionKind[] = []
     let nextSegmentIndex = 0
     let activeSegmentIndex: number | undefined
 
@@ -1771,7 +1771,7 @@ function issuePassCommandEncoding(
 
 function issueCommandEncoding(
     observation: SubmissionNativeObservation,
-    location: ScratchSubmissionNativeLocation,
+    location: GPUSubmissionNativeLocation,
     encoder: Readonly<{
         pushDebugGroup?: (groupLabel: string) => void
         popDebugGroup?: () => void
@@ -1799,7 +1799,7 @@ function issueCommandEncoding(
 function encoderSegmentLocation(
     submissionId: string,
     segmentIndex: number
-): ScratchSubmissionNativeLocation {
+): GPUSubmissionNativeLocation {
 
     return {
         kind: 'encoder-segment',
@@ -1812,7 +1812,7 @@ function submissionPassLocation(
     submissionId: string,
     stepIndex: number,
     passSpec: RenderPassSpec | ComputePassSpec
-): ScratchSubmissionNativeLocation {
+): GPUSubmissionNativeLocation {
 
     return {
         kind: 'pass',
@@ -1830,7 +1830,7 @@ function renderAttachmentLocation(
     attachmentKind: 'color' | 'resolve' | 'depth-stencil',
     attachmentIndex: number,
     target: TextureViewSpec | PreparedSurfaceAttachment | SurfaceTextureLease
-): ScratchSubmissionNativeLocation {
+): GPUSubmissionNativeLocation {
 
     if (isSurfaceTextureLease(target)) {
         if (attachmentKind !== 'color' && attachmentKind !== 'resolve') {
@@ -1885,7 +1885,7 @@ function standaloneCommandLocation(
     submissionId: string,
     stepIndex: number,
     command: { id: string, commandKind: string }
-): ScratchSubmissionNativeLocation {
+): GPUSubmissionNativeLocation {
 
     return {
         kind: 'standalone-command',
@@ -1902,7 +1902,7 @@ function passCommandLocation(
     commandIndex: number,
     passSpec: RenderPassSpec | ComputePassSpec,
     command: { id: string, commandKind: string }
-): ScratchSubmissionNativeLocation {
+): GPUSubmissionNativeLocation {
 
     return {
         kind: 'pass-command',
@@ -1919,8 +1919,8 @@ function passCommandLocation(
 function submissionQueueActionLocation(
     submissionId: string,
     actionIndex: number,
-    actionKind: ScratchSubmissionQueueActionKind
-): ScratchSubmissionNativeLocation {
+    actionKind: GPUSubmissionQueueActionKind
+): GPUSubmissionNativeLocation {
 
     return {
         kind: 'queue-action',
@@ -1932,7 +1932,7 @@ function submissionQueueActionLocation(
 
 function uploadQueueActionKind(
     command: UploadCommand | TextureUploadCommand | ExternalImageUploadCommand
-): ScratchSubmissionQueueActionKind {
+): GPUSubmissionQueueActionKind {
 
     if (command.uploadKind === 'buffer') return 'buffer-upload'
     if (command.uploadKind === 'texture') return 'texture-upload'
@@ -3040,9 +3040,9 @@ function snapshotReadinessAttempts(
 
 function readinessAttemptSubjects(
     attempts: readonly SubmissionCommandReadinessAttempt[]
-): DiagnosticSubject[] {
+): ScratchDiagnosticSubject[] {
 
-    const subjects: DiagnosticSubject[] = []
+    const subjects: ScratchDiagnosticSubject[] = []
     const seen = new Set<string>()
 
     for (const attempt of attempts) {
@@ -3061,10 +3061,10 @@ function readinessAttemptSubjects(
 function readinessAttemptCommandSubjects(
     requestedCommand: DrawCommand,
     attempts: readonly SubmissionCommandReadinessAttempt[]
-): DiagnosticSubject[] {
+): ScratchDiagnosticSubject[] {
 
     const attemptedIds = new Set(attempts.map(attempt => attempt.commandId))
-    const subjects: DiagnosticSubject[] = []
+    const subjects: ScratchDiagnosticSubject[] = []
     let command: DrawCommand | undefined = requestedCommand
 
     while (command !== undefined && attemptedIds.has(command.id)) {
@@ -3750,7 +3750,7 @@ function createCommandReadEpochDiagnostic(
 
 export class SubmittedWork {
 
-    #runtime: ScratchRuntime
+    #runtime: GPURuntime
     #id: string
     #commandBuffers: readonly GPUCommandBuffer[]
     #report: ScratchDiagnosticReport
@@ -3761,12 +3761,12 @@ export class SubmittedWork {
     #renderBundles: readonly SubmittedRenderBundleFact[]
     #readbacks: readonly SubmittedReadbackLink[]
     #potentialWrites: readonly SubmittedPotentialWrite[]
-    #nativeOutcome: Promise<ScratchSubmissionNativeOutcome>
+    #nativeOutcome: Promise<GPUSubmissionNativeOutcome>
     #done: Promise<unknown>
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         options: SubmittedWorkOptions
     ) {
 
@@ -3797,7 +3797,7 @@ export class SubmittedWork {
         Object.preventExtensions(this)
     }
 
-    get runtime(): ScratchRuntime { return this.#runtime }
+    get runtime(): GPURuntime { return this.#runtime }
     get id(): string { return this.#id }
     get commandBuffers(): readonly GPUCommandBuffer[] { return this.#commandBuffers }
     get report(): ReadonlySubmittedFact<ScratchDiagnosticReport> { return this.#report }
@@ -3823,7 +3823,7 @@ export class SubmittedWork {
 
         return this.#potentialWrites
     }
-    get nativeOutcome(): Promise<ScratchSubmissionNativeOutcome> { return this.#nativeOutcome }
+    get nativeOutcome(): Promise<GPUSubmissionNativeOutcome> { return this.#nativeOutcome }
     get done(): Promise<unknown> { return this.#done }
 
     get subject() {
@@ -3844,20 +3844,20 @@ type SubmittedWorkOptions = Readonly<{
     renderBundles: readonly SubmittedRenderBundleFact[]
     readbacks: readonly SubmittedReadbackLink[]
     potentialWrites: readonly SubmittedPotentialWrite[]
-    nativeOutcome: Promise<ScratchSubmissionNativeOutcome>
+    nativeOutcome: Promise<GPUSubmissionNativeOutcome>
     done: Promise<unknown>
 }>
 
 const submittedWorkToken = Symbol('SubmittedWork')
 
 function createSubmittedWork(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     options: SubmittedWorkOptions
 ): SubmittedWork {
 
     const Constructor = SubmittedWork as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         options: SubmittedWorkOptions
     ) => SubmittedWork
     return new Constructor(submittedWorkToken, runtime, options)
@@ -4199,9 +4199,9 @@ function cloneAndFreezeSubmittedDiagnosticValue(
     return Object.freeze(snapshot)
 }
 
-function freezeDiagnosticSubject(subject: DiagnosticSubject): DiagnosticSubject {
+function freezeDiagnosticSubject(subject: ScratchDiagnosticSubject): ScratchDiagnosticSubject {
 
-    return Object.freeze({ ...subject }) as DiagnosticSubject
+    return Object.freeze({ ...subject }) as ScratchDiagnosticSubject
 }
 
 function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
@@ -5295,13 +5295,13 @@ function createDonePromise(queue: GPUQueue): Promise<unknown> {
 }
 
 function createSubmittedWorkDone(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     submissionId: string,
     nativeDone: Promise<unknown>,
     nativeSettlement: Promise<SubmissionNativeSettlement>,
     readbacks: readonly SubmittedReadbackLink[],
     potentialWrites: readonly SubmissionPotentialWrite[],
-    reservation?: ScratchEffectfulSubmittedWorkReservation
+    reservation?: GPUEffectfulSubmittedWorkReservation
 ): Promise<unknown> {
 
     const queueCompletion = observeSubmissionQueueCompletion(
@@ -5398,7 +5398,7 @@ type SubmissionQueueCompletionOutcome =
     | Readonly<{
         status: 'failed'
         cause: unknown
-        incident: ScratchGpuIncidentReport
+        incident: GPUIncidentReport
     }>
 
 type SubmissionLifecycleOutcome =
@@ -5409,25 +5409,25 @@ type SubmissionLifecycleOutcome =
             stage: 'lifecycle-recheck'
             diagnosticCode: string
             nativeErrorCategory: 'device-lost' | 'none'
-            location: ScratchSubmissionNativeLocation
+            location: GPUSubmissionNativeLocation
             nativeError?: ReturnType<typeof serializeNativeGpuError>
         }>
         cause?: unknown
-        incident?: ScratchGpuIncidentReport
+        incident?: GPUIncidentReport
     }>
 
 type SubmissionDoneFailure = Readonly<{
-    stage: ScratchSubmissionNativeStage
+    stage: GPUSubmissionNativeStage
     diagnosticCode: string
-    nativeErrorCategory: GpuNativeErrorCategory
-    location?: ScratchSubmissionNativeLocation
+    nativeErrorCategory: GPUNativeErrorCategory
+    location?: GPUSubmissionNativeLocation
     nativeError?: ReturnType<typeof serializeNativeGpuError>
     cause?: unknown
-    incident?: ScratchGpuIncidentReport
+    incident?: GPUIncidentReport
 }>
 
 function observeSubmissionQueueCompletion(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     submissionId: string,
     nativeDone: Promise<unknown>,
     readbacks: readonly SubmittedReadbackLink[]
@@ -5444,7 +5444,7 @@ function observeSubmissionQueueCompletion(
 }
 
 function observeSubmissionLifecycleUntilQueueCompletion(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     submissionId: string,
     queueCompletion: Promise<SubmissionQueueCompletionOutcome>
 ): Promise<SubmissionLifecycleOutcome> {
@@ -5471,9 +5471,9 @@ function observeSubmissionLifecycleUntilQueueCompletion(
 }
 
 function createSubmissionLifecycleFailure(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     submissionId: string,
-    change: ScratchRuntimeLifecycleChange
+    change: GPURuntimeLifecycleChange
 ): SubmissionLifecycleOutcome & Readonly<{ status: 'failed' }> {
 
     const deviceLost = change.kind === 'device-lost'
@@ -5500,7 +5500,7 @@ function createSubmissionLifecycleFailure(
 }
 
 function completeSubmissionLifecycleOutcome(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     submissionId: string,
     readbacks: readonly SubmittedReadbackLink[],
     settlement: SubmissionNativeSettlement,
@@ -5595,11 +5595,11 @@ function selectSubmissionDoneFailure(
 }
 
 function recordSubmissionQueueCompletionIncident(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     submissionId: string,
     readbacks: readonly SubmittedReadbackLink[],
     cause: unknown
-): ScratchGpuIncidentReport {
+): GPUIncidentReport {
 
     const nativeError = serializeNativeGpuError(cause)
     return diagnosticsControllerFor(runtime).recordIncident({
@@ -5629,7 +5629,7 @@ function recordSubmissionQueueCompletionIncident(
 }
 
 function recordReadbackQueueCompletionIncidents(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     submissionId: string,
     readbacks: readonly SubmittedReadbackLink[],
     cause: unknown

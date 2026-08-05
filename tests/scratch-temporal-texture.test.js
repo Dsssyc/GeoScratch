@@ -3,7 +3,7 @@ import { expect } from 'chai'
 import {
     ExternalTextureBinding,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     SurfaceTextureLease,
     SurfaceTextureView,
 } from 'geoscratch'
@@ -87,7 +87,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'bgra8unorm',
             size: { width: 8, height: 8 },
@@ -157,7 +157,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'bgra8unorm',
             size: { width: 8, height: 8 },
@@ -241,7 +241,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'bgra8unorm',
             size: { width: 8, height: 8 },
@@ -306,7 +306,7 @@ describe('Scratch attempt-local texture authority', () => {
     it('binds regular textures and views to external-texture slots without importing', async() => {
 
         const fixture = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const layout = await runtime.createBindLayout({
             group: 0,
             entries: [ {
@@ -337,7 +337,7 @@ describe('Scratch attempt-local texture authority', () => {
     it('validates regular external-texture resources before native bind-group creation', async() => {
 
         const fixture = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const layout = await runtime.createBindLayout({
             group: 0,
             entries: [ {
@@ -395,7 +395,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'bgra8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_SRC | GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
@@ -435,7 +435,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_SRC,
@@ -483,7 +483,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'bgra8unorm',
             usage: GPU_TEXTURE_USAGE_RENDER_ATTACHMENT,
@@ -511,7 +511,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_DST,
@@ -548,7 +548,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
@@ -607,7 +607,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
@@ -653,7 +653,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_TEXTURE_BINDING,
@@ -718,7 +718,7 @@ describe('Scratch attempt-local texture authority', () => {
         const fixture = createFakeGpu()
         fixture.device.features.add('core-features-and-limits')
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_STORAGE_BINDING,
@@ -766,7 +766,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_SRC,
@@ -814,7 +814,7 @@ describe('Scratch attempt-local texture authority', () => {
     it('rejects forged temporal objects and invalid external sources', async() => {
 
         const fixture = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         let invalidSourceError
         try {
             runtime.externalTexture({
@@ -854,7 +854,7 @@ describe('Scratch attempt-local texture authority', () => {
     it('rejects direct encoding when a command needs attempt-local realization', async() => {
 
         const fixture = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const source = runtime.externalTexture({
             source: createFakeExternalImageSource('VideoFrame'),
         })
@@ -900,7 +900,7 @@ describe('Scratch attempt-local texture authority', () => {
 
         const fixture = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const surface = runtime.createSurface(canvas.canvas, {
             format: 'rgba8unorm',
             usage: GPU_TEXTURE_USAGE_COPY_SRC,

@@ -1,7 +1,7 @@
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 import type { ShaderModule } from './shader-module.js'
 
-const runtimeShaderModules = new WeakMap<ScratchRuntime, Set<ShaderModule>>()
+const runtimeShaderModules = new WeakMap<GPURuntime, Set<ShaderModule>>()
 
 export function registerShaderModuleOwnership(shaderModule: ShaderModule): void {
 
@@ -22,7 +22,7 @@ export function unregisterShaderModuleOwnership(shaderModule: ShaderModule): voi
 }
 
 export function runtimeShaderModuleSnapshot(
-    runtime: ScratchRuntime
+    runtime: GPURuntime
 ): readonly ShaderModule[] {
 
     return Object.freeze([ ...(runtimeShaderModules.get(runtime) ?? []) ])

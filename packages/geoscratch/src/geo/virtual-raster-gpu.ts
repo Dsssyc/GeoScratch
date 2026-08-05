@@ -1,6 +1,6 @@
 import type { BufferResource } from '../scratch/gpu/buffer.js'
 import type { TextureUploadCommand, UploadCommand } from '../scratch/gpu/command.js'
-import type { ScratchRuntime } from '../scratch/gpu/runtime.js'
+import type { GPURuntime } from '../scratch/gpu/runtime.js'
 import type { SubmittedWork } from '../scratch/gpu/submission.js'
 import type { TextureResource, TextureViewSpec } from '../scratch/gpu/texture.js'
 import { throwGeoDiagnostic } from './diagnostics.js'
@@ -46,7 +46,7 @@ const PAGE_TABLE_WORDS = 8
 
 export class VirtualRasterGpuState {
 
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly addressSpace: VirtualRasterAddressSpace
     readonly plane: VirtualRasterPlane
     readonly maxPhysicalPages: number
@@ -69,7 +69,7 @@ export class VirtualRasterGpuState {
     #stagedPublication: VirtualRasterPublication | undefined
 
     private constructor(
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: VirtualRasterGpuStateDescriptor,
         atlas: TextureResource,
         pageTable: BufferResource,
@@ -95,7 +95,7 @@ export class VirtualRasterGpuState {
     }
 
     static async create(
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: VirtualRasterGpuStateDescriptor
     ): Promise<VirtualRasterGpuState> {
 
@@ -423,7 +423,7 @@ export class VirtualRasterGpuState {
 }
 
 export function createVirtualRasterGpuState(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: VirtualRasterGpuStateDescriptor
 ): Promise<VirtualRasterGpuState> {
 

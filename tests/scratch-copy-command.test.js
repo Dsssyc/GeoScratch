@@ -4,7 +4,7 @@ import {
     BindSet,
     CopyCommand,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     TextureResource,
 } from 'geoscratch'
 import {
@@ -55,7 +55,7 @@ function webGpuTypeStringUnion(aliasName) {
 async function createCopyFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const source = await runtime.createBuffer({
         label: 'copy source',
         size: 32,
@@ -101,7 +101,7 @@ async function createCopyFixture() {
 async function createTextureCopyFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const source = await runtime.createTexture({
         label: 'texture copy source',
         size: { width: 4, height: 4 },
@@ -137,7 +137,7 @@ async function createTextureCopyFixture() {
 async function createBufferToTextureCopyFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const source = await runtime.createBuffer({
         label: 'buffer texture copy source',
         size: 1024,
@@ -172,7 +172,7 @@ async function createBufferToTextureCopyFixture() {
 async function createTextureToBufferCopyFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const source = await runtime.createTexture({
         label: 'texture buffer copy source',
         size: { width: 4, height: 4 },
@@ -806,7 +806,7 @@ describe('scratch CopyCommand', () => {
     it('validates 3d copy depth against each physical mip extent', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
             size: { width: 8, height: 8, depthOrArrayLayers: 8 },
             dimension: '3d',
@@ -864,7 +864,7 @@ describe('scratch CopyCommand', () => {
     it('allows same-texture copies only across disjoint native subresources', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
             size: { width: 8, height: 8, depthOrArrayLayers: 3 },
             mipLevelCount: 3,
@@ -909,7 +909,7 @@ describe('scratch CopyCommand', () => {
     it('accepts native copy-compatible linear and srgb texture formats', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'rgba8unorm',
@@ -936,7 +936,7 @@ describe('scratch CopyCommand', () => {
         for (const coreFeatures of [ false, true ]) {
             const fake = createFakeGpu()
             if (coreFeatures) fake.device.features.add('core-features-and-limits')
-            const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+            const runtime = await GPURuntime.create({ gpu: fake.gpu })
             const source = await runtime.createTexture({
                 size: { width: 4, height: 4 },
                 format: 'rgba8unorm',
@@ -979,7 +979,7 @@ describe('scratch CopyCommand', () => {
     it('requires full physical subresources for depth-stencil texture copies', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createTexture({
             size: { width: 4, height: 4 },
             format: 'depth32float',
@@ -1014,7 +1014,7 @@ describe('scratch CopyCommand', () => {
             const fake = createFakeGpu()
             fake.device.features.add('texture-compression-bc')
             if (coreFeatures) fake.device.features.add('core-features-and-limits')
-            const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+            const runtime = await GPURuntime.create({ gpu: fake.gpu })
             const source = await runtime.createTexture({
                 size: { width: 4, height: 4 },
                 format: 'bc1-rgba-unorm',
@@ -1049,7 +1049,7 @@ describe('scratch CopyCommand', () => {
         const fake = createFakeGpu()
         fake.device.features.add('core-features-and-limits')
         fake.device.features.add('texture-compression-bc')
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createTexture({
             size: { width: 12, height: 12 },
             mipLevelCount: 2,
@@ -1198,7 +1198,7 @@ describe('scratch CopyCommand', () => {
             'texture-compression-etc2',
             'texture-compression-astc',
         ]) fake.device.features.add(feature)
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const sourceBuffer = await runtime.createBuffer({
             size: 4096,
             usage: GPU_BUFFER_USAGE_COPY_SRC,
@@ -1248,7 +1248,7 @@ describe('scratch CopyCommand', () => {
 
         const compatibilityFake = createFakeGpu()
         compatibilityFake.device.features.add('texture-compression-bc')
-        const compatibilityRuntime = await ScratchRuntime.create({ gpu: compatibilityFake.gpu })
+        const compatibilityRuntime = await GPURuntime.create({ gpu: compatibilityFake.gpu })
         const compatibilityBuffer = await compatibilityRuntime.createBuffer({
             size: 256,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -1282,7 +1282,7 @@ describe('scratch CopyCommand', () => {
 
         const fake = createFakeGpu()
         fake.device.features.add('depth32float-stencil8')
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const sourceBuffer = await runtime.createBuffer({
             size: 4096,
             usage: GPU_BUFFER_USAGE_COPY_SRC,

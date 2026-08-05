@@ -135,9 +135,9 @@ async function measureAllocations(browser) {
         'packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
     )}`
     const measurement = await page.evaluate(async ({ moduleUrl, diagnosticsModuleUrl }) => {
-        const { ScratchRuntime } = await import(moduleUrl)
+        const { GPURuntime } = await import(moduleUrl)
         const { diagnosticsControllerFor } = await import(diagnosticsModuleUrl)
-        const runtime = await ScratchRuntime.create({ label: 'browser allocation measurement' })
+        const runtime = await GPURuntime.create({ label: 'browser allocation measurement' })
         const warmup = 8
         const iterations = 64
 

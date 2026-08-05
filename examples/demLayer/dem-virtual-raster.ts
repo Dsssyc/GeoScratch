@@ -1,5 +1,5 @@
 import type {
-    ScratchRuntime,
+    GPURuntime,
     SubmittedWork,
 } from 'geoscratch'
 import {
@@ -120,7 +120,7 @@ export type DemStitchInput = Readonly<{
 }>
 
 export type DemVirtualRasterRuntimeOptions = Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     manifest: DemVirtualRasterManifest
     tileServerUrl: string
     cachePolicy: VirtualRasterCachePolicy

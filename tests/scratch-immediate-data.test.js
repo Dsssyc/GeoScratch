@@ -2,7 +2,7 @@ import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     layoutCodec,
 } from 'geoscratch'
 import {
@@ -56,7 +56,7 @@ function configureImmediateSupport(fixture, options = {}) {
 async function createImmediateRuntime(options = {}) {
 
     const fixture = configureImmediateSupport(createFakeGpu(), options)
-    const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+    const runtime = await GPURuntime.create({ gpu: fixture.gpu })
     return { ...fixture, runtime }
 }
 
@@ -170,7 +170,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
             'immediate_address_space',
             'subgroups',
         ]
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
 
         expect(runtime.wgslLanguageFeatures).to.deep.equal([
             'immediate_address_space',
@@ -190,7 +190,7 @@ describe('scratch immediate data runtime and pipeline contract', () => {
     it('uses an empty frozen language feature snapshot when the GPU property is absent', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         expect(runtime.wgslLanguageFeatures).to.deep.equal([])
         expect(Object.isFrozen(runtime.wgslLanguageFeatures)).to.equal(true)

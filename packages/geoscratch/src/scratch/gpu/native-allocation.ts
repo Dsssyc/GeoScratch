@@ -2,10 +2,10 @@ import { throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { subscribeResourceDisposal } from './resource.js'
-import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
-import type { ScratchRuntimeLifecycleChange } from './runtime-diagnostics.js'
+import type { GPUPendingOperation } from './runtime-diagnostics.js'
+import type { GPURuntimeLifecycleChange } from './runtime-diagnostics.js'
 import type { Resource } from './resource.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 
 export type ScopedNativeAllocationFailureKind =
     | 'validation'
@@ -51,7 +51,7 @@ type LifecycleSettlement =
     | Readonly<{ kind: 'resource-disposed' }>
 
 export function issueScopedNativeAllocation<T>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     issue: () => T,
     resource?: Resource
 ): Promise<ScopedNativeAllocationOutcome<T>> {
@@ -149,7 +149,7 @@ export function createScratchNativeLabel(label: string | undefined, resourceId: 
 }
 
 export function recheckScopedNativeAllocationLifecycle<T>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     outcome: ScopedNativeAllocationOutcome<T>,
     resource?: Resource
 ): ScopedNativeAllocationOutcome<T> {
@@ -198,8 +198,8 @@ export function destroyNativeCandidate(candidate: unknown): void {
 }
 
 export function throwScopedAllocationFailure<T>(
-    runtime: ScratchRuntime,
-    operation: ScratchPendingGpuOperation,
+    runtime: GPURuntime,
+    operation: GPUPendingOperation,
     outcome: Extract<ScopedNativeAllocationOutcome<T>, { ok: false }>,
     codes: ScopedAllocationDiagnosticCodes,
     operationName: string
@@ -230,7 +230,7 @@ export function throwScopedAllocationFailure<T>(
             code: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             severity: 'error',
             phase: 'runtime',
-            subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+            subject: { kind: 'GPUOperation', id: operation.id, operationKind: operation.kind },
             related: [
                 runtime.subject,
                 { kind: 'Resource', id: target.resourceId, resourceKind: target.resourceKind },
@@ -268,7 +268,7 @@ export function throwScopedAllocationFailure<T>(
         code,
         severity: 'error',
         phase: outcome.kind === 'runtime-disposed' ? 'runtime' : 'resource',
-        subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+        subject: { kind: 'GPUOperation', id: operation.id, operationKind: operation.kind },
         related: [
             runtime.subject,
             { kind: 'Resource', id: target.resourceId, resourceKind: target.resourceKind },
@@ -289,7 +289,7 @@ export function throwScopedAllocationFailure<T>(
 }
 
 async function settleScopedNativeAllocation<T>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     candidate: T | undefined,
     nativeException: unknown,
     boundaryFailures: unknown[],
@@ -406,7 +406,7 @@ async function settleScopedNativeAllocation<T>(
     return Object.freeze({ ok: true, candidate })
 }
 
-function runtimeLifecycleSettlement(change: ScratchRuntimeLifecycleChange): LifecycleSettlement {
+function runtimeLifecycleSettlement(change: GPURuntimeLifecycleChange): LifecycleSettlement {
 
     return change.kind === 'device-lost'
         ? { kind: 'device-lost', info: change.info }
@@ -452,7 +452,7 @@ function failureMessage(kind: ScopedNativeAllocationFailureKind, operationName: 
     if (kind === 'validation') return `${operationName} failed native validation.`
     if (kind === 'out-of-memory') return `${operationName} observed native out-of-memory.`
     if (kind === 'scope-failure') return `${operationName} error scopes failed to settle structurally.`
-    if (kind === 'runtime-disposed') return `ScratchRuntime was disposed while ${operationName} was pending.`
+    if (kind === 'runtime-disposed') return `GPURuntime was disposed while ${operationName} was pending.`
     if (kind === 'resource-disposed') return `Resource was disposed while ${operationName} was pending.`
     return `${operationName} failed with a synchronous native exception.`
 }

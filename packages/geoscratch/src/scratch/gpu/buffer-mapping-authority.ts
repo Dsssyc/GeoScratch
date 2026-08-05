@@ -1,5 +1,5 @@
 import { throwGPUDiagnostic } from './diagnostics.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchDiagnosticSubject } from './diagnostics.js'
 import type { BufferMappingMode } from './buffer-mapping.js'
 import type { BufferRegion, BufferResource } from './buffer.js'
 
@@ -83,7 +83,7 @@ export function releaseBufferMappingAuthority(buffer: BufferResource, id: string
 
 export function assertBufferAvailableForGpuUse(
     buffer: BufferResource,
-    subject: DiagnosticSubject = buffer.subject
+    subject: ScratchDiagnosticSubject = buffer.subject
 ): void {
 
     assertAuthorityInitialized(buffer)

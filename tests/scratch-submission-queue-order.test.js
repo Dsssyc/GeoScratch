@@ -1,6 +1,6 @@
 import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
-import { ScratchDiagnosticError, ScratchRuntime } from 'geoscratch'
+import { ScratchDiagnosticError, GPURuntime } from 'geoscratch'
 import {
     advanceQuerySlotContentEpochForTest,
     advanceResourceContentEpochForTest,
@@ -236,7 +236,7 @@ async function createFallbackCompute(runtime) {
 async function createOrderingFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const copySource = await runtime.createBuffer({
         label: 'queue order copy source',
         size: 16,
@@ -1103,7 +1103,7 @@ describe('scratch submission queue order', () => {
     it('rejects detached upload data before changing logical or physical state', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const target = await runtime.createBuffer({
             label: 'detached upload target',
             size: 16,
@@ -1277,7 +1277,7 @@ describe('scratch submission queue order', () => {
     it('submits ordered readback staging before a later upload', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({
             label: 'readback before upload source',
             size: 8,
@@ -1315,7 +1315,7 @@ describe('scratch submission queue order', () => {
     it('enqueues an upload before later ordered readback staging', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({
             label: 'upload before readback source',
             size: 8,
@@ -1347,7 +1347,7 @@ describe('scratch submission queue order', () => {
     it('keeps readback operations and producer epochs distinct across an upload boundary', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({
             label: 'two epoch readback source',
             size: 8,

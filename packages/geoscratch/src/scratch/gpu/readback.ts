@@ -37,10 +37,10 @@ import {
 } from './texture-readback.js'
 import { describeValue } from './type-utils.js'
 import type { BufferResource } from './buffer.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
 import type {
-    ScratchReadbackFailureStage,
-    ScratchSubmissionNativeOutcome,
+    GPUReadbackFailureStage,
+    GPUSubmissionNativeOutcome,
 } from './gpu-operation.js'
 import type { LayoutArtifact, LayoutReadbackView } from './layout-codec.js'
 import type { ReadbackMappingTransaction } from './readback-mapping.js'
@@ -49,8 +49,8 @@ import type {
     MappedReadbackLeaseState,
 } from './readback-lease.js'
 import type { ReadbackStagingCleanupResult, ReadbackStagingSlot } from './readback-staging.js'
-import type { ScratchRuntime } from './runtime.js'
-import type { ScratchRuntimeReadbackOperationFact } from './runtime-diagnostics.js'
+import type { GPURuntime } from './runtime.js'
+import type { GPURuntimeReadbackOperationFact } from './runtime-diagnostics.js'
 import type { SubmittedResourceEpoch, SubmittedWork } from './submission.js'
 import type { ReadbackNativeSettlement } from './submission-native-observation.js'
 import type {
@@ -135,7 +135,7 @@ type OpenReadbackMapping = {
 }
 
 type ReadbackOperationPrivateState = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     label: string | undefined
     state: ReadbackState
@@ -176,7 +176,7 @@ export class ReadbackOperation {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: ReadbackOperationDescriptor,
         construction: ReadbackOperationConstruction
     ) {
@@ -187,7 +187,7 @@ export class ReadbackOperation {
                 severity: 'error',
                 phase: 'readback',
                 subject: { kind: 'ReadbackOperation' },
-                message: 'ReadbackOperation must be created by ScratchRuntime.',
+                message: 'ReadbackOperation must be created by GPURuntime.',
                 hints: [ 'Use runtime.createReadback(descriptor).' ],
             })
         }
@@ -254,7 +254,7 @@ export class ReadbackOperation {
         Object.preventExtensions(this)
     }
 
-    get runtime(): ScratchRuntime {
+    get runtime(): GPURuntime {
 
         return readbackStateFor(this).runtime
     }
@@ -344,9 +344,9 @@ export class ReadbackOperation {
         return readbackStateFor(this).cancelReason
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'ReadbackOperation',
             id: this.id,
         }
@@ -624,7 +624,7 @@ export class ReadbackOperation {
 
         let mappingTransaction: ReadbackMappingTransaction | undefined
         let directNativeSettlement: Promise<ReadbackNativeSettlement> | undefined
-        let failureStage: ScratchReadbackFailureStage = 'lifecycle-recheck'
+        let failureStage: GPUReadbackFailureStage = 'lifecycle-recheck'
 
         try {
             const isScheduled = scheduledReadbackOperations.has(this)
@@ -823,7 +823,7 @@ export class ReadbackOperation {
 
     _failMaterialization(
         error: unknown,
-        failureStage: ScratchReadbackFailureStage
+        failureStage: GPUReadbackFailureStage
     ): never {
 
         if (isScratchDiagnosticError(error)) {
@@ -989,14 +989,14 @@ export class ReadbackOperation {
 
     _setState(
         state: ReadbackState,
-        update: Partial<Omit<ScratchRuntimeReadbackOperationFact, 'id'>> = {}
+        update: Partial<Omit<GPURuntimeReadbackOperationFact, 'id'>> = {}
     ): void {
 
         readbackStateFor(this).state = state
         this._updateFact({ state, ...update })
     }
 
-    _updateFact(update: Partial<Omit<ScratchRuntimeReadbackOperationFact, 'id'>>): void {
+    _updateFact(update: Partial<Omit<GPURuntimeReadbackOperationFact, 'id'>>): void {
 
         if (!registeredReadbackOperations.has(this)) return
         updateRuntimeReadbackOperation(this.runtime, this.id, update)
@@ -1088,7 +1088,7 @@ function assertDirectReadbackNativeSettlement(
 
 function assertOrderedReadbackNativeOutcome(
     operation: ReadbackOperation,
-    outcome: ScratchSubmissionNativeOutcome
+    outcome: GPUSubmissionNativeOutcome
 ): void {
 
     if (outcome.status === 'observed-succeeded' || outcome.status === 'unobserved') return
@@ -1136,7 +1136,7 @@ function assertOrderedReadbackNativeOutcome(
     })
 }
 
-function unexpectedReadbackFailureCode(stage: ScratchReadbackFailureStage): string {
+function unexpectedReadbackFailureCode(stage: GPUReadbackFailureStage): string {
 
     if (stage === 'staging-allocation') return 'SCRATCH_READBACK_STAGING_NATIVE_FAILED'
     if (stage === 'copy-issue') return 'SCRATCH_READBACK_COPY_ISSUE_FAILED'
@@ -1147,7 +1147,7 @@ function unexpectedReadbackFailureCode(stage: ScratchReadbackFailureStage): stri
     return 'SCRATCH_READBACK_FAILED'
 }
 
-function unexpectedReadbackFailureMessage(stage: ScratchReadbackFailureStage): string {
+function unexpectedReadbackFailureMessage(stage: GPUReadbackFailureStage): string {
 
     if (stage === 'staging-allocation') return 'Readback staging allocation failed unexpectedly.'
     if (stage === 'copy-issue') return 'Readback copy issue failed before mapping.'
@@ -1161,7 +1161,7 @@ function unexpectedReadbackFailureMessage(stage: ScratchReadbackFailureStage): s
 const scheduledReadbackOperations = new WeakSet<ReadbackOperation>()
 
 export function createScheduledReadbackOperation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ScheduledReadbackOperationDescriptor
 ): ReadbackOperation {
 
@@ -1194,7 +1194,7 @@ export function createScheduledReadbackOperation(
 }
 
 export function createReadbackOperation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ReadbackOperationDescriptor
 ): ReadbackOperation {
 
@@ -1202,14 +1202,14 @@ export function createReadbackOperation(
 }
 
 function constructReadbackOperation(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ReadbackOperationDescriptor,
     construction: ReadbackOperationConstruction
 ): ReadbackOperation {
 
     const Constructor = ReadbackOperation as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: ReadbackOperationDescriptor,
         construction: ReadbackOperationConstruction
     ) => ReadbackOperation
@@ -1248,7 +1248,7 @@ function readbackTarget(operation: ReadbackOperation) {
     }
 }
 
-function readbackFact(operation: ReadbackOperation): ScratchRuntimeReadbackOperationFact {
+function readbackFact(operation: ReadbackOperation): GPURuntimeReadbackOperationFact {
 
     const path = readbackOperationPaths.get(operation) ?? 'direct'
     const state = readbackStateFor(operation)
@@ -1362,12 +1362,12 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
     }
 }
 
-function readbackRelatedSubjects(operation: ReadbackOperation): DiagnosticSubject[] {
+function readbackRelatedSubjects(operation: ReadbackOperation): ScratchDiagnosticSubject[] {
 
     return [
         readbackSourceSubject(operation.source),
         operation.after?.subject,
-    ].filter((subject): subject is DiagnosticSubject => subject !== undefined)
+    ].filter((subject): subject is ScratchDiagnosticSubject => subject !== undefined)
 }
 
 function normalizeSource(
@@ -1462,7 +1462,7 @@ function normalizeAfter(operation: ReadbackOperation, after?: SubmittedWork): Su
             severity: 'error',
             phase: 'readback',
             subject: operation.subject,
-            message: 'ReadbackOperation after must be a SubmittedWork from the same ScratchRuntime.',
+            message: 'ReadbackOperation after must be a SubmittedWork from the same GPURuntime.',
             expected: { after: 'SubmittedWork' },
             actual: { after: describeValue(after) },
         })
@@ -1492,7 +1492,7 @@ function readbackSourceResource(source: ReadbackSource): BufferResource | Textur
     return isBufferRegion(source) ? source.buffer : source.resource
 }
 
-function readbackSourceSubject(source: ReadbackSource): DiagnosticSubject {
+function readbackSourceSubject(source: ReadbackSource): ScratchDiagnosticSubject {
 
     return isBufferRegion(source) ? source.subject : source.resource.subject
 }

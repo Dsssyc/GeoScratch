@@ -6,93 +6,93 @@ import {
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type {
-    GpuAttributionConfidence,
-    GpuNativeErrorCategory,
-    ScratchGpuIncidentReport,
-    ScratchGpuReadbackOperationTarget,
-    ScratchReadbackNativeOutcome,
-    ScratchReadbackNativeOutcomeFact,
-    ScratchReadbackNativeStage,
-    ScratchSubmissionNativeLocation,
-    ScratchSubmissionNativeOutcome,
-    ScratchSubmissionNativeOutcomeFact,
-    ScratchSubmissionNativeOutcomeMode,
-    ScratchSubmissionNativeStage,
+    GPUAttributionConfidence,
+    GPUNativeErrorCategory,
+    GPUIncidentReport,
+    GPUReadbackOperationTarget,
+    GPUReadbackNativeOutcome,
+    GPUReadbackNativeOutcomeFact,
+    GPUReadbackNativeStage,
+    GPUSubmissionNativeLocation,
+    GPUSubmissionNativeOutcome,
+    GPUSubmissionNativeOutcomeFact,
+    GPUSubmissionNativeOutcomeMode,
+    GPUSubmissionNativeStage,
 } from './gpu-operation.js'
 import type {
-    ScratchPendingGpuOperation,
-    ScratchRuntimeLifecycleChange,
-    ScratchSubmissionNativeObservationReservation,
+    GPUPendingOperation,
+    GPURuntimeLifecycleChange,
+    GPUSubmissionNativeObservationReservation,
 } from './runtime-diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 
 type ScopeFilter = 'validation' | 'internal' | 'out-of-memory'
 const MAX_RETAINED_SUBMISSION_FAILURES = 64
 
 export type SubmissionNativeIssue = Readonly<{
-    stage: ScratchSubmissionNativeStage
-    location: ScratchSubmissionNativeLocation
+    stage: GPUSubmissionNativeStage
+    location: GPUSubmissionNativeLocation
 }>
 
 export type BeginSubmissionNativeObservationInput = Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     submissionId: string
     effectful: boolean
     plan: readonly SubmissionNativeIssue[]
 }>
 
 export type SubmissionNativeObservation = Readonly<{
-    mode: ScratchSubmissionNativeOutcomeMode
-    outcome: Promise<ScratchSubmissionNativeOutcome>
+    mode: GPUSubmissionNativeOutcomeMode
+    outcome: Promise<GPUSubmissionNativeOutcome>
     settlement: Promise<SubmissionNativeSettlement>
     issue<T>(
-        stage: ScratchSubmissionNativeStage,
-        location: ScratchSubmissionNativeLocation,
+        stage: GPUSubmissionNativeStage,
+        location: GPUSubmissionNativeLocation,
         issue: () => T
     ): T
     finish(): void
 }>
 
 export type SubmissionNativePrimaryFailure = Readonly<{
-    fact: ScratchSubmissionNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
+    fact: GPUSubmissionNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
     issueOrdinal: number
     cause?: unknown
-    incident?: ScratchGpuIncidentReport
+    incident?: GPUIncidentReport
 }>
 
 export type SubmissionNativeSettlement = Readonly<{
-    outcome: ScratchSubmissionNativeOutcome
+    outcome: GPUSubmissionNativeOutcome
     primaryFailure?: SubmissionNativePrimaryFailure
 }>
 
 export type BeginReadbackNativeObservationInput = Readonly<{
-    runtime: ScratchRuntime
-    target: ScratchGpuReadbackOperationTarget
-    plan: readonly ScratchReadbackNativeStage[]
+    runtime: GPURuntime
+    target: GPUReadbackOperationTarget
+    plan: readonly GPUReadbackNativeStage[]
 }>
 
 export type ReadbackNativeObservation = Readonly<{
-    mode: ScratchSubmissionNativeOutcomeMode
-    outcome: Promise<ScratchReadbackNativeOutcome>
+    mode: GPUSubmissionNativeOutcomeMode
+    outcome: Promise<GPUReadbackNativeOutcome>
     settlement: Promise<ReadbackNativeSettlement>
-    issue<T>(stage: ScratchReadbackNativeStage, issue: () => T): T
+    issue<T>(stage: GPUReadbackNativeStage, issue: () => T): T
     finish(): void
 }>
 
 export type ReadbackNativePrimaryFailure = Readonly<{
-    fact: ScratchReadbackNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
+    fact: GPUReadbackNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
     issueOrdinal: number
     cause?: unknown
-    incident?: ScratchGpuIncidentReport
+    incident?: GPUIncidentReport
 }>
 
 export type ReadbackNativeSettlement = Readonly<{
-    outcome: ScratchReadbackNativeOutcome
+    outcome: GPUReadbackNativeOutcome
     primaryFailure?: ReadbackNativePrimaryFailure
 }>
 
 type SubmissionObservedFailure = Readonly<{
-    fact: ScratchSubmissionNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
+    fact: GPUSubmissionNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
     issueOrdinal: number
     cause?: unknown
 }>
@@ -107,8 +107,8 @@ type PendingScopeObservation = Readonly<{
     observation: Promise<ScopePromiseObservation>
 }>
 
-type ScopeBundle<Location = ScratchSubmissionNativeLocation> = {
-    stage: ScratchSubmissionNativeStage
+type ScopeBundle<Location = GPUSubmissionNativeLocation> = {
+    stage: GPUSubmissionNativeStage
     location: Location
     issueOrdinal: number
     boundaryFailures: unknown[]
@@ -119,15 +119,15 @@ type ScopeBundle<Location = ScratchSubmissionNativeLocation> = {
 
 type ObservationState = {
     input: BeginSubmissionNativeObservationInput
-    mode: ScratchSubmissionNativeOutcomeMode
-    operation: ScratchPendingGpuOperation
-    reservation?: ScratchSubmissionNativeObservationReservation
+    mode: GPUSubmissionNativeOutcomeMode
+    operation: GPUPendingOperation
+    reservation?: GPUSubmissionNativeObservationReservation
     planKeys: Set<string>
     issueOrdinals: Map<string, number>
     issuedKeys: Set<string>
-    issuedLocations: ScratchSubmissionNativeLocation[]
+    issuedLocations: GPUSubmissionNativeLocation[]
     issuedLocationKeys: Set<string>
-    bundles: ScopeBundle<ScratchSubmissionNativeLocation>[]
+    bundles: ScopeBundle<GPUSubmissionNativeLocation>[]
     synchronousFailures: SubmissionObservedFailure[]
     summaryBundle?: ScopeBundle
     lifecycleFailure?: SubmissionObservedFailure
@@ -136,19 +136,19 @@ type ObservationState = {
 }
 
 type ReadbackObservedFailure = Readonly<{
-    fact: ScratchReadbackNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
+    fact: GPUReadbackNativeOutcomeFact & Readonly<{ diagnosticCode: string }>
     issueOrdinal: number
     cause?: unknown
 }>
 
 type ReadbackObservationState = {
     input: BeginReadbackNativeObservationInput
-    mode: ScratchSubmissionNativeOutcomeMode
-    operation: ScratchPendingGpuOperation
-    reservation?: ScratchSubmissionNativeObservationReservation
-    plan: Set<ScratchReadbackNativeStage>
-    issueOrdinals: Map<ScratchReadbackNativeStage, number>
-    issued: Set<ScratchReadbackNativeStage>
+    mode: GPUSubmissionNativeOutcomeMode
+    operation: GPUPendingOperation
+    reservation?: GPUSubmissionNativeObservationReservation
+    plan: Set<GPUReadbackNativeStage>
+    issueOrdinals: Map<GPUReadbackNativeStage, number>
+    issued: Set<GPUReadbackNativeStage>
     bundles: ScopeBundle<undefined>[]
     synchronousFailures: ReadbackObservedFailure[]
     summaryBundle?: ScopeBundle<undefined>
@@ -178,7 +178,7 @@ export function beginSubmissionNativeObservation(
     const reservation = mode === 'off'
         ? undefined
         : controller.reserveSubmissionNativeObservation(target)
-    let operation: ScratchPendingGpuOperation
+    let operation: GPUPendingOperation
     try {
         operation = controller.beginOperation({
             kind: 'submission-native-observation',
@@ -249,8 +249,8 @@ export function beginSubmissionNativeObservation(
         outcome,
         settlement,
         issue<T>(
-            stage: ScratchSubmissionNativeStage,
-            location: ScratchSubmissionNativeLocation,
+            stage: GPUSubmissionNativeStage,
+            location: GPUSubmissionNativeLocation,
             issue: () => T
         ): T {
 
@@ -316,7 +316,7 @@ export function beginReadbackNativeObservation(
     const reservation = mode === 'off'
         ? undefined
         : controller.reserveReadbackNativeObservation(input.target)
-    let operation: ScratchPendingGpuOperation
+    let operation: GPUPendingOperation
     try {
         operation = controller.beginOperation({
             kind: 'readback-native-observation',
@@ -378,7 +378,7 @@ export function beginReadbackNativeObservation(
         mode,
         outcome,
         settlement,
-        issue<T>(stage: ScratchReadbackNativeStage, issue: () => T): T {
+        issue<T>(stage: GPUReadbackNativeStage, issue: () => T): T {
 
             if (state.isFinished) {
                 throw new TypeError('Readback native observation is already finished.')
@@ -427,7 +427,7 @@ export function beginReadbackNativeObservation(
 
 function createEffectFreeObservation(
     submissionId: string,
-    mode: ScratchSubmissionNativeOutcomeMode
+    mode: GPUSubmissionNativeOutcomeMode
 ): SubmissionNativeObservation {
 
     const publicOutcome = createSubmissionNativeOutcome(submissionId, {
@@ -444,8 +444,8 @@ function createEffectFreeObservation(
         outcome,
         settlement,
         issue<T>(
-            _stage: ScratchSubmissionNativeStage,
-            _location: ScratchSubmissionNativeLocation,
+            _stage: GPUSubmissionNativeStage,
+            _location: GPUSubmissionNativeLocation,
             issue: () => T
         ): T {
 
@@ -491,7 +491,7 @@ async function settleObservation(
             },
         })
 
-        let incident: ScratchGpuIncidentReport | undefined
+        let incident: GPUIncidentReport | undefined
         if (primary !== undefined) {
             incident = controller.recordIncident({
                 kind: 'submission-failure',
@@ -603,7 +603,7 @@ async function settleReadbackObservation(
             },
         })
 
-        let incident: ScratchGpuIncidentReport | undefined
+        let incident: GPUIncidentReport | undefined
         if (primary !== undefined) {
             incident = controller.recordIncident({
                 kind: 'readback-failure',
@@ -684,7 +684,7 @@ async function settleReadbackObservation(
 function createPublicReadbackOutcome(
     state: ReadbackObservationState,
     failures: readonly ReadbackObservedFailure[]
-): ScratchReadbackNativeOutcome {
+): GPUReadbackNativeOutcome {
 
     if (state.mode === 'off') {
         return createReadbackNativeOutcome(state.input.target.readbackId, {
@@ -714,10 +714,10 @@ function createPublicReadbackOutcome(
 }
 
 function nativeObservationAttribution(
-    mode: ScratchSubmissionNativeOutcomeMode,
-    stage: ScratchSubmissionNativeStage,
-    category: GpuNativeErrorCategory
-): GpuAttributionConfidence {
+    mode: GPUSubmissionNativeOutcomeMode,
+    stage: GPUSubmissionNativeStage,
+    category: GPUNativeErrorCategory
+): GPUAttributionConfidence {
 
     if (stage === 'lifecycle-recheck' || category === 'device-lost') {
         return 'temporal-correlation'
@@ -728,7 +728,7 @@ function nativeObservationAttribution(
 function createPublicOutcome(
     state: ObservationState,
     failures: readonly SubmissionObservedFailure[]
-): ScratchSubmissionNativeOutcome {
+): GPUSubmissionNativeOutcome {
 
     if (state.mode === 'off') {
         return createSubmissionNativeOutcome(state.input.submissionId, {
@@ -817,7 +817,7 @@ function assertReadbackObservationInput(input: BeginReadbackNativeObservationInp
     if (!Array.isArray(input.plan) || input.plan.length === 0) {
         throw new TypeError('Readback native observation requires a non-empty plan.')
     }
-    const stages = new Set<ScratchReadbackNativeStage>()
+    const stages = new Set<GPUReadbackNativeStage>()
     for (const stage of input.plan) {
         createReadbackNativeOutcome(input.target.readbackId, {
             mode: 'detailed',
@@ -837,7 +837,7 @@ function assertReadbackObservationInput(input: BeginReadbackNativeObservationInp
 
 function openScopeBundle<Location>(
     device: GPUDevice,
-    stage: ScratchSubmissionNativeStage,
+    stage: GPUSubmissionNativeStage,
     location: Location,
     issueOrdinal: number
 ): ScopeBundle<Location> {
@@ -886,7 +886,7 @@ function closeScopeBundle<Location>(device: GPUDevice, bundle: ScopeBundle<Locat
 }
 
 async function settleScopeBundle(
-    bundle: ScopeBundle<ScratchSubmissionNativeLocation>
+    bundle: ScopeBundle<GPUSubmissionNativeLocation>
 ): Promise<SubmissionObservedFailure[]> {
 
     const failures = bundle.boundaryFailures.map(cause => observedFailure(
@@ -977,7 +977,7 @@ async function settleReadbackScopeBundle(
             continue
         }
         failures.push(readbackObservedFailure(
-            bundle.stage as ScratchReadbackNativeStage,
+            bundle.stage as GPUReadbackNativeStage,
             bundle.issueOrdinal,
             filter,
             readbackDiagnosticCodeForCategory(filter),
@@ -1008,9 +1008,9 @@ function popScope(device: GPUDevice): Promise<ScopePromiseObservation> {
 }
 
 function lifecycleFailure(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     submissionId: string,
-    change: ScratchRuntimeLifecycleChange
+    change: GPURuntimeLifecycleChange
 ): SubmissionObservedFailure {
 
     const location = submissionLocation(submissionId)
@@ -1034,8 +1034,8 @@ function lifecycleFailure(
 }
 
 function readbackLifecycleFailure(
-    runtime: ScratchRuntime,
-    change: ScratchRuntimeLifecycleChange
+    runtime: GPURuntime,
+    change: GPURuntimeLifecycleChange
 ): ReadbackObservedFailure {
 
     if (change.kind === 'device-lost') {
@@ -1056,10 +1056,10 @@ function readbackLifecycleFailure(
 }
 
 function observedFailure(
-    stage: ScratchSubmissionNativeStage,
-    location: ScratchSubmissionNativeLocation,
+    stage: GPUSubmissionNativeStage,
+    location: GPUSubmissionNativeLocation,
     issueOrdinal: number,
-    nativeErrorCategory: GpuNativeErrorCategory,
+    nativeErrorCategory: GPUNativeErrorCategory,
     diagnosticCode: string,
     cause?: unknown
 ): SubmissionObservedFailure {
@@ -1080,9 +1080,9 @@ function observedFailure(
 }
 
 function readbackObservedFailure(
-    stage: ScratchReadbackNativeStage,
+    stage: GPUReadbackNativeStage,
     issueOrdinal: number,
-    nativeErrorCategory: GpuNativeErrorCategory,
+    nativeErrorCategory: GPUNativeErrorCategory,
     diagnosticCode: string,
     cause?: unknown
 ): ReadbackObservedFailure {
@@ -1101,7 +1101,7 @@ function readbackObservedFailure(
     })
 }
 
-const submissionNativeStageOrder: readonly ScratchSubmissionNativeStage[] = Object.freeze([
+const submissionNativeStageOrder: readonly GPUSubmissionNativeStage[] = Object.freeze([
     'encoder-create',
     'attachment-view',
     'pass-begin',
@@ -1116,8 +1116,8 @@ const submissionNativeStageOrder: readonly ScratchSubmissionNativeStage[] = Obje
 ])
 
 export function compareSubmissionNativeStages(
-    left: ScratchSubmissionNativeStage,
-    right: ScratchSubmissionNativeStage
+    left: GPUSubmissionNativeStage,
+    right: GPUSubmissionNativeStage
 ): number {
 
     return submissionNativeStageOrder.indexOf(left) - submissionNativeStageOrder.indexOf(right)
@@ -1195,16 +1195,16 @@ function compareRankedSubmissionFailures(
 
 function retainIssuedLocation(
     state: ObservationState,
-    location: ScratchSubmissionNativeLocation
+    location: GPUSubmissionNativeLocation
 ): void {
 
     const key = locationKey(location)
     if (state.issuedLocationKeys.has(key)) return
     state.issuedLocationKeys.add(key)
-    state.issuedLocations.push(Object.freeze({ ...location }) as ScratchSubmissionNativeLocation)
+    state.issuedLocations.push(Object.freeze({ ...location }) as GPUSubmissionNativeLocation)
 }
 
-function submissionLocation(submissionId: string): ScratchSubmissionNativeLocation {
+function submissionLocation(submissionId: string): GPUSubmissionNativeLocation {
 
     return Object.freeze({ kind: 'submission', submissionId })
 }
@@ -1214,7 +1214,7 @@ function issueKey(issue: SubmissionNativeIssue): string {
     return `${issue.stage}:${locationKey(issue.location)}`
 }
 
-function locationKey(location: ScratchSubmissionNativeLocation): string {
+function locationKey(location: GPUSubmissionNativeLocation): string {
 
     return JSON.stringify(location)
 }

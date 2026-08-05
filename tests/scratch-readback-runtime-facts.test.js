@@ -52,7 +52,7 @@ describe('scratch readback runtime facts', () => {
     it('publishes finite default readback policy and empty current facts', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const snapshot = runtime.diagnostics.snapshot()
 
         expect(runtime.readbackPolicy).to.deep.equal({
@@ -97,7 +97,7 @@ describe('scratch readback runtime facts', () => {
             }
 
             const diagnostic = await expectScratchDiagnostic(
-                () => scr.ScratchRuntime.create({
+                () => scr.GPURuntime.create({
                     gpu,
                     readback: { [name]: value },
                 }),
@@ -115,7 +115,7 @@ describe('scratch readback runtime facts', () => {
     it('tracks immutable command and operation facts without native handles', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const controller = diagnosticsControllerFor(runtime)
         controller.registerReadbackCommand(commandFact())
         controller.registerReadbackOperation(operationFact())
@@ -153,7 +153,7 @@ describe('scratch readback runtime facts', () => {
     it('enforces pending-operation and staging-byte budgets without partial mutation', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({
+        const runtime = await scr.GPURuntime.create({
             gpu: fake.gpu,
             readback: {
                 maxPendingOperations: 1,
@@ -218,7 +218,7 @@ describe('scratch readback runtime facts', () => {
     it('accounts retained host bytes separately and returns current facts to zero under churn', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({
+        const runtime = await scr.GPURuntime.create({
             gpu: fake.gpu,
             readback: {
                 maxPendingOperations: 1,

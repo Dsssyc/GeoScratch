@@ -2,13 +2,13 @@ import { throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type {
-    GpuNativeErrorCategory,
-    ScratchGpuIncidentOutcome,
-    ScratchGpuReadbackOperationTarget,
-    ScratchReadbackFailureStage,
+    GPUNativeErrorCategory,
+    GPUIncidentOutcome,
+    GPUReadbackOperationTarget,
+    GPUReadbackFailureStage,
 } from './gpu-operation.js'
-import type { ScratchRuntime } from './runtime.js'
-import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
+import type { GPURuntime } from './runtime.js'
+import type { GPUPendingOperation } from './runtime-diagnostics.js'
 import type { ReadbackStagingCleanupResult } from './readback-staging.js'
 
 type PromiseObservation<T> =
@@ -21,16 +21,16 @@ type ScopeFilter = 'validation' | 'internal' | 'out-of-memory'
 
 type MappingFailure = Readonly<{
     code: string
-    category: GpuNativeErrorCategory
+    category: GPUNativeErrorCategory
     cause?: unknown
-    outcome: ScratchGpuIncidentOutcome
+    outcome: GPUIncidentOutcome
 }>
 
 export type ReadbackMappingLifecycleState = 'active' | 'cancelled' | 'disposed'
 
 export type ReadbackMappingInput = Readonly<{
-    runtime: ScratchRuntime
-    target: ScratchGpuReadbackOperationTarget
+    runtime: GPURuntime
+    target: GPUReadbackOperationTarget
     buffer: GPUBuffer
     byteLength: number
     label?: string
@@ -44,9 +44,9 @@ export type ReadbackMappingResult =
     | Readonly<{ status: 'cancelled', operationId: string }>
 
 type ReadbackMappingTransactionState = {
-    runtime: ScratchRuntime
-    target: ScratchGpuReadbackOperationTarget
-    operation: ScratchPendingGpuOperation
+    runtime: GPURuntime
+    target: GPUReadbackOperationTarget
+    operation: GPUPendingOperation
     isComplete: boolean
 }
 
@@ -173,10 +173,10 @@ export function cancelReadbackMapping(transaction: ReadbackMappingTransaction): 
 export function failReadbackMapping(
     transaction: ReadbackMappingTransaction,
     input: Readonly<{
-        stage: ScratchReadbackFailureStage
+        stage: GPUReadbackFailureStage
         code: string
         cause: unknown
-        category?: GpuNativeErrorCategory
+        category?: GPUNativeErrorCategory
     }>
 ): never {
 
@@ -333,10 +333,10 @@ function mapFailure(observation: Extract<PromiseObservation<undefined>, { status
 }
 
 function mappingStageFailure(input: Readonly<{
-    stage: ScratchReadbackFailureStage
+    stage: GPUReadbackFailureStage
     code: string
     cause: unknown
-    category?: GpuNativeErrorCategory
+    category?: GPUNativeErrorCategory
 }>): MappingFailure {
 
     const category = input.category ?? 'native-exception'
@@ -354,8 +354,8 @@ function mappingStageFailure(input: Readonly<{
 }
 
 function throwMappingFailures(
-    runtime: ScratchRuntime,
-    operation: ScratchPendingGpuOperation,
+    runtime: GPURuntime,
+    operation: GPUPendingOperation,
     failures: readonly MappingFailure[]
 ): never {
 
@@ -363,10 +363,10 @@ function throwMappingFailures(
 }
 
 function throwCompletedMappingFailure(
-    runtime: ScratchRuntime,
-    operation: ScratchPendingGpuOperation,
+    runtime: GPURuntime,
+    operation: GPUPendingOperation,
     failures: readonly MappingFailure[],
-    stage: ScratchReadbackFailureStage
+    stage: GPUReadbackFailureStage
 ): never {
 
     const incident = completeMappingFailure(runtime, operation, failures, stage)
@@ -375,7 +375,7 @@ function throwCompletedMappingFailure(
         code: primary.code,
         severity: 'error',
         phase: 'readback',
-        subject: { kind: 'GpuOperation', id: operation.id, operationKind: operation.kind },
+        subject: { kind: 'GPUOperation', id: operation.id, operationKind: operation.kind },
         related: [ runtime.subject, incident.subject ],
         message: mappingFailureMessage(primary.code),
         actual: {
@@ -390,10 +390,10 @@ function throwCompletedMappingFailure(
 }
 
 function completeMappingFailure(
-    runtime: ScratchRuntime,
-    operation: ScratchPendingGpuOperation,
+    runtime: GPURuntime,
+    operation: GPUPendingOperation,
     failures: readonly MappingFailure[],
-    stage: ScratchReadbackFailureStage
+    stage: GPUReadbackFailureStage
 ) {
 
     const controller = diagnosticsControllerFor(runtime)
@@ -418,7 +418,7 @@ function completeMappingFailure(
 
 function cancelMappingForLifecycle(
     input: ReadbackMappingInput,
-    operation: ScratchPendingGpuOperation,
+    operation: GPUPendingOperation,
     operationLifecycle: ReadbackMappingLifecycleState,
     runtimeLifecycle: 'active' | 'device-lost' | 'runtime-disposed',
     failures: readonly MappingFailure[]
@@ -475,7 +475,7 @@ function mappingLifecycleOutcome(
     operationLifecycle: ReadbackMappingLifecycleState,
     runtimeLifecycle: 'active' | 'device-lost' | 'runtime-disposed',
     deviceLostInfo: GPUDeviceLostInfo | undefined
-): ScratchGpuIncidentOutcome {
+): GPUIncidentOutcome {
 
     if (deviceLostInfo !== undefined || runtimeLifecycle === 'device-lost') {
         return Object.freeze({

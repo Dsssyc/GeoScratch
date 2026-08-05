@@ -1,7 +1,7 @@
 import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
-    ScratchRuntime,
+    GPURuntime,
     inspectShader,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
@@ -9,7 +9,7 @@ import { createFakeGpu } from './scratch-test-utils.js'
 async function createRuntimeFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
 
     return { ...fake, runtime }
 }

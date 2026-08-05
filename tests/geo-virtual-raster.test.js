@@ -1,5 +1,5 @@
 import { expect } from 'chai'
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import {
     VirtualRasterResidency,
     createVirtualRasterGpuState,
@@ -311,7 +311,7 @@ describe('Geo virtual raster', () => {
     it('lowers a publication into stable Scratch atlas/page-table resources and uploads', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const { addressSpace, plane, residency, pages } = fixture({ maxPhysicalPages: 2 })
         stage(residency, pages.get('0/0/0'))
         stage(residency, pages.get('0/1/0'))

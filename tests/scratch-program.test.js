@@ -2,7 +2,7 @@ import { expect } from 'chai'
 import {
     Program,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import { createFakeGpu, triangleWgsl } from './scratch-test-utils.js'
 
@@ -11,7 +11,7 @@ describe('scratch Program', () => {
     it('captures ShaderModule stage contracts, override facts, and device limits', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const vertexModule = await runtime.createShaderModule({
             sourceParts: [ { code: triangleWgsl } ],
         })
@@ -61,7 +61,7 @@ describe('scratch Program', () => {
     it('creates an explicit runtime-owned shader contract without resources', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const shaderModule = await runtime.createShaderModule({
             sourceParts: [ { code: triangleWgsl } ],
         })
@@ -93,7 +93,7 @@ describe('scratch Program', () => {
     it('rejects unavailable required features with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const shaderModule = await runtime.createShaderModule({
             sourceParts: [ { code: triangleWgsl } ],
         })
@@ -127,7 +127,7 @@ describe('scratch Program', () => {
             adapter.features.add(feature)
             device.features.add(feature)
         }
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu,
             requiredFeatures: [ 'subgroups', 'subgroup-size-control' ],
         })
@@ -174,7 +174,7 @@ describe('scratch Program', () => {
             adapter.features.add(feature)
             device.features.add(feature)
         }
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu,
             requiredFeatures: [ 'subgroups', 'subgroup-size-control' ],
         })
@@ -203,7 +203,7 @@ describe('scratch Program', () => {
     it('rejects use after disposal with structured diagnostics', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const shaderModule = await runtime.createShaderModule({
             sourceParts: [ { code: triangleWgsl } ],
         })

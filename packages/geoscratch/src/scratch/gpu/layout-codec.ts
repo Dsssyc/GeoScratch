@@ -14,7 +14,7 @@ import {
     layoutArtifactsSchemaCompatible,
 } from './layout-artifact.js'
 import { describeValue, isRecord } from './type-utils.js'
-import type { DiagnosticSubject, ScratchDiagnosticReport } from './diagnostics.js'
+import type { ScratchDiagnosticSubject, ScratchDiagnosticReport } from './diagnostics.js'
 import type {
     LayoutArtifact,
     LayoutAtomicTypeArtifact,
@@ -99,7 +99,7 @@ export class LayoutCodec {
         layoutCodecs.add(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return layoutArtifactSubject(this.artifact)
     }
@@ -1216,7 +1216,7 @@ function validateReadbackIndex(
 }
 
 function normalizeByteOffset(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     byteOffset: unknown
 ): number {
 
@@ -1236,7 +1236,7 @@ function normalizeByteOffset(
 }
 
 function createByteView(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     target: ArrayBuffer | ArrayBufferView,
     byteOffset: number,
     byteLength: number
@@ -1275,7 +1275,7 @@ function createByteView(
 }
 
 function normalizeBytes(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     bytes: unknown
 ): Uint8Array {
 
@@ -1291,7 +1291,7 @@ function normalizeBytes(
 }
 
 function normalizeNamespace(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     namespace: unknown,
     fallback: string
 ): string {
@@ -1348,7 +1348,7 @@ function throwValueDiagnostic(
 }
 
 function throwByteLengthDiagnostic(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     expected: unknown,
     actual: unknown
 ): never {
@@ -1364,7 +1364,7 @@ function throwByteLengthDiagnostic(
 
 function throwCodecDiagnostic(
     code: string,
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     message: string,
     expected: unknown,
     actual: unknown
@@ -1381,7 +1381,7 @@ function throwCodecDiagnostic(
     })
 }
 
-function fieldSubject(path: string): DiagnosticSubject {
+function fieldSubject(path: string): ScratchDiagnosticSubject {
 
     return {
         kind: 'LayoutField',
@@ -1390,7 +1390,7 @@ function fieldSubject(path: string): DiagnosticSubject {
     }
 }
 
-function unresolvedArtifactSubject(): DiagnosticSubject {
+function unresolvedArtifactSubject(): ScratchDiagnosticSubject {
 
     return {
         kind: 'LayoutArtifact',

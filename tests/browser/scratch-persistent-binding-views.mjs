@@ -96,7 +96,7 @@ async function verifyPersistentBindings(browser) {
     const probe = await page.evaluate(async ({ moduleUrl }) => {
         const {
             ScratchDiagnosticError,
-            ScratchRuntime,
+            GPURuntime,
             layoutCodec,
         } = await import(moduleUrl)
         const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })
@@ -107,7 +107,7 @@ async function verifyPersistentBindings(browser) {
             'texture-formats-tier1',
             'texture-formats-tier2',
         ].filter(feature => adapter.features.has(feature))
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             label: 'browser persistent binding views probe',
             requiredFeatures: optionalFeatures,
             diagnostics: {

@@ -3,7 +3,7 @@ import { expect } from 'chai'
 import {
     DispatchCommand,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
 
@@ -64,7 +64,7 @@ describe('Scratch Command bound resource access', () => {
     it('requires read-write storage buffers in both read and write declarations', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const buffer = await runtime.createBuffer({
             size: 256,
             usage: GPU_BUFFER_USAGE_STORAGE,
@@ -135,7 +135,7 @@ describe('Scratch Command bound resource access', () => {
     it('rejects empty read-write storage buffers during submission readiness validation', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const buffer = await runtime.createBuffer({
             size: 256,
             usage: GPU_BUFFER_USAGE_STORAGE,
@@ -168,7 +168,7 @@ describe('Scratch Command bound resource access', () => {
     it('requires sampled textures as parent-resource reads', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
             size: [ 4, 4 ],
             format: 'rgba8unorm',
@@ -209,7 +209,7 @@ describe('Scratch Command bound resource access', () => {
     it('accepts directly bound sampled textures and preserves parent-resource access', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
             size: [ 4, 4 ],
             format: 'rgba8unorm',
@@ -257,7 +257,7 @@ describe('Scratch Command bound resource access', () => {
             const fake = createFakeGpu()
             fake.device.features.add('core-features-and-limits')
             fake.device.features.add('texture-formats-tier2')
-            const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+            const runtime = await GPURuntime.create({ gpu: fake.gpu })
             const texture = await runtime.createTexture({
                 size: [ 4, 4 ],
                 format: 'rgba8unorm',
@@ -293,7 +293,7 @@ describe('Scratch Command bound resource access', () => {
         const fake = createFakeGpu()
         fake.device.features.add('core-features-and-limits')
         fake.device.features.add('texture-formats-tier2')
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
             size: [ 4, 4 ],
             format: 'rgba8unorm',

@@ -38,7 +38,7 @@ async function createDirectFixture({ diagnostics, deferMaps = false } = {}) {
         deferMaps,
     }
     const fake = createFakeGpu(fakeOptions)
-    const runtime = await scr.ScratchRuntime.create({
+    const runtime = await scr.GPURuntime.create({
         gpu: fake.gpu,
         ...(diagnostics !== undefined ? { diagnostics } : {}),
     })
@@ -57,7 +57,7 @@ async function createOrderedFixture({ diagnostics } = {}) {
 
     const fakeOptions = { deferErrorScopePops: false }
     const fake = createFakeGpu(fakeOptions)
-    const runtime = await scr.ScratchRuntime.create({
+    const runtime = await scr.GPURuntime.create({
         gpu: fake.gpu,
         ...(diagnostics !== undefined ? { diagnostics } : {}),
     })

@@ -133,14 +133,14 @@ async function verifyReadbackTransactions(browser) {
         diagnosticsModuleUrl,
         ownershipModuleUrl,
     }) => {
-        const { ScratchRuntime } = await import(runtimeModuleUrl)
+        const { GPURuntime } = await import(runtimeModuleUrl)
         const { ScratchDiagnosticError } = await import(diagnosticModuleUrl)
         const { diagnosticsControllerFor } = await import(diagnosticsModuleUrl)
         const {
             runtimeReadbackCommandCount,
             runtimeReadbackOperationCount,
         } = await import(ownershipModuleUrl)
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             label: 'browser readback provenance probe',
             readback: {
                 maxPendingOperations: 16,
@@ -228,7 +228,7 @@ async function verifyReadbackTransactions(browser) {
         success.lifecycleSubscriberCount = diagnosticsControllerFor(runtime).lifecycleSubscriberCount
         runtime.dispose()
 
-        const budgetRuntime = await ScratchRuntime.create({
+        const budgetRuntime = await GPURuntime.create({
             label: 'browser readback budget probe',
             readback: { maxPendingOperations: 2, maxStagingBytes: 8 },
         })

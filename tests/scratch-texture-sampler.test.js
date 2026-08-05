@@ -5,7 +5,7 @@ import {
     BindSet,
     SamplerResource,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     TextureResource,
     TextureUploadCommand,
 } from 'geoscratch'
@@ -29,7 +29,7 @@ async function createTextureFixture({ features = [] } = {}) {
 
     const fake = createFakeGpu()
     for (const feature of features) fake.device.features.add(feature)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const texture = await runtime.createTexture({
         label: 'checker texture',
         size: { width: 2, height: 2 },
@@ -261,7 +261,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
     it('preserves full 2d-array bindings and rejects layer subsets on compatibility devices', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
             size: [ 2, 2, 3 ],
             format: 'rgba8unorm',
@@ -342,7 +342,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
 
         const fake = createFakeGpu()
         fake.device.features.add('core-features-and-limits')
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
             size: [ 2, 2, 6 ],
             format: 'rgba8unorm',
@@ -654,7 +654,7 @@ describe('scratch TextureResource, SamplerResource, and TextureUploadCommand', (
     it('rejects invalid texture and sampler binding descriptors with structured diagnostics', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
 
         try {
             await runtime.createBindLayout({

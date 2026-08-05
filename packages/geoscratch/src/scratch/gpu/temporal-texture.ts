@@ -10,8 +10,8 @@ import {
     surfaceFactsFor,
 } from './surface.js'
 import { describeValue, getGlobalConstant, isRecord } from './type-utils.js'
-import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { ScratchDiagnosticSubject } from './diagnostics.js'
+import type { GPURuntime } from './runtime.js'
 import type {
     PreparedSurfaceAttachment,
     Surface,
@@ -44,7 +44,7 @@ export type ExternalTextureBindingDescriptor = {
 type ExternalTextureSourceKind = 'HTMLVideoElement' | 'VideoFrame'
 
 type ExternalTextureBindingState = Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     label?: string
     source: HTMLVideoElement | VideoFrame
@@ -53,7 +53,7 @@ type ExternalTextureBindingState = Readonly<{
 }>
 
 export interface ExternalTextureBinding {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly sourceKind: ExternalTextureSourceKind
@@ -64,13 +64,13 @@ export class ExternalTextureBinding {
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: ExternalTextureBindingDescriptor
     ) {
 
         if (token !== externalTextureBindingToken || new.target !== ExternalTextureBinding) {
             throw new TypeError(
-                'ExternalTextureBinding must be created by ScratchRuntime.createExternalTextureBinding().'
+                'ExternalTextureBinding must be created by GPURuntime.createExternalTextureBinding().'
             )
         }
         assertScratchRuntimeActive(runtime)
@@ -94,7 +94,7 @@ export class ExternalTextureBinding {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         const state = externalTextureBindingStateFor(this)
         return {
@@ -105,7 +105,7 @@ export class ExternalTextureBinding {
         }
     }
 
-    assertRuntime(runtime: ScratchRuntime): void {
+    assertRuntime(runtime: GPURuntime): void {
 
         const state = externalTextureBindingStateFor(this)
         assertScratchRuntimeActive(state.runtime)
@@ -116,7 +116,7 @@ export class ExternalTextureBinding {
             phase: 'binding',
             subject: this.subject,
             related: [ state.runtime.subject, runtime.subject ],
-            message: 'ExternalTextureBinding belongs to a different ScratchRuntime.',
+            message: 'ExternalTextureBinding belongs to a different GPURuntime.',
             expected: { runtimeId: state.runtime.id },
             actual: { runtimeId: runtime.id },
         })
@@ -126,13 +126,13 @@ export class ExternalTextureBinding {
 Object.freeze(ExternalTextureBinding.prototype)
 
 export function createExternalTextureBinding(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ExternalTextureBindingDescriptor
 ): ExternalTextureBinding {
 
     const Constructor = ExternalTextureBinding as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: ExternalTextureBindingDescriptor
     ) => ExternalTextureBinding
     return new Constructor(externalTextureBindingToken, runtime, descriptor)
@@ -147,7 +147,7 @@ export function isExternalTextureBinding(value: unknown): value is ExternalTextu
 
 export function assertExternalTextureBindingUsable(
     binding: ExternalTextureBinding,
-    runtime: ScratchRuntime
+    runtime: GPURuntime
 ): void {
 
     binding.assertRuntime(runtime)
@@ -157,13 +157,13 @@ export function assertExternalTextureBindingUsable(
 export type SurfaceTextureLeaseState = 'pending' | 'active' | 'expired'
 
 export type SurfaceTextureLeaseOwner = {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly isSubmitted: boolean
 }
 
 type SurfaceTextureLeaseInternalState = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     owner: SurfaceTextureLeaseOwner
     surface: Surface
@@ -173,7 +173,7 @@ type SurfaceTextureLeaseInternalState = {
 }
 
 export interface SurfaceTextureLease {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly surface: Surface
     readonly state: SurfaceTextureLeaseState
@@ -245,7 +245,7 @@ export class SurfaceTextureLease {
         Object.preventExtensions(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         const state = surfaceTextureLeaseStateFor(this)
         return {
@@ -294,7 +294,7 @@ export class SurfaceTextureView {
         Object.freeze(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         const state = surfaceTextureViewStateFor(this)
         return {
@@ -467,7 +467,7 @@ export type AttemptTextureBindingResource =
 export class AttemptTextureAuthority {
 
     readonly #owner: SurfaceTextureLeaseOwner
-    readonly #runtime: ScratchRuntime
+    readonly #runtime: GPURuntime
     readonly #surfaceTextures = new Map<Surface, {
         texture: GPUTexture
         configurationVersion: number
@@ -649,8 +649,8 @@ export class AttemptTextureAuthority {
 function createAttemptTextureView(
     texture: GPUTexture,
     descriptor: GPUTextureViewDescriptor | undefined,
-    subject: DiagnosticSubject,
-    related: DiagnosticSubject[] = []
+    subject: ScratchDiagnosticSubject,
+    related: ScratchDiagnosticSubject[] = []
 ): GPUTextureView {
 
     try {
@@ -671,7 +671,7 @@ function createAttemptTextureView(
 export function surfaceTextureLeaseFacts(
     lease: SurfaceTextureLease
 ): Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     owner: SurfaceTextureLeaseOwner
     surface: Surface
@@ -721,7 +721,7 @@ export function surfaceTextureUsageForRole(
 }
 
 function normalizeExternalTextureBindingDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: ExternalTextureBindingDescriptor
 ): ExternalTextureBindingState {
 
@@ -784,7 +784,7 @@ function assertExternalTextureSourceUsable(
 }
 
 function throwExternalTextureSourceInvalid(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     source: unknown,
     field: string
 ): never {

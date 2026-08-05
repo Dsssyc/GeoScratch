@@ -2,7 +2,7 @@ import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     createFakeGpu,
@@ -29,7 +29,7 @@ async function expectScratchDiagnostic(action, expected) {
 async function createRenderFixture(size = [ 32, 24 ]) {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const target = await runtime.createTexture({
         size,
         format: 'rgba8unorm',
@@ -242,7 +242,7 @@ describe('scratch ClearBufferCommand', () => {
     it('uses native clearBuffer in declared order and records one buffer write', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const buffer = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -315,7 +315,7 @@ describe('scratch ClearBufferCommand', () => {
     it('satisfies a later same-submission content dependency in declared order', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({
             size: 8,
             usage: GPU_BUFFER_USAGE_COPY_SRC | GPU_BUFFER_USAGE_COPY_DST,
@@ -382,7 +382,7 @@ describe('scratch ClearBufferCommand', () => {
     it('treats a zero-size clear as a physical and logical no-op', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const buffer = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,
@@ -408,7 +408,7 @@ describe('scratch ClearBufferCommand', () => {
     it('rejects invalid target, usage, alignment, and replacement range', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const sourceOnly = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_SRC,
@@ -454,7 +454,7 @@ describe('scratch ClearBufferCommand', () => {
     it('rejects a disposed target before native effects', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const buffer = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,
@@ -475,7 +475,7 @@ describe('scratch ClearBufferCommand', () => {
     it('attributes native clear failure and marks only the target write indeterminate', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const buffer = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,
@@ -520,7 +520,7 @@ describe('scratch ClearBufferCommand', () => {
     it('marks the clear target indeterminate when device loss precedes queue completion', async() => {
 
         const fake = createFakeGpu({ deferSubmittedWorkDone: true })
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const buffer = await runtime.createBuffer({
             size: 16,
             usage: GPU_BUFFER_USAGE_COPY_DST,

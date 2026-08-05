@@ -1,6 +1,6 @@
 import {
     MercatorCoordinate,
-    ScratchRuntime,
+    GPURuntime,
     layoutCodec,
 } from 'geoscratch'
 import { mat4 } from 'wgpu-matrix'
@@ -21,8 +21,8 @@ import type {
     RenderPassSpec,
     RenderPassDepthStencilAttachmentSpec,
     Resource,
-    ScratchComputePipeline,
-    ScratchRenderPipeline,
+    ComputePipeline,
+    RenderPipeline,
     SubmittedWork,
     Surface,
     SurfaceSize,
@@ -166,11 +166,11 @@ type FlowSettings = Readonly<{
 
 export type FlowFailureProof = Readonly<{
     simulationShader(source: string): string
-    beforeSimulationShaderModule(runtime: ScratchRuntime): void
+    beforeSimulationShaderModule(runtime: GPURuntime): void
 }>
 
 type FlowLayerCreateOptions = Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     surface: Surface
     map: FlowMap
     lifetime: FlowLifecycle
@@ -289,7 +289,7 @@ type FlowHistoryDirection = Readonly<{
 }>
 
 type FlowGraph = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     surface: Surface
     map: FlowMap
     settings: FlowSettings
@@ -325,7 +325,7 @@ export async function createFlowLayer({
     failureProof,
 }: FlowLayerCreateOptions) {
 
-    if (!(runtime instanceof ScratchRuntime)) throw new TypeError('Flow Layer requires ScratchRuntime')
+    if (!(runtime instanceof GPURuntime)) throw new TypeError('Flow Layer requires GPURuntime')
     const settings = normalizeOptions(options)
     const codecs = createCodecs()
     const stationGeometry = await createStationGeometry(settings.flowDomainMaxEdge, lifetime.signal)
@@ -482,7 +482,7 @@ function createCodecs() {
 }
 
 async function createUniformResources(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     codecs: FlowCodecs,
     settings: FlowSettings,
     size: SurfaceSize
@@ -563,7 +563,7 @@ async function createUniformResources(
 }
 
 async function createUniform<T extends FlowLayoutValues>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     label: string,
     codec: LayoutCodec,
     values: T
@@ -660,7 +660,7 @@ function createParticleData(random: FlowRandom): Float32Array {
 }
 
 async function createBufferResources(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     geometry: FlowStationGeometry,
     fields: FlowFieldData,
     particles: Float32Array
@@ -701,7 +701,7 @@ async function createBufferResources(
 }
 
 async function createBufferWithUpload<T extends Float32Array | Uint32Array>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     label: string,
     data: T,
     usage: GPUBufferUsageFlags
@@ -717,7 +717,7 @@ async function createBufferWithUpload<T extends Float32Array | Uint32Array>(
     }
 }
 
-async function createTextures(runtime: ScratchRuntime, size: SurfaceSize) {
+async function createTextures(runtime: GPURuntime, size: SurfaceSize) {
 
     const sampledTargetUsage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
     const flow = await runtime.createTexture({
@@ -767,7 +767,7 @@ async function createTextures(runtime: ScratchRuntime, size: SurfaceSize) {
     }
 }
 
-async function createBindLayouts(runtime: ScratchRuntime, codecs: FlowCodecs) {
+async function createBindLayouts(runtime: GPURuntime, codecs: FlowCodecs) {
 
     const uniform = (
         binding: number,
@@ -875,7 +875,7 @@ async function createBindLayouts(runtime: ScratchRuntime, codecs: FlowCodecs) {
 }
 
 async function createBindSets(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     layouts: FlowLayouts,
     uniforms: FlowUniforms,
     buffers: FlowBuffers,
@@ -931,7 +931,7 @@ async function createBindSets(
 }
 
 async function createPrograms(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     codecs: FlowCodecs,
     failureProof: FlowFailureProof
 ) {
@@ -1031,7 +1031,7 @@ async function createPrograms(
 }
 
 async function createPipelines(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     surface: Surface,
     textures: FlowTextures,
     layouts: FlowLayouts,
@@ -1145,7 +1145,7 @@ function vertexLayout(
     }
 }
 
-function createPasses(runtime: ScratchRuntime, surface: Surface, textures: FlowTextures) {
+function createPasses(runtime: GPURuntime, surface: Surface, textures: FlowTextures) {
 
     const depth: RenderPassDepthStencilAttachmentSpec = {
         target: textures.views.depth,
@@ -1192,7 +1192,7 @@ function createPasses(runtime: ScratchRuntime, surface: Surface, textures: FlowT
 }
 
 function createCommands(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     uniforms: FlowUniforms,
     buffers: FlowBuffers,
     textures: FlowTextures,
@@ -1732,7 +1732,7 @@ function stableIdentitySnapshot(graph: FlowGraph): string[] {
     return [ ...new Set(objects.map(object => object.id)) ].sort()
 }
 
-function persistentFactSnapshot(runtime: ScratchRuntime): FlowPersistentFacts {
+function persistentFactSnapshot(runtime: GPURuntime): FlowPersistentFacts {
 
     const facts = runtime.diagnostics.snapshot()
     return Object.freeze({

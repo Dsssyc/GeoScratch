@@ -9,16 +9,16 @@ import {
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type {
-    GpuAttributionConfidence,
-    GpuNativeErrorCategory,
-    ScratchGpuIncidentReport,
-    ScratchGpuCommandOperationTarget,
-    ScratchGpuOperationRecord,
-    ScratchGpuReadbackOperationTarget,
+    GPUAttributionConfidence,
+    GPUNativeErrorCategory,
+    GPUIncidentReport,
+    GPUCommandOperationTarget,
+    GPUOperationRecord,
+    GPUReadbackOperationTarget,
 } from './gpu-operation.js'
 import type { ScopedNativeAllocationFailureKind, ScopedNativeAllocationOutcome } from './native-allocation.js'
-import type { ScratchRuntime } from './runtime.js'
-import type { ScratchPendingGpuOperation, ScratchReadbackStagingReservation } from './runtime-diagnostics.js'
+import type { GPURuntime } from './runtime.js'
+import type { GPUPendingOperation, GPUReadbackStagingReservation } from './runtime-diagnostics.js'
 import type { Resource } from './resource.js'
 
 const BUFFER_USAGE_MAP_READ = 0x1
@@ -26,11 +26,11 @@ const BUFFER_USAGE_COPY_DST = 0x8
 const readbackStagingSlotToken = Symbol('ReadbackStagingSlot')
 
 export type ReadbackStagingTarget =
-    | ScratchGpuCommandOperationTarget
-    | ScratchGpuReadbackOperationTarget
+    | GPUCommandOperationTarget
+    | GPUReadbackOperationTarget
 
 export type ReadbackStagingAllocationInput = Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     target: ReadbackStagingTarget
     source: Resource
     byteLength: number
@@ -38,13 +38,13 @@ export type ReadbackStagingAllocationInput = Readonly<{
 }>
 
 type ReadbackStagingSlotState = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     id: string
     byteLength: number
     allocationOperationId: string
     target: ReadbackStagingTarget
     buffer: GPUBuffer
-    reservation: ScratchReadbackStagingReservation
+    reservation: GPUReadbackStagingReservation
     isReleased: boolean
 }
 
@@ -55,12 +55,12 @@ export type ReadbackStagingCleanupFailure = Readonly<{
 
 export type ReadbackStagingCleanupResult = Readonly<{
     failures: readonly ReadbackStagingCleanupFailure[]
-    releaseOperation?: ScratchGpuOperationRecord
-    incident?: ScratchGpuIncidentReport
+    releaseOperation?: GPUOperationRecord
+    incident?: GPUIncidentReport
 }>
 
 export type ReadbackStagingReleaseRecordInput = Readonly<{
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     target: ReadbackStagingTarget
     byteLength: number
     allocationOperationId: string
@@ -131,7 +131,7 @@ export async function allocateReadbackStaging(
         fullDescriptor: { ...nativeDescriptor },
         nativeLabel,
     })
-    let reservation: ScratchReadbackStagingReservation
+    let reservation: GPUReadbackStagingReservation
     try {
         reservation = controller.reserveReadbackStaging(operation.id, byteLength)
     } catch (cause) {
@@ -262,7 +262,7 @@ export function recordReadbackStagingRelease(
         status: failures.length === 0 ? 'succeeded' : 'failed',
         ...(failures.length > 0 ? { nativeErrorCategory: 'native-exception' } : {}),
     })
-    let incident: ScratchGpuIncidentReport | undefined
+    let incident: GPUIncidentReport | undefined
     if (failures.length > 0 && input.recordIncident !== false) {
         incident = controller.recordIncident({
             kind: 'readback-failure',
@@ -294,8 +294,8 @@ function readbackCleanupFailureCode(kind: ReadbackStagingCleanupFailure['kind'])
 
 function freezeReadbackStagingCleanupResult(
     failures: readonly ReadbackStagingCleanupFailure[],
-    releaseOperation?: ScratchGpuOperationRecord,
-    incident?: ScratchGpuIncidentReport
+    releaseOperation?: GPUOperationRecord,
+    incident?: GPUIncidentReport
 ): ReadbackStagingCleanupResult {
 
     return Object.freeze({
@@ -326,8 +326,8 @@ function stagingTargetId(target: ReadbackStagingTarget): string {
 }
 
 function throwReadbackStagingBudgetFailure(
-    runtime: ScratchRuntime,
-    operation: ScratchPendingGpuOperation,
+    runtime: GPURuntime,
+    operation: GPUPendingOperation,
     source: Resource,
     cause: unknown
 ): never {
@@ -359,14 +359,14 @@ function throwReadbackStagingBudgetFailure(
         phase: 'readback',
         subject: gpuOperationSubject(operation),
         related: [ runtime.subject, stagingTargetSubject(operation.target), source.subject ],
-        message: 'ScratchRuntime readback staging budget is exhausted.',
+        message: 'GPURuntime readback staging budget is exhausted.',
         ...(actual !== undefined ? { actual } : {}),
     }, { cause, incident })
 }
 
 function throwReadbackStagingAllocationFailure(
-    runtime: ScratchRuntime,
-    operation: ScratchPendingGpuOperation,
+    runtime: GPURuntime,
+    operation: GPUPendingOperation,
     source: Resource,
     outcome: Extract<ScopedNativeAllocationOutcome<GPUBuffer>, { ok: false }>
 ): never {
@@ -456,7 +456,7 @@ function stagingFailureCode(kind: ScopedNativeAllocationFailureKind): string {
     return 'SCRATCH_READBACK_STAGING_NATIVE_FAILED'
 }
 
-function stagingFailureNativeCategory(kind: ScopedNativeAllocationFailureKind): GpuNativeErrorCategory {
+function stagingFailureNativeCategory(kind: ScopedNativeAllocationFailureKind): GPUNativeErrorCategory {
 
     if (kind === 'validation' || kind === 'out-of-memory' || kind === 'scope-failure') return kind
     if (kind === 'device-lost') return 'device-lost'
@@ -464,7 +464,7 @@ function stagingFailureNativeCategory(kind: ScopedNativeAllocationFailureKind): 
     return 'native-exception'
 }
 
-function stagingFailureAttribution(kind: ScopedNativeAllocationFailureKind): GpuAttributionConfidence {
+function stagingFailureAttribution(kind: ScopedNativeAllocationFailureKind): GPUAttributionConfidence {
 
     return kind === 'device-lost' ? 'temporal-correlation' : 'exact-operation'
 }
@@ -475,21 +475,21 @@ function stagingFailureMessage(kind: ScopedNativeAllocationFailureKind): string 
     if (kind === 'out-of-memory') return 'Readback staging allocation observed native out-of-memory.'
     if (kind === 'scope-failure') return 'Readback staging allocation error scopes failed to settle structurally.'
     if (kind === 'device-lost') return 'GPU device was lost while readback staging allocation was pending.'
-    if (kind === 'runtime-disposed') return 'ScratchRuntime was disposed while readback staging allocation was pending.'
+    if (kind === 'runtime-disposed') return 'GPURuntime was disposed while readback staging allocation was pending.'
     if (kind === 'resource-disposed') return 'Readback source was disposed while staging allocation was pending.'
     return 'Readback staging allocation failed with a synchronous native exception.'
 }
 
-function gpuOperationSubject(operation: ScratchPendingGpuOperation) {
+function gpuOperationSubject(operation: GPUPendingOperation) {
 
     return {
-        kind: 'GpuOperation',
+        kind: 'GPUOperation',
         id: operation.id,
         operationKind: operation.kind,
     }
 }
 
-function stagingTargetSubject(target: ScratchPendingGpuOperation['target']) {
+function stagingTargetSubject(target: GPUPendingOperation['target']) {
 
     if (target.kind === 'command') {
         return { kind: 'Command', id: target.commandId, commandKind: target.commandKind }

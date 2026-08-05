@@ -1,4 +1,4 @@
-import type { ScratchRuntime } from 'geoscratch'
+import type { GPURuntime } from 'geoscratch'
 import type { DemMap } from './dem-map.ts'
 
 type LifecycleState = 'active' | 'disposing' | 'disposed'
@@ -57,7 +57,7 @@ export function createDemLifecycle() {
     const cleanupActions: CleanupAction[] = []
     const cleanupFailures: CleanupFailure[] = []
     let map: DemMap | undefined
-    let runtime: ScratchRuntime | undefined
+    let runtime: GPURuntime | undefined
     let nextActionId = 1
     let nextObservationId = 1
     let state: LifecycleState = 'active'
@@ -94,7 +94,7 @@ export function createDemLifecycle() {
         return value
     }
 
-    function ownRuntime(value: ScratchRuntime) {
+    function ownRuntime(value: GPURuntime) {
 
         assertActive('own Scratch runtime')
         if (value === undefined || value === null) throw new TypeError('Scratch runtime must be defined')
@@ -162,8 +162,8 @@ export function createDemLifecycle() {
     }
 
     function acquireRuntime(
-        acquisition: ScratchRuntime | PromiseLike<ScratchRuntime>
-    ): Promise<ScratchRuntime> {
+        acquisition: GPURuntime | PromiseLike<GPURuntime>
+    ): Promise<GPURuntime> {
 
         assertActive('acquire Scratch runtime')
         const guarded = Promise.resolve(acquisition).then(async value => {

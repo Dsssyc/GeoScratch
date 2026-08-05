@@ -36,7 +36,7 @@ describe('Hello GAW Scratch clean cut', () => {
         const source = read('examples', 'helloGAW', 'main.ts')
 
         expect(source).to.include("from 'geoscratch'")
-        expect(source).to.include('ScratchRuntime')
+        expect(source).to.include('GPURuntime')
         expect(source).to.include('createSurface')
         expect(source).to.include('createExternalImageUploadCommand')
         expect(source).to.include('createSubmission')

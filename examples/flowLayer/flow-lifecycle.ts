@@ -1,4 +1,4 @@
-import type { ScratchRuntime } from 'geoscratch'
+import type { GPURuntime } from 'geoscratch'
 import type { FlowMap } from './flow-map.ts'
 
 type FlowLifecycleState = 'active' | 'disposing' | 'disposed'
@@ -59,8 +59,8 @@ export type FlowLifecycleSnapshot = Readonly<{
 export type FlowLifecycle = Readonly<{
     ownWorker(value: Worker): Worker
     ownMap(value: FlowMap): FlowMap
-    ownRuntime(value: ScratchRuntime): ScratchRuntime
-    acquireRuntime(acquisition: ScratchRuntime | PromiseLike<ScratchRuntime>): Promise<ScratchRuntime>
+    ownRuntime(value: GPURuntime): GPURuntime
+    acquireRuntime(acquisition: GPURuntime | PromiseLike<GPURuntime>): Promise<GPURuntime>
     deferStop(action: Readonly<{
         label: string
         run: () => void | Promise<void>
@@ -83,7 +83,7 @@ export function createFlowLifecycle() {
     const cleanupFailures: FlowCleanupFailure[] = []
     let worker: Worker | undefined
     let map: FlowMap | undefined
-    let runtime: ScratchRuntime | undefined
+    let runtime: GPURuntime | undefined
     let nextActionId = 1
     let nextObservationId = 1
     let state: FlowLifecycleState = 'active'
@@ -112,7 +112,7 @@ export function createFlowLifecycle() {
         if (state !== 'active') throw lifecycleStopError()
     }
 
-    function own<T extends Worker | FlowMap | ScratchRuntime>(
+    function own<T extends Worker | FlowMap | GPURuntime>(
         kind: 'worker' | 'map' | 'runtime',
         value: T
     ): T {
@@ -127,7 +127,7 @@ export function createFlowLifecycle() {
             map = value as FlowMap
         } else {
             if (runtime !== undefined) throw new Error('Flow runtime ownership is already established')
-            runtime = value as ScratchRuntime
+            runtime = value as GPURuntime
         }
         return value
     }
@@ -185,8 +185,8 @@ export function createFlowLifecycle() {
     }
 
     function acquireRuntime(
-        acquisition: ScratchRuntime | PromiseLike<ScratchRuntime>
-    ): Promise<ScratchRuntime> {
+        acquisition: GPURuntime | PromiseLike<GPURuntime>
+    ): Promise<GPURuntime> {
 
         assertActive('acquire Scratch runtime')
         const guarded = Promise.resolve(acquisition).then(async value => {

@@ -100,7 +100,7 @@ describe('Scratch foundation source topology', () => {
             const forbiddenDomainImport = /from ['"][^'"]*(?:gpu|geo|cache)[^'"]*['"]/
             expect(source, basename).not.to.match(forbiddenDomainImport)
             expect(source, basename).not.to.match(
-                /\b(?:GPUDevice|GPUCanvasContext|HTMLCanvasElement|OffscreenCanvas|ScratchRuntime)\b/
+                /\b(?:GPUDevice|GPUCanvasContext|HTMLCanvasElement|OffscreenCanvas|GPURuntime)\b/
             )
         }
     })

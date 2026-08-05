@@ -34,7 +34,7 @@ describe('generic WorkerSystem public contract', () => {
         const workerRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch', 'worker')
         for (const name of fs.readdirSync(workerRoot).filter(name => name.endsWith('.ts'))) {
             const source = fs.readFileSync(path.join(workerRoot, name), 'utf8')
-            expect(source, name).not.to.match(/\.\.\/gpu|\.\.\/\.\.\/geo|ScratchRuntime|GPUDevice|TileMatrix|DEM/)
+            expect(source, name).not.to.match(/\.\.\/gpu|\.\.\/\.\.\/geo|GPURuntime|GPUDevice|TileMatrix|DEM/)
         }
     })
 })

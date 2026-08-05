@@ -1,8 +1,8 @@
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 import type {
-    ScratchDiagnosticCapture,
-    ScratchDiagnosticCaptureReport,
-    ScratchRuntimeDiagnosticsEvidence,
+    GPUDiagnosticCapture,
+    GPUDiagnosticCaptureReport,
+    GPURuntimeDiagnosticsEvidence,
     Surface,
     SurfaceSize,
 } from 'geoscratch'
@@ -35,7 +35,7 @@ type CleanupProof = Readonly<{
     virtualRaster?: ReturnType<DemLayer['virtualRasterFacts']>
 }>
 type PageSettlement = Promise<FailureProof | CleanupProof | void | undefined>
-type PageContext = { graph: DemLayer; runtime: ScratchRuntime }
+type PageContext = { graph: DemLayer; runtime: GPURuntime }
 type CameraMoveOptions = Parameters<DemMap['jumpTo']>[0]
 type FrameWork = {
     scheduled: number
@@ -124,7 +124,7 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
     proof.reach(FAILURE_SCENARIOS[0])
 
     const mapReady = waitForDemMap(map, lifetime.signal)
-    const runtimeReady = lifetime.acquireRuntime(ScratchRuntime.create({
+    const runtimeReady = lifetime.acquireRuntime(GPURuntime.create({
         label: 'DEM Layer runtime',
         powerPreference: 'high-performance',
         diagnostics: {
@@ -339,7 +339,7 @@ async function main(lifetime: DemLifecycle, proof: FailureProofController) {
     requestRender()
 }
 
-function publishGraphFacts(runtime: ScratchRuntime, graph: DemLayer) {
+function publishGraphFacts(runtime: GPURuntime, graph: DemLayer) {
 
     canvas.dataset.proofMode = String(proofMode)
     canvas.dataset.stageOrder = DEM_STAGE_ORDER.join('|')
@@ -383,7 +383,7 @@ function publishFrameFacts({
     latestProvenance,
     frameWork,
 }: {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     graph: DemLayer
     lifetime: DemLifecycle
     submittedFrames: number
@@ -433,7 +433,7 @@ function publishFrameFacts({
     canvas.dataset.deviceLosses = String(diagnostics.aggregates.deviceLosses)
 }
 
-function adapterFacts(runtime: ScratchRuntime) {
+function adapterFacts(runtime: GPURuntime) {
 
     const info = runtime.adapter?.info
     return frozenJson({
@@ -450,11 +450,11 @@ function adapterFacts(runtime: ScratchRuntime) {
 
 function createFailureProofController(configuration: FailureConfiguration) {
 
-    let runtime: ScratchRuntime | undefined
+    let runtime: GPURuntime | undefined
     let surface: Surface | undefined
-    let capture: ScratchDiagnosticCapture | undefined
-    let captureReport: ScratchDiagnosticCaptureReport | undefined
-    let runtimeEvidence: ScratchRuntimeDiagnosticsEvidence | undefined
+    let capture: GPUDiagnosticCapture | undefined
+    let captureReport: GPUDiagnosticCaptureReport | undefined
+    let runtimeEvidence: GPURuntimeDiagnosticsEvidence | undefined
     let runtimeEvidenceByteLength: number | undefined
     let evidenceFailure: unknown
     let reachedCount = 0
@@ -487,7 +487,7 @@ function createFailureProofController(configuration: FailureConfiguration) {
         return `${source}\n@vertex fn demInjectedFailure( {`
     }
 
-    function beforeTerrainShaderModule(value: ScratchRuntime) {
+    function beforeTerrainShaderModule(value: GPURuntime) {
 
         if (configuration.scenario !== FAILURE_SCENARIOS[1]) return
         reachedCount++
@@ -558,7 +558,7 @@ function createFailureProofController(configuration: FailureConfiguration) {
         beforeTerrainShaderModule,
         captureBeforeDisposal,
         finalize,
-        observeRuntime: (value: ScratchRuntime) => { runtime = value },
+        observeRuntime: (value: GPURuntime) => { runtime = value },
         observeSurface: (value: Surface) => { surface = value },
         mapAcquired: () => { mapAcquiredCount++ },
         rasterAcquired: () => { rasterAcquiredCount++ },

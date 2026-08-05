@@ -3,7 +3,7 @@ import {
     BindLayout,
     BindSet,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     advanceResourceContentEpochForTest,
@@ -434,7 +434,7 @@ describe('Scratch BindSet preparation', () => {
     it('validates the narrowed texture-view usage before issuing native candidates', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture({
             size: [ 4, 4 ],
             format: 'rgba8unorm',
@@ -488,7 +488,7 @@ describe('Scratch BindSet preparation', () => {
         const fake = createFakeGpu()
         fake.device.features.add('float32-filterable')
         fake.device.features.add('texture-formats-tier2')
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const uniform = await runtime.createBuffer({ size: 256, usage: GPU_BUFFER_USAGE_UNIFORM })
         const storage = await runtime.createBuffer({ size: 512, usage: GPU_BUFFER_USAGE_STORAGE })
         const filtering = await runtime.createSampler({ minFilter: 'linear' })
@@ -567,7 +567,7 @@ describe('Scratch BindSet preparation', () => {
         const fake = createFakeGpu()
         fake.device.features.add('core-features-and-limits')
         fake.device.features.add('texture-formats-tier2')
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const descriptors = [
             [ 'oneD', '1d', [ 4, 1, 1 ], 'write-only' ],
             [ 'twoD', '2d', [ 4, 4, 1 ], 'read-only' ],
@@ -607,7 +607,7 @@ describe('Scratch BindSet preparation', () => {
     it('rejects deterministic buffer range violations before native issue', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const uniform = await runtime.createBuffer({ size: 1024, usage: GPU_BUFFER_USAGE_UNIFORM })
         const storage = await runtime.createBuffer({ size: 1024, usage: GPU_BUFFER_USAGE_STORAGE })
         const cases = [
@@ -683,7 +683,7 @@ describe('Scratch BindSet preparation', () => {
 
         const fake = createFakeGpu()
         fake.device.features.add('core-features-and-limits')
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const descriptors = [
             [ 'oneD', '1d', [ 4, 1, 1 ], '1d' ],
             [ 'twoD', '2d', [ 4, 4, 1 ], '2d' ],
@@ -741,7 +741,7 @@ describe('Scratch BindSet preparation', () => {
 
         const fake = createFakeGpu()
         fake.device.features.add('texture-component-swizzle')
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const nearest = await runtime.createSampler()
         const linear = await runtime.createSampler({ minFilter: 'linear' })
         const comparison = await runtime.createSampler({ compare: 'less' })
@@ -820,7 +820,7 @@ describe('Scratch BindSet preparation', () => {
     it('issues every native candidate before awaiting and selects failures by stable causal order', async() => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const textureCreation = runtime.createTexture({
             size: [ 4, 4 ],
             mipLevelCount: 2,
@@ -1012,7 +1012,7 @@ describe('Scratch BindSet preparation', () => {
 async function createUniformFixture(options = {}) {
 
     const fake = createFakeGpu(options)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const bufferCreation = runtime.createBuffer({
         label: 'uniform buffer',
         size: 512,
@@ -1049,7 +1049,7 @@ async function createPreparedUniformBindSet(fixture) {
 async function createTextureFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const texture = await runtime.createTexture({
         label: 'sampled texture',
         size: [ 4, 4 ],

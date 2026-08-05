@@ -73,7 +73,7 @@ import { sphere } from 'geoscratch/geometry'
 持久 Scratch buffer 与 texture allocation 需要异步确认。只有原生 validation 与 out-of-memory scope 都成功 settle 后才返回资源；texture replacement 使用同一 transaction boundary。
 
 ```js
-const runtime = await scr.ScratchRuntime.create()
+const runtime = await scr.GPURuntime.create()
 const vertices = await runtime.createBuffer({
     label: 'vertices',
     size: 4096,
@@ -134,7 +134,7 @@ creation 前失败。Submission 绝不重建 binding。
 `SubmissionBuilder.submit()` 保持同步。异步 native validation 通过显式结果暴露:
 
 ```js
-const runtime = await scr.ScratchRuntime.create({
+const runtime = await scr.GPURuntime.create({
     diagnostics: {
         submissionScopes: 'summary',
         maxPendingNativeObservations: 64,
@@ -220,14 +220,14 @@ evidence，不是 classifier。
 下面的代码在 canvas 上渲染一个硬编码三角形。
 
 ```js
-import { ScratchRuntime } from 'geoscratch'
+import { GPURuntime } from 'geoscratch'
 
 const canvas = document.getElementById('GPUFrame')
 
 main().catch(console.error)
 
 async function main() {
-    const runtime = await ScratchRuntime.create({ label: 'triangle runtime' })
+    const runtime = await GPURuntime.create({ label: 'triangle runtime' })
     const surface = runtime.createSurface(canvas, { format: 'preferred' })
     const shaderModule = await runtime.createShaderModule({
         sourceParts: [ { code: `

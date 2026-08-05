@@ -1,16 +1,16 @@
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
-import type { ScratchGpuPipelineOperationRecord } from './gpu-operation.js'
+import type { GPUPipelineOperationRecord } from './gpu-operation.js'
 import type { ComputePipeline, RenderPipeline } from './pipeline.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 
 type RuntimePipeline = RenderPipeline | ComputePipeline
 
-const runtimePipelines = new WeakMap<ScratchRuntime, Set<RuntimePipeline>>()
+const runtimePipelines = new WeakMap<GPURuntime, Set<RuntimePipeline>>()
 
 export function registerRuntimePipeline(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     pipeline: RuntimePipeline,
-    creationOperation: ScratchGpuPipelineOperationRecord
+    creationOperation: GPUPipelineOperationRecord
 ): void {
 
     const pipelines = runtimePipelineSetFor(runtime)
@@ -26,7 +26,7 @@ export function registerRuntimePipeline(
 }
 
 export function unregisterRuntimePipeline(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     pipeline: RuntimePipeline
 ): void {
 
@@ -34,17 +34,17 @@ export function unregisterRuntimePipeline(
     diagnosticsControllerFor(runtime).unregisterPipeline(pipeline.id)
 }
 
-export function runtimePipelineSnapshot(runtime: ScratchRuntime): readonly RuntimePipeline[] {
+export function runtimePipelineSnapshot(runtime: GPURuntime): readonly RuntimePipeline[] {
 
     return Object.freeze([ ...(runtimePipelines.get(runtime) ?? []) ])
 }
 
-export function runtimePipelineCount(runtime: ScratchRuntime): number {
+export function runtimePipelineCount(runtime: GPURuntime): number {
 
     return runtimePipelines.get(runtime)?.size ?? 0
 }
 
-function runtimePipelineSetFor(runtime: ScratchRuntime): Set<RuntimePipeline> {
+function runtimePipelineSetFor(runtime: GPURuntime): Set<RuntimePipeline> {
 
     let pipelines = runtimePipelines.get(runtime)
     if (pipelines === undefined) {

@@ -139,8 +139,8 @@ describe('Scratch current WebGPU and WGSL coverage manifests', () => {
         expect(manifest.entries.some(entry =>
             entry.current.status === 'managed' &&
             entry.expression.publicSymbols.some(symbol =>
-                symbol === 'ScratchRuntime.device' ||
-                symbol === 'ScratchRuntime.queue'
+                symbol === 'GPURuntime.device' ||
+                symbol === 'GPURuntime.queue'
             )
         )).to.equal(false)
     })

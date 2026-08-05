@@ -1,5 +1,5 @@
 import {
-    ScratchRuntime,
+    GPURuntime,
     layoutCodec,
     plane,
 } from 'geoscratch'
@@ -11,7 +11,7 @@ import type {
     LayoutCodec,
     LayoutFixedFieldDescriptor,
     ProgramBufferLayoutRequirement,
-    ScratchRuntimeDiagnosticsSnapshot,
+    GPURuntimeDiagnosticsSnapshot,
     SubmittedWork,
     Surface,
     SurfaceSize,
@@ -40,7 +40,7 @@ type DemShaders = {
 
 type DemFailureProof = {
     terrainShader(source: string): string
-    beforeTerrainShaderModule(runtime: ScratchRuntime): void
+    beforeTerrainShaderModule(runtime: GPURuntime): void
 }
 
 type DemCameraState = {
@@ -72,7 +72,7 @@ type BufferData = Float32Array<ArrayBuffer> | Uint32Array<ArrayBuffer> | Uint8Ar
 type ContentResource = BufferResource | TextureResource
 
 type DemGraph = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     surface: Surface
     virtualRaster: DemVirtualRaster
     codecs: Codecs
@@ -134,7 +134,7 @@ type PersistentFacts = Readonly<{
 }>
 
 type DemLayerOptions = {
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     surface: Surface
     virtualRaster: DemVirtualRaster
     size: SurfaceSize
@@ -171,7 +171,7 @@ export async function createDemLayer({
     provenanceVerifier = verifyFrameProvenance,
 }: DemLayerOptions) {
 
-    if (!(runtime instanceof ScratchRuntime)) throw new TypeError('DEM Layer requires ScratchRuntime')
+    if (!(runtime instanceof GPURuntime)) throw new TypeError('DEM Layer requires GPURuntime')
     assertSize(size)
     assertVirtualRaster(virtualRaster)
     assertShaders(shaders)
@@ -418,7 +418,7 @@ function createCodecs() {
     })
 }
 
-async function createUniformResources(runtime: ScratchRuntime, codecs: Codecs) {
+async function createUniformResources(runtime: GPURuntime, codecs: Codecs) {
 
     const identity = Array.from((mat4.identity as (destination?: Float32Array) => Float32Array)())
     return {
@@ -449,7 +449,7 @@ async function createUniformResources(runtime: ScratchRuntime, codecs: Codecs) {
 }
 
 async function createUniform(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     label: string,
     codec: LayoutCodec,
     values: LayoutValues
@@ -485,7 +485,7 @@ function createTerrainGeometry() {
 }
 
 async function createBufferResources(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     geometry: TerrainGeometry,
     virtualRaster: DemVirtualRaster
 ) {
@@ -552,7 +552,7 @@ async function createBufferResources(
 }
 
 async function createBufferWithUpload<T extends BufferData>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     label: string,
     data: T,
     usage: number
@@ -568,7 +568,7 @@ async function createBufferWithUpload<T extends BufferData>(
     })
 }
 
-async function createTextures(runtime: ScratchRuntime, size: SurfaceSize) {
+async function createTextures(runtime: GPURuntime, size: SurfaceSize) {
 
     const lodMap = await runtime.createTexture({
         label: 'DEM LoD map',
@@ -592,7 +592,7 @@ async function createTextures(runtime: ScratchRuntime, size: SurfaceSize) {
     }
 }
 
-async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
+async function createBindLayouts(runtime: GPURuntime, codecs: Codecs) {
 
     const uniform = (
         binding: number,
@@ -675,7 +675,7 @@ async function createBindLayouts(runtime: ScratchRuntime, codecs: Codecs) {
 }
 
 async function createBindSets(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     layouts: Layouts,
     uniforms: Uniforms,
     buffers: Buffers,
@@ -714,7 +714,7 @@ async function createBindSets(
 }
 
 async function createPrograms(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     codecs: Codecs,
     shaders: DemShaders,
     failureProof: DemFailureProof,
@@ -768,7 +768,7 @@ async function createPrograms(
 }
 
 async function createPipelines(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     surface: Surface,
     textures: Textures,
     layouts: Layouts,
@@ -808,7 +808,7 @@ async function createPipelines(
     return { lodMap, terrain }
 }
 
-function createPasses(runtime: ScratchRuntime, surface: Surface, textures: Textures) {
+function createPasses(runtime: GPURuntime, surface: Surface, textures: Textures) {
 
     return {
         lodMap: runtime.createRenderPass({
@@ -839,7 +839,7 @@ function createPasses(runtime: ScratchRuntime, surface: Surface, textures: Textu
 }
 
 function createCommands(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     geometry: TerrainGeometry,
     uniforms: Uniforms,
     buffers: Buffers,
@@ -1067,7 +1067,7 @@ function identityObjectsByKind(graph: DemGraph) {
     }
 }
 
-function persistentFactSnapshot(runtime: ScratchRuntime): PersistentFacts {
+function persistentFactSnapshot(runtime: GPURuntime): PersistentFacts {
 
     const facts = runtime.diagnostics.snapshot()
     return Object.freeze({

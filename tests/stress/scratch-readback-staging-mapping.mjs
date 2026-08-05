@@ -1,6 +1,6 @@
 import process from 'node:process'
 import { performance } from 'node:perf_hooks'
-import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
+import { GPURuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
 import { diagnosticsControllerFor } from '../../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
 import {
     runtimeReadbackCommandCount,
@@ -210,7 +210,7 @@ async function stressTextureMappedLease(iterations) {
 
 async function createStressRuntime(fake) {
 
-    return ScratchRuntime.create({
+    return GPURuntime.create({
         gpu: fake.gpu,
         diagnostics: {
             operationCapacity: 64,

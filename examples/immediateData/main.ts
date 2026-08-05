@@ -1,5 +1,5 @@
 import {
-    ScratchRuntime,
+    GPURuntime,
     layoutCodec,
 } from 'geoscratch'
 import type {
@@ -97,7 +97,7 @@ async function main() {
         )
     }
 
-    const runtime = await ScratchRuntime.create({
+    const runtime = await GPURuntime.create({
         label: 'immediate data runtime',
     })
     if (!runtime.wgslLanguageFeatures.includes(languageFeature)) {

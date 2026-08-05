@@ -16,8 +16,8 @@ import {
     textureFormatSupportsResolve,
 } from './texture-format-capabilities.js'
 import { describeValue, diagnosticSubjectOf, getGlobalConstant, isDefined, isRecord } from './type-utils.js'
-import type { DiagnosticSubject } from './diagnostics.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
+import type { GPURuntime } from './runtime.js'
 import type { Surface, SurfaceFacts } from './surface.js'
 import type {
     SurfaceTextureLease,
@@ -109,7 +109,7 @@ export type RenderPassNativeAttachments = Readonly<{
 }>
 
 type RenderAttachmentExtent = {
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
     width: number
     height: number
     sampleCount: number
@@ -127,7 +127,7 @@ type ColorAttachmentFacts = {
 type RenderAttachmentRegion = {
     index: number
     role: 'color' | 'resolve'
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
     target: GPUCanvasContext | TextureResource
     dimension: 'surface' | GPUTextureViewDimension
     baseMipLevel?: number
@@ -141,7 +141,7 @@ type SurfaceAttachmentViewFacts = Readonly<{
 }>
 
 export interface RenderPassSpec {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly passKind: 'render'
@@ -155,7 +155,7 @@ export interface RenderPassSpec {
 
 export class RenderPassSpec {
 
-    constructor(runtime: ScratchRuntime, descriptor: RenderPassSpecDescriptor) {
+    constructor(runtime: GPURuntime, descriptor: RenderPassSpecDescriptor) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -183,9 +183,9 @@ export class RenderPassSpec {
         })
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'PassSpec',
             id: this.id,
             passKind: 'render',
@@ -195,7 +195,7 @@ export class RenderPassSpec {
         return subject
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -209,7 +209,7 @@ export class RenderPassSpec {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'PassSpec belongs to a different ScratchRuntime.',
+                message: 'PassSpec belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -298,7 +298,7 @@ export function createRenderPassDescriptor(
 }
 
 export interface ComputePassSpec {
-    readonly runtime: ScratchRuntime
+    readonly runtime: GPURuntime
     readonly id: string
     readonly label?: string
     readonly passKind: 'compute'
@@ -308,7 +308,7 @@ export interface ComputePassSpec {
 
 export class ComputePassSpec {
 
-    constructor(runtime: ScratchRuntime, descriptor: ComputePassSpecDescriptor = {}) {
+    constructor(runtime: GPURuntime, descriptor: ComputePassSpecDescriptor = {}) {
 
         assertScratchRuntimeActive(runtime)
 
@@ -327,9 +327,9 @@ export class ComputePassSpec {
         })
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
-        const subject: DiagnosticSubject = {
+        const subject: GPUDiagnosticSubjectDraft = {
             kind: 'PassSpec',
             id: this.id,
             passKind: 'compute',
@@ -339,7 +339,7 @@ export class ComputePassSpec {
         return subject
     }
 
-    assertRuntime(runtime: ScratchRuntime) {
+    assertRuntime(runtime: GPURuntime) {
 
         this.assertUsable()
 
@@ -353,7 +353,7 @@ export class ComputePassSpec {
                     this.runtime.subject,
                     runtime?.subject,
                 ].filter(Boolean),
-                message: 'PassSpec belongs to a different ScratchRuntime.',
+                message: 'PassSpec belongs to a different GPURuntime.',
                 expected: { runtimeId: this.runtime.id },
                 actual: { runtimeId: runtime?.id },
             })
@@ -520,7 +520,7 @@ function throwTimestampWritesDiagnostic(pass: RenderPassSpec | ComputePassSpec, 
         ].filter(isDefined),
         message: 'PassSpec timestampWrites requires a timestamp QuerySetResource and distinct valid query slot indices.',
         expected: {
-            querySet: 'timestamp QuerySetResource owned by this ScratchRuntime',
+            querySet: 'timestamp QuerySetResource owned by this GPURuntime',
             begin: 'optional integer query index within querySet.count',
             end: 'optional integer query index within querySet.count',
             distinct: 'provided begin and end indices differ',
@@ -544,8 +544,8 @@ function throwOcclusionQuerySetDiagnostic(pass: RenderPassSpec, querySet: unknow
         related: [
             diagnosticSubjectOf(querySet),
         ].filter(isDefined),
-        message: 'RenderPassSpec occlusionQuerySet requires an occlusion QuerySetResource owned by this ScratchRuntime.',
-        expected: { occlusionQuerySet: 'occlusion QuerySetResource owned by this ScratchRuntime' },
+        message: 'RenderPassSpec occlusionQuerySet requires an occlusion QuerySetResource owned by this GPURuntime.',
+        expected: { occlusionQuerySet: 'occlusion QuerySetResource owned by this GPURuntime' },
         actual: {
             reason,
             occlusionQuerySet: describeValue(querySet),
@@ -649,7 +649,7 @@ function normalizeColorAttachment(
                 surface.subject,
                 pass.runtime.subject,
             ].filter(Boolean),
-            message: 'Surface color attachment belongs to a different ScratchRuntime.',
+            message: 'Surface color attachment belongs to a different GPURuntime.',
             expected: { runtimeId: pass.runtime.id },
             actual: { runtimeId: surface.runtime.id },
         })
@@ -802,7 +802,7 @@ function normalizeMaxDrawCount(pass: RenderPassSpec, value: unknown): number | u
 
 function normalizeColorClearValue(
     pass: RenderPassSpec,
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     value: unknown
 ): GPUColor {
 
@@ -1378,7 +1378,7 @@ function validateRenderAttachmentView(
 
 function validateColorAttachmentFormat(
     pass: RenderPassSpec,
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     requested: GPUTextureFormat | undefined,
     actual: GPUTextureFormat
 ): void {
@@ -1398,9 +1398,9 @@ function validateColorAttachmentFormat(
 
 function validateColorRenderableAttachmentFormat(
     pass: RenderPassSpec,
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     format: GPUTextureFormat,
-    related: DiagnosticSubject[] = []
+    related: ScratchDiagnosticSubject[] = []
 ): void {
 
     if (textureFormatIsColorRenderable(pass.runtime, format)) return
@@ -1535,7 +1535,7 @@ export function assertRenderPassTemporalDependencies(
 
 function normalizeColorAttachmentOperations(
     pass: RenderPassSpec,
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     attachment: RenderPassColorAttachmentSpec,
     transient: boolean
 ): Readonly<{ load: GPULoadOp, store: GPUStoreOp }> {
@@ -1809,7 +1809,7 @@ function throwDepthStencilAttachmentDiagnostic(
         related: [
             diagnosticSubjectOf(target),
         ].filter(isDefined),
-        message: 'RenderPassSpec depth attachment requires a depth/stencil TextureViewSpec owned by this ScratchRuntime.',
+        message: 'RenderPassSpec depth attachment requires a depth/stencil TextureViewSpec owned by this GPURuntime.',
         expected: {
             target: 'TextureViewSpec with depth/stencil format and GPUTextureUsage.RENDER_ATTACHMENT',
             depthLoad: [ 'clear', 'load' ],

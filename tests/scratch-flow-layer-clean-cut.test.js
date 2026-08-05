@@ -84,7 +84,7 @@ describe('Flow Layer Scratch clean cut', () => {
         const source = `${main}\n${layer}\n${map}`
 
         for (const required of [
-            'ScratchRuntime',
+            'GPURuntime',
             'layoutCodec',
             'runtime.createSurface(',
             'runtime.createBuffer(',
@@ -161,11 +161,11 @@ describe('Flow Layer Scratch clean cut', () => {
         const main = read('examples', 'flowLayer', 'main.ts')
         const layer = read('examples', 'flowLayer', 'flow-layer.ts')
         const pagehideRegistration = main.indexOf("window.addEventListener('pagehide'")
-        const firstInitializationAwait = main.indexOf('ScratchRuntime.create({')
+        const firstInitializationAwait = main.indexOf('GPURuntime.create({')
 
         expect(pagehideRegistration).to.be.greaterThan(-1)
         expect(pagehideRegistration).to.be.lessThan(firstInitializationAwait)
-        expect(main).to.include('lifetime.acquireRuntime(ScratchRuntime.create({')
+        expect(main).to.include('lifetime.acquireRuntime(GPURuntime.create({')
         expect(main).to.include('waitForFlowMap(map, lifetime.signal)')
         expect(main).to.include("lifetime.assertActive('request Flow field')")
         expect(layer).to.include('createStationGeometry(settings.flowDomainMaxEdge, lifetime.signal)')

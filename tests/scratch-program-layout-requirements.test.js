@@ -4,10 +4,10 @@ import {
     DrawCommand,
     DispatchCommand,
     Program,
-    ScratchComputePipeline,
+    ComputePipeline,
     ScratchDiagnosticError,
-    ScratchRenderPipeline,
-    ScratchRuntime,
+    RenderPipeline,
+    GPURuntime,
     layoutCodec,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
@@ -64,7 +64,7 @@ function createAbiMismatchCodec(name = 'WideParticle') {
 async function createRuntimeFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
 
     return { ...fake, runtime }
 }
@@ -366,14 +366,14 @@ describe('scratch Program buffer layout requirements', () => {
             layout: { mode: 'explicit', bindLayouts: [ computeLayout ] },
         })
 
-        expect(renderPipeline).to.be.instanceOf(ScratchRenderPipeline)
-        expect(computePipeline).to.be.instanceOf(ScratchComputePipeline)
+        expect(renderPipeline).to.be.instanceOf(RenderPipeline)
+        expect(computePipeline).to.be.instanceOf(ComputePipeline)
     })
 
     it('derives f16 device requirements from Program layout contracts', async() => {
 
         const unsupported = createFakeGpu()
-        const unsupportedRuntime = await ScratchRuntime.create({
+        const unsupportedRuntime = await GPURuntime.create({
             gpu: unsupported.gpu,
         })
         const codec = layoutCodec({
@@ -409,7 +409,7 @@ describe('scratch Program buffer layout requirements', () => {
 
         const supported = createFakeGpu()
         supported.device.features.add('shader-f16')
-        const supportedRuntime = await ScratchRuntime.create({
+        const supportedRuntime = await GPURuntime.create({
             gpu: supported.gpu,
         })
         const program = await createTestProgram(supportedRuntime, {
@@ -445,7 +445,7 @@ describe('scratch Program buffer layout requirements', () => {
         })
 
         const unsupported = createFakeGpu()
-        const unsupportedRuntime = await ScratchRuntime.create({
+        const unsupportedRuntime = await GPURuntime.create({
             gpu: unsupported.gpu,
         })
         let unavailable
@@ -472,7 +472,7 @@ describe('scratch Program buffer layout requirements', () => {
         supported.gpu.wgslLanguageFeatures = new Set([
             'uniform_buffer_standard_layout',
         ])
-        const supportedRuntime = await ScratchRuntime.create({
+        const supportedRuntime = await GPURuntime.create({
             gpu: supported.gpu,
         })
         const program = await createTestProgram(supportedRuntime, {
@@ -492,7 +492,7 @@ describe('scratch Program buffer layout requirements', () => {
             'buffer_view',
             'unrestricted_pointer_parameters',
         ])
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const raw = layoutCodec({
             name: 'RawBytes',
             type: {
@@ -616,7 +616,7 @@ describe('scratch Program buffer layout requirements', () => {
         }
 
         const unavailableFixture = createFakeGpu()
-        const unavailableRuntime = await ScratchRuntime.create({
+        const unavailableRuntime = await GPURuntime.create({
             gpu: unavailableFixture.gpu,
         })
         let unavailable
@@ -641,7 +641,7 @@ describe('scratch Program buffer layout requirements', () => {
 
         const fixture = createFakeGpu()
         fixture.gpu.wgslLanguageFeatures = new Set([ 'buffer_view' ])
-        const runtime = await ScratchRuntime.create({ gpu: fixture.gpu })
+        const runtime = await GPURuntime.create({ gpu: fixture.gpu })
         const program = await createTestProgram(runtime, {
             sourceParts: [ computeWgsl ],
             compute: 'csMain',
@@ -907,7 +907,7 @@ describe('scratch Program buffer layout requirements', () => {
             })
         })
 
-        expect(pipeline).to.be.instanceOf(ScratchComputePipeline)
+        expect(pipeline).to.be.instanceOf(ComputePipeline)
         expect(diagnostic.expected).to.deep.include({
             minimumBindingSize: codec.artifact.minimumBindingSize,
             minBindingSize: `0 or >= ${codec.artifact.minimumBindingSize}`,

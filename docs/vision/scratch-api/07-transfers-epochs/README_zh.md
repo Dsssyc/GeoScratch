@@ -199,7 +199,7 @@ physical depth/stencil subresource、mip range 与 source byte range。Queue wri
 不继承 encoder-copy requirement：data offset 与 row stride 不会被强制套用
 encoder-only 256-byte row alignment。
 
-三种 immediate upload variant 都只能在其所属的 `ScratchRuntime.queue` 上执行。
+三种 immediate upload variant 都只能在其所属的 `GPURuntime.queue` 上执行。
 foreign queue 会在 `writeBuffer()`、`writeTexture()`、`copyExternalImageToTexture()`
 或任何逻辑 content-epoch effect 前以 `SCRATCH_COMMAND_WRONG_RUNTIME` 和
 `actual.queueOwnedByRuntime: false` 被拒绝。这样即使 command 脱离
@@ -758,7 +758,7 @@ runtime policy 有限且保守:
 配置形状示例:
 
 ```ts
-const runtime = await ScratchRuntime.create({
+const runtime = await GPURuntime.create({
     readback: {
         maxPendingOperations: 16,
         maxStagingBytes: 64 * 1024 * 1024,

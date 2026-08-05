@@ -25,10 +25,10 @@ import {
     textureFormatIsRenderable,
     textureFormatSupportsStorageBinding,
 } from './texture-format-capabilities.js'
-import type { DiagnosticSubject } from './diagnostics.js'
-import type { ResourceState, ScratchResourceIdentity } from './resource.js'
-import type { ScratchRuntime } from './runtime.js'
-import type { ScratchPendingGpuOperation } from './runtime-diagnostics.js'
+import type { GPUDiagnosticSubjectDraft, ScratchDiagnosticSubject } from './diagnostics.js'
+import type { ResourceState, GPUResourceIdentity } from './resource.js'
+import type { GPURuntime } from './runtime.js'
+import type { GPUPendingOperation } from './runtime-diagnostics.js'
 
 const GPU_TEXTURE_USAGE_STORAGE_BINDING = getGlobalConstant('GPUTextureUsage', 'STORAGE_BINDING', 0x8)
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = getGlobalConstant('GPUTextureUsage', 'RENDER_ATTACHMENT', 0x10)
@@ -208,13 +208,13 @@ export class TextureResource extends Resource {
 
     #gpuTexture: GPUTexture
     #physicalDescriptor: NormalizedTextureDescriptor
-    #pendingReplacement: ScratchPendingGpuOperation | undefined
+    #pendingReplacement: GPUPendingOperation | undefined
 
     private constructor(
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: NormalizedTextureDescriptor,
-        identity: ScratchResourceIdentity,
+        identity: GPUResourceIdentity,
         gpuTexture: GPUTexture
     ) {
 
@@ -222,7 +222,7 @@ export class TextureResource extends Resource {
             throw new TypeError('TextureResource does not support subclass construction.')
         }
         if (token !== textureResourceToken) {
-            throw new TypeError('TextureResource must be created by ScratchRuntime.createTexture().')
+            throw new TypeError('TextureResource must be created by GPURuntime.createTexture().')
         }
 
         super(runtime, contentBearingResourceOptions({
@@ -318,7 +318,7 @@ export class TextureResource extends Resource {
                 subject: this.subject,
                 related: [
                     {
-                        kind: 'GpuOperation',
+                        kind: 'GPUOperation',
                         id: this.#pendingReplacement.id,
                         operationKind: this.#pendingReplacement.kind,
                     },
@@ -434,7 +434,7 @@ export class TextureViewSpec {
         Object.freeze(this)
     }
 
-    get subject(): DiagnosticSubject {
+    get subject(): ScratchDiagnosticSubject {
 
         return textureViewSpecSubject(this)
     }
@@ -453,9 +453,9 @@ export function isTextureViewSpec(value: unknown): value is TextureViewSpec {
     return typeof value === 'object' && value !== null && textureViewSpecs.has(value as TextureViewSpec)
 }
 
-export function textureViewSpecSubject(view: TextureViewSpec): DiagnosticSubject {
+export function textureViewSpecSubject(view: TextureViewSpec): ScratchDiagnosticSubject {
 
-    const subject: DiagnosticSubject = {
+    const subject: GPUDiagnosticSubjectDraft = {
         kind: 'TextureViewSpec',
         resourceId: view.texture.id,
         hash: view.hash,
@@ -510,7 +510,7 @@ function constructTextureViewSpec(
 }
 
 export async function createTextureResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: TextureResourceDescriptor
 ): Promise<TextureResource> {
 
@@ -580,17 +580,17 @@ export async function createTextureResource(
 }
 
 function constructTextureResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: NormalizedTextureDescriptor,
-    identity: ScratchResourceIdentity,
+    identity: GPUResourceIdentity,
     gpuTexture: GPUTexture
 ): TextureResource {
 
     const Constructor = TextureResource as unknown as new (
         token: symbol,
-        runtime: ScratchRuntime,
+        runtime: GPURuntime,
         descriptor: NormalizedTextureDescriptor,
-        identity: ScratchResourceIdentity,
+        identity: GPUResourceIdentity,
         gpuTexture: GPUTexture
     ) => TextureResource
     return new Constructor(textureResourceToken, runtime, descriptor, identity, gpuTexture)
@@ -610,9 +610,9 @@ function textureDescriptorSummary(descriptor: NormalizedTextureDescriptor): Reco
     }
 }
 
-function normalizeTextureDescriptor(runtime: ScratchRuntime, descriptor: unknown): NormalizedTextureDescriptor {
+function normalizeTextureDescriptor(runtime: GPURuntime, descriptor: unknown): NormalizedTextureDescriptor {
 
-    const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
+    const subject = runtime?.subject ?? { kind: 'GPURuntime' }
 
     assertTextureCreationAvailable(runtime)
 
@@ -671,7 +671,7 @@ function freezeTextureDescriptor(descriptor: NormalizedTextureDescriptor): Norma
     return Object.freeze(descriptor)
 }
 
-function normalizeTextureSize(subject: DiagnosticSubject, size: unknown): NormalizedTextureSize {
+function normalizeTextureSize(subject: ScratchDiagnosticSubject, size: unknown): NormalizedTextureSize {
 
     let width: unknown
     let height: unknown
@@ -716,7 +716,7 @@ function normalizeTextureSize(subject: DiagnosticSubject, size: unknown): Normal
     })
 }
 
-function normalizeTextureFormat(subject: DiagnosticSubject, format: unknown): GPUTextureFormat {
+function normalizeTextureFormat(subject: ScratchDiagnosticSubject, format: unknown): GPUTextureFormat {
 
     if (typeof format !== 'string' || format.length === 0) {
         throwTextureDescriptorDiagnostic(subject, { format }, {
@@ -727,7 +727,7 @@ function normalizeTextureFormat(subject: DiagnosticSubject, format: unknown): GP
     return format as GPUTextureFormat
 }
 
-function normalizeTextureUsage(subject: DiagnosticSubject, usage: unknown): GPUTextureUsageFlags {
+function normalizeTextureUsage(subject: ScratchDiagnosticSubject, usage: unknown): GPUTextureUsageFlags {
 
     if (usage === undefined) {
         throwGPUDiagnostic({
@@ -755,7 +755,7 @@ function normalizeTextureUsage(subject: DiagnosticSubject, usage: unknown): GPUT
     return usage
 }
 
-function normalizePositiveInteger(subject: DiagnosticSubject, value: unknown, key: string): number {
+function normalizePositiveInteger(subject: ScratchDiagnosticSubject, value: unknown, key: string): number {
 
     if (
         typeof value !== 'number' ||
@@ -771,7 +771,7 @@ function normalizePositiveInteger(subject: DiagnosticSubject, value: unknown, ke
     return value
 }
 
-function normalizeSampleCount(subject: DiagnosticSubject, value: unknown): number {
+function normalizeSampleCount(subject: ScratchDiagnosticSubject, value: unknown): number {
 
     const sampleCount = normalizePositiveInteger(subject, value, 'sampleCount')
     if (sampleCount !== 1 && sampleCount !== 4) {
@@ -784,7 +784,7 @@ function normalizeSampleCount(subject: DiagnosticSubject, value: unknown): numbe
 }
 
 function normalizeTextureViewFormats(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     value: unknown
 ): GPUTextureFormat[] {
 
@@ -826,7 +826,7 @@ function normalizeTextureViewFormats(
 }
 
 function normalizeTextureBindingViewDimension(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     value: unknown
 ): GPUTextureViewDimension | undefined {
 
@@ -1226,7 +1226,7 @@ function fnv1a64(value: string): string {
 }
 
 function normalizeTextureDimension(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     descriptor: unknown,
     dimension: unknown
 ): GPUTextureDimension {
@@ -1241,7 +1241,7 @@ function normalizeTextureDimension(
 }
 
 function validateTextureAllocationDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: NormalizedTextureDescriptor,
     size: NormalizedTextureSize,
     actual: unknown
@@ -1394,7 +1394,7 @@ function validateTextureAllocationDescriptor(
 }
 
 function validateTextureBindingViewSize(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     viewDimension: GPUTextureViewDimension | undefined,
     size: NormalizedTextureSize,
     actual: unknown
@@ -1512,7 +1512,7 @@ function colorTexelCopyFootprint(format: GPUTextureFormat): number | undefined {
     return undefined
 }
 
-function textureFormatSupports3D(runtime: ScratchRuntime, format: GPUTextureFormat): boolean {
+function textureFormatSupports3D(runtime: GPURuntime, format: GPUTextureFormat): boolean {
 
     if (/^bc(?:[1-5]|6h|7)-/.test(format)) {
         return runtime.deviceFeatures.has('texture-compression-bc-sliced-3d')
@@ -1531,16 +1531,16 @@ function sameTextureSize(left: NormalizedTextureSize, right: NormalizedTextureSi
         left.depthOrArrayLayers === right.depthOrArrayLayers
 }
 
-function assertTextureCreationAvailable(runtime: ScratchRuntime): void {
+function assertTextureCreationAvailable(runtime: GPURuntime): void {
 
     if (!runtime?.device || typeof runtime.device.createTexture !== 'function') {
-        const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
+        const subject = runtime?.subject ?? { kind: 'GPURuntime' }
         throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',
             subject,
-            message: 'ScratchRuntime device cannot create GPU textures.',
+            message: 'GPURuntime device cannot create GPU textures.',
             expected: { device: 'GPUDevice with createTexture()' },
             actual: { createTexture: typeof runtime?.device?.createTexture },
         })
@@ -1548,7 +1548,7 @@ function assertTextureCreationAvailable(runtime: ScratchRuntime): void {
 }
 
 function throwTextureDescriptorDiagnostic(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     actual: unknown,
     expected: unknown
 ): never {

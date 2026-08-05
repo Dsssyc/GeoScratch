@@ -1,7 +1,7 @@
 import type { RenderBundle } from './render-bundle.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 
-const runtimeRenderBundles = new WeakMap<ScratchRuntime, Set<RenderBundle>>()
+const runtimeRenderBundles = new WeakMap<GPURuntime, Set<RenderBundle>>()
 
 export function registerRenderBundleOwnership(bundle: RenderBundle): void {
 
@@ -21,7 +21,7 @@ export function unregisterRenderBundleOwnership(bundle: RenderBundle): void {
     runtimeRenderBundles.get(bundle.runtime)?.delete(bundle)
 }
 
-export function runtimeRenderBundleSnapshot(runtime: ScratchRuntime): readonly RenderBundle[] {
+export function runtimeRenderBundleSnapshot(runtime: GPURuntime): readonly RenderBundle[] {
 
     return Object.freeze([ ...(runtimeRenderBundles.get(runtime) ?? []) ])
 }

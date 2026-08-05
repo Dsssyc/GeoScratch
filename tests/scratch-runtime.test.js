@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 
 function createFakeGpu() {
@@ -59,13 +59,13 @@ function createFakeGpu() {
     return { gpu, adapter, device }
 }
 
-describe('ScratchRuntime', () => {
+describe('GPURuntime', () => {
 
     it('is created explicitly and asynchronously without a canvas', async() => {
 
         const { gpu, adapter, device } = createFakeGpu()
 
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu,
             label: 'test runtime',
             featureLevel: 'compatibility',
@@ -77,7 +77,7 @@ describe('ScratchRuntime', () => {
             defaultQueue: { label: 'test queue' },
         })
 
-        expect(runtime).to.be.instanceOf(ScratchRuntime)
+        expect(runtime).to.be.instanceOf(GPURuntime)
         expect(gpu.requestAdapterCalls).to.deep.equal([
             {
                 featureLevel: 'compatibility',
@@ -156,7 +156,7 @@ describe('ScratchRuntime', () => {
         const requiredFeatures = [ 'timestamp-query' ]
         const requiredLimits = { maxBufferSize: 512 }
         const defaultQueue = { label: 'initial queue' }
-        const creation = ScratchRuntime.create({
+        const creation = GPURuntime.create({
             gpu,
             requiredFeatures,
             requiredLimits,
@@ -189,7 +189,7 @@ describe('ScratchRuntime', () => {
         let caught
 
         try {
-            await ScratchRuntime.create({
+            await GPURuntime.create({
                 gpu,
                 requiredFeatures: [ 'subgroup-size-control' ],
             })
@@ -221,7 +221,7 @@ describe('ScratchRuntime', () => {
             device.features.add(feature)
         }
 
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu,
             requiredFeatures: [
                 'subgroups',
@@ -247,7 +247,7 @@ describe('ScratchRuntime', () => {
             vendor: 'partial-vendor',
             architecture: '',
         }
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         expect(runtime.adapterInfo).to.deep.equal({
             available: true,
@@ -257,7 +257,7 @@ describe('ScratchRuntime', () => {
         expect(JSON.stringify(runtime.adapterInfo)).not.to.include('requestDevice')
 
         delete adapter.info
-        const withoutInfo = await ScratchRuntime.create({ gpu })
+        const withoutInfo = await GPURuntime.create({ gpu })
         expect(withoutInfo.adapterInfo).to.deep.equal({ available: false })
     })
 
@@ -267,7 +267,7 @@ describe('ScratchRuntime', () => {
         let caught
 
         try {
-            await ScratchRuntime.create({ gpu, featureLevel: 'maximum' })
+            await GPURuntime.create({ gpu, featureLevel: 'maximum' })
         } catch (error) {
             caught = error
         }
@@ -333,7 +333,7 @@ describe('ScratchRuntime', () => {
             let caught
 
             try {
-                await ScratchRuntime.create({ gpu, ...testCase.options })
+                await GPURuntime.create({ gpu, ...testCase.options })
             } catch (error) {
                 caught = error
             }
@@ -352,8 +352,8 @@ describe('ScratchRuntime', () => {
     it('rejects creation failures with structured diagnostics', async() => {
 
         try {
-            await ScratchRuntime.create({ gpu: undefined })
-            throw new Error('expected ScratchRuntime.create to fail')
+            await GPURuntime.create({ gpu: undefined })
+            throw new Error('expected GPURuntime.create to fail')
         } catch (error) {
             expect(error).to.be.instanceOf(ScratchDiagnosticError)
             expect(error.diagnostic).to.include({
@@ -362,14 +362,14 @@ describe('ScratchRuntime', () => {
                 severity: 'error',
                 phase: 'runtime',
             })
-            expect(error.diagnostic.subject).to.deep.equal({ kind: 'ScratchRuntime' })
+            expect(error.diagnostic.subject).to.deep.equal({ kind: 'GPURuntime' })
         }
     })
 
     it('tracks disposal and rejects dependent operations after disposal', async() => {
 
         const { gpu, device } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         runtime.dispose()
 
@@ -385,7 +385,7 @@ describe('ScratchRuntime', () => {
                 phase: 'runtime',
             })
             expect(error.diagnostic.subject).to.deep.equal({
-                kind: 'ScratchRuntime',
+                kind: 'GPURuntime',
                 id: runtime.id,
             })
         }
@@ -398,7 +398,7 @@ describe('ScratchRuntime', () => {
         device.lost = new Promise((resolve) => {
             loseDevice = resolve
         })
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         loseDevice({ reason: 'unknown', message: 'test loss' })
         await Promise.resolve()
@@ -414,7 +414,7 @@ describe('ScratchRuntime', () => {
     it('keeps disposed lifecycle authority after public assertActive shadowing', async() => {
 
         const { gpu, device } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         Object.defineProperty(runtime, 'assertActive', {
             configurable: true,
             value() {},
@@ -440,7 +440,7 @@ describe('ScratchRuntime', () => {
         device.lost = new Promise((resolve) => {
             loseDevice = resolve
         })
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         Object.defineProperty(runtime, 'assertActive', {
             configurable: true,
             value() {},
@@ -464,7 +464,7 @@ describe('ScratchRuntime', () => {
     it('keeps downstream runtime authority after public assertActive shadowing', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const submission = runtime.createSubmission()
         Object.defineProperty(runtime, 'assertActive', {
             configurable: true,

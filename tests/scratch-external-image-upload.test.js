@@ -2,7 +2,7 @@ import { expect } from 'chai'
 import {
     ExternalImageUploadCommand,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import { ExternalImageUploadCommand as CompatExternalImageUploadCommand } from 'geoscratch/scratch'
 import { createFakeExternalImageSource, createFakeGpu } from './scratch-test-utils.js'
@@ -22,7 +22,7 @@ async function createFixture(options = {}) {
 
     const fake = createFakeGpu()
     for (const feature of options.features ?? []) fake.device.features.add(feature)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const target = await runtime.createTexture({
         label: options.label ?? 'external upload target',
         size: options.targetSize ?? { width: 8, height: 8, depthOrArrayLayers: 2 },

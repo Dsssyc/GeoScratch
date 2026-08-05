@@ -2,7 +2,7 @@ import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     advanceResourceContentEpochForTest,
@@ -67,7 +67,7 @@ describe('scratch render/pass native parity', () => {
     it('preserves nullable color slots and lowers maxDrawCount without resource effects', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const target = await runtime.createTexture({
             size: [ 32, 32 ],
             format: 'rgba8unorm',
@@ -115,7 +115,7 @@ describe('scratch render/pass native parity', () => {
     it('rejects color holes, undefined slots, null-only passes, and invalid maxDrawCount', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const target = await runtime.createTexture({
             size: [ 8, 8 ],
             format: 'rgba8unorm',
@@ -173,7 +173,7 @@ describe('scratch render/pass native parity', () => {
     it('lowers multisample resolve and records retained and discarded content facts', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createTexture({
             label: 'multisampled source',
             size: [ 32, 32 ],
@@ -237,7 +237,7 @@ describe('scratch render/pass native parity', () => {
 
         const fake = createFakeGpu()
         const canvas = createFakeCanvas()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createTexture({
             size: [ 24, 16 ],
             sampleCount: 4,
@@ -275,7 +275,7 @@ describe('scratch render/pass native parity', () => {
     it('rejects invalid resolve pairs and revalidates replacement allocation extents', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createTexture({
             size: [ 16, 16 ],
             sampleCount: 4,
@@ -380,7 +380,7 @@ describe('scratch render/pass native parity', () => {
 
         const tierFake = createFakeGpu()
         tierFake.device.features.add('texture-formats-tier1')
-        const tierRuntime = await ScratchRuntime.create({ gpu: tierFake.gpu })
+        const tierRuntime = await GPURuntime.create({ gpu: tierFake.gpu })
 
         for (const format of [
             'r8snorm',
@@ -402,7 +402,7 @@ describe('scratch render/pass native parity', () => {
 
         const coreFake = createFakeGpu()
         coreFake.device.features.add('core-features-and-limits')
-        const coreRuntime = await ScratchRuntime.create({ gpu: coreFake.gpu })
+        const coreRuntime = await GPURuntime.create({ gpu: coreFake.gpu })
         const corePass = await createResolvePass(coreRuntime, 'rgba16float')
         expect(corePass.color[0].format).to.equal('rgba16float')
     })
@@ -410,7 +410,7 @@ describe('scratch render/pass native parity', () => {
     it('compares complete render layouts while ignoring only trailing null color slots', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const target = await runtime.createTexture({
             size: [ 16, 16 ],
             format: 'rgba8unorm',
@@ -460,7 +460,7 @@ describe('scratch render/pass native parity', () => {
     it('rejects render layout sample-count and depth-format absence before encoding', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const color = await runtime.createTexture({
             size: [ 16, 16 ],
             format: 'rgba8unorm',
@@ -516,7 +516,7 @@ describe('scratch render/pass native parity', () => {
     it('rejects clear values on read-only depth and stencil aspects', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const depth = await runtime.createTexture({
             size: [ 16, 16 ],
             format: 'depth24plus',
@@ -554,7 +554,7 @@ describe('scratch render/pass native parity', () => {
     it('lowers read-only depth as a pass read without advancing its content epoch', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const color = await runtime.createTexture({
             size: [ 32, 32 ],
             format: 'rgba8unorm',
@@ -614,7 +614,7 @@ describe('scratch render/pass native parity', () => {
     it('requires initialized read-only content and rejects a depth-writing pipeline', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const depth = await runtime.createTexture({
             size: [ 16, 16 ],
             format: 'depth24plus',
@@ -666,7 +666,7 @@ describe('scratch render/pass native parity', () => {
     it('keeps a stencil-only read-only attachment ready without a write epoch', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const stencil = await runtime.createTexture({
             size: [ 16, 16 ],
             format: 'stencil8',
@@ -700,7 +700,7 @@ describe('scratch render/pass native parity', () => {
     it('allows depth-only sampling while a disjoint stencil aspect remains writable', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const color = await runtime.createTexture({
             size: [ 16, 16 ],
             format: 'rgba8unorm',
@@ -799,7 +799,7 @@ describe('scratch render/pass native parity', () => {
     it('advances a mixed read-only/writable depth-stencil attachment only once', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const depthStencil = await runtime.createTexture({
             size: [ 16, 16 ],
             format: 'depth24plus-stencil8',

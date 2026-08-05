@@ -1,4 +1,4 @@
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 
 export type SupportingObjectFailureKind =
     | 'validation'
@@ -43,7 +43,7 @@ const filters = Object.freeze([
 ] satisfies ScopeFilter[])
 
 export function issueSupportingObjectCreation<T>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     issue: () => T
 ): Promise<SupportingObjectCreationOutcome<T>> {
 
@@ -51,7 +51,7 @@ export function issueSupportingObjectCreation<T>(
 }
 
 export function beginSupportingObjectCreation<T>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     issue: () => T
 ): SupportingObjectCreationAttempt<T> {
 
@@ -122,7 +122,7 @@ export function beginSupportingObjectCreation<T>(
 }
 
 export function recheckSupportingObjectLifecycle<T>(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     outcome: SupportingObjectCreationOutcome<T>
 ): SupportingObjectCreationOutcome<T> {
 
@@ -154,7 +154,7 @@ export function recheckSupportingObjectLifecycle<T>(
 }
 
 function supportingObjectLifecycleFailures(
-    runtime: ScratchRuntime
+    runtime: GPURuntime
 ): SupportingObjectObservedFailure[] {
 
     const failures: SupportingObjectObservedFailure[] = []

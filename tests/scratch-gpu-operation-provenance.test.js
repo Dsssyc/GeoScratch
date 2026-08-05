@@ -9,7 +9,7 @@ import {
     diagnosticsControllerFor,
     logicalTextureDescriptorFootprint,
 } from '../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
-import { ScratchRuntime } from '../packages/geoscratch/dist/scratch/gpu/runtime.js'
+import { GPURuntime } from '../packages/geoscratch/dist/scratch/gpu/runtime.js'
 import { BufferResource } from '../packages/geoscratch/dist/scratch/gpu/buffer.js'
 import { TextureResource } from '../packages/geoscratch/dist/scratch/gpu/texture.js'
 import { layoutCodec } from '../packages/geoscratch/dist/scratch/gpu/layout-codec.js'
@@ -228,13 +228,13 @@ describe('fake WebGPU error scopes', () => {
     })
 })
 
-describe('ScratchRuntime bounded GPU diagnostics', () => {
+describe('GPURuntime bounded GPU diagnostics', () => {
 
     it('keeps the runtime native-device ownership immutable', async () => {
 
         const primary = createFakeGpu()
         const replacement = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: primary.gpu })
+        const runtime = await GPURuntime.create({ gpu: primary.gpu })
         const originalDevice = runtime.device
         const originalQueue = runtime.queue
 
@@ -259,7 +259,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('exposes a readonly immutable current fact graph without GPU handles', async () => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu, label: 'facts runtime' })
+        const runtime = await GPURuntime.create({ gpu, label: 'facts runtime' })
         const buffer = await runtime.createBuffer({
             label: 'facts buffer',
             size: 64,
@@ -316,7 +316,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
             name: 'CapturedLayout',
             fields: [ { name: 'value', type: 'f32' } ],
         })
-        const runtime = await ScratchRuntime.create({ gpu, label: longRuntimeLabel })
+        const runtime = await GPURuntime.create({ gpu, label: longRuntimeLabel })
         const buffer = await runtime.createBuffer({
             label: longResourceLabel,
             size: 4,
@@ -384,7 +384,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('preserves BindSet identity when a preparation completion advances its stage', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
         const target = {
             kind: 'bind-set',
@@ -434,7 +434,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('bounds operation records, evidence bytes, and monotonic sequence facts', async () => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu,
             diagnostics: {
                 operationCapacity: 3,
@@ -475,7 +475,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('does not clone full descriptors into default pending operation state', async () => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
         const compact = controller.beginOperation(operationInput(0))
 
@@ -518,7 +518,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('removes disposed resources from current facts before disposal capture can degrade', async () => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const buffer = await runtime.createBuffer({ size: 4, usage: 1 })
         const capture = runtime.diagnostics.capture({
             maxOperations: 8,
@@ -538,7 +538,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('keeps recorder state structurally bounded under sustained overwrite stress', async () => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu,
             diagnostics: {
                 operationCapacity: 8,
@@ -597,7 +597,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('releases runtime and resource lifecycle subscriptions after successful settlement', async () => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
 
         for (let index = 0; index < 64; index++) {
@@ -619,7 +619,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('releases successful pending detail after settlement', async () => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
         const operation = controller.beginOperation(operationInput(0))
 
@@ -646,7 +646,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
         let applicationEvents = 0
         const applicationListener = () => applicationEvents++
         device.addEventListener('uncapturederror', applicationListener)
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu,
             diagnostics: {
                 operationCapacity: 2,
@@ -676,7 +676,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('records device loss without fabricating operation causality', async () => {
 
         const { gpu, errors } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
         const pending = controller.beginOperation(operationInput(0))
 
@@ -698,7 +698,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('captures stacks and full descriptors only in finite deep capture sessions', async () => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const controller = diagnosticsControllerFor(runtime)
         const capture = runtime.diagnostics.capture({
             maxOperations: 2,
@@ -729,7 +729,7 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     it('automatically expires capture sessions by duration', async () => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const capture = runtime.diagnostics.capture({
             maxOperations: 100,
             maxDurationMs: 5,
@@ -745,12 +745,12 @@ describe('ScratchRuntime bounded GPU diagnostics', () => {
     })
 })
 
-describe('ScratchRuntime fallible initial GPU allocation', () => {
+describe('GPURuntime fallible initial GPU allocation', () => {
 
     it('pops both scopes before awaiting and registers a buffer only after acknowledgement', async () => {
 
         const { gpu, calls, errors } = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         const creation = runtime.createBuffer({
             label: 'vertices',
@@ -798,7 +798,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('attributes validation failure exactly and never registers the failed candidate', async () => {
 
         const { gpu, calls, errors } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const nativeError = Object.assign(new Error('invalid native descriptor'), {
             name: 'GPUValidationError',
         })
@@ -826,7 +826,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('keeps a returned failure incident finite when the native label is extremely long', async () => {
 
         const { gpu, calls, errors } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu,
             diagnostics: { evidenceByteCapacity: 1_024 },
         })
@@ -852,7 +852,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
 
         for (const maxOperations of [ 1, 2 ]) {
             const { gpu, errors } = createFakeGpu()
-            const runtime = await ScratchRuntime.create({
+            const runtime = await GPURuntime.create({
                 gpu,
                 diagnostics: { operationCapacity: 0 },
             })
@@ -883,7 +883,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('attributes OOM to the trigger operation while preserving contributor caveats', async () => {
 
         const { gpu, calls, errors } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const resident = await Promise.resolve(runtime.createBuffer({ size: 32, usage: 1 }))
         const nativeError = Object.assign(new Error('out of memory'), {
             name: 'GPUOutOfMemoryError',
@@ -910,7 +910,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('records bounded disposal churn without counting disposal as allocation', async () => {
 
         const { gpu, errors } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const resident = await runtime.createBuffer({
             label: 'temporary resident',
             size: 32,
@@ -955,7 +955,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('balances scopes after a synchronous native throw and reports the native category', async () => {
 
         const { gpu, calls, errors } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const nativeError = new TypeError('native createBuffer threw')
         errors.throwNext('createBuffer', nativeError)
 
@@ -975,7 +975,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('handles a scope-pop failure structurally after issuing both pops', async () => {
 
         const { gpu, calls, errors } = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const creation = runtime.createTexture(textureDescriptor('scope failure'))
 
         errors.rejectPop(0, new Error('validation pop rejected'))
@@ -992,7 +992,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('isolates concurrent allocations and preserves an application outer scope', async () => {
 
         const { gpu, device, errors } = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const nativeError = Object.assign(new Error('first invalid'), { name: 'GPUValidationError' })
 
         device.pushErrorScope('validation')
@@ -1020,8 +1020,8 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
 
         const fakeA = createFakeGpu({ deferErrorScopePops: true })
         const fakeB = createFakeGpu({ deferErrorScopePops: true })
-        const runtimeA = await ScratchRuntime.create({ gpu: fakeA.gpu })
-        const runtimeB = await ScratchRuntime.create({ gpu: fakeB.gpu })
+        const runtimeA = await GPURuntime.create({ gpu: fakeA.gpu })
+        const runtimeB = await GPURuntime.create({ gpu: fakeB.gpu })
         const validationError = Object.assign(new Error('runtime A invalid'), {
             name: 'GPUValidationError',
         })
@@ -1046,7 +1046,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('rejects device loss and runtime disposal while scopes settle without exposing candidates', async () => {
 
         const lostFake = createFakeGpu({ deferErrorScopePops: true })
-        const lostRuntime = await ScratchRuntime.create({ gpu: lostFake.gpu })
+        const lostRuntime = await GPURuntime.create({ gpu: lostFake.gpu })
         const lostCreation = lostRuntime.createTexture(textureDescriptor('lost candidate'))
         lostFake.errors.loseDevice({ reason: 'unknown', message: 'device vanished' })
         const lostError = await rejectedDiagnostic(lostCreation)
@@ -1060,7 +1060,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         lostFake.errors.settlePop(1)
 
         const disposedFake = createFakeGpu({ deferErrorScopePops: true })
-        const disposedRuntime = await ScratchRuntime.create({ gpu: disposedFake.gpu })
+        const disposedRuntime = await GPURuntime.create({ gpu: disposedFake.gpu })
         const disposedCreation = disposedRuntime.createBuffer({ size: 4, usage: 1 })
         disposedRuntime.dispose()
         const disposedError = await rejectedDiagnostic(disposedCreation)
@@ -1075,7 +1075,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('rechecks runtime lifecycle after scope acknowledgement and before resource installation', async () => {
 
         const bufferFake = createFakeGpu()
-        const bufferRuntime = await ScratchRuntime.create({ gpu: bufferFake.gpu })
+        const bufferRuntime = await GPURuntime.create({ gpu: bufferFake.gpu })
         triggerOnLifecycleUnsubscribe(bufferRuntime, () => bufferRuntime.dispose())
         const bufferFailure = await rejectedDiagnostic(
             bufferRuntime.createBuffer({ size: 4, usage: 1 })
@@ -1087,7 +1087,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         expect(bufferRuntime.diagnostics.operations().at(-1).status).to.equal('cancelled')
 
         const textureFake = createFakeGpu()
-        const textureRuntime = await ScratchRuntime.create({ gpu: textureFake.gpu })
+        const textureRuntime = await GPURuntime.create({ gpu: textureFake.gpu })
         triggerOnLifecycleUnsubscribe(textureRuntime, () => textureRuntime.dispose())
         const textureFailure = await rejectedDiagnostic(
             textureRuntime.createTexture(textureDescriptor('dispose after scopes'))
@@ -1102,7 +1102,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
     it('removes every synchronous public allocation bypass', async () => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
 
         expect(BufferResource).not.to.have.property('create')
         expect(TextureResource).not.to.have.property('create')
@@ -1118,7 +1118,7 @@ describe('TextureResource transactional replacement allocation', () => {
     it('keeps the old allocation current until scoped replacement acknowledgement', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const initial = runtime.createTexture(textureDescriptor('transactional'))
         fake.errors.settlePop(0)
         fake.errors.settlePop(1)
@@ -1173,7 +1173,7 @@ describe('TextureResource transactional replacement allocation', () => {
     it('preserves every old allocation fact after validation failure', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture(textureDescriptor('rollback'))
         advanceResourceContentEpochForTest(texture)
         const oldTexture = texture.gpuTexture
@@ -1210,7 +1210,7 @@ describe('TextureResource transactional replacement allocation', () => {
     it('reports replacement OOM without treating the trigger as the sole cause', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture(textureDescriptor('replacement oom'))
         const error = Object.assign(new Error('replacement oom'), { name: 'GPUOutOfMemoryError' })
         fake.errors.failNext('createTexture', 'out-of-memory', error)
@@ -1229,7 +1229,7 @@ describe('TextureResource transactional replacement allocation', () => {
     it('keeps same-size resize scope-free and cancels a candidate on resource disposal', async () => {
 
         const noOpFake = createFakeGpu()
-        const noOpRuntime = await ScratchRuntime.create({ gpu: noOpFake.gpu })
+        const noOpRuntime = await GPURuntime.create({ gpu: noOpFake.gpu })
         const texture = await noOpRuntime.createTexture(textureDescriptor('no-op'))
         const scopeCallsBefore = noOpFake.calls.errorScopes.length
         const operationRecordsBefore = noOpRuntime.diagnostics.operations().length
@@ -1242,7 +1242,7 @@ describe('TextureResource transactional replacement allocation', () => {
         expect(noOpRuntime.diagnostics.operations()).to.have.length(operationRecordsBefore)
 
         const disposeFake = createFakeGpu({ deferErrorScopePops: true })
-        const disposeRuntime = await ScratchRuntime.create({ gpu: disposeFake.gpu })
+        const disposeRuntime = await GPURuntime.create({ gpu: disposeFake.gpu })
         const initial = disposeRuntime.createTexture(textureDescriptor('dispose pending'))
         disposeFake.errors.settlePop(0)
         disposeFake.errors.settlePop(1)
@@ -1262,7 +1262,7 @@ describe('TextureResource transactional replacement allocation', () => {
     it('records device loss during replacement without claiming rollback usability', async () => {
 
         const fake = createFakeGpu({ deferErrorScopePops: true })
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const initial = runtime.createTexture(textureDescriptor('loss replacement'))
         fake.errors.settlePop(0)
         fake.errors.settlePop(1)
@@ -1290,7 +1290,7 @@ describe('TextureResource transactional replacement allocation', () => {
     it('rechecks device loss after scope acknowledgement and before replacement commit', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const texture = await runtime.createTexture(textureDescriptor('late replacement loss'))
         const oldTexture = texture.gpuTexture
         const oldVersion = texture.allocationVersion

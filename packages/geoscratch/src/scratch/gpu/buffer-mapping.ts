@@ -24,15 +24,15 @@ import type {
     MappedBufferResourceDescriptor,
 } from './buffer.js'
 import type {
-    GpuNativeErrorCategory,
-    ScratchBufferMappingFailureStage,
-    ScratchGpuIncidentOutcome,
+    GPUNativeErrorCategory,
+    GPUBufferMappingFailureStage,
+    GPUIncidentOutcome,
 } from './gpu-operation.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 import type {
-    ScratchPendingGpuOperation,
-    ScratchRuntimeBufferMappingFact,
-    ScratchRuntimeDiagnosticsController,
+    GPUPendingOperation,
+    GPURuntimeBufferMappingFact,
+    GPURuntimeDiagnosticsController,
 } from './runtime-diagnostics.js'
 
 export type BufferMappingMode = 'read' | 'write'
@@ -64,9 +64,9 @@ type ScopeFilter = 'validation' | 'internal' | 'out-of-memory'
 
 type MappingFailure = Readonly<{
     code: string
-    category: GpuNativeErrorCategory
+    category: GPUNativeErrorCategory
     cause?: unknown
-    outcome: ScratchGpuIncidentOutcome
+    outcome: GPUIncidentOutcome
 }>
 
 type MappingCancellation = Readonly<{
@@ -76,14 +76,14 @@ type MappingCancellation = Readonly<{
 
 type MappingContext = {
     id: string
-    runtime: ScratchRuntime
+    runtime: GPURuntime
     buffer: BufferResource
     region: BufferRegion
     mode: BufferMappingMode
     allocationVersion: number
     contentEpoch: number
-    controller: ScratchRuntimeDiagnosticsController
-    operation: ScratchPendingGpuOperation
+    controller: GPURuntimeDiagnosticsController
+    operation: GPUPendingOperation
     phase: 'pending' | 'mapped' | 'poisoned' | 'terminal'
     nativeMapIssued: boolean
     unmapIssued: boolean
@@ -123,7 +123,7 @@ export class MappedBufferLease {
     private constructor(token: symbol) {
 
         if (token !== mappedBufferLeaseToken || new.target !== MappedBufferLease) {
-            throw new TypeError('MappedBufferLease must be created by ScratchRuntime.')
+            throw new TypeError('MappedBufferLease must be created by GPURuntime.')
         }
         Object.preventExtensions(this)
     }
@@ -188,7 +188,7 @@ export class MappedBufferLease {
 }
 
 export function markHostWrittenBuffersIndeterminateOnDeviceLoss(
-    runtime: ScratchRuntime
+    runtime: GPURuntime
 ): void {
 
     for (const resource of runtime._resources) {
@@ -209,7 +209,7 @@ export function markHostWrittenBuffersIndeterminateOnDeviceLoss(
 }
 
 export async function createMappedBufferResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: MappedBufferResourceDescriptor
 ): Promise<MappedBufferCreation> {
 
@@ -302,7 +302,7 @@ export async function createMappedBufferResource(
 }
 
 export async function mapBufferResource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: BufferMappingDescriptor
 ): Promise<MappedBufferLease> {
 
@@ -320,7 +320,7 @@ export async function mapBufferResource(
         onLifecycle: reason => requestMappingCancellation(context, reason),
     })
 
-    let operation: ScratchPendingGpuOperation
+    let operation: GPUPendingOperation
     try {
         operation = controller.beginOperation({
             kind: 'buffer-mapping',
@@ -663,7 +663,7 @@ function completeMappingCancellation(
 function throwMappingFailures(
     context: MappingContext,
     failures: readonly MappingFailure[],
-    stage: ScratchBufferMappingFailureStage
+    stage: GPUBufferMappingFailureStage
 ): never {
 
     const allFailures = context.unmapFailure === undefined
@@ -702,7 +702,7 @@ function throwMappingFailures(
 function completeMappingFailure(
     context: MappingContext,
     failures: readonly MappingFailure[],
-    stage: ScratchBufferMappingFailureStage
+    stage: GPUBufferMappingFailureStage
 ) {
 
     const primary = failures[0]
@@ -784,7 +784,7 @@ function unmapContextOnce(
 
 function registerMappingFact(
     context: MappingContext,
-    state: ScratchRuntimeBufferMappingFact['state']
+    state: GPURuntimeBufferMappingFact['state']
 ): void {
 
     context.controller.registerBufferMapping(Object.freeze({
@@ -819,7 +819,7 @@ function throwInvalidMappingSignal(context: MappingContext, cause: unknown): nev
 }
 
 function normalizeBufferMappingDescriptor(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: unknown
 ): BufferMappingDescriptor {
 
@@ -854,7 +854,7 @@ function normalizeBufferMappingDescriptor(
             phase: 'buffer-mapping',
             subject: region.subject,
             related: [ runtime.subject, region.buffer.subject ],
-            message: 'BufferRegion belongs to another ScratchRuntime.',
+            message: 'BufferRegion belongs to another GPURuntime.',
             expected: { runtimeId: runtime.id },
             actual: { runtimeId: region.buffer.runtime.id },
         })
@@ -1084,7 +1084,7 @@ function lifecycleFailure(
     reason: 'abort' | BufferMappingLifecycleReason
 ): MappingFailure {
 
-    const category: GpuNativeErrorCategory = reason === 'device-lost'
+    const category: GPUNativeErrorCategory = reason === 'device-lost'
         ? 'device-lost'
         : 'none'
     return structuralMappingFailure({
@@ -1095,9 +1095,9 @@ function lifecycleFailure(
 }
 
 function structuralMappingFailure(input: Readonly<{
-    stage: ScratchBufferMappingFailureStage
+    stage: GPUBufferMappingFailureStage
     code: string
-    category: GpuNativeErrorCategory
+    category: GPUNativeErrorCategory
 }>): MappingFailure {
 
     return Object.freeze({
@@ -1112,10 +1112,10 @@ function structuralMappingFailure(input: Readonly<{
 }
 
 function mappingStageFailure(input: Readonly<{
-    stage: ScratchBufferMappingFailureStage
+    stage: GPUBufferMappingFailureStage
     code: string
     cause: unknown
-    category?: GpuNativeErrorCategory
+    category?: GPUNativeErrorCategory
 }>): MappingFailure {
 
     const category = input.category ?? 'native-exception'
@@ -1282,7 +1282,7 @@ function cancellationMessage(reason: 'abort' | BufferMappingLifecycleReason): st
 
     if (reason === 'abort') return 'Pending buffer mapping was cancelled by AbortSignal.'
     if (reason === 'device-lost') return 'Buffer mapping ended because the GPU device was lost.'
-    if (reason === 'runtime-disposed') return 'Buffer mapping ended because ScratchRuntime was disposed.'
+    if (reason === 'runtime-disposed') return 'Buffer mapping ended because GPURuntime was disposed.'
     return 'Buffer mapping ended because BufferResource was disposed.'
 }
 

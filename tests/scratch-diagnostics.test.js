@@ -15,12 +15,12 @@ describe('scratch diagnostics', () => {
             severity: 'error',
             phase: 'resource',
             subject: { kind: 'Resource', id: 'buffer-a', resourceKind: 'BufferResource' },
-            message: 'Resource belongs to a different ScratchRuntime.',
+            message: 'Resource belongs to a different GPURuntime.',
             expected: { runtimeId: 'runtime-a' },
             actual: { runtimeId: 'runtime-b' },
             hints: [ 'Use resources with the runtime that created them.' ],
             related: [
-                { kind: 'ScratchRuntime', id: 'runtime-a' },
+                { kind: 'GPURuntime', id: 'runtime-a' },
             ],
         })
 
@@ -31,12 +31,12 @@ describe('scratch diagnostics', () => {
             severity: 'error',
             phase: 'resource',
             subject: { kind: 'Resource', id: 'buffer-a', resourceKind: 'BufferResource' },
-            message: 'Resource belongs to a different ScratchRuntime.',
+            message: 'Resource belongs to a different GPURuntime.',
             expected: { runtimeId: 'runtime-a' },
             actual: { runtimeId: 'runtime-b' },
             hints: [ 'Use resources with the runtime that created them.' ],
             related: [
-                { kind: 'ScratchRuntime', id: 'runtime-a' },
+                { kind: 'GPURuntime', id: 'runtime-a' },
             ],
         })
     })
@@ -56,8 +56,8 @@ describe('scratch diagnostics', () => {
             code: 'SCRATCH_RUNTIME_DISPOSED',
             severity: 'error',
             phase: 'runtime',
-            subject: { kind: 'ScratchRuntime', id: 'runtime-a' },
-            message: 'ScratchRuntime has been disposed.',
+            subject: { kind: 'GPURuntime', id: 'runtime-a' },
+            message: 'GPURuntime has been disposed.',
         })
 
         const report = createScratchDiagnosticReport([ warning, errorDiagnostic ])

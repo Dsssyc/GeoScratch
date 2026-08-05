@@ -2,7 +2,7 @@ import { createTestProgram } from './scratch-test-utils.js'
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
 } from 'geoscratch'
 import {
     diagnosticsControllerFor,
@@ -27,12 +27,12 @@ fn csMain() {
 }
 `
 
-describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
+describe('GPURuntime pipeline lifecycle and bounded evidence', () => {
 
     it('keeps runtime pipeline ownership outside the public mutable object surface', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const pipeline = await runtime.createComputePipeline({
             program: await createComputeProgram(runtime),
         })
@@ -49,7 +49,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
     it('keeps pending, live, disposed, and retained facts bounded under sustained churn', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu,
             diagnostics: {
                 operationCapacity: 8,
@@ -110,7 +110,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
     it('preserves complete native labels while bounding successful current and history facts', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const label = `successful-pipeline-${'p'.repeat(100_000)}`
         const pipeline = await runtime.createComputePipeline({
             label,
@@ -138,7 +138,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
     it('bounds pipeline labels in deterministic local-validation diagnostics', async() => {
 
         const { gpu, calls } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const label = `invalid-local-pipeline-${'l'.repeat(100_000)}`
         const error = await rejectedDiagnostic(runtime.createRenderPipeline({
             label,
@@ -158,7 +158,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
     it('allows empty color targets when a render pipeline has depth-stencil state', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const pipeline = await runtime.createRenderPipeline({
             program: await createRenderProgram(runtime),
             targets: [],
@@ -195,7 +195,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
                 linePos: 0,
             } ],
         })
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu: fake.gpu,
             diagnostics: {
                 operationCapacity: 2,
@@ -265,7 +265,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
 
         const controls = { deferAsyncPipelines: false }
         const fake = createFakeGpu(controls)
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const program = await createRenderProgram(runtime)
         fake.device.limits.maxBindGroups = 80
         fake.device.limits.maxUniformBuffersPerShaderStage = 80
@@ -295,9 +295,9 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         expect(error.context.incident.related).to.have.length.at.most(64)
         expect(error.context.incident.outcomes).to.have.length.at.most(64)
         expect(error.context.incident.related.slice(0, 3).map(subject => subject.kind)).to.deep.equal([
-            'ScratchRuntime',
+            'GPURuntime',
             'Program',
-            'GpuOperation',
+            'GPUOperation',
         ])
         expect(error.context.incident.evidence.complete).to.equal(false)
         expect(error.context.incident.evidence.omittedRecords).to.equal(35)
@@ -317,7 +317,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
     it('captures full pipeline descriptors and stacks only inside a finite source-free capture', async() => {
 
         const { gpu } = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu })
+        const runtime = await GPURuntime.create({ gpu })
         const renderProgram = await createRenderProgram(runtime)
         const computeProgram = await createComputeProgram(runtime, { scale: 7 })
         const capture = runtime.diagnostics.capture({
@@ -375,7 +375,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
     it('links real pipeline failures into capture when default history capacities are zero', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({
+        const runtime = await GPURuntime.create({
             gpu: fake.gpu,
             diagnostics: {
                 operationCapacity: 0,

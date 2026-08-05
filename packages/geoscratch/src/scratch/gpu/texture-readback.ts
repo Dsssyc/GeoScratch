@@ -11,9 +11,9 @@ import {
     textureFormatIsDepthStencil,
 } from './texture.js'
 import { describeValue, isRecord } from './type-utils.js'
-import type { DiagnosticSubject } from './diagnostics.js'
+import type { ScratchDiagnosticSubject } from './diagnostics.js'
 import type { LayoutArtifact } from './layout-codec.js'
-import type { ScratchRuntime } from './runtime.js'
+import type { GPURuntime } from './runtime.js'
 import type { TextureResource } from './texture.js'
 
 const TEXTURE_USAGE_COPY_SRC = 0x1
@@ -69,9 +69,9 @@ export type NormalizedTextureReadback = Readonly<{
 }>
 
 export function normalizeTextureReadbackSource(
-    runtime: ScratchRuntime,
+    runtime: GPURuntime,
     descriptor: unknown,
-    subject: DiagnosticSubject
+    subject: ScratchDiagnosticSubject
 ): NormalizedTextureReadback {
 
     if (!isRecord(descriptor)) {
@@ -315,7 +315,7 @@ export function copyTextureReadbackLogicalBytes(
 }
 
 function normalizeMipLevel(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     resource: TextureResource,
     value: unknown
 ): number {
@@ -332,7 +332,7 @@ function normalizeMipLevel(
 }
 
 function normalizeOrigin(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     resource: TextureResource,
     value: unknown
 ): { x: number, y: number, z: number } {
@@ -361,7 +361,7 @@ function normalizeOrigin(
 }
 
 function normalizeSize(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     resource: TextureResource,
     value: unknown
 ): { width: number, height: number, depthOrArrayLayers: number } {
@@ -393,7 +393,7 @@ function normalizeSize(
 }
 
 function normalizeAspect(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     resource: TextureResource,
     value: unknown
 ): GPUTextureAspect {
@@ -406,7 +406,7 @@ function normalizeAspect(
 }
 
 function normalizeInterpretation(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     resource: TextureResource,
     value: unknown
 ): LayoutArtifact | undefined {
@@ -445,7 +445,7 @@ function textureMipExtent(
 }
 
 function checkedProduct(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     resource: TextureResource,
     left: number,
     right: number,
@@ -465,7 +465,7 @@ function checkedProduct(
 }
 
 function checkedRoundUp(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     resource: TextureResource,
     value: number,
     alignment: number,
@@ -485,7 +485,7 @@ function checkedRoundUp(
 }
 
 function throwTextureReadbackSourceInvalid(
-    subject: DiagnosticSubject,
+    subject: ScratchDiagnosticSubject,
     resource: TextureResource | undefined,
     actual: unknown,
     reason: string,

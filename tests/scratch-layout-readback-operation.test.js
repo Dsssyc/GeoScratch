@@ -3,7 +3,7 @@ import { expect } from 'chai'
 import {
     ReadbackOperation,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     layoutCodec,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
@@ -37,7 +37,7 @@ function createParticleValues(index = 0) {
 async function createRuntimeFixture() {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
 
     return { ...fake, runtime }
 }

@@ -38,7 +38,7 @@ async function createRuntime(options = {}, features = []) {
         fake.adapter.features.add(feature)
         fake.device.features.add(feature)
     }
-    const runtime = await scr.ScratchRuntime.create({
+    const runtime = await scr.GPURuntime.create({
         gpu: fake.gpu,
         ...(options.readback !== undefined ? { readback: options.readback } : {}),
     })

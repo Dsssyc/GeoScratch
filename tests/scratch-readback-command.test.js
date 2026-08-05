@@ -24,7 +24,7 @@ async function expectScratchDiagnostic(action, expected) {
 async function createSubmittedReadback(retain = 'consume-on-read', fakeOptions = {}) {
 
     const fake = createFakeGpu(fakeOptions)
-    const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
     const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
     const upload = runtime.createUploadCommand({
         target: (source).region(),
@@ -49,7 +49,7 @@ describe('scratch ReadbackCommand', () => {
     it('creates explicit buffer readback commands from both runtime factories', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({
             label: 'readback source',
             size: 16,
@@ -87,7 +87,7 @@ describe('scratch ReadbackCommand', () => {
     it('stages at the submission step and maps without a second copy', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({
             label: 'ordered source',
             size: 16,
@@ -125,7 +125,7 @@ describe('scratch ReadbackCommand', () => {
     it('rejects invalid descriptors and unaligned regions with structured diagnostics', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC })
         const noCopySource = await runtime.createBuffer({ size: 16, usage: COPY_DST })
         const texture = await runtime.createTexture({
@@ -191,7 +191,7 @@ describe('scratch ReadbackCommand', () => {
     it('revalidates readback source usage against replacement allocations before staging copy effects', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const command = await runtime.createReadbackCommand({
             source: { region: source.region(), contentEpoch: 0 },
@@ -221,8 +221,8 @@ describe('scratch ReadbackCommand', () => {
 
         const fakeA = createFakeGpu()
         const fakeB = createFakeGpu()
-        const runtimeA = await scr.ScratchRuntime.create({ gpu: fakeA.gpu })
-        const runtimeB = await scr.ScratchRuntime.create({ gpu: fakeB.gpu })
+        const runtimeA = await scr.GPURuntime.create({ gpu: fakeA.gpu })
+        const runtimeB = await scr.GPURuntime.create({ gpu: fakeB.gpu })
         const source = await runtimeA.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const command = await runtimeA.createReadbackCommand({
             source: { region: (source).region(), contentEpoch: 0 },
@@ -252,7 +252,7 @@ describe('scratch ReadbackCommand', () => {
     it('rejects duplicate use of one command in the same submission', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC })
         advanceResourceContentEpochForTest(source)
         const command = await runtime.createReadbackCommand({
@@ -279,8 +279,8 @@ describe('scratch ReadbackCommand', () => {
 
         const fakeA = createFakeGpu()
         const fakeB = createFakeGpu()
-        const runtimeA = await scr.ScratchRuntime.create({ gpu: fakeA.gpu })
-        const runtimeB = await scr.ScratchRuntime.create({ gpu: fakeB.gpu })
+        const runtimeA = await scr.GPURuntime.create({ gpu: fakeA.gpu })
+        const runtimeB = await scr.GPURuntime.create({ gpu: fakeB.gpu })
         const sourceA = await runtimeA.createBuffer({ size: 16, usage: COPY_SRC })
         const sourceB = await runtimeB.createBuffer({ size: 16, usage: COPY_SRC })
         const upload = runtimeA.createUploadCommand({
@@ -322,7 +322,7 @@ describe('scratch ReadbackCommand', () => {
 
         for (const validation of [ 'throw', 'warn', 'off' ]) {
             const fake = createFakeGpu()
-            const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+            const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
             const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC })
             const command = await runtime.createReadbackCommand({
                 source: { region: (source).region(), contentEpoch: 0 },
@@ -359,7 +359,7 @@ describe('scratch ReadbackCommand', () => {
         for (const scenario of [ 'future', 'stale' ]) {
             for (const validation of [ 'throw', 'warn', 'off' ]) {
                 const fake = createFakeGpu()
-                const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+                const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
                 const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
                 advanceResourceContentEpochForTest(source)
                 const upload = scenario === 'stale'
@@ -408,7 +408,7 @@ describe('scratch ReadbackCommand', () => {
     it('records a read-only ledger entry and preserves earlier producer provenance', async () => {
 
         const standaloneFake = createFakeGpu()
-        const standaloneRuntime = await scr.ScratchRuntime.create({ gpu: standaloneFake.gpu })
+        const standaloneRuntime = await scr.GPURuntime.create({ gpu: standaloneFake.gpu })
         const standaloneSource = await standaloneRuntime.createBuffer({ size: 16, usage: COPY_SRC })
         advanceResourceContentEpochForTest(standaloneSource)
         const standaloneCommand = await standaloneRuntime.createReadbackCommand({
@@ -432,7 +432,7 @@ describe('scratch ReadbackCommand', () => {
         expect(standaloneSource.contentEpoch).to.equal(1)
 
         const producedFake = createFakeGpu()
-        const producedRuntime = await scr.ScratchRuntime.create({ gpu: producedFake.gpu })
+        const producedRuntime = await scr.GPURuntime.create({ gpu: producedFake.gpu })
         const producedSource = await producedRuntime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const upload = producedRuntime.createUploadCommand({
             target: (producedSource).region(),
@@ -462,7 +462,7 @@ describe('scratch ReadbackCommand', () => {
     it('pins bytes and producer provenance to the readback step before later GPU writes', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 8, usage: COPY_SRC | COPY_DST })
         const laterSource = await runtime.createBuffer({ size: 8, usage: COPY_SRC | COPY_DST })
         const firstUpload = runtime.createUploadCommand({
@@ -563,7 +563,7 @@ describe('scratch ReadbackCommand', () => {
     it('preserves layout-aware views on the scheduled path', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const codec = scr.layoutCodec({
             name: 'OrderedReadbackValue',
             fields: [ { name: 'value', type: 'f32' } ],
@@ -661,7 +661,7 @@ describe('scratch ReadbackCommand', () => {
     it('keeps an exact submitted result retrievable after command disposal', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const upload = runtime.createUploadCommand({
             target: (source).region(),
@@ -692,7 +692,7 @@ describe('scratch ReadbackCommand', () => {
     it('wraps queue completion rejection without rewriting the linked readback', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const upload = runtime.createUploadCommand({
             target: (source).region(),
@@ -769,7 +769,7 @@ describe('scratch ReadbackCommand', () => {
     it('records enclosing-family queue completion evidence for every linked readback', async () => {
 
         const fake = createFakeGpu()
-        const runtime = await scr.ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await scr.GPURuntime.create({ gpu: fake.gpu })
         const source = await runtime.createBuffer({ size: 16, usage: COPY_SRC | COPY_DST })
         const upload = runtime.createUploadCommand({
             target: (source).region(),

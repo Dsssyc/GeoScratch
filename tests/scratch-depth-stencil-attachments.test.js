@@ -3,7 +3,7 @@ import { expect } from 'chai'
 import {
     BindSet,
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     TextureResource,
 } from 'geoscratch'
 import {
@@ -34,7 +34,7 @@ fn fsMain() {}
 async function createDepthFixture(depthFormat = 'depth24plus') {
 
     const fake = createFakeGpu()
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const colorTarget = await runtime.createTexture({
         label: 'scene color',
         size: { width: 64, height: 64 },
@@ -356,7 +356,7 @@ describe('scratch depth/stencil render attachments', () => {
     it('accepts native-valid depth-only pipelines and render passes', async() => {
 
         const fake = createFakeGpu()
-        const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+        const runtime = await GPURuntime.create({ gpu: fake.gpu })
         const depthTarget = await runtime.createTexture({
             size: [ 32, 32 ],
             format: 'depth24plus',

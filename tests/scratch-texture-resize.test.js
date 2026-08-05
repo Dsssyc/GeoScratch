@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import {
     ScratchDiagnosticError,
-    ScratchRuntime,
+    GPURuntime,
     TextureResource,
 } from 'geoscratch'
 import { createFakeGpu } from './scratch-test-utils.js'
@@ -20,7 +20,7 @@ async function createFixture(descriptor = {}) {
         maxTextureArrayLayers: 256,
     })
     Object.assign(fake.adapter.limits, fake.device.limits)
-    const runtime = await ScratchRuntime.create({ gpu: fake.gpu })
+    const runtime = await GPURuntime.create({ gpu: fake.gpu })
     const texture = await runtime.createTexture({
         label: 'resizable texture',
         size: { width: 8, height: 8 },
