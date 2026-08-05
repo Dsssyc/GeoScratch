@@ -1,5 +1,5 @@
 import { UUID } from '../../core/utils/uuid.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { updateRuntimeResourceFact } from './runtime-diagnostics.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -151,7 +151,7 @@ export abstract class Resource {
         }
 
         if (!runtime || typeof runtime._registerResource !== 'function') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'resource',
@@ -244,7 +244,7 @@ export abstract class Resource {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'resource',
@@ -264,7 +264,7 @@ export abstract class Resource {
     assertUsable(): void {
 
         if (this.#isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RESOURCE_DISPOSED',
                 severity: 'error',
                 phase: 'resource',

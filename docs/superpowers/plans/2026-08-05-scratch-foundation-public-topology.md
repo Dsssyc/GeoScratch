@@ -214,17 +214,17 @@ export type ScratchDiagnosticErrorContext =
 - Modify: `tests/fixtures/worker-system.ts`
 - Modify: `tests/types/public-api.ts`
 
-- [ ] Add RED tests proving `createScratchDiagnostic()` requires an explicit `domain`, freezes the envelope plus copied library-owned subject/list entries, does not mutate opaque caller-owned `expected`/`actual` values, and returns a union narrowed by `diagnostic.domain`.
-- [ ] Add RED tests proving GPU and Worker failures are both `ScratchDiagnosticError`, `isScratchDiagnosticError()` recognizes only branded instances, and an error context domain must match its diagnostic domain.
-- [ ] Implement `ScratchDiagnosticBase`, `ScratchDiagnostic`, `ScratchDiagnosticInput`, `ScratchDiagnosticReport`, `ScratchDiagnosticErrorContext`, `ScratchDiagnosticError`, `createScratchDiagnostic`, `createScratchDiagnosticReport`, and `isScratchDiagnosticError` in the shared diagnostics domain.
-- [ ] Export the common public values `ScratchDiagnosticError`, `createScratchDiagnostic`, `createScratchDiagnosticReport`, and `isScratchDiagnosticError`; keep domain throw helpers internal and remove `throwScratchDiagnostic` from the public facade.
-- [ ] Keep GPU-only phase/subject/facts in `gpu/diagnostics.ts`; provide internal `createGPUDiagnostic()` and `throwGPUDiagnostic()` helpers so every GPU call emits `domain: 'gpu'` without exporting a second public envelope.
-- [ ] Keep Worker-only code/phase/subject/cancellation/remote facts in `worker/diagnostics.ts`; retain an internal `workerDiagnosticError()` factory returning `ScratchDiagnosticError<WorkerDiagnostic>`.
-- [ ] Delete `WorkerDiagnosticError` and `createWorkerDiagnostic` as public and internal concepts. Update typed Worker failure slots and tests to the common error while preserving remote stack, cause, retriable, cancellation kind, and task/group/module facts.
-- [ ] Replace the old public `.incident` field with `error.context` and migrate all GPU tests/call sites. Never copy GPU incident state into Worker diagnostics.
-- [ ] Ensure `createScratchDiagnosticReport()` accepts mixed GPU/Worker diagnostics, remains immutable, and computes counts without reinterpreting domain-specific codes.
-- [ ] Run `npm test -- --grep "Scratch foundation diagnostics|scratch diagnostics|WorkerSystem|worker public API"` and `npm run typecheck`.
-- [ ] Commit as `Unify Scratch diagnostic envelopes`.
+- [x] Add RED tests proving `createScratchDiagnostic()` requires an explicit `domain`, freezes the envelope plus copied library-owned subject/list entries, does not mutate opaque caller-owned `expected`/`actual` values, and returns a union narrowed by `diagnostic.domain`.
+- [x] Add RED tests proving GPU and Worker failures are both `ScratchDiagnosticError`, `isScratchDiagnosticError()` recognizes only branded instances, and an error context domain must match its diagnostic domain.
+- [x] Implement `ScratchDiagnosticBase`, `ScratchDiagnostic`, `ScratchDiagnosticInput`, `ScratchDiagnosticReport`, `ScratchDiagnosticErrorContext`, `ScratchDiagnosticError`, `createScratchDiagnostic`, `createScratchDiagnosticReport`, and `isScratchDiagnosticError` in the shared diagnostics domain.
+- [x] Export the common public values `ScratchDiagnosticError`, `createScratchDiagnostic`, `createScratchDiagnosticReport`, and `isScratchDiagnosticError`; keep domain throw helpers internal and remove `throwScratchDiagnostic` from the public facade.
+- [x] Keep GPU-only phase/subject/facts in `gpu/diagnostics.ts`; provide internal `createGPUDiagnostic()` and `throwGPUDiagnostic()` helpers so every GPU call emits `domain: 'gpu'` without exporting a second public envelope.
+- [x] Keep Worker-only code/phase/subject/cancellation/remote facts in `worker/diagnostics.ts`; retain an internal `workerDiagnosticError()` factory returning `ScratchDiagnosticError<WorkerDiagnostic>`.
+- [x] Delete `WorkerDiagnosticError` and `createWorkerDiagnostic` as public and internal concepts. Update typed Worker failure slots and tests to the common error while preserving remote stack, cause, retriable, cancellation kind, and task/group/module facts.
+- [x] Replace the old public `.incident` field with `error.context` and migrate all GPU tests/call sites. Never copy GPU incident state into Worker diagnostics.
+- [x] Ensure `createScratchDiagnosticReport()` accepts mixed GPU/Worker diagnostics, remains immutable, and computes counts without reinterpreting domain-specific codes.
+- [x] Run `npm test -- --grep "Scratch foundation diagnostics|scratch diagnostics|WorkerSystem|worker public API"` and `npm run typecheck`.
+- [x] Commit as `Unify Scratch diagnostic envelopes`.
 
 ### Task 4: Apply The Complete GPU Naming Clean Cut
 

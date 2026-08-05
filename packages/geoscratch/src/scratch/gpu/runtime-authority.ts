@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { ScratchRuntime } from './runtime.js'
 import type { ScratchDeviceLostInfo } from './runtime-diagnostics.js'
@@ -80,7 +80,7 @@ export function assertScratchRuntimeActive(runtime: ScratchRuntime): void {
 
     const state = runtimeAuthorityStateFor(runtime)
     if (state.isDisposed) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DISPOSED',
             severity: 'error',
             phase: 'runtime',
@@ -91,7 +91,7 @@ export function assertScratchRuntimeActive(runtime: ScratchRuntime): void {
     }
 
     if (state.isDeviceLost) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DEVICE_LOST',
             severity: 'error',
             phase: 'runtime',
@@ -120,7 +120,7 @@ export function assertScratchRuntimeAuthority(stamp: ScratchRuntimeAuthorityStam
     assertScratchRuntimeActive(stamp.runtime)
     if (observation.isCurrent) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RUNTIME_LIFECYCLE_CHANGED',
         severity: 'error',
         phase: 'runtime',

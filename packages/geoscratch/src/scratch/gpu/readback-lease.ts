@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import type { LayoutArtifact } from './layout-codec.js'
 import type { ReadbackOperation } from './readback.js'
 import type { TextureReadbackRowLayout } from './texture-readback.js'
@@ -61,7 +61,7 @@ export class MappedReadbackLease {
 
         const facts = leaseFactsFor(this)
         if (facts.state !== 'mapped') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_MAPPED_LEASE_INACTIVE',
                 severity: 'error',
                 phase: 'readback',

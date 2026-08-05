@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 import type { BufferMappingMode } from './buffer-mapping.js'
 import type { BufferRegion, BufferResource } from './buffer.js'
@@ -40,7 +40,7 @@ export function claimBufferMappingAuthority(
     assertAuthorityInitialized(buffer)
     const current = authorityByBuffer.get(buffer)
     if (current !== undefined) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_MAPPING_CONFLICT',
             severity: 'error',
             phase: 'buffer-mapping',
@@ -89,7 +89,7 @@ export function assertBufferAvailableForGpuUse(
     assertAuthorityInitialized(buffer)
     const claim = authorityByBuffer.get(buffer)
     if (claim === undefined) return
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BUFFER_MAPPING_GPU_USE_CONFLICT',
         severity: 'error',
         phase: 'buffer-mapping',

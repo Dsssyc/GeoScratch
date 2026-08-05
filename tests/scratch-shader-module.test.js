@@ -158,11 +158,11 @@ describe('scratch ShaderModule', () => {
             throw new Error('expected ShaderModule rejection')
         } catch (error) {
             expect(error.diagnostic.code).to.equal('SCRATCH_SHADER_MODULE_COMPILATION_FAILED')
-            expect(error.incident.failureStage).to.equal('shader-compilation')
-            expect(error.incident.target.kind).to.equal('shader-module')
-            expect(error.incident.shaderModuleCompilationReport).to.deep.include({
-                shaderModuleId: error.incident.target.shaderModuleId,
-                sourceHash: error.incident.target.sourceHash,
+            expect(error.context.incident.failureStage).to.equal('shader-compilation')
+            expect(error.context.incident.target.kind).to.equal('shader-module')
+            expect(error.context.incident.shaderModuleCompilationReport).to.deep.include({
+                shaderModuleId: error.context.incident.target.shaderModuleId,
+                sourceHash: error.context.incident.target.sourceHash,
                 errorCount: 1,
             })
         }
@@ -202,15 +202,15 @@ describe('scratch ShaderModule', () => {
             throw new Error('expected ShaderModule rejection')
         } catch (error) {
             expect(error.diagnostic.code).to.equal('SCRATCH_SHADER_MODULE_COMPILATION_FAILED')
-            expect(error.incident.failureStage).to.equal('shader-compilation')
-            expect(error.incident.shaderModuleCompilationReport).to.deep.include({
-                shaderModuleId: error.incident.target.shaderModuleId,
-                sourceHash: error.incident.target.sourceHash,
+            expect(error.context.incident.failureStage).to.equal('shader-compilation')
+            expect(error.context.incident.shaderModuleCompilationReport).to.deep.include({
+                shaderModuleId: error.context.incident.target.shaderModuleId,
+                sourceHash: error.context.incident.target.sourceHash,
                 sourcePartCount: 1,
                 retainedSourcePartCount: 1,
                 errorCount: 1,
             })
-            const creationOutcome = error.incident.outcomes.find(outcome =>
+            const creationOutcome = error.context.incident.outcomes.find(outcome =>
                 outcome.diagnosticCode === 'SCRATCH_SHADER_MODULE_CREATION_VALIDATION_FAILED'
             )
             expect(creationOutcome).to.deep.include({
@@ -218,7 +218,7 @@ describe('scratch ShaderModule', () => {
                 nativeErrorCategory: 'validation',
                 subject: {
                     kind: 'ShaderModule',
-                    id: error.incident.target.shaderModuleId,
+                    id: error.context.incident.target.shaderModuleId,
                 },
             })
             expect(creationOutcome.nativeError).to.deep.include({
@@ -226,13 +226,13 @@ describe('scratch ShaderModule', () => {
                 sourceExcerptRedacted: true,
             })
             expect(creationOutcome.nativeError.message).not.to.include(source)
-            expect(error.incident.outcomes).to.deep.include({
+            expect(error.context.incident.outcomes).to.deep.include({
                 stage: 'shader-compilation',
                 diagnosticCode: 'SCRATCH_SHADER_MODULE_COMPILATION_FAILED',
                 nativeErrorCategory: 'validation',
                 subject: {
                     kind: 'ShaderModule',
-                    id: error.incident.target.shaderModuleId,
+                    id: error.context.incident.target.shaderModuleId,
                 },
             })
         }

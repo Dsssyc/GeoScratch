@@ -47,7 +47,7 @@ type FailureDetails = Error & {
     code?: unknown
     scenario?: unknown
     diagnostic?: { code?: unknown }
-    incident?: unknown
+    context?: { domain?: unknown, incident?: unknown }
 }
 
 declare global {
@@ -518,7 +518,7 @@ function createFailureProofController(configuration: FailureConfiguration) {
 
         if (configuration.scenario === undefined) return undefined
         const diagnostic = (primaryFailure as FailureDetails | null | undefined)?.diagnostic
-        const incident = (primaryFailure as FailureDetails | null | undefined)?.incident
+        const incident = (primaryFailure as FailureDetails | null | undefined)?.context?.incident
         const proof = {
             schemaVersion: 1,
             scenario: configuration.scenario,

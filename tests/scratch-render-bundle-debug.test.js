@@ -617,7 +617,7 @@ describe('scratch RenderBundle and public debug commands', () => {
 
         expect(validationError.diagnostic.code)
             .to.equal('SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED')
-        expect(validationError.incident.target).to.deep.include({
+        expect(validationError.context.incident.target).to.deep.include({
             kind: 'submission',
             submissionId: submitted.id,
         })
@@ -642,7 +642,7 @@ describe('scratch RenderBundle and public debug commands', () => {
 
         expect(bundleError.diagnostic.code)
             .to.equal('SCRATCH_RENDER_BUNDLE_NATIVE_VALIDATION_FAILED')
-        expect(bundleError.incident.target).to.deep.include({
+        expect(bundleError.context.incident.target).to.deep.include({
             kind: 'render-bundle',
             realization: 'persistent',
         })
@@ -1080,7 +1080,7 @@ describe('scratch RenderBundle and public debug commands', () => {
                     commands: [ draw ],
                 })
             )
-            const renderBundleId = error.incident.target.renderBundleId
+            const renderBundleId = error.context.incident.target.renderBundleId
             const operation = fixture.runtime.diagnostics.operations({
                 kind: 'render-bundle-creation',
                 renderBundleId,
@@ -1121,11 +1121,11 @@ describe('scratch RenderBundle and public debug commands', () => {
         const error = await rejectedDiagnostic(() => creation)
 
         expect(error.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             kind: 'supporting-object-failure',
             failureStage: 'lifecycle-recheck',
         })
-        expect(error.incident.triggerOperation.status).to.equal('cancelled')
+        expect(error.context.incident.triggerOperation.status).to.equal('cancelled')
         expect(fixture.runtime.diagnostics.snapshot().pendingOperations).to.deep.equal([])
     })
 

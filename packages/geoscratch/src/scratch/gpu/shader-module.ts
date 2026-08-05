@@ -1,6 +1,6 @@
 import { UUID } from '../../core/utils/uuid.js'
 import { isBindLayout } from './binding.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { isLayoutArtifact } from './layout-codec.js'
 import { createScratchNativeLabel } from './native-allocation.js'
 import {
@@ -112,7 +112,7 @@ export class ShaderModule {
     }>) {
 
         if (token !== shaderModuleToken || state === undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SHADER_MODULE_CONSTRUCTOR_PRIVATE',
                 severity: 'error',
                 phase: 'program',
@@ -155,7 +155,7 @@ export class ShaderModule {
         this.assertUsable()
         if (runtime === this.runtime) return
 
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SHADER_MODULE_WRONG_RUNTIME',
             severity: 'error',
             phase: 'program',
@@ -170,7 +170,7 @@ export class ShaderModule {
     assertUsable(): void {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SHADER_MODULE_DISPOSED',
                 severity: 'error',
                 phase: 'program',
@@ -765,7 +765,7 @@ function throwShaderModuleDescriptorInvalid(
     reason?: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SHADER_MODULE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'program',

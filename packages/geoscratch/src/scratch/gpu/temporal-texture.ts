@@ -1,5 +1,5 @@
 import { UUID } from '../../core/utils/uuid.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createScratchNativeLabel } from './native-allocation.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
@@ -110,7 +110,7 @@ export class ExternalTextureBinding {
         const state = externalTextureBindingStateFor(this)
         assertScratchRuntimeActive(state.runtime)
         if (runtime === state.runtime) return
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_EXTERNAL_TEXTURE_WRONG_RUNTIME',
             severity: 'error',
             phase: 'binding',
@@ -195,7 +195,7 @@ export class SurfaceTextureLease {
         assertScratchRuntimeActive(owner.runtime)
         const facts = surfaceFactsFor(surface)
         if (facts.runtime !== owner.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SURFACE_TEXTURE_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'submission',
@@ -207,7 +207,7 @@ export class SurfaceTextureLease {
             })
         }
         if (owner.isSubmitted) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SUBMISSION_WORK_ALREADY_SUBMITTED',
                 severity: 'error',
                 phase: 'submission',
@@ -314,7 +314,7 @@ export function createSurfaceTextureLease(
 ): SurfaceTextureLease {
 
     if (!isSurfaceReceiver(surface)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_TEXTURE_LEASE_INVALID',
             severity: 'error',
             phase: 'submission',
@@ -356,7 +356,7 @@ export function assertSurfaceTextureLeaseForSubmission(
     const state = surfaceTextureLeaseStateFor(lease)
     assertScratchRuntimeActive(state.runtime)
     if (state.owner !== owner) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_TEXTURE_LEASE_WRONG_SUBMISSION',
             severity: 'error',
             phase: 'submission',
@@ -376,7 +376,7 @@ export function assertSurfaceTextureLeaseForSubmission(
         throwStaleSurfaceTextureLease(lease, state, 'surface-reconfigured')
     }
     if (requiredUsage !== undefined && (facts.usage & requiredUsage) !== requiredUsage) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_TEXTURE_USAGE_MISSING',
             severity: 'error',
             phase: 'submission',
@@ -427,7 +427,7 @@ function activateSurfaceTextureLeaseForOwner(
     const state = surfaceTextureLeaseStateFor(lease)
     assertScratchRuntimeActive(state.runtime)
     if (state.owner !== owner) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_TEXTURE_LEASE_WRONG_SUBMISSION',
             severity: 'error',
             phase: 'submission',
@@ -498,7 +498,7 @@ export class AttemptTextureAuthority {
                 colorSpace: state.colorSpace,
             })
         } catch (cause) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_EXTERNAL_TEXTURE_IMPORT_FAILED',
                 severity: 'error',
                 phase: 'submission',
@@ -587,7 +587,7 @@ export class AttemptTextureAuthority {
     #acquireSurface(surface: Surface, facts: SurfaceFacts): GPUTexture {
 
         if (facts.runtime !== this.#runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SURFACE_TEXTURE_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'submission',
@@ -602,7 +602,7 @@ export class AttemptTextureAuthority {
         const existing = this.#surfaceTextures.get(surface)
         if (existing !== undefined) {
             if (existing.configurationVersion !== facts.configurationVersion) {
-                throwScratchDiagnostic({
+                throwGPUDiagnostic({
                     code: 'SCRATCH_SURFACE_TEXTURE_LEASE_STALE',
                     severity: 'error',
                     phase: 'submission',
@@ -618,7 +618,7 @@ export class AttemptTextureAuthority {
         try {
             texture = facts.context.getCurrentTexture()
         } catch (cause) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SURFACE_TEXTURE_ACQUISITION_FAILED',
                 severity: 'error',
                 phase: 'submission',
@@ -656,7 +656,7 @@ function createAttemptTextureView(
     try {
         return texture.createView(descriptor)
     } catch (cause) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_TEXTURE_VIEW_FAILED',
             severity: 'error',
             phase: 'submission',
@@ -772,7 +772,7 @@ function assertExternalTextureSourceUsable(
     } catch {
         return
     }
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_EXTERNAL_TEXTURE_SOURCE_EXPIRED',
         severity: 'error',
         phase: 'submission',
@@ -789,7 +789,7 @@ function throwExternalTextureSourceInvalid(
     field: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_EXTERNAL_TEXTURE_SOURCE_INVALID',
         severity: 'error',
         phase: 'binding',
@@ -861,7 +861,7 @@ function throwSurfaceTextureViewInvalid(
 ): never {
 
     const facts = surfaceFactsForState(state)
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SURFACE_TEXTURE_VIEW_INVALID',
         severity: 'error',
         phase: 'binding',
@@ -899,7 +899,7 @@ function throwStaleSurfaceTextureLease(
     reason: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SURFACE_TEXTURE_LEASE_STALE',
         severity: 'error',
         phase: 'submission',

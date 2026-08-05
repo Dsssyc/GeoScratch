@@ -1,5 +1,5 @@
 import { UUID } from '../../core/utils/uuid.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -83,7 +83,7 @@ export class DebugCommand {
 
         this.assertUsable()
         if (runtime === this.runtime) return
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
             severity: 'error',
             phase: 'command',
@@ -98,7 +98,7 @@ export class DebugCommand {
     assertUsable(): void {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -132,7 +132,7 @@ export class DebugCommand {
             }
             encoder.insertDebugMarker(this.label!)
         } catch (cause) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_DEBUG_COMMAND_NATIVE_FAILED',
                 severity: 'error',
                 phase: 'command',
@@ -199,7 +199,7 @@ export function validateBalancedDebugCommands(
             stack.pop()
             continue
         }
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_DEBUG_GROUP_UNBALANCED',
             severity: 'error',
             phase: 'command',
@@ -212,7 +212,7 @@ export function validateBalancedDebugCommands(
     }
     if (stack.length === 0) return
     const first = stack[0]!
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_DEBUG_GROUP_UNBALANCED',
         severity: 'error',
         phase: 'command',
@@ -262,7 +262,7 @@ function throwDebugDescriptorInvalid(
     descriptor: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_DEBUG_COMMAND_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'command',
@@ -282,7 +282,7 @@ function throwDebugDescriptorInvalid(
 
 function throwUnsupportedDebugCommand(command: DebugCommand): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_DEBUG_COMMAND_UNSUPPORTED',
         severity: 'error',
         phase: 'command',

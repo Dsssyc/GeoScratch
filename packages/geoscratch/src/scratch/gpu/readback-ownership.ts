@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type { ReadbackCommand } from './command.js'
 import type { ReadbackOperation } from './readback.js'
@@ -190,7 +190,7 @@ function throwReadbackPolicyDiagnostic(
     runtimeLabel?: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_READBACK_POLICY_INVALID',
         severity: 'error',
         phase: 'runtime',

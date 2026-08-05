@@ -318,16 +318,16 @@ describe('Scratch buffer host mapping', () => {
             first,
             'SCRATCH_BUFFER_MAPPING_ABORTED'
         )
-        expect(cancellation.incident).to.deep.include({
+        expect(cancellation.context.incident).to.deep.include({
             kind: 'buffer-mapping-failure',
             diagnosticCode: 'SCRATCH_BUFFER_MAPPING_ABORTED',
             failureStage: 'lifecycle-recheck',
         })
-        expect(cancellation.incident.related).to.deep.include.members([
+        expect(cancellation.context.incident.related).to.deep.include.members([
             buffer.subject,
             region.subject,
         ])
-        const lifecycleOutcome = cancellation.incident.outcomes.find(
+        const lifecycleOutcome = cancellation.context.incident.outcomes.find(
             outcome => outcome.diagnosticCode === 'SCRATCH_BUFFER_MAPPING_ABORTED'
         )
         expect(lifecycleOutcome).to.not.have.property('nativeError')
@@ -484,7 +484,7 @@ describe('Scratch buffer host mapping', () => {
                 scenario.code
             )
 
-            expect(failure.incident).to.deep.include({
+            expect(failure.context.incident).to.deep.include({
                 kind: 'buffer-mapping-failure',
                 failureStage: 'mapping',
                 nativeErrorCategory: scenario.filter,
@@ -520,12 +520,12 @@ describe('Scratch buffer host mapping', () => {
             'SCRATCH_BUFFER_MAPPING_ABORTED'
         )
 
-        expect(failure.incident.outcomes.map(outcome => outcome.diagnosticCode))
+        expect(failure.context.incident.outcomes.map(outcome => outcome.diagnosticCode))
             .to.include.members([
                 'SCRATCH_BUFFER_MAPPING_ABORTED',
                 'SCRATCH_BUFFER_MAPPING_VALIDATION_FAILED',
             ])
-        expect(failure.incident.nativeErrorCategory).to.equal('validation')
+        expect(failure.context.incident.nativeErrorCategory).to.equal('validation')
         expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
     })
 
@@ -557,13 +557,13 @@ describe('Scratch buffer host mapping', () => {
             'SCRATCH_BUFFER_MAPPING_DEVICE_LOST'
         )
 
-        expect(failure.incident).to.deep.include({
+        expect(failure.context.incident).to.deep.include({
             diagnosticCode: 'SCRATCH_BUFFER_MAPPING_DEVICE_LOST',
             nativeErrorCategory: 'device-lost',
             failureStage: 'lifecycle-recheck',
         })
-        expect(failure.incident.outcomes).to.have.length(1)
-        expect(failure.incident.outcomes[0]).to.not.have.property('nativeError')
+        expect(failure.context.incident.outcomes).to.have.length(1)
+        expect(failure.context.incident.outcomes[0]).to.not.have.property('nativeError')
         expect(runtime.diagnostics.snapshot().bufferMappings).to.deep.equal([])
     })
 
@@ -683,7 +683,7 @@ describe('Scratch buffer host mapping', () => {
             await assertGpuUseBlocked()
             expect(fake.calls.queueWrites).to.have.length(beforeQueueWrites)
             expect(fake.calls.commandEncoders).to.have.length(beforeEncoders)
-            expect(failure.incident).to.deep.include({ failureStage: 'release' })
+            expect(failure.context.incident).to.deep.include({ failureStage: 'release' })
 
             buffer.dispose()
 
@@ -751,7 +751,7 @@ describe('Scratch buffer host mapping', () => {
             'SCRATCH_BUFFER_MAPPING_RUNTIME_DISPOSED'
         )
 
-        expect(pendingFailure.incident).to.deep.include({
+        expect(pendingFailure.context.incident).to.deep.include({
             diagnosticCode: 'SCRATCH_BUFFER_MAPPING_RUNTIME_DISPOSED',
             failureStage: 'lifecycle-recheck',
         })

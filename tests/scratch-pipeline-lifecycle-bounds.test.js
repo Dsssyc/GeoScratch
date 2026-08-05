@@ -230,19 +230,19 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
             layout: { mode: 'explicit', bindLayouts: [ bindLayout ] },
             targets: [ { format: 'bgra8unorm' } ],
         }))
-        const suffix = ` [scratch:${error.incident.target.pipelineId}]`
-        const incidentJson = JSON.stringify(error.incident)
+        const suffix = ` [scratch:${error.context.incident.target.pipelineId}]`
+        const incidentJson = JSON.stringify(error.context.incident)
         const diagnosticJson = JSON.stringify(error.diagnostic)
 
         expect(fake.calls.asyncPipelineRequests[0].descriptor.label)
             .to.equal(`${pipelineLabel}${suffix}`)
         expect(program.vertex.module.compilationReport.messages[0].message.length)
             .to.be.at.most(4_096)
-        expect(error.incident.pipelineCreationReport.stages)
-            .to.deep.equal(error.incident.triggerOperation.pipelineCreationReport.stages)
-        expect(error.incident.triggerOperation.nativeLabel.length).to.be.at.most(256)
-        expect(error.incident.triggerOperation.nativeLabel.endsWith(suffix)).to.equal(true)
-        expect(error.incident.related.every(subject =>
+        expect(error.context.incident.pipelineCreationReport.stages)
+            .to.deep.equal(error.context.incident.triggerOperation.pipelineCreationReport.stages)
+        expect(error.context.incident.triggerOperation.nativeLabel.length).to.be.at.most(256)
+        expect(error.context.incident.triggerOperation.nativeLabel.endsWith(suffix)).to.equal(true)
+        expect(error.context.incident.related.every(subject =>
             subject.label === undefined || subject.label.length <= 256
         )).to.equal(true)
         expect(error.diagnostic.subject.label?.length ?? 0).to.be.at.most(256)
@@ -256,7 +256,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         expect(incidentJson).not.to.include(pipelineLabel)
         expect(incidentJson).not.to.include(programLabel)
         expect(incidentJson).not.to.include(layoutLabel)
-        expect(error.incident).not.to.have.property('pressure')
+        expect(error.context.incident).not.to.have.property('pressure')
         expect(runtime.diagnostics.snapshot().pipelines).to.have.length(0)
         expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
     })
@@ -292,15 +292,15 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         fake.pipelines.resolvePipeline(0)
         const error = await rejectedDiagnostic(promise)
 
-        expect(error.incident.related).to.have.length.at.most(64)
-        expect(error.incident.outcomes).to.have.length.at.most(64)
-        expect(error.incident.related.slice(0, 3).map(subject => subject.kind)).to.deep.equal([
+        expect(error.context.incident.related).to.have.length.at.most(64)
+        expect(error.context.incident.outcomes).to.have.length.at.most(64)
+        expect(error.context.incident.related.slice(0, 3).map(subject => subject.kind)).to.deep.equal([
             'ScratchRuntime',
             'Program',
             'GpuOperation',
         ])
-        expect(error.incident.evidence.complete).to.equal(false)
-        expect(error.incident.evidence.omittedRecords).to.equal(35)
+        expect(error.context.incident.evidence.complete).to.equal(false)
+        expect(error.context.incident.evidence.omittedRecords).to.equal(35)
         expect(error.diagnostic.actual).to.deep.include({
             failureCount: 80,
             retainedFailureCount: 64,
@@ -308,7 +308,7 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         })
         expect(error.diagnostic.actual.failureStages).to.have.length.at.most(64)
         expect(error.diagnostic.actual.diagnosticCodes).to.have.length.at.most(64)
-        expect(JSON.stringify(error.incident).length).to.be.lessThan(65_536)
+        expect(JSON.stringify(error.context.incident).length).to.be.lessThan(65_536)
         expect(JSON.stringify(error.diagnostic).length).to.be.lessThan(32_768)
         expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
         expect(runtime.diagnostics.snapshot().pipelines).to.have.length(0)
@@ -401,8 +401,8 @@ describe('ScratchRuntime pipeline lifecycle and bounded evidence', () => {
         expect(runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
         expect(runtime.diagnostics.snapshot().pipelines).to.have.length(0)
         expect(report.operations).to.have.length(1)
-        expect(report.operations[0].incidentId).to.equal(error.incident.id)
-        expect(report.operations[0].target.pipelineId).to.equal(error.incident.target.pipelineId)
+        expect(report.operations[0].incidentId).to.equal(error.context.incident.id)
+        expect(report.operations[0].target.pipelineId).to.equal(error.context.incident.target.pipelineId)
         expect(report.retainedEvidenceBytes).to.equal(
             serializedEvidenceBytes(report.operations[0])
         )

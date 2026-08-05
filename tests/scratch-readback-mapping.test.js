@@ -135,12 +135,12 @@ describe('scratch readback mapping transaction', () => {
 
             expect(error.diagnostic.code).to.equal(scenario.code)
             expect(error.cause).to.equal(nativeError)
-            expect(error.incident).to.deep.include({
+            expect(error.context.incident).to.deep.include({
                 kind: 'readback-failure',
                 nativeErrorCategory: scenario.filter,
                 failureStage: 'mapping',
             })
-            expect(error.incident.outcomes.find(outcome => outcome.diagnosticCode === scenario.code)).to.deep.include({
+            expect(error.context.incident.outcomes.find(outcome => outcome.diagnosticCode === scenario.code)).to.deep.include({
                 stage: 'mapping',
                 diagnosticCode: scenario.code,
                 nativeErrorCategory: scenario.filter,
@@ -160,11 +160,11 @@ describe('scratch readback mapping transaction', () => {
 
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_MAPPING_REJECTED')
         expect(error.cause).to.equal(nativeError)
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             nativeErrorCategory: 'native-exception',
             failureStage: 'mapping',
         })
-        expect(error.incident.nativeErrorCategory).not.to.equal('out-of-memory')
+        expect(error.context.incident.nativeErrorCategory).not.to.equal('out-of-memory')
     })
 
     it('reports mapping scope settlement failure after every scope is popped', async () => {
@@ -190,7 +190,7 @@ describe('scratch readback mapping transaction', () => {
         const error = await rejectedDiagnostic(materialization)
 
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_MAPPING_SCOPE_FAILED')
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             nativeErrorCategory: 'scope-failure',
             failureStage: 'mapping',
         })
@@ -224,7 +224,7 @@ describe('scratch readback mapping transaction', () => {
             const error = await rejectedDiagnostic(operation.toBytes())
 
             expect(error.diagnostic.code).to.equal(scenario.code)
-            expect(error.incident).to.deep.include({
+            expect(error.context.incident).to.deep.include({
                 kind: 'readback-failure',
                 failureStage: scenario.stage,
             })

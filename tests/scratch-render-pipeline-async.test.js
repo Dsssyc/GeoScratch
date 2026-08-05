@@ -162,9 +162,9 @@ describe('ScratchRuntime async render pipeline creation', () => {
         )
         expect(failure.diagnostic.code).to.equal('SCRATCH_PIPELINE_CREATION_VALIDATION_FAILED')
         expect(failure.cause).to.equal(nativeError)
-        expect(failure.incident.pipelineErrorReason).to.equal('validation')
-        expect(failure.incident.nativeError.sourceExcerptRedacted).to.equal(true)
-        expect(JSON.stringify(failure.incident)).not.to.include(sourceExcerpt)
+        expect(failure.context.incident.pipelineErrorReason).to.equal('validation')
+        expect(failure.context.incident.nativeError.sourceExcerptRedacted).to.equal(true)
+        expect(JSON.stringify(failure.context.incident)).not.to.include(sourceExcerpt)
         assertFailedPipelineFacts(fixture, failure, 'failed')
     })
 
@@ -179,7 +179,7 @@ describe('ScratchRuntime async render pipeline creation', () => {
             layoutFixture.runtime.createRenderPipeline(layoutFixture.descriptor)
         )
         expect(layoutFailure.diagnostic.code).to.equal('SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED')
-        expect(layoutFailure.incident.nativeErrorCategory).to.equal('out-of-memory')
+        expect(layoutFailure.context.incident.nativeErrorCategory).to.equal('out-of-memory')
         assertFailedPipelineFacts(layoutFixture, layoutFailure, 'failed')
 
         const nativeFixture = await createRenderFixture()
@@ -393,16 +393,16 @@ function renderDescriptor(program, bindLayout) {
 
 function assertFailedPipelineFacts(fixture, error, status) {
 
-    expect(error.incident.kind).to.equal('pipeline-failure')
-    expect(error.incident.target.pipelineKind).to.equal('render')
-    expect(error.incident.target.programId).to.equal(fixture.program.id)
+    expect(error.context.incident.kind).to.equal('pipeline-failure')
+    expect(error.context.incident.target.pipelineKind).to.equal('render')
+    expect(error.context.incident.target.programId).to.equal(fixture.program.id)
     const operations = fixture.runtime.diagnostics.operations({
         targetKind: 'pipeline',
-        pipelineId: error.incident.target.pipelineId,
+        pipelineId: error.context.incident.target.pipelineId,
     })
     expect(operations).to.have.length(1)
     expect(operations[0].status).to.equal(status)
-    expect(operations[0].incidentId).to.equal(error.incident.id)
+    expect(operations[0].incidentId).to.equal(error.context.incident.id)
     expect(fixture.runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
     expect(fixture.runtime.diagnostics.snapshot().pipelines).to.have.length(0)
 }

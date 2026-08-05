@@ -414,10 +414,10 @@ describe('Scratch BindSet preparation', () => {
             event.type === 'native-method' && event.method === 'createTextureView'
         ))).to.have.length(1)
         expect(fixture.calls.bindGroups).to.have.length(0)
-        expect(error.incident.outcomes).to.have.length(1)
-        expect(error.incident.outcomes[0].subject).to.deep.equal({
+        expect(error.context.incident.outcomes).to.have.length(1)
+        expect(error.context.incident.outcomes[0].subject).to.deep.equal({
             kind: 'BindSetTextureViewCandidate',
-            bindSetId: error.incident.target.bindSetId,
+            bindSetId: error.context.incident.target.bindSetId,
             bindLayoutId: fixture.layout.id,
             group: fixture.layout.group,
             resourceId: fixture.texture.id,
@@ -670,8 +670,8 @@ describe('Scratch BindSet preparation', () => {
         expect(bindSet.preparationState).to.equal('stale')
         expect(bindSet.prepareGeneration).to.equal(1)
         expect(bindSet.preparedSnapshotHash).to.equal(undefined)
-        expect(bindSet.lastIncidentId).to.equal(failure.incident.id)
-        expect(failure.incident.pressure.currentScratchLogicalFootprintBytes).to.equal(512)
+        expect(bindSet.lastIncidentId).to.equal(failure.context.incident.id)
+        expect(failure.context.incident.pressure.currentScratchLogicalFootprintBytes).to.equal(512)
 
         await bindSet.prepare()
         expect(bindSet.preparationState).to.equal('prepared')
@@ -862,8 +862,8 @@ describe('Scratch BindSet preparation', () => {
 
         const error = await rejectedDiagnostic(creation)
         expect(error.diagnostic.code).to.equal('SCRATCH_BIND_SET_PREPARATION_INTERNAL_FAILED')
-        expect(error.incident.failureStage).to.equal('texture-view-acknowledgement')
-        expect(error.incident.outcomes.map(outcome => outcome.diagnosticCode)).to.deep.equal([
+        expect(error.context.incident.failureStage).to.equal('texture-view-acknowledgement')
+        expect(error.context.incident.outcomes.map(outcome => outcome.diagnosticCode)).to.deep.equal([
             'SCRATCH_BIND_SET_PREPARATION_INTERNAL_FAILED',
             'SCRATCH_BIND_SET_PREPARATION_VALIDATION_FAILED',
             'SCRATCH_BIND_SET_PREPARATION_OUT_OF_MEMORY',
@@ -890,8 +890,8 @@ describe('Scratch BindSet preparation', () => {
 
         const error = await rejectedDiagnostic(creation)
         expect(error.diagnostic.code).to.equal('SCRATCH_BIND_SET_PREPARATION_VALIDATION_FAILED')
-        expect(error.incident.failureStage).to.equal('bind-group-acknowledgement')
-        expect(error.incident.outcomes.map(outcome => ({
+        expect(error.context.incident.failureStage).to.equal('bind-group-acknowledgement')
+        expect(error.context.incident.outcomes.map(outcome => ({
             stage: outcome.stage,
             code: outcome.diagnosticCode,
         }))).to.deep.equal([
@@ -933,8 +933,8 @@ describe('Scratch BindSet preparation', () => {
 
         const error = await rejectedDiagnostic(creation)
         expect(error.diagnostic.code).to.equal('SCRATCH_BIND_DISPOSED')
-        expect(error.incident.failureStage).to.equal('lifecycle-recheck')
-        expect(error.incident.outcomes.map(outcome => ({
+        expect(error.context.incident.failureStage).to.equal('lifecycle-recheck')
+        expect(error.context.incident.outcomes.map(outcome => ({
             stage: outcome.stage,
             code: outcome.diagnosticCode,
             subjectKind: outcome.subject.kind,
@@ -964,7 +964,7 @@ describe('Scratch BindSet preparation', () => {
         const lostError = await rejectedDiagnostic(lostCreation)
         expect(lostError.diagnostic.code)
             .to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
-        expect(lostError.incident).to.deep.include({
+        expect(lostError.context.incident).to.deep.include({
             kind: 'supporting-object-failure',
             diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             nativeErrorCategory: 'device-lost',
@@ -972,21 +972,21 @@ describe('Scratch BindSet preparation', () => {
             operationId: lostPendingOperation.id,
             failureStage: 'lifecycle-recheck',
         })
-        expect(lostError.incident.triggerOperation).to.deep.include({
+        expect(lostError.context.incident.triggerOperation).to.deep.include({
             id: lostPendingOperation.id,
             status: 'cancelled',
             nativeErrorCategory: 'device-lost',
         })
-        expect(lostError.diagnostic.actual.failures).to.deep.equal(lostError.incident.outcomes)
+        expect(lostError.diagnostic.actual.failures).to.deep.equal(lostError.context.incident.outcomes)
         const lostIncidents = lostFixture.runtime.diagnostics.incidents()
         const deviceLossIncident = lostIncidents.find(incident => incident.kind === 'device-loss')
         expect(deviceLossIncident).not.to.equal(undefined)
-        expect(deviceLossIncident.id).not.to.equal(lostError.incident.id)
-        expect(lostError.incident.related).to.deep.include(deviceLossIncident.subject)
+        expect(deviceLossIncident.id).not.to.equal(lostError.context.incident.id)
+        expect(lostError.context.incident.related).to.deep.include(deviceLossIncident.subject)
         expect(lostError.diagnostic.related).to.deep.include(deviceLossIncident.subject)
-        expect(lostError.diagnostic.related).to.deep.include(lostError.incident.subject)
+        expect(lostError.diagnostic.related).to.deep.include(lostError.context.incident.subject)
         expect(lostFixture.runtime.diagnostics.operation(lostPendingOperation.id).incidentId)
-            .to.equal(lostError.incident.id)
+            .to.equal(lostError.context.incident.id)
     })
 
     it('cancels an initial candidate when a dependency is disposed during acknowledgement', async() => {
@@ -1003,7 +1003,7 @@ describe('Scratch BindSet preparation', () => {
 
         const error = await rejectedDiagnostic(creation)
         expect(error.diagnostic.code).to.equal('SCRATCH_BIND_DISPOSED')
-        expect(error.incident.failureStage).to.equal('lifecycle-recheck')
+        expect(error.context.incident.failureStage).to.equal('lifecycle-recheck')
         expect(fixture.runtime.diagnostics.snapshot().bindSets).to.deep.equal([])
         expect(fixture.calls.bindGroups).to.have.length(1)
     })

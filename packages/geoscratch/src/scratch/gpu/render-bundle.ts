@@ -6,7 +6,7 @@ import {
     encodeDrawCommandInRenderBundle,
     snapshotCommandImmediateData,
 } from './command.js'
-import { throwScratchDiagnostic, isScratchDiagnosticError } from './diagnostics.js'
+import { throwGPUDiagnostic, isScratchDiagnosticError } from './diagnostics.js'
 import {
     DebugCommand,
     isDebugCommand,
@@ -160,7 +160,7 @@ export class BundleDrawCommand {
 
         this.assertUsable()
         if (runtime === this.runtime) return
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
             severity: 'error',
             phase: 'command',
@@ -320,7 +320,7 @@ export class RenderBundle {
 
         this.assertUsable()
         if (runtime === this.runtime) return
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_WRONG_RUNTIME',
             severity: 'error',
             phase: 'command',
@@ -336,7 +336,7 @@ export class RenderBundle {
 
         const state = renderBundleStateFor(this)
         if (state.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RENDER_BUNDLE_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -554,7 +554,7 @@ export class ExecuteRenderBundlesCommand {
 
         this.assertUsable()
         if (runtime === this.runtime) return
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
             severity: 'error',
             phase: 'command',
@@ -569,7 +569,7 @@ export class ExecuteRenderBundlesCommand {
     assertUsable(): void {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -585,7 +585,7 @@ export class ExecuteRenderBundlesCommand {
 
         this.assertUsable()
         if (!isRenderPassSpec(pass)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
                 severity: 'error',
                 phase: 'command',
@@ -611,7 +611,7 @@ export class ExecuteRenderBundlesCommand {
             throw new TypeError('ExecuteRenderBundlesCommand native bundle count is inconsistent.')
         }
         if (typeof encoder.executeBundles !== 'function') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RENDER_BUNDLE_EXECUTION_UNSUPPORTED',
                 severity: 'error',
                 phase: 'command',
@@ -622,7 +622,7 @@ export class ExecuteRenderBundlesCommand {
         try {
             encoder.executeBundles(nativeBundles)
         } catch (cause) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RENDER_BUNDLE_EXECUTION_FAILED',
                 severity: 'error',
                 phase: 'command',
@@ -705,7 +705,7 @@ export function realizeRenderBundleForAttempt(
         )
     } catch (cause) {
         if (isScratchDiagnosticError(cause)) throw cause
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_ATTEMPT_REALIZATION_FAILED',
             severity: 'error',
             phase: 'submission',
@@ -770,7 +770,7 @@ function normalizeBundleDrawDescriptor(
         descriptor.fallback !== undefined ||
         descriptor.renderState !== undefined
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_COMMAND_INVALID',
             severity: 'error',
             phase: 'command',
@@ -902,7 +902,7 @@ function normalizeExecuteRenderBundlesDescriptor(
             return throwExecuteRenderBundlesDescriptorInvalid(runtime, descriptor)
         }
         if (bundle.runtime !== runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RENDER_BUNDLE_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -1057,7 +1057,7 @@ function assertPersistentBundleHasNoTemporalDependencies(
             .map(invocation => invocation.set)
             .filter(set => set.isAttemptLocal)
         if (temporalSets.length === 0) continue
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_TEMPORAL_REALIZATION_REQUIRED',
             severity: 'error',
             phase: 'command',
@@ -1094,7 +1094,7 @@ function assertPersistentRenderBundleSnapshotCurrent(
         ) {
             throw cause
         }
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_STALE',
             severity: 'error',
             phase: 'command',
@@ -1118,7 +1118,7 @@ function assertDependencySnapshotCurrent(
     for (const dependency of snapshot.resources) {
         dependency.resource.assertUsable()
         if (dependency.resource.allocationVersion === dependency.allocationVersion) continue
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_STALE',
             severity: 'error',
             phase: 'command',
@@ -1137,7 +1137,7 @@ function assertDependencySnapshotCurrent(
         ) {
             continue
         }
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_STALE',
             severity: 'error',
             phase: 'command',
@@ -1167,7 +1167,7 @@ function assertBundleDrawPipelineCompatibility(
         pipelineLayout.depthStencilFormat !== layout.depthStencilFormat ||
         pipelineLayout.sampleCount !== layout.sampleCount
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_PIPELINE_LAYOUT_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -1190,7 +1190,7 @@ function assertBundleDrawPipelineCompatibility(
         layout.depthReadOnly &&
         command.pipeline.depthStencil?.depthWriteEnabled === true
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_READ_ONLY_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -1208,7 +1208,7 @@ function assertBundleDrawPipelineCompatibility(
             command.pipeline.primitive
         )
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_READ_ONLY_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -1234,7 +1234,7 @@ function assertRenderBundleCompatibleWithPass(
         (!passLayout.depthReadOnly || bundle.layout.depthReadOnly) &&
         (!passLayout.stencilReadOnly || bundle.layout.stencilReadOnly)
     if (compatible) return
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RENDER_BUNDLE_PASS_INCOMPATIBLE',
         severity: 'error',
         phase: 'command',
@@ -1358,7 +1358,7 @@ function throwRenderBundleDescriptorInvalid(
     field: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RENDER_BUNDLE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'command',
@@ -1383,7 +1383,7 @@ function throwExecuteRenderBundlesDescriptorInvalid(
     descriptor: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RENDER_BUNDLE_EXECUTION_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'command',
@@ -1404,7 +1404,7 @@ function snapshotIterable<T>(
     try {
         return Array.from(value)
     } catch (cause) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RENDER_BUNDLE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'command',

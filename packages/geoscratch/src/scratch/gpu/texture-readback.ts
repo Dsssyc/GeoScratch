@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import {
     isLayoutArtifact,
     layoutArtifactAcceptsViewByteLength,
@@ -91,7 +91,7 @@ export function normalizeTextureReadbackSource(
     resource.assertRuntime(runtime)
     resource.assertUsable()
     if ((resource.usage & TEXTURE_USAGE_COPY_SRC) === 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'readback',
@@ -219,7 +219,7 @@ export function normalizeTextureReadbackSource(
             !layoutArtifactAcceptsViewByteLength(layout, logicalByteLength)
         )
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_LAYOUT_INVALID',
             severity: 'error',
             phase: 'readback',
@@ -413,7 +413,7 @@ function normalizeInterpretation(
 
     if (value === undefined) return undefined
     if (!isLayoutArtifact(value)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_LAYOUT_INVALID',
             severity: 'error',
             phase: 'readback',
@@ -492,7 +492,7 @@ function throwTextureReadbackSourceInvalid(
     normalized?: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_READBACK_TEXTURE_SOURCE_INVALID',
         severity: 'error',
         phase: 'readback',

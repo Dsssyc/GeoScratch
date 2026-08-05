@@ -1,5 +1,5 @@
 import { UUID } from '../../core/utils/uuid.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { advanceQuerySlotContentEpoch, isQuerySetResource, QuerySetResource } from './query-set.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { isSurfaceReceiver, surfaceFactsFor } from './surface.js'
@@ -200,7 +200,7 @@ export class RenderPassSpec {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PASS_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'submission',
@@ -219,7 +219,7 @@ export class RenderPassSpec {
     assertUsable() {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PASS_DISPOSED',
                 severity: 'error',
                 phase: 'submission',
@@ -344,7 +344,7 @@ export class ComputePassSpec {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PASS_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'submission',
@@ -363,7 +363,7 @@ export class ComputePassSpec {
     assertUsable() {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PASS_DISPOSED',
                 severity: 'error',
                 phase: 'submission',
@@ -510,7 +510,7 @@ function throwTimestampWritesDiagnostic(pass: RenderPassSpec | ComputePassSpec, 
 
     const querySet = isRecord(timestampWrites) ? timestampWrites.querySet : undefined
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PASS_TIMESTAMP_WRITES_INVALID',
         severity: 'error',
         phase: 'submission',
@@ -536,7 +536,7 @@ function throwTimestampWritesDiagnostic(pass: RenderPassSpec | ComputePassSpec, 
 
 function throwOcclusionQuerySetDiagnostic(pass: RenderPassSpec, querySet: unknown, reason: string): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PASS_OCCLUSION_QUERY_SET_INVALID',
         severity: 'error',
         phase: 'submission',
@@ -603,7 +603,7 @@ function normalizeColorAttachment(
             [ target.texture.subject ]
         )
         if (attachment.viewDescriptor !== undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
                 severity: 'error',
                 phase: 'resource',
@@ -640,7 +640,7 @@ function normalizeColorAttachment(
     const surface = surfaceAttachmentFactsFor(target)
 
     if (surface.runtime !== pass.runtime) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_SURFACE_VIEW_OUT_OF_SCOPE',
             severity: 'error',
             phase: 'submission',
@@ -674,7 +674,7 @@ function normalizeColorAttachment(
         normalized.clear = normalizeColorClearValue(pass, surface.subject, attachment.clear)
     }
     if (attachment.depthSlice !== undefined) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -766,7 +766,7 @@ function validateRenderPassHasAttachment(
 
     if (color.some(attachment => attachment !== null) || depth !== undefined) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
         severity: 'error',
         phase: 'submission',
@@ -789,7 +789,7 @@ function normalizeMaxDrawCount(pass: RenderPassSpec, value: unknown): number | u
     if (value === undefined) return undefined
     if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PASS_MAX_DRAW_COUNT_INVALID',
         severity: 'error',
         phase: 'submission',
@@ -828,7 +828,7 @@ function normalizeColorClearValue(
         })
     }
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'resource',
@@ -855,7 +855,7 @@ function normalizeColorAttachmentDepthSlice(
 
     if (view.descriptor.dimension !== '3d') {
         if (depthSlice === undefined) return undefined
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -877,7 +877,7 @@ function normalizeColorAttachmentDepthSlice(
         depthSlice < 0 ||
         depthSlice >= mipDepth
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -1332,7 +1332,7 @@ function validateRenderAttachmentView(
     view.texture.assertRuntime(pass.runtime)
     const prepared = prepareTextureViewSpecDescriptor(view)
     if ((prepared.usage & TEXTURE_USAGE_RENDER_ATTACHMENT) === 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'resource',
@@ -1354,7 +1354,7 @@ function validateRenderAttachmentView(
         prepared.aspect !== 'all' ||
         prepared.swizzle !== 'rgba'
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -1384,7 +1384,7 @@ function validateColorAttachmentFormat(
 ): void {
 
     if (requested === undefined || requested === actual) return
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'resource',
@@ -1405,7 +1405,7 @@ function validateColorRenderableAttachmentFormat(
 
     if (textureFormatIsColorRenderable(pass.runtime, format)) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'resource',
@@ -1449,7 +1449,7 @@ function validateSurfaceAttachmentViewDescriptor(
         effectiveUsage,
     })
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'resource',
@@ -1547,7 +1547,7 @@ function normalizeColorAttachmentOperations(
         !STORE_OPS.has(store) ||
         (transient && (load !== 'clear' || store !== 'discard'))
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -1687,7 +1687,7 @@ function validateDisjointColorAttachmentRegions(
             const right = regions[rightIndex]
             if (!renderAttachmentRegionsOverlap(left, right)) continue
 
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
                 severity: 'error',
                 phase: 'resource',
@@ -1752,7 +1752,7 @@ function validateMatchingRenderAttachmentExtents(
         extent.sampleCount === expected.sampleCount
     ))) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'resource',
@@ -1781,7 +1781,7 @@ function validateTextureDepthStencilAttachmentUsage(pass: RenderPassSpec, textur
 
     if ((texture.usage & TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_USAGE_MISSING',
         severity: 'error',
         phase: 'resource',
@@ -1801,7 +1801,7 @@ function throwDepthStencilAttachmentDiagnostic(
 
     const target = isRecord(attachment) ? attachment.target : undefined
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PASS_DEPTH_STENCIL_ATTACHMENT_INVALID',
         severity: 'error',
         phase: 'submission',
@@ -1843,7 +1843,7 @@ function throwColorAttachmentDiagnostic(
 ): never {
 
     const target = isRecord(attachment) ? attachment.target : undefined
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PASS_COLOR_ATTACHMENT_INVALID',
         severity: 'error',
         phase: 'submission',
@@ -1872,7 +1872,7 @@ function throwResolveAttachmentDiagnostic(
 ): never {
 
     const record = isRecord(attachment) ? attachment : {}
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PASS_RESOLVE_ATTACHMENT_INVALID',
         severity: 'error',
         phase: 'submission',
@@ -1903,7 +1903,7 @@ function validateTextureColorAttachmentUsage(pass: RenderPassSpec, texture: Text
 
     if ((texture.usage & TEXTURE_USAGE_RENDER_ATTACHMENT) !== 0) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_USAGE_MISSING',
         severity: 'error',
         phase: 'resource',

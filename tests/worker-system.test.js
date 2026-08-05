@@ -1,8 +1,6 @@
 import { expect } from 'chai'
-import {
-    WorkerDiagnosticError,
-    WorkerSystem,
-} from 'geoscratch/worker'
+import { ScratchDiagnosticError } from 'geoscratch'
+import { WorkerSystem } from 'geoscratch/worker'
 import {
     ScriptedWorker,
     scriptedWorkerFactory,
@@ -56,7 +54,7 @@ describe('generic WorkerSystem', () => {
             priority: { class: 'user-visible', score: 0 },
         })
         expect(() => group.run({ module: 'fixture', operation: 'overflow', input: null }))
-            .to.throw(WorkerDiagnosticError)
+            .to.throw(ScratchDiagnosticError)
             .with.property('diagnostic')
             .that.deep.includes({ code: 'WORKER_QUEUE_SATURATED' })
 
@@ -249,20 +247,20 @@ describe('generic WorkerSystem', () => {
             operation: 'unsafe-sync',
             input: null,
             cancellation: 'non-cooperative',
-        })).to.throw(WorkerDiagnosticError)
+        })).to.throw(ScratchDiagnosticError)
         expect(() => shared.run({
             module: 'fixture',
             operation: 'hard-on-shared',
             input: null,
             cancellation: 'hard',
-        })).to.throw(WorkerDiagnosticError)
+        })).to.throw(ScratchDiagnosticError)
         let contextFailure
         try {
             await shared.openContext({ module: 'fixture', key: 'invalid', init: null })
         } catch (error) {
             contextFailure = error
         }
-        expect(contextFailure).to.be.instanceOf(WorkerDiagnosticError)
+        expect(contextFailure).to.be.instanceOf(ScratchDiagnosticError)
         expect(contextFailure.diagnostic.code).to.equal('WORKER_DESCRIPTOR_INVALID')
         await system.dispose()
     })
@@ -387,7 +385,7 @@ async function expectDiagnostic(promise, code, cancellationKind) {
     } catch (error) {
         failure = error
     }
-    expect(failure).to.be.instanceOf(WorkerDiagnosticError)
+    expect(failure).to.be.instanceOf(ScratchDiagnosticError)
     expect(failure.diagnostic.code).to.equal(code)
     if (cancellationKind !== undefined) {
         expect(failure.diagnostic.cancellationKind).to.equal(cancellationKind)

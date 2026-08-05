@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { destroySupportingObjectCandidate } from './supporting-object-creation.js'
@@ -127,7 +127,7 @@ export function throwSupportingObjectCreationFailure<T>(
     })
 
     if (primary.kind === 'device-lost') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             severity: 'error',
             phase: 'runtime',
@@ -145,7 +145,7 @@ export function throwSupportingObjectCreationFailure<T>(
     }
 
     if (primary.kind === 'runtime-disposed') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DISPOSED',
             severity: 'error',
             phase: 'runtime',
@@ -156,7 +156,7 @@ export function throwSupportingObjectCreationFailure<T>(
         }, { incident })
     }
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code,
         severity: 'error',
         phase: input.phase,

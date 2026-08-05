@@ -9,7 +9,7 @@ import {
     isBufferResource,
     isBufferRegion,
 } from './buffer.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import {
     advanceResourceContentEpoch,
@@ -167,7 +167,7 @@ export class MappedBufferLease {
 
         const facts = leaseFactsFor(this)
         if (facts.state !== 'mapped') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BUFFER_MAPPING_LEASE_INACTIVE',
                 severity: 'error',
                 phase: 'buffer-mapping',
@@ -494,7 +494,7 @@ function releaseMappedBufferLease(lease: MappedBufferLease): void {
         })
         const incident = completeMappingFailure(context, [ failure ], 'release')
         detachAbortObserver(context)
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: failure.code,
             severity: 'error',
             phase: 'buffer-mapping',
@@ -605,7 +605,7 @@ function throwCancelledMapping(
     )
     if (shouldQuarantine) detachAbortObserver(context)
     else cleanupMappingContext(context)
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: cancellation.code,
         severity: 'error',
         phase: 'buffer-mapping',
@@ -682,7 +682,7 @@ function throwMappingFailures(
     if (shouldQuarantine) detachAbortObserver(context)
     else cleanupMappingContext(context)
     const primary = allFailures[0]
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: primary.code,
         severity: 'error',
         phase: 'buffer-mapping',
@@ -806,7 +806,7 @@ function throwInvalidMappingSignal(context: MappingContext, cause: unknown): nev
     context.phase = 'terminal'
     context.controller.completeOperation(context.operation, { status: 'failed' })
     cleanupMappingContext(context)
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BUFFER_MAPPING_SIGNAL_INVALID',
         severity: 'error',
         phase: 'buffer-mapping',
@@ -824,7 +824,7 @@ function normalizeBufferMappingDescriptor(
 ): BufferMappingDescriptor {
 
     if (!isRecord(descriptor)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_MAPPING_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'buffer-mapping',
@@ -835,7 +835,7 @@ function normalizeBufferMappingDescriptor(
         })
     }
     if (!isBufferRegion(descriptor.region)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_MAPPING_REGION_INVALID',
             severity: 'error',
             phase: 'buffer-mapping',
@@ -848,7 +848,7 @@ function normalizeBufferMappingDescriptor(
     const region = descriptor.region
     region.assertUsable()
     if (region.buffer.runtime !== runtime) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_MAPPING_RUNTIME_MISMATCH',
             severity: 'error',
             phase: 'buffer-mapping',
@@ -860,7 +860,7 @@ function normalizeBufferMappingDescriptor(
         })
     }
     if (descriptor.mode !== 'read' && descriptor.mode !== 'write') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_MAPPING_MODE_INVALID',
             severity: 'error',
             phase: 'buffer-mapping',
@@ -873,7 +873,7 @@ function normalizeBufferMappingDescriptor(
     }
     validateMappingUsage(region.buffer, descriptor.mode)
     if (region.offset % 8 !== 0 || region.size % 4 !== 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_MAPPING_RANGE_INVALID',
             severity: 'error',
             phase: 'buffer-mapping',
@@ -885,7 +885,7 @@ function normalizeBufferMappingDescriptor(
         })
     }
     if (descriptor.signal !== undefined && !isAbortSignal(descriptor.signal)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_MAPPING_SIGNAL_INVALID',
             severity: 'error',
             phase: 'buffer-mapping',
@@ -911,7 +911,7 @@ function validateMappingUsage(buffer: BufferResource, mode: BufferMappingMode): 
         ? required | GPUBufferUsageValue('COPY_DST')
         : required | GPUBufferUsageValue('COPY_SRC')
     if ((buffer.usage & required) !== 0 && (buffer.usage & ~allowed) === 0) return
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BUFFER_MAPPING_USAGE_INVALID',
         severity: 'error',
         phase: 'buffer-mapping',

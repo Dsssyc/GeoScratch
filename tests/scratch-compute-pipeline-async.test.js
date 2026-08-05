@@ -155,7 +155,7 @@ describe('ScratchRuntime async compute pipeline creation', () => {
             layoutFixture.runtime.createComputePipeline(layoutFixture.descriptor)
         )
         expect(layoutFailure.diagnostic.code).to.equal('SCRATCH_PIPELINE_SUPPORT_OBJECT_FAILED')
-        expect(layoutFailure.incident.nativeErrorCategory).to.equal('out-of-memory')
+        expect(layoutFailure.context.incident.nativeErrorCategory).to.equal('out-of-memory')
         assertFailedPipelineFacts(layoutFixture, layoutFailure, 'failed')
 
         const scopeFixture = await createComputeFixture({ deferErrorScopePops: true })
@@ -300,16 +300,16 @@ async function createComputeFixture(deferred = {}) {
 
 function assertFailedPipelineFacts(fixture, error, status) {
 
-    expect(error.incident.kind).to.equal('pipeline-failure')
-    expect(error.incident.target.pipelineKind).to.equal('compute')
-    expect(error.incident.target.programId).to.equal(fixture.program.id)
+    expect(error.context.incident.kind).to.equal('pipeline-failure')
+    expect(error.context.incident.target.pipelineKind).to.equal('compute')
+    expect(error.context.incident.target.programId).to.equal(fixture.program.id)
     const operations = fixture.runtime.diagnostics.operations({
         targetKind: 'pipeline',
-        pipelineId: error.incident.target.pipelineId,
+        pipelineId: error.context.incident.target.pipelineId,
     })
     expect(operations).to.have.length(1)
     expect(operations[0].status).to.equal(status)
-    expect(operations[0].incidentId).to.equal(error.incident.id)
+    expect(operations[0].incidentId).to.equal(error.context.incident.id)
     expect(fixture.runtime.diagnostics.snapshot().pendingOperations).to.have.length(0)
     expect(fixture.runtime.diagnostics.snapshot().pipelines).to.have.length(0)
 }

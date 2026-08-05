@@ -153,7 +153,7 @@ describe('scratch acknowledged readback staging', () => {
 
             expect(error.diagnostic.code).to.equal(failure.code)
             expect(error.cause).to.equal(nativeError)
-            expect(error.incident).to.deep.include({
+            expect(error.context.incident).to.deep.include({
                 kind: 'readback-failure',
                 nativeErrorCategory: failure.category,
                 attribution: 'exact-operation',
@@ -186,7 +186,7 @@ describe('scratch acknowledged readback staging', () => {
         const error = await rejectedDiagnostic(materialization)
 
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_SCOPE_FAILED')
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             kind: 'readback-failure',
             nativeErrorCategory: 'scope-failure',
             failureStage: 'staging-allocation',
@@ -212,8 +212,8 @@ describe('scratch acknowledged readback staging', () => {
 
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED')
         expect(error.diagnostic.related.map(subject => subject.id)).to.include(source.id)
-        expect(error.incident.related.map(subject => subject.id)).to.include(source.id)
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident.related.map(subject => subject.id)).to.include(source.id)
+        expect(error.context.incident).to.deep.include({
             kind: 'readback-failure',
             failureStage: 'budget',
         })
@@ -241,12 +241,12 @@ describe('scratch acknowledged readback staging', () => {
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED')
         expect(error.diagnostic.subject.kind).to.equal('ReadbackOperation')
         expect(error.diagnostic.related.map(subject => subject.id)).to.include(source.id)
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             kind: 'readback-failure',
             attribution: 'exact-operation',
             failureStage: 'budget',
         })
-        expect(error.incident.target).to.deep.include({
+        expect(error.context.incident.target).to.deep.include({
             kind: 'readback',
             path: 'direct',
             sourceResourceId: source.id,
@@ -281,12 +281,12 @@ describe('scratch acknowledged readback staging', () => {
         ))
 
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED')
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             kind: 'readback-failure',
             attribution: 'exact-operation',
             failureStage: 'budget',
         })
-        expect(error.incident.target).to.deep.include({
+        expect(error.context.incident.target).to.deep.include({
             kind: 'readback',
             path: 'ordered',
             commandId: command.id,
@@ -322,16 +322,16 @@ describe('scratch acknowledged readback staging', () => {
 
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED')
         expect(error.diagnostic.related.map(subject => subject.id)).to.include(source.id)
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             kind: 'readback-failure',
             attribution: 'exact-operation',
             failureStage: 'budget',
         })
-        expect(error.incident.target).to.deep.include({
+        expect(error.context.incident.target).to.deep.include({
             kind: 'command',
             commandKind: 'readback',
         })
-        expect(error.incident.related.map(subject => subject.id)).to.include(source.id)
+        expect(error.context.incident.related.map(subject => subject.id)).to.include(source.id)
         expect(fake.calls.buffers).to.have.length(bufferCount)
         expect(fake.calls.commandEncoders).to.have.length(encoderCount)
         expect(runtime.diagnostics.snapshot().readbackCommands).to.deep.equal([])
@@ -381,7 +381,7 @@ describe('scratch acknowledged readback staging', () => {
         await settleMicrotasks()
 
         expect(error.diagnostic.code).to.equal('SCRATCH_RESOURCE_DISPOSED')
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             kind: 'readback-failure',
             failureStage: 'lifecycle-recheck',
         })
@@ -524,7 +524,7 @@ describe('scratch acknowledged readback staging', () => {
         }))
 
         expect(error.diagnostic.code).to.equal('SCRATCH_READBACK_STAGING_VALIDATION_FAILED')
-        expect(error.incident.target).to.deep.include({ kind: 'command', commandKind: 'readback' })
+        expect(error.context.incident.target).to.deep.include({ kind: 'command', commandKind: 'readback' })
         expect(runtime.diagnostics.snapshot().readbackCommands).to.deep.equal([])
         expect(runtime.diagnostics.snapshot().readbackMemory.currentStagingBytes).to.equal(0)
         expect(fake.calls.commandEncoders).to.have.length(encoderCount)

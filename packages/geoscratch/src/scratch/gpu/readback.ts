@@ -1,7 +1,7 @@
 import { UUID } from '../../core/utils/uuid.js'
 import { BufferRegion, isBufferRegion } from './buffer.js'
 import { assertBufferAvailableForGpuUse } from './buffer-mapping-authority.js'
-import { isScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
+import { isScratchDiagnosticError, throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createLayoutReadbackView } from './layout-codec.js'
 import {
@@ -182,7 +182,7 @@ export class ReadbackOperation {
     ) {
 
         if (token !== readbackOperationToken || new.target !== ReadbackOperation) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_OPERATION_CONSTRUCTOR_PRIVATE',
                 severity: 'error',
                 phase: 'readback',
@@ -380,7 +380,7 @@ export class ReadbackOperation {
         const elementSize = ViewConstructor.BYTES_PER_ELEMENT
 
         if (!Number.isInteger(elementSize) || elementSize <= 0 || bytes.byteLength % elementSize !== 0) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_VIEW_INVALID',
                 severity: 'error',
                 phase: 'readback',
@@ -409,7 +409,7 @@ export class ReadbackOperation {
         this._assertReadableLifecycle()
 
         if (this.layout === undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_LAYOUT_MISSING',
                 severity: 'error',
                 phase: 'readback',
@@ -439,7 +439,7 @@ export class ReadbackOperation {
             state.retainedBytes !== undefined ||
             state.activeLease !== undefined
         ) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_IN_PROGRESS',
                 severity: 'error',
                 phase: 'readback',
@@ -499,7 +499,7 @@ export class ReadbackOperation {
         }
 
         if (state.materializationOwner === 'map') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_IN_PROGRESS',
                 severity: 'error',
                 phase: 'readback',
@@ -515,7 +515,7 @@ export class ReadbackOperation {
             if (this.retain === 'until-dispose') {
                 return cloneBytes(await state.materialization)
             }
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_IN_PROGRESS',
                 severity: 'error',
                 phase: 'readback',
@@ -871,7 +871,7 @@ export class ReadbackOperation {
                 nativeError,
             }) ],
         })
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: failureCode,
             severity: 'error',
             phase: 'readback',
@@ -887,7 +887,7 @@ export class ReadbackOperation {
         assertScratchRuntimeActive(this.runtime)
 
         if (this.isDisposed || this.state === 'disposed') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_OPERATION_DISPOSED',
                 severity: 'error',
                 phase: 'readback',
@@ -899,7 +899,7 @@ export class ReadbackOperation {
         }
 
         if (this.isCancelled || this.state === 'cancelled') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_CANCELLED',
                 severity: 'error',
                 phase: 'readback',
@@ -911,7 +911,7 @@ export class ReadbackOperation {
         }
 
         if (this.state === 'consumed') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_ALREADY_CONSUMED',
                 severity: 'error',
                 phase: 'readback',
@@ -923,7 +923,7 @@ export class ReadbackOperation {
         }
 
         if (this.state === 'failed') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: readbackStateFor(this).failureCode ?? 'SCRATCH_READBACK_FAILED',
                 severity: 'error',
                 phase: 'readback',
@@ -1061,7 +1061,7 @@ function assertDirectReadbackNativeSettlement(
         return
     }
     const incident = primary.incident
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: primary.fact.diagnosticCode,
         severity: 'error',
         phase: 'readback',
@@ -1114,7 +1114,7 @@ function assertOrderedReadbackNativeOutcome(
         })),
         omittedOutcomeCount: outcome.omittedOutcomeCount,
     })
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_READBACK_ORDERED_COPY_UNTRUSTED',
         severity: 'error',
         phase: 'readback',
@@ -1310,7 +1310,7 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
 
     const resource = readbackSourceResource(operation.source)
     if (resource.state === 'indeterminate') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_CONTENT_INDETERMINATE',
             severity: 'error',
             phase: 'readback',
@@ -1328,7 +1328,7 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
     }
 
     if (resource.contentEpoch !== operation.contentEpoch) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_EPOCH_STALE',
             severity: 'error',
             phase: 'readback',
@@ -1345,7 +1345,7 @@ function assertReadbackSourceCurrent(operation: ReadbackOperation): void {
     }
 
     if (resource.allocationVersion !== operation.allocationVersion) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_ALLOCATION_STALE',
             severity: 'error',
             phase: 'readback',
@@ -1389,7 +1389,7 @@ function normalizeSource(
     }
 
     if (source.size <= 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_INVALID',
             severity: 'error',
             phase: 'readback',
@@ -1404,7 +1404,7 @@ function normalizeSource(
     source.assertUsable()
 
     if (source.offset % 4 !== 0 || source.size % 4 !== 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_SOURCE_INVALID',
             severity: 'error',
             phase: 'readback',
@@ -1417,7 +1417,7 @@ function normalizeSource(
     }
 
     if ((source.buffer.usage & BUFFER_USAGE_COPY_SRC) === 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'readback',
@@ -1440,7 +1440,7 @@ function normalizeRetentionPolicy(operation: ReadbackOperation, retain: unknown)
     if (retain === undefined) return 'consume-on-read'
     if (retain === 'consume-on-read' || retain === 'until-dispose') return retain
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_READBACK_RETAIN_INVALID',
         severity: 'error',
         phase: 'readback',
@@ -1457,7 +1457,7 @@ function normalizeAfter(operation: ReadbackOperation, after?: SubmittedWork): Su
     if (after === undefined) return undefined
 
     if (!after || after.runtime !== operation.runtime || typeof after.done?.then !== 'function') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_AFTER_INVALID',
             severity: 'error',
             phase: 'readback',

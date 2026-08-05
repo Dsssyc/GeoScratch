@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { createScratchNativeLabel } from './native-allocation.js'
 import {
     createScratchResourceIdentity,
@@ -218,7 +218,7 @@ function normalizeSamplerDescriptor(
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
     if (runtime?.device && typeof runtime.device.createSampler !== 'function') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',
@@ -386,7 +386,7 @@ function throwSamplerDescriptorDiagnostic(
     expected: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'resource',

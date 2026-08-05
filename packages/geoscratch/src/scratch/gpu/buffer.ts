@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import {
     assertBufferAvailableForGpuUse,
     disposeBufferMappingAuthority,
@@ -273,7 +273,7 @@ export class BufferRegion {
 
         this.assertUsable()
         if (!isLayoutArtifact(layout)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
                 severity: 'error',
                 phase: 'layout-codec',
@@ -286,7 +286,7 @@ export class BufferRegion {
         }
 
         if (this.layout !== undefined && !layoutArtifactsAbiCompatible(this.layout, layout)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_LAYOUT_ABI_MISMATCH',
                 severity: 'error',
                 phase: 'layout-codec',
@@ -429,7 +429,7 @@ function normalizeBufferRegionDescriptor(
     const layout = descriptor.layout
     if (layout !== undefined) {
         if (!isLayoutArtifact(layout)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
                 severity: 'error',
                 phase: 'layout-codec',
@@ -495,7 +495,7 @@ function validateBufferRegionLayout(
         offset % offsetAlignment !== 0 ||
         !layoutArtifactAcceptsBindingByteLength(layout, size)
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_REGION_LAYOUT_INVALID',
             severity: 'error',
             phase: 'layout-codec',
@@ -531,7 +531,7 @@ function throwBufferRegionRangeDiagnostic(
     expected: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BUFFER_REGION_RANGE_INVALID',
         severity: 'error',
         phase: 'resource',
@@ -567,7 +567,7 @@ async function createBufferResourceAllocation(
     assertScratchRuntimeActive(runtime)
     const normalizedDescriptor = normalizeBufferDescriptor(runtime, descriptor)
     if (mappedAtCreation && normalizedDescriptor.size % 4 !== 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_MAPPING_RANGE_INVALID',
             severity: 'error',
             phase: 'buffer-mapping',
@@ -662,7 +662,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
     const subject: DiagnosticSubject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
     if (runtime?.device && typeof runtime.device.createBuffer !== 'function') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',
@@ -674,7 +674,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
     }
 
     if (!isRecord(descriptor)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -688,7 +688,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
     const removedFields = REMOVED_BUFFER_RESOURCE_DESCRIPTOR_FIELDS
         .filter(key => Object.prototype.hasOwnProperty.call(descriptor, key))
     if (removedFields.length > 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -703,7 +703,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
         })
     }
     if (Object.prototype.hasOwnProperty.call(descriptor, 'mappedAtCreation')) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BUFFER_MAPPING_USE_EXPLICIT_FACTORY',
             severity: 'error',
             phase: 'buffer-mapping',
@@ -725,7 +725,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
         !Number.isSafeInteger(descriptor.size) ||
         descriptor.size < 0
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -737,7 +737,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
     }
 
     if (descriptor.usage === undefined) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'resource',
@@ -754,7 +754,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
         descriptor.usage < 0 ||
         descriptor.usage > GPU_FLAGS_MAX
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -766,7 +766,7 @@ function normalizeBufferDescriptor(runtime: ScratchRuntime, descriptor: unknown)
     }
 
     if (descriptor.label !== undefined && typeof descriptor.label !== 'string') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',

@@ -2522,7 +2522,7 @@ function createFailureProofController(configuration: FailureConfiguration): Fail
             ? (primaryFailure as { diagnostic?: unknown }).diagnostic
             : undefined
         const incident = primaryFailure && typeof primaryFailure === 'object'
-            ? (primaryFailure as { incident?: unknown }).incident
+            ? (primaryFailure as { context?: { incident?: unknown } }).context?.incident
             : undefined
         const cleanup = {
             runtime: {

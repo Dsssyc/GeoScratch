@@ -600,7 +600,7 @@ describe('scratch submission native integration', () => {
             code: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             phase: 'submission',
         })
-        expect(failure.incident).to.include({
+        expect(failure.context.incident).to.include({
             kind: 'submission-failure',
             attribution: 'temporal-correlation',
             failureStage: 'lifecycle-recheck',
@@ -673,8 +673,8 @@ describe('scratch submission native integration', () => {
             commandId: fixture.firstCopy.id,
             commandKind: 'copy',
         })
-        expect(caught.incident.failureStage).to.equal(caught.diagnostic.actual.primary.stage)
-        expect(caught.incident.outcomes[0].location)
+        expect(caught.context.incident.failureStage).to.equal(caught.diagnostic.actual.primary.stage)
+        expect(caught.context.incident.outcomes[0].location)
             .to.deep.equal(caught.diagnostic.actual.primary.location)
         capture.stop()
     })
@@ -783,7 +783,7 @@ describe('scratch submission native integration', () => {
             code: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
             phase: 'submission',
         })
-        expect(caught.incident).to.deep.include({
+        expect(caught.context.incident).to.deep.include({
             kind: 'submission-failure',
             diagnosticCode: 'SCRATCH_SUBMISSION_NATIVE_VALIDATION_FAILED',
         })

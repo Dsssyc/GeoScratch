@@ -1,6 +1,34 @@
+import {
+    ScratchDiagnosticError,
+    createScratchDiagnostic,
+    createScratchDiagnosticReport,
+    isScratchDiagnosticError,
+} from '../diagnostics/base.js'
+import type {
+    ScratchDiagnosticBase,
+    ScratchDiagnosticErrorOptions as SharedDiagnosticErrorOptions,
+    ScratchDiagnosticEvidence,
+    ScratchDiagnosticInput as SharedDiagnosticInput,
+    ScratchDiagnosticReport as SharedDiagnosticReport,
+    ScratchDiagnosticSeverity,
+    ScratchDiagnosticSubject,
+    ScratchDiagnosticSuggestion,
+} from '../diagnostics/base.js'
 import type { ScratchGpuIncidentReport } from './gpu-operation.js'
 
-export type DiagnosticSeverity = 'info' | 'warn' | 'error'
+export {
+    ScratchDiagnosticError,
+    createScratchDiagnosticReport,
+    isScratchDiagnosticError,
+}
+export type {
+    ScratchDiagnosticEvidence,
+    ScratchDiagnosticSeverity,
+    ScratchDiagnosticSubject,
+    ScratchDiagnosticSuggestion,
+}
+
+export type DiagnosticSeverity = ScratchDiagnosticSeverity
 
 export type DiagnosticPhase =
     | 'runtime'
@@ -21,7 +49,6 @@ export type DiagnosticSubject = {
     label?: string
     [key: string]: unknown
 }
-
 export type DiagnosticSuggestion = {
     kind: string
     confidence: 'low' | 'medium' | 'high'
@@ -30,138 +57,55 @@ export type DiagnosticSuggestion = {
     set?: unknown
     note?: string
 }
-
 export type DiagnosticEvidence = {
     kind: string
     value?: unknown
     note?: string
 }
 
-export type ScratchDiagnostic = {
-    version: 1
-    code: string
-    severity: DiagnosticSeverity
-    phase: DiagnosticPhase
+export type GPUDiagnostic = ScratchDiagnosticBase<
+    'gpu',
+    string,
+    DiagnosticPhase,
+    ScratchDiagnosticSubject
+>
+export type ScratchDiagnostic = GPUDiagnostic
+export type ScratchDiagnosticReport = SharedDiagnosticReport<GPUDiagnostic>
+
+export type ScratchDiagnosticInput = Omit<
+    SharedDiagnosticInput<'gpu', string, DiagnosticPhase, ScratchDiagnosticSubject>,
+    'domain' | 'subject' | 'suggestions' | 'evidence'
+> & Readonly<{
     subject: DiagnosticSubject
-    message: string
-    expected?: unknown
-    actual?: unknown
-    hints?: string[]
-    related?: DiagnosticSubject[]
-    suggestions?: DiagnosticSuggestion[]
-    evidence?: DiagnosticEvidence[]
-}
+    suggestions?: readonly DiagnosticSuggestion[]
+    evidence?: readonly DiagnosticEvidence[]
+}>
 
-export type ScratchDiagnosticInput = {
-    code: string
-    severity?: DiagnosticSeverity
-    phase: DiagnosticPhase
-    subject: DiagnosticSubject
-    message?: string
-    expected?: unknown
-    actual?: unknown
-    hint?: string
-    hints?: string | string[]
-    related?: DiagnosticSubject[]
-    suggestions?: DiagnosticSuggestion[]
-    evidence?: DiagnosticEvidence[]
-}
-
-export type ScratchDiagnosticReport = {
-    version: 1
-    diagnostics: ScratchDiagnostic[]
-    hasErrors: boolean
-    errorCount: number
-    warningCount: number
-}
-
-export type ScratchDiagnosticErrorOptions = ErrorOptions & {
+export type ScratchDiagnosticErrorOptions = ErrorOptions & Readonly<{
     incident?: ScratchGpuIncidentReport
+}>
+
+export function createGPUDiagnostic(input: ScratchDiagnosticInput): GPUDiagnostic {
+
+    return createScratchDiagnostic({ domain: 'gpu', ...input })
 }
 
-export function createScratchDiagnostic(input: ScratchDiagnosticInput): ScratchDiagnostic {
-
-    const diagnostic: ScratchDiagnostic = {
-        version: 1,
-        code: input.code,
-        severity: input.severity ?? 'error',
-        phase: input.phase,
-        subject: input.subject,
-        message: input.message ?? input.code,
-    }
-
-    if (input.expected !== undefined) diagnostic.expected = input.expected
-    if (input.actual !== undefined) diagnostic.actual = input.actual
-    if (input.related !== undefined) diagnostic.related = input.related
-    if (input.suggestions !== undefined) diagnostic.suggestions = input.suggestions
-    if (input.evidence !== undefined) diagnostic.evidence = input.evidence
-
-    const hints = normalizeHints(input.hints ?? input.hint)
-    if (hints !== undefined) diagnostic.hints = hints
-
-    return diagnostic
-}
-
-export function createScratchDiagnosticReport(diagnostics: ScratchDiagnostic[] = []): ScratchDiagnosticReport {
-
-    let errorCount = 0
-    let warningCount = 0
-
-    for (const diagnostic of diagnostics) {
-        if (diagnostic.severity === 'error') errorCount++
-        if (diagnostic.severity === 'warn') warningCount++
-    }
-
-    return {
-        version: 1,
-        diagnostics,
-        hasErrors: errorCount > 0,
-        errorCount,
-        warningCount,
-    }
-}
-
-const scratchDiagnosticErrors = new WeakSet<ScratchDiagnosticError>()
-
-export class ScratchDiagnosticError extends Error {
-
-    diagnostic: ScratchDiagnostic
-    report: ScratchDiagnosticReport
-    incident?: ScratchGpuIncidentReport
-
-    constructor(
-        diagnostic: ScratchDiagnostic,
-        report = createScratchDiagnosticReport([ diagnostic ]),
-        options?: ScratchDiagnosticErrorOptions
-    ) {
-
-        super(diagnostic.message, options)
-
-        this.name = 'ScratchDiagnosticError'
-        this.diagnostic = diagnostic
-        this.report = report
-        if (options?.incident !== undefined) this.incident = options.incident
-        scratchDiagnosticErrors.add(this)
-    }
-}
-
-export function isScratchDiagnosticError(value: unknown): value is ScratchDiagnosticError {
-
-    return typeof value === 'object' && value !== null && scratchDiagnosticErrors.has(value as ScratchDiagnosticError)
-}
-
-export function throwScratchDiagnostic(
+export function throwGPUDiagnostic(
     input: ScratchDiagnosticInput,
     options?: ScratchDiagnosticErrorOptions
 ): never {
 
-    const diagnostic = createScratchDiagnostic(input)
-    throw new ScratchDiagnosticError(diagnostic, createScratchDiagnosticReport([ diagnostic ]), options)
-}
-
-function normalizeHints(hints: string | string[] | undefined): string[] | undefined {
-
-    if (hints === undefined) return undefined
-    if (Array.isArray(hints)) return hints
-    return [ hints ]
+    const diagnostic = createGPUDiagnostic(input)
+    const sharedOptions: SharedDiagnosticErrorOptions<GPUDiagnostic> = {
+        ...(options?.cause === undefined ? {} : { cause: options.cause }),
+        context: {
+            domain: 'gpu',
+            ...(options?.incident === undefined ? {} : { incident: options.incident }),
+        },
+    }
+    throw new ScratchDiagnosticError(
+        diagnostic,
+        createScratchDiagnosticReport([ diagnostic ]),
+        sharedOptions
+    )
 }

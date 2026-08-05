@@ -462,11 +462,11 @@ describe('scratch immediate data runtime and pipeline contract', () => {
             phase: 'pipeline',
         })
         expect(failure.cause).to.equal(nativeError)
-        expect(failure.incident).to.deep.include({
+        expect(failure.context.incident).to.deep.include({
             nativeErrorCategory: 'validation',
             failureStage: 'pipeline-creation',
         })
-        expect(failure.incident.target).to.deep.include({
+        expect(failure.context.incident.target).to.deep.include({
             pipelineKind: 'compute',
             programId: program.id,
         })

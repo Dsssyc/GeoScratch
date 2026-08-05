@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { describeValue, isRecord } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
 
@@ -2511,7 +2511,7 @@ function throwBufferViewDiagnostic(
     actual: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_LAYOUT_BUFFER_VIEW_INVALID',
         severity: 'error',
         phase: 'layout-codec',
@@ -2531,7 +2531,7 @@ function throwLayoutDiagnostic(
     actual: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code,
         severity: 'error',
         phase: 'layout-codec',

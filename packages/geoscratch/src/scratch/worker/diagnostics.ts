@@ -1,4 +1,13 @@
-export type WorkerDiagnosticSeverity = 'info' | 'warn' | 'error'
+import {
+    ScratchDiagnosticError,
+    createScratchDiagnostic,
+    createScratchDiagnosticReport,
+} from '../diagnostics/base.js'
+import type {
+    ScratchDiagnosticBase,
+    ScratchDiagnosticSeverity,
+} from '../diagnostics/base.js'
+import type { WorkerRemoteErrorFacts } from './worker-system.js'
 
 export type WorkerDiagnosticPhase =
     | 'worker-system'
@@ -30,17 +39,7 @@ export type WorkerDiagnosticSubject = Readonly<{
 
 export type WorkerCancellationKind = 'queued' | 'cooperative' | 'stale' | 'hard'
 
-export type WorkerDiagnostic = Readonly<{
-    version: 1
-    code: WorkerDiagnosticCode
-    severity: WorkerDiagnosticSeverity
-    phase: WorkerDiagnosticPhase
-    subject: WorkerDiagnosticSubject
-    message: string
-    expected?: unknown
-    actual?: unknown
-    hints?: readonly string[]
-    related?: readonly WorkerDiagnosticSubject[]
+type WorkerDiagnosticFacts = Readonly<{
     groupId?: string
     workerId?: string
     moduleId?: string
@@ -52,42 +51,86 @@ export type WorkerDiagnostic = Readonly<{
     retriable?: boolean
 }>
 
-export type WorkerDiagnosticInput = Omit<WorkerDiagnostic, 'version'>
+export type WorkerDiagnostic = ScratchDiagnosticBase<
+    'worker',
+    WorkerDiagnosticCode,
+    WorkerDiagnosticPhase,
+    WorkerDiagnosticSubject
+> & WorkerDiagnosticFacts
 
-export class WorkerDiagnosticError extends Error {
-
-    readonly diagnostic: WorkerDiagnostic
-
-    constructor(diagnostic: WorkerDiagnostic, cause?: unknown) {
-
-        super(diagnostic.message, cause === undefined ? undefined : { cause })
-        this.name = 'WorkerDiagnosticError'
-        this.diagnostic = diagnostic
-    }
-}
-
-export function createWorkerDiagnostic(input: WorkerDiagnosticInput): WorkerDiagnostic {
-
-    return freezeDiagnostic({ version: 1, ...input })
-}
+export type WorkerDiagnosticInput = Readonly<{
+    code: WorkerDiagnosticCode
+    severity: ScratchDiagnosticSeverity
+    phase: WorkerDiagnosticPhase
+    subject: WorkerDiagnosticSubject
+    message: string
+    expected?: unknown
+    actual?: unknown
+    hints?: readonly string[]
+    related?: readonly WorkerDiagnosticSubject[]
+}> & WorkerDiagnosticFacts
 
 export function workerDiagnosticError(
     input: WorkerDiagnosticInput,
     cause?: unknown
-): WorkerDiagnosticError {
+): ScratchDiagnosticError<WorkerDiagnostic> {
 
-    return new WorkerDiagnosticError(createWorkerDiagnostic(input), cause)
+    const diagnostic = createWorkerDomainDiagnostic(input)
+    const remote = workerRemoteFacts(input.actual)
+    return new ScratchDiagnosticError(
+        diagnostic,
+        createScratchDiagnosticReport([ diagnostic ]),
+        {
+            ...(cause === undefined ? {} : { cause }),
+            context: {
+                domain: 'worker',
+                ...(remote === undefined ? {} : { remote }),
+            },
+        }
+    )
 }
 
-function freezeDiagnostic(input: WorkerDiagnostic): WorkerDiagnostic {
+function createWorkerDomainDiagnostic(input: WorkerDiagnosticInput): WorkerDiagnostic {
 
-    const result: WorkerDiagnostic = {
-        ...input,
-        subject: Object.freeze({ ...input.subject }),
-        ...(input.hints === undefined ? {} : { hints: Object.freeze([ ...input.hints ]) }),
-        ...(input.related === undefined ? {} : {
-            related: Object.freeze(input.related.map(subject => Object.freeze({ ...subject }))),
+    const base = createScratchDiagnostic({
+        domain: 'worker',
+        code: input.code,
+        severity: input.severity,
+        phase: input.phase,
+        subject: input.subject,
+        message: input.message,
+        ...(input.expected === undefined ? {} : { expected: input.expected }),
+        ...(input.actual === undefined ? {} : { actual: input.actual }),
+        ...(input.hints === undefined ? {} : { hints: input.hints }),
+        ...(input.related === undefined ? {} : { related: input.related }),
+    })
+    const facts: WorkerDiagnosticFacts = {
+        ...(input.groupId === undefined ? {} : { groupId: input.groupId }),
+        ...(input.workerId === undefined ? {} : { workerId: input.workerId }),
+        ...(input.moduleId === undefined ? {} : { moduleId: input.moduleId }),
+        ...(input.moduleVersion === undefined ? {} : { moduleVersion: input.moduleVersion }),
+        ...(input.operation === undefined ? {} : { operation: input.operation }),
+        ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+        ...(input.remoteStack === undefined ? {} : { remoteStack: input.remoteStack }),
+        ...(input.cancellationKind === undefined ? {} : {
+            cancellationKind: input.cancellationKind,
         }),
+        ...(input.retriable === undefined ? {} : { retriable: input.retriable }),
     }
-    return Object.freeze(result)
+
+    return Object.freeze({ ...base, ...facts })
+}
+
+function workerRemoteFacts(actual: unknown): WorkerRemoteErrorFacts | undefined {
+
+    if (typeof actual !== 'object' || actual === null) return undefined
+    const candidate = actual as Partial<WorkerRemoteErrorFacts>
+    if (typeof candidate.remoteName !== 'string' || typeof candidate.remoteMessage !== 'string') {
+        return undefined
+    }
+    return Object.freeze({
+        remoteName: candidate.remoteName,
+        remoteMessage: candidate.remoteMessage,
+        ...(typeof candidate.remoteCode === 'string' ? { remoteCode: candidate.remoteCode } : {}),
+    })
 }

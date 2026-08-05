@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import { subscribeResourceDisposal } from './resource.js'
@@ -226,7 +226,7 @@ export function throwScopedAllocationFailure<T>(
             nativeErrorCategory: 'device-lost',
             ...(incident !== undefined ? { incidentId: incident.id } : {}),
         })
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             severity: 'error',
             phase: 'runtime',
@@ -264,7 +264,7 @@ export function throwScopedAllocationFailure<T>(
         triggerLogicalFootprintBytes: target.logicalFootprintBytes,
     })
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code,
         severity: 'error',
         phase: outcome.kind === 'runtime-disposed' ? 'runtime' : 'resource',

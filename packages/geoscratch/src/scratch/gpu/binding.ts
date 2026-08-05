@@ -6,7 +6,7 @@ import {
     unregisterBindSetOwnership,
 } from './binding-ownership.js'
 import { BufferRegion, isBufferRegion } from './buffer.js'
-import { ScratchDiagnosticError, isScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
+import { ScratchDiagnosticError, isScratchDiagnosticError, throwGPUDiagnostic, type GPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createScratchNativeLabel } from './native-allocation.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
@@ -495,7 +495,7 @@ export class BindLayout {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'binding',
@@ -514,7 +514,7 @@ export class BindLayout {
     assertUsable() {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_DISPOSED',
                 severity: 'error',
                 phase: 'binding',
@@ -762,7 +762,7 @@ export class BindSet {
         assertScratchRuntimeActive(runtime)
 
         if (!isBindLayout(layout)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',
                 severity: 'error',
                 phase: 'binding',
@@ -777,7 +777,7 @@ export class BindSet {
         if (!isRecord(options) || (
             options.label !== undefined && typeof options.label !== 'string'
         )) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_SET_DESCRIPTOR_INVALID',
                 severity: 'error',
                 phase: 'binding',
@@ -878,7 +878,7 @@ export class BindSet {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'binding',
@@ -897,7 +897,7 @@ export class BindSet {
     assertUsable() {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_DISPOSED',
                 severity: 'error',
                 phase: 'binding',
@@ -921,7 +921,7 @@ export class BindSet {
 
         const state = this.preparationState
         if (state !== 'prepared') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: state === 'preparing'
                     ? 'SCRATCH_BIND_SET_PREPARING'
                     : state === 'disposed'
@@ -1067,7 +1067,7 @@ export async function createBindSet(
 export function preparedBindGroupFor(bindSet: BindSet): GPUBindGroup {
 
     if (bindSet.isAttemptLocal) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_ATTEMPT_AUTHORITY_REQUIRED',
             severity: 'error',
             phase: 'binding',
@@ -1151,7 +1151,7 @@ export function realizeAttemptBindGroup(
                 )
             )
         } catch (cause) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_SET_ATTEMPT_REALIZATION_FAILED',
                 severity: 'error',
                 phase: 'submission',
@@ -1175,7 +1175,7 @@ export function realizeAttemptBindGroup(
             entries,
         })
     } catch (cause) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_SET_ATTEMPT_REALIZATION_FAILED',
             severity: 'error',
             phase: 'submission',
@@ -1526,7 +1526,9 @@ function failBindSetPreflight(
     cause: unknown
 ): never {
 
-    const diagnosticError = isScratchDiagnosticError(cause) ? cause : undefined
+    const diagnosticError = isScratchDiagnosticError(cause) && cause.diagnostic.domain === 'gpu'
+        ? cause as ScratchDiagnosticError<GPUDiagnostic>
+        : undefined
     const code = diagnosticError?.diagnostic.code ?? BIND_SET_PREPARATION_CODES.nativeException
     const failure = Object.freeze({
         stage: 'descriptor-validation' as const,
@@ -1546,7 +1548,7 @@ function failBindSetPreparation(
     bindSet: BindSet,
     inFlight: InFlightBindSetPreparation,
     failures: readonly BindSetPreparationFailure[],
-    sourceDiagnostic?: ScratchDiagnosticError
+    sourceDiagnostic?: ScratchDiagnosticError<GPUDiagnostic>
 ): never {
 
     const ordered = [ ...failures ].sort(comparePreparationFailures)
@@ -1599,11 +1601,11 @@ function failBindSetPreparation(
         throw new ScratchDiagnosticError(
             sourceDiagnostic.diagnostic,
             sourceDiagnostic.report,
-            { cause: sourceDiagnostic, incident }
+            { cause: sourceDiagnostic, context: { domain: 'gpu', incident } }
         )
     }
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: primary.code,
         severity: 'error',
         phase: primary.stage === 'lifecycle-recheck' ? 'runtime' : 'binding',
@@ -2029,11 +2031,11 @@ function bindSetPreparationFailureMessage(failure: BindSetPreparationFailure): s
 }
 
 function rejectedBindSetDiagnostic(
-    input: Parameters<typeof throwScratchDiagnostic>[0]
+    input: Parameters<typeof throwGPUDiagnostic>[0]
 ): Promise<never> {
 
     try {
-        throwScratchDiagnostic(input)
+        throwGPUDiagnostic(input)
     } catch (cause) {
         return Promise.reject(cause)
     }
@@ -2126,7 +2128,7 @@ export function normalizeBindLayoutDescriptor(
 ): NormalizedBindLayoutDescriptor {
 
     if (!runtime?.device || typeof runtime.device.createBindGroupLayout !== 'function') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',
@@ -2185,7 +2187,7 @@ function normalizeGroup(
         group < 0 ||
         group >= maxBindGroups
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',
             severity: 'error',
             phase: 'binding',
@@ -2228,7 +2230,7 @@ function normalizeEntries(
         }
 
         if (names.has(entry.name) || bindings.has(entry.binding)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_SHADER_INDEX_MISMATCH',
                 severity: 'error',
                 phase: 'binding',
@@ -2355,7 +2357,7 @@ function normalizeVisibility(
 function normalizeBindings(bindSet: BindSet, bindings: BindSetBindings): Map<string, NormalizedBindSetBinding> {
 
     if (!bindings || typeof bindings !== 'object') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',
             severity: 'error',
             phase: 'binding',
@@ -2369,7 +2371,7 @@ function normalizeBindings(bindSet: BindSet, bindings: BindSetBindings): Map<str
     const expectedNames = bindSet.layout.entries.map(entry => entry.name)
     for (const name of Object.keys(bindings)) {
         if (!expectedNames.includes(name)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_UNKNOWN_ENTRY',
                 severity: 'error',
                 phase: 'binding',
@@ -2387,7 +2389,7 @@ function normalizeBindings(bindSet: BindSet, bindings: BindSetBindings): Map<str
     for (const entry of bindSet.layout.entries) {
         const resource = bindings[entry.name]
         if (resource === undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',
                 severity: 'error',
                 phase: 'binding',
@@ -2437,7 +2439,7 @@ function validateBufferResource(
 ) {
 
     if (!isBufferRegion(resource)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
             severity: 'error',
             phase: 'binding',
@@ -2454,7 +2456,7 @@ function validateBufferResource(
 
     const requiredUsage = REQUIRED_BUFFER_USAGE[entry.type]
     if ((resource.buffer.usage & requiredUsage) === 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'binding',
@@ -2522,7 +2524,7 @@ function validateTextureResource(
         return
     }
     if (!isTextureResource(resource) && !isTextureViewSpec(resource)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
             severity: 'error',
             phase: 'binding',
@@ -2544,7 +2546,7 @@ function validateTextureResource(
         ? TEXTURE_USAGE_TEXTURE_BINDING
         : TEXTURE_USAGE_STORAGE_BINDING
     if ((descriptor.usage & requiredUsage) === 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'binding',
@@ -2794,7 +2796,7 @@ function validateExternalTextureResource(
         })
         return
     }
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
         severity: 'error',
         phase: 'binding',
@@ -2883,7 +2885,7 @@ function validateSamplerResource(
 ) {
 
     if (!isSamplerResource(resource)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
             severity: 'error',
             phase: 'binding',
@@ -2974,7 +2976,7 @@ function throwBindingCompatibilityDiagnostic(
     }>
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: input.code ?? 'SCRATCH_BIND_RESOURCE_TYPE_MISMATCH',
         severity: 'error',
         phase: 'binding',
@@ -3064,7 +3066,7 @@ function throwBindLayoutDescriptorDiagnostic(
     expected: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BIND_LAYOUT_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'binding',
@@ -3101,7 +3103,7 @@ function normalizeStorageTextureFormat(
     const capabilities = storageTextureFormatCapabilities(entry.format as GPUTextureFormat)
     const requirement = capabilities?.[access]
     if (requirement === undefined || !runtimeSupportsTextureFormatRequirement(runtime, requirement)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_STORAGE_TEXTURE_FORMAT_UNSUPPORTED',
             severity: 'error',
             phase: 'binding',
@@ -3148,7 +3150,7 @@ function normalizeMinBindingSize(
         !Number.isSafeInteger(minBindingSize) ||
         minBindingSize < 0
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_MIN_BINDING_SIZE_INVALID',
             severity: 'error',
             phase: 'binding',
@@ -3170,7 +3172,7 @@ function validateBindingLimits(
 
     const violation = firstBindingLimitViolation(runtime, entries)
     if (violation === undefined) return
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BIND_LAYOUT_LIMIT_EXCEEDED',
         severity: 'error',
         phase: 'binding',
@@ -3383,7 +3385,7 @@ function throwDynamicOffsetFlagDiagnostic(
     expected: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
         severity: 'error',
         phase: 'binding',
@@ -3400,7 +3402,7 @@ function throwDynamicOffsetFlagDiagnostic(
 
 function throwBindEntryDiagnostic(layout: BindLayoutDiagnosticContext, entry: unknown): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BIND_REQUIRED_ENTRY_MISSING',
         severity: 'error',
         phase: 'binding',

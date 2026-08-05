@@ -141,7 +141,7 @@ type FlowError = Error & {
     code?: string
     scenario?: string
     diagnostic?: ScratchDiagnostic
-    incident?: ScratchGpuIncidentReport
+    context?: { domain: 'gpu', incident?: ScratchGpuIncidentReport }
 }
 
 type FlowFailureProofController = FlowFailureProof & Readonly<{
@@ -637,7 +637,7 @@ function createFailureProofController(configuration: Readonly<{
             ? (primaryFailure as FlowError).diagnostic
             : undefined
         const incident = primaryFailure && typeof primaryFailure === 'object'
-            ? (primaryFailure as FlowError).incident
+            ? (primaryFailure as FlowError).context?.incident
             : undefined
         const proof = frozenJson({
             schemaVersion: 1,

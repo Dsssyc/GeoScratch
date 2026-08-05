@@ -1,8 +1,5 @@
-import {
-    WorkerDiagnosticError,
-    WorkerSystem,
-    type WorkerTaskHandle,
-} from 'geoscratch/worker'
+import { ScratchDiagnosticError } from 'geoscratch/scratch'
+import { WorkerSystem, type WorkerTaskHandle } from 'geoscratch/worker'
 
 export async function runWorkerSystemProof() {
 
@@ -175,7 +172,7 @@ async function captureDiagnostic(task: WorkerTaskHandle<unknown>) {
         await task.result
         return { code: 'unexpected-success' }
     } catch (error) {
-        if (!(error instanceof WorkerDiagnosticError)) throw error
+        if (!(error instanceof ScratchDiagnosticError)) throw error
         return error.diagnostic
     }
 }

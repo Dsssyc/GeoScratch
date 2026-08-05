@@ -61,6 +61,32 @@ declare const typedTextureUploadOrigin: scr.TextureUploadOrigin
 declare const typedTextureUploadSize: scr.TextureUploadSize
 const compatBufferResourceDescriptor: scratchCompat.BufferResourceDescriptor = typedBufferResourceDescriptor
 const compatDiagnosticInput: scratchCompat.ScratchDiagnosticInput = typedDiagnosticInput
+
+const typedGpuDiagnostic = scratchCompat.createScratchDiagnostic({
+    domain: 'gpu',
+    code: 'GPU_TYPED_DIAGNOSTIC',
+    phase: 'runtime',
+    subject: { kind: 'GPURuntime', id: 'runtime-a' },
+})
+const typedWorkerDiagnostic = scratchCompat.createScratchDiagnostic({
+    domain: 'worker',
+    code: 'WORKER_TASK_FAILED',
+    phase: 'worker-task',
+    subject: { kind: 'WorkerTask', id: 'task-a' },
+})
+const typedFoundationDiagnostic: scratchCompat.ScratchDiagnostic = Math.random() > 0.5
+    ? typedGpuDiagnostic
+    : typedWorkerDiagnostic
+if (typedFoundationDiagnostic.domain === 'worker') {
+    const narrowedWorkerDiagnostic: workers.WorkerDiagnostic = typedFoundationDiagnostic
+    void narrowedWorkerDiagnostic
+}
+// @ts-expect-error Scratch diagnostics require an explicit domain
+scratchCompat.createScratchDiagnostic({
+    code: 'MISSING_DOMAIN',
+    phase: 'runtime',
+    subject: { kind: 'GPURuntime', id: 'runtime-a' },
+})
 const compatProgramDescriptor: scratchCompat.ProgramDescriptor = typedProgramDescriptor
 const compatProgramStage: scratchCompat.ProgramStage = typedProgramStage
 const compatRenderPipelineDescriptor: scratchCompat.ScratchRenderPipelineDescriptor = typedRenderPipelineDescriptor
@@ -883,6 +909,7 @@ async function useScratchFoundation(gpu: GPU, canvas: HTMLCanvasElement) {
     scr.validateRenderPassAttachments(undefined as never)
 
     const diagnostic: scr.ScratchDiagnostic = scr.createScratchDiagnostic({
+        domain: 'gpu',
         code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
         severity: 'error',
         phase: 'resource',

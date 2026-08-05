@@ -3,7 +3,7 @@ import {
     registerResource,
     Resource,
 } from './resource.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { createScratchNativeLabel } from './native-allocation.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { updateRuntimeResourceFact } from './runtime-diagnostics.js'
@@ -309,7 +309,7 @@ function assertQuerySlotIndex(querySet: QuerySetResource, index: number): void {
 
     if (Number.isInteger(index) && index >= 0 && index < querySet.count) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_QUERY_SLOT_INDEX_INVALID',
         severity: 'error',
         phase: 'resource',
@@ -325,7 +325,7 @@ function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: unknow
     const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
 
     if (runtime?.device && typeof runtime.device.createQuerySet !== 'function') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',
@@ -358,7 +358,7 @@ function normalizeQuerySetDescriptor(runtime: ScratchRuntime, descriptor: unknow
     }
 
     if (descriptor.type === 'timestamp' && !runtime?.deviceFeatures?.has?.('timestamp-query')) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_FEATURE_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',
@@ -383,7 +383,7 @@ function throwQuerySetDescriptorDiagnostic(subject: DiagnosticSubject, descripto
 
     const descriptorRecord = isRecord(descriptor) ? descriptor : {}
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'resource',

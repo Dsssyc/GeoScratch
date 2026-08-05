@@ -1,4 +1,4 @@
-import { createScratchDiagnosticReport, throwScratchDiagnostic } from './diagnostics.js'
+import { createScratchDiagnosticReport, throwGPUDiagnostic } from './diagnostics.js'
 import {
     createLayoutArtifact,
     createLayoutBufferViewContract,
@@ -1370,7 +1370,7 @@ function throwCodecDiagnostic(
     actual: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code,
         severity: 'error',
         phase: 'layout-codec',

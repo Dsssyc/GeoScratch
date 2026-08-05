@@ -1,4 +1,5 @@
 import { expect } from 'chai'
+import { ScratchDiagnosticError } from 'geoscratch'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -16,10 +17,11 @@ describe('generic WorkerSystem public contract', () => {
         for (const name of [
             'WorkerSystem',
             'WorkerGroup',
-            'WorkerDiagnosticError',
-            'createWorkerDiagnostic',
             'defineWorkerModule',
         ]) expect(worker).to.have.property(name)
+        expect(worker).not.to.have.property('WorkerDiagnosticError')
+        expect(worker).not.to.have.property('createWorkerDiagnostic')
+        expect(ScratchDiagnosticError).to.be.a('function')
     })
 
     it('keeps the Worker implementation independent from Geo and GPU runtime state', () => {

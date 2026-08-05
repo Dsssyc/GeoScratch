@@ -739,7 +739,9 @@ const baselineValueExports = exportNames(baseline.scratchIndex, 'value')
 const currentValueExports = exportNames(current.scratchIndex, 'value')
 const historicalValueExports = exportNames(historical.scratchIndex, 'value')
 const baselineMissingValues = difference(baselineValueExports, currentValueExports)
+const expectedBaselineMissingValues = Object.freeze([ 'throwScratchDiagnostic' ])
 const historicalMissingValues = difference(historicalValueExports, currentValueExports)
+const expectedHistoricalMissingValues = Object.freeze([ 'throwScratchDiagnostic' ])
 
 const baselineTypeReplacements = Object.freeze({
     CommandDynamicOffsets: 'CommandBindSetInvocation',
@@ -814,6 +816,7 @@ const goalStartPublicMemberReplacements = Object.freeze({
     'Resource.state:get': 'content-bearing BufferResource/TextureResource only',
     'SamplerResource.constructor:constructor': 'Promise-only ScratchRuntime.createSampler()',
     'SamplerResource.static.create:method': 'Promise-only ScratchRuntime.createSampler()',
+    'ScratchDiagnosticError.incident:property': 'domain-matched ScratchDiagnosticError.context incident branch',
     'Surface.getCurrentTexture:method': 'SubmissionBuilder.surfaceTexture() attempt-local lease authority',
     'TextureResource.createView:method': 'logical TextureResource.view() returning TextureViewSpec',
 })
@@ -827,6 +830,9 @@ const goalStartChangedPublicMemberReplacements = Object.freeze({
     'LayoutCodec.wgslAccessors:method': 'named recursive WGSL accessor options',
     'LayoutCodec.write:method': 'canonical recursive root values plus explicit runtime-sized extent',
     'ReadbackOperation.source:get': 'whole BufferResource source -> explicit BufferRegion source',
+    'ScratchDiagnosticError.constructor:constructor': 'generic domain-matched diagnostic, report, and context contract',
+    'ScratchDiagnosticError.diagnostic:property': 'immutable domain-discriminated diagnostic union',
+    'ScratchDiagnosticError.report:property': 'immutable mixed-domain diagnostic report',
     'ScratchRuntime.bindLayout:method': 'Promise-only acknowledged BindLayout factory',
     'ScratchRuntime.bindSet:method': 'Promise-only initially prepared BindSet factory',
     'ScratchRuntime.createBindLayout:method': 'Promise-only acknowledged BindLayout factory',
@@ -1751,8 +1757,14 @@ assertParity(
     capabilityRows.every(row => row.status === 'passed'),
     `capability rows failed: ${failedRows(capabilityRows)}`
 )
-assertParity(baselineMissingValues.length === 0, `Goal-start value exports missing: ${baselineMissingValues}`)
-assertParity(historicalMissingValues.length === 0, `historical value exports missing: ${historicalMissingValues}`)
+assertParity(
+    equalSets(baselineMissingValues, expectedBaselineMissingValues),
+    `Goal-start value export removals drifted: ${baselineMissingValues}`
+)
+assertParity(
+    equalSets(historicalMissingValues, expectedHistoricalMissingValues),
+    `historical value export removals drifted: ${historicalMissingValues}`
+)
 assertParity(
     equalSets(baselineMissingTypes, expectedBaselineMissingTypes),
     `Goal-start type replacements drifted: ${JSON.stringify(baselineMissingTypes)}`

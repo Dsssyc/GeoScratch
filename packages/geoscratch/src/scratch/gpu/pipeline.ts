@@ -5,7 +5,7 @@ import {
     isBindLayout,
     normalizeBindLayoutDescriptor,
 } from './binding.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import {
     issuePipelineCreation,
 } from './pipeline-creation.js'
@@ -144,7 +144,7 @@ export class RenderPipeline {
     private constructor(token: symbol, state?: RenderPipelineState) {
 
         if (token !== renderPipelineToken || state === undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_CONSTRUCTOR_PRIVATE',
                 severity: 'error',
                 phase: 'pipeline',
@@ -196,7 +196,7 @@ export class RenderPipeline {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'pipeline',
@@ -215,7 +215,7 @@ export class RenderPipeline {
     assertUsable() {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_DISPOSED',
                 severity: 'error',
                 phase: 'pipeline',
@@ -416,7 +416,7 @@ function prepareRenderPipeline(
     const input = descriptor ?? {} as RenderPipelineDescriptor
     const program = input.program
     if (!isProgram(program)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_PROGRAM_INVALID',
             severity: 'error',
             phase: 'pipeline',
@@ -539,7 +539,7 @@ function snapshotProgramSource(
         }
         return snapshotPipelineSource({ id: program.id, modules })
     } catch {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PROGRAM_STAGE_INVALID',
             severity: 'error',
             phase: 'program',
@@ -780,7 +780,7 @@ function throwPipelineCreationFailure(
         ? incident.outcomes ?? []
         : []
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: diagnosticCode,
         severity: 'error',
         phase: single?.diagnosticCode === 'SCRATCH_PIPELINE_CREATION_RUNTIME_DISPOSED'
@@ -942,7 +942,7 @@ export class ComputePipeline {
     private constructor(token: symbol, state?: ComputePipelineState) {
 
         if (token !== computePipelineToken || state === undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_CONSTRUCTOR_PRIVATE',
                 severity: 'error',
                 phase: 'pipeline',
@@ -986,7 +986,7 @@ export class ComputePipeline {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'pipeline',
@@ -1005,7 +1005,7 @@ export class ComputePipeline {
     assertUsable() {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_DISPOSED',
                 severity: 'error',
                 phase: 'pipeline',
@@ -1160,7 +1160,7 @@ function prepareComputePipeline(
     const input = descriptor ?? {} as ComputePipelineDescriptor
     const program = input.program
     if (!isProgram(program)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_PROGRAM_INVALID',
             severity: 'error',
             phase: 'pipeline',
@@ -1327,7 +1327,7 @@ async function getPipelineBindLayout(
 
     pipeline.assertUsable()
     if (pipeline.layoutMode !== 'auto') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_LAYOUT_DERIVATION_FORBIDDEN',
             severity: 'error',
             phase: 'pipeline',
@@ -1349,7 +1349,7 @@ async function getPipelineBindLayout(
     const signature = normalizedBindLayoutDescriptorSignature(normalizedDescriptor)
     const establishedSignature = state.derivedLayoutSignatures.get(group)
     if (establishedSignature !== undefined && establishedSignature !== signature) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_LAYOUT_DERIVATION_DESCRIPTOR_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -1453,7 +1453,7 @@ function normalizePipelineImmediateSize(
         !alignedTo4Bytes ||
         (positive && !withinDeviceLimit)
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID',
             severity: 'error',
             phase: 'pipeline',
@@ -1483,7 +1483,7 @@ function normalizePipelineImmediateSize(
         normalized > 0 &&
         !requiredLanguageFeatures.includes('immediate_address_space')
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_IMMEDIATE_SIZE_INVALID',
             severity: 'error',
             phase: 'pipeline',
@@ -1625,7 +1625,7 @@ function throwRenderConstantsDiagnostic(
     name?: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PIPELINE_CONSTANTS_INVALID',
         severity: 'error',
         phase: 'pipeline',
@@ -1688,7 +1688,7 @@ function normalizeVertexAttribute(pipeline: PipelineValidationContext, attribute
 
 function throwVertexLayoutDiagnostic(pipeline: PipelineValidationContext, { expected, actual }: { expected: unknown, actual: unknown }): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PIPELINE_VERTEX_LAYOUT_MISMATCH',
         severity: 'error',
         phase: 'pipeline',
@@ -1707,7 +1707,7 @@ function normalizeBindLayouts(
 
     const pipelineName = pipeline.pipelineKind === 'render' ? 'RenderPipeline' : 'ComputePipeline'
     if (!Array.isArray(bindLayouts)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
             severity: 'error',
             phase: 'pipeline',
@@ -1721,7 +1721,7 @@ function normalizeBindLayouts(
     const groups = new Set<number>()
     const normalized = bindLayouts.map((layout: BindLayout) => {
         if (!isBindLayout(layout)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'pipeline',
@@ -1735,7 +1735,7 @@ function normalizeBindLayouts(
         layout.assertRuntime(pipeline.runtime)
 
         if (groups.has(layout.group)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'pipeline',
@@ -1756,7 +1756,7 @@ function normalizeBindLayouts(
         normalized.flatMap(layout => layout.entries)
     )
     if (violation !== undefined) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
             severity: 'error',
             phase: 'pipeline',
@@ -1823,7 +1823,7 @@ function throwPipelineLayoutModeInvalid(
     actual: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PIPELINE_LAYOUT_MODE_INVALID',
         severity: 'error',
         phase: 'pipeline',
@@ -1859,7 +1859,7 @@ function normalizeTargets(
 ): (GPUColorTargetState | null)[] {
 
     if (!Array.isArray(targets)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_TARGET_STATE_INVALID',
             severity: 'error',
             phase: 'pipeline',
@@ -1874,7 +1874,7 @@ function normalizeTargets(
     const normalized: (GPUColorTargetState | null)[] = []
     for (let slot = 0; slot < targetSlots.length; slot++) {
         if (!Object.hasOwn(targetSlots, slot) || targetSlots[slot] === undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_TARGET_STATE_INVALID',
                 severity: 'error',
                 phase: 'pipeline',
@@ -1896,7 +1896,7 @@ function normalizeTargets(
         }
 
         if (typeof target !== 'object' || typeof target.format !== 'string') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_TARGET_STATE_INVALID',
                 severity: 'error',
                 phase: 'pipeline',
@@ -1925,7 +1925,7 @@ function normalizeRenderTargetsForFragment(
 
     if (fragment === undefined) {
         if (value !== undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_FRAGMENT_FIELDS_FORBIDDEN',
                 severity: 'error',
                 phase: 'pipeline',
@@ -1939,7 +1939,7 @@ function normalizeRenderTargetsForFragment(
         return Object.freeze([])
     }
     if (value === undefined) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_TARGETS_INVALID',
             severity: 'error',
             phase: 'pipeline',
@@ -1958,7 +1958,7 @@ function throwMissingProgramStage(
     stage: 'vertex' | 'compute'
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: stage === 'vertex'
             ? 'SCRATCH_PIPELINE_VERTEX_STAGE_MISSING'
             : 'SCRATCH_PIPELINE_COMPUTE_STAGE_MISSING',
@@ -2013,7 +2013,7 @@ function validateRenderPipelineHasAttachment(
 
     if (targets.some(target => target !== null) || depthStencil !== undefined) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
         severity: 'error',
         phase: 'pipeline',
@@ -2152,7 +2152,7 @@ function throwProgramLayoutMismatch(
     }
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH',
         severity: 'error',
         phase: 'program',

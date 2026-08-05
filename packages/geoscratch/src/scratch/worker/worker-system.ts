@@ -1,7 +1,6 @@
-import {
-    WorkerDiagnosticError,
-    workerDiagnosticError,
-} from './diagnostics.js'
+import { isScratchDiagnosticError } from '../diagnostics/base.js'
+import type { ScratchDiagnosticError } from '../diagnostics/base.js'
+import { workerDiagnosticError } from './diagnostics.js'
 import type {
     WorkerCancellationKind,
     WorkerDiagnostic,
@@ -14,6 +13,8 @@ import type {
     WorkerRemoteError,
     WorkerTaskOutboundMessage,
 } from './protocol.js'
+
+type WorkerFailure = ScratchDiagnosticError<WorkerDiagnostic>
 
 export type WorkerTaskPriorityClass = 'background' | 'user-visible' | 'critical'
 
@@ -270,7 +271,7 @@ export class WorkerContextHandle<State = unknown> {
     readonly #key: string
     #state: 'active' | 'lost' | 'disposed' = 'active'
     #disposePromise: Promise<void> | undefined
-    #loss: WorkerDiagnosticError | undefined
+    #loss: WorkerFailure | undefined
 
     private constructor(
         group: WorkerGroup,
@@ -361,7 +362,7 @@ export class WorkerContextHandle<State = unknown> {
     }
 
     /** @internal */
-    lose(error: WorkerDiagnosticError): void {
+    lose(error: WorkerFailure): void {
 
         if (this.#state !== 'active') return
         this.#state = 'lost'
@@ -742,7 +743,7 @@ export class WorkerGroup {
     }
 
     /** @internal */
-    handleHostFailure(host: WorkerHost, remote: WorkerRemoteError): WorkerDiagnosticError {
+    handleHostFailure(host: WorkerHost, remote: WorkerRemoteError): WorkerFailure {
 
         const record = host.activeTask
         const error = record === undefined
@@ -949,7 +950,7 @@ export class WorkerGroup {
         releaseTaskInputs(record)
     }
 
-    #settleError(record: TaskRecord, error: WorkerDiagnosticError): void {
+    #settleError(record: TaskRecord, error: WorkerFailure): void {
 
         if (isTerminal(record.state)) return
         const code = error.diagnostic.code
@@ -990,7 +991,7 @@ export class WorkerGroup {
         return await this.#system.createHost(this)
     }
 
-    #terminateHost(host: WorkerHost, activeError?: WorkerDiagnosticError): void {
+    #terminateHost(host: WorkerHost, activeError?: WorkerFailure): void {
 
         if (!this.#hosts.has(host.id)) return
         this.#clearIdle(host)
@@ -1264,7 +1265,7 @@ export class WorkerSystem {
         try {
             await host.ready
         } catch (error) {
-            if (error instanceof WorkerDiagnosticError) throw error
+            if (isScratchDiagnosticError(error) && error.diagnostic.domain === 'worker') throw error
             const remote = error instanceof HostControlError
                 ? error.remote
                 : { name: 'Error', message: error instanceof Error ? error.message : String(error) }
@@ -1752,7 +1753,7 @@ function taskCancellationError(
     record: TaskRecord,
     kind: 'queued' | 'cooperative',
     reason?: unknown
-): WorkerDiagnosticError {
+): WorkerFailure {
 
     return workerDiagnosticError({
         code: 'WORKER_TASK_CANCELLED',
@@ -1771,7 +1772,7 @@ function taskCancellationError(
     })
 }
 
-function taskStaleError(record: TaskRecord): WorkerDiagnosticError {
+function taskStaleError(record: TaskRecord): WorkerFailure {
 
     const latestGeneration = record.staleKey === undefined
         ? undefined
@@ -1803,7 +1804,7 @@ function taskTerminationError(
     kind: 'hard',
     reason?: unknown,
     remote?: WorkerRemoteError
-): WorkerDiagnosticError {
+): WorkerFailure {
 
     return workerDiagnosticError({
         code: 'WORKER_TERMINATED',
@@ -1824,7 +1825,7 @@ function taskTerminationError(
     }, remote)
 }
 
-function groupDisposedError(groupId: string, record?: TaskRecord): WorkerDiagnosticError {
+function groupDisposedError(groupId: string, record?: TaskRecord): WorkerFailure {
 
     return workerDiagnosticError({
         code: 'WORKER_GROUP_DISPOSED',
@@ -1848,7 +1849,7 @@ function contextLostError(
     workerId: string,
     moduleId: string,
     contextId: string
-): WorkerDiagnosticError {
+): WorkerFailure {
 
     return workerDiagnosticError({
         code: 'WORKER_CONTEXT_LOST',
@@ -1868,7 +1869,7 @@ function unexpectedControlResponse(
     workerId: string,
     expectedKind: string,
     actualKind: string
-): WorkerDiagnosticError {
+): WorkerFailure {
 
     return workerDiagnosticError({
         code: 'WORKER_TRANSFER_INVALID',
@@ -1891,7 +1892,7 @@ function remoteDiagnosticError(input: Readonly<{
     phase: 'worker-task' | 'worker-context'
     subject: Readonly<{ kind: 'WorkerTask' | 'WorkerContext', id: string }>
     record?: TaskRecord
-}>): WorkerDiagnosticError {
+}>): WorkerFailure {
 
     const code = WORKER_CODES.has(input.remote.code ?? '')
         ? input.remote.code as WorkerDiagnosticCode
@@ -1931,7 +1932,7 @@ function descriptorError(
     message: string,
     expected?: unknown,
     actual?: unknown
-): WorkerDiagnosticError {
+): WorkerFailure {
 
     return workerDiagnosticError({
         code: 'WORKER_DESCRIPTOR_INVALID',

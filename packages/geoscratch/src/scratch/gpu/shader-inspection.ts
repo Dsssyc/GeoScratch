@@ -1,5 +1,5 @@
 import { isBindLayout } from './binding.js'
-import { createScratchDiagnostic, createScratchDiagnosticReport, throwScratchDiagnostic } from './diagnostics.js'
+import { createGPUDiagnostic, createScratchDiagnosticReport, throwGPUDiagnostic } from './diagnostics.js'
 import { Program, isProgram } from './program.js'
 import { describeValue } from './type-utils.js'
 import type { BindLayout, BindLayoutEntry } from './binding.js'
@@ -307,7 +307,7 @@ function createInconclusiveDiagnostic(input: {
 
     const shaderSubject = shaderBindingSubject(input)
 
-    return createScratchDiagnostic({
+    return createGPUDiagnostic({
         code: 'SCRATCH_PROGRAM_SHADER_REFLECTION_INCONCLUSIVE',
         severity: 'warn',
         phase: 'program',
@@ -356,7 +356,7 @@ function collectBindLayoutEntries(bindLayouts: ReadonlyArray<BindLayout>): BindL
 
 function throwShaderInspectionInputInvalid(input: unknown): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SHADER_INSPECTION_INPUT_INVALID',
         severity: 'error',
         phase: 'program',
@@ -369,7 +369,7 @@ function throwShaderInspectionInputInvalid(input: unknown): never {
 
 function throwShaderInspectionBindLayoutInvalid(layout: unknown): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BIND_LAYOUT_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'binding',
@@ -387,7 +387,7 @@ function isComparableShaderBinding(binding: ShaderBinding): boolean {
 
 function createMissingBindLayoutEntryDiagnostic(binding: ShaderBinding, program: Program | undefined): ScratchDiagnostic {
 
-    return createScratchDiagnostic({
+    return createGPUDiagnostic({
         code: 'SCRATCH_BIND_SHADER_INDEX_MISMATCH',
         severity: 'warn',
         phase: 'binding',
@@ -409,7 +409,7 @@ function createMissingBindLayoutEntryDiagnostic(binding: ShaderBinding, program:
 
 function createExtraBindLayoutEntryDiagnostic(record: BindLayoutEntryRecord, program: Program | undefined): ScratchDiagnostic {
 
-    return createScratchDiagnostic({
+    return createGPUDiagnostic({
         code: 'SCRATCH_BIND_SHADER_INDEX_MISMATCH',
         severity: 'warn',
         phase: 'binding',
@@ -431,7 +431,7 @@ function createExtraBindLayoutEntryDiagnostic(record: BindLayoutEntryRecord, pro
 
 function createBindTypeMismatchDiagnostic(record: BindLayoutEntryRecord, binding: ShaderBinding, program: Program | undefined): ScratchDiagnostic {
 
-    return createScratchDiagnostic({
+    return createGPUDiagnostic({
         code: 'SCRATCH_BIND_SHADER_TYPE_MISMATCH',
         severity: 'warn',
         phase: 'binding',

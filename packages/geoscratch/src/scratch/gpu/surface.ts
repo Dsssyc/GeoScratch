@@ -1,5 +1,5 @@
 import { UUID } from '../../core/utils/uuid.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'
 import { getGlobalConstant } from './type-utils.js'
 import type { DiagnosticSubject } from './diagnostics.js'
@@ -277,7 +277,7 @@ export class Surface {
         }
 
         if (unconfigureCause !== undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SURFACE_UNCONFIGURE_FAILED',
                 severity: 'error',
                 phase: 'runtime',
@@ -367,7 +367,7 @@ export function assertPreparedSurfaceFactsCurrent(
         state.configurationVersion === facts.configurationVersion
     ) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SURFACE_CONFIGURATION_STALE',
         severity: 'error',
         phase: 'submission',
@@ -428,7 +428,7 @@ function assertSurfaceAliveOwner(surface: Surface): SurfaceState {
 
     const state = surfaceStates.get(surface)
     if (state?.isDisposed) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_DISPOSED',
             severity: 'error',
             phase: 'runtime',
@@ -459,7 +459,7 @@ function assertSurfaceConfigurationCandidateCurrent(
     assertScratchRuntimeActive(currentState.runtime)
     if (currentState === state && currentState.configurationVersion === configurationVersion) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SURFACE_CONFIGURATION_STALE',
         severity: 'error',
         phase: 'runtime',
@@ -490,7 +490,7 @@ function claimSurfaceContext(surface: Surface, state: SurfaceState): void {
 
     const ownerState = surfaceStates.get(owner)
     const ownerRuntime = ownerState?.runtime
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SURFACE_CONTEXT_IN_USE',
         severity: 'error',
         phase: 'runtime',
@@ -529,7 +529,7 @@ function throwSurfaceContextNotOwned(
     const ownerState = owner === undefined ? undefined : surfaceStates.get(owner)
     const runtime = claimedState?.runtime
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SURFACE_CONTEXT_NOT_OWNED',
         severity: 'error',
         phase: 'runtime',
@@ -583,7 +583,7 @@ function assertSurfaceConfigurationCurrent(surface: Surface, state: SurfaceState
     try {
         observed = captureCurrentSurfaceConfiguration(state.context)
     } catch (cause) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_CONFIGURATION_STALE',
             severity: 'error',
             phase: 'runtime',
@@ -606,7 +606,7 @@ function assertSurfaceConfigurationCurrent(surface: Surface, state: SurfaceState
         canvasSize.height === state.size.height
     ) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SURFACE_CONFIGURATION_STALE',
         severity: 'error',
         phase: 'runtime',
@@ -823,7 +823,7 @@ function throwSurfaceConfigurationInputInvalid<Value>(
     expected: Readonly<Record<string, unknown>>
 ): Value {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SURFACE_CONFIGURATION_FAILED',
         severity: 'error',
         phase: 'runtime',
@@ -965,7 +965,7 @@ function throwSurfaceConfigurationFailed(
     actual: Readonly<Record<string, unknown>>
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SURFACE_CONFIGURATION_FAILED',
         severity: 'error',
         phase: 'runtime',
@@ -1016,7 +1016,7 @@ function freezeSurfaceConfiguration(
 function createCanvasContext(subject: DiagnosticSubject, canvas: ScratchCanvas): GPUCanvasContext {
 
     if (!canvas || typeof canvas.getContext !== 'function') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_CONTEXT_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',
@@ -1035,7 +1035,7 @@ function createCanvasContext(subject: DiagnosticSubject, canvas: ScratchCanvas):
         typeof context.getConfiguration !== 'function' ||
         typeof context.getCurrentTexture !== 'function'
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SURFACE_CONTEXT_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',

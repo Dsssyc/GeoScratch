@@ -10,6 +10,7 @@ describe('scratch diagnostics', () => {
     it('creates machine-readable diagnostics with stable fields', () => {
 
         const diagnostic = createScratchDiagnostic({
+            domain: 'gpu',
             code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
             severity: 'error',
             phase: 'resource',
@@ -25,6 +26,7 @@ describe('scratch diagnostics', () => {
 
         expect(diagnostic).to.deep.equal({
             version: 1,
+            domain: 'gpu',
             code: 'SCRATCH_RESOURCE_WRONG_RUNTIME',
             severity: 'error',
             phase: 'resource',
@@ -42,6 +44,7 @@ describe('scratch diagnostics', () => {
     it('builds deterministic diagnostic reports and errors', () => {
 
         const warning = createScratchDiagnostic({
+            domain: 'gpu',
             code: 'SCRATCH_PROGRAM_SHADER_REFLECTION_INCONCLUSIVE',
             severity: 'warn',
             phase: 'program',
@@ -49,6 +52,7 @@ describe('scratch diagnostics', () => {
             message: 'Shader reflection could not verify the explicit layout.',
         })
         const errorDiagnostic = createScratchDiagnostic({
+            domain: 'gpu',
             code: 'SCRATCH_RUNTIME_DISPOSED',
             severity: 'error',
             phase: 'runtime',

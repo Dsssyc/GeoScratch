@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { diagnosticsControllerFor } from './runtime-diagnostics.js'
 import type {
@@ -371,7 +371,7 @@ function throwCompletedMappingFailure(
 
     const incident = completeMappingFailure(runtime, operation, failures, stage)
     const primary = failures[0]
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: primary.code,
         severity: 'error',
         phase: 'readback',

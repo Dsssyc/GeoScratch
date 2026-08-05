@@ -1,14 +1,9 @@
-export {
-    WorkerDiagnosticError,
-    createWorkerDiagnostic,
-} from './diagnostics.js'
 export type {
     WorkerCancellationKind,
     WorkerDiagnostic,
     WorkerDiagnosticCode,
     WorkerDiagnosticInput,
     WorkerDiagnosticPhase,
-    WorkerDiagnosticSeverity,
     WorkerDiagnosticSubject,
 } from './diagnostics.js'
 export {

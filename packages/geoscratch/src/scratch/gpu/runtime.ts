@@ -26,7 +26,7 @@ import {
     UploadCommand,
 } from './command.js'
 import { createDebugCommand as createScratchDebugCommand } from './debug-command.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import {
     findMissingScratchFeatureDependency,
     normalizeScratchRequiredFeatures,
@@ -207,7 +207,7 @@ export class ScratchRuntime {
     private constructor(token: symbol, options: ScratchRuntimeConstructorOptions) {
 
         if (token !== runtimeToken) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_CONSTRUCTOR_PRIVATE',
                 severity: 'error',
                 phase: 'runtime',
@@ -296,7 +296,7 @@ export class ScratchRuntime {
         const gpu = options.gpu ?? globalThis.navigator?.gpu
 
         if (!gpu || typeof gpu.requestAdapter !== 'function') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
@@ -311,7 +311,7 @@ export class ScratchRuntime {
         const adapter = await gpu.requestAdapter(request.adapterDescriptor)
 
         if (!adapter || typeof adapter.requestDevice !== 'function') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
@@ -326,7 +326,7 @@ export class ScratchRuntime {
         const device = await adapter.requestDevice(request.deviceDescriptor)
 
         if (!device) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
@@ -893,7 +893,7 @@ function snapshotRuntimeRequest(options: ScratchRuntimeCreateOptions): RuntimeRe
             normalizedFeatures
         )
         if (missingDependency !== undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_REQUEST_INVALID',
                 severity: 'error',
                 phase: 'runtime',
@@ -1023,7 +1023,7 @@ function throwRuntimeRequestInvalid(
     expected: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RUNTIME_REQUEST_INVALID',
         severity: 'error',
         phase: 'runtime',

@@ -1,5 +1,5 @@
 import { UUID } from '../../core/utils/uuid.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import {
     findMissingScratchFeatureDependency,
     normalizeScratchRequiredFeatures,
@@ -231,7 +231,7 @@ export function assertProgramPipelineAuthority(stamp: ProgramPipelineAuthoritySt
     const state = programStateFor(stamp.program)
     assertProgramNotDisposed(stamp.program, state)
     if (state.lifecycleEpoch !== stamp.lifecycleEpoch) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PROGRAM_LIFECYCLE_CHANGED',
             severity: 'error',
             phase: 'program',
@@ -350,7 +350,7 @@ function normalizeProgramDescriptor(
     const fragment = normalizeProgramStage(runtime, subject, 'fragment', descriptor.fragment)
     const compute = normalizeProgramStage(runtime, subject, 'compute', descriptor.compute)
     if (vertex === undefined && fragment === undefined && compute === undefined) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PROGRAM_STAGE_MISSING',
             severity: 'error',
             phase: 'program',
@@ -432,7 +432,7 @@ function normalizeProgramStage(
 
     if (value === undefined) return undefined
     if (!isRecord(value) || !isShaderModule(value.module)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PROGRAM_STAGE_INVALID',
             severity: 'error',
             phase: 'program',
@@ -455,7 +455,7 @@ function normalizeProgramStage(
             value.entryPoint.length === 0
         )
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PROGRAM_ENTRY_POINT_INVALID',
             severity: 'error',
             phase: 'program',
@@ -855,7 +855,7 @@ function validateRequiredFeatures(
 
     for (const feature of requiredFeatures) {
         if (runtime.deviceFeatures?.has?.(feature)) continue
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PROGRAM_FEATURE_UNAVAILABLE',
             severity: 'error',
             phase: 'program',
@@ -874,7 +874,7 @@ function validateRequiredFeatureDependencies(
 
     const missingDependency = findMissingScratchFeatureDependency(requiredFeatures)
     if (missingDependency === undefined) return
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PROGRAM_FEATURE_DEPENDENCY_MISSING',
         severity: 'error',
         phase: 'program',
@@ -900,7 +900,7 @@ function validateRequiredLimits(
         if (required === undefined) continue
         const available = limits[name]
         if (typeof available !== 'number') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PROGRAM_LIMIT_UNAVAILABLE',
                 severity: 'error',
                 phase: 'program',
@@ -914,7 +914,7 @@ function validateRequiredLimits(
             ? available <= required
             : available >= required
         if (satisfied) continue
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PROGRAM_LIMIT_UNAVAILABLE',
             severity: 'error',
             phase: 'program',
@@ -940,7 +940,7 @@ function validateRequiredLanguageFeatures(
 
     for (const languageFeature of features) {
         if (runtime.wgslLanguageFeatures.includes(languageFeature)) continue
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PROGRAM_LANGUAGE_FEATURE_UNAVAILABLE',
             severity: 'error',
             phase: 'program',
@@ -972,7 +972,7 @@ function assertProgramRuntimeAuthority(program: Program, runtime: ScratchRuntime
     const state = programStateFor(program)
     assertProgramUsableAuthority(program)
     if (runtime === state.runtime) return
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PROGRAM_WRONG_RUNTIME',
         severity: 'error',
         phase: 'program',
@@ -990,7 +990,7 @@ function assertProgramRuntimeAuthority(program: Program, runtime: ScratchRuntime
 function assertProgramNotDisposed(program: Program, state: ProgramState): void {
 
     if (!state.isDisposed) return
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PROGRAM_DISPOSED',
         severity: 'error',
         phase: 'program',
@@ -1050,7 +1050,7 @@ function throwProgramDescriptorInvalid(
     reason?: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PROGRAM_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'program',
@@ -1071,7 +1071,7 @@ function throwLayoutRequirementDiagnostic(
     details: { expected: unknown, actual: unknown }
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH',
         severity: 'error',
         phase: 'program',

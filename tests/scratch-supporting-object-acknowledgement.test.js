@@ -636,10 +636,10 @@ describe('Scratch acknowledged supporting objects', () => {
                 )
                 const error = await rejectedDiagnostic(testCase.create(fixture.runtime))
                 expect(error.diagnostic.code).to.equal(testCase.codes[filter])
-                expect(error.incident.nativeErrorCategory).to.equal(filter)
-                expect(error.incident.failureStage).to.equal('scope-settlement')
-                expect(error.incident.outcomes).to.have.length(1)
-                expect(error.incident.outcomes[0]).to.include({
+                expect(error.context.incident.nativeErrorCategory).to.equal(filter)
+                expect(error.context.incident.failureStage).to.equal('scope-settlement')
+                expect(error.context.incident.outcomes).to.have.length(1)
+                expect(error.context.incident.outcomes[0]).to.include({
                     stage: 'scope-settlement',
                     diagnosticCode: testCase.codes[filter],
                     nativeErrorCategory: filter,
@@ -653,8 +653,8 @@ describe('Scratch acknowledged supporting objects', () => {
             const thrown = await rejectedDiagnostic(testCase.create(thrownFixture.runtime))
             expect(thrown.diagnostic.code).to.equal(testCase.codes.throw)
             expect(thrown.cause).to.equal(nativeCause)
-            expect(thrown.incident.failureStage).to.equal('native-issue')
-            expect(thrown.incident.outcomes[0]).to.include({
+            expect(thrown.context.incident.failureStage).to.equal('native-issue')
+            expect(thrown.context.incident.outcomes[0]).to.include({
                 stage: 'native-issue',
                 diagnosticCode: testCase.codes.throw,
                 nativeErrorCategory: 'native-exception',
@@ -667,7 +667,7 @@ describe('Scratch acknowledged supporting objects', () => {
             scopeFixture.errors.settlePop(2)
             const scopeError = await rejectedDiagnostic(scopeFailure)
             expect(scopeError.diagnostic.code).to.equal('SCRATCH_GPU_ERROR_SCOPE_FAILED')
-            expect(scopeError.incident.nativeErrorCategory).to.equal('scope-failure')
+            expect(scopeError.context.incident.nativeErrorCategory).to.equal('scope-failure')
             expect(scopeFixture.errors.scopeDepth).to.equal(0)
         })
     }
@@ -680,14 +680,14 @@ describe('Scratch acknowledged supporting objects', () => {
         settleAllPops(disposedFixture)
         const disposedError = await rejectedDiagnostic(disposedCreation)
         expect(disposedError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DISPOSED')
-        expect(disposedError.incident).to.deep.include({
+        expect(disposedError.context.incident).to.deep.include({
             kind: 'supporting-object-failure',
             diagnosticCode: 'SCRATCH_RUNTIME_DISPOSED',
             nativeErrorCategory: 'none',
             failureStage: 'lifecycle-recheck',
         })
-        expect(disposedError.incident.triggerOperation.status).to.equal('cancelled')
-        expect(disposedError.diagnostic.actual.failures).to.deep.equal(disposedError.incident.outcomes)
+        expect(disposedError.context.incident.triggerOperation.status).to.equal('cancelled')
+        expect(disposedError.diagnostic.actual.failures).to.deep.equal(disposedError.context.incident.outcomes)
         expect(causalOutcomeFacts(disposedError)).to.deep.equal([
             {
                 stage: 'lifecycle-recheck',
@@ -710,7 +710,7 @@ describe('Scratch acknowledged supporting objects', () => {
         settleAllPops(lostFixture)
         const lostError = await rejectedDiagnostic(lostCreation)
         expect(lostError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
-        expect(lostError.incident).to.deep.include({
+        expect(lostError.context.incident).to.deep.include({
             kind: 'supporting-object-failure',
             diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
             nativeErrorCategory: 'device-lost',
@@ -719,13 +719,13 @@ describe('Scratch acknowledged supporting objects', () => {
             operationId: lostPendingOperation.id,
             failureStage: 'lifecycle-recheck',
         })
-        expect(lostError.incident.triggerOperation).to.deep.include({
+        expect(lostError.context.incident.triggerOperation).to.deep.include({
             id: lostPendingOperation.id,
             status: 'cancelled',
             target: lostPendingOperation.target,
             nativeErrorCategory: 'device-lost',
         })
-        expect(lostError.diagnostic.actual.failures).to.deep.equal(lostError.incident.outcomes)
+        expect(lostError.diagnostic.actual.failures).to.deep.equal(lostError.context.incident.outcomes)
         expect(causalOutcomeFacts(lostError)).to.deep.equal([ {
             stage: 'lifecycle-recheck',
             diagnosticCode: 'SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION',
@@ -734,13 +734,13 @@ describe('Scratch acknowledged supporting objects', () => {
         const lostIncidents = lostFixture.runtime.diagnostics.incidents()
         const deviceLossIncident = lostIncidents.find(incident => incident.kind === 'device-loss')
         expect(deviceLossIncident).not.to.equal(undefined)
-        expect(deviceLossIncident.id).not.to.equal(lostError.incident.id)
+        expect(deviceLossIncident.id).not.to.equal(lostError.context.incident.id)
         expect(lostError.diagnostic.related).to.deep.include(deviceLossIncident.subject)
-        expect(lostError.diagnostic.related).to.deep.include(lostError.incident.subject)
+        expect(lostError.diagnostic.related).to.deep.include(lostError.context.incident.subject)
         expect(lostIncidents.filter(incident => incident.kind === 'supporting-object-failure'))
-            .to.deep.equal([ lostError.incident ])
+            .to.deep.equal([ lostError.context.incident ])
         expect(lostFixture.runtime.diagnostics.operation(lostPendingOperation.id).incidentId)
-            .to.equal(lostError.incident.id)
+            .to.equal(lostError.context.incident.id)
         expect(lostFixture.runtime._resources.size).to.equal(0)
 
         const recheckFixture = await createFixture({ deferErrorScopePops: true })
@@ -773,7 +773,7 @@ describe('Scratch acknowledged supporting objects', () => {
         const nativeError = await rejectedDiagnostic(nativeCreation)
         expect(nativeError.diagnostic.code).to.equal('SCRATCH_SAMPLER_ALLOCATION_NATIVE_FAILED')
         expect(nativeError.cause).to.equal(nativeCause)
-        expect(nativeError.incident.failureStage).to.equal('native-issue')
+        expect(nativeError.context.incident.failureStage).to.equal('native-issue')
         expect(causalOutcomeFacts(nativeError)).to.deep.equal([
             {
                 stage: 'native-issue',
@@ -824,7 +824,7 @@ function settleAllPops(fixture) {
 
 function causalOutcomeFacts(error) {
 
-    return error.incident.outcomes.map(({ stage, diagnosticCode, nativeErrorCategory }) => ({
+    return error.context.incident.outcomes.map(({ stage, diagnosticCode, nativeErrorCategory }) => ({
         stage,
         diagnosticCode,
         nativeErrorCategory,

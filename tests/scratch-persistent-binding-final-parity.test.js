@@ -299,17 +299,17 @@ describe('Scratch persistent binding final parity', () => {
             ordinaryExampleCount: 17,
             legacyExampleCount: 0,
         })
-        expect(result.publicSurface.missingBaselineValues).to.deep.equal([])
-        expect(result.publicSurface.missingHistoricalValues).to.deep.equal([])
+        expect(result.publicSurface.missingBaselineValues).to.deep.equal([ 'throwScratchDiagnostic' ])
+        expect(result.publicSurface.missingHistoricalValues).to.deep.equal([ 'throwScratchDiagnostic' ])
         expect(result.publicSurface.historicalTypeInventory).to.have.length(18)
         expect(result.publicSurface.historicalTypeInventory.every(entry => entry.status === 'passed')).to.equal(true)
         expect(result.publicSurface.publicMemberParity).to.deep.include({
             goalStartCount: 357,
-            finalCount: 490,
+            finalCount: 514,
             status: 'passed',
         })
-        expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(22)
-        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(18)
+        expect(result.publicSurface.publicMemberParity.missingGoalStart).to.have.length(23)
+        expect(result.publicSurface.publicMemberParity.changedGoalStart).to.have.length(21)
         expect(result.publicSurface.programReadonlyPublicContracts.map(
             contract => contract.id
         )).to.deep.equal([ 'Program.runtime', 'Program.id', 'Program.isDisposed' ])
@@ -323,11 +323,11 @@ describe('Scratch persistent binding final parity', () => {
         expect(result.publicSurface.programPipelineFactSnapshot.mutablePlannerReads).to.deep.equal([])
         expect(result.publicSurface.productionEmitParity).to.deep.include({
             status: 'passed',
-            emittedJavaScriptCount: 126,
-            emittedDeclarationCount: 126,
-            declarationSignatureCount: 5754,
+            emittedJavaScriptCount: 128,
+            emittedDeclarationCount: 128,
+            declarationSignatureCount: 5788,
         })
-        expect(result.publicSurface.productionEmitParity.files).to.have.length(252)
+        expect(result.publicSurface.productionEmitParity.files).to.have.length(256)
         expect(result.publicSurface.productionEmitParity.files.every(entry => entry.exactMatch)).to.equal(true)
         expect(result.diagnostics).to.deep.include({ schemaVersion: 5 })
         expect(result.diagnostics.unexpectedMissing).to.deep.equal([])

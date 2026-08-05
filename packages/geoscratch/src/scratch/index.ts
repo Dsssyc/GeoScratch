@@ -2,14 +2,22 @@ export {
     ScratchDiagnosticError,
     createScratchDiagnostic,
     createScratchDiagnosticReport,
-    throwScratchDiagnostic,
-} from './gpu/diagnostics.js'
+    isScratchDiagnosticError,
+} from './diagnostics/index.js'
 export type {
-    DiagnosticSubject,
     ScratchDiagnostic,
+    ScratchDiagnosticBase,
+    ScratchDiagnosticDomain,
+    ScratchDiagnosticErrorContext,
+    ScratchDiagnosticErrorOptions,
+    ScratchDiagnosticEvidence,
     ScratchDiagnosticInput,
     ScratchDiagnosticReport,
-} from './gpu/diagnostics.js'
+    ScratchDiagnosticSeverity,
+    ScratchDiagnosticSubject,
+    ScratchDiagnosticSuggestion,
+} from './diagnostics/index.js'
+export type { DiagnosticSubject } from './gpu/diagnostics.js'
 export type {
     GpuAttributionConfidence,
     GpuDescriptorEvidence,

@@ -34,10 +34,10 @@ import {
 } from './debug-command.js'
 import {
     ScratchDiagnosticError,
-    createScratchDiagnostic,
+    createGPUDiagnostic,
     createScratchDiagnosticReport,
     isScratchDiagnosticError,
-    throwScratchDiagnostic,
+    throwGPUDiagnostic,
 } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import {
@@ -89,7 +89,7 @@ import { TextureResource, createNativeTextureView, isTextureResource, isTextureV
 import { diagnosticSubjectOf, isDefined, isRecord } from './type-utils.js'
 import type { BeginOcclusionQueryCommand, ClearBufferCommand, CommandResourceReadDescriptor, CommandResourceReadEpoch, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, QuerySetSlotReadDescriptor, ReadbackCommand, ReadbackCommandClaim, ResolveQuerySetCommand, ResolvedCommandImmediateData, ResourceReadinessPolicy, TextureUploadCommand, UploadCommand } from './command.js'
 import type { DebugCommand } from './debug-command.js'
-import type { DiagnosticSubject, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
+import type { DiagnosticSubject, GPUDiagnostic, ScratchDiagnostic, ScratchDiagnosticReport } from './diagnostics.js'
 import type { ComputePassSpec, RenderPassNativeAttachments, RenderPassSpec } from './pass.js'
 import type { QuerySetResource, QuerySetSlotState } from './query-set.js'
 import type {
@@ -672,7 +672,7 @@ export class SubmissionBuilder {
         assertScratchRuntimeActive(this.runtime)
 
         if (this.isSubmitted) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SUBMISSION_WORK_ALREADY_SUBMITTED',
                 severity: 'error',
                 phase: 'submission',
@@ -2196,7 +2196,7 @@ function validateDebugStep(builder: SubmissionBuilder, step: DebugStep): void {
 
     const command: unknown = step.command
     if (!isDebugCommand(command)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
             phase: 'submission',
@@ -2218,7 +2218,7 @@ function validateUploadStep(builder: SubmissionBuilder, step: UploadStep) {
     const command = step.command
 
     if (!isUploadCommand(command)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
             phase: 'submission',
@@ -2237,7 +2237,7 @@ function validateClearStep(builder: SubmissionBuilder, step: ClearStep): void {
     const command = step.command
 
     if (!isClearBufferCommand(command)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
             phase: 'submission',
@@ -2261,7 +2261,7 @@ function validateCopyStep(builder: SubmissionBuilder, step: CopyStep) {
     const command = step.command
 
     if (!isCopyCommand(command)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
             phase: 'submission',
@@ -2302,7 +2302,7 @@ function validateReadbackStep(builder: SubmissionBuilder, step: ReadbackStep) {
     const command = step.command
 
     if (!isReadbackCommand(command)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
             phase: 'submission',
@@ -2343,7 +2343,7 @@ function validateReadbackUniqueness(
         return
     }
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_READBACK_COMMAND_DUPLICATE_IN_SUBMISSION',
         severity: 'error',
         phase: 'submission',
@@ -2365,7 +2365,7 @@ function validateResolveStep(builder: SubmissionBuilder, step: ResolveStep) {
     const command = step.command
 
     if (!isResolveQuerySetCommand(command)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
             phase: 'submission',
@@ -2695,7 +2695,7 @@ function throwUnreadableAttachmentDiagnostic(
         )
     }
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
         severity: 'error',
         phase: 'submission',
@@ -3114,7 +3114,8 @@ function validateFallbackCommandForPass(
     try {
         fallback.assertRuntime(builder.runtime)
     } catch (error) {
-        if (isScratchDiagnosticError(error)) {
+        if (isScratchDiagnosticError(error) && error.diagnostic.domain === 'gpu') {
+            const diagnostic = error.diagnostic as GPUDiagnostic
             throwFallbackResolutionDiagnostic(
                 builder,
                 stepIndex,
@@ -3123,8 +3124,8 @@ function validateFallbackCommandForPass(
                 attemptedCommands,
                 attempts,
                 fallback,
-                error.diagnostic.code,
-                error.diagnostic
+                diagnostic.code,
+                diagnostic
             )
         }
         throw error
@@ -3183,7 +3184,7 @@ function throwFallbackPassIncompatibleDiagnostic(
 
     const fallbackRecord = isRecord(fallback) ? fallback : {}
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
         severity: 'error',
         phase: 'submission',
@@ -3227,7 +3228,7 @@ function throwFallbackResolutionDiagnostic(
     cause?: ScratchDiagnostic
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_FALLBACK_INVALID',
         severity: 'error',
         phase: 'submission',
@@ -3436,7 +3437,7 @@ function throwQuerySlotNotReadyDiagnostic(
 
     const querySet = command.source.querySet
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_QUERY_RESOLVE_UNWRITTEN_RANGE',
         severity: 'error',
         phase: 'query',
@@ -3477,7 +3478,7 @@ function throwQuerySlotIndeterminateDiagnostic(
 ): never {
 
     const querySet = command.source.querySet
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_QUERY_SLOT_CONTENT_INDETERMINATE',
         severity: 'error',
         phase: 'query',
@@ -3520,7 +3521,7 @@ function createQuerySlotEpochDiagnostic(
     const querySet = command.source.querySet
     const isFutureRead = code === 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE'
 
-    return createScratchDiagnostic({
+    return createGPUDiagnostic({
         code,
         severity: 'error',
         phase: 'submission',
@@ -3567,7 +3568,7 @@ function throwCommandResourceNotReadyDiagnostic(
 
     const resource = readRequirement.resource
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_RESOURCE_NOT_READY',
         severity: 'error',
         phase: 'command',
@@ -3619,7 +3620,7 @@ function throwIndeterminateResourceReadDiagnostic(
 ): never {
 
     const resource = readRequirement.resource
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_RESOURCE_CONTENT_INDETERMINATE',
         severity: 'error',
         phase: 'command',
@@ -3664,7 +3665,7 @@ function throwIndeterminateAttachmentLoadDiagnostic(
     attachmentRole: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PASS_ATTACHMENT_CONTENT_INDETERMINATE',
         severity: 'error',
         phase: 'submission',
@@ -3706,7 +3707,7 @@ function createCommandReadEpochDiagnostic(
     const resource = readRequirement.resource
     const isFutureRead = code === 'SCRATCH_SUBMISSION_READ_BEFORE_WRITE'
 
-    return createScratchDiagnostic({
+    return createGPUDiagnostic({
         code,
         severity: 'error',
         phase: 'submission',
@@ -3770,7 +3771,7 @@ export class SubmittedWork {
     ) {
 
         if (token !== submittedWorkToken || new.target !== SubmittedWork) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SUBMITTED_WORK_CONSTRUCTOR_PRIVATE',
                 severity: 'error',
                 phase: 'submission',
@@ -4208,7 +4209,7 @@ function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
     const passSpec: unknown = step.passSpec
 
     if (!isRenderPassSpec(passSpec) && !isComputePassSpec(passSpec)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
             phase: 'submission',
@@ -4222,7 +4223,7 @@ function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
     passSpec.assertRuntime(builder.runtime)
 
     if (!isRenderPassSpec(passSpec)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
             severity: 'error',
             phase: 'command',
@@ -4242,7 +4243,7 @@ function validateRenderStep(builder: SubmissionBuilder, step: RenderStep) {
             !isExecuteRenderBundlesCommand(command) &&
             !isDebugCommand(command)
         ) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'submission',
@@ -4272,7 +4273,7 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
     const passSpec: unknown = step.passSpec
 
     if (!isRenderPassSpec(passSpec) && !isComputePassSpec(passSpec)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
             severity: 'error',
             phase: 'submission',
@@ -4286,7 +4287,7 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
     passSpec.assertRuntime(builder.runtime)
 
     if (!isComputePassSpec(passSpec)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
             severity: 'error',
             phase: 'command',
@@ -4308,7 +4309,7 @@ function validateComputeStep(builder: SubmissionBuilder, step: ComputeStep) {
                     command.validateForPass(passSpec as unknown as RenderPassSpec)
                 }
             }
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SUBMISSION_PASS_COMMAND_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'submission',
@@ -4439,7 +4440,7 @@ function collectRenderCommandResourceConflictDiagnostics(
             ? readinessAttemptCommandSubjects(requestedCommand, outcome.attempts)
             : [ command.subject ]
 
-        diagnostics.push(createScratchDiagnostic({
+        diagnostics.push(createGPUDiagnostic({
             code: 'SCRATCH_SUBMISSION_RESOURCE_ACCESS_CONFLICT',
             severity: 'error',
             phase: 'submission',
@@ -4734,7 +4735,7 @@ function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec)
     const pipelineColorFormats = withoutTrailingNulls(pipelineLayout.colorFormats)
     const passColorFormats = withoutTrailingNulls(passLayout.colorFormats)
     if (pipelineColorFormats.length !== passColorFormats.length) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -4760,7 +4761,7 @@ function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec)
         const actual = pipelineColorFormats[index]
 
         if (expected !== actual) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_TARGET_FORMAT_MISMATCH',
                 severity: 'error',
                 phase: 'pipeline',
@@ -4779,7 +4780,7 @@ function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec)
     validatePipelineDepthStencil(command, passSpec)
 
     if (pipelineLayout.depthStencilFormat !== passLayout.depthStencilFormat) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -4796,7 +4797,7 @@ function validatePipelineTargets(command: DrawCommand, passSpec: RenderPassSpec)
     }
 
     if (pipelineLayout.sampleCount !== passLayout.sampleCount) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_SAMPLE_COUNT_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -4853,7 +4854,7 @@ function validatePipelineDepthStencil(command: DrawCommand, passSpec: RenderPass
     const passFormat = passSpec.depth?.target.descriptor.format
 
     if (passFormat === undefined) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -4872,7 +4873,7 @@ function validatePipelineDepthStencil(command: DrawCommand, passSpec: RenderPass
     }
 
     if (pipelineFormat !== passFormat) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -4896,7 +4897,7 @@ function validatePipelineDepthStencil(command: DrawCommand, passSpec: RenderPass
         (passDepth.depthReadOnly === true && writesDepth) ||
         (passDepth.stencilReadOnly === true && writesStencil)
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_DEPTH_STENCIL_MISMATCH',
             severity: 'error',
             phase: 'pipeline',
@@ -4987,7 +4988,7 @@ function throwOcclusionQueryStateDiagnostic(
     const commandRecord = isRecord(command) ? command : {}
     const querySet = commandRecord.querySet
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SUBMISSION_OCCLUSION_QUERY_STATE_INVALID',
         severity: 'error',
         phase: 'submission',
@@ -5342,7 +5343,7 @@ function createSubmittedWorkDone(
         )
         if (primary === undefined) return
 
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: primary.diagnosticCode,
             severity: 'error',
             phase: 'submission',

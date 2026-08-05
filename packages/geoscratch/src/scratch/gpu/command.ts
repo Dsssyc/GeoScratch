@@ -7,7 +7,7 @@ import {
     preparedBindGroupFor,
     realizeAttemptBindGroup,
 } from './binding.js'
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import {
     describeLayoutCompatibilityDifference,
     isLayoutArtifact,
@@ -722,7 +722,7 @@ export class DrawCommand {
 
         const pipeline: unknown = descriptor.pipeline
         if (!isRenderPipeline(pipeline)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
                 severity: 'error',
                 phase: 'command',
@@ -796,7 +796,7 @@ export class DrawCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -815,7 +815,7 @@ export class DrawCommand {
     assertUsable() {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -860,7 +860,7 @@ export class DrawCommand {
         this.assertUsable()
 
         if (passSpec.passKind !== 'render') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
                 severity: 'error',
                 phase: 'command',
@@ -1064,7 +1064,7 @@ export class BeginOcclusionQueryCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -1083,7 +1083,7 @@ export class BeginOcclusionQueryCommand {
     assertUsable() {
 
         if (this.#isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -1101,7 +1101,7 @@ export class BeginOcclusionQueryCommand {
         this.assertUsable()
 
         if (passSpec.passKind !== 'render') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
                 severity: 'error',
                 phase: 'command',
@@ -1122,7 +1122,7 @@ export class BeginOcclusionQueryCommand {
         this.assertUsable()
 
         if (!passEncoder || typeof passEncoder.beginOcclusionQuery !== 'function') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
@@ -1190,7 +1190,7 @@ export class EndOcclusionQueryCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -1209,7 +1209,7 @@ export class EndOcclusionQueryCommand {
     assertUsable() {
 
         if (this.#isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -1226,7 +1226,7 @@ export class EndOcclusionQueryCommand {
         this.assertUsable()
 
         if (passSpec.passKind !== 'render') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
                 severity: 'error',
                 phase: 'command',
@@ -1246,7 +1246,7 @@ export class EndOcclusionQueryCommand {
         this.assertUsable()
 
         if (!passEncoder || typeof passEncoder.endOcclusionQuery !== 'function') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
@@ -1292,7 +1292,7 @@ export class DispatchCommand {
 
         const pipeline: unknown = descriptor.pipeline
         if (!isComputePipeline(pipeline)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
                 severity: 'error',
                 phase: 'command',
@@ -1359,7 +1359,7 @@ export class DispatchCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -1378,7 +1378,7 @@ export class DispatchCommand {
     assertUsable() {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -1414,7 +1414,7 @@ export class DispatchCommand {
         this.assertUsable()
 
         if (passSpec.passKind !== 'compute') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_PASS_KIND_MISMATCH',
                 severity: 'error',
                 phase: 'command',
@@ -1869,7 +1869,7 @@ function throwCommandImmediateDataDiagnostic(
     }
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_IMMEDIATE_DATA_INVALID',
         severity: 'error',
         phase: 'command',
@@ -2248,7 +2248,7 @@ function throwDrawRenderStateDiagnostic(
     actual: Record<string, unknown> = { renderState: describeValue(value) }
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_RENDER_STATE_INVALID',
         severity: 'error',
         phase: 'command',
@@ -2511,7 +2511,7 @@ export class UploadCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -2530,7 +2530,7 @@ export class UploadCommand {
     assertUsable() {
 
         if (this.#isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -2630,7 +2630,7 @@ export class ClearBufferCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -2649,7 +2649,7 @@ export class ClearBufferCommand {
     assertUsable(): void {
 
         if (this.#isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -2675,7 +2675,7 @@ export class ClearBufferCommand {
         if (!this.hasContentEffect) return
 
         if (!commandEncoder || typeof commandEncoder.clearBuffer !== 'function') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
@@ -2864,7 +2864,7 @@ export class CopyCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -2883,7 +2883,7 @@ export class CopyCommand {
     assertUsable() {
 
         if (this.#isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -2929,7 +2929,7 @@ export class CopyCommand {
             copyCommandRequiresAttemptAuthority(this) &&
             attemptTextureAuthority === undefined
         ) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_ATTEMPT_AUTHORITY_REQUIRED',
                 severity: 'error',
                 phase: 'command',
@@ -2942,7 +2942,7 @@ export class CopyCommand {
 
         if (this.copyKind === 'buffer-to-buffer') {
             if (!commandEncoder || typeof commandEncoder.copyBufferToBuffer !== 'function') {
-                throwScratchDiagnostic({
+                throwGPUDiagnostic({
                     code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                     severity: 'error',
                     phase: 'runtime',
@@ -2963,7 +2963,7 @@ export class CopyCommand {
             )
         } else if (this.copyKind === 'texture-to-texture') {
             if (!commandEncoder || typeof commandEncoder.copyTextureToTexture !== 'function') {
-                throwScratchDiagnostic({
+                throwGPUDiagnostic({
                     code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                     severity: 'error',
                     phase: 'runtime',
@@ -2995,7 +2995,7 @@ export class CopyCommand {
             )
         } else if (this.copyKind === 'buffer-to-texture') {
             if (!commandEncoder || typeof commandEncoder.copyBufferToTexture !== 'function') {
-                throwScratchDiagnostic({
+                throwGPUDiagnostic({
                     code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                     severity: 'error',
                     phase: 'runtime',
@@ -3026,7 +3026,7 @@ export class CopyCommand {
             )
         } else {
             if (!commandEncoder || typeof commandEncoder.copyTextureToBuffer !== 'function') {
-                throwScratchDiagnostic({
+                throwGPUDiagnostic({
                     code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                     severity: 'error',
                     phase: 'runtime',
@@ -3122,7 +3122,7 @@ export class ReadbackCommand {
     ) {
 
         if (token !== readbackCommandToken || new.target !== ReadbackCommand) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_COMMAND_CONSTRUCTOR_PRIVATE',
                 severity: 'error',
                 phase: 'readback',
@@ -3168,7 +3168,7 @@ export class ReadbackCommand {
 
         this.assertUsable()
         if (runtime === this.runtime) return
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
             severity: 'error',
             phase: 'command',
@@ -3193,7 +3193,7 @@ export class ReadbackCommand {
         assertScratchRuntimeActive(this.runtime)
         const after = options?.after
         if (!after || after.runtime !== this.runtime || typeof after.done?.then !== 'function') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_COMMAND_AFTER_INVALID',
                 severity: 'error',
                 phase: 'readback',
@@ -3207,7 +3207,7 @@ export class ReadbackCommand {
         }
         const operation = readbackCommandResults.get(this)?.get(after)
         if (operation === undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_COMMAND_RESULT_UNAVAILABLE',
                 severity: 'error',
                 phase: 'readback',
@@ -3244,7 +3244,7 @@ export class ReadbackCommand {
     private _assertNotDisposed(): void {
 
         if (!this.isDisposed) return
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_DISPOSED',
             severity: 'error',
             phase: 'command',
@@ -3310,7 +3310,7 @@ export function claimReadbackCommand(
     command.assertUsable()
     const commandState = readbackCommandStateFor(command)
     if (commandState.state !== 'idle' || commandState.activeClaim !== undefined) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_COMMAND_BUSY',
             severity: 'error',
             phase: 'submission',
@@ -3671,7 +3671,7 @@ function validateCurrentReadbackCommandSource(
         throwReadbackCommandSourceDiagnostic(runtime, subject, source, 'copyAlignment')
     }
     if ((region.buffer.usage & GPU_BUFFER_USAGE_COPY_SRC) === 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'command',
@@ -3691,7 +3691,7 @@ function throwReadbackCommandSourceDiagnostic(
     reason = 'source'
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_READBACK_SOURCE_INVALID',
         severity: 'error',
         phase: 'command',
@@ -3725,7 +3725,7 @@ function normalizeReadbackCommandRetention(
 
     if (retain === undefined) return 'consume-on-read'
     if (retain === 'consume-on-read' || retain === 'until-dispose') return retain
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_READBACK_RETAIN_INVALID',
         severity: 'error',
         phase: 'command',
@@ -3744,7 +3744,7 @@ function normalizeReadbackCommandReadinessPolicy(
 ): 'throw' {
 
     if (whenMissing === 'throw') return whenMissing
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
         severity: 'error',
         phase: 'command',
@@ -3871,7 +3871,7 @@ export class ResolveQuerySetCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -3890,7 +3890,7 @@ export class ResolveQuerySetCommand {
     assertUsable() {
 
         if (this.#isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -3912,7 +3912,7 @@ export class ResolveQuerySetCommand {
         assertCommandBufferGpuUseAvailable(this)
 
         if (!commandEncoder || typeof commandEncoder.resolveQuerySet !== 'function') {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                 severity: 'error',
                 phase: 'runtime',
@@ -3978,7 +3978,7 @@ export class TextureUploadCommand {
         target.assertRuntime(runtime)
 
         if ((target.usage & GPU_TEXTURE_USAGE_COPY_DST) === 0) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_RESOURCE_USAGE_MISSING',
                 severity: 'error',
                 phase: 'resource',
@@ -4051,7 +4051,7 @@ export class TextureUploadCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -4070,7 +4070,7 @@ export class TextureUploadCommand {
     assertUsable() {
 
         if (this.#isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -4188,7 +4188,7 @@ export class ExternalImageUploadCommand {
         this.assertUsable()
 
         if (runtime !== this.runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -4204,7 +4204,7 @@ export class ExternalImageUploadCommand {
     assertUsable(): void {
 
         if (this.isDisposed) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DISPOSED',
                 severity: 'error',
                 phase: 'command',
@@ -4242,7 +4242,7 @@ export function validateUploadCommandQueueAction(
         case 'buffer':
             validateBufferUploadUsage(command.runtime, command.target)
             if (!queue || typeof queue.writeBuffer !== 'function') {
-                throwScratchDiagnostic({
+                throwGPUDiagnostic({
                     code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                     severity: 'error',
                     phase: 'runtime',
@@ -4258,7 +4258,7 @@ export function validateUploadCommandQueueAction(
             return
         case 'texture':
             if (!queue || typeof queue.writeTexture !== 'function') {
-                throwScratchDiagnostic({
+                throwGPUDiagnostic({
                     code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
                     severity: 'error',
                     phase: 'runtime',
@@ -4334,7 +4334,7 @@ function validateUploadCommandQueueOwner(
 
     if (queue === command.runtime.queue) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
         severity: 'error',
         phase: 'command',
@@ -4417,7 +4417,7 @@ function normalizeOcclusionQueryIndex(runtime: ScratchRuntime, querySet: QuerySe
 
 function throwOcclusionQueryCommandDiagnostic({ runtime, querySet, index, reason }: OcclusionQueryCommandDiagnosticInput): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_OCCLUSION_QUERY_INVALID',
         severity: 'error',
         phase: 'command',
@@ -4463,7 +4463,7 @@ function rejectRemovedCommandDynamicOffsets(command: DynamicOffsetCommand, descr
 
     if (!isRecord(descriptor) || !Object.prototype.hasOwnProperty.call(descriptor, 'dynamicOffsets')) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
         severity: 'error',
         phase: 'binding',
@@ -4486,7 +4486,7 @@ function normalizeBindSetInvocations(
 ): CommandBindSetInvocation[] {
 
     if (!Array.isArray(bindSets)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
             severity: 'error',
             phase: 'pipeline',
@@ -4502,7 +4502,7 @@ function normalizeBindSetInvocations(
     const dynamicOffsetContracts = new Map<number, CommandDynamicOffsetContract>()
     const normalized = bindSets.map((invocation): CommandBindSetInvocation => {
         if (!isRecord(invocation) || !('set' in invocation)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'pipeline',
@@ -4518,7 +4518,7 @@ function normalizeBindSetInvocations(
 
         const bindSet = invocation.set
         if (!isBindSet(bindSet)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'pipeline',
@@ -4534,7 +4534,7 @@ function normalizeBindSetInvocations(
         const group = bindSet.layout.group
         const expectedLayout = command.pipeline.bindLayoutsByGroup.get(group)
         if (expectedLayout !== bindSet.layout) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'pipeline',
@@ -4551,7 +4551,7 @@ function normalizeBindSetInvocations(
         }
 
         if (groups.has(group)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_PIPELINE_BIND_LAYOUT_INCOMPATIBLE',
                 severity: 'error',
                 phase: 'pipeline',
@@ -4596,7 +4596,7 @@ function normalizeInvocationDynamicOffsets(
 
     const entries = dynamicBufferEntries(bindSet)
     if (supplied !== undefined && (!isRecord(supplied) || Array.isArray(supplied))) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
             severity: 'error',
             phase: 'binding',
@@ -4616,7 +4616,7 @@ function normalizeInvocationDynamicOffsets(
 
     if (missing.length > 0 || extra.length > 0) {
         const onlyMissing = missing.length > 0 && extra.length === 0
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: onlyMissing
                 ? 'SCRATCH_BIND_DYNAMIC_OFFSET_MISSING'
                 : 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
@@ -4681,7 +4681,7 @@ function validateDynamicOffsetValue(
         offset < 0 ||
         offset > GPU_SIZE_32_MAX
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
             severity: 'error',
             phase: 'binding',
@@ -4700,7 +4700,7 @@ function validateDynamicOffsetValue(
 
     const binding = bindSet.bindings.get(entry.name)
     if (binding === undefined || !isBufferRegion(binding.resource)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_INVALID',
             severity: 'error',
             phase: 'binding',
@@ -4717,7 +4717,7 @@ function validateDynamicOffsetValue(
     const effectiveEnd = effectiveOffset + region.size
     const alignment = dynamicOffsetAlignment(command, entry)
     if (effectiveOffset % alignment !== 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_UNALIGNED',
             severity: 'error',
             phase: 'binding',
@@ -4740,7 +4740,7 @@ function validateDynamicOffsetValue(
         !Number.isSafeInteger(effectiveEnd) ||
         effectiveEnd > region.buffer.size
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_BIND_DYNAMIC_OFFSET_OUT_OF_BOUNDS',
             severity: 'error',
             phase: 'binding',
@@ -4958,7 +4958,7 @@ function throwCommandProgramLayoutMismatch(
         details.actualLayout,
     ]
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_PROGRAM_ACCESSOR_LAYOUT_MISMATCH',
         severity: 'error',
         phase: 'program',
@@ -5107,7 +5107,7 @@ function normalizeDispatchCount(command: DispatchCommand, count: DispatchCount):
     const maxWorkgroupsPerDimension = command.runtime.deviceLimits.maxComputeWorkgroupsPerDimension
     for (const value of workgroups) {
         if (!isGpuSize32(value) || value > maxWorkgroupsPerDimension) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_COUNT_INVALID',
                 severity: 'error',
                 phase: 'command',
@@ -5129,7 +5129,7 @@ function normalizeDispatchCount(command: DispatchCommand, count: DispatchCount):
 function normalizeResourceAccess(command: DrawCommand | DispatchCommand, resources: CommandResourceAccessDescriptor) {
 
     if (!resources || typeof resources !== 'object' || !Array.isArray(resources.read) || !Array.isArray(resources.write)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
             severity: 'error',
             phase: 'command',
@@ -5197,7 +5197,7 @@ function validateBoundResourceAccess(command: DrawCommand | DispatchCommand): vo
             const missingWrite = access.write && !declaredWrites.has(resource)
             if (!missingRead && !missingWrite) continue
 
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
                 severity: 'error',
                 phase: 'command',
@@ -5259,7 +5259,7 @@ function assertDeclaredCommandRead(
 
     if (command.resources.read.some(read => read.resource === resource)) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
         severity: 'error',
         phase: 'command',
@@ -5323,7 +5323,7 @@ function normalizeResourceList(
 
     for (const resource of resources) {
         if (!isContentResource(resource)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
                 severity: 'error',
                 phase: 'command',
@@ -5368,7 +5368,7 @@ function throwResourceReadDescriptorDiagnostic(
     }
     if ('contentEpoch' in descriptorRecord) actual.contentEpoch = descriptorRecord.contentEpoch
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_DECLARED_ACCESS_INCOMPLETE',
         severity: 'error',
         phase: 'command',
@@ -5418,7 +5418,7 @@ function normalizeDrawCount(
         }
 
         if (!isGpuSize32(count.indexCount)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_COUNT_INVALID',
                 severity: 'error',
                 phase: 'command',
@@ -5432,7 +5432,7 @@ function normalizeDrawCount(
 
         for (const key of [ 'instanceCount', 'firstIndex', 'firstInstance' ] satisfies StaticIndexedDrawCountOptionalKey[]) {
             if (count[key] !== undefined && !isGpuSize32(count[key])) {
-                throwScratchDiagnostic({
+                throwGPUDiagnostic({
                     code: 'SCRATCH_COMMAND_COUNT_INVALID',
                     severity: 'error',
                     phase: 'command',
@@ -5446,7 +5446,7 @@ function normalizeDrawCount(
         }
 
         if (count.baseVertex !== undefined && !isGpuSignedOffset32(count.baseVertex)) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_COUNT_INVALID',
                 severity: 'error',
                 phase: 'command',
@@ -5474,7 +5474,7 @@ function normalizeDrawCount(
     if (!('vertexCount' in count)) throwCountDiagnostic(command, count)
 
     if (!isGpuSize32(count.vertexCount)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_COUNT_INVALID',
             severity: 'error',
             phase: 'command',
@@ -5488,7 +5488,7 @@ function normalizeDrawCount(
 
     for (const key of [ 'instanceCount', 'firstVertex', 'firstInstance' ] satisfies StaticDrawCountOptionalKey[]) {
         if (count[key] !== undefined && !isGpuSize32(count[key])) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_COUNT_INVALID',
                 severity: 'error',
                 phase: 'command',
@@ -5581,7 +5581,7 @@ function validateCurrentVertexBufferBinding(
     }
     if ((buffer.usage & GPU_BUFFER_USAGE_VERTEX) !== 0) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_USAGE_MISSING',
         severity: 'error',
         phase: 'resource',
@@ -5631,7 +5631,7 @@ function validateCurrentIndexBufferBinding(
     }
     if ((buffer.usage & GPU_BUFFER_USAGE_INDEX) !== 0) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_USAGE_MISSING',
         severity: 'error',
         phase: 'resource',
@@ -5706,7 +5706,7 @@ function validateCurrentIndirectCommandRegion(
     }
 
     if ((buffer.usage & GPU_BUFFER_USAGE_INDIRECT) === 0) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'resource',
@@ -5759,7 +5759,7 @@ function createLayoutUploadBytes(runtime: ScratchRuntime, uploadView: LayoutUplo
         uploadView.byteLength < 0 ||
         uploadView.byteOffset + uploadView.byteLength > uploadView.bytes.buffer.byteLength
     ) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_CODEC_BYTE_LENGTH_MISMATCH',
             severity: 'error',
             phase: 'layout-codec',
@@ -5791,7 +5791,7 @@ function normalizeUploadLayout(
     if (layout === undefined) return undefined
     if (isLayoutArtifact(layout)) return layout
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_LAYOUT_UNSUPPORTED_FORMAT',
         severity: 'error',
         phase: 'layout-codec',
@@ -5880,7 +5880,7 @@ function validateBufferUploadUsage(runtime: ScratchRuntime, target: BufferRegion
 
     if ((target.buffer.usage & GPU_BUFFER_USAGE_COPY_DST) !== 0) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_USAGE_MISSING',
         severity: 'error',
         phase: 'resource',
@@ -5918,7 +5918,7 @@ function throwClearBufferDiagnostic(
 ): never {
 
     const region = isBufferRegion(target) ? target : undefined
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_CLEAR_BUFFER_INVALID',
         severity: 'error',
         phase: 'command',
@@ -5954,7 +5954,7 @@ function validateUploadLayout(command: UploadCommand) {
     const targetLayout = command.target.layout
     if (targetLayout === undefined) {
         if (command.layout === undefined) return
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_CODEC_SCHEMA_MISMATCH',
             severity: 'error',
             phase: 'layout-codec',
@@ -5970,7 +5970,7 @@ function validateUploadLayout(command: UploadCommand) {
     }
 
     if (command.layout !== undefined && !layoutArtifactsSchemaCompatible(targetLayout, command.layout)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_CODEC_SCHEMA_MISMATCH',
             severity: 'error',
             phase: 'layout-codec',
@@ -6020,7 +6020,7 @@ function validateBufferCopyUsage(
 
     if ((buffer.usage & requiredUsage) !== 0) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_USAGE_MISSING',
         severity: 'error',
         phase: 'resource',
@@ -6043,7 +6043,7 @@ function validateTextureCopyUsage(
     const facts = textureCopyEndpointFacts(texture)
     if ((facts.usage & requiredUsage) !== 0) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: isSurfaceTextureLease(texture)
             ? 'SCRATCH_SURFACE_TEXTURE_USAGE_MISSING'
             : 'SCRATCH_RESOURCE_USAGE_MISSING',
@@ -6177,7 +6177,7 @@ function normalizeCopySource(runtime: ScratchRuntime, descriptor: CopyCommandDes
         assertSurfaceTextureLeaseUsable(surface)
         const facts = surfaceTextureLeaseFacts(surface)
         if (facts.runtime !== runtime) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
                 severity: 'error',
                 phase: 'command',
@@ -6318,7 +6318,7 @@ function assertTextureCopyEndpointRuntime(
     }
     const facts = surfaceTextureLeaseFacts(endpoint)
     if (facts.runtime === runtime) return
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_WRONG_RUNTIME',
         severity: 'error',
         phase: 'command',
@@ -6434,7 +6434,7 @@ export function assertCommandTemporalDependencies(
 function normalizeCopyReadinessPolicy(command: CopyCommand, whenMissing: ResourceReadinessPolicy): 'throw' {
 
     if (whenMissing !== 'throw') {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
             severity: 'error',
             phase: 'command',
@@ -6997,7 +6997,7 @@ function throwCopySourceDiagnostic({
     reason,
 }: CopySourceDiagnosticInput): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_COPY_SOURCE_INVALID',
         severity: 'error',
         phase: 'command',
@@ -7054,7 +7054,7 @@ function throwCopyDiagnostic({
     reason,
 }: CopyDiagnosticInput): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_COPY_RANGE_INVALID',
         severity: 'error',
         phase: 'command',
@@ -7099,7 +7099,7 @@ function validateResolveDestinationUsage(runtime: ScratchRuntime, destination: B
 
     if ((destination.usage & GPU_BUFFER_USAGE_QUERY_RESOLVE) !== 0) return
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_USAGE_MISSING',
         severity: 'error',
         phase: 'resource',
@@ -7277,7 +7277,7 @@ function throwResolveQuerySetDiagnostic({
     reason,
 }: ResolveQuerySetDiagnosticInput): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_RESOLVE_QUERY_SET_INVALID',
         severity: 'error',
         phase: 'command',
@@ -7318,7 +7318,7 @@ function throwResolveQuerySetDiagnostic({
 
 function throwUploadDiagnostic({ runtime, target, data, offset, dataOffset, size, layout, reason }: UploadDiagnosticInput): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_UPLOAD_RANGE_INVALID',
         severity: 'error',
         phase: 'command',
@@ -7656,7 +7656,7 @@ function throwTextureUploadDiagnostic({
     reason,
 }: TextureUploadDiagnosticInput): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_TEXTURE_UPLOAD_INVALID',
         severity: 'error',
         phase: 'command',
@@ -8062,7 +8062,7 @@ function writeExternalImageUploadQueueAction(
 function throwExternalImageUploadInvalid(input: ExternalImageUploadDiagnosticInput, cause?: unknown): never {
 
     const target = isTextureResource(input.target) ? input.target : input.command?.target
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_INVALID',
         severity: 'error',
         phase: 'command',
@@ -8118,7 +8118,7 @@ function throwExternalImageUploadInvalid(input: ExternalImageUploadDiagnosticInp
 function throwExternalImageUploadFailed(command: ExternalImageUploadCommand, cause: unknown): never {
 
     const nativeError = serializeNativeError(cause)
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_EXTERNAL_IMAGE_UPLOAD_FAILED',
         severity: 'error',
         phase: 'command',
@@ -8180,7 +8180,7 @@ function normalizeReadinessPolicy(command: DrawCommand | DispatchCommand, whenMi
     const allowed = new Set<ResourceReadinessPolicy>([ 'throw', 'skip-command', 'skip-pass', 'use-fallback' ])
 
     if (typeof whenMissing !== 'string' || !allowed.has(whenMissing as ResourceReadinessPolicy)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_COMMAND_READINESS_POLICY_MISSING',
             severity: 'error',
             phase: 'command',
@@ -8272,7 +8272,7 @@ function throwReadinessContractDiagnostic(
     reason: 'missing-fallback' | 'forbidden-fallback'
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_FALLBACK_INVALID',
         severity: 'error',
         phase: 'command',
@@ -8302,7 +8302,7 @@ function throwFallbackDiagnostic(
         : []
     const runtime = isRecord(record.runtime) ? record.runtime : undefined
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_FALLBACK_INVALID',
         severity: 'error',
         phase: 'command',
@@ -8334,7 +8334,7 @@ function throwFallbackDiagnostic(
 
 function throwCountDiagnostic(command: DrawCommand, count: unknown): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_COUNT_INVALID',
         severity: 'error',
         phase: 'command',
@@ -8357,7 +8357,7 @@ function throwVertexBufferDiagnostic(
     { expected, actual, related = [] }: VertexBufferDiagnosticDetails
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_VERTEX_BUFFER_INVALID',
         severity: 'error',
         phase: 'command',
@@ -8378,7 +8378,7 @@ function throwIndexBufferDiagnostic(
     { expected, actual, related = [] }: VertexBufferDiagnosticDetails
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_INDEX_BUFFER_INVALID',
         severity: 'error',
         phase: 'command',
@@ -8398,7 +8398,7 @@ function throwIndirectBufferDiagnostic(
     { expected, actual, related = [] }: IndirectBufferDiagnosticDetails
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_INDIRECT_BUFFER_INVALID',
         severity: 'error',
         phase: 'command',
@@ -8412,7 +8412,7 @@ function throwIndirectBufferDiagnostic(
 
 function throwDispatchCountDiagnostic(command: DispatchCommand, count: unknown): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_COMMAND_COUNT_INVALID',
         severity: 'error',
         phase: 'command',

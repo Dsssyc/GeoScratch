@@ -1,4 +1,4 @@
-import { isScratchDiagnosticError, throwScratchDiagnostic } from './diagnostics.js'
+import { isScratchDiagnosticError, throwGPUDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import {
     createScratchNativeLabel,
@@ -353,7 +353,7 @@ function throwReadbackStagingBudgetFailure(
     const actual = isScratchDiagnosticError(cause)
         ? cause.diagnostic.actual
         : undefined
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED',
         severity: 'error',
         phase: 'readback',
@@ -404,7 +404,7 @@ function throwReadbackStagingAllocationFailure(
                 : {}),
     })
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code,
         severity: 'error',
         phase: outcome.kind === 'runtime-disposed' || outcome.kind === 'device-lost'

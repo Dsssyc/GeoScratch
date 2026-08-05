@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import { isContentResource } from './resource.js'
 import {
     assertGpuOperationTarget,
@@ -730,7 +730,7 @@ export class ScratchRuntimeDiagnosticsController {
                 target,
                 failureStage: 'budget',
             })
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_SUBMISSION_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
                 severity: 'error',
                 phase: 'submission',
@@ -795,7 +795,7 @@ export class ScratchRuntimeDiagnosticsController {
                 target,
                 failureStage: 'budget',
             })
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_READBACK_NATIVE_OBSERVATION_BUDGET_EXCEEDED',
                 severity: 'error',
                 phase: 'readback',
@@ -1314,7 +1314,7 @@ export class ScratchRuntimeDiagnosticsController {
     capture(options: ScratchDiagnosticCaptureOptions): ScratchDiagnosticCapture {
 
         if (this.#captures.size >= this.#options.maxActiveCaptures) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_DIAGNOSTIC_CAPTURE_LIMIT_EXCEEDED',
                 severity: 'error',
                 phase: 'runtime',
@@ -1988,7 +1988,7 @@ export class ScratchRuntimeDiagnosticsController {
                     ? [ { kind: 'Submission' as const, id: fact.submissionId } ]
                     : []),
             ]
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_READBACK_STAGING_BUDGET_EXCEEDED',
             severity: 'error',
             phase: 'readback',
@@ -2389,7 +2389,7 @@ function throwDiagnosticsOption(
     expected: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'runtime',
@@ -2411,7 +2411,7 @@ function throwSubmissionNativePolicyOption(
     expected: string
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_SUBMISSION_NATIVE_POLICY_INVALID',
         severity: 'error',
         phase: 'runtime',

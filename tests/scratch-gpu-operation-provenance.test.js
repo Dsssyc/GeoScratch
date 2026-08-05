@@ -808,11 +808,11 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
 
         expect(error.diagnostic.code).to.equal('SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED')
         expect(error.cause).to.equal(nativeError)
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             nativeErrorCategory: 'validation',
             attribution: 'exact-operation',
         })
-        expect(error.incident.operationId).to.equal(error.diagnostic.subject.id)
+        expect(error.context.incident.operationId).to.equal(error.diagnostic.subject.id)
         expect(calls.buffers).to.have.length(1)
         expect(calls.buffers[0].destroyed).to.equal(true)
         expect(runtime._resources.size).to.equal(0)
@@ -838,12 +838,12 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         )
 
         const error = await rejectedDiagnostic(runtime.createBuffer({ label, size: 4, usage: 1 }))
-        const nativeSuffix = ` [scratch:${error.incident.target.resourceId}]`
-        const serializedIncident = JSON.stringify(error.incident)
+        const nativeSuffix = ` [scratch:${error.context.incident.target.resourceId}]`
+        const serializedIncident = JSON.stringify(error.context.incident)
 
         expect(calls.buffers[0].descriptor.label).to.equal(`${label}${nativeSuffix}`)
-        expect(error.incident.triggerOperation.nativeLabel.length).to.be.at.most(256)
-        expect(error.incident.triggerOperation.nativeLabel.endsWith(nativeSuffix)).to.equal(true)
+        expect(error.context.incident.triggerOperation.nativeLabel.length).to.be.at.most(256)
+        expect(error.context.incident.triggerOperation.nativeLabel.endsWith(nativeSuffix)).to.equal(true)
         expect(serializedIncident.length).to.be.lessThan(16_384)
         expect(serializedIncident).not.to.include(label)
     })
@@ -871,7 +871,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
             const report = capture.stop()
 
             expect(report.operations).to.have.length(1)
-            expect(report.operations[0].incidentId).to.equal(error.incident.id)
+            expect(report.operations[0].incidentId).to.equal(error.context.incident.id)
             expect(report.retainedEvidenceBytes).to.be.at.most(16_384)
             expect(report.retainedEvidenceBytes).to.equal(
                 serializedEvidenceBytes(report.operations[0])
@@ -893,14 +893,14 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         const error = await rejectedDiagnostic(runtime.createTexture(textureDescriptor('oom texture')))
 
         expect(error.diagnostic.code).to.equal('SCRATCH_TEXTURE_ALLOCATION_OUT_OF_MEMORY')
-        expect(error.incident.nativeErrorCategory).to.equal('out-of-memory')
-        expect(error.incident.pressure).to.deep.include({
+        expect(error.context.incident.nativeErrorCategory).to.equal('out-of-memory')
+        expect(error.context.incident.pressure).to.deep.include({
             triggerLogicalFootprintBytes: 64,
             currentScratchLogicalFootprintBytes: 32,
         })
-        expect(error.incident.pressure.largestContributors[0].resourceId).to.equal(resident.id)
-        expect(error.incident.pressure).not.to.have.property('rootCause')
-        expect(error.incident.pressure.caveats).to.include(
+        expect(error.context.incident.pressure.largestContributors[0].resourceId).to.equal(resident.id)
+        expect(error.context.incident.pressure).not.to.have.property('rootCause')
+        expect(error.context.incident.pressure.caveats).to.include(
             'The triggering operation is not necessarily the sole OOM cause.'
         )
         expect(calls.textures[0].destroyed).to.equal(true)
@@ -939,7 +939,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
             logicalFootprintBytes: 32,
         })
         expect(queriedDisposals.map(operation => operation.id)).to.deep.equal([ disposal.id ])
-        expect(error.incident.pressure.recentChurn).to.deep.include({
+        expect(error.context.incident.pressure.recentChurn).to.deep.include({
             sequence: disposal.sequence,
             operationId: disposal.id,
             operationKind: 'resource-disposal',
@@ -963,7 +963,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
 
         expect(error.diagnostic.code).to.equal('SCRATCH_BUFFER_ALLOCATION_NATIVE_FAILED')
         expect(error.cause).to.equal(nativeError)
-        expect(error.incident.nativeErrorCategory).to.equal('native-exception')
+        expect(error.context.incident.nativeErrorCategory).to.equal('native-exception')
         expect(calls.errorScopes.map(call => call.action)).to.deep.equal([
             'push', 'push', 'pop', 'pop',
         ])
@@ -983,7 +983,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         const error = await rejectedDiagnostic(creation)
 
         expect(error.diagnostic.code).to.equal('SCRATCH_GPU_ERROR_SCOPE_FAILED')
-        expect(error.incident.nativeErrorCategory).to.equal('scope-failure')
+        expect(error.context.incident.nativeErrorCategory).to.equal('scope-failure')
         expect(calls.textures[0].destroyed).to.equal(true)
         expect(runtime._resources.size).to.equal(0)
         expect(errors.scopeDepth).to.equal(0)
@@ -1037,7 +1037,7 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         const errorA = await rejectedDiagnostic(allocationA)
         const bufferB = await allocationB
         expect(errorA.diagnostic.code).to.equal('SCRATCH_BUFFER_ALLOCATION_VALIDATION_FAILED')
-        expect(errorA.incident.runtimeId).to.equal(runtimeA.id)
+        expect(errorA.context.incident.runtimeId).to.equal(runtimeA.id)
         expect(bufferB.runtime).to.equal(runtimeB)
         expect(runtimeA._resources.size).to.equal(0)
         expect(runtimeB._resources.size).to.equal(1)
@@ -1052,8 +1052,8 @@ describe('ScratchRuntime fallible initial GPU allocation', () => {
         const lostError = await rejectedDiagnostic(lostCreation)
 
         expect(lostError.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
-        expect(lostError.incident.kind).to.equal('device-loss')
-        expect(lostError.incident.attribution).to.equal('temporal-correlation')
+        expect(lostError.context.incident.kind).to.equal('device-loss')
+        expect(lostError.context.incident.attribution).to.equal('temporal-correlation')
         expect(lostFake.calls.textures[0].destroyed).to.equal(true)
         expect(lostRuntime._resources.size).to.equal(0)
         lostFake.errors.settlePop(0)
@@ -1186,11 +1186,11 @@ describe('TextureResource transactional replacement allocation', () => {
 
         expect(failure.diagnostic.code).to.equal('SCRATCH_TEXTURE_REPLACEMENT_VALIDATION_FAILED')
         expect(failure.cause).to.equal(error)
-        expect(failure.incident).to.deep.include({
+        expect(failure.context.incident).to.deep.include({
             nativeErrorCategory: 'validation',
             attribution: 'exact-operation',
         })
-        expect(failure.incident.target).to.deep.include({
+        expect(failure.context.incident.target).to.deep.include({
             kind: 'resource',
             resourceId: texture.id,
         })
@@ -1218,8 +1218,8 @@ describe('TextureResource transactional replacement allocation', () => {
         const failure = await rejectedDiagnostic(texture.resize({ width: 8, height: 8 }))
 
         expect(failure.diagnostic.code).to.equal('SCRATCH_TEXTURE_REPLACEMENT_OUT_OF_MEMORY')
-        expect(failure.incident.pressure.triggerLogicalFootprintBytes).to.equal(256)
-        expect(failure.incident.pressure.caveats).to.include(
+        expect(failure.context.incident.pressure.triggerLogicalFootprintBytes).to.equal(256)
+        expect(failure.context.incident.pressure.caveats).to.include(
             'The triggering operation is not necessarily the sole OOM cause.'
         )
         expect(texture.width).to.equal(4)
@@ -1274,7 +1274,7 @@ describe('TextureResource transactional replacement allocation', () => {
         const failure = await rejectedDiagnostic(replacement)
 
         expect(failure.diagnostic.code).to.equal('SCRATCH_RUNTIME_DEVICE_LOST_DURING_GPU_OPERATION')
-        expect(failure.incident).to.deep.include({
+        expect(failure.context.incident).to.deep.include({
             kind: 'device-loss',
             attribution: 'temporal-correlation',
         })
@@ -1282,7 +1282,7 @@ describe('TextureResource transactional replacement allocation', () => {
         expect(fake.calls.textures[1].destroyed).to.equal(true)
         expect(texture.gpuTexture).to.equal(oldTexture)
         expect(() => texture.assertUsable()).to.throw(ScratchDiagnosticError)
-        expect(failure.incident).not.to.have.property('rollbackRestoredUsability')
+        expect(failure.context.incident).not.to.have.property('rollbackRestoredUsability')
         fake.errors.settlePop(2)
         fake.errors.settlePop(3)
     })

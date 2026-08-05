@@ -127,11 +127,11 @@ describe('scratch readback native outcomes', () => {
             code: 'SCRATCH_READBACK_NATIVE_VALIDATION_FAILED',
             phase: 'readback',
         })
-        expect(error.incident).to.deep.include({
+        expect(error.context.incident).to.deep.include({
             kind: 'readback-failure',
             failureStage: 'copy-issue',
         })
-        expect(error.incident.outcomes).to.deep.include.members([ {
+        expect(error.context.incident.outcomes).to.deep.include.members([ {
             stage: 'scope-settlement',
             diagnosticCode: 'SCRATCH_READBACK_NATIVE_VALIDATION_FAILED',
             nativeErrorCategory: 'validation',

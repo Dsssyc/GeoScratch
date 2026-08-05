@@ -1,4 +1,4 @@
-import { throwScratchDiagnostic } from './diagnostics.js'
+import { throwGPUDiagnostic } from './diagnostics.js'
 import {
     createScratchNativeLabel,
     destroyNativeCandidate,
@@ -311,7 +311,7 @@ export class TextureResource extends Resource {
         const nextSize = normalizeTextureSize(this.subject, size)
         validateTextureAllocationDescriptor(this.runtime, this.#physicalDescriptor, nextSize, size)
         if (this.#pendingReplacement !== undefined) {
-            throwScratchDiagnostic({
+            throwGPUDiagnostic({
                 code: 'SCRATCH_TEXTURE_REPLACEMENT_PENDING',
                 severity: 'error',
                 phase: 'resource',
@@ -471,7 +471,7 @@ export function prepareTextureViewSpecDescriptor(
 ): NormalizedTextureViewDescriptor {
 
     if (!isTextureViewSpec(view)) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
             severity: 'error',
             phase: 'resource',
@@ -730,7 +730,7 @@ function normalizeTextureFormat(subject: DiagnosticSubject, format: unknown): GP
 function normalizeTextureUsage(subject: DiagnosticSubject, usage: unknown): GPUTextureUsageFlags {
 
     if (usage === undefined) {
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RESOURCE_USAGE_MISSING',
             severity: 'error',
             phase: 'resource',
@@ -1177,7 +1177,7 @@ function throwTextureViewDescriptorDiagnostic(
     expected: object
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'resource',
@@ -1535,7 +1535,7 @@ function assertTextureCreationAvailable(runtime: ScratchRuntime): void {
 
     if (!runtime?.device || typeof runtime.device.createTexture !== 'function') {
         const subject = runtime?.subject ?? { kind: 'ScratchRuntime' }
-        throwScratchDiagnostic({
+        throwGPUDiagnostic({
             code: 'SCRATCH_RUNTIME_DEVICE_UNAVAILABLE',
             severity: 'error',
             phase: 'runtime',
@@ -1553,7 +1553,7 @@ function throwTextureDescriptorDiagnostic(
     expected: unknown
 ): never {
 
-    throwScratchDiagnostic({
+    throwGPUDiagnostic({
         code: 'SCRATCH_RESOURCE_DESCRIPTOR_INVALID',
         severity: 'error',
         phase: 'resource',
