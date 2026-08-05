@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geoscratch-dem-tiles"
+version = "0.1.0"
+description = "Deterministic local COG tile adapter for the GeoScratch DEM example"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "fastapi==0.141.1",
+    "numpy==2.4.6",
+    "Pillow==12.3.0",
+    "rasterio==1.5.0",
+    "rio-cogeo==7.0.2",
+    "rio-tiler==9.4.2",
+    "uvicorn==0.52.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "httpx==0.28.1",
+    "pytest==9.1.1",
+]
+
+[project.scripts]
+dem-tile-build = "geoscratch_dem_tiles.build:main"
+dem-tile-serve = "geoscratch_dem_tiles.service:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

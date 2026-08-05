@@ -48,3 +48,9 @@ dist/
 output/
 examples/public/json/examples/*
 *.bin
+examples/demLayer/tile-server/.venv/
+examples/demLayer/tile-server/cache/
+examples/demLayer/tile-server/.pytest_cache/
+examples/demLayer/tile-server/**/__pycache__/
+examples/demLayer/tile-server/**/*.py[cod]
+examples/demLayer/tile-server/src/*.egg-info/
