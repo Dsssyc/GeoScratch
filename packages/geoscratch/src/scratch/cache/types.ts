@@ -111,6 +111,7 @@ export type CacheHistoryEntry = Readonly<{
 
 export type PersistentCacheFacts = Readonly<{
     namespace: string
+    observationScope: 'instance'
     state: PersistentCacheState
     maxPayloadBytes: number
     maxEntries: number

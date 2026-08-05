@@ -59,7 +59,7 @@ type PendingPayload = {
 }
 
 type PutCommit<Metadata extends object> = Readonly<{
-    status: 'stored' | 'already-present'
+    status: 'stored' | 'already-present' | 'journal-missing'
     entry?: StoredCacheEntry<Metadata>
     victims: readonly StoredCacheEntry[]
 }>
@@ -243,6 +243,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
         const values = [ ...this.#entries.values() ]
         const facts: {
             namespace: string
+            observationScope: 'instance'
             state: PersistentCacheState
             maxPayloadBytes: number
             maxEntries: number
@@ -268,6 +269,7 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
             history: readonly CacheHistoryEntry[]
         } = {
             namespace: this.namespace,
+            observationScope: 'instance',
             state: this.#state,
             maxPayloadBytes: this.maxPayloadBytes,
             maxEntries: this.maxEntries,
@@ -359,7 +361,10 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
             'read-metadata',
             () => readEntry(this.#database, namespacedStorageKey(this.namespace, key.storageKey))
         ) as StoredCacheEntry<Metadata> | undefined
-        if (entry === undefined) return this.#miss(key, 'absent')
+        if (entry === undefined) {
+            this.#entries.delete(namespacedStorageKey(this.namespace, key.storageKey))
+            return this.#miss(key, 'absent')
+        }
         if (!validStoredEntry(entry, this.namespace) || entry.key.storageKey !== key.storageKey) {
             return this.#invalidEntryMiss(
                 key,
@@ -457,7 +462,13 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
             'check-existing',
             () => readEntry(this.#database, storageKey)
         )
-        if (existing !== undefined) return this.#alreadyPresent(key, byteLength)
+        if (existing !== undefined) {
+            return this.#alreadyPresent(
+                key,
+                byteLength,
+                existing as StoredCacheEntry<Metadata>
+            )
+        }
 
         const payloadId = payload === undefined ? undefined : createPayloadId()
         if (payloadId !== undefined && payload !== undefined) {
@@ -513,7 +524,23 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
         }
         if (commit.status === 'already-present') {
             if (payloadId !== undefined) await this.#bestEffortAbortPayload(payloadId, 'race-loser')
-            return this.#alreadyPresent(key, byteLength)
+            return this.#alreadyPresent(key, byteLength, commit.entry)
+        }
+        if (commit.status === 'journal-missing') {
+            if (payloadId !== undefined) {
+                await this.#bestEffortAbortPayload(payloadId, 'journal-reclaimed')
+            }
+            return storageFailure(
+                this.namespace,
+                'cache-write',
+                'commit-reclaimed-payload',
+                'coordination',
+                namedError(
+                    'AbortError',
+                    'The pending payload journal was reclaimed before metadata commit.'
+                ),
+                key
+            )
         }
         this.#entries.set(entry.storageKey, entry)
         for (const victim of commit.victims) this.#entries.delete(victim.storageKey)
@@ -573,18 +600,15 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
 
     async #collectGarbage(minimumPendingAgeMs: number): Promise<CacheGarbageCollectionOutcome> {
 
-        const now = Date.now()
+        const stalePending = await reclaimStalePending(
+            this.#database,
+            this.namespace,
+            Date.now() - minimumPendingAgeMs
+        )
         const [ entries, pending ] = await Promise.all([
             listEntries(this.#database, this.namespace),
             listPending(this.#database, this.namespace),
         ])
-        const stalePending = pending.filter(item => now - item.createdAt >= minimumPendingAgeMs)
-        if (stalePending.length > 0) {
-            await deletePendingRows(
-                this.#database,
-                stalePending.map(item => item.journalKey)
-            )
-        }
         const referenced = new Set(entries.flatMap(entry => (
             entry.payloadId === undefined ? [] : [ payloadFileName(entry.payloadId) ]
         )))
@@ -596,6 +620,12 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
         try {
             for await (const [ name, handle ] of directoryEntries(this.#payloadDirectory)) {
                 if (handle.kind !== 'file' || referenced.has(name) || livePending.has(name)) continue
+                const payloadId = payloadIdFromFileName(name)
+                if (payloadId === undefined || await payloadIsReferenced(
+                    this.#database,
+                    this.namespace,
+                    payloadId
+                )) continue
                 try {
                     await this.#payloadDirectory.removeEntry(name)
                     removedPayloadCount++
@@ -731,8 +761,13 @@ export class PersistentCache<Metadata extends object = Readonly<Record<string, u
         return (touched ?? entry) as StoredCacheEntry<Metadata>
     }
 
-    #alreadyPresent(key: PersistentCacheKey, byteLength: number): CachePutOutcome {
+    #alreadyPresent(
+        key: PersistentCacheKey,
+        byteLength: number,
+        entry?: StoredCacheEntry<Metadata>
+    ): CachePutOutcome {
 
+        if (entry !== undefined) this.#entries.set(entry.storageKey, entry)
         this.#alreadyPresentCount++
         this.#record('already-present', 'put', key)
         return freezePutOutcome('already-present', byteLength, 0)
@@ -1162,6 +1197,25 @@ async function deletePendingRows(database: IDBDatabase, journalKeys: readonly st
     await done
 }
 
+async function reclaimStalePending(
+    database: IDBDatabase,
+    namespace: string,
+    createdAtOrBefore: number
+): Promise<readonly PendingPayload[]> {
+
+    const transaction = relaxedTransaction(database, PENDING_STORE)
+    const done = transactionDone(transaction)
+    const store = transaction.objectStore(PENDING_STORE)
+    const current = await requestValue<PendingPayload[]>(
+        store.index(NAMESPACE_INDEX).getAll(IDBKeyRange.only(namespace))
+    )
+    const stale = current.filter(item => item.createdAt <= createdAtOrBefore)
+    for (const item of stale) store.delete(item.journalKey)
+    transaction.commit()
+    await done
+    return Object.freeze(stale)
+}
+
 async function commitEntry<Metadata extends object>(
     database: IDBDatabase,
     entry: StoredCacheEntry<Metadata>,
@@ -1176,13 +1230,29 @@ async function commitEntry<Metadata extends object>(
         entriesStore.index(NAMESPACE_INDEX).getAll(IDBKeyRange.only(entry.namespace))
     )
     if (current.some(candidate => candidate.storageKey === entry.storageKey)) {
+        const existing = current.find(candidate => candidate.storageKey === entry.storageKey)
         if (entry.payloadId !== undefined) {
             transaction.objectStore(PENDING_STORE)
                 .delete(pendingJournalKey(entry.namespace, entry.payloadId))
         }
         transaction.commit()
         await done
-        return Object.freeze({ status: 'already-present', victims: Object.freeze([]) })
+        return Object.freeze({
+            status: 'already-present',
+            entry: existing as StoredCacheEntry<Metadata>,
+            victims: Object.freeze([]),
+        })
+    }
+    if (entry.payloadId !== undefined) {
+        const journal = await requestValue<PendingPayload | undefined>(
+            transaction.objectStore(PENDING_STORE)
+                .get(pendingJournalKey(entry.namespace, entry.payloadId))
+        )
+        if (journal === undefined) {
+            transaction.commit()
+            await done
+            return Object.freeze({ status: 'journal-missing', victims: Object.freeze([]) })
+        }
     }
     const victims = selectBudgetVictims(current, entry, maxPayloadBytes, maxEntries)
     for (const victim of victims) entriesStore.delete(victim.storageKey)
@@ -1269,6 +1339,26 @@ async function deleteEntryIfCurrent(
     transaction.commit()
     await done
     return matches
+}
+
+async function payloadIsReferenced(
+    database: IDBDatabase,
+    namespace: string,
+    payloadId: string
+): Promise<boolean> {
+
+    const transaction = database.transaction([ ENTRIES_STORE, PENDING_STORE ], 'readonly')
+    const done = transactionDone(transaction)
+    const entriesRequest = requestValue<StoredCacheEntry[]>(
+        transaction.objectStore(ENTRIES_STORE).index(NAMESPACE_INDEX)
+            .getAll(IDBKeyRange.only(namespace))
+    )
+    const pendingRequest = requestValue<PendingPayload | undefined>(
+        transaction.objectStore(PENDING_STORE).get(pendingJournalKey(namespace, payloadId))
+    )
+    const [ entries, pending ] = await Promise.all([ entriesRequest, pendingRequest ])
+    await done
+    return pending !== undefined || entries.some(entry => entry.payloadId === payloadId)
 }
 
 async function deleteStorageKeys(
@@ -1403,6 +1493,13 @@ function payloadFileName(payloadId: string): string {
     return `${payloadId}.bin`
 }
 
+function payloadIdFromFileName(fileName: string): string | undefined {
+
+    return fileName.endsWith('.bin') && fileName.length > 4
+        ? fileName.slice(0, -4)
+        : undefined
+}
+
 function pendingPayload(namespace: string, payloadId: string): PendingPayload {
 
     return {
@@ -1435,6 +1532,13 @@ function createPayloadId(): string {
     const bytes = new Uint8Array(16)
     globalThis.crypto.getRandomValues(bytes)
     return [ ...bytes ].map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function namedError(name: string, message: string): Error {
+
+    const error = new Error(message)
+    error.name = name
+    return error
 }
 
 function validStoredEntry(entry: unknown, namespace: string): entry is StoredCacheEntry {

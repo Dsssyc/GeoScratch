@@ -132,6 +132,7 @@ type CachePutStatus =
 - metadata transaction 失败时 entry 不可见，并清理本次 payload；
 - open 时删除超过 recovery grace period 的 pending payload；
 - garbage collection 只删除既未被 committed entry 引用、也未被 live pending row 引用的文件；
+- garbage collection 在删除每个候选文件前用一个 IndexedDB snapshot 重查 committed entry 与 pending row；writer 只有在 commit transaction 中仍持有自己的 pending row 才能发布 metadata；
 - read 与 delete 竞态导致旧 payload 消失时，读取者重读一次 metadata；若 revision 已换则读取新 payload，若 metadata 已删除则返回正常 miss；
 - 所有未知清理失败进入 bounded history，不把已经成功提交的 entry 伪装成失败。
 
@@ -147,7 +148,7 @@ type ScratchDiagnostic = GPUDiagnostic | WorkerDiagnostic | CacheDiagnostic
 
 Cache diagnostics 包含 code、phase、subject、operation、key/revision、storage error name 与 retriable 等结构化事实。`ScratchDiagnosticErrorContext` 增加 `{ domain: 'cache', storage?: CacheStorageErrorFacts }`。
 
-`inspect()` 只返回固定计数、容量、storage estimate、persistence 结果和不超过 `maxHistory` 的历史。raw payload、完整 metadata 和无界 key 列表不得进入诊断历史。
+`inspect()` 只返回固定计数、容量、storage estimate、persistence 结果和不超过 `maxHistory` 的历史。`observationScope: 'instance'` 明确说明 entry 容量事实与计数是该实例已观测的 namespace 状态，而不是伪造的跨 context 同步快照。raw payload、完整 metadata 和无界 key 列表不得进入诊断历史。
 
 ## Geo 适配边界
 

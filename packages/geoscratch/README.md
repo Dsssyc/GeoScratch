@@ -82,6 +82,9 @@ await cache.dispose()
 IndexedDB stores metadata and the authoritative commit record; OPFS stores optional
 immutable raw payloads. Hits return caller-owned buffers. Cache has no Worker, GPU,
 or Geo dependency, no hidden memory tier, and no Buffer/Texture conversion API.
+Cross-context commits and garbage collection preserve storage consistency, while
+synchronous `inspect()` truthfully reports bounded `observationScope: 'instance'`
+facts.
 
 ## Scratch Async Resource Allocation
 

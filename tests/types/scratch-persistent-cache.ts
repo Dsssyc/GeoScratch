@@ -47,6 +47,7 @@ await cache.invalidate({ idPrefix: 'typed-cache/' })
 await cache.clear()
 await cache.collectGarbage()
 const facts = cache.inspect()
+const observationScope: 'instance' = facts.observationScope
 await cache.dispose()
 
 const address = virtualRasterCacheAddress({
@@ -81,4 +82,5 @@ import('geoscratch/geo').then(module => module.createVirtualRasterCache)
 
 void write
 void facts
+void observationScope
 void addressKey

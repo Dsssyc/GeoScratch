@@ -124,6 +124,7 @@ packages/geoscratch/src/
 - `GPURuntime` 只拥有 WebGPU adapter/device、GPU resource、pipeline、command、submission 和 GPU diagnostics；
 - `WorkerSystem` 只拥有 Worker、任务、优先级、取消、上下文与 CPU 并发状态；
 - `PersistentCache` 只拥有 IndexedDB、OPFS、缓存条目和存储生命周期；
+- Cache 的 IndexedDB commit 与 GC candidate recheck 保证跨 context 存储一致性；同步 `inspect()` 只报告 `observationScope: 'instance'` 的有界观测事实；
 - 不创建统管这些能力的 `ScratchPlatformRuntime`；
 - GPU、Worker 和 Cache 不能调用彼此的内部实现；
 - Geo 或应用按需组合公开能力，不需要某项能力的消费者不得被迫创建它。

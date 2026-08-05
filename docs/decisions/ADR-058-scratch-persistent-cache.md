@@ -84,6 +84,13 @@ Missing or size-mismatched committed payloads become structured repair misses an
 their metadata is removed. Cleanup failures are retained in bounded diagnostics for
 later garbage collection; they do not reverse a committed metadata transaction.
 
+Garbage collection rechecks every deletion candidate against committed entries and
+pending rows in one IndexedDB snapshot immediately before removing the immutable
+file. A writer may publish metadata only while its own pending row still exists in
+the commit transaction. Therefore a collector that reclaims a stale writer forces
+that writer to fail with a retriable coordination diagnostic instead of publishing
+metadata that points at a removed file. Payload IDs are never reused.
+
 The implementation does not claim IndexedDB plus OPFS atomicity. Immutable payload
 IDs, the pending journal, the IndexedDB commit point, conditional repair, and
 garbage collection make partial states classifiable and recoverable.
@@ -108,9 +115,12 @@ type ScratchDiagnostic = GPUDiagnostic | WorkerDiagnostic | CacheDiagnostic
 
 Storage unavailability and unknown storage failures throw `ScratchDiagnosticError`
 with a cache-domain context. Quota exhaustion and repairable payload corruption are
-explicit outcomes with structured diagnostics. `inspect()` contains bounded current
-facts, counters, storage estimate/persistence observations, and finite history; it
-never contains payloads or an unbounded key log.
+explicit outcomes with structured diagnostics. `inspect()` contains bounded
+instance-observed namespace facts, instance-local counters, storage
+estimate/persistence observations, and finite history; it never contains payloads
+or an unbounded key log. Its machine-readable `observationScope` is `instance`:
+another context can mutate the same namespace between local observations, so the
+synchronous method does not fabricate a globally synchronized snapshot.
 
 ## Alternatives Rejected
 

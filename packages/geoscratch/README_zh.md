@@ -81,7 +81,9 @@ await cache.dispose()
 
 IndexedDB 保存 metadata 与权威 commit record，OPFS 保存可选 immutable raw
 payload。hit 返回 caller-owned buffer。Cache 不依赖 Worker、GPU 或 Geo，不包含隐藏
-memory tier，也不提供 Buffer/Texture 转换 API。
+memory tier，也不提供 Buffer/Texture 转换 API。跨 context 的 commit 与 garbage
+collection 保持存储一致性，而同步 `inspect()` 明确只返回有界的
+`observationScope: 'instance'` 事实。
 
 ## Scratch 异步资源分配
 

@@ -105,7 +105,9 @@ await cache.dispose()
 
 Cache 会 snapshot 调用方输入，hit 时返回新的 caller-owned buffer，因此可以安全
 transfer。它没有隐藏 memory tier，也不提供 Buffer/Texture 转换 API；这些策略和
-转换由 application 持有。不创建 cache 就是显式 no-cache mode。
+转换由 application 持有。不创建 cache 就是显式 no-cache mode。存储 commit 与
+garbage collection 保证跨 context 一致性；同步 `inspect()` 只报告有界的
+`observationScope: 'instance'` 事实，不虚构全局同步 diagnostic snapshot。
 
 ## Scratch 异步资源分配
 

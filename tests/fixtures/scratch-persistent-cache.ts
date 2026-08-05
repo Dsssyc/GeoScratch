@@ -105,6 +105,9 @@ export async function finishScratchPersistentCacheProof(namespace: string) {
     const afterClear = cache.inspect()
     await cache.dispose()
 
+    const crossContext = await proveCrossContextGarbageCollection(namespace)
+    const reclaimedJournal = await proveReclaimedJournalCannotCommit(namespace)
+
     let disposedCode: string | undefined
     try {
         await cache.get(RAW_KEY)
@@ -122,7 +125,107 @@ export async function finishScratchPersistentCacheProof(namespace: string) {
         cleared,
         afterClear,
         disposedCode,
+        crossContext,
+        reclaimedJournal,
     })
+}
+
+async function proveCrossContextGarbageCollection(namespace: string) {
+
+    const raceNamespace = `${namespace}.cross-context`
+    const collector = await openProofCache(raceNamespace, false)
+    const writer = await openProofCache(raceNamespace, false)
+    await collector.clear()
+    const liveKey = key('race/live')
+    const payloads = await getPayloadDirectory(raceNamespace)
+    const prototype = Object.getPrototypeOf(payloads) as DirectoryPrototype
+    const originalEntries = prototype.entries
+    let writeOutcome: Awaited<ReturnType<typeof writer.put>> | undefined
+    let triggered = false
+    prototype.entries = function(this: FileSystemDirectoryHandle) {
+
+        const directory = this
+        return (async function*() {
+            if (!triggered) {
+                triggered = true
+                writeOutcome = await writer.put(liveKey, raw(11))
+            }
+            yield* originalEntries.call(directory)
+        })()
+    }
+
+    let garbage
+    try {
+        garbage = await collector.collectGarbage({ minimumPendingAgeMs: 0 })
+    } finally {
+        prototype.entries = originalEntries
+    }
+    const read = serializeRead(await collector.get(liveKey))
+    const facts = collector.inspect()
+    await collector.clear()
+    await Promise.all([ collector.dispose(), writer.dispose() ])
+    return Object.freeze({
+        triggered,
+        writeOutcome,
+        garbage,
+        read,
+        facts,
+    })
+}
+
+async function proveReclaimedJournalCannotCommit(namespace: string) {
+
+    const raceNamespace = `${namespace}.reclaimed-journal`
+    const collector = await openProofCache(raceNamespace, false)
+    const writer = await openProofCache(raceNamespace, false)
+    await collector.clear()
+    const liveKey = key('race/reclaimed')
+    const payloads = await getPayloadDirectory(raceNamespace)
+    const probe = await payloads.getFileHandle('writable-prototype-probe.bin', { create: true })
+    const probeWritable = await probe.createWritable()
+    const prototype = Object.getPrototypeOf(probeWritable) as WritablePrototype
+    const originalClose = prototype.close
+    await probeWritable.close()
+    await payloads.removeEntry('writable-prototype-probe.bin')
+
+    let enteredResolve!: () => void
+    let releaseResolve!: () => void
+    const entered = new Promise<void>(resolve => { enteredResolve = resolve })
+    const release = new Promise<void>(resolve => { releaseResolve = resolve })
+    let blocked = false
+    prototype.close = async function(this: FileSystemWritableFileStream) {
+
+        await originalClose.call(this)
+        if (blocked) return
+        blocked = true
+        enteredResolve()
+        await release
+    }
+
+    let garbage
+    let writeResult
+    try {
+        const pendingWrite = writer.put(liveKey, raw(21)).then(
+            value => ({ status: 'resolved' as const, value }),
+            error => ({
+                status: 'rejected' as const,
+                code: (error as { diagnostic?: { code?: string } }).diagnostic?.code,
+                storage: (error as { diagnostic?: { storage?: string } }).diagnostic?.storage,
+                retriable: (error as { diagnostic?: { retriable?: boolean } }).diagnostic?.retriable,
+            })
+        )
+        await withProofTimeout(entered, 'writer did not reach the pre-commit close boundary')
+        garbage = await collector.collectGarbage({ minimumPendingAgeMs: 0 })
+        releaseResolve()
+        writeResult = await pendingWrite
+    } finally {
+        releaseResolve()
+        prototype.close = originalClose
+    }
+    const read = serializeRead(await collector.get(liveKey))
+    await collector.clear()
+    await Promise.all([ collector.dispose(), writer.dispose() ])
+    return Object.freeze({ blocked, garbage, writeResult, read })
 }
 
 async function openProofCache(namespace: string, requestPersistence: boolean) {
@@ -170,6 +273,15 @@ function serializeRead(outcome: CacheReadOutcome<ProofMetadata>) {
 
 async function createOrphanPayload(namespace: string): Promise<void> {
 
+    const payloads = await getPayloadDirectory(namespace)
+    const file = await payloads.getFileHandle('orphan-proof.bin', { create: true })
+    const writable = await file.createWritable()
+    await writable.write(Uint8Array.of(9, 8, 7, 6))
+    await writable.close()
+}
+
+async function getPayloadDirectory(namespace: string): Promise<FileSystemDirectoryHandle> {
+
     const root = await navigator.storage.getDirectory()
     const cacheRoot = await root.getDirectoryHandle('geoscratch-persistent-cache-v1', {
         create: true,
@@ -178,11 +290,32 @@ async function createOrphanPayload(namespace: string): Promise<void> {
         namespaceDirectoryName(namespace),
         { create: true }
     )
-    const payloads = await namespaceDirectory.getDirectoryHandle('payloads', { create: true })
-    const file = await payloads.getFileHandle('orphan-proof.bin', { create: true })
-    const writable = await file.createWritable()
-    await writable.write(Uint8Array.of(9, 8, 7, 6))
-    await writable.close()
+    return await namespaceDirectory.getDirectoryHandle('payloads', { create: true })
+}
+
+type DirectoryPrototype = {
+    entries: (
+        this: FileSystemDirectoryHandle
+    ) => AsyncIterableIterator<[string, FileSystemHandle]>
+}
+
+type WritablePrototype = {
+    close: (this: FileSystemWritableFileStream) => Promise<void>
+}
+
+async function withProofTimeout<Value>(promise: Promise<Value>, message: string): Promise<Value> {
+
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<never>((_, reject) => {
+                timeout = setTimeout(() => reject(new Error(message)), 5_000)
+            }),
+        ])
+    } finally {
+        if (timeout !== undefined) clearTimeout(timeout)
+    }
 }
 
 function namespaceDirectoryName(namespace: string): string {

@@ -565,6 +565,7 @@ function emptyPersistentCacheFacts(): Extract<DemTileCacheFacts, { mode: 'persis
     return Object.freeze({
         mode: 'persistent',
         namespace: 'pending',
+        observationScope: 'instance',
         state: 'active',
         maxPayloadBytes: 0,
         maxEntries: 0,

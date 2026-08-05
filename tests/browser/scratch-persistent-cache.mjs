@@ -110,7 +110,8 @@ function validate(value) {
         JSON.stringify(first.immediate.payload) !== JSON.stringify([ 1, 2, 3, 4 ])) {
         failures.push('put did not snapshot raw caller bytes before persistence')
     }
-    if (first.beforeDispose?.entryCount !== 2 || first.beforeDispose.payloadBytes !== 4 ||
+    if (first.beforeDispose?.observationScope !== 'instance' ||
+        first.beforeDispose.entryCount !== 2 || first.beforeDispose.payloadBytes !== 4 ||
         first.beforeDispose.metadataOnlyEntryCount !== 1 ||
         first.beforeDispose.persistenceRequested !== true ||
         typeof first.beforeDispose.persisted !== 'boolean' ||
@@ -121,7 +122,8 @@ function validate(value) {
     if (first.budget?.first?.status !== 'hit' || first.budget?.second?.status !== 'miss' ||
         first.budget?.third?.status !== 'hit' ||
         first.budget?.thirdWrite?.evictedCount !== 1 ||
-        first.budget?.facts?.entryCount !== 2 || first.budget.facts.payloadBytes !== 8 ||
+        first.budget?.facts?.observationScope !== 'instance' ||
+        first.budget.facts.entryCount !== 2 || first.budget.facts.payloadBytes !== 8 ||
         first.budget.facts.evictionCount !== 1) {
         failures.push('byte and entry budgets did not apply deterministic LRU eviction')
     }
@@ -142,6 +144,24 @@ function validate(value) {
         second.afterClear?.entryCount !== 0 || second.afterClear.payloadBytes !== 0 ||
         second.disposedCode !== 'CACHE_DISPOSED') {
         failures.push('clear or post-dispose diagnostic behavior did not converge')
+    }
+    if (second.crossContext?.triggered !== true ||
+        second.crossContext.writeOutcome?.status !== 'stored' ||
+        second.crossContext.read?.status !== 'hit' ||
+        second.crossContext.facts?.observationScope !== 'instance' ||
+        JSON.stringify(second.crossContext.read.payload) !== JSON.stringify([ 11, 12, 13, 14 ])) {
+        failures.push('cross-context garbage collection removed a concurrently committed payload')
+    }
+    if (second.reclaimedJournal?.blocked !== true ||
+        second.reclaimedJournal.garbage?.removedPendingCount !== 1 ||
+        second.reclaimedJournal.garbage?.removedPayloadCount !== 1 ||
+        second.reclaimedJournal.writeResult?.status !== 'rejected' ||
+        second.reclaimedJournal.writeResult?.code !== 'CACHE_STORAGE_FAILED' ||
+        second.reclaimedJournal.writeResult?.storage !== 'coordination' ||
+        second.reclaimedJournal.writeResult?.retriable !== true ||
+        second.reclaimedJournal.read?.status !== 'miss' ||
+        second.reclaimedJournal.read?.reason !== 'absent') {
+        failures.push('a writer published metadata after its pending journal was reclaimed')
     }
     if (events.consoleFailures.length !== 0 || events.consoleWarnings.length !== 0 ||
         events.pageErrors.length !== 0 || events.requestFailures.length !== 0 ||

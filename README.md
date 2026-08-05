@@ -111,7 +111,9 @@ await cache.dispose()
 The cache snapshots caller input and returns a new caller-owned buffer on a hit, so
 it can be transferred. It has no hidden memory tier and no Buffer/Texture conversion
 API; applications own those policies and conversions. Omitting cache construction is
-the explicit no-cache mode.
+the explicit no-cache mode. Storage commits and garbage collection remain safe across
+contexts; synchronous `inspect()` reports bounded `observationScope: 'instance'`
+facts instead of claiming a globally synchronized diagnostic snapshot.
 
 ## Scratch Async Resource Allocation
 
