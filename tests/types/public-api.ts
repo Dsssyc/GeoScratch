@@ -7,16 +7,25 @@ import {
     MercatorCoordinate,
     Node2D,
     WideFixedCodec,
+    VirtualRasterGpuState,
+    VirtualRasterResidency,
     cellLocalF32Codec,
     coordinateDomain,
     localVector,
     surfaceDomain,
     wideFixedCodec,
+    virtualRasterAccessor,
+    virtualRasterAddressSpace,
+    virtualRasterPlane,
+    virtualRasterSamplingProfile,
+    virtualRasterSource,
     type CellLocalPosition,
     type CoordinateDomain,
     type MapOptions,
     type PositionPrecisionFacts,
     type WideFixedPosition,
+    type VirtualRasterPageIdentity,
+    type VirtualRasterSample,
 } from 'geoscratch/geo'
 import { plane, sphere } from 'geoscratch/geometry'
 
@@ -163,6 +172,61 @@ const typedFixedCodec: WideFixedCodec = wideFixedCodec({
 const typedFixedPosition: WideFixedPosition = typedFixedCodec.fromQuanta([ 1n, -1n ])
 const typedPrecisionFacts: PositionPrecisionFacts = typedFixedCodec.facts
 const typedGeoError: GeoDiagnosticError | undefined = undefined
+const typedRasterAddressSpace = virtualRasterAddressSpace({
+    id: 'typed-raster',
+    dimensions: 2,
+    extent: [ 1024, 512 ],
+    pageSize: [ 128, 128 ],
+    levelCount: 4,
+})
+const typedRasterPage: VirtualRasterPageIdentity = typedRasterAddressSpace.page({
+    level: 0,
+    x: 0,
+    y: 0,
+})
+const typedRasterPlane = virtualRasterPlane({
+    id: 'typed-height',
+    addressSpace: typedRasterAddressSpace,
+    kind: 'scalar',
+    channels: 1,
+    sampleType: 'unorm8',
+    gpuFormat: 'r8unorm',
+})
+const typedRasterSource = virtualRasterSource({
+    id: 'typed-source',
+    async loadPage(page) {
+
+        return {
+            page,
+            width: 128,
+            height: 128,
+            channels: 1,
+            data: new Uint8Array(128 * 128),
+            contentVersion: 'typed',
+        }
+    },
+})
+const typedRasterResidency: VirtualRasterResidency = new VirtualRasterResidency({
+    addressSpace: typedRasterAddressSpace,
+    plane: typedRasterPlane,
+    source: typedRasterSource,
+    maxPhysicalPages: 8,
+    maxCpuBytes: 128 * 128 * 8,
+})
+const typedRasterProfile = virtualRasterSamplingProfile({
+    filter: 'bilinear',
+    level: 0,
+    outerBoundary: 'clamp',
+})
+const typedRasterAccessor = virtualRasterAccessor({
+    addressSpace: typedRasterAddressSpace,
+    plane: typedRasterPlane,
+})
+const typedRasterSample: VirtualRasterSample = typedRasterAccessor.sample(
+    typedRasterResidency.currentSnapshot,
+    { texel: [ 0, 0 ], profile: typedRasterProfile },
+)
+const typedRasterGpuState: VirtualRasterGpuState | undefined = undefined
 // @ts-expect-error Coordinate dimensions are limited to one, two, or three
 coordinateDomain({ id: 'typed-invalid', intrinsicDimensions: 4, embeddingDimensions: 3, axes: [] })
 // @ts-expect-error Mercator coordinate inputs require two components
@@ -186,6 +250,9 @@ void typedAdvancedPosition
 void typedFixedPosition
 void typedPrecisionFacts
 void typedGeoError
+void typedRasterPage
+void typedRasterSample
+void typedRasterGpuState
 const planeGeometry = plane(2)
 const sphereGeometry = sphere(1, 8, 4)
 

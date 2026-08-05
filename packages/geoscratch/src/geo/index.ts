@@ -47,6 +47,58 @@ export type {
     WideFixedPosition,
 } from './position-codec.js'
 export {
+    VirtualRasterAccessor,
+    VirtualRasterAddressSpace,
+    VirtualRasterSnapshot,
+    virtualRasterAccessor,
+    virtualRasterAddressSpace,
+    virtualRasterPlane,
+    virtualRasterSamplingProfile,
+    virtualRasterSource,
+} from './virtual-raster.js'
+export type {
+    VirtualRasterAccessorDescriptor,
+    VirtualRasterAccessorWgslOptions,
+    VirtualRasterAddressSpaceDescriptor,
+    VirtualRasterFieldKind,
+    VirtualRasterFilter,
+    VirtualRasterOuterBoundary,
+    VirtualRasterPageDescriptor,
+    VirtualRasterPageIdentity,
+    VirtualRasterPagePayload,
+    VirtualRasterPageTableEntry,
+    VirtualRasterPhysicalPage,
+    VirtualRasterPlane,
+    VirtualRasterPlaneDescriptor,
+    VirtualRasterSample,
+    VirtualRasterSampleDescriptor,
+    VirtualRasterSampleStatus,
+    VirtualRasterSampleType,
+    VirtualRasterSamplingProfile,
+    VirtualRasterSamplingProfileDescriptor,
+    VirtualRasterSnapshotResolveStatus,
+    VirtualRasterSource,
+    VirtualRasterSourceDescriptor,
+    VirtualRasterSourceLoadContext,
+} from './virtual-raster.js'
+export { VirtualRasterResidency } from './virtual-raster-residency.js'
+export type {
+    VirtualRasterHistoryEntry,
+    VirtualRasterRequestOutcome,
+    VirtualRasterRequestStatus,
+    VirtualRasterResidencyDescriptor,
+    VirtualRasterResidencyFacts,
+} from './virtual-raster-residency.js'
+export {
+    VirtualRasterGpuState,
+    createVirtualRasterGpuState,
+} from './virtual-raster-gpu.js'
+export type {
+    VirtualRasterGpuFacts,
+    VirtualRasterGpuStateDescriptor,
+    VirtualRasterGpuUpdate,
+} from './virtual-raster-gpu.js'
+export {
     GeoQuadNode2D,
     Node2D,
     type MapOptions,
