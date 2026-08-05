@@ -2,7 +2,8 @@
 
 ## 状态
 
-已实施。Implemented by ADR-057。
+已实施。公共拓扑由 ADR-057 实施，Persistent Cache 与 Geo/DEM cache 适配分别由
+ADR-058 和 ADR-059 实施。
 
 ## 日期
 
@@ -12,7 +13,7 @@
 
 GeoScratch 的公共架构收敛为两个概念入口：`scratch` 与 `geo`。
 
-`scratch` 不再只指 GPU execution kernel，而是 GeoScratch 的领域无关基础能力层。GPU、Worker 和后续 Persistent Cache 都是 Scratch 中彼此独立的能力域。`geo` 是建立在 Scratch 之上的地理语义适配层，负责地图、地球、坐标、投影、瓦片和虚拟栅格等模型。
+`scratch` 不再只指 GPU execution kernel，而是 GeoScratch 的领域无关基础能力层。GPU、Worker 和 Persistent Cache 都是 Scratch 中彼此独立的能力域。`geo` 是建立在 Scratch 之上的地理语义适配层，负责地图、地球、坐标、投影、瓦片和虚拟栅格等模型。
 
 这一依赖方向可以概括为：**Geo from the Scratch**。
 
@@ -45,7 +46,9 @@ Geo 可以依赖 Scratch 的公开契约，Scratch 不得依赖 Geo。
 2. Scratch Persistent Cache；
 3. Geo Virtual Raster 与 DEM example 验证。
 
-本文只规定 Goal 1。Goal 1 不实现 Persistent Cache，不迁移 DEM 缓存，也不推进 Flow Layer 的虚拟栅格化。
+三个 goal 均已完成。Goal 2 没有引入第三个公共入口；Goal 3 只把通用 cache
+address/coherence 留在 Geo，并以 DEM example 验证 raw page persistence。Flow Layer
+虚拟栅格化仍不属于这三个 goal。
 
 这种拆分只限制交付范围，不引入临时兼容 API、重复实现或替代性的目标架构。
 
@@ -101,6 +104,7 @@ packages/geoscratch/src/
 ├── scratch.ts
 ├── scratch/
 │   ├── index.ts
+│   ├── cache/
 │   ├── diagnostics/
 │   ├── gpu/
 │   ├── worker/
@@ -113,13 +117,13 @@ packages/geoscratch/src/
     └── virtual-raster/
 ```
 
-Goal 2 将在 `scratch/` 下增加独立的 `cache/` 能力域。
+`scratch/cache/` 已实现独立的持久缓存能力域。
 
 统一公共门面不意味着共享 runtime：
 
 - `GPURuntime` 只拥有 WebGPU adapter/device、GPU resource、pipeline、command、submission 和 GPU diagnostics；
 - `WorkerSystem` 只拥有 Worker、任务、优先级、取消、上下文与 CPU 并发状态；
-- 后续 `PersistentCache` 只拥有 IndexedDB、OPFS、缓存条目和存储生命周期；
+- `PersistentCache` 只拥有 IndexedDB、OPFS、缓存条目和存储生命周期；
 - 不创建统管这些能力的 `ScratchPlatformRuntime`；
 - GPU、Worker 和 Cache 不能调用彼此的内部实现；
 - Geo 或应用按需组合公开能力，不需要某项能力的消费者不得被迫创建它。
@@ -174,7 +178,9 @@ Goal 1 不保留旧类名、旧类型名或旧 export alias。GeoScratch 仍处�
 - virtual-raster addressing、sampling、demand、residency 和 GPU lowering；
 - GeoDiagnostic。
 
-现有 Geo virtual-raster cache 在 Goal 1 中不改写。Goal 2/3 将用 Scratch Persistent Cache 和 Geo address adapter 完整替换它。Goal 1 不得为它新增兼容入口或扩展其公共模型。
+旧 Geo virtual-raster cache 已由 Scratch `PersistentCache` 和 Geo
+`virtualRasterCacheAddress()` 完整替换。Geo adapter 只生成 Scratch key、可 clone
+metadata 与 invalidation prefixes，不拥有存储、预算、LRU 或 lifecycle。
 
 ### 删除
 
@@ -197,6 +203,7 @@ Scratch 提供一个公共、可判别的诊断 envelope：
 type ScratchDiagnostic =
     | GPUDiagnostic
     | WorkerDiagnostic
+    | CacheDiagnostic
 
 type ScratchDiagnosticBase<Domain, Code, Phase, Subject> = Readonly<{
     version: 1
@@ -223,6 +230,10 @@ type ScratchDiagnosticErrorContext =
         domain: 'worker'
         remote?: WorkerRemoteErrorFacts
     }>
+    | Readonly<{
+        domain: 'cache'
+        storage?: CacheStorageErrorFacts
+    }>
 ```
 
 公共统一能力是：
@@ -233,7 +244,9 @@ type ScratchDiagnosticErrorContext =
 - `createScratchDiagnostic()`；
 - `isScratchDiagnosticError()`。
 
-GPU 与 Worker 保留各自的 code、phase、subject、facts 和附加证据。`WorkerDiagnostic` 是统一 union 中 `domain: 'worker'` 的窄化成员，不再拥有平行的 envelope。
+GPU、Worker 与 Cache 保留各自的 code、phase、subject、facts 和附加证据。
+`WorkerDiagnostic` 与 `CacheDiagnostic` 都是统一 union 中可按 `domain` 窄化的成员，
+不再拥有平行 envelope。
 
 `ScratchDiagnosticError` 只统一错误入口。需要随错误携带的领域事实通过与 `diagnostic.domain` 一致的 `ScratchDiagnosticErrorContext` 表达。GPU incident 与 Worker remote facts 不会因此进入对方的生命周期或事实图。
 
@@ -317,6 +330,9 @@ Goal 1 不使用开放式、不断扩张的审查循环。
 
 ## 后续 Goal 边界
 
-Goal 2 在完成本拓扑后实现独立的 Scratch Persistent Cache：IndexedDB 元数据、OPFS raw blocks、不可变 revision、预算、回收和 cache-domain ScratchDiagnostic。
+Goal 2 已实现独立 Scratch Persistent Cache：IndexedDB 元数据、OPFS raw blocks、
+不可变 revision、双预算、回收和 cache-domain `ScratchDiagnostic`。
 
-Goal 3 让 Geo 保持在通用 virtual-raster/virtual-texture 方案边界，并由 DEM example 作为第一个完整消费者验证 raw height 缓存。DEM source、decode、Worker task、mesh-stitching、terrain shader 和 layer lifecycle 始终留在 example。
+Goal 3 已让 Geo 保持在通用 virtual-raster/virtual-texture 适配边界，并由 DEM
+example 作为第一个完整消费者验证 raw height cache。DEM source、decode、Worker
+task、mesh-stitching、terrain shader 和 layer lifecycle 始终留在 example。

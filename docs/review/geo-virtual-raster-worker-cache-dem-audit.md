@@ -3,13 +3,15 @@
 ## Scope
 
 This is the required one-to-one audit for the clean cut from the ADR-055 local DEM
-prototype to the ADR-056 target. It compares the exact baseline liabilities with the
-public contracts, implementation owners, and executable proof. A feature is not
-marked complete merely because a type or ADR exists.
+prototype through the ADR-056 streaming architecture and the ADR-058/059 cache
+replacement. It compares the exact baseline liabilities with the public contracts,
+implementation owners, and executable proof. A feature is not marked complete merely
+because a type or ADR exists.
 
-Audit classification: `completed-with-findings`. All functional, lifecycle, build,
-Python, and browser gates pass, but Finding F-1 records one unmet memory-cache
-representation requirement.
+Audit classification: `implementation-complete`; the Goal 2/3 fixed full gate is
+recorded separately after execution. The former memory-cache representation finding
+is resolved by the ADR-058/059 clean cut rather than hidden behind a compatibility
+tier.
 
 Audited implementation commits:
 
@@ -21,6 +23,10 @@ fd8ef8b Implement WebMercatorQuad virtual addressing
 a62b79e Migrate DEM streaming to WebMercator workers
 3e6425a Separate DEM network and decode budgets
 5b5233a Remove foreign residency accounting facts
+a5c6148 Define Scratch persistent cache and DEM goals
+b5dc94b Define Scratch cache public contract tests
+8c67417 Add Scratch persistent cache and Geo address adapter
+7efe1c2 Integrate persistent raw DEM tile cache
 ```
 
 ## One-To-One Replacement Matrix
@@ -43,9 +49,9 @@ a62b79e Migrate DEM streaming to WebMercator workers
 | Main thread fetched and decoded DEM image pages. | Worker context performs cache lookup, HTTP fetch, image decode, candidate accept/discard, and bounded facts. | `dem-tile-worker.ts`, `dem-worker-source.ts`. | Source scan leaves `createImageBitmap` only in Worker; standard tile traffic and worker counters are observed in Chrome. | Replaced |
 | Residency cloned decoded typed arrays. | Whole backing ArrayBuffer transfer and one-time owned payload adoption; residency moves ownership without clone/slice. | `virtual-raster-transfer.ts`, `virtual-raster-residency.ts`. | Detachment, source scan, identity/adoption tests, and zero sender decoded bytes after transfer. | Replaced |
 | Immutable snapshots retained decoded payloads. | Snapshot holds mapping/fallback/epoch only; `VirtualRasterPublication` exclusively owns finite upload payloads until acknowledgement or abandon. | Residency publication and `VirtualRasterGpuState.stage/acknowledge`. | Snapshot tests find no payload; staging bytes return to zero after GPU observation and at teardown. | Replaced |
-| CPU bytes, cache, staging, and GPU residency were one accounting bucket. | Orthogonal executor pending/decode facts, cache bytes, publication staging bytes, resident GPU bytes, page count, and bounded histories, each reported only by its authority. | Executor/cache/residency/GPU facts; Residency no longer publishes foreign fields as constant false zeroes. | Unit tests reject foreign Residency facts; browser terminal facts prove every actual owner separately returns to zero. | Replaced |
-| Completed-result retention was implicit. | Explicit `none`, byte-bounded decoded `memory`, and bounded encoded IndexedDB `persistent` tiers. | `VirtualRasterCache` and persistent store provide all policies, but DEM currently uses encoded records for both retained tiers. | Browser proves none/memory/persistent retention behavior, but does not prove decoded reuse on a DEM memory hit. | Partial (F-1) |
-| Cache retention implied content correctness and was unsafe for editing. | Independent immutable/revisioned/editable coherence keys; dirty working state remains outside cache. | `VirtualRasterCacheCoherence` and full cache key schema. | Revision change forces a network load; invalidation and key isolation unit/browser tests pass. | Replaced |
+| CPU bytes, cache, staging, and GPU residency were one accounting bucket. | Orthogonal executor pending/decode facts, persistent cache bytes, publication staging bytes, resident GPU bytes, page count, and bounded histories, each reported only by its authority. | Executor/cache/residency/GPU facts; Residency no longer publishes foreign fields as constant false zeroes. | Unit tests reject foreign Residency facts; browser terminal facts prove active operations and transient ownership return to zero while accepted persistent payloads remain until eviction, invalidation, or clear. | Replaced |
+| Completed-result retention was implicit. | Absence of a cache means `none`; independently opened Scratch `PersistentCache` stores bounded raw payloads without a built-in application memory tier. | `scratch/cache/` owns IndexedDB metadata, OPFS raw payloads, LRU budgets, recovery, diagnostics, and lifecycle. Geo owns only `virtualRasterCacheAddress()`. | Dedicated Chrome proof covers raw/meta records, reload, immutable revision, byte/entry LRU, invalidation, GC, repair, clear, storage facts, and disposal. | Replaced |
+| Cache retention implied content correctness and was unsafe for editing. | Independent immutable/revisioned/editable-base coherence keys; dirty working state remains outside cache. | Geo address adapter maps coherence plus source/representation/decoder/schema facts to a Scratch `(id, revision)` key and stable invalidation prefixes. | Revision change misses; prefix invalidation and key isolation unit/browser tests pass. | Replaced |
 | Camera code fanned out requests directly and acted like a fragile `prepare()` state machine. | Idempotent demand generations reconcile retained/new/obsolete pages and expose one settlement promise. | `VirtualRasterRequestScheduler`. | Unit tests cover dedupe, reprioritize, cancellation, stale discard, request budget, and repeated disposal; DEM churn converges to newest camera. | Replaced |
 | Root fallback could be evicted or starved by detail. | Pinned root page plus critical required priority; detail/prefetch remain lower priority. | DEM demand planner and deterministic residency LRU. | Two-page atlas repeatedly evicts detail while root fallback remains available. | Replaced |
 | `/tiles/{z}/{x}/{y}.png` and full-image fallback left two data models. | Only `/tiles/WebMercatorQuad/{matrix}/{row}/{col}.png`; source PNG is offline COG input. | Python service, manifest, client URL builder, server README. | Old/full routes fail, network observer records only standard tiles, and source scan finds no browser PNG fallback. | Deleted |
@@ -69,13 +75,17 @@ a62b79e Migrate DEM streaming to WebMercator workers
 
 ### Cache
 
-- `none`: two source loads, zero retained entries;
-- `memory`: second access is a hit, 8-byte budget retained, one deterministic eviction;
-- `persistent`: IndexedDB entry survives reload, revised content misses, clear releases two
-  entries/eight bytes, persistence denial is reported honestly;
-- quota returns `quota-exceeded`; storage failure uses
-  `GEO_VIRTUAL_RASTER_CACHE_STORAGE_FAILED`;
-- proof deletes its namespace and closes Chrome/Vite.
+- raw payload and metadata-only records survive a new cache instance;
+- caller payload mutation after `put()` cannot change the stored snapshot, and every
+  hit returns a caller-owned buffer;
+- the same immutable key is first-writer-wins while a new revision misses;
+- independent byte and entry budgets enforce deterministic LRU;
+- exact delete, ID-prefix invalidation, clear, stale pending cleanup, and orphan OPFS
+  garbage collection converge;
+- payload loss or size mismatch becomes a structured repair miss;
+- oversize and quota outcomes are explicit, storage failures use cache-domain
+  `ScratchDiagnosticError`, and persistence/estimate facts remain browser observations;
+- repeated dispose is equivalent and later operations fail as `CACHE_DISPOSED`.
 
 ### DEM
 
@@ -84,7 +94,10 @@ a62b79e Migrate DEM streaming to WebMercator workers
 - rapid churn produces four cancellations and four stale results without stale publication;
 - network and decode use independent limits of two and one; observed maxima stay within
   each limit and both active/queued counts return to zero;
-- memory return produces three cumulative hits while network count remains unchanged;
+- camera return produces three cumulative raw-cache hits while network and decode
+  counts remain unchanged;
+- after complete Worker/page disposal, a new lifecycle restores two raw pages with
+  zero network requests, zero image decodes, and no new COG reads;
 - staging bytes, pending candidates, sender decoded bytes, active tasks, native observations,
   warnings, errors, failed required requests, and transparent pixels all settle to zero;
 - terminal Worker/cache/residency/GPU ownership and all managed processes/ports are released.
@@ -108,39 +121,26 @@ The production source scan confirms:
 - Worker source has no Geo/Scratch/DEM/tile dependency;
 - Geo uses the generic Worker priority/execution vocabulary without adding tile operations
   to Worker;
-- Scratch has no new tile, cache, Worker, CRS, virtual-raster, or DEM concept;
+- Scratch Cache has no Worker, GPU, Geo, tile, CRS, virtual-raster, or DEM dependency;
+- Geo cache adaptation has no storage, LRU, budget, database, filesystem, or lifecycle
+  authority;
 - DEM imports library behavior only from public package entrypoints;
 - all added browser/library implementation source is TypeScript and generated `dist` is not
   tracked.
 
-## Remaining Boundaries
+## Resolved Finding And Remaining Boundaries
 
-### Finding F-1: DEM Memory Cache Retains Encoded Bytes
+The former F-1 is resolved by deleting the built-in memory tier and encoded persistent
+store. DEM now persists decode-ready raw height pages in the domain-neutral Scratch
+cache. A network miss makes one bounded raw snapshot because transfer detaches the
+render owner before stale-result acceptance; a hit transfers a fresh OPFS read directly
+and performs no image decode. This does not invent an ownership-moving decoded L1 or
+claim zero-copy persistence.
 
-The current DEM `memory` tier stores validated PNG bytes in its Worker-local bounded
-cache. A camera return therefore avoids another HTTP request, but the hit still passes
-through `createImageBitmap` and channel extraction. This does not meet the goal's
-literal requirement that the memory tier retain an immutable decoded payload.
-
-The cause is an unresolved ownership transition: transferring a decoded `ArrayBuffer`
-to the main thread detaches it from the Worker, while keeping it in both places would
-require the prohibited second payload clone. Correct resolution is a representation-
-aware cache split: source-neutral encoded L2 plus an ownership-moving decoded L1 whose
-entry leases its one payload to Residency and receives it back only after the relevant
-Scratch upload has a settled `SubmittedWork`. The cache key must retain decoder/sample
-identity, an in-flight lease must deduplicate requests, eviction must wait for or cancel
-the lease explicitly, and no path may alias or clone the decoded backing buffer.
-
-This finding does not affect DEM correctness, orientation, seams, cancellation,
-bounded memory, GPU residency, or current example usability. It affects repeated-decode
-CPU cost after a page leaves the GPU atlas. The exact unmet gate is the decoded-payload
-clause under the goal's `memory` cache semantics, so the audit outcome is
-`completed-with-findings`, not `verified-clean`.
-
-The following are explicit non-goals rather than hidden partial implementations:
+The following remain explicit non-goals rather than hidden partial implementations:
 
 - visible `flowLayer` migration;
-- OPFS or CacheStorage backends;
+- application JS memory cache or Service Worker CacheStorage;
 - collaborative edit protocol or editor UI;
 - a complete CRS engine or OGC API Tiles server;
 - WebGPU native sparse textures, which are not currently available;

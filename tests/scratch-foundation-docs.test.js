@@ -45,7 +45,9 @@ describe('Scratch foundation docs', () => {
             expect(adr, fact).to.include(fact)
         }
         expect(adr).to.include('supersedes ADR-056 only for Worker public topology')
-        expect(topology).to.include('Implemented by ADR-057')
+        for (const decision of [ 'ADR-057', 'ADR-058', 'ADR-059' ]) {
+            expect(topology, decision).to.include(decision)
+        }
     })
 
     it('uses only the three approved package import forms in user-facing docs', () => {

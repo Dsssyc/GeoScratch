@@ -59,8 +59,29 @@ import { MercatorCoordinate, WebMercatorQuad } from 'geoscratch/geo'
 ```
 
 Scratch 是领域无关的 TypeScript source-first 基础能力层，Geo 在其上适配地理
-语义；单向依赖可以概括为 **Geo from the Scratch**。`WorkerSystem` 与 `GPURuntime`
-保持独立构造，不共享可变状态或 lifecycle authority。
+语义；单向依赖可以概括为 **Geo from the Scratch**。`WorkerSystem`、
+`PersistentCache` 与 `GPURuntime` 保持独立构造，不共享可变状态或 lifecycle
+authority。
+
+## Scratch Persistent Cache
+
+```js
+import { PersistentCache, persistentCacheKey } from 'geoscratch/scratch'
+
+const cache = await PersistentCache.open({
+    namespace: 'my-dataset-v1',
+    maxPayloadBytes: 128 * 1024 * 1024,
+    maxEntries: 2048,
+})
+const key = persistentCacheKey({ id: 'object/42', revision: 'v1' })
+await cache.put(key, { metadata: { format: 'raw' }, payload: bytes.buffer })
+const result = await cache.get(key)
+await cache.dispose()
+```
+
+IndexedDB 保存 metadata 与权威 commit record，OPFS 保存可选 immutable raw
+payload。hit 返回 caller-owned buffer。Cache 不依赖 Worker、GPU 或 Geo，不包含隐藏
+memory tier，也不提供 Buffer/Texture 转换 API。
 
 ## Scratch 异步资源分配
 

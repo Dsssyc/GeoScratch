@@ -65,9 +65,9 @@ Scratch 是领域无关的 TypeScript source-first 基础能力层，Geo 在其�
 ## Geo Streaming 与 Worker
 
 `geoscratch/geo` 公开 OGC `WebMercatorQuad`、有限 `TileMatrixLimits`、高精度
-canonical coordinate、虚拟栅格 demand/residency、显式 `none`/memory/IndexedDB
-缓存策略、owned page transfer 与 Scratch GPU publication。全局瓦片身份通过数据源
-的 compact coverage 映射，不会创建覆盖整个世界的 dense page table。
+canonical coordinate、虚拟栅格 demand/residency、纯 cache address/coherence adapter、
+owned page transfer 与 Scratch GPU publication。全局瓦片身份通过数据源的 compact
+coverage 映射，不会创建覆盖整个世界的 dense page table。
 
 从 `geoscratch/scratch` 导入的 `WorkerSystem` 是独立且需要显式构造的线程抽象。
 它支持 URL module、自定义 operation、有界优先级 group、cooperative/hard
@@ -76,9 +76,36 @@ cancellation、stale-result rejection、stateful context、Transferable 所有�
 tile、DEM 或 GPU。
 
 DEM Layer 是这条路径的可执行参考：terrain demand 在 Worker 中获取和解码标准
-WebMercatorQuad tile，将 decoded page 转移到有限 atlas，并在 vertex shader 中进行
-跨页逻辑过滤和 parent fallback。源 PNG 只用于离线构建 COG；浏览器没有完整图片或
-旧瓦片路径回退。
+WebMercatorQuad tile，通过 Scratch Cache 持久化可直接使用的 raw height page，将
+page 转移到有限 atlas，并在 vertex shader 中进行跨页逻辑过滤和 parent fallback。
+源 PNG 只用于离线构建 COG；浏览器没有完整图片或旧瓦片路径回退。
+
+## Scratch Persistent Cache
+
+`PersistentCache` 与 Worker、GPU、Geo 相互独立。IndexedDB 保存结构化 metadata 并
+作为权威 commit point；可选 raw `ArrayBuffer` 以 immutable `(id, revision)` key
+存入 OPFS：
+
+```js
+import { PersistentCache, persistentCacheKey } from 'geoscratch/scratch'
+
+const cache = await PersistentCache.open({
+    namespace: 'my-dataset-v1',
+    maxPayloadBytes: 128 * 1024 * 1024,
+    maxEntries: 2048,
+})
+const key = persistentCacheKey({ id: 'tiles/10/843/418', revision: 'source-v3' })
+await cache.put(key, {
+    metadata: { format: 'raw/uint8', width: 256, height: 256 },
+    payload: decodedBytes.buffer,
+})
+const result = await cache.get(key)
+await cache.dispose()
+```
+
+Cache 会 snapshot 调用方输入，hit 时返回新的 caller-owned buffer，因此可以安全
+transfer。它没有隐藏 memory tier，也不提供 Buffer/Texture 转换 API；这些策略和
+转换由 application 持有。不创建 cache 就是显式 no-cache mode。
 
 ## Scratch 异步资源分配
 

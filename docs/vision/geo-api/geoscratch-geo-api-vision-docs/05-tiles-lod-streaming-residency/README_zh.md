@@ -1,7 +1,7 @@
 # Tiles、LoD、Streaming 与 Residency
 
-状态: Vision draft，当前基础契约由 ADR-055 和 ADR-056 冻结
-日期: 2026-08-05
+状态: Vision draft，当前基础契约由 ADR-055、ADR-056、ADR-058 和 ADR-059 冻结
+日期: 2026-08-06
 
 ## 决策
 
@@ -17,7 +17,8 @@ canonical high-precision position
     -> transient TileMatrixSet sample address
     -> idempotent demand generation
     -> generic WorkerSystem request execution
-    -> explicit cache tier and coherence
+    -> Geo cache address/coherence adapter
+    -> optional Scratch PersistentCache raw lookup
     -> unique owned decoded payload
     -> bounded staging publication
     -> Scratch upload and SubmittedWork acknowledgement
@@ -27,15 +28,16 @@ canonical high-precision position
 
 ## 冻结的所有权边界
 
-- `geoscratch/scratch` 只拥有通用 Dedicated Worker、module、group、task、priority、
-  cancellation、stateful context、Transferable、remote error 和有界诊断。它不认识
-  Geo、Scratch、tile、camera 或 DEM。
+- `geoscratch/scratch` 分别拥有通用 Dedicated Worker 与 Persistent Cache 能力。
+  Worker 管理 module、group、task、priority、cancellation、stateful context、
+  Transferable、remote error 和有界诊断；Cache 管理 IndexedDB metadata、OPFS raw
+  payload、预算、回收与存储诊断。两者不共享状态，也不认识 Geo、tile、camera 或 DEM。
 - `geoscratch/geo` 拥有 TileMatrixSet、canonical address translation、virtual raster、
-  demand、source/cache policy、request adapter、residency、snapshot、fallback 与 GPU
-  lowering。
-- Scratch 只拥有 WebGPU resource、command、submission、epoch 与 GPU diagnostics。
+  demand、cache address/coherence adapter、request adapter、residency、snapshot、
+  fallback 与 GPU lowering。
+- Scratch GPU 域只拥有 WebGPU resource、command、submission、epoch 与 GPU diagnostics。
 - example 或上层 source adapter 拥有数据 URL、业务展示范围、camera selection、
-  source revision、cache policy 选择和最终 presentation。
+  source revision、是否创建 PersistentCache、缓存预算和最终 presentation。
 
 缓存不是数据真相，GPU residency 不是缓存，in-flight 去重不是 completed cache，
 editable working state 也不是缓存。
@@ -139,7 +141,7 @@ fingerprint 与成功 reset 契约。
 | --- | --- |
 | Demand | generation、required/prefetch、priority、retained/cancelled/dropped |
 | Worker task | queued/active/completed/cancelled/stale/failed、phase、context affinity |
-| Cache | tier、hit/miss、bytes、eviction、invalidation、quota、persistence grant |
+| Cache | mode、entry/payload bytes、hit/miss、eviction、invalidation、quota、persistence grant |
 | Payload ownership | worker-owned、transferred、adopted、staged、released |
 | Residency | missing/staged/resident、slot generation、pin、fallback、eviction |
 | Publication | pending/settling/acknowledged/abandoned、snapshot epoch、staging bytes |
@@ -149,37 +151,29 @@ fingerprint 与成功 reset 契约。
 
 ## Cache 与 coherence
 
-当前 cache policy 是显式选择:
+Cache 是否存在由 application 显式决定。`none` 表示不创建 cache；`persistent`
+表示 application 以 namespace、payload byte budget、entry budget 和 persistence
+request 打开独立的 Scratch `PersistentCache`。Scratch 不提供默认或隐藏的 JS memory
+cache，快速内存缓存仍是业务策略。
 
-```ts
-type VirtualRasterCachePolicy =
-    | { tier: 'none' }
-    | { tier: 'memory', maxBytes: number }
-    | {
-        tier: 'persistent'
-        memoryMaxBytes: number
-        persistentMaxBytes: number
-        backend: 'indexeddb'
-        namespace: string
-      }
-```
+Scratch cache 只理解 `(id, revision)`、structured-clone metadata 与可选 raw
+`ArrayBuffer`。IndexedDB 是 metadata 和 commit point，OPFS 保存 immutable raw block；
+不存在跨二者的虚构事务。pending journal、随机 payload ID、read repair 与显式 GC
+使中断状态可判定、可回收。cache hit 返回新的 caller-owned buffer，因而可以安全
+transfer。
 
-`none` 不保留 completed result；`memory` 是 deterministic byte-bounded LRU；
-`persistent` 使用 IndexedDB 作为有界 L2，并如实报告 quota、usage 和
-`navigator.storage.persist()` 结果。所有 tier 都可以保留短生命周期的 in-flight
-dedupe 与 upload staging，但这不能计作 cache hit。
+Geo 的 `virtualRasterCacheAddress()` 只把 source、matrix set、matrix、row、column、
+plane/band、source/payload representation、decoder、sample type、schema 和 coherence
+映射为 Scratch key、metadata 与 invalidation prefixes。coherence 独立表达
+`immutable(contentVersion)`、`revisioned(revision, validator)` 和
+`editable(baseRevision)`。dirty edit 由 working-state authority 持有；clear cache
+不得丢弃未提交编辑，旧 base 也不得覆盖新 content epoch。
 
-coherence 独立表达 `immutable(contentVersion)`、`revisioned(revision, validator)`
-和 `editable(baseRevision)`。cache key 必须包含 source、matrix set、matrix、row、
-column、plane/band、revision、encoded representation、decoder、sample type 与 schema。
-dirty edit 由 working-state authority 持有；clear cache 不得丢弃未提交编辑，旧 base
-也不得覆盖新 content epoch。
-
-当前 DEM `memory` tier 仍保留 encoded PNG，并在 GPU eviction 后重新 decode；这只能
-算 source cache hit，不能冒充 decoded cache hit。目标模型需要进一步区分
-source-neutral encoded L2 与 ownership-moving decoded L1。decoded L1 必须把唯一 payload
-以 lease 方式移交给 Residency，并在对应 Scratch upload 的 `SubmittedWork` settled 后
-收回；禁止为了同时保留 cache 和 transfer 而复制第二份 decoded backing buffer。
+当前 DEM 持久化的是 decode-ready `raw/uint8` height page。首次 network miss 在 Worker
+中 decode 一次；scheduler 接受当前结果后提交受限 raw snapshot。后续 camera return
+以及新 Worker lifecycle 的 hit 都直接 transfer raw payload，不再请求网络或执行图片
+decode。这里的一次 miss-path snapshot 是 transfer detachment 与 stale-result acceptance
+之间的必要 ownership 边界，不是常驻 memory tier。
 
 ## Transfer、Staging 与 Snapshot
 
@@ -243,6 +237,6 @@ bind-group invalidation，不把 Worker/tile/cache 概念注入 Scratch，也不
 - 不把 tile 设计成 material、scene node 或 render object。
 - 不让 layer 持有隐藏 cache 或 Worker singleton。
 - 不把 dirty editable state 当作可逐出的 cache entry。
-- 不要求 OPFS、SharedArrayBuffer、Service Worker CacheStorage 或 WebGPU native sparse texture。
+- 不要求 SharedArrayBuffer、Service Worker CacheStorage 或 WebGPU native sparse texture。
 - 不声称当前基础已经迁移可见 Flow layer；动态 Flow proof 只证明通用契约可表达。
 - 不让 AI 通过 console 或网络全集猜测调度、fallback、ownership 或终止状态。

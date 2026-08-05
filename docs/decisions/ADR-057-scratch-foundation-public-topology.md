@@ -75,7 +75,7 @@ Scratch public facade, but they do not share mutable runtime state.
   priority, cancellation, contexts, transfer protocol, failure convergence, and
   reclamation.
 - Geometry factories are stateless Scratch helpers.
-- A later Persistent Cache capability will own browser storage state independently.
+- `PersistentCache` owns browser storage state independently, as accepted by ADR-058.
 
 No aggregate `ScratchRuntime` or `ScratchPlatformRuntime` is introduced. Consumers
 construct only the authorities they need and compose them at application or Geo
@@ -86,7 +86,7 @@ boundaries.
 Scratch exposes one machine-readable, domain-discriminated diagnostic family:
 
 ```ts
-type ScratchDiagnostic = GPUDiagnostic | WorkerDiagnostic
+type ScratchDiagnostic = GPUDiagnostic | WorkerDiagnostic | CacheDiagnostic
 ```
 
 `ScratchDiagnosticError`, `createScratchDiagnostic()`,
@@ -117,12 +117,12 @@ unchanged.
 
 ### Explicit Exclusions
 
-Goal 1 ends at the Scratch/Geo topology and TypeScript clean cut.
+Goal 1 ended at the Scratch/Geo topology and TypeScript clean cut.
 
-- Goal 2 will define the independent Scratch Persistent Cache capability and its
-  IndexedDB/OPFS contracts.
-- Goal 3 will adapt Geo virtual-raster caching and validate the DEM example against
-  that capability.
+- Goal 2 is implemented by ADR-058: the independent Scratch Persistent Cache uses
+  IndexedDB metadata and OPFS raw payloads.
+- Goal 3 is implemented by ADR-059: Geo supplies a pure virtual-raster cache address
+  adapter and DEM validates persistent raw-page reuse.
 - This decision does not migrate DEM caching, redesign virtual-raster residency, or
   make Flow Layer virtual-raster aware.
 

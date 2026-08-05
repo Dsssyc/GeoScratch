@@ -66,10 +66,10 @@ as **Geo from the Scratch**.
 ## Geo Streaming And Workers
 
 `geoscratch/geo` exposes OGC `WebMercatorQuad`, finite `TileMatrixLimits`,
-high-precision canonical coordinates, virtual-raster demand and residency, explicit
-`none`/memory/IndexedDB cache policies, owned page transfer, and Scratch GPU
-publication. Global tile identity is mapped through compact source coverage rather
-than a dense world page table.
+high-precision canonical coordinates, virtual-raster demand and residency, a pure
+cache address/coherence adapter, owned page transfer, and Scratch GPU publication.
+Global tile identity is mapped through compact source coverage rather than a dense
+world page table.
 
 `WorkerSystem`, imported from `geoscratch/scratch`, is an independent, explicitly
 constructed thread abstraction. It accepts URL-loaded custom modules, bounded
@@ -79,10 +79,39 @@ shares no mutable state or lifecycle authority with `GPURuntime` and has no Geo,
 tile, DEM, or GPU dependency.
 
 The DEM Layer is the executable reference path: terrain demand resolves standard
-WebMercatorQuad tiles in Workers, transfers decoded pages into a finite atlas, and
-samples them logically in the vertex shader with cross-page filtering and parent
-fallback. The source PNG is only an offline COG build input; the browser has no
-full-image or legacy-tile fallback.
+WebMercatorQuad tiles in Workers, persists decode-ready raw height pages through
+Scratch Cache, transfers pages into a finite atlas, and samples them logically in
+the vertex shader with cross-page filtering and parent fallback. The source PNG is
+only an offline COG build input; the browser has no full-image or legacy-tile
+fallback.
+
+## Scratch Persistent Cache
+
+`PersistentCache` is independent from Worker, GPU, and Geo. IndexedDB stores
+structured metadata and is the authoritative commit point; optional raw
+`ArrayBuffer` payloads live in OPFS under immutable `(id, revision)` keys:
+
+```js
+import { PersistentCache, persistentCacheKey } from 'geoscratch/scratch'
+
+const cache = await PersistentCache.open({
+    namespace: 'my-dataset-v1',
+    maxPayloadBytes: 128 * 1024 * 1024,
+    maxEntries: 2048,
+})
+const key = persistentCacheKey({ id: 'tiles/10/843/418', revision: 'source-v3' })
+await cache.put(key, {
+    metadata: { format: 'raw/uint8', width: 256, height: 256 },
+    payload: decodedBytes.buffer,
+})
+const result = await cache.get(key)
+await cache.dispose()
+```
+
+The cache snapshots caller input and returns a new caller-owned buffer on a hit, so
+it can be transferred. It has no hidden memory tier and no Buffer/Texture conversion
+API; applications own those policies and conversions. Omitting cache construction is
+the explicit no-cache mode.
 
 ## Scratch Async Resource Allocation
 

@@ -60,8 +60,28 @@ import { MercatorCoordinate, WebMercatorQuad } from 'geoscratch/geo'
 
 Scratch is the domain-neutral TypeScript source-first capability foundation; Geo
 adapts those contracts for geographic semantics. The one-way dependency is summarized
-as **Geo from the Scratch**. `WorkerSystem` and `GPURuntime` remain independently
-constructed and share no mutable state or lifecycle authority.
+as **Geo from the Scratch**. `WorkerSystem`, `PersistentCache`, and `GPURuntime`
+remain independently constructed and share no mutable state or lifecycle authority.
+
+## Scratch Persistent Cache
+
+```js
+import { PersistentCache, persistentCacheKey } from 'geoscratch/scratch'
+
+const cache = await PersistentCache.open({
+    namespace: 'my-dataset-v1',
+    maxPayloadBytes: 128 * 1024 * 1024,
+    maxEntries: 2048,
+})
+const key = persistentCacheKey({ id: 'object/42', revision: 'v1' })
+await cache.put(key, { metadata: { format: 'raw' }, payload: bytes.buffer })
+const result = await cache.get(key)
+await cache.dispose()
+```
+
+IndexedDB stores metadata and the authoritative commit record; OPFS stores optional
+immutable raw payloads. Hits return caller-owned buffers. Cache has no Worker, GPU,
+or Geo dependency, no hidden memory tier, and no Buffer/Texture conversion API.
 
 ## Scratch Async Resource Allocation
 

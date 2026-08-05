@@ -3,8 +3,9 @@
 ## Audit Status
 
 The DEM example is the first visible consumer of the high-precision coordinate,
-standard TileMatrixSet, generic Worker, explicit cache, owned-transfer, finite
-residency, and Scratch publication contracts accepted by ADR-055 and ADR-056. Its
+standard TileMatrixSet, generic Worker, Scratch Persistent Cache, owned-transfer,
+finite residency, and Scratch publication contracts accepted by ADR-055, ADR-056,
+ADR-058, and ADR-059. Its
 single normal path uses OGC `WebMercatorQuad`; the earlier local raster pyramid is
 not retained as a fallback or feature flag.
 
@@ -48,7 +49,7 @@ and source-parity facts explicit.
 | Bilinear samples cross logical page boundaries and resolve parents. | Generated accessor resolves each footprint texel through compact coverage and immutable page-table entries. Mixed parent fallback recomputes weights at the resolved level; a residency-aware guard band smooths LoD transitions. | Cross-page/fallback unit tests and page-boundary pixel contrast limits. | Strengthened | Manual logical bilinear requires multiple table/atlas loads. |
 | COG output is source-equivalent and correctly oriented. | `build.py` records source facts and standard matrix limits; `service.py` uses morecantile/rio-tiler semantics and top-left rows. | 11 Python tests cover corners, center, random samples, edge/error routes, validators, and orientation; rio-cogeo validates the result. | Verified | Backend is an example adapter, not full OGC API Tiles. |
 | Camera churn cannot publish obsolete pages. | Generation reconciliation aborts obsolete requests and rejects late results before cache commit or residency stage. | Constrained browser proof observes four cancellations and four stale results while final camera facts match the newest demand. | Strengthened | Synchronous Worker code is only rejectable after it yields. |
-| Cache behavior is explicit and bounded. | DEM selects `none`, byte-bounded `memory`, or IndexedDB `persistent`; encoded bytes are cache records while decoded bytes remain staging. | DEM memory return increases hits without a new network request; the dedicated cache proof covers all tiers, reload, revision, quota, clear, and persistence facts. | Partial (F-1) | Memory hits still repeat image decode; an ownership-moving decoded L1 is not implemented. OPFS remains a non-goal. |
+| Cache behavior is explicit, bounded, and decode-ready. | DEM selects `none` or Scratch `persistent`; Geo maps raster facts to immutable cache addresses while IndexedDB commits metadata and OPFS stores raw uint8 height pages. | Camera return increases raw-cache hits without network or decode; a fresh Worker/page lifecycle restores two pages with zero network requests and zero image decodes. The dedicated Scratch cache proof covers metadata-only records, reload, revision, dual-budget LRU, invalidation, repair, GC, clear, storage facts, and disposal. | Replaced | Application-level JS memory cache is intentionally outside Scratch and DEM. |
 | Lifecycle teardown is singular and ordered. | DEM lifecycle stops demand, settles/cancels requests, releases Worker contexts/system/cache/residency/GPU state, then releases Scratch and MapLibre. | Pause-and-drain, double-dispose equivalence, zero terminal tasks/contexts/cache/staging/native observations, and closed owned processes/ports. | Strengthened | Device-loss recovery is not claimed. |
 
 ## Constrained Browser Evidence
@@ -66,14 +67,17 @@ The observed run included:
   and zero queued/active phase work after settlement;
 - two resident physical pages, repeated eviction/fallback, and zero staging bytes
   after each acknowledgement;
-- a memory-cache return hit without increasing the network-request counter;
+- three persistent raw-cache return hits without increasing network or decode counters;
+- a fresh Worker/page lifecycle restoring two raw pages with zero network requests,
+  zero image decodes, and no additional COG window reads;
 - page-boundary contrast runs of 1 vertical pixel and 25 horizontal pixels, below
   the proof threshold, with zero transparent pixels;
 - identical page-boundary, return-camera, and repeated-static screenshot hashes;
 - zero console warnings/errors, page errors, required request failures, uncaptured
   WebGPU errors, device losses, or pending native observations;
-- terminal Worker system/group/context counts, cache bytes, residency entries,
-  staging bytes, browser, Vite, tile server, and owned ports all at zero/closed.
+- terminal Worker system/group/context counts, active cache operations, residency
+  entries, staging bytes, browser, Vite, tile server, and owned ports all at
+  zero/closed. Persisted cache bytes remain by design until invalidated or cleared.
 
 ## Known Depth Limitation
 
