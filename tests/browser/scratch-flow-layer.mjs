@@ -19,6 +19,14 @@ const expectedDisplayExtent = Object.freeze([
     32.08401085804678,
 ])
 const timeout = positiveInteger(process.env.FLOW_LAYER_BROWSER_TIMEOUT_MS, 120_000)
+const browserShutdownTimeout = positiveInteger(
+    process.env.FLOW_LAYER_BROWSER_SHUTDOWN_TIMEOUT_MS,
+    30_000
+)
+const browserKillTimeout = positiveInteger(
+    process.env.FLOW_LAYER_BROWSER_KILL_TIMEOUT_MS,
+    5_000
+)
 const outputDirectory = resolve(
     process.env.FLOW_LAYER_BROWSER_OUTPUT ?? '/tmp/geoscratch-flow-layer-browser'
 )
@@ -47,8 +55,10 @@ if (proofFrames < 660) throw new TypeError('FLOW_LAYER_PROOF_FRAMES must be at l
 
 await mkdir(outputDirectory, { recursive: true })
 const vite = startVite(port)
+let browserServer
 let browser
 let browserVersion
+let browserLifecycle
 let adapter
 let normalProof
 let boundaryProof
@@ -59,11 +69,12 @@ let serverClosed = false
 
 try {
     await waitForVite(vite, `${baseUrl}/flowLayer/index.html`)
-    browser = await chromium.launch({
+    browserServer = await chromium.launchServer({
         channel: 'chrome',
         headless: false,
         args: [ '--enable-unsafe-webgpu' ],
     })
+    browser = await chromium.connect(browserServer.wsEndpoint())
     browserVersion = await browser.version()
     const verified = await verifyNormalFlow(browser)
     adapter = verified.adapter
@@ -78,7 +89,15 @@ try {
 } finally {
     const cleanupFailures = []
     try {
-        if (browser !== undefined) await withTimeout(browser.close(), 5_000, 'Chrome shutdown')
+        if (browserServer !== undefined) {
+            browserLifecycle = await closeBrowserServer(browserServer, browser)
+            if (!browserLifecycle.graceful) {
+                cleanupFailures.push(browserLifecycle.gracefulError)
+            }
+            if (browserLifecycle.forcedError !== undefined) {
+                cleanupFailures.push(browserLifecycle.forcedError)
+            }
+        }
     } catch (error) {
         cleanupFailures.push(serializeError(error))
     }
@@ -103,6 +122,7 @@ const failures = validateResult({
     fatalError,
     cleanupError,
     serverClosed,
+    browserLifecycle,
 })
 const result = {
     schemaVersion: 1,
@@ -111,6 +131,7 @@ const result = {
     proofFrames,
     baseUrl,
     outputDirectory,
+    browserLifecycle,
     vite: {
         pid: vite.child.pid,
         exitCode: vite.child.exitCode,
@@ -567,6 +588,13 @@ function validateResult(result) {
     const failures = []
     if (result.fatalError !== undefined) failures.push(`browser probe failed: ${result.fatalError}`)
     if (result.cleanupError !== undefined) failures.push(`cleanup failed: ${result.cleanupError}`)
+    if (result.browserLifecycle === undefined) {
+        failures.push('managed Chrome lifecycle facts were not produced')
+    } else if (!result.browserLifecycle.graceful || result.browserLifecycle.forced ||
+        !result.browserLifecycle.browserDisconnected ||
+        !result.browserLifecycle.browserProcessExited) {
+        failures.push('managed Chrome did not close gracefully with its process observed')
+    }
     if (!result.serverClosed) failures.push(`managed Vite port ${port} remained open after cleanup`)
     if (result.adapter?.available !== true) failures.push('navigator.gpu was unavailable')
     if (result.adapter?.adapterAvailable !== true) failures.push('WebGPU adapter was unavailable')
@@ -1131,6 +1159,78 @@ async function waitForPortClosed(selectedPort) {
     return false
 }
 
+async function closeBrowserServer(browserServer, connectedBrowser) {
+
+    const browserProcess = browserServer.process()
+    const startedAt = performance.now()
+    let forced = false
+    let gracefulError
+    let forcedError
+    void browserServer.close().catch((error) => {
+        gracefulError = serializeError(error)
+    })
+    let browserProcessExited = await waitForBrowserProcessExit(
+        browserProcess,
+        browserShutdownTimeout
+    )
+    if (!browserProcessExited) {
+        forced = true
+        void browserServer.kill().catch((error) => {
+            forcedError = serializeError(error)
+        })
+        browserProcessExited = await waitForBrowserProcessExit(
+            browserProcess,
+            browserKillTimeout
+        )
+        if (!browserProcessExited) {
+            try {
+                browserProcess.kill('SIGKILL')
+            } catch (error) {
+                forcedError = serializeError(error)
+            }
+            browserProcessExited = await waitForBrowserProcessExit(
+                browserProcess,
+                browserKillTimeout
+            )
+        }
+        if (!browserProcessExited) {
+            forcedError ??=
+                `Chrome process ${browserProcess.pid} did not exit after forced cleanup.`
+        }
+    }
+    const graceful = !forced && gracefulError === undefined &&
+        browserProcessExited && browserProcess.exitCode === 0 &&
+        browserProcess.signalCode === null
+    return Object.freeze({
+        pid: browserProcess.pid,
+        graceful,
+        forced,
+        gracefulError,
+        forcedError,
+        browserDisconnected: connectedBrowser === undefined || !connectedBrowser.isConnected(),
+        browserProcessExited,
+        exitCode: browserProcess.exitCode,
+        signalCode: browserProcess.signalCode,
+        elapsedMs: performance.now() - startedAt,
+    })
+}
+
+async function waitForBrowserProcessExit(browserProcess, milliseconds) {
+
+    if (browserProcess.exitCode !== null || browserProcess.signalCode !== null) return true
+    return await new Promise((resolvePromise) => {
+        const timer = setTimeout(() => {
+            browserProcess.off('exit', onExit)
+            resolvePromise(false)
+        }, milliseconds)
+        const onExit = () => {
+            clearTimeout(timer)
+            resolvePromise(true)
+        }
+        browserProcess.once('exit', onExit)
+    })
+}
+
 async function canConnect(selectedPort) {
 
     return await new Promise((resolvePromise) => {
@@ -1169,24 +1269,6 @@ function pushBounded(target, value) {
 function serializeError(error) {
 
     return error instanceof Error ? error.stack ?? error.message : String(error)
-}
-
-async function withTimeout(promise, milliseconds, label) {
-
-    let timer
-    try {
-        return await Promise.race([
-            promise,
-            new Promise((resolvePromise, rejectPromise) => {
-                timer = setTimeout(
-                    () => rejectPromise(new Error(`${label} exceeded ${milliseconds} ms.`)),
-                    milliseconds
-                )
-            }),
-        ])
-    } finally {
-        clearTimeout(timer)
-    }
 }
 
 function delay(milliseconds) {

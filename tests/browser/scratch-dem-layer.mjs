@@ -33,6 +33,7 @@ const requiredProvenanceNames = Object.freeze([
     'terrain-arguments-upload-to-terrain-draw',
     'lod-map-pass-to-terrain-draw',
 ])
+const optionalProvenanceName = 'virtual-page-table-upload-to-terrain-draw'
 const failureScenarios = Object.freeze([
     'after-map-acquisition',
     'invalid-terrain-shader-wgsl',
@@ -691,11 +692,16 @@ function validateDemFacts(label, facts, failures, expectedStatus = 'ready') {
         }
     }
     const provenance = parseJson(facts.provenance, `${label} provenance`, failures)
-    if (!Array.isArray(provenance) || provenance.length !== requiredProvenanceNames.length) {
-        failures.push(`${label} provenance did not contain five exact chains`)
+    if (!Array.isArray(provenance) ||
+        provenance.length < requiredProvenanceNames.length ||
+        provenance.length > requiredProvenanceNames.length + 1) {
+        failures.push(`${label} provenance did not contain the exact required chains`)
     } else {
         for (const [ index, chain ] of provenance.entries()) {
-            if (chain.name !== requiredProvenanceNames[index]) {
+            const expectedName = index < requiredProvenanceNames.length
+                ? requiredProvenanceNames[index]
+                : optionalProvenanceName
+            if (chain.name !== expectedName) {
                 failures.push(`${label} provenance chain ${index} was incorrect`)
             }
             if (chain.declaredContentEpoch !== 'current-at-step') {

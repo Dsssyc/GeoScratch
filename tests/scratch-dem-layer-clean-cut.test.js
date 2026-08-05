@@ -424,6 +424,7 @@ describe('DEM Layer clean cut', () => {
         const demBytes = fs.readFileSync(path.join(root, 'examples', 'demLayer', 'assets', 'dem.png'))
         const lodShader = read('examples', 'demLayer', 'shaders', 'lod-map.wgsl')
         const terrainShader = read('examples', 'demLayer', 'shaders', 'terrain-mesh.wgsl')
+        const browserProof = read('tests', 'browser', 'scratch-dem-layer.mjs')
 
         expect(sha256(demBytes)).to.equal('aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1')
         expect(sha256(lodShader.replaceAll('var<storage, read>', 'var<storage>')))
@@ -442,6 +443,12 @@ describe('DEM Layer clean cut', () => {
         expect(layer).not.to.include('createExternalImageUploadCommand')
         expect(layer).not.to.include('DEM elevation texture')
         expect(main).not.to.include("./assets/dem.png")
+        expect(browserProof).to.include(
+            "const optionalProvenanceName = 'virtual-page-table-upload-to-terrain-draw'"
+        )
+        expect(browserProof).to.include(
+            'provenance.length > requiredProvenanceNames.length + 1'
+        )
     })
 
     it('observes issued native work before surfacing a provenance failure', async() => {

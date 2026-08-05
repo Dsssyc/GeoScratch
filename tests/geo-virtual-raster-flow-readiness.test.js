@@ -28,6 +28,20 @@ describe('Geo virtual-raster Flow readiness contract', () => {
         expect(browser).to.include('value.sourceFacts.modifiesVisibleFlowLayer')
     })
 
+    it('owns the existing Flow regression Chrome process through BrowserServer', () => {
+
+        const regression = read('tests', 'browser', 'scratch-flow-layer.mjs')
+
+        expect(regression).to.include('chromium.launchServer({')
+        expect(regression).to.include('browserServer.process()')
+        expect(regression).to.include('browserServer.close()')
+        expect(regression).to.include('browserServer.kill()')
+        expect(regression).to.include('waitForBrowserProcessExit(browserProcess')
+        expect(regression).to.include('browserProcess.exitCode === 0')
+        expect(regression).to.include('browserProcessExited')
+        expect(regression).not.to.include('chromium.launch({')
+    })
+
     it('uses workgroup reduction and records every bounded proof fact', () => {
 
         expect(fixture).to.include('var<workgroup> workgroup_counters')
