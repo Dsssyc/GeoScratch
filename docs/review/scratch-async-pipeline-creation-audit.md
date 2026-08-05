@@ -173,7 +173,7 @@ because that would silently pretend the APIs share semantics.
 
 ## Old-To-New Functional Parity
 
-The comparison uses `0de026b:packages/geoscratch/src/scratch/pipeline.ts` as the
+The comparison uses `0de026b:packages/geoscratch/src/scratch/gpu/pipeline.ts` as the
 last synchronous implementation. Every old descriptor field has one current
 snapshot and native-lowering path.
 

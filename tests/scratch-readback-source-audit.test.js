@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { expect } from 'chai'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch')
+const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch', 'gpu')
 const readbackFiles = [
     'readback.ts',
     'readback-staging.ts',
@@ -25,7 +25,7 @@ function callSites(pattern) {
         const source = fs.readFileSync(path.join(scratchRoot, file), 'utf8')
         for (const [index, line] of source.split('\n').entries()) {
             if (pattern.test(line)) {
-                sites.push(`packages/geoscratch/src/scratch/${file}:${index + 1}`)
+                sites.push(`packages/geoscratch/src/scratch/gpu/${file}:${index + 1}`)
             }
         }
     }
@@ -45,19 +45,19 @@ describe('scratch readback source and attribution audit', () => {
         expect(mappings).to.deep.equal([
             mappings.find(site => site.includes('/readback-mapping.ts:')),
         ])
-        expect(read('packages', 'geoscratch', 'src', 'scratch', 'submission.ts'))
+        expect(read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'submission.ts'))
             .not.to.match(/\.createBuffer\s*\(/)
-        expect(read('packages', 'geoscratch', 'src', 'scratch', 'readback.ts'))
+        expect(read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'readback.ts'))
             .not.to.match(/await\s+(?:this\.)?after\.done/)
-        expect(read('packages', 'geoscratch', 'src', 'scratch', 'readback.ts'))
+        expect(read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'readback.ts'))
             .not.to.include('SCRATCH_READBACK_MAP_FAILED')
     })
 
     it('keeps constructors and native staging ownership outside the public surface', () => {
 
-        const command = read('packages', 'geoscratch', 'src', 'scratch', 'command.ts')
-        const readback = read('packages', 'geoscratch', 'src', 'scratch', 'readback.ts')
-        const runtime = read('packages', 'geoscratch', 'src', 'scratch', 'runtime.ts')
+        const command = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'command.ts')
+        const readback = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'readback.ts')
+        const runtime = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'runtime.ts')
 
         expect(command).to.include('private constructor(')
         expect(readback).to.include('private constructor(')

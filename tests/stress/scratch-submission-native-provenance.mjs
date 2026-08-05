@@ -1,9 +1,9 @@
 import os from 'node:os'
 import process from 'node:process'
 import { performance } from 'node:perf_hooks'
-import { ScratchDiagnosticError } from '../../packages/geoscratch/dist/scratch/diagnostics.js'
-import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/runtime.js'
-import { diagnosticsControllerFor } from '../../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
+import { ScratchDiagnosticError } from '../../packages/geoscratch/dist/scratch/gpu/diagnostics.js'
+import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
+import { diagnosticsControllerFor } from '../../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
 import { createFakeGpu } from '../scratch-test-utils.js'
 
 const summaryIterations = positiveInteger(

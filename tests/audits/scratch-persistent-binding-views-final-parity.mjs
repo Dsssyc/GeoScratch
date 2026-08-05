@@ -52,31 +52,31 @@ const currentPaths = Object.freeze({
     packageIndex: 'packages/geoscratch/src/index.ts',
     scratchIndex: 'packages/geoscratch/src/scratch/index.ts',
     scratchShim: 'packages/geoscratch/src/scratch.ts',
-    runtime: 'packages/geoscratch/src/scratch/runtime.ts',
-    runtimeAuthority: 'packages/geoscratch/src/scratch/runtime-authority.ts',
-    surface: 'packages/geoscratch/src/scratch/surface.ts',
-    resource: 'packages/geoscratch/src/scratch/resource.ts',
-    buffer: 'packages/geoscratch/src/scratch/buffer.ts',
-    texture: 'packages/geoscratch/src/scratch/texture.ts',
-    textureFormatCapabilities: 'packages/geoscratch/src/scratch/texture-format-capabilities.ts',
-    layoutArtifact: 'packages/geoscratch/src/scratch/layout-artifact.ts',
-    layoutCodec: 'packages/geoscratch/src/scratch/layout-codec.ts',
-    sampler: 'packages/geoscratch/src/scratch/sampler.ts',
-    querySet: 'packages/geoscratch/src/scratch/query-set.ts',
-    binding: 'packages/geoscratch/src/scratch/binding.ts',
-    program: 'packages/geoscratch/src/scratch/program.ts',
-    pipeline: 'packages/geoscratch/src/scratch/pipeline.ts',
-    command: 'packages/geoscratch/src/scratch/command.ts',
-    debugCommand: 'packages/geoscratch/src/scratch/debug-command.ts',
-    renderBundle: 'packages/geoscratch/src/scratch/render-bundle.ts',
-    pass: 'packages/geoscratch/src/scratch/pass.ts',
-    shaderInspection: 'packages/geoscratch/src/scratch/shader-inspection.ts',
-    readback: 'packages/geoscratch/src/scratch/readback.ts',
-    supportingObjectCreation: 'packages/geoscratch/src/scratch/supporting-object-creation.ts',
-    supportingObjectFailure: 'packages/geoscratch/src/scratch/supporting-object-failure.ts',
-    submission: 'packages/geoscratch/src/scratch/submission.ts',
-    gpuOperation: 'packages/geoscratch/src/scratch/gpu-operation.ts',
-    runtimeDiagnostics: 'packages/geoscratch/src/scratch/runtime-diagnostics.ts',
+    runtime: 'packages/geoscratch/src/scratch/gpu/runtime.ts',
+    runtimeAuthority: 'packages/geoscratch/src/scratch/gpu/runtime-authority.ts',
+    surface: 'packages/geoscratch/src/scratch/gpu/surface.ts',
+    resource: 'packages/geoscratch/src/scratch/gpu/resource.ts',
+    buffer: 'packages/geoscratch/src/scratch/gpu/buffer.ts',
+    texture: 'packages/geoscratch/src/scratch/gpu/texture.ts',
+    textureFormatCapabilities: 'packages/geoscratch/src/scratch/gpu/texture-format-capabilities.ts',
+    layoutArtifact: 'packages/geoscratch/src/scratch/gpu/layout-artifact.ts',
+    layoutCodec: 'packages/geoscratch/src/scratch/gpu/layout-codec.ts',
+    sampler: 'packages/geoscratch/src/scratch/gpu/sampler.ts',
+    querySet: 'packages/geoscratch/src/scratch/gpu/query-set.ts',
+    binding: 'packages/geoscratch/src/scratch/gpu/binding.ts',
+    program: 'packages/geoscratch/src/scratch/gpu/program.ts',
+    pipeline: 'packages/geoscratch/src/scratch/gpu/pipeline.ts',
+    command: 'packages/geoscratch/src/scratch/gpu/command.ts',
+    debugCommand: 'packages/geoscratch/src/scratch/gpu/debug-command.ts',
+    renderBundle: 'packages/geoscratch/src/scratch/gpu/render-bundle.ts',
+    pass: 'packages/geoscratch/src/scratch/gpu/pass.ts',
+    shaderInspection: 'packages/geoscratch/src/scratch/gpu/shader-inspection.ts',
+    readback: 'packages/geoscratch/src/scratch/gpu/readback.ts',
+    supportingObjectCreation: 'packages/geoscratch/src/scratch/gpu/supporting-object-creation.ts',
+    supportingObjectFailure: 'packages/geoscratch/src/scratch/gpu/supporting-object-failure.ts',
+    submission: 'packages/geoscratch/src/scratch/gpu/submission.ts',
+    gpuOperation: 'packages/geoscratch/src/scratch/gpu/gpu-operation.ts',
+    runtimeDiagnostics: 'packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts',
 })
 const baselinePaths = Object.freeze(Object.fromEntries(
     Object.entries(currentPaths).filter(([ name ]) =>
@@ -88,7 +88,10 @@ const baselinePaths = Object.freeze(Object.fromEntries(
         name !== 'renderBundle' &&
         name !== 'supportingObjectCreation' &&
         name !== 'supportingObjectFailure'
-    )
+    ).map(([ name, sourcePath ]) => [
+        name,
+        sourcePath.replace('/scratch/gpu/', '/scratch/'),
+    ])
 ))
 const historicalPaths = Object.freeze({
     packageIndex: 'packages/geoscratch/src/index.js',
@@ -325,7 +328,7 @@ const finalScratchDeclarations = scratchDeclarationTree(emittedProductionOutputs
 const goalStartProgramDeclaration = Object.entries(goalStartScratchDeclarations)
     .find(([ sourcePath ]) => sourcePath.endsWith('scratch/program.d.ts'))?.[1] ?? ''
 const finalProgramDeclaration = Object.entries(finalScratchDeclarations)
-    .find(([ sourcePath ]) => sourcePath.endsWith('scratch/program.d.ts'))?.[1] ?? ''
+    .find(([ sourcePath ]) => sourcePath.endsWith('scratch/gpu/program.d.ts'))?.[1] ?? ''
 const publicApiTypeSource = fs.readFileSync('tests/types/public-api.ts', 'utf8')
 const pipelineMutableProgramFactReads = Object.freeze([
     ...current.pipeline.matchAll(/\bprogram\.(modules|entryPoints|requiredFeatures|layoutRequirements)\b/g),

@@ -219,15 +219,15 @@ async function verifySubmissionTransactions(browser) {
 
     const runtimeModuleUrl = `${baseUrl}/@fs${resolve(
         root,
-        'packages/geoscratch/dist/scratch/runtime.js'
+        'packages/geoscratch/dist/scratch/gpu/runtime.js'
     )}`
     const diagnosticModuleUrl = `${baseUrl}/@fs${resolve(
         root,
-        'packages/geoscratch/dist/scratch/diagnostics.js'
+        'packages/geoscratch/dist/scratch/gpu/diagnostics.js'
     )}`
     const diagnosticsModuleUrl = `${baseUrl}/@fs${resolve(
         root,
-        'packages/geoscratch/dist/scratch/runtime-diagnostics.js'
+        'packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
     )}`
 
     const evaluated = await page.evaluate(async ({

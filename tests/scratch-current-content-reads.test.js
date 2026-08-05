@@ -4,7 +4,7 @@ import {
     ScratchDiagnosticError,
     ScratchRuntime,
 } from 'geoscratch'
-import { setResourceContentState } from '../packages/geoscratch/dist/scratch/resource.js'
+import { setResourceContentState } from '../packages/geoscratch/dist/scratch/gpu/resource.js'
 import {
     advanceResourceContentEpochForTest,
     createFakeGpu,

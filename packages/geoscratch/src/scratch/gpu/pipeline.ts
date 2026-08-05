@@ -1,4 +1,4 @@
-import { UUID } from '../core/utils/uuid.js'
+import { UUID } from '../../core/utils/uuid.js'
 import {
     createNativeDerivedBindLayout,
     firstBindingLimitViolation,

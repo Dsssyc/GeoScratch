@@ -63,9 +63,9 @@ describe('scratch async pipeline creation documentation', () => {
 
     it('removes every immediate Scratch pipeline creation path', () => {
 
-        const pipeline = read('packages', 'geoscratch', 'src', 'scratch', 'pipeline.ts')
-        const creation = read('packages', 'geoscratch', 'src', 'scratch', 'pipeline-creation.ts')
-        const runtime = read('packages', 'geoscratch', 'src', 'scratch', 'runtime.ts')
+        const pipeline = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'pipeline.ts')
+        const creation = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'pipeline-creation.ts')
+        const runtime = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'runtime.ts')
 
         const pipelineCalls = propertyCallNames(pipeline, 'pipeline.ts')
         const creationCalls = propertyCallNames(creation, 'pipeline-creation.ts')
@@ -84,7 +84,7 @@ describe('scratch async pipeline creation documentation', () => {
 
     it('keeps compilation and pipeline work out of submission source', () => {
 
-        const submission = read('packages', 'geoscratch', 'src', 'scratch', 'submission.ts')
+        const submission = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'submission.ts')
 
         for (const forbidden of [
             'createShaderModule',

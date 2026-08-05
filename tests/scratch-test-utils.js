@@ -1,11 +1,11 @@
 import {
     advanceResourceContentEpoch,
     replaceResourceAllocation,
-} from '../packages/geoscratch/dist/scratch/resource.js'
+} from '../packages/geoscratch/dist/scratch/gpu/resource.js'
 import {
     commitBufferResourceAllocation,
-} from '../packages/geoscratch/dist/scratch/buffer.js'
-import { advanceQuerySlotContentEpoch } from '../packages/geoscratch/dist/scratch/query-set.js'
+} from '../packages/geoscratch/dist/scratch/gpu/buffer.js'
+import { advanceQuerySlotContentEpoch } from '../packages/geoscratch/dist/scratch/gpu/query-set.js'
 
 const fakeExternalImageSourcePlatforms = new Map()
 

@@ -47,15 +47,15 @@ The checked Editor's Draft revision is
 
 | Native operation | Current call site | Ownership classification | Result |
 | --- | --- | --- | --- |
-| General `mapAsync` | `packages/geoscratch/src/scratch/buffer-mapping.ts:975` | Mapping transaction boundary | Approved |
-| Mapped-creation `getMappedRange` | `packages/geoscratch/src/scratch/buffer-mapping.ts:274` | Whole-buffer WRITE lease | Approved |
-| Ordinary `getMappedRange` | `packages/geoscratch/src/scratch/buffer-mapping.ts:440` | Selected-region lease | Approved |
-| General `unmap` | `packages/geoscratch/src/scratch/buffer-mapping.ts:777` | Single cleanup owner | Approved |
-| Readback `mapAsync` | `packages/geoscratch/src/scratch/readback-mapping.ts:255` | Readback-private mapped staging | Retained |
-| Readback `getMappedRange` | `packages/geoscratch/src/scratch/readback.ts:542` | Readback-private owned-copy materialization | Retained |
-| Readback `unmap` | `packages/geoscratch/src/scratch/readback-staging.ts:199`, `:237` | Readback-private cleanup | Retained |
-| Dedicated `mappedAtCreation` lowering | `packages/geoscratch/src/scratch/buffer-mapping.ts`, `packages/geoscratch/src/scratch/buffer.ts` | Internal mapped factory only | Approved |
-| Ordinary descriptor guard | `packages/geoscratch/src/scratch/buffer.ts:685` | Reject even `mappedAtCreation: false` | Complete |
+| General `mapAsync` | `packages/geoscratch/src/scratch/gpu/buffer-mapping.ts:975` | Mapping transaction boundary | Approved |
+| Mapped-creation `getMappedRange` | `packages/geoscratch/src/scratch/gpu/buffer-mapping.ts:274` | Whole-buffer WRITE lease | Approved |
+| Ordinary `getMappedRange` | `packages/geoscratch/src/scratch/gpu/buffer-mapping.ts:440` | Selected-region lease | Approved |
+| General `unmap` | `packages/geoscratch/src/scratch/gpu/buffer-mapping.ts:777` | Single cleanup owner | Approved |
+| Readback `mapAsync` | `packages/geoscratch/src/scratch/gpu/readback-mapping.ts:255` | Readback-private mapped staging | Retained |
+| Readback `getMappedRange` | `packages/geoscratch/src/scratch/gpu/readback.ts:542` | Readback-private owned-copy materialization | Retained |
+| Readback `unmap` | `packages/geoscratch/src/scratch/gpu/readback-staging.ts:199`, `:237` | Readback-private cleanup | Retained |
+| Dedicated `mappedAtCreation` lowering | `packages/geoscratch/src/scratch/gpu/buffer-mapping.ts`, `packages/geoscratch/src/scratch/gpu/buffer.ts` | Internal mapped factory only | Approved |
+| Ordinary descriptor guard | `packages/geoscratch/src/scratch/gpu/buffer.ts:685` | Reject even `mappedAtCreation: false` | Complete |
 | Legacy `mapAsync/getMappedRange/unmap` | `packages/geoscratch/src/gpu/buffer/mapBuffer.js` | Non-Scratch legacy/raw module | Explicitly outside Scratch authority |
 
 `tests/audits/scratch-buffer-mapping-parity.mjs` parses JavaScript and

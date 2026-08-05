@@ -15,7 +15,7 @@ message, timing adjacency, or logical byte count into a stronger claim.
 | R4 | Ordered staging is claimed before encoder effects and reused only sequentially.<br>Ordered slot 在 encoder effect 前 claim，且只能顺序复用。 | Busy preflight tests; 5,000 ordered reuses with no reuse-time allocation. | Exact operation | Complete |
 | R5 | `SubmittedWork.readbacks` contains frozen serializable links, not live operations or handles.<br>Links 只保存冻结事实，不保存 live operation 或 handle。 | Link contract/type tests; schema-v3 JSON round trip in Chrome. | Exact operation | Complete |
 | R6 | Direct readback does not await `after.done`; queue replay order supplies the dependency.<br>Direct readback 不等待 `after.done`，依靠已 replay 的 queue order。 | Source audit and deferred queue-completion test. | Exact operation | Complete |
-| R7 | Mapping uses one buffer-specific `mapAsync()` transaction.<br>Mapping 只使用一个 buffer-specific `mapAsync()` transaction。 | `packages/geoscratch/src/scratch/readback-mapping.ts:255`; one-call source audit. | Exact operation | Complete |
+| R7 | Mapping uses one buffer-specific `mapAsync()` transaction.<br>Mapping 只使用一个 buffer-specific `mapAsync()` transaction。 | `packages/geoscratch/src/scratch/gpu/readback-mapping.ts:255`; one-call source audit. | Exact operation | Complete |
 | R8 | Validation, internal, OOM, map rejection, and scope settlement stay independent of Promise order.<br>各 native outcome 不由 Promise settle 顺序选择主因。 | Reverse-settlement and simultaneous device-loss tests. | Exact operation | Complete |
 | R9 | Copy issue, mapping, mapped range, host copy, cleanup, budget, queue completion, and lifecycle recheck are distinct stages.<br>失败阶段使用结构化区分。 | Stable-code fake tests and schema-v3 stage contract. | Exact operation except queue completion, which is enclosing-family | Complete |
 | R10 | One materialization owner prevents duplicate native work.<br>单一 materialization owner 阻止重复 native work。 | Retained-reader sharing and consume-on-read competition tests. | Exact operation | Complete |
@@ -32,8 +32,8 @@ message, timing adjacency, or logical byte count into a stronger claim.
 
 | Call | Current site | Ownership | Result |
 | --- | --- | --- | --- |
-| Readback staging `GPUDevice.createBuffer()` | `packages/geoscratch/src/scratch/readback-staging.ts:143` | Shared direct and ordered allocation transaction | Covered; no staging allocation remains in submission encoding |
-| Readback `GPUBuffer.mapAsync()` | `packages/geoscratch/src/scratch/readback-mapping.ts:255` | Shared direct and ordered mapping transaction | Covered; no second mapping path remains |
+| Readback staging `GPUDevice.createBuffer()` | `packages/geoscratch/src/scratch/gpu/readback-staging.ts:143` | Shared direct and ordered allocation transaction | Covered; no staging allocation remains in submission encoding |
+| Readback `GPUBuffer.mapAsync()` | `packages/geoscratch/src/scratch/gpu/readback-mapping.ts:255` | Shared direct and ordered mapping transaction | Covered; no second mapping path remains |
 
 `readback.ts`, `command.ts`, and `submission.ts` contain no additional readback
 staging `createBuffer()` call. `readback.ts` contains no direct `mapAsync()` and

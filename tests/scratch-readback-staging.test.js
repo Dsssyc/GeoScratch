@@ -1,6 +1,6 @@
 import { expect } from 'chai'
 import * as scr from 'geoscratch'
-import { diagnosticsControllerFor } from '../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
+import { diagnosticsControllerFor } from '../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
 import {
     advanceResourceContentEpochForTest,
     createFakeGpu,

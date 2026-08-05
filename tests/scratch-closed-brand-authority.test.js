@@ -454,7 +454,7 @@ describe('scratch closed brand authority', () => {
 
     it('does not use open instanceof checks as Scratch-owned internal brands', () => {
 
-        const scratchRoot = new URL('../packages/geoscratch/src/scratch/', import.meta.url)
+        const scratchRoot = new URL('../packages/geoscratch/src/scratch/gpu/', import.meta.url)
         const ownedAuthorities = new Set([
             'BeginOcclusionQueryCommand',
             'BindLayout',
@@ -491,11 +491,11 @@ describe('scratch closed brand authority', () => {
             for (const match of source.matchAll(/\binstanceof\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
                 if (!ownedAuthorities.has(match[1])) continue
                 const line = source.slice(0, match.index).split('\n').length
-                sites.push(`packages/geoscratch/src/scratch/${entry.name}:${line}:${match[1]}`)
+                sites.push(`packages/geoscratch/src/scratch/gpu/${entry.name}:${line}:${match[1]}`)
             }
             for (const match of source.matchAll(/typeof\s+[A-Za-z_$][A-Za-z0-9_$.]*\.assertRuntime\s*!==?\s*['"]function['"]/g)) {
                 const line = source.slice(0, match.index).split('\n').length
-                duckTypedAuthoritySites.push(`packages/geoscratch/src/scratch/${entry.name}:${line}`)
+                duckTypedAuthoritySites.push(`packages/geoscratch/src/scratch/gpu/${entry.name}:${line}`)
             }
         }
 

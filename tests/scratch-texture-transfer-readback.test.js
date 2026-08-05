@@ -5,7 +5,7 @@ import {
     createFakeGpu,
     replaceResourceAllocationForTest,
 } from './scratch-test-utils.js'
-import { setResourceContentState } from '../packages/geoscratch/dist/scratch/resource.js'
+import { setResourceContentState } from '../packages/geoscratch/dist/scratch/gpu/resource.js'
 
 const BUFFER_COPY_SRC = 0x4
 const BUFFER_COPY_DST = 0x8

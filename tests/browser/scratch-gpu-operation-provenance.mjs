@@ -132,7 +132,7 @@ async function measureAllocations(browser) {
 
     const moduleUrl = `${baseUrl}/@fs${resolve('packages/geoscratch/dist/index.js')}`
     const diagnosticsModuleUrl = `${baseUrl}/@fs${resolve(
-        'packages/geoscratch/dist/scratch/runtime-diagnostics.js'
+        'packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
     )}`
     const measurement = await page.evaluate(async ({ moduleUrl, diagnosticsModuleUrl }) => {
         const { ScratchRuntime } = await import(moduleUrl)

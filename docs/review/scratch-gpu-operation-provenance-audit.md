@@ -52,12 +52,12 @@ device calls and are excluded. Every actual `device.createBuffer()` and
 
 | ID | Native call site | Native object | Classification | Fact |
 | --- | --- | --- | --- | --- |
-| N1 | `packages/geoscratch/src/scratch/buffer.ts:611` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
-| N2 | `packages/geoscratch/src/scratch/readback-staging.ts:143` | Buffer | Acknowledged readback staging | Shared direct and ordered staging allocation transaction covered by ADR-034. |
+| N1 | `packages/geoscratch/src/scratch/gpu/buffer.ts:611` | Buffer | Covered by this goal | Public persistent initial buffer transaction. |
+| N2 | `packages/geoscratch/src/scratch/gpu/readback-staging.ts:143` | Buffer | Acknowledged readback staging | Shared direct and ordered staging allocation transaction covered by ADR-034. |
 | N3 | `packages/geoscratch/src/gpu/director/director.js:195` | Buffer | Raw native escape hatch | Legacy director persistent buffer creation. |
 | N4 | `packages/geoscratch/src/gpu/director/director.js:371` | Buffer | Raw native escape hatch | Legacy director temporary texture-copy staging buffer. |
-| N5 | `packages/geoscratch/src/scratch/texture.ts:361` | Texture | Covered by this goal | Public persistent texture replacement transaction. |
-| N6 | `packages/geoscratch/src/scratch/texture.ts:545` | Texture | Covered by this goal | Public persistent initial texture transaction. |
+| N5 | `packages/geoscratch/src/scratch/gpu/texture.ts:361` | Texture | Covered by this goal | Public persistent texture replacement transaction. |
+| N6 | `packages/geoscratch/src/scratch/gpu/texture.ts:545` | Texture | Covered by this goal | Public persistent initial texture transaction. |
 | N7 | `packages/geoscratch/src/gpu/director/director.js:341` | Texture | Raw native escape hatch | Legacy director intermediate image texture. |
 | N8 | `packages/geoscratch/src/gpu/director/director.js:382` | Texture | Raw native escape hatch | Legacy director parsed image texture. |
 | N9 | `packages/geoscratch/src/gpu/director/director.js:412` | Texture | Raw native escape hatch | Legacy director size-based texture creation. |

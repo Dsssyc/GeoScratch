@@ -15,7 +15,7 @@ import {
 const fixturePath =
     'tests/fixtures/scratch-structured-proof.ts'
 const runtimePath =
-    'packages/geoscratch/src/scratch/runtime.ts'
+    'packages/geoscratch/src/scratch/gpu/runtime.ts'
 const entrypointPath =
     'packages/geoscratch/src/index.ts'
 
@@ -73,7 +73,7 @@ describe('Scratch structured WebGPU and WGSL normative proofs', () => {
                 kind: 'descriptor-field',
                 operation: 'GPUBufferDescriptor.size',
                 sourcePath:
-                    'packages/geoscratch/src/scratch/buffer.ts',
+                    'packages/geoscratch/src/scratch/gpu/buffer.ts',
                 selector: {
                     field: 'size',
                     ownerTypes: [ 'GPUBufferDescriptor' ],
@@ -323,7 +323,7 @@ describe('Scratch structured WebGPU and WGSL normative proofs', () => {
             kind: 'wgsl-contract',
             operation: 'unbound WGSL payload',
             sourcePath:
-                'packages/geoscratch/src/scratch/shader-module.ts',
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts',
             selector: {
                 contractId: 'fixture.unbound',
                 descriptorType: 'GPUShaderModuleDescriptor',
@@ -398,7 +398,7 @@ describe('Scratch structured WebGPU and WGSL normative proofs', () => {
             expect(exact, entry.id).to.include({
                 kind,
                 sourcePath:
-                    'packages/geoscratch/src/scratch/runtime.ts',
+                    'packages/geoscratch/src/scratch/gpu/runtime.ts',
             })
             if (kind === 'property-read') {
                 expect(exact.selector).to.deep.equal({

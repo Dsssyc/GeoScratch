@@ -1,9 +1,9 @@
 import os from 'node:os'
 import process from 'node:process'
 import { performance } from 'node:perf_hooks'
-import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/runtime.js'
-import { diagnosticsControllerFor } from '../../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
-import { runtimePipelineCount } from '../../packages/geoscratch/dist/scratch/pipeline-ownership.js'
+import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
+import { diagnosticsControllerFor } from '../../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
+import { runtimePipelineCount } from '../../packages/geoscratch/dist/scratch/gpu/pipeline-ownership.js'
 import { createFakeGpu, triangleWgsl } from '../scratch-test-utils.js'
 
 const iterations = positiveInteger(process.env.SCRATCH_PIPELINE_BENCH_ITERATIONS, 200)

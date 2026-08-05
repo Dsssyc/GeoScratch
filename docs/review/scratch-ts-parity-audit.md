@@ -32,21 +32,21 @@ Evidence:
 
 | Baseline source | TypeScript source | Parity |
 | --- | --- | --- |
-| `packages/geoscratch/src/scratch/diagnostics.js` | `packages/geoscratch/src/scratch/diagnostics.ts` | Complete |
-| `packages/geoscratch/src/scratch/resource.js` | `packages/geoscratch/src/scratch/resource.ts` | Complete |
-| `packages/geoscratch/src/scratch/buffer.js` | `packages/geoscratch/src/scratch/buffer.ts` | Complete |
-| `packages/geoscratch/src/scratch/texture.js` | `packages/geoscratch/src/scratch/texture.ts` | Complete |
-| `packages/geoscratch/src/scratch/sampler.js` | `packages/geoscratch/src/scratch/sampler.ts` | Complete |
-| `packages/geoscratch/src/scratch/surface.js` | `packages/geoscratch/src/scratch/surface.ts` | Complete |
-| `packages/geoscratch/src/scratch/query-set.js` | `packages/geoscratch/src/scratch/query-set.ts` | Complete |
-| `packages/geoscratch/src/scratch/readback.js` | `packages/geoscratch/src/scratch/readback.ts` | Complete |
-| `packages/geoscratch/src/scratch/binding.js` | `packages/geoscratch/src/scratch/binding.ts` | Complete |
-| `packages/geoscratch/src/scratch/program.js` | `packages/geoscratch/src/scratch/program.ts` | Complete |
-| `packages/geoscratch/src/scratch/pipeline.js` | `packages/geoscratch/src/scratch/pipeline.ts` | Complete |
-| `packages/geoscratch/src/scratch/command.js` | `packages/geoscratch/src/scratch/command.ts` | Complete |
-| `packages/geoscratch/src/scratch/pass.js` | `packages/geoscratch/src/scratch/pass.ts` | Complete |
-| `packages/geoscratch/src/scratch/submission.js` | `packages/geoscratch/src/scratch/submission.ts` | Complete |
-| `packages/geoscratch/src/scratch/runtime.js` | `packages/geoscratch/src/scratch/runtime.ts` | Complete |
+| `packages/geoscratch/src/scratch/diagnostics.js` | `packages/geoscratch/src/scratch/gpu/diagnostics.ts` | Complete |
+| `packages/geoscratch/src/scratch/resource.js` | `packages/geoscratch/src/scratch/gpu/resource.ts` | Complete |
+| `packages/geoscratch/src/scratch/buffer.js` | `packages/geoscratch/src/scratch/gpu/buffer.ts` | Complete |
+| `packages/geoscratch/src/scratch/texture.js` | `packages/geoscratch/src/scratch/gpu/texture.ts` | Complete |
+| `packages/geoscratch/src/scratch/sampler.js` | `packages/geoscratch/src/scratch/gpu/sampler.ts` | Complete |
+| `packages/geoscratch/src/scratch/surface.js` | `packages/geoscratch/src/scratch/gpu/surface.ts` | Complete |
+| `packages/geoscratch/src/scratch/query-set.js` | `packages/geoscratch/src/scratch/gpu/query-set.ts` | Complete |
+| `packages/geoscratch/src/scratch/readback.js` | `packages/geoscratch/src/scratch/gpu/readback.ts` | Complete |
+| `packages/geoscratch/src/scratch/binding.js` | `packages/geoscratch/src/scratch/gpu/binding.ts` | Complete |
+| `packages/geoscratch/src/scratch/program.js` | `packages/geoscratch/src/scratch/gpu/program.ts` | Complete |
+| `packages/geoscratch/src/scratch/pipeline.js` | `packages/geoscratch/src/scratch/gpu/pipeline.ts` | Complete |
+| `packages/geoscratch/src/scratch/command.js` | `packages/geoscratch/src/scratch/gpu/command.ts` | Complete |
+| `packages/geoscratch/src/scratch/pass.js` | `packages/geoscratch/src/scratch/gpu/pass.ts` | Complete |
+| `packages/geoscratch/src/scratch/submission.js` | `packages/geoscratch/src/scratch/gpu/submission.ts` | Complete |
+| `packages/geoscratch/src/scratch/runtime.js` | `packages/geoscratch/src/scratch/gpu/runtime.ts` | Complete |
 | `packages/geoscratch/src/scratch/index.js` | `packages/geoscratch/src/scratch/index.ts` | Complete |
 | `packages/geoscratch/src/index.js` | `packages/geoscratch/src/index.ts` | Complete |
 | `packages/geoscratch/src/scratch.js` | `packages/geoscratch/src/scratch.ts` | Complete |

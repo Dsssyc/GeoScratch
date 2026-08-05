@@ -5,8 +5,8 @@ import {
     hashPipelineSource,
     sanitizePipelineEvidenceText,
     snapshotPipelineSource,
-} from '../packages/geoscratch/dist/scratch/pipeline-compilation.js'
-import { serializedEvidenceBytes } from '../packages/geoscratch/dist/scratch/gpu-operation.js'
+} from '../packages/geoscratch/dist/scratch/gpu/pipeline-compilation.js'
+import { serializedEvidenceBytes } from '../packages/geoscratch/dist/scratch/gpu/gpu-operation.js'
 
 describe('scratch pipeline source snapshots', () => {
 

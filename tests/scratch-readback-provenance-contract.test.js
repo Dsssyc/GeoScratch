@@ -1,6 +1,6 @@
 import { expect } from 'chai'
 import * as scr from 'geoscratch'
-import { createGpuOperationRecord } from '../packages/geoscratch/dist/scratch/gpu-operation.js'
+import { createGpuOperationRecord } from '../packages/geoscratch/dist/scratch/gpu/gpu-operation.js'
 import { createFakeGpu } from './scratch-test-utils.js'
 
 const COPY_SRC = 0x4

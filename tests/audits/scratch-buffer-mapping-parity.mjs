@@ -13,18 +13,18 @@ const expectedNativeMappingCalls = Object.freeze({
         mapAsync: 1,
         unmap: 1,
     }),
-    'packages/geoscratch/src/scratch/buffer-mapping.ts': Object.freeze({
+    'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts': Object.freeze({
         getMappedRange: 2,
         mapAsync: 1,
         unmap: 1,
     }),
-    'packages/geoscratch/src/scratch/readback-mapping.ts': Object.freeze({
+    'packages/geoscratch/src/scratch/gpu/readback-mapping.ts': Object.freeze({
         mapAsync: 1,
     }),
-    'packages/geoscratch/src/scratch/readback-staging.ts': Object.freeze({
+    'packages/geoscratch/src/scratch/gpu/readback-staging.ts': Object.freeze({
         unmap: 2,
     }),
-    'packages/geoscratch/src/scratch/readback.ts': Object.freeze({
+    'packages/geoscratch/src/scratch/gpu/readback.ts': Object.freeze({
         getMappedRange: 1,
     }),
 })
@@ -32,14 +32,14 @@ const expectedNativeMappingCalls = Object.freeze({
 const nativeMappingCalls = scanNativeMappingCalls(scratchRoot)
 const nativeInventory = summarizeNativeCalls(nativeMappingCalls)
 const example = read(examplePath)
-const buffer = read('packages/geoscratch/src/scratch/buffer.ts')
-const mapping = read('packages/geoscratch/src/scratch/buffer-mapping.ts')
-const authority = read('packages/geoscratch/src/scratch/buffer-mapping-authority.ts')
-const command = read('packages/geoscratch/src/scratch/command.ts')
-const readback = read('packages/geoscratch/src/scratch/readback.ts')
-const submission = read('packages/geoscratch/src/scratch/submission.ts')
-const runtime = read('packages/geoscratch/src/scratch/runtime.ts')
-const diagnostics = read('packages/geoscratch/src/scratch/runtime-diagnostics.ts')
+const buffer = read('packages/geoscratch/src/scratch/gpu/buffer.ts')
+const mapping = read('packages/geoscratch/src/scratch/gpu/buffer-mapping.ts')
+const authority = read('packages/geoscratch/src/scratch/gpu/buffer-mapping-authority.ts')
+const command = read('packages/geoscratch/src/scratch/gpu/command.ts')
+const readback = read('packages/geoscratch/src/scratch/gpu/readback.ts')
+const submission = read('packages/geoscratch/src/scratch/gpu/submission.ts')
+const runtime = read('packages/geoscratch/src/scratch/gpu/runtime.ts')
+const diagnostics = read('packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts')
 const scratchIndex = read('packages/geoscratch/src/scratch/index.ts')
 const packageIndex = read('packages/geoscratch/src/index.ts')
 

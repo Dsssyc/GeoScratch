@@ -15,6 +15,7 @@ import {
 
 const root = process.cwd()
 const scratchRoot = path.join(root, 'packages', 'geoscratch', 'src', 'scratch')
+const gpuRoot = path.join(scratchRoot, 'gpu')
 const webGpuManifest = readJson(webGpuManifestPath)
 const wgslManifest = readJson(wgslManifestPath)
 const generatedWebGpuManifest = createWebGpuManifest()
@@ -90,11 +91,11 @@ const checks = Object.freeze({
         ),
     textureTransferNativeCoverage:
         nativeCalls.filter(call =>
-            call.path === 'packages/geoscratch/src/scratch/command.ts' &&
+            call.path === 'packages/geoscratch/src/scratch/gpu/command.ts' &&
             call.operation === 'writeTexture'
         ).length === 1 &&
         nativeCalls.filter(call =>
-            call.path === 'packages/geoscratch/src/scratch/readback.ts' &&
+            call.path === 'packages/geoscratch/src/scratch/gpu/readback.ts' &&
             call.operation === 'copyTextureToBuffer'
         ).length === 1,
     textureTransferPublicExports:
@@ -307,8 +308,8 @@ function scanExports(absolute) {
 
 function scanOldSurfaceInventory() {
 
-    const programPath = path.join(scratchRoot, 'program.ts')
-    const pipelineCompilationPath = path.join(scratchRoot, 'pipeline-compilation.ts')
+    const programPath = path.join(gpuRoot, 'program.ts')
+    const pipelineCompilationPath = path.join(gpuRoot, 'pipeline-compilation.ts')
     const program = parse(programPath)
     const pipelineCompilation = parse(pipelineCompilationPath)
     return {
@@ -326,10 +327,10 @@ function scanOldSurfaceInventory() {
 
 function scanTextureTransferSurfaceInventory() {
 
-    const command = parse(path.join(scratchRoot, 'command.ts'))
-    const textureReadback = parse(path.join(scratchRoot, 'texture-readback.ts'))
-    const readback = parse(path.join(scratchRoot, 'readback.ts'))
-    const readbackLease = parse(path.join(scratchRoot, 'readback-lease.ts'))
+    const command = parse(path.join(gpuRoot, 'command.ts'))
+    const textureReadback = parse(path.join(gpuRoot, 'texture-readback.ts'))
+    const readback = parse(path.join(gpuRoot, 'readback.ts'))
+    const readbackLease = parse(path.join(gpuRoot, 'readback-lease.ts'))
     return {
         textureUploadAspect: findTypeMember(
             command,
@@ -357,9 +358,9 @@ function scanTextureTransferSurfaceInventory() {
 
 function scanWgslLayoutSurfaceInventory() {
 
-    const layoutArtifact = parse(path.join(scratchRoot, 'layout-artifact.ts'))
-    const layoutCodec = parse(path.join(scratchRoot, 'layout-codec.ts'))
-    const program = parse(path.join(scratchRoot, 'program.ts'))
+    const layoutArtifact = parse(path.join(gpuRoot, 'layout-artifact.ts'))
+    const layoutCodec = parse(path.join(gpuRoot, 'layout-codec.ts'))
+    const program = parse(path.join(gpuRoot, 'program.ts'))
     const declarationNames = [
         'LayoutScalarType',
         'LayoutVectorType',

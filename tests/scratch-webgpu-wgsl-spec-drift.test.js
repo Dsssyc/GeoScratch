@@ -721,7 +721,7 @@ describe('Scratch normative WebGPU and WGSL inventory extraction', () => {
                 requiredFeature: entry.requiredFeature,
             }))
         const contract = parseTypeScriptSource(
-            'packages/geoscratch/src/scratch/feature-contract.ts'
+            'packages/geoscratch/src/scratch/gpu/feature-contract.ts'
         )
         const actual = staticFrozenObjectArray(
             contract,

@@ -3,13 +3,13 @@ export {
     createScratchDiagnostic,
     createScratchDiagnosticReport,
     throwScratchDiagnostic,
-} from './diagnostics.js'
+} from './gpu/diagnostics.js'
 export type {
     DiagnosticSubject,
     ScratchDiagnostic,
     ScratchDiagnosticInput,
     ScratchDiagnosticReport,
-} from './diagnostics.js'
+} from './gpu/diagnostics.js'
 export type {
     GpuAttributionConfidence,
     GpuDescriptorEvidence,
@@ -75,7 +75,7 @@ export type {
     ScratchNativeGpuErrorFacts,
     ScratchGpuSupportingObjectIncidentReport,
     ScratchSupportingObjectFailureStage,
-} from './gpu-operation.js'
+} from './gpu/gpu-operation.js'
 export type {
     PipelineCreationReport,
     PipelineCreationStageFact,
@@ -85,8 +85,8 @@ export type {
     ShaderModuleCompilationReport,
     ShaderModuleCompilationSourcePartFact,
     ShaderModuleCompilationSourcePartLocation,
-} from './pipeline-compilation.js'
-export { ScratchRuntime } from './runtime.js'
+} from './gpu/pipeline-compilation.js'
+export { ScratchRuntime } from './gpu/runtime.js'
 export type {
     ScratchAdapterInfoSnapshot,
     ScratchFeatureLevel,
@@ -94,9 +94,9 @@ export type {
     ScratchRuntimeCreateOptions,
     ScratchRuntimeDeviceRequestFacts,
     ScratchRuntimeRequestFacts,
-} from './runtime.js'
-export type { ScratchReadbackOptions, ScratchReadbackPolicy } from './readback-ownership.js'
-export { ScratchDiagnosticCapture, ScratchRuntimeDiagnostics } from './runtime-diagnostics.js'
+} from './gpu/runtime.js'
+export type { ScratchReadbackOptions, ScratchReadbackPolicy } from './gpu/readback-ownership.js'
+export { ScratchDiagnosticCapture, ScratchRuntimeDiagnostics } from './gpu/runtime-diagnostics.js'
 export type {
     ScratchReadbackCommandState,
     ScratchDeviceLostInfo,
@@ -119,51 +119,51 @@ export type {
     ScratchRuntimeReadbackOperationFact,
     ScratchRuntimeBufferMappingFact,
     ScratchRuntimeResourceFact,
-} from './runtime-diagnostics.js'
-export { Surface } from './surface.js'
-export type { SurfaceFormat, SurfaceOptions, SurfaceSize } from './surface.js'
+} from './gpu/runtime-diagnostics.js'
+export { Surface } from './gpu/surface.js'
+export type { SurfaceFormat, SurfaceOptions, SurfaceSize } from './gpu/surface.js'
 export {
     ExternalTextureBinding,
     SurfaceTextureLease,
     SurfaceTextureView,
-} from './temporal-texture.js'
+} from './gpu/temporal-texture.js'
 export type {
     ExternalTextureBindingDescriptor,
     SurfaceTextureLeaseState,
-} from './temporal-texture.js'
-export { Resource } from './resource.js'
-export type { ResourceState } from './resource.js'
-export { BufferRegion, BufferResource } from './buffer.js'
+} from './gpu/temporal-texture.js'
+export { Resource } from './gpu/resource.js'
+export type { ResourceState } from './gpu/resource.js'
+export { BufferRegion, BufferResource } from './gpu/buffer.js'
 export type {
     BufferRegionDescriptor,
     BufferResourceDescriptor,
     BufferSubregionDescriptor,
     MappedBufferResourceDescriptor,
-} from './buffer.js'
-export { MappedBufferLease } from './buffer-mapping.js'
+} from './gpu/buffer.js'
+export { MappedBufferLease } from './gpu/buffer-mapping.js'
 export type {
     BufferMappingDescriptor,
     BufferMappingMode,
     MappedBufferCreation,
     MappedBufferLeaseState,
-} from './buffer-mapping.js'
-export { TextureResource, TextureViewSpec } from './texture.js'
+} from './gpu/buffer-mapping.js'
+export { TextureResource, TextureViewSpec } from './gpu/texture.js'
 export type {
     NormalizedTextureViewDescriptor,
     TextureResourceDescriptor,
     TextureResourceSize,
     TextureViewDescriptor,
-} from './texture.js'
-export { SamplerResource } from './sampler.js'
-export type { SamplerResourceDescriptor } from './sampler.js'
-export { QuerySetResource } from './query-set.js'
+} from './gpu/texture.js'
+export { SamplerResource } from './gpu/sampler.js'
+export type { SamplerResourceDescriptor } from './gpu/sampler.js'
+export { QuerySetResource } from './gpu/query-set.js'
 export type {
     QuerySetResourceDescriptor,
     QuerySetSlotSnapshot,
     QuerySetSlotState,
     QuerySetType,
-} from './query-set.js'
-export { BindLayout, BindSet } from './binding.js'
+} from './gpu/query-set.js'
+export { BindLayout, BindSet } from './gpu/binding.js'
 export type {
     BindLayoutDescriptor,
     BindLayoutEntry,
@@ -185,7 +185,7 @@ export type {
     StorageTextureBindLayoutEntry,
     TextureBindLayoutEntry,
     UniformBindLayoutEntry,
-} from './binding.js'
+} from './gpu/binding.js'
 export {
     LayoutCodec,
     createLayoutReadbackView,
@@ -201,7 +201,7 @@ export {
     layoutArtifactsAbiCompatible,
     layoutArtifactsSchemaCompatible,
     layoutCodec,
-} from './layout-codec.js'
+} from './gpu/layout-codec.js'
 export type {
     FixedLayoutArtifact,
     LayoutArtifact,
@@ -279,14 +279,14 @@ export type {
     LayoutWgslBufferViewOptions,
     LayoutWriteOptions,
     RuntimeLayoutArtifact,
-} from './layout-codec.js'
-export { Program } from './program.js'
+} from './gpu/layout-codec.js'
+export { Program } from './gpu/program.js'
 export type {
     ProgramBufferLayoutRequirement,
     ProgramDescriptor,
     ProgramStage,
-} from './program.js'
-export { ShaderModule } from './shader-module.js'
+} from './gpu/program.js'
+export { ShaderModule } from './gpu/shader-module.js'
 export type {
     NormalizedShaderModuleSourcePart,
     ShaderModuleCompilationHint,
@@ -294,8 +294,8 @@ export type {
     ShaderModuleCompilationHintLayout,
     ShaderModuleDescriptor,
     ShaderModuleSourcePart,
-} from './shader-module.js'
-export { inspectShader } from './shader-inspection.js'
+} from './gpu/shader-module.js'
+export { inspectShader } from './gpu/shader-inspection.js'
 export type {
     ShaderBindLayoutComparisonOptions,
     ShaderBinding,
@@ -303,10 +303,10 @@ export type {
     ShaderInspection,
     ShaderInspectionInput,
     ShaderInspectionOptions,
-} from './shader-inspection.js'
-export { ComputePipeline, RenderPipeline } from './pipeline.js'
-export type { ComputePipelineDescriptor, RenderPipelineDescriptor } from './pipeline.js'
-export { BeginOcclusionQueryCommand, ClearBufferCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './command.js'
+} from './gpu/shader-inspection.js'
+export { ComputePipeline, RenderPipeline } from './gpu/pipeline.js'
+export type { ComputePipelineDescriptor, RenderPipelineDescriptor } from './gpu/pipeline.js'
+export { BeginOcclusionQueryCommand, ClearBufferCommand, CopyCommand, DispatchCommand, DrawCommand, EndOcclusionQueryCommand, ExternalImageUploadCommand, ReadbackCommand, ResolveQuerySetCommand, TextureUploadCommand, UploadCommand } from './gpu/command.js'
 export type {
     BeginOcclusionQueryCommandDescriptor,
     ClearBufferCommandDescriptor,
@@ -358,17 +358,17 @@ export type {
     TextureUploadOrigin,
     TextureUploadSize,
     UploadCommandDescriptor,
-} from './command.js'
-export { DebugCommand } from './debug-command.js'
+} from './gpu/command.js'
+export { DebugCommand } from './gpu/debug-command.js'
 export type {
     DebugCommandAction,
     DebugCommandDescriptor,
-} from './debug-command.js'
+} from './gpu/debug-command.js'
 export {
     BundleDrawCommand,
     ExecuteRenderBundlesCommand,
     RenderBundle,
-} from './render-bundle.js'
+} from './gpu/render-bundle.js'
 export type {
     BundleDrawCommandDescriptor,
     ExecuteRenderBundlesCommandDescriptor,
@@ -377,34 +377,34 @@ export type {
     RenderBundleLayout,
     RenderBundleRealization,
     RenderBundleRealizationState,
-} from './render-bundle.js'
-export { ComputePassSpec, RenderPassSpec } from './pass.js'
+} from './gpu/render-bundle.js'
+export { ComputePassSpec, RenderPassSpec } from './gpu/pass.js'
 export type {
     ComputePassSpecDescriptor,
     RenderPassColorAttachmentSpec,
     RenderPassDepthStencilAttachmentSpec,
     RenderPassSpecDescriptor,
     TimestampWritesSpec,
-} from './pass.js'
-export { ReadbackOperation } from './readback.js'
+} from './gpu/pass.js'
+export { ReadbackOperation } from './gpu/readback.js'
 export type {
     ReadbackOperationDescriptor,
     ReadbackRetentionPolicy,
     ReadbackSource,
     ReadbackState,
-} from './readback.js'
-export { MappedReadbackLease } from './readback-lease.js'
+} from './gpu/readback.js'
+export { MappedReadbackLease } from './gpu/readback-lease.js'
 export type {
     MappedReadbackLeaseState,
-} from './readback-lease.js'
+} from './gpu/readback-lease.js'
 export type {
     TextureReadbackOrigin,
     TextureReadbackRowLayout,
     TextureReadbackSize,
     TextureReadbackSource,
     TextureReadbackSourceDescriptor,
-} from './texture-readback.js'
-export { SubmissionBuilder, SubmittedWork } from './submission.js'
+} from './gpu/texture-readback.js'
+export { SubmissionBuilder, SubmittedWork } from './gpu/submission.js'
 export type {
     ComputeCommand,
     RenderCommand,
@@ -422,4 +422,4 @@ export type {
     SubmissionResourceAccessKind,
     SubmissionStepKind,
     SubmissionValidationMode,
-} from './submission.js'
+} from './gpu/submission.js'

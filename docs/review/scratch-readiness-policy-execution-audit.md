@@ -6,10 +6,10 @@ Decision: `docs/decisions/ADR-028-scratch-readiness-policy-execution.md`
 
 ## Traceability Rules
 
-- Public contract evidence is in `packages/geoscratch/src/scratch/command.ts` and the exports in `packages/geoscratch/src/scratch/index.ts` / `packages/geoscratch/src/index.ts`.
-- Resolution evidence is in `resolveExecutableCommand()`, `resolveComputeReadiness()`, `resolveRenderReadiness()`, and `resolveSubmissionBeforeEncoding()` in `packages/geoscratch/src/scratch/submission.ts`.
-- Native encoding evidence is in `DrawCommand.encode()` and `DispatchCommand.encode()` in `packages/geoscratch/src/scratch/command.ts`; resolution never duplicates those methods.
-- Ledger evidence is in `SubmittedWork`, `freezeExecutionOutcomes()`, resource-access capture, and producer-epoch construction in `packages/geoscratch/src/scratch/submission.ts`.
+- Public contract evidence is in `packages/geoscratch/src/scratch/gpu/command.ts` and the exports in `packages/geoscratch/src/scratch/index.ts` / `packages/geoscratch/src/index.ts`.
+- Resolution evidence is in `resolveExecutableCommand()`, `resolveComputeReadiness()`, `resolveRenderReadiness()`, and `resolveSubmissionBeforeEncoding()` in `packages/geoscratch/src/scratch/gpu/submission.ts`.
+- Native encoding evidence is in `DrawCommand.encode()` and `DispatchCommand.encode()` in `packages/geoscratch/src/scratch/gpu/command.ts`; resolution never duplicates those methods.
+- Ledger evidence is in `SubmittedWork`, `freezeExecutionOutcomes()`, resource-access capture, and producer-epoch construction in `packages/geoscratch/src/scratch/gpu/submission.ts`.
 
 ## Eight-Row Matrix
 

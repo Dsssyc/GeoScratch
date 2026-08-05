@@ -31,145 +31,145 @@ const wgslBrowserMatrixPath =
 
 const operationDefinitions = [
     call(
-        'packages/geoscratch/src/scratch/binding.ts',
+        'packages/geoscratch/src/scratch/gpu/binding.ts',
         'createBindGroup',
         'createBindGroup',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/binding.ts',
+        'packages/geoscratch/src/scratch/gpu/binding.ts',
         'createBindGroupLayout',
         'createBindGroupLayout',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/binding.ts',
+        'packages/geoscratch/src/scratch/gpu/binding.ts',
         'getBindGroupLayout',
         'getBindGroupLayout',
         [ 'GPURenderPipeline', 'GPUComputePipeline' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/buffer-mapping.ts',
+        'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts',
         'getMappedRange',
         'getMappedRange',
         [ 'GPUBuffer' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/buffer-mapping.ts',
+        'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts',
         'mapAsync',
         'mapAsync',
         [ 'GPUBuffer' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/buffer-mapping.ts',
+        'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts',
         'unmap',
         'unmap',
         [ 'GPUBuffer' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/buffer.ts',
+        'packages/geoscratch/src/scratch/gpu/buffer.ts',
         'createBuffer',
         'createBuffer',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/buffer.ts',
+        'packages/geoscratch/src/scratch/gpu/buffer.ts',
         'destroy',
         'destroy',
         [ 'GPUBuffer' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'beginOcclusionQuery',
         'beginOcclusionQuery',
         [ 'GPURenderPassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'clearBuffer',
         'clearBuffer',
         [ 'GPUCommandEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'copyBufferToBuffer',
         'copyBufferToBuffer',
         [ 'GPUCommandEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'copyBufferToTexture',
         'copyBufferToTexture',
         [ 'GPUCommandEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'copyExternalImageToTexture',
         'copyExternalImageToTexture',
         [ 'GPUQueue' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'copyTextureToBuffer',
         'copyTextureToBuffer',
         [ 'GPUCommandEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'copyTextureToTexture',
         'copyTextureToTexture',
         [ 'GPUCommandEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'dispatchWorkgroups',
         'dispatchWorkgroups',
         [ 'GPUComputePassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'dispatchWorkgroupsIndirect',
         'dispatchWorkgroupsIndirect',
         [ 'GPUComputePassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'draw',
         'draw',
         [ 'GPURenderPassEncoder', 'GPURenderBundleEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'drawIndexed',
         'drawIndexed',
         [ 'GPURenderPassEncoder', 'GPURenderBundleEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'drawIndexedIndirect',
         'drawIndexedIndirect',
         [ 'GPURenderPassEncoder', 'GPURenderBundleEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'drawIndirect',
         'drawIndirect',
         [ 'GPURenderPassEncoder', 'GPURenderBundleEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'endOcclusionQuery',
         'endOcclusionQuery',
         [ 'GPURenderPassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'resolveQuerySet',
         'resolveQuerySet',
         [ 'GPUCommandEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'setBindGroup',
         'setBindGroup',
         [
@@ -179,13 +179,13 @@ const operationDefinitions = [
         ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'setBlendConstant',
         'setBlendConstant',
         [ 'GPURenderPassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'setImmediates',
         'setImmediates',
         [
@@ -195,13 +195,13 @@ const operationDefinitions = [
         ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'setIndexBuffer',
         'setIndexBuffer',
         [ 'GPURenderPassEncoder', 'GPURenderBundleEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'setPipeline',
         'setPipeline',
         [
@@ -211,43 +211,43 @@ const operationDefinitions = [
         ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'setScissorRect',
         'setScissorRect',
         [ 'GPURenderPassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'setStencilReference',
         'setStencilReference',
         [ 'GPURenderPassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'setVertexBuffer',
         'setVertexBuffer',
         [ 'GPURenderPassEncoder', 'GPURenderBundleEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'setViewport',
         'setViewport',
         [ 'GPURenderPassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'writeBuffer',
         'writeBuffer',
         [ 'GPUQueue' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/command.ts',
+        'packages/geoscratch/src/scratch/gpu/command.ts',
         'writeTexture',
         'writeTexture',
         [ 'GPUQueue' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/debug-command.ts',
+        'packages/geoscratch/src/scratch/gpu/debug-command.ts',
         'insertDebugMarker',
         'insertDebugMarker',
         [
@@ -257,7 +257,7 @@ const operationDefinitions = [
         ]
     ),
     call(
-        'packages/geoscratch/src/scratch/debug-command.ts',
+        'packages/geoscratch/src/scratch/gpu/debug-command.ts',
         'popDebugGroup',
         'popDebugGroup',
         [
@@ -267,7 +267,7 @@ const operationDefinitions = [
         ]
     ),
     call(
-        'packages/geoscratch/src/scratch/debug-command.ts',
+        'packages/geoscratch/src/scratch/gpu/debug-command.ts',
         'pushDebugGroup',
         'pushDebugGroup',
         [
@@ -277,354 +277,354 @@ const operationDefinitions = [
         ]
     ),
     scratchOperation(
-        'packages/geoscratch/src/scratch/gpu-operation.ts',
+        'packages/geoscratch/src/scratch/gpu/gpu-operation.ts',
         'serializeNativeGpuError',
         'serializeNativeGpuError'
     ),
     scratchMember(
-        'packages/geoscratch/src/scratch/layout-codec.ts',
+        'packages/geoscratch/src/scratch/gpu/layout-codec.ts',
         'LayoutCodec.pack',
         'LayoutCodec',
         'pack'
     ),
     scratchMember(
-        'packages/geoscratch/src/scratch/layout-codec.ts',
+        'packages/geoscratch/src/scratch/gpu/layout-codec.ts',
         'LayoutCodec.wgslAccessors',
         'LayoutCodec',
         'wgslAccessors'
     ),
     scratchOperation(
-        'packages/geoscratch/src/scratch/native-allocation.ts',
+        'packages/geoscratch/src/scratch/gpu/native-allocation.ts',
         'createScratchNativeLabel',
         'createScratchNativeLabel'
     ),
     call(
-        'packages/geoscratch/src/scratch/native-allocation.ts',
+        'packages/geoscratch/src/scratch/gpu/native-allocation.ts',
         'destroy',
         'destroy',
         [ '{ destroy(): void; }' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/pipeline-creation.ts',
+        'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts',
         'createComputePipelineAsync',
         'createComputePipelineAsync',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/pipeline-creation.ts',
+        'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts',
         'createPipelineLayout',
         'createPipelineLayout',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/pipeline-creation.ts',
+        'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts',
         'createRenderPipelineAsync',
         'createRenderPipelineAsync',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/query-set.ts',
+        'packages/geoscratch/src/scratch/gpu/query-set.ts',
         'createQuerySet',
         'createQuerySet',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/query-set.ts',
+        'packages/geoscratch/src/scratch/gpu/query-set.ts',
         'destroy',
         'destroy',
         [ 'GPUQuerySet' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/readback-mapping.ts',
+        'packages/geoscratch/src/scratch/gpu/readback-mapping.ts',
         'mapAsync',
         'mapAsync',
         [ 'GPUBuffer' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/render-bundle.ts',
+        'packages/geoscratch/src/scratch/gpu/render-bundle.ts',
         'GPURenderBundleEncoder.finish',
         'finish',
         [ 'GPURenderBundleEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/render-bundle.ts',
+        'packages/geoscratch/src/scratch/gpu/render-bundle.ts',
         'createRenderBundleEncoder',
         'createRenderBundleEncoder',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/render-bundle.ts',
+        'packages/geoscratch/src/scratch/gpu/render-bundle.ts',
         'executeBundles',
         'executeBundles',
         [ 'GPURenderPassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime-diagnostics.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts',
         'uncapturederror',
         'addEventListener',
         [ 'GPUDevice' ],
         [ { index: 0, value: 'uncapturederror' } ]
     ),
     propertyRead(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapter.info',
         'info',
         [ 'GPUAdapter' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterInfo.architecture',
         'snapshotAdapterInfoString',
         [],
         [ { index: 2, value: 'architecture' } ]
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterInfo.description',
         'snapshotAdapterInfoString',
         [],
         [ { index: 2, value: 'description' } ]
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterInfo.device',
         'snapshotAdapterInfoString',
         [],
         [ { index: 2, value: 'device' } ]
     ),
     propertyRead(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterInfo.isFallbackAdapter',
         'isFallbackAdapter',
         [ 'Partial<GPUAdapterInfo>' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterInfo.subgroupMaxSize',
         'snapshotAdapterInfoNumber',
         [],
         [ { index: 2, value: 'subgroupMaxSize' } ]
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterInfo.subgroupMinSize',
         'snapshotAdapterInfoNumber',
         [],
         [ { index: 2, value: 'subgroupMinSize' } ]
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterInfo.vendor',
         'snapshotAdapterInfoString',
         [],
         [ { index: 2, value: 'vendor' } ]
     ),
     propertyRead(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapter.features',
         'features',
         [ 'GPUAdapter' ]
     ),
     propertyRead(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapter.limits',
         'limits',
         [ 'GPUAdapter' ]
     ),
     scratchMember(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterFeatures',
         'ScratchRuntime',
         'adapterFeatures'
     ),
     scratchMember(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'adapterInfo',
         'ScratchRuntime',
         'adapterInfo'
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'device.destroy',
         'destroy',
         [ 'GPUDevice' ]
     ),
     propertyRead(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'device.features',
         'features',
         [ 'GPUDevice' ]
     ),
     propertyRead(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'device.limits',
         'limits',
         [ 'GPUDevice' ]
     ),
     propertyRead(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'device.lost',
         'lost',
         [ 'GPUDevice' ]
     ),
     scratchMember(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'deviceFeatures',
         'ScratchRuntime',
         'deviceFeatures'
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'requestAdapter',
         'requestAdapter',
         [ 'GPU' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'requestDevice',
         'requestDevice',
         [ 'GPUAdapter' ]
     ),
     propertyRead(
-        'packages/geoscratch/src/scratch/runtime.ts',
+        'packages/geoscratch/src/scratch/gpu/runtime.ts',
         'wgslLanguageFeatures',
         'wgslLanguageFeatures',
         [ 'GPU' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/sampler.ts',
+        'packages/geoscratch/src/scratch/gpu/sampler.ts',
         'createSampler',
         'createSampler',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/shader-module.ts',
+        'packages/geoscratch/src/scratch/gpu/shader-module.ts',
         'createShaderModule',
         'createShaderModule',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/shader-module.ts',
+        'packages/geoscratch/src/scratch/gpu/shader-module.ts',
         'getCompilationInfo',
         'getCompilationInfo',
         [ 'GPUShaderModule' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/submission.ts',
+        'packages/geoscratch/src/scratch/gpu/submission.ts',
         'GPUCommandEncoder.finish',
         'finish',
         [ 'GPUCommandEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/submission.ts',
+        'packages/geoscratch/src/scratch/gpu/submission.ts',
         'beginComputePass',
         'beginComputePass',
         [ 'GPUCommandEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/submission.ts',
+        'packages/geoscratch/src/scratch/gpu/submission.ts',
         'beginRenderPass',
         'beginRenderPass',
         [ 'GPUCommandEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/submission.ts',
+        'packages/geoscratch/src/scratch/gpu/submission.ts',
         'createCommandEncoder',
         'createCommandEncoder',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/submission.ts',
+        'packages/geoscratch/src/scratch/gpu/submission.ts',
         'end',
         'end',
         [ 'GPUComputePassEncoder', 'GPURenderPassEncoder' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/submission.ts',
+        'packages/geoscratch/src/scratch/gpu/submission.ts',
         'onSubmittedWorkDone',
         'onSubmittedWorkDone',
         [ 'GPUQueue' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/submission.ts',
+        'packages/geoscratch/src/scratch/gpu/submission.ts',
         'queue.submit',
         'submit',
         [ 'GPUQueue' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/supporting-object-creation.ts',
+        'packages/geoscratch/src/scratch/gpu/supporting-object-creation.ts',
         'popErrorScope',
         'popErrorScope',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/supporting-object-creation.ts',
+        'packages/geoscratch/src/scratch/gpu/supporting-object-creation.ts',
         'pushErrorScope',
         'pushErrorScope',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/surface.ts',
+        'packages/geoscratch/src/scratch/gpu/surface.ts',
         'GPUCanvasContext.configure',
         'configure',
         [ 'GPUCanvasContext' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/surface.ts',
+        'packages/geoscratch/src/scratch/gpu/surface.ts',
         'configure',
         'configure',
         [ 'GPUCanvasContext' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/surface.ts',
+        'packages/geoscratch/src/scratch/gpu/surface.ts',
         'getConfiguration',
         'getConfiguration',
         [ 'GPUCanvasContext' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/surface.ts',
+        'packages/geoscratch/src/scratch/gpu/surface.ts',
         'getPreferredCanvasFormat',
         'getPreferredCanvasFormat',
         [ 'GPU' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/surface.ts',
+        'packages/geoscratch/src/scratch/gpu/surface.ts',
         'unconfigure',
         'unconfigure',
         [ 'GPUCanvasContext' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/temporal-texture.ts',
+        'packages/geoscratch/src/scratch/gpu/temporal-texture.ts',
         'GPUCanvasContext.getCurrentTexture',
         'getCurrentTexture',
         [ 'GPUCanvasContext' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/temporal-texture.ts',
+        'packages/geoscratch/src/scratch/gpu/temporal-texture.ts',
         'getCurrentTexture',
         'getCurrentTexture',
         [ 'GPUCanvasContext' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/temporal-texture.ts',
+        'packages/geoscratch/src/scratch/gpu/temporal-texture.ts',
         'importExternalTexture',
         'importExternalTexture',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/texture.ts',
+        'packages/geoscratch/src/scratch/gpu/texture.ts',
         'GPUTexture.createView',
         'createView',
         [ 'GPUTexture' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/texture.ts',
+        'packages/geoscratch/src/scratch/gpu/texture.ts',
         'createTexture',
         'createTexture',
         [ 'GPUDevice' ]
     ),
     call(
-        'packages/geoscratch/src/scratch/texture.ts',
+        'packages/geoscratch/src/scratch/gpu/texture.ts',
         'destroy',
         'destroy',
         [ 'GPUTexture' ]
@@ -2661,7 +2661,7 @@ function webGpuTypeEvidence(entry) {
             kind: 'constructor-call',
             operation: `${entry.id} structured diagnostic construction`,
             sourcePath:
-                'packages/geoscratch/src/scratch/diagnostics.ts',
+                'packages/geoscratch/src/scratch/gpu/diagnostics.ts',
             selector: {
                 constructorTypes: [ 'ScratchDiagnosticError' ],
             },
@@ -2716,7 +2716,7 @@ function wgslContractEvidence(entry) {
         kind: 'wgsl-contract',
         operation: `${entry.id} caller-authored WGSL lowering`,
         sourcePath:
-            'packages/geoscratch/src/scratch/shader-module.ts',
+            'packages/geoscratch/src/scratch/gpu/shader-module.ts',
         selector: {
             contractId: entry.id,
             descriptorType: 'GPUShaderModuleDescriptor',
@@ -2734,7 +2734,7 @@ function layoutContractEvidence(entry) {
         kind: 'layout-contract',
         operation: `${entry.id} layout codec contract`,
         sourcePath:
-            'packages/geoscratch/src/scratch/layout-codec.ts',
+            'packages/geoscratch/src/scratch/gpu/layout-codec.ts',
         selector: {
             exportName: 'LayoutCodec',
             members: [

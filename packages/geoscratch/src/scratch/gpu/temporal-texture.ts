@@ -1,4 +1,4 @@
-import { UUID } from '../core/utils/uuid.js'
+import { UUID } from '../../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { serializeNativeGpuError } from './gpu-operation.js'
 import { createScratchNativeLabel } from './native-allocation.js'

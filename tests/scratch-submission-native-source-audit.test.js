@@ -71,15 +71,15 @@ describe('scratch submission native source audit', () => {
 
         expect(callSites).to.have.length(59)
         expect(countByFile(callSites)).to.deep.equal({
-            'packages/geoscratch/src/scratch/binding.ts': 4,
-            'packages/geoscratch/src/scratch/command.ts': 30,
-            'packages/geoscratch/src/scratch/debug-command.ts': 3,
-            'packages/geoscratch/src/scratch/readback.ts': 5,
-            'packages/geoscratch/src/scratch/render-bundle.ts': 3,
-            'packages/geoscratch/src/scratch/submission.ts': 9,
-            'packages/geoscratch/src/scratch/surface.ts': 1,
-            'packages/geoscratch/src/scratch/temporal-texture.ts': 3,
-            'packages/geoscratch/src/scratch/texture.ts': 1,
+            'packages/geoscratch/src/scratch/gpu/binding.ts': 4,
+            'packages/geoscratch/src/scratch/gpu/command.ts': 30,
+            'packages/geoscratch/src/scratch/gpu/debug-command.ts': 3,
+            'packages/geoscratch/src/scratch/gpu/readback.ts': 5,
+            'packages/geoscratch/src/scratch/gpu/render-bundle.ts': 3,
+            'packages/geoscratch/src/scratch/gpu/submission.ts': 9,
+            'packages/geoscratch/src/scratch/gpu/surface.ts': 1,
+            'packages/geoscratch/src/scratch/gpu/temporal-texture.ts': 3,
+            'packages/geoscratch/src/scratch/gpu/texture.ts': 1,
         })
         expect(inventoryRows).to.have.length(callSites.length)
         for (const callSite of callSites) {
@@ -91,11 +91,11 @@ describe('scratch submission native source audit', () => {
 
     it('keeps every submission-owned physical call under the declared observation owner', () => {
 
-        const submission = read('packages', 'geoscratch', 'src', 'scratch', 'submission.ts')
-        const pass = read('packages', 'geoscratch', 'src', 'scratch', 'pass.ts')
-        const readback = read('packages', 'geoscratch', 'src', 'scratch', 'readback.ts')
-        const surface = read('packages', 'geoscratch', 'src', 'scratch', 'surface.ts')
-        const temporal = read('packages', 'geoscratch', 'src', 'scratch', 'temporal-texture.ts')
+        const submission = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'submission.ts')
+        const pass = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'pass.ts')
+        const readback = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'readback.ts')
+        const surface = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'surface.ts')
+        const temporal = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'temporal-texture.ts')
 
         for (const nativeCall of [
             'createCommandEncoder',
@@ -148,8 +148,8 @@ describe('scratch submission native source audit', () => {
             'review',
             'scratch-submission-native-provenance-audit.md'
         )
-        const command = read('packages', 'geoscratch', 'src', 'scratch', 'command.ts')
-        const binding = read('packages', 'geoscratch', 'src', 'scratch', 'binding.ts')
+        const command = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'command.ts')
+        const binding = read('packages', 'geoscratch', 'src', 'scratch', 'gpu', 'binding.ts')
 
         expect(command.match(/writeUploadCommandQueueAction\(this, queue\)/g)).to.have.length(3)
         expect(audit).to.include('direct `execute(queue)` remains explicitly deferred')

@@ -6,13 +6,13 @@ import {
 } from 'geoscratch'
 import {
     diagnosticsControllerFor,
-} from '../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
+} from '../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
 import {
     runtimePipelineCount,
-} from '../packages/geoscratch/dist/scratch/pipeline-ownership.js'
+} from '../packages/geoscratch/dist/scratch/gpu/pipeline-ownership.js'
 import {
     serializedEvidenceBytes,
-} from '../packages/geoscratch/dist/scratch/gpu-operation.js'
+} from '../packages/geoscratch/dist/scratch/gpu/gpu-operation.js'
 import {
     createFakeGpu,
     createFakePipelineError,

@@ -91,21 +91,21 @@ const evidence = Object.freeze([
     evidenceRecord(
         'webgpu-runtime-capabilities',
         'Explicit adapter/device requests, immutable capability facts, queue ownership, and device-loss lifecycle.',
-        [ 'packages/geoscratch/src/scratch/runtime.ts', 'packages/geoscratch/src/scratch/runtime-authority.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/runtime.ts', 'packages/geoscratch/src/scratch/gpu/runtime-authority.ts' ],
         [ 'tests/scratch-runtime.test.js', 'tests/scratch-closed-brand-authority.test.js' ],
         [ 'ScratchRuntime', 'ScratchRuntimeCreateOptions', 'ScratchRuntimeRequestFacts' ]
     ),
     evidenceRecord(
         'webgpu-surface-presentation',
         'Explicit Surface configuration and attempt-local current-texture leases preserve presentation semantics.',
-        [ 'packages/geoscratch/src/scratch/surface.ts', 'packages/geoscratch/src/scratch/temporal-texture.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/surface.ts', 'packages/geoscratch/src/scratch/gpu/temporal-texture.ts' ],
         [ 'tests/scratch-surface.test.js', 'tests/scratch-temporal-texture.test.js' ],
         [ 'Surface', 'SurfaceOptions', 'SurfaceTextureLease', 'SurfaceTextureView' ]
     ),
     evidenceRecord(
         'webgpu-resource-lifetime',
         'Logical resource identity, runtime ownership, allocation versions, content epochs, and disposal are explicit.',
-        [ 'packages/geoscratch/src/scratch/resource.ts', 'packages/geoscratch/src/scratch/native-allocation.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/resource.ts', 'packages/geoscratch/src/scratch/gpu/native-allocation.ts' ],
         [ 'tests/scratch-resource.test.js', 'tests/scratch-resource-views.test.js' ],
         [ 'Resource', 'ResourceState' ]
     ),
@@ -113,9 +113,9 @@ const evidence = Object.freeze([
         'webgpu-buffer-mapping',
         'Buffer allocation, regions, host mapping authority, and GPU upload paths are managed without implicit synchronization.',
         [
-            'packages/geoscratch/src/scratch/buffer.ts',
-            'packages/geoscratch/src/scratch/buffer-mapping.ts',
-            'packages/geoscratch/src/scratch/command.ts',
+            'packages/geoscratch/src/scratch/gpu/buffer.ts',
+            'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts',
+            'packages/geoscratch/src/scratch/gpu/command.ts',
         ],
         [
             'tests/scratch-buffer-mapping.test.js',
@@ -127,14 +127,14 @@ const evidence = Object.freeze([
     evidenceRecord(
         'webgpu-texture-resource',
         'Texture allocation, replacement, view descriptors, formats, sizes, usages, and subresource identity are explicit.',
-        [ 'packages/geoscratch/src/scratch/texture.ts', 'packages/geoscratch/src/scratch/texture-format-capabilities.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/texture.ts', 'packages/geoscratch/src/scratch/gpu/texture-format-capabilities.ts' ],
         [ 'tests/scratch-texture-resize.test.js', 'tests/scratch-texture-sampler.test.js' ],
         [ 'TextureResource', 'TextureViewSpec', 'TextureResourceDescriptor' ]
     ),
     evidenceRecord(
         'webgpu-sampler',
         'Sampler descriptors and allocation failures are represented by a runtime-owned SamplerResource.',
-        [ 'packages/geoscratch/src/scratch/sampler.ts', 'packages/geoscratch/src/scratch/supporting-object-creation.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/sampler.ts', 'packages/geoscratch/src/scratch/gpu/supporting-object-creation.ts' ],
         [ 'tests/scratch-texture-sampler.test.js', 'tests/scratch-supporting-object-acknowledgement.test.js' ],
         [ 'SamplerResource', 'SamplerResourceDescriptor' ]
     ),
@@ -142,9 +142,9 @@ const evidence = Object.freeze([
         'webgpu-bindings',
         'Explicit BindLayout and BindSet contracts retain native binding types, dynamic offsets, and preparation authority.',
         [
-            'packages/geoscratch/src/scratch/binding.ts',
-            'packages/geoscratch/src/scratch/binding-ownership.ts',
-            'packages/geoscratch/src/scratch/command.ts',
+            'packages/geoscratch/src/scratch/gpu/binding.ts',
+            'packages/geoscratch/src/scratch/gpu/binding-ownership.ts',
+            'packages/geoscratch/src/scratch/gpu/command.ts',
         ],
         [
             'tests/scratch-bind-dynamic-offsets.test.js',
@@ -157,9 +157,9 @@ const evidence = Object.freeze([
         'webgpu-shader-program',
         'Caller-authored WGSL, ShaderModule acknowledgement, Program stage contracts, compilation information, and explicit capabilities are preserved.',
         [
-            'packages/geoscratch/src/scratch/shader-module.ts',
-            'packages/geoscratch/src/scratch/program.ts',
-            'packages/geoscratch/src/scratch/shader-inspection.ts',
+            'packages/geoscratch/src/scratch/gpu/shader-module.ts',
+            'packages/geoscratch/src/scratch/gpu/program.ts',
+            'packages/geoscratch/src/scratch/gpu/shader-inspection.ts',
         ],
         [
             'tests/scratch-shader-module.test.js',
@@ -172,9 +172,9 @@ const evidence = Object.freeze([
         'webgpu-pipelines',
         'Render and compute pipelines retain native state, optional fragment semantics, explicit layouts, async creation, and validation.',
         [
-            'packages/geoscratch/src/scratch/pipeline.ts',
-            'packages/geoscratch/src/scratch/pipeline-creation.ts',
-            'packages/geoscratch/src/scratch/pipeline-compilation.ts',
+            'packages/geoscratch/src/scratch/gpu/pipeline.ts',
+            'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts',
+            'packages/geoscratch/src/scratch/gpu/pipeline-compilation.ts',
         ],
         [
             'tests/scratch-pipeline-decomposition.test.js',
@@ -187,9 +187,9 @@ const evidence = Object.freeze([
         'webgpu-pass-state',
         'Persistent render/compute pass specs and command state retain native attachment, timestamp, viewport, scissor, stencil, blend, and draw semantics.',
         [
-            'packages/geoscratch/src/scratch/pass.ts',
-            'packages/geoscratch/src/scratch/command.ts',
-            'packages/geoscratch/src/scratch/submission.ts',
+            'packages/geoscratch/src/scratch/gpu/pass.ts',
+            'packages/geoscratch/src/scratch/gpu/command.ts',
+            'packages/geoscratch/src/scratch/gpu/submission.ts',
         ],
         [
             'tests/scratch-render-pass-native-parity.test.js',
@@ -201,14 +201,14 @@ const evidence = Object.freeze([
     evidenceRecord(
         'webgpu-command-encoding',
         'Standalone command-encoder operations are explicit immutable Commands selected by SubmissionBuilder.',
-        [ 'packages/geoscratch/src/scratch/command.ts', 'packages/geoscratch/src/scratch/submission.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/command.ts', 'packages/geoscratch/src/scratch/gpu/submission.ts' ],
         [ 'tests/scratch-render-state-clear.test.js', 'tests/scratch-pass-submission.test.js' ],
         [ 'ClearBufferCommand', 'SubmissionBuilder' ]
     ),
     evidenceRecord(
         'webgpu-copy-upload',
         'All four native GPU copy quadrants plus explicit queue uploads are expressed without CPU roundtrips.',
-        [ 'packages/geoscratch/src/scratch/command.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/command.ts' ],
         [
             'tests/scratch-copy-command.test.js',
             'tests/scratch-binding-upload.test.js',
@@ -219,7 +219,7 @@ const evidence = Object.freeze([
     evidenceRecord(
         'webgpu-external-image-upload',
         'External image uploads preserve native source, origin, color-space, alpha, flip, destination, and extent contracts.',
-        [ 'packages/geoscratch/src/scratch/command.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/command.ts' ],
         [ 'tests/scratch-external-image-upload.test.js', 'tests/scratch-external-image-upload-docs.test.js' ],
         [ 'ExternalImageUploadCommand', 'ExternalImageUploadCommandDescriptor' ]
     ),
@@ -227,8 +227,8 @@ const evidence = Object.freeze([
         'webgpu-submission',
         'SubmissionBuilder and SubmittedWork own explicit order, command encoding, queue completion, epochs, readiness, and native observation.',
         [
-            'packages/geoscratch/src/scratch/submission.ts',
-            'packages/geoscratch/src/scratch/submission-native-observation.ts',
+            'packages/geoscratch/src/scratch/gpu/submission.ts',
+            'packages/geoscratch/src/scratch/gpu/submission-native-observation.ts',
         ],
         [
             'tests/scratch-pass-submission.test.js',
@@ -241,10 +241,10 @@ const evidence = Object.freeze([
         'webgpu-readback',
         'Buffer and texture readback use explicit operations, GPU copies, staging/mapping leases, retention bounds, and structured outcomes.',
         [
-            'packages/geoscratch/src/scratch/readback.ts',
-            'packages/geoscratch/src/scratch/texture-readback.ts',
-            'packages/geoscratch/src/scratch/readback-lease.ts',
-            'packages/geoscratch/src/scratch/readback-mapping.ts',
+            'packages/geoscratch/src/scratch/gpu/readback.ts',
+            'packages/geoscratch/src/scratch/gpu/texture-readback.ts',
+            'packages/geoscratch/src/scratch/gpu/readback-lease.ts',
+            'packages/geoscratch/src/scratch/gpu/readback-mapping.ts',
         ],
         [
             'tests/scratch-readback-command.test.js',
@@ -256,14 +256,14 @@ const evidence = Object.freeze([
     evidenceRecord(
         'webgpu-query',
         'Indexed timestamp/occlusion QuerySetResource slots and resolve commands retain native query lifecycle and availability.',
-        [ 'packages/geoscratch/src/scratch/query-set.ts', 'packages/geoscratch/src/scratch/command.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/query-set.ts', 'packages/geoscratch/src/scratch/gpu/command.ts' ],
         [ 'tests/scratch-query-set.test.js', 'tests/scratch-occlusion-query.test.js' ],
         [ 'QuerySetResource', 'ResolveQuerySetCommand', 'BeginOcclusionQueryCommand', 'EndOcclusionQueryCommand' ]
     ),
     evidenceRecord(
         'webgpu-external-texture',
         'External texture import, binding, expiry, runtime provenance, and attempt-local realization are managed explicitly.',
-        [ 'packages/geoscratch/src/scratch/temporal-texture.ts', 'packages/geoscratch/src/scratch/binding.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/temporal-texture.ts', 'packages/geoscratch/src/scratch/gpu/binding.ts' ],
         [ 'tests/scratch-temporal-texture.test.js', 'tests/scratch-command-binding-access.test.js' ],
         [ 'ExternalTextureBinding', 'ExternalTextureBindingDescriptor', 'ExternalTextureBindLayoutEntry' ]
     ),
@@ -271,8 +271,8 @@ const evidence = Object.freeze([
         'webgpu-render-bundle-debug',
         'Render bundle encoding/execution and pass/bundle debug commands lower to native operations with lifecycle diagnostics.',
         [
-            'packages/geoscratch/src/scratch/render-bundle.ts',
-            'packages/geoscratch/src/scratch/debug-command.ts',
+            'packages/geoscratch/src/scratch/gpu/render-bundle.ts',
+            'packages/geoscratch/src/scratch/gpu/debug-command.ts',
         ],
         [ 'tests/scratch-render-bundle-debug.test.js' ],
         [ 'RenderBundle', 'BundleDrawCommand', 'ExecuteRenderBundlesCommand', 'DebugCommand' ]
@@ -281,10 +281,10 @@ const evidence = Object.freeze([
         'webgpu-diagnostics',
         'Validation, internal, OOM, uncaptured, device-loss, and operation provenance are retained as bounded structured diagnostics.',
         [
-            'packages/geoscratch/src/scratch/diagnostics.ts',
-            'packages/geoscratch/src/scratch/runtime-diagnostics.ts',
-            'packages/geoscratch/src/scratch/gpu-operation.ts',
-            'packages/geoscratch/src/scratch/supporting-object-creation.ts',
+            'packages/geoscratch/src/scratch/gpu/diagnostics.ts',
+            'packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts',
+            'packages/geoscratch/src/scratch/gpu/gpu-operation.ts',
+            'packages/geoscratch/src/scratch/gpu/supporting-object-creation.ts',
         ],
         [
             'tests/scratch-diagnostics.test.js',
@@ -297,10 +297,10 @@ const evidence = Object.freeze([
         'webgpu-numeric-domains',
         'WebIDL numeric aliases without standalone GPU behavior are range-checked where they enter explicit Scratch descriptors.',
         [
-            'packages/geoscratch/src/scratch/runtime.ts',
-            'packages/geoscratch/src/scratch/command.ts',
-            'packages/geoscratch/src/scratch/pipeline.ts',
-            'packages/geoscratch/src/scratch/submission.ts',
+            'packages/geoscratch/src/scratch/gpu/runtime.ts',
+            'packages/geoscratch/src/scratch/gpu/command.ts',
+            'packages/geoscratch/src/scratch/gpu/pipeline.ts',
+            'packages/geoscratch/src/scratch/gpu/submission.ts',
         ],
         [
             'tests/types/public-api.ts',
@@ -320,11 +320,11 @@ const evidence = Object.freeze([
         'wgsl-recursive-layout',
         'Recursive LayoutCodec artifacts cover scalar/vector/matrix shapes, f16, arrays, structs, atomics, member attributes, runtime roots, BufferView contracts, packing, accessors, and readback ABI.',
         [
-            'packages/geoscratch/src/scratch/layout-codec.ts',
-            'packages/geoscratch/src/scratch/layout-artifact.ts',
-            'packages/geoscratch/src/scratch/program.ts',
-            'packages/geoscratch/src/scratch/shader-module.ts',
-            'packages/geoscratch/src/scratch/pipeline-creation.ts',
+            'packages/geoscratch/src/scratch/gpu/layout-codec.ts',
+            'packages/geoscratch/src/scratch/gpu/layout-artifact.ts',
+            'packages/geoscratch/src/scratch/gpu/program.ts',
+            'packages/geoscratch/src/scratch/gpu/shader-module.ts',
+            'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts',
         ],
         [
             'tests/scratch-recursive-layout-codec.test.js',
@@ -337,9 +337,9 @@ const evidence = Object.freeze([
         'wgsl-caller-authored-source',
         'WGSL syntax, control flow, built-ins, address spaces, pointers, opaque types, and entry points remain lossless caller-authored Program source.',
         [
-            'packages/geoscratch/src/scratch/shader-module.ts',
-            'packages/geoscratch/src/scratch/program.ts',
-            'packages/geoscratch/src/scratch/pipeline-creation.ts',
+            'packages/geoscratch/src/scratch/gpu/shader-module.ts',
+            'packages/geoscratch/src/scratch/gpu/program.ts',
+            'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts',
         ],
         [ 'tests/scratch-shader-module.test.js', 'tests/scratch-program.test.js' ],
         [ 'ShaderModule', 'ShaderModuleSourcePart', 'Program', 'ProgramDescriptor' ]
@@ -347,7 +347,7 @@ const evidence = Object.freeze([
     evidenceRecord(
         'wgsl-language-contract',
         'WGSL language extensions are declared separately through Program.requiredLanguageFeatures and checked against an immutable Runtime language-feature snapshot.',
-        [ 'packages/geoscratch/src/scratch/runtime.ts', 'packages/geoscratch/src/scratch/program.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/runtime.ts', 'packages/geoscratch/src/scratch/gpu/program.ts' ],
         [ 'tests/scratch-program-layout-requirements.test.js', 'tests/scratch-immediate-data.test.js' ],
         [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts', 'Program', 'ProgramDescriptor' ]
     ),
@@ -355,9 +355,9 @@ const evidence = Object.freeze([
         'wgsl-enable-contract',
         'WGSL enable directives remain caller-authored while matching GPU features and formal dependencies are declared explicitly by Runtime and Program.',
         [
-            'packages/geoscratch/src/scratch/feature-contract.ts',
-            'packages/geoscratch/src/scratch/runtime.ts',
-            'packages/geoscratch/src/scratch/program.ts',
+            'packages/geoscratch/src/scratch/gpu/feature-contract.ts',
+            'packages/geoscratch/src/scratch/gpu/runtime.ts',
+            'packages/geoscratch/src/scratch/gpu/program.ts',
         ],
         [
             'tests/scratch-runtime.test.js',
@@ -370,7 +370,7 @@ const evidence = Object.freeze([
     evidenceRecord(
         'wgsl-immediate-data',
         'The immediate_address_space language contract is coupled to explicit pipeline byte size and per-command submission snapshots.',
-        [ 'packages/geoscratch/src/scratch/pipeline.ts', 'packages/geoscratch/src/scratch/command.ts' ],
+        [ 'packages/geoscratch/src/scratch/gpu/pipeline.ts', 'packages/geoscratch/src/scratch/gpu/command.ts' ],
         [ 'tests/scratch-immediate-data.test.js' ],
         [ 'Program', 'CommandImmediateData', 'ScratchRenderPipelineDescriptor' ]
     ),
@@ -385,11 +385,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'requestAdapter',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
             operationProof(
                 'requestDevice',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -399,7 +399,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'requestAdapter',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -409,7 +409,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'requestDevice',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -419,11 +419,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'adapterFeatures',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
             operationProof(
                 'deviceFeatures',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -433,7 +433,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'adapterInfo',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -443,7 +443,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'wgslLanguageFeatures',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -453,11 +453,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'adapter.limits',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
             operationProof(
                 'device.limits',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -467,7 +467,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'device.lost',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -477,11 +477,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'device.destroy',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
             operationProof(
                 'device.lost',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -491,11 +491,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'GPUCanvasContext.configure',
-                'packages/geoscratch/src/scratch/surface.ts'
+                'packages/geoscratch/src/scratch/gpu/surface.ts'
             ),
             operationProof(
                 'GPUCanvasContext.getCurrentTexture',
-                'packages/geoscratch/src/scratch/temporal-texture.ts'
+                'packages/geoscratch/src/scratch/gpu/temporal-texture.ts'
             ),
         ]
     ),
@@ -505,7 +505,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'GPUCanvasContext.configure',
-                'packages/geoscratch/src/scratch/surface.ts'
+                'packages/geoscratch/src/scratch/gpu/surface.ts'
             ),
         ]
     ),
@@ -515,7 +515,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'destroy',
-                'packages/geoscratch/src/scratch/native-allocation.ts'
+                'packages/geoscratch/src/scratch/gpu/native-allocation.ts'
             ),
         ]
     ),
@@ -525,7 +525,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createBuffer',
-                'packages/geoscratch/src/scratch/buffer.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer.ts'
             ),
         ]
     ),
@@ -535,15 +535,15 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'mapAsync',
-                'packages/geoscratch/src/scratch/buffer-mapping.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts'
             ),
             operationProof(
                 'getMappedRange',
-                'packages/geoscratch/src/scratch/buffer-mapping.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts'
             ),
             operationProof(
                 'unmap',
-                'packages/geoscratch/src/scratch/buffer-mapping.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts'
             ),
         ]
     ),
@@ -553,11 +553,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createTexture',
-                'packages/geoscratch/src/scratch/texture.ts'
+                'packages/geoscratch/src/scratch/gpu/texture.ts'
             ),
             operationProof(
                 'GPUTexture.createView',
-                'packages/geoscratch/src/scratch/texture.ts'
+                'packages/geoscratch/src/scratch/gpu/texture.ts'
             ),
         ]
     ),
@@ -567,7 +567,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createTexture',
-                'packages/geoscratch/src/scratch/texture.ts'
+                'packages/geoscratch/src/scratch/gpu/texture.ts'
             ),
         ]
     ),
@@ -577,7 +577,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'GPUTexture.createView',
-                'packages/geoscratch/src/scratch/texture.ts'
+                'packages/geoscratch/src/scratch/gpu/texture.ts'
             ),
         ]
     ),
@@ -587,7 +587,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createSampler',
-                'packages/geoscratch/src/scratch/sampler.ts'
+                'packages/geoscratch/src/scratch/gpu/sampler.ts'
             ),
         ]
     ),
@@ -597,7 +597,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createBindGroupLayout',
-                'packages/geoscratch/src/scratch/binding.ts'
+                'packages/geoscratch/src/scratch/gpu/binding.ts'
             ),
         ]
     ),
@@ -607,7 +607,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createBindGroup',
-                'packages/geoscratch/src/scratch/binding.ts'
+                'packages/geoscratch/src/scratch/gpu/binding.ts'
             ),
         ]
     ),
@@ -617,7 +617,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'setBindGroup',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -627,11 +627,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createShaderModule',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
             operationProof(
                 'getCompilationInfo',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
         ]
     ),
@@ -641,7 +641,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createShaderModule',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
         ]
     ),
@@ -651,7 +651,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'getCompilationInfo',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
         ]
     ),
@@ -666,11 +666,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createRenderPipelineAsync',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
             operationProof(
                 'createComputePipelineAsync',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
         ]
     ),
@@ -683,7 +683,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createPipelineLayout',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
         ]
     ),
@@ -693,7 +693,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createRenderPipelineAsync',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
         ]
     ),
@@ -703,7 +703,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createComputePipelineAsync',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
         ]
     ),
@@ -718,11 +718,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createRenderPipelineAsync',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
             operationProof(
                 'createSampler',
-                'packages/geoscratch/src/scratch/sampler.ts'
+                'packages/geoscratch/src/scratch/gpu/sampler.ts'
             ),
         ]
     ),
@@ -732,7 +732,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createRenderPipelineAsync',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
         ]
     ),
@@ -742,7 +742,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'beginRenderPass',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -752,7 +752,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'beginComputePass',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -762,11 +762,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'draw',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'drawIndexed',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -776,11 +776,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createCommandEncoder',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
             operationProof(
                 'GPUCommandEncoder.finish',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -790,7 +790,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createCommandEncoder',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -800,7 +800,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'GPUCommandEncoder.finish',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -810,19 +810,19 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'copyBufferToBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'copyBufferToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'copyTextureToBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'copyTextureToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -837,23 +837,23 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'copyBufferToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'copyExternalImageToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'copyTextureToBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'copyTextureToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'writeTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -863,11 +863,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'copyBufferToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'copyTextureToBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -877,7 +877,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'copyExternalImageToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -887,11 +887,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'queue.submit',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
             operationProof(
                 'onSubmittedWorkDone',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -901,11 +901,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'copyTextureToBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'mapAsync',
-                'packages/geoscratch/src/scratch/readback-mapping.ts'
+                'packages/geoscratch/src/scratch/gpu/readback-mapping.ts'
             ),
         ]
     ),
@@ -915,11 +915,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createQuerySet',
-                'packages/geoscratch/src/scratch/query-set.ts'
+                'packages/geoscratch/src/scratch/gpu/query-set.ts'
             ),
             operationProof(
                 'resolveQuerySet',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -929,7 +929,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createQuerySet',
-                'packages/geoscratch/src/scratch/query-set.ts'
+                'packages/geoscratch/src/scratch/gpu/query-set.ts'
             ),
         ]
     ),
@@ -939,7 +939,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'beginComputePass',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -949,7 +949,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'beginRenderPass',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -959,7 +959,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'importExternalTexture',
-                'packages/geoscratch/src/scratch/temporal-texture.ts'
+                'packages/geoscratch/src/scratch/gpu/temporal-texture.ts'
             ),
         ]
     ),
@@ -969,7 +969,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createRenderBundleEncoder',
-                'packages/geoscratch/src/scratch/render-bundle.ts'
+                'packages/geoscratch/src/scratch/gpu/render-bundle.ts'
             ),
         ]
     ),
@@ -979,7 +979,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'executeBundles',
-                'packages/geoscratch/src/scratch/render-bundle.ts'
+                'packages/geoscratch/src/scratch/gpu/render-bundle.ts'
             ),
         ]
     ),
@@ -989,11 +989,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createRenderBundleEncoder',
-                'packages/geoscratch/src/scratch/render-bundle.ts'
+                'packages/geoscratch/src/scratch/gpu/render-bundle.ts'
             ),
             operationProof(
                 'GPURenderBundleEncoder.finish',
-                'packages/geoscratch/src/scratch/render-bundle.ts'
+                'packages/geoscratch/src/scratch/gpu/render-bundle.ts'
             ),
         ]
     ),
@@ -1003,7 +1003,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'GPURenderBundleEncoder.finish',
-                'packages/geoscratch/src/scratch/render-bundle.ts'
+                'packages/geoscratch/src/scratch/gpu/render-bundle.ts'
             ),
         ]
     ),
@@ -1013,15 +1013,15 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'pushDebugGroup',
-                'packages/geoscratch/src/scratch/debug-command.ts'
+                'packages/geoscratch/src/scratch/gpu/debug-command.ts'
             ),
             operationProof(
                 'popDebugGroup',
-                'packages/geoscratch/src/scratch/debug-command.ts'
+                'packages/geoscratch/src/scratch/gpu/debug-command.ts'
             ),
             operationProof(
                 'insertDebugMarker',
-                'packages/geoscratch/src/scratch/debug-command.ts'
+                'packages/geoscratch/src/scratch/gpu/debug-command.ts'
             ),
         ]
     ),
@@ -1031,11 +1031,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'pushErrorScope',
-                'packages/geoscratch/src/scratch/supporting-object-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/supporting-object-creation.ts'
             ),
             operationProof(
                 'popErrorScope',
-                'packages/geoscratch/src/scratch/supporting-object-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/supporting-object-creation.ts'
             ),
         ]
     ),
@@ -1045,7 +1045,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'serializeNativeGpuError',
-                'packages/geoscratch/src/scratch/gpu-operation.ts'
+                'packages/geoscratch/src/scratch/gpu/gpu-operation.ts'
             ),
         ]
     ),
@@ -1055,11 +1055,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'copyBufferToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
             operationProof(
                 'draw',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -1069,11 +1069,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createShaderModule',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
             operationProof(
                 'getCompilationInfo',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
         ]
     ),
@@ -1083,11 +1083,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'LayoutCodec.pack',
-                'packages/geoscratch/src/scratch/layout-codec.ts'
+                'packages/geoscratch/src/scratch/gpu/layout-codec.ts'
             ),
             operationProof(
                 'LayoutCodec.wgslAccessors',
-                'packages/geoscratch/src/scratch/layout-codec.ts'
+                'packages/geoscratch/src/scratch/gpu/layout-codec.ts'
             ),
         ]
     ),
@@ -1097,11 +1097,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createRenderPipelineAsync',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
             operationProof(
                 'createComputePipelineAsync',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
         ]
     ),
@@ -1111,11 +1111,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createBindGroupLayout',
-                'packages/geoscratch/src/scratch/binding.ts'
+                'packages/geoscratch/src/scratch/gpu/binding.ts'
             ),
             operationProof(
                 'createShaderModule',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
         ]
     ),
@@ -1125,11 +1125,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createBindGroupLayout',
-                'packages/geoscratch/src/scratch/binding.ts'
+                'packages/geoscratch/src/scratch/gpu/binding.ts'
             ),
             operationProof(
                 'createTexture',
-                'packages/geoscratch/src/scratch/texture.ts'
+                'packages/geoscratch/src/scratch/gpu/texture.ts'
             ),
         ]
     ),
@@ -1139,7 +1139,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'getCompilationInfo',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
         ]
     ),
@@ -1149,11 +1149,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'createShaderModule',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
             operationProof(
                 'wgslLanguageFeatures',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -1163,11 +1163,11 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'requestDevice',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
             operationProof(
                 'createShaderModule',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
         ]
     ),
@@ -1177,7 +1177,7 @@ const entryProofProfiles = Object.freeze({
         [
             operationProof(
                 'setImmediates',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -1731,7 +1731,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'requestAdapter',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -1742,7 +1742,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'getPreferredCanvasFormat',
-                'packages/geoscratch/src/scratch/surface.ts'
+                'packages/geoscratch/src/scratch/gpu/surface.ts'
             ),
         ]
     ),
@@ -1758,7 +1758,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'requestDevice',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -1769,7 +1769,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'adapter.features',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -1780,7 +1780,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'adapter.info',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -1791,11 +1791,11 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'adapter.info',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
             operationProof(
                 'adapterInfo.isFallbackAdapter',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -1823,7 +1823,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'adapter.limits',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -1834,7 +1834,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'destroy',
-                'packages/geoscratch/src/scratch/buffer.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer.ts'
             ),
         ]
     ),
@@ -1845,7 +1845,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'getMappedRange',
-                'packages/geoscratch/src/scratch/buffer-mapping.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts'
             ),
         ]
     ),
@@ -1856,7 +1856,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'mapAsync',
-                'packages/geoscratch/src/scratch/buffer-mapping.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts'
             ),
         ]
     ),
@@ -1867,11 +1867,11 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'mapAsync',
-                'packages/geoscratch/src/scratch/buffer-mapping.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts'
             ),
             operationProof(
                 'unmap',
-                'packages/geoscratch/src/scratch/buffer-mapping.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts'
             ),
         ]
     ),
@@ -1882,7 +1882,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'unmap',
-                'packages/geoscratch/src/scratch/buffer-mapping.ts'
+                'packages/geoscratch/src/scratch/gpu/buffer-mapping.ts'
             ),
         ]
     ),
@@ -1893,7 +1893,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'configure',
-                'packages/geoscratch/src/scratch/surface.ts'
+                'packages/geoscratch/src/scratch/gpu/surface.ts'
             ),
         ]
     ),
@@ -1904,7 +1904,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'getConfiguration',
-                'packages/geoscratch/src/scratch/surface.ts'
+                'packages/geoscratch/src/scratch/gpu/surface.ts'
             ),
         ]
     ),
@@ -1915,7 +1915,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'getCurrentTexture',
-                'packages/geoscratch/src/scratch/temporal-texture.ts'
+                'packages/geoscratch/src/scratch/gpu/temporal-texture.ts'
             ),
         ]
     ),
@@ -1926,7 +1926,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'unconfigure',
-                'packages/geoscratch/src/scratch/surface.ts'
+                'packages/geoscratch/src/scratch/gpu/surface.ts'
             ),
         ]
     ),
@@ -1972,7 +1972,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'clearBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ],
         { publicSymbols: [ 'ClearBufferCommand' ] }
@@ -1989,7 +1989,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'resolveQuerySet',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ],
         {
@@ -2006,7 +2006,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'copyBufferToBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2017,7 +2017,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'copyBufferToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2028,7 +2028,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'copyTextureToBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2039,7 +2039,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'copyTextureToTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2065,7 +2065,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'dispatchWorkgroups',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ],
         { publicSymbols: [ 'DispatchCommand' ] }
@@ -2078,7 +2078,7 @@ const webGpuExactRules = Object.freeze({
             [
                 operationProof(
                     'dispatchWorkgroupsIndirect',
-                    'packages/geoscratch/src/scratch/command.ts'
+                    'packages/geoscratch/src/scratch/gpu/command.ts'
                 ),
             ],
             { publicSymbols: [ 'DispatchCommand' ] }
@@ -2090,7 +2090,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'end',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -2101,7 +2101,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'setPipeline',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ],
         {
@@ -2118,7 +2118,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'insertDebugMarker',
-                'packages/geoscratch/src/scratch/debug-command.ts'
+                'packages/geoscratch/src/scratch/gpu/debug-command.ts'
             ),
         ]
     ),
@@ -2129,7 +2129,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'popDebugGroup',
-                'packages/geoscratch/src/scratch/debug-command.ts'
+                'packages/geoscratch/src/scratch/gpu/debug-command.ts'
             ),
         ]
     ),
@@ -2140,7 +2140,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'pushDebugGroup',
-                'packages/geoscratch/src/scratch/debug-command.ts'
+                'packages/geoscratch/src/scratch/gpu/debug-command.ts'
             ),
         ]
     ),
@@ -2151,7 +2151,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'device.lost',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -2162,7 +2162,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'adapter.info',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -2173,7 +2173,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'device.features',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -2199,7 +2199,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'createCommandEncoder',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -2221,7 +2221,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'createPipelineLayout',
-                'packages/geoscratch/src/scratch/pipeline-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts'
             ),
         ]
     ),
@@ -2232,7 +2232,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'createQuerySet',
-                'packages/geoscratch/src/scratch/query-set.ts'
+                'packages/geoscratch/src/scratch/gpu/query-set.ts'
             ),
         ]
     ),
@@ -2264,7 +2264,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'createShaderModule',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
         ]
     ),
@@ -2275,7 +2275,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'createTexture',
-                'packages/geoscratch/src/scratch/texture.ts'
+                'packages/geoscratch/src/scratch/gpu/texture.ts'
             ),
         ]
     ),
@@ -2286,7 +2286,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'device.destroy',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -2302,7 +2302,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'device.limits',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -2324,7 +2324,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'uncapturederror',
-                'packages/geoscratch/src/scratch/runtime-diagnostics.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime-diagnostics.ts'
             ),
         ],
         { classification: 'managed-semantic-equivalent' }
@@ -2336,7 +2336,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'popErrorScope',
-                'packages/geoscratch/src/scratch/supporting-object-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/supporting-object-creation.ts'
             ),
         ],
         { classification: 'managed-semantic-equivalent' }
@@ -2348,7 +2348,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'pushErrorScope',
-                'packages/geoscratch/src/scratch/supporting-object-creation.ts'
+                'packages/geoscratch/src/scratch/gpu/supporting-object-creation.ts'
             ),
         ],
         { classification: 'managed-semantic-equivalent' }
@@ -2365,7 +2365,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'onSubmittedWorkDone',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -2376,7 +2376,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'queue.submit',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -2387,7 +2387,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'writeBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ],
         { publicSymbols: [ 'UploadCommand' ] }
@@ -2399,7 +2399,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'writeTexture',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ],
         { publicSymbols: [ 'TextureUploadCommand' ] }
@@ -2411,7 +2411,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'createScratchNativeLabel',
-                'packages/geoscratch/src/scratch/native-allocation.ts'
+                'packages/geoscratch/src/scratch/gpu/native-allocation.ts'
             ),
         ],
         { classification: 'managed-semantic-equivalent' }
@@ -2423,7 +2423,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'getBindGroupLayout',
-                'packages/geoscratch/src/scratch/binding.ts'
+                'packages/geoscratch/src/scratch/gpu/binding.ts'
             ),
         ],
         {
@@ -2441,7 +2441,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'destroy',
-                'packages/geoscratch/src/scratch/query-set.ts'
+                'packages/geoscratch/src/scratch/gpu/query-set.ts'
             ),
         ],
         { publicSymbols: [ 'QuerySetResource' ] }
@@ -2453,7 +2453,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'GPURenderBundleEncoder.finish',
-                'packages/geoscratch/src/scratch/render-bundle.ts'
+                'packages/geoscratch/src/scratch/gpu/render-bundle.ts'
             ),
         ]
     ),
@@ -2464,7 +2464,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'draw',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2475,7 +2475,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'drawIndexed',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2487,7 +2487,7 @@ const webGpuExactRules = Object.freeze({
             [
                 operationProof(
                     'drawIndexedIndirect',
-                    'packages/geoscratch/src/scratch/command.ts'
+                    'packages/geoscratch/src/scratch/gpu/command.ts'
                 ),
             ]
         ),
@@ -2498,7 +2498,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'drawIndirect',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2509,7 +2509,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'setIndexBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2520,7 +2520,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'setPipeline',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ],
         {
@@ -2537,7 +2537,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'setVertexBuffer',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2549,7 +2549,7 @@ const webGpuExactRules = Object.freeze({
             [
                 operationProof(
                     'beginOcclusionQuery',
-                    'packages/geoscratch/src/scratch/command.ts'
+                    'packages/geoscratch/src/scratch/gpu/command.ts'
                 ),
             ],
             {
@@ -2566,7 +2566,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'end',
-                'packages/geoscratch/src/scratch/submission.ts'
+                'packages/geoscratch/src/scratch/gpu/submission.ts'
             ),
         ]
     ),
@@ -2578,7 +2578,7 @@ const webGpuExactRules = Object.freeze({
             [
                 operationProof(
                     'endOcclusionQuery',
-                    'packages/geoscratch/src/scratch/command.ts'
+                    'packages/geoscratch/src/scratch/gpu/command.ts'
                 ),
             ],
             { publicSymbols: [ 'EndOcclusionQueryCommand' ] }
@@ -2590,7 +2590,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'setBlendConstant',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2601,7 +2601,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'setScissorRect',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2613,7 +2613,7 @@ const webGpuExactRules = Object.freeze({
             [
                 operationProof(
                     'setStencilReference',
-                    'packages/geoscratch/src/scratch/command.ts'
+                    'packages/geoscratch/src/scratch/gpu/command.ts'
                 ),
             ]
         ),
@@ -2624,7 +2624,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'setViewport',
-                'packages/geoscratch/src/scratch/command.ts'
+                'packages/geoscratch/src/scratch/gpu/command.ts'
             ),
         ]
     ),
@@ -2635,7 +2635,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'getCompilationInfo',
-                'packages/geoscratch/src/scratch/shader-module.ts'
+                'packages/geoscratch/src/scratch/gpu/shader-module.ts'
             ),
         ]
     ),
@@ -2646,7 +2646,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'GPUTexture.createView',
-                'packages/geoscratch/src/scratch/texture.ts'
+                'packages/geoscratch/src/scratch/gpu/texture.ts'
             ),
         ]
     ),
@@ -2657,7 +2657,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'destroy',
-                'packages/geoscratch/src/scratch/texture.ts'
+                'packages/geoscratch/src/scratch/gpu/texture.ts'
             ),
         ]
     ),
@@ -2668,7 +2668,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'serializeNativeGpuError',
-                'packages/geoscratch/src/scratch/gpu-operation.ts'
+                'packages/geoscratch/src/scratch/gpu/gpu-operation.ts'
             ),
         ],
         { classification: 'managed-semantic-equivalent' }
@@ -2680,7 +2680,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'serializeNativeGpuError',
-                'packages/geoscratch/src/scratch/gpu-operation.ts'
+                'packages/geoscratch/src/scratch/gpu/gpu-operation.ts'
             ),
         ],
         { classification: 'managed-semantic-equivalent' }
@@ -2692,7 +2692,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'serializeNativeGpuError',
-                'packages/geoscratch/src/scratch/gpu-operation.ts'
+                'packages/geoscratch/src/scratch/gpu/gpu-operation.ts'
             ),
         ],
         { classification: 'managed-semantic-equivalent' }
@@ -2704,7 +2704,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'serializeNativeGpuError',
-                'packages/geoscratch/src/scratch/gpu-operation.ts'
+                'packages/geoscratch/src/scratch/gpu/gpu-operation.ts'
             ),
         ],
         { classification: 'managed-semantic-equivalent' }
@@ -2716,7 +2716,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'serializeNativeGpuError',
-                'packages/geoscratch/src/scratch/gpu-operation.ts'
+                'packages/geoscratch/src/scratch/gpu/gpu-operation.ts'
             ),
         ],
         { classification: 'managed-semantic-equivalent' }
@@ -2740,7 +2740,7 @@ const webGpuExactRules = Object.freeze({
         [
             operationProof(
                 'adapter.info',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     ),
@@ -4225,11 +4225,11 @@ function adapterInfoMemberRule(member) {
         [
             operationProof(
                 'adapter.info',
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
             operationProof(
                 `adapterInfo.${member}`,
-                'packages/geoscratch/src/scratch/runtime.ts'
+                'packages/geoscratch/src/scratch/gpu/runtime.ts'
             ),
         ]
     )

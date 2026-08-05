@@ -1,4 +1,4 @@
-import { UUID } from '../core/utils/uuid.js'
+import { UUID } from '../../core/utils/uuid.js'
 import { throwScratchDiagnostic } from './diagnostics.js'
 import { advanceQuerySlotContentEpoch, isQuerySetResource, QuerySetResource } from './query-set.js'
 import { assertScratchRuntimeActive } from './runtime-authority.js'

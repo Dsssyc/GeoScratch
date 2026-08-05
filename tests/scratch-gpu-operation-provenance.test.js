@@ -4,17 +4,17 @@ import {
     createGpuOperationRecord,
     serializeNativeGpuError,
     serializedEvidenceBytes,
-} from '../packages/geoscratch/dist/scratch/gpu-operation.js'
+} from '../packages/geoscratch/dist/scratch/gpu/gpu-operation.js'
 import {
     diagnosticsControllerFor,
     logicalTextureDescriptorFootprint,
-} from '../packages/geoscratch/dist/scratch/runtime-diagnostics.js'
-import { ScratchRuntime } from '../packages/geoscratch/dist/scratch/runtime.js'
-import { BufferResource } from '../packages/geoscratch/dist/scratch/buffer.js'
-import { TextureResource } from '../packages/geoscratch/dist/scratch/texture.js'
-import { layoutCodec } from '../packages/geoscratch/dist/scratch/layout-codec.js'
-import { resourceDisposalSubscriberCount } from '../packages/geoscratch/dist/scratch/resource.js'
-import { ScratchDiagnosticError } from '../packages/geoscratch/dist/scratch/diagnostics.js'
+} from '../packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
+import { ScratchRuntime } from '../packages/geoscratch/dist/scratch/gpu/runtime.js'
+import { BufferResource } from '../packages/geoscratch/dist/scratch/gpu/buffer.js'
+import { TextureResource } from '../packages/geoscratch/dist/scratch/gpu/texture.js'
+import { layoutCodec } from '../packages/geoscratch/dist/scratch/gpu/layout-codec.js'
+import { resourceDisposalSubscriberCount } from '../packages/geoscratch/dist/scratch/gpu/resource.js'
+import { ScratchDiagnosticError } from '../packages/geoscratch/dist/scratch/gpu/diagnostics.js'
 import {
     advanceResourceContentEpochForTest,
     createFakeGpu,

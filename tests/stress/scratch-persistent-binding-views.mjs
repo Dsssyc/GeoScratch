@@ -1,7 +1,7 @@
 import os from 'node:os'
 import process from 'node:process'
 import { performance } from 'node:perf_hooks'
-import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/runtime.js'
+import { ScratchRuntime } from '../../packages/geoscratch/dist/scratch/gpu/runtime.js'
 import {
     advanceResourceContentEpochForTest,
     createFakeGpu,

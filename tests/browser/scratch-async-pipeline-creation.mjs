@@ -120,16 +120,16 @@ async function verifyPipelineTransactions(browser) {
     })
 
     const runtimeModuleUrl = `${baseUrl}/@fs${resolve(
-        'packages/geoscratch/dist/scratch/runtime.js'
+        'packages/geoscratch/dist/scratch/gpu/runtime.js'
     )}`
     const diagnosticModuleUrl = `${baseUrl}/@fs${resolve(
-        'packages/geoscratch/dist/scratch/diagnostics.js'
+        'packages/geoscratch/dist/scratch/gpu/diagnostics.js'
     )}`
     const diagnosticsModuleUrl = `${baseUrl}/@fs${resolve(
-        'packages/geoscratch/dist/scratch/runtime-diagnostics.js'
+        'packages/geoscratch/dist/scratch/gpu/runtime-diagnostics.js'
     )}`
     const pipelineOwnershipModuleUrl = `${baseUrl}/@fs${resolve(
-        'packages/geoscratch/dist/scratch/pipeline-ownership.js'
+        'packages/geoscratch/dist/scratch/gpu/pipeline-ownership.js'
     )}`
     const probe = await page.evaluate(async ({
         runtimeModuleUrl,

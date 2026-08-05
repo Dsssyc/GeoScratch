@@ -599,7 +599,7 @@ function evidenceAttributionRegressionsPass() {
             ],
             operations: [ 'createRenderBundleEncoder' ],
             sourcePaths: [
-                'packages/geoscratch/src/scratch/render-bundle.ts',
+                'packages/geoscratch/src/scratch/gpu/render-bundle.ts',
             ],
         }) &&
         entryProofMatches(entries, 'GPURenderPassEncoder.executeBundles', {
@@ -612,7 +612,7 @@ function evidenceAttributionRegressionsPass() {
             ],
             operations: [ 'executeBundles' ],
             sourcePaths: [
-                'packages/geoscratch/src/scratch/render-bundle.ts',
+                'packages/geoscratch/src/scratch/gpu/render-bundle.ts',
             ],
         }) &&
         entryProofMatches(entries, 'interface.GPUCommandBufferDescriptor', {
@@ -622,7 +622,7 @@ function evidenceAttributionRegressionsPass() {
             publicSymbols: [ 'SubmissionBuilder', 'SubmittedWork' ],
             operations: [ 'GPUCommandEncoder.finish' ],
             sourcePaths: [
-                'packages/geoscratch/src/scratch/submission.ts',
+                'packages/geoscratch/src/scratch/gpu/submission.ts',
             ],
         }) &&
         entryProofMatches(entries, 'interface.GPUVertexBufferLayout', {
@@ -635,7 +635,7 @@ function evidenceAttributionRegressionsPass() {
             ],
             operations: [ 'createRenderPipelineAsync' ],
             sourcePaths: [
-                'packages/geoscratch/src/scratch/pipeline-creation.ts',
+                'packages/geoscratch/src/scratch/gpu/pipeline-creation.ts',
             ],
         }) &&
         entryProofMatches(entries, 'interface.GPUTexelCopyTextureInfo', {
@@ -656,7 +656,7 @@ function evidenceAttributionRegressionsPass() {
                 'writeTexture',
             ],
             sourcePaths: [
-                'packages/geoscratch/src/scratch/command.ts',
+                'packages/geoscratch/src/scratch/gpu/command.ts',
             ],
         }) &&
         entryProofMatches(entries, 'interface.GPUSupportedLimits', {
@@ -666,7 +666,7 @@ function evidenceAttributionRegressionsPass() {
             publicSymbols: [ 'ScratchRuntime', 'ScratchRuntimeRequestFacts' ],
             operations: [ 'adapter.limits', 'device.limits' ],
             sourcePaths: [
-                'packages/geoscratch/src/scratch/runtime.ts',
+                'packages/geoscratch/src/scratch/gpu/runtime.ts',
             ],
         }) &&
         deepEqual(
@@ -1359,13 +1359,13 @@ function enableContractFact(entry) {
 function featureDependencySourceIsShared() {
 
     const contract = parseTypeScriptSource(
-        'packages/geoscratch/src/scratch/feature-contract.ts'
+        'packages/geoscratch/src/scratch/gpu/feature-contract.ts'
     )
     const runtime = parseTypeScriptSource(
-        'packages/geoscratch/src/scratch/runtime.ts'
+        'packages/geoscratch/src/scratch/gpu/runtime.ts'
     )
     const program = parseTypeScriptSource(
-        'packages/geoscratch/src/scratch/program.ts'
+        'packages/geoscratch/src/scratch/gpu/program.ts'
     )
     const dependencies = staticFrozenObjectArray(
         contract,

@@ -332,7 +332,7 @@ function runtimePreflightMatchesCallerCompanions() {
             requiredFeature: entry.requiredFeature,
         }))
     const sourceFile = parseTypeScriptSource(
-        'packages/geoscratch/src/scratch/feature-contract.ts'
+        'packages/geoscratch/src/scratch/gpu/feature-contract.ts'
     )
     const actual = staticFrozenObjectArray(
         sourceFile,

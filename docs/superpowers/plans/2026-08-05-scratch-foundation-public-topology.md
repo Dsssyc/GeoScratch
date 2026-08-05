@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Goal 起点固定为提交 `e43d162150070c1d0b0cb0d61e27ac027a98ab64`，设计依据为 `docs/vision/scratch-foundation-public-topology.md`。
+- Goal 绿色起点固定为提交 `063b543a5e9616b791a4e1d87f65d0e42342209b`；该提交是在全部分支合入 `dev-feature` 后修复两项基线测试所得，设计依据为 `docs/vision/scratch-foundation-public-topology.md`。
 - 这是 `0.x.x` clean cut：不保留 deprecated alias、旧子路径、双导出、运行时 shim 或旧名称兼容层。
 - 本 Goal 只改变代码归属、公共拓扑、GPU 命名和诊断 envelope；不得改变 GPU command/resource/submission/readiness/native-error 语义。
 - 不得改变 Worker 的优先级、排队、取消、context retention、transfer、故障隔离或回收语义。
@@ -163,14 +163,14 @@ export type ScratchDiagnosticErrorContext =
 - Modify: `packages/geoscratch/src/geo/virtual-raster-gpu.ts`
 - Modify: every file returned by `rg -l "packages/geoscratch/src/scratch/[A-Za-z0-9_-]+\\.ts" tests`
 
-- [ ] Generate the manifest from baseline commit `e43d162` and classify every exported value/type from root, `./scratch`, `./worker`, `./geometry`, and `./geo` exactly once as `preserve`, `rename`, `move`, or `remove`; reject duplicate and unclassified symbols in the audit script.
-- [ ] Add a RED source-topology test asserting that `scratch/index.ts` is the only TypeScript file directly under `scratch/`, all current GPU implementation basenames exist under `scratch/gpu/`, and no GPU source imports `scratch/worker` or `geo`.
-- [ ] Move files without changing public names or runtime behavior. Preserve each file body first; only adjust relative import paths and the `scratch/index.ts` barrel.
-- [ ] Update `geo/virtual-raster-gpu.ts` to import its GPU types from `../scratch/gpu/` during this internal-layout phase. Do not rename `ScratchRuntime` yet.
-- [ ] Replace every exact source-evidence path in `tests/audits/`, `tests/browser/`, `tests/stress/`, `tests/benchmarks/`, and `tests/*.test.js`; do not weaken source inventories or replace them with broad directory checks.
-- [ ] Run `node --test` nowhere; this repository uses Mocha. Run `npm test -- --grep "scratch foundation source topology"` and every source-audit test whose path inventory changed.
-- [ ] Run `npm run typecheck` and `npm run build`; expected result is success with unchanged public declarations.
-- [ ] Commit as `Move Scratch GPU implementation into its domain`.
+- [x] Generate the manifest from baseline commit `063b543` and classify every exported value/type from root, `./scratch`, `./worker`, `./geometry`, and `./geo` exactly once as `preserve`, `rename`, `move`, or `remove`; reject duplicate and unclassified symbols in the audit script.
+- [x] Add a RED source-topology test asserting that `scratch/index.ts` is the only TypeScript file directly under `scratch/`, all current GPU implementation basenames exist under `scratch/gpu/`, and no GPU source imports `scratch/worker` or `geo`.
+- [x] Move files without changing public names or runtime behavior. Preserve each file body first; only adjust relative import paths and the `scratch/index.ts` barrel.
+- [x] Update `geo/virtual-raster-gpu.ts` to import its GPU types from `../scratch/gpu/` during this internal-layout phase. Do not rename `ScratchRuntime` yet.
+- [x] Replace every exact source-evidence path in `tests/audits/`, `tests/browser/`, `tests/stress/`, `tests/benchmarks/`, and `tests/*.test.js`; do not weaken source inventories or replace them with broad directory checks.
+- [x] Run `node --test` nowhere; this repository uses Mocha. Run `npm test -- --grep "scratch foundation source topology"` and every source-audit test whose path inventory changed.
+- [x] Run `npm run typecheck` and `npm run build`; expected result is success with unchanged public declarations.
+- [x] Commit as `Move Scratch GPU implementation into its domain`.
 
 ### Task 2: Move Worker Into Scratch Without Changing Worker Semantics
 
@@ -378,12 +378,12 @@ node tests/browser/scratch-flow-layer.mjs
 
 - [ ] For browser gates, require zero uncaptured WebGPU errors, zero device loss, zero leaked Worker, and the currently accepted visible Hello GAW, DEM Layer, and Flow Layer results. Do not reinterpret an infrastructure interruption as a product failure.
 - [ ] If a gate has a deterministic Goal 1 failure, record command/error/root cause, fix only that cause, and rerun only the failed gate plus directly affected gates. Do not restart the entire review loop.
-- [ ] Perform one final review limited to `git diff e43d162..HEAD` across correctness, public-contract completeness, architecture direction, accidental deletion, TypeScript declaration output, diagnostics immutability, Worker semantic parity, and browser-visible regressions.
+- [ ] Perform one final review limited to `git diff 063b543..HEAD` across correctness, public-contract completeness, architecture direction, accidental deletion, TypeScript declaration output, diagnostics immutability, Worker semantic parity, and browser-visible regressions.
 - [ ] Reconcile the manifest against final exports and record a preserved/renamed/moved/removed matrix. Explicitly confirm that every pre-goal GPU and Worker behavior has a current implementation and test owner.
 - [ ] Run final hygiene commands:
 
 ```bash
-git diff --check e43d162..HEAD
+git diff --check 063b543..HEAD
 git status --short
 rg -n "geoscratch/(worker|geometry)" packages examples tests README.md README_zh.md
 rg -n "ScratchRuntime|ScratchDiagnosticCapture|ScratchRenderPipeline|ScratchComputePipeline|WorkerDiagnosticError|createWorkerDiagnostic" packages examples tests README.md README_zh.md docs/vision docs/review
@@ -603,7 +603,7 @@ The final audit and user report must use this exact shape:
 
 ```text
 Status: confirmed-clean | completed-with-findings
-Goal-start: e43d162150070c1d0b0cb0d61e27ac027a98ab64
+Goal-start: 063b543a5e9616b791a4e1d87f65d0e42342209b
 Final commit: output of `git rev-parse HEAD` at completion
 Public exports: pass | finding
 GPU one-to-one parity: pass | finding
