@@ -3,10 +3,12 @@ import {
     DEM_COORDINATE_CODEC,
     DEM_COORDINATE_QUANTUM,
     canonicalDemCoordinateCells,
+    createDemHttpVirtualRasterSource,
     createDemVirtualRasterModel,
     demHeightSamplingLevel,
     encodeDemCoordinate,
     encodeDemCanonicalNodes,
+    fetchDemVirtualRasterManifest,
     parseDemVirtualRasterManifest,
     planDemVirtualPages,
     resolveDemStitchedGrid,
@@ -16,7 +18,7 @@ import { selectTerrainNodes } from '../examples/demLayer/terrain-selection.ts'
 const manifest = Object.freeze({
     schemaVersion: 1,
     sourceHash: 'aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1',
-    contentVersion: 'dem-aa7a584830f19877-cog-v1',
+    contentVersion: 'dem-aa7a584830f19877-cog-v2',
     crs: 'EPSG:4326',
     bounds: [ 120.04373606134682, 31.173901952209487, 121.96623240116922, 32.08401085804678 ],
     rasterDimensions: { width: 1024, height: 558 },
@@ -34,7 +36,7 @@ const manifest = Object.freeze({
     offset: -80.06899999999999,
     overviewLevels: [ 2, 4, 8 ],
     pixelOrientation: {
-        source: 'south-up-row-major',
+        source: 'north-up-row-major',
         cog: 'north-up-row-major',
         tile: 'south-up-row-major',
     },
@@ -67,6 +69,59 @@ describe('DEM high precision virtual raster', () => {
             gpuFormat: 'r8unorm',
         })
         expect(model.plane).not.to.have.property('noData')
+    })
+
+    it('versions immutable HTTP tile URLs with the manifest content identity', async() => {
+
+        const parsed = parseDemVirtualRasterManifest(manifest)
+        const model = createDemVirtualRasterModel(parsed)
+        const source = createDemHttpVirtualRasterSource(parsed, 'http://127.0.0.1:8787/')
+        const page = model.addressSpace.page({ level: 0, x: 3, y: 2 })
+        const originalFetch = globalThis.fetch
+        let requestedUrl
+        let failure
+        globalThis.fetch = async(input) => {
+            requestedUrl = String(input)
+            return { ok: false, status: 404 }
+        }
+        try {
+            await source.loadPage(page, { signal: new AbortController().signal })
+        } catch (error) {
+            failure = error
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+
+        expect(failure).to.be.instanceOf(Error)
+        expect(failure.code).to.equal('DEM_TILE_MISSING')
+        expect(requestedUrl).to.equal(
+            'http://127.0.0.1:8787/tiles/3/3/2.png?v=dem-aa7a584830f19877-cog-v2'
+        )
+    })
+
+    it('bypasses stale browser cache when fetching the mutable manifest endpoint', async() => {
+
+        const originalFetch = globalThis.fetch
+        let requestedUrl
+        let requestOptions
+        globalThis.fetch = async(input, options) => {
+            requestedUrl = String(input)
+            requestOptions = options
+            return { ok: true, json: async() => manifest }
+        }
+        let result
+        try {
+            result = await fetchDemVirtualRasterManifest(
+                'http://127.0.0.1:8787/',
+                new AbortController().signal
+            )
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+
+        expect(requestedUrl).to.equal('http://127.0.0.1:8787/manifest.json')
+        expect(requestOptions.cache).to.equal('no-store')
+        expect(result.contentVersion).to.equal(manifest.contentVersion)
     })
 
     it('plans visible detail plus every parent without attaching pages to positions', () => {

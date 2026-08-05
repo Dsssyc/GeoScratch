@@ -57,7 +57,7 @@ export type DemVirtualRasterManifest = Readonly<{
     offset: number
     overviewLevels: readonly number[]
     pixelOrientation: Readonly<{
-        source: 'south-up-row-major'
+        source: 'north-up-row-major'
         cog: 'north-up-row-major'
         tile: 'south-up-row-major'
     }>
@@ -151,7 +151,7 @@ export function parseDemVirtualRasterManifest(value: unknown): DemVirtualRasterM
         manifest.nodata !== null || manifest.sampleType !== 'uint8' ||
         !Number.isFinite(manifest.scale) || !Number.isFinite(manifest.offset) ||
         !sameNumbers(manifest.overviewLevels, [ 2, 4, 8 ]) ||
-        orientation?.source !== 'south-up-row-major' ||
+        orientation?.source !== 'north-up-row-major' ||
         orientation.cog !== 'north-up-row-major' ||
         orientation.tile !== 'south-up-row-major' ||
         manifest.outerBoundary !== 'clamp' ||
@@ -224,7 +224,8 @@ export function createDemHttpVirtualRasterSource(
             const [ x, y ] = page.coordinates
             const zoom = model.httpZoom(page)
             const response = await fetch(
-                `${normalizedBaseUrl}/tiles/${zoom}/${x}/${y}.png`,
+                `${normalizedBaseUrl}/tiles/${zoom}/${x}/${y}.png` +
+                    `?v=${encodeURIComponent(manifest.contentVersion)}`,
                 { signal }
             )
             if (!response.ok) {
@@ -255,7 +256,10 @@ export async function fetchDemVirtualRasterManifest(
     signal: AbortSignal
 ): Promise<DemVirtualRasterManifest> {
 
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/manifest.json`, { signal })
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/manifest.json`, {
+        signal,
+        cache: 'no-store',
+    })
     if (!response.ok) {
         throw new Error(`DEM manifest request failed with HTTP ${response.status}`)
     }

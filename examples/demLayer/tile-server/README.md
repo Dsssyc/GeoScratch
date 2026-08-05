@@ -4,11 +4,11 @@ This temporary example-owned adapter turns the repository DEM PNG into a
 georeferenced Cloud Optimized GeoTIFF and exposes a bounded local raster pyramid.
 It is not part of the `geoscratch` package API.
 
-The source PNG stores logical rows south-to-north because the existing DEM shader
-maps increasing latitude to increasing texture `v`. The generated COG is standard
-north-up and therefore contains a vertical flip. HTTP tile rows are flipped back
-to the example's southwest-origin logical raster convention. `255` is a valid
-source value, so the COG declares no NoData value.
+The source PNG and generated COG both use standard north-up row-major storage. The
+HTTP adapter selects geospatial windows from that COG and flips each response once
+into the example's southwest-origin logical raster convention, matching the old
+DEM upload's `flipY: true` behavior. `255` is a valid source value, so the COG
+declares no NoData value.
 
 ## Setup and build
 

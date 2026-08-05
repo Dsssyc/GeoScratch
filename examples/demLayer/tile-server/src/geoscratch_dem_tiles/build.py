@@ -75,7 +75,7 @@ def _manifest(source_hash: str) -> dict[str, Any]:
     return {
         "schemaVersion": BUILD_SCHEMA_VERSION,
         "sourceHash": source_hash,
-        "contentVersion": f"dem-{source_hash[:16]}-cog-v1",
+        "contentVersion": f"dem-{source_hash[:16]}-cog-v2",
         "crs": "EPSG:4326",
         "bounds": list(DEM_BOUNDS),
         "rasterDimensions": {"width": DEM_WIDTH, "height": DEM_HEIGHT},
@@ -93,7 +93,7 @@ def _manifest(source_hash: str) -> dict[str, Any]:
         "offset": DEM_ELEVATION_MIN,
         "overviewLevels": list(OVERVIEW_LEVELS),
         "pixelOrientation": {
-            "source": "south-up-row-major",
+            "source": "north-up-row-major",
             "cog": "north-up-row-major",
             "tile": "south-up-row-major",
         },
@@ -118,7 +118,7 @@ def _read_source(source_path: Path) -> np.ndarray:
         return np.asarray(image, dtype=np.uint8).copy()
 
 
-def _write_source_geotiff(path: Path, south_up_source: np.ndarray, source_hash: str) -> None:
+def _write_source_geotiff(path: Path, north_up_source: np.ndarray, source_hash: str) -> None:
     transform = from_bounds(*DEM_BOUNDS, DEM_WIDTH, DEM_HEIGHT)
     profile = {
         "driver": "GTiff",
@@ -131,10 +131,10 @@ def _write_source_geotiff(path: Path, south_up_source: np.ndarray, source_hash: 
         "nodata": None,
     }
     with rasterio.open(path, "w", **profile) as dataset:
-        dataset.write(np.flipud(south_up_source), 1)
+        dataset.write(north_up_source, 1)
         dataset.update_tags(
             GEOSCRATCH_SOURCE_SHA256=source_hash,
-            GEOSCRATCH_SOURCE_ORIENTATION="south-up-row-major",
+            GEOSCRATCH_SOURCE_ORIENTATION="north-up-row-major",
             GEOSCRATCH_COG_ORIENTATION="north-up-row-major",
         )
 
@@ -170,7 +170,7 @@ def build_dem_cog(source_path: str | Path, output_directory: str | Path) -> Buil
     source = Path(source_path).resolve()
     output = Path(output_directory).resolve()
     source_hash = _source_hash(source) if source.is_file() else ""
-    south_up_source = _read_source(source)
+    north_up_source = _read_source(source)
     output.mkdir(parents=True, exist_ok=True)
 
     cog_path = output / "dem.cog.tif"
@@ -180,7 +180,7 @@ def build_dem_cog(source_path: str | Path, output_directory: str | Path) -> Buil
         source_tiff = temporary_directory / "source.tif"
         temporary_cog = temporary_directory / "dem.cog.tif"
         temporary_manifest = temporary_directory / "manifest.json"
-        _write_source_geotiff(source_tiff, south_up_source, source_hash)
+        _write_source_geotiff(source_tiff, north_up_source, source_hash)
         _write_cog(source_tiff, temporary_cog)
         temporary_manifest.write_text(
             json.dumps(_manifest(source_hash), indent=2, sort_keys=True) + "\n",

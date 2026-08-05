@@ -33,7 +33,7 @@ def test_health_manifest_cors_and_cache_contract(built_dem):
     assert health.status_code == 200
     assert health.json() == {
         "status": "ok",
-        "contentVersion": f"dem-{built_dem.source_hash[:16]}-cog-v1",
+        "contentVersion": f"dem-{built_dem.source_hash[:16]}-cog-v2",
     }
     assert health.headers["cache-control"] == "no-store"
     assert manifest.status_code == 200
@@ -43,16 +43,16 @@ def test_health_manifest_cors_and_cache_contract(built_dem):
     assert manifest.headers["access-control-allow-origin"] == "*"
 
 
-def test_finest_tiles_match_source_at_corners_center_and_seeded_points(
+def test_finest_tiles_preserve_legacy_flip_y_geographic_mapping(
     built_dem,
     dem_source,
 ):
     source = np.asarray(Image.open(dem_source).convert("L"), dtype=np.uint8)
 
     with TestClient(create_app(built_dem.output_directory)) as client:
-        for source_x, source_y in SAMPLE_POINTS:
-            page_x = source_x // 256
-            page_y = source_y // 256
+        for logical_x, logical_y in SAMPLE_POINTS:
+            page_x = logical_x // 256
+            page_y = logical_y // 256
             response = client.get(f"/tiles/3/{page_x}/{page_y}.png")
             tile = decode_tile(response.content)
 
@@ -62,7 +62,8 @@ def test_finest_tiles_match_source_at_corners_center_and_seeded_points(
             assert response.headers["x-dem-valid-width"] == str(min(256, 1024 - page_x * 256))
             assert response.headers["x-dem-valid-height"] == str(min(256, 558 - page_y * 256))
             assert tile.shape == (256, 256)
-            assert tile[source_y % 256, source_x % 256] == source[source_y, source_x]
+            source_y = source.shape[0] - 1 - logical_y
+            assert tile[logical_y % 256, logical_x % 256] == source[source_y, logical_x]
 
 
 def test_tiles_expose_each_cog_overview_as_a_local_pyramid(built_dem):

@@ -21,7 +21,7 @@ def test_manifest_freezes_source_and_local_raster_pyramid(built_dem):
 
     assert manifest["schemaVersion"] == 1
     assert manifest["sourceHash"] == DEM_SOURCE_SHA256
-    assert manifest["contentVersion"] == f"dem-{DEM_SOURCE_SHA256[:16]}-cog-v1"
+    assert manifest["contentVersion"] == f"dem-{DEM_SOURCE_SHA256[:16]}-cog-v2"
     assert manifest["crs"] == "EPSG:4326"
     assert manifest["bounds"] == list(DEM_BOUNDS)
     assert manifest["rasterDimensions"] == {"width": 1024, "height": 558}
@@ -41,7 +41,7 @@ def test_manifest_freezes_source_and_local_raster_pyramid(built_dem):
     assert manifest["offset"] == DEM_ELEVATION_MIN
     assert manifest["overviewLevels"] == [2, 4, 8]
     assert manifest["pixelOrientation"] == {
-        "source": "south-up-row-major",
+        "source": "north-up-row-major",
         "cog": "north-up-row-major",
         "tile": "south-up-row-major",
     }
@@ -68,7 +68,7 @@ def test_cog_is_valid_north_up_and_preserves_every_source_sample(built_dem, dem_
         assert dataset.block_shapes == [(256, 256)]
         assert dataset.overviews(1) == [2, 4, 8]
         assert dataset.transform.e < 0
-        assert np.array_equal(dataset.read(1), np.flipud(source))
+        assert np.array_equal(dataset.read(1), source)
 
 
 def test_repeated_builds_have_identical_pixels_and_metadata_semantics(

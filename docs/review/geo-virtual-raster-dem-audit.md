@@ -18,9 +18,9 @@ supported fallback.
 - Source SHA-256: `aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1`.
 - Bounds: `[120.04373606134682, 31.173901952209487, 121.96623240116922, 32.08401085804678]`.
 - Elevation mapping: `[-80.06899999999999, 4.3745]`; no precision beyond the 8-bit source is claimed.
-- The source rows are south-up. COG construction flips them to standard north-up
-  `EPSG:4326`; the HTTP adapter flips each result back to the southwest-origin logical
-  raster convention used by the shader.
+- The source rows and COG are standard north-up `EPSG:4326`. The HTTP adapter flips
+  each selected geospatial window once into the southwest-origin logical raster
+  convention, preserving the old full-image upload's `flipY: true` behavior.
 - The generated COG uses 256 by 256 internal blocks, DEFLATE compression, nearest
   overviews at factors 2, 4, and 8, and no NoData sentinel because every uint8 value,
   including 255, is valid source data.

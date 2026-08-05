@@ -21,7 +21,7 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8')
 const demManifest = parseDemVirtualRasterManifest({
     schemaVersion: 1,
     sourceHash: 'aa7a584830f198772d242df1ce1ae47e21b2bdc85bfc1f97101af8be986c57e1',
-    contentVersion: 'dem-aa7a584830f19877-cog-v1',
+    contentVersion: 'dem-aa7a584830f19877-cog-v2',
     crs: 'EPSG:4326',
     bounds: [ 120.04373606134682, 31.173901952209487, 121.96623240116922, 32.08401085804678 ],
     rasterDimensions: { width: 1024, height: 558 },
@@ -39,7 +39,7 @@ const demManifest = parseDemVirtualRasterManifest({
     offset: -80.06899999999999,
     overviewLevels: [ 2, 4, 8 ],
     pixelOrientation: {
-        source: 'south-up-row-major',
+        source: 'north-up-row-major',
         cog: 'north-up-row-major',
         tile: 'south-up-row-major',
     },

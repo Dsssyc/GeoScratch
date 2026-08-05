@@ -22,10 +22,13 @@ const tilePort = await findAvailablePort()
 const baseUrl = `http://127.0.0.1:${vitePort}`
 const tileBaseUrl = `http://127.0.0.1:${tilePort}`
 const defaultCamera = Object.freeze({ center: [ 120.980697, 31.684162 ], zoom: 10 })
+const sourceFeatureRow = 256
+const logicalFeatureY = 558 - 1 - sourceFeatureRow
 const pageBoundaryCamera = Object.freeze({
     center: [
         120.04373606134682 + (121.96623240116922 - 120.04373606134682) * 0.5,
-        31.173901952209487 + (32.08401085804678 - 31.173901952209487) * 256 / 558,
+        31.173901952209487 +
+            (32.08401085804678 - 31.173901952209487) * logicalFeatureY / 558,
     ],
     zoom: 11,
 })
